@@ -62,57 +62,7 @@ use pvt_preparation::{
 };
 pub(in crate::simulation) use run_receipt::result_source_domain;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PreparationStage {
-    DesignChecks,
-    SourceChecks,
-    AnalysisPlan,
-    ModelBindings,
-    Netlist,
-    Authorization,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PreparationError {
-    stage: PreparationStage,
-    message: String,
-    /// The 1-based deck line this failure named, where it named one.
-    line: Option<usize>,
-}
-
-impl PreparationError {
-    pub(crate) fn new(stage: PreparationStage, message: impl Into<String>) -> Self {
-        Self {
-            stage,
-            message: message.into(),
-            line: None,
-        }
-    }
-
-    /// The same failure, at the line the parser reported it on.
-    pub(crate) fn at_line(mut self, line: Option<usize>) -> Self {
-        self.line = line;
-        self
-    }
-
-    pub(crate) const fn stage(&self) -> PreparationStage {
-        self.stage
-    }
-
-    pub(crate) fn message(&self) -> &str {
-        &self.message
-    }
-
-    pub(crate) const fn line(&self) -> Option<usize> {
-        self.line
-    }
-}
-
-impl std::fmt::Display for PreparationError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
+use rspice_simulation::preparation::{PreparationError, PreparationStage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::simulation) enum SavePolicy {

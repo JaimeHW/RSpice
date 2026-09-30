@@ -5,6 +5,37 @@ use rspice_project::{
 };
 
 impl PdkTechnologyRegistry {
+    pub(crate) fn project_signed_technology_package(
+        &self,
+        binding: Option<&ProjectTechnologyBinding>,
+    ) -> Result<Option<&crate::state::pdk_config::ValidatedPdkTechnologyPackage>, String> {
+        let Some(binding) = binding else {
+            return Ok(None);
+        };
+        let Some(pin) = binding.signed_package() else {
+            return Err("Project technology binding has no signed package pin.".to_owned());
+        };
+        self.validate_project_binding(binding)
+            .map_err(|error| format!("Signed PDK project binding is unavailable: {error}"))?;
+        self
+            .validated_packages()
+            .iter()
+            .find(|package| {
+                package
+                    .manifest()
+                    .package_id
+                    .eq_ignore_ascii_case(pin.package_id())
+                    && package.manifest().revision == pin.revision()
+                    && package.manifest_digest() == pin.manifest_digest()
+                    && package.archive_digest() == pin.archive_digest()
+            })
+            .map(Some)
+            .ok_or_else(|| {
+                "The project's exact signed PDK package is not present in the current trusted runtime catalog."
+                    .to_owned()
+            })
+    }
+
     pub(crate) fn validate_project_binding(
         &self,
         binding: &ProjectTechnologyBinding,

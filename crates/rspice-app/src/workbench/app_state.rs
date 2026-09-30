@@ -455,34 +455,9 @@ impl AppState {
     pub(crate) fn project_signed_technology_package(
         &self,
     ) -> Result<Option<&crate::state::pdk_config::ValidatedPdkTechnologyPackage>, String> {
-        let Some(binding) = self.workspace.content.project.technology_binding() else {
-            return Ok(None);
-        };
-        let Some(pin) = binding.signed_package() else {
-            return Err("Project technology binding has no signed package pin.".to_owned());
-        };
         self.pdk_config
             .technology_registry
-            .validate_project_binding(binding)
-            .map_err(|error| format!("Signed PDK project binding is unavailable: {error}"))?;
-        self.pdk_config
-            .technology_registry
-            .validated_packages()
-            .iter()
-            .find(|package| {
-                package
-                    .manifest()
-                    .package_id
-                    .eq_ignore_ascii_case(pin.package_id())
-                    && package.manifest().revision == pin.revision()
-                    && package.manifest_digest() == pin.manifest_digest()
-                    && package.archive_digest() == pin.archive_digest()
-            })
-            .map(Some)
-            .ok_or_else(|| {
-                "The project's exact signed PDK package is not present in the current trusted runtime catalog."
-                    .to_owned()
-            })
+            .project_signed_technology_package(self.workspace.content.project.technology_binding())
     }
 
     /// Whether an attached project technology is in effect: bound, and bound

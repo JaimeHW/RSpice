@@ -13,6 +13,7 @@ mod snapshot;
 pub(in crate::simulation) use authorization::PreparedRunAuthorization;
 #[cfg(test)]
 pub(in crate::simulation) use permit::ExecutionPermitIssuer;
+pub(crate) use rspice_simulation::preparation::{PreparationError, PreparationStage};
 pub(in crate::simulation) use snapshot::bound_cards;
 pub(in crate::simulation) use snapshot::{
     AuthorizedRunDispatch, AuthorizedTaskDispatch, ExecutionTargetCapabilities,
@@ -20,9 +21,7 @@ pub(in crate::simulation) use snapshot::{
     PreparedRunSnapshot, PreparedTask, ResolvedTaskDispatch, RunSourceReceipt, SavePolicy,
     SnapshotParts, TouchstoneExportPolicy, result_source_domain,
 };
-pub(crate) use snapshot::{
-    PreparationError, PreparationStage, PreparedRunMetadata, execution_target_supports_cancellation,
-};
+pub(crate) use snapshot::{PreparedRunMetadata, execution_target_supports_cancellation};
 
 /// What the execution target will do with a multi-point run: the target's own
 /// name, and how many of its tasks run at once.

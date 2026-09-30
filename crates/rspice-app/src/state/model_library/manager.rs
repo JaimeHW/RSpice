@@ -368,17 +368,12 @@ impl ModelLibraryManager {
             .and_then(|name| self.catalog.get_library(name))
     }
 
-    /// Canonical identities of every project-owned model definition admitted
-    /// to the executable model closure.
-    ///
-    /// Prepared simulation receipts retain these typed identities so later
-    /// engineering evidence can prove that an exact model revision was present
-    /// in the immutable run snapshot instead of trusting a display name or a
-    /// user-entered digest.
-    pub(crate) fn project_model_definition_identities(
-        &self,
-    ) -> Result<Vec<(ModelSourceId, String, ObjectRevision, ContentDigest)>, String> {
-        self.catalog.project_model_definition_identities()
+    pub(crate) fn catalog(&self) -> &rspice_model_library::ModelCatalog {
+        &self.catalog
+    }
+
+    pub(crate) fn resolution_records(&self) -> &ModelResolutionRecords {
+        &self.resolution_records
     }
 
     /// Search for models by name

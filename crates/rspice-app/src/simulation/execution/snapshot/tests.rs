@@ -858,10 +858,7 @@ fn snapshot_requires_the_exact_aliased_project_runtime_directive() {
             .unwrap();
     assert!(matches!(
         PreparedRunSnapshot::new(missing),
-        Err(PreparationError {
-            stage: PreparationStage::ModelBindings,
-            ..
-        })
+        Err(error) if error.stage() == PreparationStage::ModelBindings
     ));
 
     let directive = rspice_simulation::netlist_preparation::project_veriloga_directive(
@@ -919,10 +916,7 @@ fn snapshot_rejects_unsealed_or_duplicate_veriloga_directives() {
     unsealed.project_veriloga_runtimes = runtime_set.clone();
     assert!(matches!(
         PreparedRunSnapshot::new(unsealed),
-        Err(PreparationError {
-            stage: PreparationStage::ModelBindings,
-            ..
-        })
+        Err(error) if error.stage() == PreparationStage::ModelBindings
     ));
 
     let mut duplicated = parts();
@@ -930,10 +924,7 @@ fn snapshot_rejects_unsealed_or_duplicate_veriloga_directives() {
     duplicated.project_veriloga_runtimes = runtime_set;
     assert!(matches!(
         PreparedRunSnapshot::new(duplicated),
-        Err(PreparationError {
-            stage: PreparationStage::ModelBindings,
-            ..
-        })
+        Err(error) if error.stage() == PreparationStage::ModelBindings
     ));
 }
 

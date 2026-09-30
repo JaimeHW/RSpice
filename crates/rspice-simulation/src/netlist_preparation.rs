@@ -12,7 +12,7 @@ use crate::sweeps::CornerRunConfig;
 mod parsing;
 pub use parsing::{
     parse_runner_netlist_with_abort, parse_runner_netlist_with_options_and_abort,
-    parse_runner_netlist_with_resource_limits_and_abort,
+    parse_runner_netlist_with_resource_limits_and_abort, validated_executable_hierarchy,
 };
 
 pub const REFERENCE_MODEL_BINDING_BEGIN: &str = "* RSPICE REFERENCE MODEL BINDING BEGIN";

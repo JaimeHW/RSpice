@@ -1,19 +1,26 @@
-//! Project-owned model provenance in a prepared executable deck.
+//! Model-provider authority for the frozen design hierarchy.
 //!
-//! Correlates referenced executable cards with one exact authored source and
-//! its immutable qualification release before recording run evidence.
+//! Checks retained instance bindings against project catalog decisions and
+//! resolves signed package authority only when a referenced provider needs it.
 
-use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use super::{AppState, PreparationError, PreparationStage, validated_executable_hierarchy};
+use crate::simulation::execution::{PreparationError, PreparationStage};
+use crate::state::pdk_config::PdkTechnologyRegistry;
+use rspice_design::library::LibraryCatalog;
+use rspice_model_library::{ModelCatalog, ModelResolutionRecords};
+use rspice_project::ProjectTechnologyBinding;
 
 /// Revalidate every model-bearing instance in the frozen hierarchy against
 /// the project-global provider decision. Editor properties are not an
 /// execution authority: restored projects and older symbol revisions must
 /// pass this boundary immediately before their sources are sealed.
 pub(super) fn validate_projected_model_binding_authority(
-    state: &AppState,
+    models: &ModelCatalog,
+    resolutions: &ModelResolutionRecords,
+    libraries: &LibraryCatalog,
+    technology_binding: Option<&ProjectTechnologyBinding>,
+    technologies: &PdkTechnologyRegistry,
     projection: &crate::state::workspace::ConfigurationExecutionProjection,
 ) -> Result<(), PreparationError> {
     use crate::state::model_library::ModelConsumerScope;
@@ -72,7 +79,9 @@ pub(super) fn validate_projected_model_binding_authority(
             };
 
             let symbol_provider_library = model_bound_cell
-                .map(|binding| bound_symbol_provider_library(state, binding, view, &component.name))
+                .map(|binding| {
+                    bound_symbol_provider_library(libraries, binding, view, &component.name)
+                })
                 .transpose()?
                 .flatten();
             let selected_library = params
@@ -82,15 +91,14 @@ pub(super) fn validate_projected_model_binding_authority(
                 .filter(|library| !library.is_empty())
                 .map(str::to_owned)
                 .or(symbol_provider_library);
-            let providers = state
-                .model_library_manager
-                .definition_providers(scope, &definition);
+            let providers = models.definition_providers(scope, &definition);
             if providers.is_empty() {
                 if let (Some(binding), Some(selected_library)) =
                     (model_bound_cell, selected_library.as_deref())
                     && selected_library.starts_with("signed-pdk:")
                     && signed_pdk_symbol_binding_matches(
-                        state,
+                        technology_binding,
+                        technologies,
                         selected_library,
                         &definition,
                         binding.source_path.as_deref(),
@@ -115,9 +123,8 @@ pub(super) fn validate_projected_model_binding_authority(
                 // runs against the completed executable deck below.
                 continue;
             }
-            let effective = state
-                .model_library_manager
-                .effective_definition_provider(scope, &definition)
+            let effective = resolutions
+                .effective_definition_provider(models, scope, &definition)
                 .map_err(|error| {
                     PreparationError::new(
                         PreparationStage::ModelBindings,
@@ -155,8 +162,7 @@ pub(super) fn validate_projected_model_binding_authority(
                         ),
                     )
                 })?;
-                let provider = state
-                    .model_library_manager
+                let provider = models
                     .get_library(&effective.library)
                     .expect("the effective provider belongs to the live catalog");
                 let source_matches = provider
@@ -186,7 +192,8 @@ pub(super) fn validate_projected_model_binding_authority(
 }
 
 fn signed_pdk_symbol_binding_matches(
-    state: &AppState,
+    technology_binding: Option<&ProjectTechnologyBinding>,
+    technologies: &PdkTechnologyRegistry,
     provider_library: &str,
     definition: &str,
     source_path: Option<&Path>,
@@ -194,8 +201,8 @@ fn signed_pdk_symbol_binding_matches(
     let Some(source_path) = source_path else {
         return Ok(false);
     };
-    let package = state
-        .project_signed_technology_package()
+    let package = technologies
+        .project_signed_technology_package(technology_binding)
         .map_err(|error| {
             PreparationError::new(
                 PreparationStage::ModelBindings,
@@ -220,13 +227,12 @@ fn signed_pdk_symbol_binding_matches(
 }
 
 fn bound_symbol_provider_library(
-    state: &AppState,
+    libraries: &LibraryCatalog,
     binding: &crate::state::LibraryCellInstance,
     view: &str,
     instance: &str,
 ) -> Result<Option<String>, PreparationError> {
-    let Some(cell) = state
-        .library_manager
+    let Some(cell) = libraries
         .get_library(&binding.library)
         .and_then(|library| library.get_cell(&binding.cell))
     else {
@@ -290,260 +296,4 @@ fn component_value_is_model_name(kind: crate::state::ComponentType) -> bool {
             | ComponentType::Nmesfet
             | ComponentType::Pmesfet
     )
-}
-
-pub(super) fn prepared_project_model_sources(
-    state: &AppState,
-    executable_netlist: &str,
-) -> Result<Vec<crate::state::PreparedModelSourceIdentity>, PreparationError> {
-    let (parsed, flattened) = validated_executable_hierarchy(executable_netlist)?;
-    let referenced_names = flattened
-        .elements
-        .iter()
-        .filter_map(element_model_name)
-        .map(str::to_ascii_lowercase)
-        .collect::<HashSet<_>>();
-    let executable_models = parsed
-        .models
-        .iter()
-        .chain(flattened.scoped_models.iter())
-        .collect::<Vec<_>>();
-    let identities = state
-        .model_library_manager
-        .project_model_definition_identities()
-        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?
-        .into_iter()
-        .filter(|(_, model_name, _, _)| referenced_names.contains(&model_name.to_ascii_lowercase()))
-        .collect::<Vec<_>>();
-    let canonical_models = canonical_project_model_definitions(state);
-    let mut name_counts = HashMap::<String, usize>::new();
-    for (_, model_name, _, _) in &identities {
-        *name_counts
-            .entry(model_name.to_ascii_lowercase())
-            .or_default() += 1;
-    }
-    identities
-        .into_iter()
-        // A repeated semantic name cannot be traced back to one exact project
-        // source from the executable SPICE instance. Omit every ambiguous
-        // candidate so simulation remains available while correlation
-        // evidence fails closed.
-        .filter(|(_, model_name, _, _)| {
-            name_counts.get(&model_name.to_ascii_lowercase()).copied() == Some(1)
-        })
-        .filter(|(source_id, model_name, _, _)| {
-            let mut executable_matches = executable_models
-                .iter()
-                .copied()
-                .filter(|model| model.name.eq_ignore_ascii_case(model_name));
-            let Some(executable_model) = executable_matches.next() else {
-                return false;
-            };
-            if executable_matches.next().is_some() {
-                return false;
-            }
-
-            let mut canonical_matches =
-                canonical_models
-                    .iter()
-                    .filter(|(candidate_source_id, candidate_name, _)| {
-                        candidate_source_id == source_id
-                            && candidate_name.eq_ignore_ascii_case(model_name)
-                    });
-            let Some((_, _, canonical_model)) = canonical_matches.next() else {
-                return false;
-            };
-            canonical_matches.next().is_none()
-                && model_definitions_match(canonical_model, executable_model)
-        })
-        .map(|(source_id, model_name, revision, content_digest)| {
-            let qualification = model_qualification_at_preparation(
-                state,
-                source_id,
-                &model_name,
-                revision,
-                content_digest,
-            );
-            crate::state::PreparedModelSourceIdentity::new(
-                source_id,
-                model_name,
-                revision,
-                content_digest,
-                qualification,
-            )
-            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
-        })
-        .collect()
-}
-
-/// Whether an immutable release covers this exact model revision right now.
-///
-/// Matched on the exact source digest and revision, not on the model name: a
-/// release authorizes the bytes it was measured against, so a model edited
-/// after it was released is a different model and is not covered by it. That is
-/// the whole value of recording the answer per run — the qualification state is
-/// editable and the run is not.
-fn model_qualification_at_preparation(
-    state: &AppState,
-    source_id: crate::product::ModelSourceId,
-    model_name: &str,
-    revision: crate::product::ObjectRevision,
-    content_digest: crate::product::ContentDigest,
-) -> crate::state::PreparedModelQualification {
-    use crate::state::PreparedModelQualification;
-    use crate::state::model_library::ModelSourceAuthority;
-
-    let Some(library) = state
-        .model_library_manager
-        .libraries_sorted()
-        .into_iter()
-        .find(|library| {
-            matches!(
-                library.source_authority,
-                ModelSourceAuthority::ProjectOwned { source_id: owner, .. } if owner == source_id
-            )
-        })
-    else {
-        return PreparedModelQualification::Unqualified;
-    };
-
-    let released = library
-        .model_qualification
-        .iter()
-        .filter(|(name, _)| name.eq_ignore_ascii_case(model_name))
-        .any(|(_, qualification)| {
-            qualification.releases.iter().any(|release| {
-                release.source.source_id == Some(source_id)
-                    && release.source.source_digest == content_digest
-                    && release.source.source_revision == revision
-            })
-        });
-
-    if released {
-        PreparedModelQualification::Released
-    } else {
-        PreparedModelQualification::Unqualified
-    }
-}
-
-fn canonical_project_model_definitions(
-    state: &AppState,
-) -> Vec<(
-    crate::product::ModelSourceId,
-    String,
-    rspice_core::netlist::ModelDef,
-)> {
-    let mut models = Vec::new();
-    for library in state
-        .model_library_manager
-        .libraries_sorted()
-        .into_iter()
-        .filter(|library| library.source_authority.is_project_owned())
-    {
-        let crate::state::model_library::ModelSourceAuthority::ProjectOwned { source_id, .. } =
-            library.source_authority
-        else {
-            continue;
-        };
-        for (model_name, model) in &library.models {
-            let Some(metadata) = library.model_definition_metadata.get(model_name) else {
-                continue;
-            };
-            let definition = crate::state::model_library::ProjectModelRevisionDefinition::new(
-                crate::state::model_library::ProjectModelDefinition::from_device_model(model),
-                metadata.clone(),
-            );
-            let Ok(source) = definition.qualification_model_source(None) else {
-                continue;
-            };
-            let deck = format!("Authenticated project model\n{source}.end\n");
-            let Ok(parsed) = rspice_core::netlist::parse_netlist(&deck) else {
-                continue;
-            };
-            let mut matching = parsed
-                .models
-                .into_iter()
-                .filter(|candidate| candidate.name.eq_ignore_ascii_case(model_name));
-            let Some(canonical_model) = matching.next() else {
-                continue;
-            };
-            if matching.next().is_none() {
-                models.push((source_id, model_name.clone(), canonical_model));
-            }
-        }
-    }
-    models
-}
-
-fn model_definitions_match(
-    canonical: &rspice_core::netlist::ModelDef,
-    executable: &rspice_core::netlist::ModelDef,
-) -> bool {
-    canonical.name.eq_ignore_ascii_case(&executable.name)
-        && canonical
-            .model_type
-            .eq_ignore_ascii_case(&executable.model_type)
-        && named_model_fields_match(&canonical.params, &executable.params)
-        && named_model_fields_match(&canonical.expr_params, &executable.expr_params)
-        && named_model_fields_match(&canonical.string_params, &executable.string_params)
-        && named_model_fields_match(
-            &canonical.string_vector_params,
-            &executable.string_vector_params,
-        )
-        && named_model_fields_match(
-            &canonical.real_vector_params,
-            &executable.real_vector_params,
-        )
-        && named_model_fields_match(
-            &canonical.real_vector_expr_params,
-            &executable.real_vector_expr_params,
-        )
-        && named_model_fields_match(
-            &canonical.integer_vector_params,
-            &executable.integer_vector_params,
-        )
-}
-
-fn named_model_fields_match<T: PartialEq>(
-    canonical: &[(String, T)],
-    executable: &[(String, T)],
-) -> bool {
-    fn normalized<T>(fields: &[(String, T)]) -> Option<HashMap<String, &T>> {
-        let mut normalized = HashMap::with_capacity(fields.len());
-        for (name, value) in fields {
-            if normalized
-                .insert(name.to_ascii_lowercase(), value)
-                .is_some()
-            {
-                return None;
-            }
-        }
-        Some(normalized)
-    }
-
-    normalized(canonical)
-        .zip(normalized(executable))
-        .is_some_and(|(canonical, executable)| canonical == executable)
-}
-
-fn element_model_name(element: &rspice_core::netlist::Element) -> Option<&str> {
-    use rspice_core::netlist::ElementKind as Kind;
-    match &element.kind {
-        Kind::Resistor { model, .. }
-        | Kind::Capacitor { model, .. }
-        | Kind::Inductor { model, .. }
-        | Kind::TransmissionLine { model, .. } => model.as_deref(),
-        Kind::JilesAthertonInductor { model, .. }
-        | Kind::Diode { model, .. }
-        | Kind::Bjt { model, .. }
-        | Kind::Mosfet { model, .. }
-        | Kind::Jfet { model, .. }
-        | Kind::Mesfet { model, .. }
-        | Kind::XyceMemristor { model, .. }
-        | Kind::VSwitch { model, .. }
-        | Kind::ISwitch { model, .. }
-        | Kind::GenericSwitch { model, .. }
-        | Kind::Xspice { model, .. } => Some(model),
-        _ => None,
-    }
 }

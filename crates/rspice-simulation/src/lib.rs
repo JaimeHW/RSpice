@@ -22,6 +22,7 @@ pub mod optimization;
 pub mod output_contract;
 pub mod pdk;
 pub mod periodic;
+pub mod preparation;
 pub mod prepared_dependency;
 pub mod project_veriloga;
 pub mod results;

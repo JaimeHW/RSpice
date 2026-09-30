@@ -1,5 +1,8 @@
 //! Authentication and materialization of immutable model-source snapshots.
 
+mod project_provenance;
+pub use project_provenance::prepared_project_model_sources;
+
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 

@@ -45,10 +45,12 @@ pub(crate) mod occurrence_outputs;
 mod periodic_sources;
 
 use deferred_sources::{deferred_external_source_reason, executable_source_portion};
-use dependency_expansion::{expand_manual_dependencies, validated_executable_hierarchy};
-use model_sources::{prepared_project_model_sources, validate_projected_model_binding_authority};
+use dependency_expansion::expand_manual_dependencies;
+use model_sources::validate_projected_model_binding_authority;
 use occurrence_outputs::{effective_plan_capture, projection_occurrence_nets};
 use periodic_sources::validate_prepared_periodic_sources;
+use rspice_simulation::model_sources::prepared_project_model_sources;
+use rspice_simulation::netlist_preparation::validated_executable_hierarchy;
 
 /// Let the deck find the data files its sources name.
 ///
@@ -312,7 +314,14 @@ impl SimulationController {
                 "The configured simulation root is not materialized",
             )
         })?;
-        validate_projected_model_binding_authority(state, &projection)?;
+        validate_projected_model_binding_authority(
+            state.model_library_manager.catalog(),
+            state.model_library_manager.resolution_records(),
+            state.library_manager.catalog(),
+            state.workspace.content.project.technology_binding(),
+            &state.pdk_config.technology_registry,
+            &projection,
+        )?;
         let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
             state.library_manager.catalog(),
             &projection,
@@ -777,7 +786,14 @@ impl SimulationController {
                 ),
             ));
         }
-        validate_projected_model_binding_authority(state, &execution_projection)?;
+        validate_projected_model_binding_authority(
+            state.model_library_manager.catalog(),
+            state.model_library_manager.resolution_records(),
+            state.library_manager.catalog(),
+            state.workspace.content.project.technology_binding(),
+            &state.pdk_config.technology_registry,
+            &execution_projection,
+        )?;
 
         let plan = Self::build_analysis_plan(&state.sim_setup).map_err(|errors| {
             PreparationError::new(PreparationStage::AnalysisPlan, errors.join("; "))
@@ -1008,7 +1024,8 @@ impl SimulationController {
             tasks.iter().map(PreparedTask::queued_analysis),
             &netlist,
         )?;
-        let project_model_sources = prepared_project_model_sources(state, &netlist)?;
+        let project_model_sources =
+            prepared_project_model_sources(state.model_library_manager.catalog(), &netlist)?;
 
         let source_digest = generated_executable_source_digest(&netlist);
         let receipt = RunSourceReceipt::SchematicDrc(drc_receipt_digest(
@@ -1207,7 +1224,8 @@ impl SimulationController {
         )
         .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
         reject_unresolved_device_models(&expanded, has_project_technology)?;
-        let project_model_sources = prepared_project_model_sources(state, &expanded)?;
+        let project_model_sources =
+            prepared_project_model_sources(state.model_library_manager.catalog(), &expanded)?;
         let project_veriloga_runtimes = project_veriloga_runtimes_referenced_by(state, &expanded)?
             .try_merge(external_veriloga_runtimes)
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;

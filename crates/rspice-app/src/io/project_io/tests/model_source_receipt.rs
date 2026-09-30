@@ -20,7 +20,7 @@ fn prepared_run_receipt_round_trip_retains_exact_project_model_sources() {
         "nch_receipt",
         ObjectRevision::INITIAL,
         ContentDigest::from_bytes([0x51; 32]),
-        crate::state::PreparedModelQualification::Unqualified,
+        rspice_results::run_receipt::PreparedModelQualification::Unqualified,
     )
     .unwrap();
     let analysis_id = AnalysisInstanceId::new();
@@ -94,7 +94,7 @@ fn prepared_run_receipt_round_trip_retains_exact_project_model_sources() {
     assert_eq!(restored_source.model_name(), "nch_receipt");
     assert_eq!(
         restored_source.qualification(),
-        crate::state::PreparedModelQualification::Unqualified,
+        rspice_results::run_receipt::PreparedModelQualification::Unqualified,
         "the qualification gate a run was prepared under must survive the \
          project file, or a reopened project presents an unqualified result as \
          sign-off evidence"
