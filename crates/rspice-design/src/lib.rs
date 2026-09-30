@@ -17,6 +17,7 @@ pub mod projection;
 pub mod properties;
 pub mod references;
 pub mod resolved_symbol;
+pub mod rf_ports;
 pub mod schematic;
 pub mod symbol;
 pub mod symbol_generation;

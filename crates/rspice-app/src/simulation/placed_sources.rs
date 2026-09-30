@@ -87,7 +87,11 @@ use crate::state::{
     CellViewRef, Component, ComponentType, InstancePath, LibraryManager, SchematicState,
     StimulusLibrary,
 };
-use rspice_design::connectivity::summary::{design_nets, projection_nets};
+use rspice_design::connectivity::summary::{
+    keyed_by_terminal, net_names_by_terminal, projection_nets, terminal_nets,
+};
+use rspice_design::parameters::carries_source_value as carries_value;
+pub use rspice_design::rf_ports::RfPortMode;
 
 /// Net names keyed by (component id, terminal name), as
 /// [`net_names_by_terminal`] resolves them for one schematic.
@@ -202,39 +206,6 @@ impl PlacedSource {
     #[must_use]
     pub fn occurrence_label(&self) -> String {
         occurrence_label(self.occurrence.as_ref())
-    }
-}
-
-/// What a placed RF port does in the design it sits in.
-///
-/// One port element covers the whole span from a passive load to a
-/// large-signal generator, and which of those a row is decides whether an
-/// unread port is a finding or the ordinary state. The order is the netlist
-/// generator's own precedence (`netlist_gen::instances`, the `RfPort` arm): a
-/// power drive outranks an AC magnitude, which outranks a DC bias, and a port
-/// carrying none of the three is a termination.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RfPortMode {
-    /// `PWR=` — an available-power generator behind Z0.
-    PowerDrive,
-    /// `AC` — a small-signal magnitude behind Z0.
-    AcDrive,
-    /// `DC` — a bias behind Z0, with no signal of its own.
-    DcBias,
-    /// No source spec at all: the port is a Z0 load.
-    Termination,
-}
-
-impl RfPortMode {
-    /// The word a column with room for one has to carry.
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::PowerDrive => "drive",
-            Self::AcDrive => "AC drive",
-            Self::DcBias => "DC bias",
-            Self::Termination => "term",
-        }
     }
 }
 
@@ -792,19 +763,22 @@ fn placed_source(
     ))
 }
 
-/// One component read as an RF port. The caller has already established that
-/// it is one.
 fn placed_rf_port(component: &Component, nets: &HashMap<(u64, String), String>) -> PlacedRfPort {
-    let params = crate::state::parse_params_string(&component.params);
-    PlacedRfPort {
-        component_id: component.id,
-        reference: component.spice_instance_name(),
-        port_number: port_number(&params),
-        z0: reference_impedance(&params),
-        mode: rf_port_mode(component, &params),
-        nets: terminal_nets(component, nets),
-        consumers: Vec::new(),
-        occurrence: None,
+    rspice_design::rf_ports::rf_port(component, nets).into()
+}
+
+impl From<rspice_design::rf_ports::RfPort> for PlacedRfPort {
+    fn from(port: rspice_design::rf_ports::RfPort) -> Self {
+        Self {
+            component_id: port.component_id,
+            reference: port.reference,
+            port_number: port.port_number,
+            z0: port.z0,
+            mode: port.mode,
+            nets: port.nets,
+            consumers: Vec::new(),
+            occurrence: None,
+        }
     }
 }
 
@@ -820,45 +794,23 @@ fn with_source_consumers(
     source
 }
 
-/// Every RF port on this sheet, with what the plan reads it as.
-///
-/// Ports come back in port-number order, and by reference within a number, so
-/// the list reads in the order an S-parameter matrix is indexed rather than in
-/// the order the ports were drawn. A repeated number is reported rather than
-/// refused — see [`duplicate_port_numbers`].
-///
-/// Costed like [`placed_sources`]: the net map walks the whole design, so the
-/// function returns before building it on a sheet that places no port, which is
-/// every design that is not an RF testbench.
+/// Every RF port on this sheet, with the plan's consumers attached.
 pub fn placed_rf_ports(
     schematic: &impl AsRef<SchematicDocument>,
     plan: Option<&SimulationPlan>,
 ) -> Vec<PlacedRfPort> {
-    if !schematic
-        .as_ref()
-        .components
-        .iter()
-        .any(|component| component.kind == ComponentType::RfPort)
-    {
+    let ports = rspice_design::rf_ports::rf_ports(schematic);
+    if ports.is_empty() {
         return Vec::new();
     }
-    let nets = net_names_by_terminal(schematic);
-    // Every analysis that reads a port reads all of them, so the plan is walked
-    // once for the whole sheet and the answer cloned onto each row rather than
-    // re-derived per port.
     let consumers = plan.map(port_consumers_for).unwrap_or_default();
-    let mut ports: Vec<PlacedRfPort> = schematic
-        .as_ref()
-        .components
-        .iter()
-        .filter(|component| component.kind == ComponentType::RfPort)
-        .map(|component| PlacedRfPort {
-            consumers: consumers.clone(),
-            ..placed_rf_port(component, &nets)
-        })
-        .collect();
-    ports.sort_by_key(port_order);
     ports
+        .into_iter()
+        .map(|port| PlacedRfPort {
+            consumers: consumers.clone(),
+            ..port.into()
+        })
+        .collect()
 }
 
 /// The port numbers more than one placed port claims, in ascending order.
@@ -1110,77 +1062,6 @@ fn carries_ac_excitation(params: &HashMap<String, String>, kind: ComponentType) 
     carries_value(params.get("ac").map(String::as_str))
 }
 
-/// Whether a parameter is set to something the deck would carry.
-///
-/// Absent, blank and every spelling of zero are all "not set", because a source
-/// spec of zero is the absence of that spec: a port with `AC 0` behind its Z0
-/// is a termination, not a drive.
-fn carries_value(raw: Option<&str>) -> bool {
-    raw.is_some_and(|value| {
-        !matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "" | "0" | "+0" | "-0" | "0.0"
-        )
-    })
-}
-
-/// The index an S-parameter run addresses this port by.
-///
-/// One, when the parameter is absent or holds something a port number cannot
-/// be. That is the registry's own default and its own floor (the `port`
-/// property is bounded 1–64), and a row reporting port 0 for a field the
-/// property sheet will not accept would state a port the run can never
-/// address.
-fn port_number(params: &HashMap<String, String>) -> u32 {
-    params
-        .get("port")
-        .and_then(|raw| crate::quantity::parse_engineering_value(raw).ok())
-        .filter(|number| *number >= 1.0)
-        .map_or(1, |number| number.round() as u32)
-}
-
-/// The port's reference impedance, as the deck would carry it.
-///
-/// Re-formatted through the same parse-and-format path a source's key figure
-/// takes, so `5e1` and `50` print identically. An impedance authored as an
-/// expression parses as neither, and is echoed rather than dropped: the field
-/// is what the port was given, and a blank cell would read as a port with no
-/// reference impedance at all.
-fn reference_impedance(params: &HashMap<String, String>) -> String {
-    let raw = params
-        .get("z0")
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .unwrap_or("50");
-    crate::quantity::parse_engineering_value(raw)
-        .map(crate::state::format_engineering)
-        .unwrap_or_else(|_| raw.to_owned())
-}
-
-/// What this port does in the design.
-///
-/// The precedence is the netlist generator's own (`netlist_gen::instances`,
-/// the `RfPort` arm): `PWR` outranks `AC`, which outranks `DC`. The `dc`
-/// parameter falls back to the component's value exactly as the emitted card
-/// does, so a port biased through its value field is not reported as a
-/// termination the deck then biases.
-fn rf_port_mode(component: &Component, params: &HashMap<String, String>) -> RfPortMode {
-    let param = |key: &str| params.get(key).map(String::as_str);
-    if carries_value(param("pwr")) {
-        RfPortMode::PowerDrive
-    } else if carries_value(param("ac_mag")) {
-        RfPortMode::AcDrive
-    } else if carries_value(
-        param("dc")
-            .filter(|dc| !dc.trim().is_empty())
-            .or(Some(component.value.as_str())),
-    ) {
-        RfPortMode::DcBias
-    } else {
-        RfPortMode::Termination
-    }
-}
-
 /// The waveform family label, or `None` for anything that is not an
 /// independent source.
 ///
@@ -1392,13 +1273,6 @@ fn key_figure(
     }
 }
 
-/// Net name for every terminal in the design, keyed by instance and pin.
-fn net_names_by_terminal(
-    schematic: &impl AsRef<SchematicDocument>,
-) -> HashMap<(u64, String), String> {
-    keyed_by_terminal(design_nets(schematic))
-}
-
 /// The same map for one cell view of a frozen projection.
 ///
 /// Built on `projection_nets`, which resolves the hierarchy the way the run
@@ -1415,36 +1289,6 @@ fn projection_terminal_nets(
             .iter()
             .cloned(),
     )
-}
-
-fn keyed_by_terminal(
-    nets: impl IntoIterator<Item = rspice_design::connectivity::summary::DesignNet>,
-) -> HashMap<(u64, String), String> {
-    nets.into_iter()
-        .flat_map(|net| {
-            let name = net.name.clone();
-            net.terminals
-                .into_iter()
-                .map(move |terminal| ((terminal.component_id, terminal.pin), name.clone()))
-        })
-        .collect()
-}
-
-/// This source's nets, in the order its pins are declared.
-///
-/// A terminal with no net is reported as unconnected rather than skipped: a
-/// source driving nothing is exactly what a reader scanning this list is
-/// looking for, and dropping the entry would hide it.
-fn terminal_nets(component: &Component, nets: &HashMap<(u64, String), String>) -> Vec<String> {
-    component
-        .terminal_positions()
-        .into_iter()
-        .map(|(pin, _)| {
-            nets.get(&(component.id, pin.to_owned()))
-                .cloned()
-                .unwrap_or_else(|| "unconnected".to_owned())
-        })
-        .collect()
 }
 
 #[cfg(test)]

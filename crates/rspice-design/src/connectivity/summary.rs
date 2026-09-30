@@ -2,6 +2,7 @@
 
 use super::{extract_with_hierarchy, net_at_schematic_point, terminal_positions_with_hierarchy};
 use crate::hierarchy::HierarchySource;
+use crate::schematic::component::Component;
 use crate::schematic::document::SchematicDocument;
 use rspice_design_model::port::PortDirection;
 use std::any::Any;
@@ -238,4 +239,41 @@ fn collect_design_nets(
             ))
     });
     nets
+}
+
+/// Net name for every terminal in the design, keyed by instance and pin.
+pub fn net_names_by_terminal(
+    schematic: &impl AsRef<SchematicDocument>,
+) -> HashMap<(u64, String), String> {
+    keyed_by_terminal(design_nets(schematic))
+}
+
+pub fn keyed_by_terminal(
+    nets: impl IntoIterator<Item = DesignNet>,
+) -> HashMap<(u64, String), String> {
+    nets.into_iter()
+        .flat_map(|net| {
+            let name = net.name.clone();
+            net.terminals
+                .into_iter()
+                .map(move |terminal| ((terminal.component_id, terminal.pin), name.clone()))
+        })
+        .collect()
+}
+
+/// This source's nets, in the order its pins are declared.
+///
+/// A terminal with no net is reported as unconnected rather than skipped: a
+/// source driving nothing is exactly what a reader scanning this list is
+/// looking for, and dropping the entry would hide it.
+pub fn terminal_nets(component: &Component, nets: &HashMap<(u64, String), String>) -> Vec<String> {
+    component
+        .terminal_positions()
+        .into_iter()
+        .map(|(pin, _)| {
+            nets.get(&(component.id, pin.to_owned()))
+                .cloned()
+                .unwrap_or_else(|| "unconnected".to_owned())
+        })
+        .collect()
 }

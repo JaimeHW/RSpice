@@ -322,6 +322,20 @@ pub fn normalize_params(params: &str) -> String {
     }
 }
 
+/// Whether a parameter is set to something the deck would carry.
+///
+/// Absent, blank and every spelling of zero are all "not set", because a source
+/// spec of zero is the absence of that spec: a port with `AC 0` behind its Z0
+/// is a termination, not a drive.
+pub fn carries_source_value(raw: Option<&str>) -> bool {
+    raw.is_some_and(|value| {
+        !matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "" | "0" | "+0" | "-0" | "0.0"
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
