@@ -30,11 +30,11 @@ use rspice_simulation::output_contract::streaming_tag;
 #[cfg(test)]
 use crate::state::AnalysisResultSourceDomain;
 
-use super::artifact::ExecutionArtifactEnvelope;
-use super::artifact::PreparedDependencyBinding;
-use super::artifact::ResolvedExecutionDependencies;
 use super::permit::ConsumedExecutionPermit;
 use rspice_app_types::canonical::{CanonicalWriter, content_digest};
+use rspice_simulation::execution_artifact::ExecutionArtifactEnvelope;
+use rspice_simulation::execution_artifact::PreparedDependencyBinding;
+use rspice_simulation::execution_artifact::ResolvedExecutionDependencies;
 use rspice_simulation::execution_identity::analysis_config_digest;
 use rspice_simulation::prepared_dependency::ExecutionArtifactError;
 use rspice_simulation::prepared_dependency::ExecutionArtifactKind;

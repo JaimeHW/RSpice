@@ -53,7 +53,8 @@ fn qpxf_controls_survive_saved_draft_worker_card_and_dependency_dispatch() {
     .unwrap()
     .operating_point;
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
-    use crate::simulation::execution::{ExecutionArtifactEnvelope, PreparedDependencyBinding};
+    use rspice_simulation::execution_artifact::ExecutionArtifactEnvelope;
+    use rspice_simulation::execution_artifact::PreparedDependencyBinding;
     let snapshot = ContentDigest::from_bytes([31; 32]);
     let binding = PreparedDependencyBinding::qpss_state(
         AnalysisInstanceId::new(),
@@ -61,13 +62,14 @@ fn qpxf_controls_survive_saved_draft_worker_card_and_dependency_dispatch() {
         ContentDigest::from_bytes([32; 32]),
     );
     let producer_spec = producer.to_spec().unwrap();
-    let artifact = ExecutionArtifactEnvelope::from_qpss_result(
+    let artifact = ExecutionArtifactEnvelope::from_qpss_result_with_environment(
         snapshot,
         binding.producer_instance_id(),
         binding.producer_source_revision(),
         binding.producer_config_digest(),
         &producer_spec,
         &SimulationResult::from_qpss_operating_point(point.clone()).unwrap(),
+        None,
     )
     .unwrap()
     .unwrap();
@@ -77,7 +79,9 @@ fn qpxf_controls_survive_saved_draft_worker_card_and_dependency_dispatch() {
         &std::collections::HashMap::from([(binding.producer_instance_id(), artifact)]),
     )
     .unwrap();
-    let (metadata, buffers) = dependencies.encode_transfer().unwrap();
+    let (metadata, buffers) =
+        crate::simulation::runner::worker_contract::copy_dependency_transfer(&dependencies)
+            .unwrap();
     let dependencies = ResolvedExecutionDependencies::decode_transfer(&metadata, buffers).unwrap();
     let run = |deck: &str, dependencies: &ResolvedExecutionDependencies| {
         run_spec_request(

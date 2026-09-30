@@ -7,8 +7,10 @@
 use super::*;
 use std::collections::HashMap;
 
-use crate::simulation::execution::{PreparedDependencyBinding, PreparedTask, bound_cards};
+use crate::simulation::execution::PreparedTask;
+use crate::simulation::execution::bound_cards;
 use crate::simulation::plan::FrozenSimulationPlan;
+use rspice_simulation::execution_artifact::PreparedDependencyBinding;
 
 impl SimulationController {
     /// Compile a candidate saved output through the same frozen-plan and

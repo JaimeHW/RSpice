@@ -9,8 +9,8 @@
 use rspice_core::abort_signal::AbortSignal;
 
 use crate::simulation::config::FftRequest;
-use crate::simulation::execution::ResolvedExecutionDependencies;
 use rspice_simulation::error::SimulationError;
+use rspice_simulation::execution_artifact::ResolvedExecutionDependencies;
 use rspice_simulation::results::SimulationResult;
 
 pub(super) fn run(
@@ -29,7 +29,7 @@ pub(super) fn run(
 
 pub(super) fn run_from_trajectory(
     request: &FftRequest,
-    trajectory: &crate::simulation::execution::TransientTrajectoryArtifact,
+    trajectory: &rspice_simulation::execution_artifact::TransientTrajectoryArtifact,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     super::ensure_not_aborted(abort)?;

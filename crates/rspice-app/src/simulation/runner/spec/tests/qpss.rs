@@ -30,10 +30,11 @@ fn authored() -> QpssDraft {
 #[test]
 fn autonomous_qpac_qpxf_studio_dependency_worker_and_save_preserve_phase_response() {
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
-    use crate::simulation::execution::{ExecutionArtifactEnvelope, PreparedDependencyBinding};
     use crate::simulation::plan::{QuasiPeriodicAcDraft, QuasiPeriodicTransferDraft};
     use crate::simulation::runner::worker_contract::round_trip_response_for_test;
     use rspice_core::engine::QpxfFrequencyAxis;
+    use rspice_simulation::execution_artifact::ExecutionArtifactEnvelope;
+    use rspice_simulation::execution_artifact::PreparedDependencyBinding;
     use std::f64::consts::{SQRT_2, TAU};
     let producer = QpssDraft {
         tones: format!("{},{}", 1.2 / TAU, SQRT_2 / TAU),
@@ -63,13 +64,14 @@ fn autonomous_qpac_qpxf_studio_dependency_worker_and_save_preserve_phase_respons
         ObjectRevision::INITIAL,
         ContentDigest::from_bytes([82; 32]),
     );
-    let artifact = ExecutionArtifactEnvelope::from_qpss_result(
+    let artifact = ExecutionArtifactEnvelope::from_qpss_result_with_environment(
         snapshot,
         binding.producer_instance_id(),
         binding.producer_source_revision(),
         binding.producer_config_digest(),
         &producer,
         &SimulationResult::from_qpss_operating_point(point.clone()).unwrap(),
+        None,
     )
     .unwrap()
     .unwrap();
@@ -79,7 +81,8 @@ fn autonomous_qpac_qpxf_studio_dependency_worker_and_save_preserve_phase_respons
         &HashMap::from([(binding.producer_instance_id(), artifact)]),
     )
     .unwrap();
-    let (metadata, buffers) = deps.encode_transfer().unwrap();
+    let (metadata, buffers) =
+        crate::simulation::runner::worker_contract::copy_dependency_transfer(&deps).unwrap();
     let deps = ResolvedExecutionDependencies::decode_transfer(&metadata, buffers).unwrap();
     let ac = QuasiPeriodicAcDraft {
         explicit_offsets: "-.03,1e-20,.04".into(),
@@ -466,11 +469,12 @@ fn qpss_controls_direct_mode_retains_inactive_krylov_draft_buffers() {
 fn qpss_op_handoff_preserves_environment_and_consumers_across_worker_transport() {
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
     use crate::simulation::dialog::{OpConfig, OpTemperatureMode};
-    use crate::simulation::execution::{ExecutionArtifactEnvelope, PreparedDependencyBinding};
     use crate::simulation::plan::{
         QpnoiseSourceSelection, QuasiPeriodicAcDraft, QuasiPeriodicNoiseDraft,
         QuasiPeriodicTransferDraft,
     };
+    use rspice_simulation::execution_artifact::ExecutionArtifactEnvelope;
+    use rspice_simulation::execution_artifact::PreparedDependencyBinding;
     let basis = "Bound QP OP\nV1 in 0 DC .2 AC .3 30\nI1 0 out DC 0 AC .001 -20\nRS in out {1000+10*(TEMP-37)} TC1=.01\nRL out 0 1k\nC1 out 0 100n\n.options TEMP=12 TNOM=27 GMIN=1e-10\n.end\n";
     let op_deck = rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
         basis,
@@ -581,7 +585,8 @@ fn qpss_op_handoff_preserves_environment_and_consumers_across_worker_transport()
     )
     .unwrap();
     consumers.bind_source(&consumer_deck, crate::state::content_digest(basis));
-    let (metadata, buffers) = consumers.encode_transfer().unwrap();
+    let (metadata, buffers) =
+        crate::simulation::runner::worker_contract::copy_dependency_transfer(&consumers).unwrap();
     let changed = metadata.replace(
         "\"temperature_celsius\":37.0",
         "\"temperature_celsius\":47.0",

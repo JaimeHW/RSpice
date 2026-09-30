@@ -9,19 +9,22 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
-use crate::simulation::multi_run::AnalysisSpec;
-use crate::simulation::multi_run::PssMethod;
+#[cfg(test)]
+use crate::execution_options::SpecExecutionOptions;
+use crate::prepared_dependency::ExecutionArtifactError;
+use crate::prepared_dependency::ExecutionArtifactKind;
+#[cfg(test)]
+use crate::prepared_dependency::validate_prepared_dependency_contract_with_options;
+use crate::results::SimulationResult;
 use rspice_app_types::canonical::CanonicalWriter;
-#[cfg(test)]
-use rspice_simulation::execution_options::SpecExecutionOptions;
-#[cfg(test)]
-use rspice_simulation::prepared_dependency::validate_prepared_dependency_contract_with_options;
-use rspice_simulation::prepared_dependency::{ExecutionArtifactError, ExecutionArtifactKind};
-use rspice_simulation::results::SimulationResult;
+use rspice_app_types::product::AnalysisInstanceId;
+use rspice_app_types::product::ContentDigest;
+use rspice_app_types::product::ObjectRevision;
+use rspice_simulation_contract::analysis_spec::AnalysisSpec;
+use rspice_simulation_contract::analysis_spec::PssMethod;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(in crate::simulation) struct PreparedDependencyBinding {
+pub struct PreparedDependencyBinding {
     kind: ExecutionArtifactKind,
     producer_instance_id: AnalysisInstanceId,
     producer_source_revision: ObjectRevision,
@@ -29,7 +32,7 @@ pub(in crate::simulation) struct PreparedDependencyBinding {
 }
 
 impl PreparedDependencyBinding {
-    pub(in crate::simulation) const fn transient_trajectory(
+    pub const fn transient_trajectory(
         producer_instance_id: AnalysisInstanceId,
         producer_source_revision: ObjectRevision,
         producer_config_digest: ContentDigest,
@@ -42,7 +45,7 @@ impl PreparedDependencyBinding {
         }
     }
 
-    pub(in crate::simulation) const fn periodic_state(
+    pub const fn periodic_state(
         producer_instance_id: AnalysisInstanceId,
         producer_source_revision: ObjectRevision,
         producer_config_digest: ContentDigest,
@@ -55,7 +58,7 @@ impl PreparedDependencyBinding {
         }
     }
 
-    pub(in crate::simulation) const fn dc_operating_point_seed(
+    pub const fn dc_operating_point_seed(
         producer_instance_id: AnalysisInstanceId,
         producer_source_revision: ObjectRevision,
         producer_config_digest: ContentDigest,
@@ -68,7 +71,7 @@ impl PreparedDependencyBinding {
         }
     }
 
-    pub(in crate::simulation) const fn hb_state(
+    pub const fn hb_state(
         producer_instance_id: AnalysisInstanceId,
         producer_source_revision: ObjectRevision,
         producer_config_digest: ContentDigest,
@@ -81,7 +84,7 @@ impl PreparedDependencyBinding {
         }
     }
 
-    pub(in crate::simulation) const fn qpss_state(
+    pub const fn qpss_state(
         producer_instance_id: AnalysisInstanceId,
         producer_source_revision: ObjectRevision,
         producer_config_digest: ContentDigest,
@@ -94,23 +97,23 @@ impl PreparedDependencyBinding {
         }
     }
 
-    pub(in crate::simulation) const fn kind(&self) -> ExecutionArtifactKind {
+    pub const fn kind(&self) -> ExecutionArtifactKind {
         self.kind
     }
 
-    pub(in crate::simulation) const fn producer_instance_id(&self) -> AnalysisInstanceId {
+    pub const fn producer_instance_id(&self) -> AnalysisInstanceId {
         self.producer_instance_id
     }
 
-    pub(in crate::simulation) const fn producer_source_revision(&self) -> ObjectRevision {
+    pub const fn producer_source_revision(&self) -> ObjectRevision {
         self.producer_source_revision
     }
 
-    pub(in crate::simulation) const fn producer_config_digest(&self) -> ContentDigest {
+    pub const fn producer_config_digest(&self) -> ContentDigest {
         self.producer_config_digest
     }
 
-    pub(in crate::simulation) fn rebind_producer(
+    pub fn rebind_producer(
         &mut self,
         producer_instance_id: AnalysisInstanceId,
         producer_source_revision: ObjectRevision,
@@ -121,7 +124,7 @@ impl PreparedDependencyBinding {
         self.producer_config_digest = producer_config_digest;
     }
 
-    pub(super) fn encode(&self, writer: &mut CanonicalWriter) {
+    pub fn encode(&self, writer: &mut CanonicalWriter) {
         writer.u8(match self.kind {
             ExecutionArtifactKind::TransientTrajectory => 0,
             ExecutionArtifactKind::PeriodicState => 1,
@@ -136,7 +139,7 @@ impl PreparedDependencyBinding {
 }
 
 #[cfg(test)]
-pub(in crate::simulation) fn validate_prepared_dependency_contract(
+pub(crate) fn validate_prepared_dependency_contract(
     consumer: &AnalysisSpec,
     producer: &AnalysisSpec,
 ) -> Result<(), ExecutionArtifactError> {
@@ -186,26 +189,24 @@ fn validate_periodic_producer_config(
     // was a field the two could disagree about — and a disagreement refuses a
     // converged periodic state as unauthenticated. The HB arm below has always
     // delegated for the same reason.
-    let expected = crate::services::simulation_runner::build_core_pss_config(
-        &crate::services::simulation_runner::PssRunConfig {
-            fundamental_freq: *fundamental_freq,
-            tone_sources: tone_sources.clone(),
-            tstab_periods: *tstab_periods,
-            points_per_period: *points_per_period,
-            num_harmonics: *num_harmonics,
-            tolerance: *tolerance,
-            oscillator_mode: *oscillator_mode,
-            oscillator_node: oscillator_node.clone(),
-            integration_method: integration_method
-                .map(crate::simulation::dialog::IntegrationMethod::core),
-            tstab: *tstab,
-            max_iterations: *max_iterations,
-            abstol: *abstol,
-            damping: *damping,
-            max_period_change: *max_period_change,
-            verbose: *verbose,
-        },
-    );
+    let expected = crate::periodic::build_core_pss_config(&crate::periodic::PssRunConfig {
+        fundamental_freq: *fundamental_freq,
+        tone_sources: tone_sources.clone(),
+        tstab_periods: *tstab_periods,
+        points_per_period: *points_per_period,
+        num_harmonics: *num_harmonics,
+        tolerance: *tolerance,
+        oscillator_mode: *oscillator_mode,
+        oscillator_node: oscillator_node.clone(),
+        integration_method: integration_method
+            .map(rspice_simulation_contract::options::IntegrationMethod::core),
+        tstab: *tstab,
+        max_iterations: *max_iterations,
+        abstol: *abstol,
+        damping: *damping,
+        max_period_change: *max_period_change,
+        verbose: *verbose,
+    });
 
     if actual != &expected {
         return Err(ExecutionArtifactError::ContractMismatch(
@@ -243,10 +244,10 @@ fn validate_hb_producer_config(
             "HB-state artifact producer is not a Harmonic Balance analysis".to_owned(),
         ));
     };
-    let run_config = crate::services::simulation_runner::HbRunConfig {
+    let run_config = crate::periodic::HbRunConfig {
         tones: tones
             .iter()
-            .map(|tone| crate::services::simulation_runner::HbToneRunConfig {
+            .map(|tone| crate::periodic::HbToneRunConfig {
                 frequency: tone.frequency,
                 harmonics: tone.harmonics,
                 source: tone.source.clone(),
@@ -267,11 +268,9 @@ fn validate_hb_producer_config(
         use_exact_jacobian: *use_exact_jacobian,
         verbose: *verbose,
     };
-    let expected = crate::services::simulation_runner::build_core_hb_config(
-        &run_config,
-        &rspice_core::abort_signal::NoAbort,
-    )
-    .map_err(|error| ExecutionArtifactError::ContractMismatch(error.to_string()))?;
+    let expected =
+        crate::periodic::build_core_hb_config(&run_config, &rspice_core::abort_signal::NoAbort)
+            .map_err(|error| ExecutionArtifactError::ContractMismatch(error.to_string()))?;
     // Resolve from the host's frozen deck, never from worker-returned settings.
     // OP temperature also governs expressions in the producer's option cards.
     let source = producer_source.ok_or_else(|| {
@@ -281,17 +280,15 @@ fn validate_hb_producer_config(
         )
     })?;
     let source = match environment {
-        Some(environment) => {
-            rspice_simulation::netlist_preparation::source_with_run_temperature_with_abort(
-                source,
-                environment.temperature_celsius(),
-                &rspice_core::NoAbort,
-            )
-            .map_err(|error| ExecutionArtifactError::ContractMismatch(error.to_string()))?
-        }
+        Some(environment) => crate::netlist_preparation::source_with_run_temperature_with_abort(
+            source,
+            environment.temperature_celsius(),
+            &rspice_core::NoAbort,
+        )
+        .map_err(|error| ExecutionArtifactError::ContractMismatch(error.to_string()))?,
         None => source.to_owned(),
     };
-    let netlist = crate::services::simulation_runner::parse_runner_netlist_with_abort(
+    let netlist = crate::netlist_preparation::parse_runner_netlist_with_abort(
         &source,
         None,
         &rspice_core::NoAbort,
@@ -311,4 +308,4 @@ fn validate_hb_producer_config(
 
 mod payload;
 
-pub(in crate::simulation) use payload::*;
+pub use payload::*;

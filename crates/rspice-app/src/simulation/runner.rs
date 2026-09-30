@@ -20,9 +20,10 @@ pub(crate) use rspice_simulation_contract::worker_protocol::AnalysisExecutionEnv
 use crate::diagnostics::engine_log::{EngineLogLine, EngineLogQueue, RunLogSink};
 
 use super::config::AnalysisConfig;
-use super::execution::{ResolvedExecutionDependencies, ResolvedTaskDispatch};
+use super::execution::ResolvedTaskDispatch;
 use super::multi_run::AnalysisSpec;
 use super::status::{SimulationProgress, SimulationStatus};
+use rspice_simulation::execution_artifact::ResolvedExecutionDependencies;
 use rspice_simulation::results::SimulationResult;
 
 #[cfg(test)]

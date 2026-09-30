@@ -4,7 +4,6 @@ use super::*;
 #[test]
 fn autonomous_qpnoise_studio_preserves_options_correlations_worker_and_saved_results() {
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
-    use crate::simulation::execution::{ExecutionArtifactEnvelope, PreparedDependencyBinding};
     use crate::simulation::plan::{
         QpnoiseOutputDraft, QpnoiseSourceSelection, QpssDraft, QuasiPeriodicNoiseDraft,
     };
@@ -13,6 +12,8 @@ fn autonomous_qpnoise_studio_preserves_options_correlations_worker_and_saved_res
     };
     use rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod;
     use rspice_core::engine::{QpnoiseFrequencyAxis, QpnoiseValue};
+    use rspice_simulation::execution_artifact::ExecutionArtifactEnvelope;
+    use rspice_simulation::execution_artifact::PreparedDependencyBinding;
     use std::f64::consts::{SQRT_2, TAU};
     let deck = "Studio oscillator noise\nCx x 0 1\nCy y 0 1\nRx x 0 1\nRy y 0 1\nIprobe 0 x DC 0\nBx 0 x I={(2-v(x)^2-v(y)^2)*v(x)-v(y)}\nBy 0 y I={(2-v(x)^2-v(y)^2)*v(y)+v(x)}\n.end\n";
     let producer = QpssDraft {
@@ -42,13 +43,14 @@ fn autonomous_qpnoise_studio_preserves_options_correlations_worker_and_saved_res
         ObjectRevision::INITIAL,
         ContentDigest::from_bytes([85; 32]),
     );
-    let artifact = ExecutionArtifactEnvelope::from_qpss_result(
+    let artifact = ExecutionArtifactEnvelope::from_qpss_result_with_environment(
         snapshot,
         binding.producer_instance_id(),
         binding.producer_source_revision(),
         binding.producer_config_digest(),
         &producer,
         &SimulationResult::from_qpss_operating_point(point.clone()).unwrap(),
+        None,
     )
     .unwrap()
     .unwrap();
@@ -58,7 +60,8 @@ fn autonomous_qpnoise_studio_preserves_options_correlations_worker_and_saved_res
         &HashMap::from([(binding.producer_instance_id(), artifact)]),
     )
     .unwrap();
-    let (metadata, buffers) = deps.encode_transfer().unwrap();
+    let (metadata, buffers) =
+        crate::simulation::runner::worker_contract::copy_dependency_transfer(&deps).unwrap();
     let deps = ResolvedExecutionDependencies::decode_transfer(&metadata, buffers).unwrap();
     let draft = QuasiPeriodicNoiseDraft {
         explicit_frequencies: "0.005,0.01".into(),
@@ -150,7 +153,8 @@ fn autonomous_qpnoise_studio_preserves_options_correlations_worker_and_saved_res
 #[test]
 fn qpnoise_result_dependency_dispatch_requires_exact_retained_qpss_state() {
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
-    use crate::simulation::execution::{ExecutionArtifactEnvelope, PreparedDependencyBinding};
+    use rspice_simulation::execution_artifact::ExecutionArtifactEnvelope;
+    use rspice_simulation::execution_artifact::PreparedDependencyBinding;
     let deck = "Noise dispatch\nV1 in 0 DC 1\nRs in out 1k\nRl out 0 2k\n.end\n";
     let producer = crate::simulation::plan::QpssDraft {
         tones: "1000,1414.2135623730951".into(),
@@ -173,13 +177,14 @@ fn qpnoise_result_dependency_dispatch_requires_exact_retained_qpss_state() {
         ObjectRevision::new(1).unwrap(),
         ContentDigest::from_bytes([52; 32]),
     );
-    let artifact = ExecutionArtifactEnvelope::from_qpss_result(
+    let artifact = ExecutionArtifactEnvelope::from_qpss_result_with_environment(
         snapshot,
         binding.producer_instance_id(),
         binding.producer_source_revision(),
         binding.producer_config_digest(),
         &producer,
         &SimulationResult::from_qpss_operating_point(point.clone()).unwrap(),
+        None,
     )
     .unwrap()
     .unwrap();
@@ -189,7 +194,9 @@ fn qpnoise_result_dependency_dispatch_requires_exact_retained_qpss_state() {
         &std::collections::HashMap::from([(binding.producer_instance_id(), artifact)]),
     )
     .unwrap();
-    let (metadata, buffers) = dependencies.encode_transfer().unwrap();
+    let (metadata, buffers) =
+        crate::simulation::runner::worker_contract::copy_dependency_transfer(&dependencies)
+            .unwrap();
     let dependencies = ResolvedExecutionDependencies::decode_transfer(&metadata, buffers).unwrap();
     let spec = crate::simulation::plan::QuasiPeriodicNoiseDraft {
         explicit_frequencies: "100,300,700".into(),

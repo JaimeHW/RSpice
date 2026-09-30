@@ -7,10 +7,10 @@
 
 use super::spec::run_spec_request;
 use crate::simulation::engine_bridge::EngineBridge;
-use crate::simulation::execution::ResolvedExecutionDependencies;
 use crate::simulation::multi_run::AnalysisSpec;
 use crate::simulation::netlist_gen::generate_netlist;
 use crate::state::{Component, ComponentType, Point, SchematicState, Wire};
+use rspice_simulation::execution_artifact::ResolvedExecutionDependencies;
 use rspice_simulation::execution_options::SpecExecutionOptions;
 
 struct Bench {

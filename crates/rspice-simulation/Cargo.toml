@@ -17,6 +17,7 @@ generated-veriloga-catalog = ["rspice-design/generated-veriloga-catalog"]
 wasm-jit = ["rspice-veriloga/wasm-jit"]
 
 [dependencies]
+num-complex.workspace = true
 base64.workspace = true
 rspice-app-types.workspace = true
 rspice-results = { workspace = true, features = ["engine-evidence"] }
@@ -37,5 +38,4 @@ wasmi.workspace = true
 
 [dev-dependencies]
 rspice-design = { workspace = true, features = ["schematic-test-fixtures"] }
-num-complex.workspace = true
 ron = { version = "0.12.2", features = ["integer128"] }

@@ -11,10 +11,10 @@ use rspice_core::abort_signal::AbortSignal;
 use crate::services::simulation_runner as svc_runner;
 
 use super::super::engine_bridge::{EngineBridge, SupplyCornerScale};
-use super::super::execution::ResolvedExecutionDependencies;
 use super::super::multi_run::AnalysisSpec;
 use super::AnalysisExecutionEnvironment;
 use rspice_simulation::error::SimulationError;
+use rspice_simulation::execution_artifact::ResolvedExecutionDependencies;
 use rspice_simulation::execution_options::SpecExecutionOptions;
 use rspice_simulation::results::SimulationResult;
 
@@ -396,12 +396,13 @@ mod tests {
 
     use super::*;
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
-    use crate::simulation::execution::{ExecutionArtifactEnvelope, PreparedDependencyBinding};
     use crate::simulation::multi_run::{
         EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve, HbToneSpec,
         SpPort,
     };
     use crate::simulation::runner::pvt_point_evidence::op_dependencies;
+    use rspice_simulation::execution_artifact::ExecutionArtifactEnvelope;
+    use rspice_simulation::execution_artifact::PreparedDependencyBinding;
 
     fn digest(byte: u8) -> ContentDigest {
         ContentDigest::from_bytes([byte; 32])
@@ -522,9 +523,9 @@ mod tests {
         )
         .expect("the exact producer binding resolves");
         resolved.bind_source(netlist, crate::state::content_digest(netlist));
-        let (metadata, buffers) = resolved
-            .encode_transfer()
-            .expect("HB state serializes for worker transport");
+        let (metadata, buffers) =
+            crate::simulation::runner::worker_contract::copy_dependency_transfer(&resolved)
+                .expect("HB state serializes for worker transport");
         ResolvedExecutionDependencies::decode_transfer(&metadata, buffers)
             .expect("HB state authenticates after worker transport")
     }
@@ -574,13 +575,14 @@ mod tests {
         let revision = ObjectRevision::INITIAL;
         let snapshot = digest(0xc1);
         let config_digest = digest(0xc2);
-        let artifact = ExecutionArtifactEnvelope::from_periodic_result(
+        let artifact = ExecutionArtifactEnvelope::from_periodic_result_with_environment(
             snapshot,
             producer,
             revision,
             config_digest,
             &producer_spec,
             &result,
+            None,
         )
         .expect("the PSS result forms a typed dependency")
         .expect("PSS retains its numerical periodic state");
@@ -594,9 +596,9 @@ mod tests {
             &HashMap::from([(producer, artifact)]),
         )
         .expect("the exact producer binding resolves");
-        let (metadata, buffers) = resolved
-            .encode_transfer()
-            .expect("PSS state serializes for worker transport");
+        let (metadata, buffers) =
+            crate::simulation::runner::worker_contract::copy_dependency_transfer(&resolved)
+                .expect("PSS state serializes for worker transport");
         ResolvedExecutionDependencies::decode_transfer(&metadata, buffers)
             .expect("PSS state authenticates after worker transport")
     }

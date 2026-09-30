@@ -139,7 +139,7 @@ fn fourier_results_preserve_voltage_and_current_dimensions() {
 #[test]
 fn an_authored_fourier_run_reports_every_output() {
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
-    use crate::simulation::execution::ExecutionArtifactEnvelope;
+    use rspice_simulation::execution_artifact::ExecutionArtifactEnvelope;
     let time = (0..=64)
         .map(|index| f64::from(index) / 64.0)
         .collect::<Vec<_>>();
@@ -258,8 +258,8 @@ fn an_authored_fourier_run_reports_every_output() {
 #[test]
 fn convergence_fourier_retains_its_source_quality_through_native_conversion() {
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
-    use crate::simulation::execution::ExecutionArtifactEnvelope;
     use crate::state::{AnalysisType, TransientConvergenceEvidence};
+    use rspice_simulation::execution_artifact::ExecutionArtifactEnvelope;
     let time = (0..=64)
         .map(|index| f64::from(index) / 64.0)
         .collect::<Vec<_>>();

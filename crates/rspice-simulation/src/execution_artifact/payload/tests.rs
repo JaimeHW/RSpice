@@ -6,7 +6,7 @@
 //! belongs to a different frozen configuration.
 
 use super::*;
-use rspice_simulation::results::WaveformData;
+use crate::results::WaveformData;
 
 fn digest(byte: u8) -> ContentDigest {
     ContentDigest::from_bytes([byte; 32])
@@ -58,7 +58,7 @@ fn transient_convergence_changes_dependency_artifact_identity() {
         unreachable!()
     };
     *convergence = Some(std::sync::Arc::new(
-        crate::state::TransientConvergenceEvidence::capture(
+        rspice_results::convergence_quality::TransientConvergenceEvidence::capture(
             Default::default(),
             time,
             &rspice_core::abort_signal::NoAbort,
@@ -75,7 +75,7 @@ fn transient_convergence_changes_dependency_artifact_identity() {
     let mut quality = rspice_core::diagnostics::ConvergenceQuality::default();
     quality.record_force_accept(1);
     *convergence = Some(std::sync::Arc::new(
-        crate::state::TransientConvergenceEvidence::capture(
+        rspice_results::convergence_quality::TransientConvergenceEvidence::capture(
             quality,
             time,
             &rspice_core::abort_signal::NoAbort,
@@ -246,7 +246,7 @@ fn authenticated_periodic_result() -> SimulationResult {
 
 fn hb_spec() -> AnalysisSpec {
     AnalysisSpec::HarmonicBalance {
-        tones: vec![crate::simulation::multi_run::HbToneSpec {
+        tones: vec![rspice_simulation_contract::analysis_spec::HbToneSpec {
             frequency: 1.0,
             harmonics: 8,
             source: Some("V1".to_owned()),
@@ -289,11 +289,11 @@ fn hb_result() -> SimulationResult {
     else {
         unreachable!()
     };
-    let config = crate::services::simulation_runner::build_core_hb_config(
-        &crate::services::simulation_runner::HbRunConfig {
+    let config = crate::periodic::build_core_hb_config(
+        &crate::periodic::HbRunConfig {
             tones: tones
                 .into_iter()
-                .map(|tone| crate::services::simulation_runner::HbToneRunConfig {
+                .map(|tone| crate::periodic::HbToneRunConfig {
                     frequency: tone.frequency,
                     harmonics: tone.harmonics,
                     source: tone.source,
@@ -484,14 +484,14 @@ fn hb_state_transfer_round_trips_and_rejects_tamper() {
         start_freq: 1.0e3,
         stop_freq: 1.0e6,
         points_per_unit: 3,
-        sweep: crate::simulation::multi_run::FrequencySweep::Decade,
+        sweep: rspice_simulation_contract::config::FrequencySweep::Decade,
         ports: vec![
-            crate::simulation::multi_run::SpPort {
+            rspice_simulation_contract::analysis_spec::SpPort {
                 node_pos: "p1".to_owned(),
                 node_neg: "0".to_owned(),
                 z0: Some(50.0),
             },
-            crate::simulation::multi_run::SpPort {
+            rspice_simulation_contract::analysis_spec::SpPort {
                 node_pos: "p2".to_owned(),
                 node_neg: "0".to_owned(),
                 z0: Some(50.0),
@@ -515,7 +515,7 @@ fn hb_state_transfer_round_trips_and_rejects_tamper() {
         start_freq: 1.0e3,
         stop_freq: 1.0e6,
         points_per_unit: 10,
-        sweep: crate::simulation::multi_run::FrequencySweep::Decade,
+        sweep: rspice_simulation_contract::config::FrequencySweep::Decade,
         output_node: "out".to_owned(),
         output_ref: "0".to_owned(),
         input_source: "vin".to_owned(),
@@ -603,12 +603,14 @@ fn hb_artifact_rejects_returned_state_from_another_frozen_config() {
 }
 
 fn dc_operating_point_result() -> SimulationResult {
-    let mut configuration = crate::simulation::dialog::OpConfig::default();
-    configuration.temperature_celsius = 125.0;
+    let mut configuration = rspice_simulation_contract::config::OpConfig {
+        temperature_celsius: 125.0,
+        ..Default::default()
+    };
     configuration.run_point.supply_voltage = Some(1.2);
     configuration.run_point.nominal_supply_voltage = Some(1.0);
     configuration.run_point.supply_source_names = vec!["V1".to_owned()];
-    SimulationResult::DcOp(Box::new(rspice_simulation::results::DcOpResult {
+    SimulationResult::DcOp(Box::new(crate::results::DcOpResult {
         configuration,
         mna_node_names: vec!["in".to_owned(), "out".to_owned()],
         mna_branch_names: vec!["V1".to_owned()],
@@ -712,7 +714,10 @@ fn op_seed_rejects_worker_returned_environment_tamper() {
         match tamper {
             0 => returned_op.configuration.temperature_celsius = 25.0,
             1 => returned_op.configuration.run_point.supply_voltage = Some(1.3),
-            _ => returned_op.configuration.accuracy = crate::simulation::dialog::OpAccuracy::Robust,
+            _ => {
+                returned_op.configuration.accuracy =
+                    rspice_simulation_contract::config::OpAccuracy::Robust
+            }
         }
         let error = ExecutionArtifactEnvelope::from_dc_operating_point_result(
             digest(1),
@@ -930,8 +935,10 @@ fn pss_consumers_require_a_shooting_periodic_state_contract() {
 
 #[test]
 fn prepared_phase_pnoise_requires_an_autonomous_pss_artifact() {
-    let mut pnoise = rspice_simulation::periodic::PnoiseRunConfig::default();
-    pnoise.noise_ref = rspice_simulation::periodic::PnoiseReference::Phase;
+    let pnoise = crate::periodic::PnoiseRunConfig {
+        noise_ref: crate::periodic::PnoiseReference::Phase,
+        ..Default::default()
+    };
     let options = SpecExecutionOptions {
         pnoise: Some(pnoise),
         ..SpecExecutionOptions::default()
@@ -1327,7 +1334,23 @@ fn current_impulses_are_authenticated_and_preserved_in_fourier_dependencies() {
     let mut result = transient();
     let legacy = create(&result);
     if let SimulationResult::Transient { events, .. } = &mut result {
-        events.current_impulses = Some(crate::state::current_impulse_history_fixture());
+        events.current_impulses = Some(
+            rspice_results::current_impulses::CurrentImpulseHistoryEvidence {
+                start_time_s: 0.0,
+                stop_time_s: 1.0,
+                delivery_complete: true,
+                traces: vec![rspice_core::CurrentImpulseTrace {
+                    owner: rspice_core::CurrentImpulseOwner::Branch {
+                        branch_name: "V1".into(),
+                    },
+                    complete: true,
+                    points: vec![rspice_core::CurrentImpulsePoint {
+                        time: 0.3,
+                        charge_coulombs: -0.002,
+                    }],
+                }],
+            },
+        );
     }
     let artifact = create(&result);
     assert_ne!(legacy.payload_digest, artifact.payload_digest);

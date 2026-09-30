@@ -7,6 +7,7 @@ pub mod analysis_preparation;
 pub mod capture_ledger;
 pub mod compilation;
 pub mod error;
+pub mod execution_artifact;
 pub mod execution_identity;
 pub mod execution_options;
 pub mod live_transient;

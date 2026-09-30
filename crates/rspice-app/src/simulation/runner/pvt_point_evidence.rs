@@ -38,7 +38,7 @@ pub(in crate::simulation) fn run_standalone_spec(
         Default::default(),
         deck,
         None,
-        &crate::simulation::execution::ResolvedExecutionDependencies::default(),
+        &rspice_simulation::execution_artifact::ResolvedExecutionDependencies::default(),
         &NoAbort,
     )
     .unwrap()
@@ -50,9 +50,9 @@ pub(in crate::simulation) fn run_hb_spec_with_op(
     deck: &str,
     spec: AnalysisSpec,
 ) -> super::SimulationResult {
-    use crate::simulation::execution::{
-        ExecutionArtifactEnvelope, PreparedDependencyBinding, ResolvedExecutionDependencies,
-    };
+    use rspice_simulation::execution_artifact::ExecutionArtifactEnvelope;
+    use rspice_simulation::execution_artifact::PreparedDependencyBinding;
+    use rspice_simulation::execution_artifact::ResolvedExecutionDependencies;
     let bridge = crate::simulation::EngineBridge::new();
     let config = crate::simulation::dialog::OpConfig::default();
     let result = bridge
@@ -347,11 +347,12 @@ pub(in crate::simulation) fn op_dependencies(
     op_deck: &str,
     consumer_deck: &str,
     config: crate::simulation::dialog::OpConfig,
-) -> crate::simulation::execution::ResolvedExecutionDependencies {
+) -> rspice_simulation::execution_artifact::ResolvedExecutionDependencies {
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
     use crate::simulation::engine_bridge::EngineBridge;
-    use crate::simulation::execution::ResolvedExecutionDependencies;
-    use crate::simulation::execution::{ExecutionArtifactEnvelope, PreparedDependencyBinding};
+    use rspice_simulation::execution_artifact::ExecutionArtifactEnvelope;
+    use rspice_simulation::execution_artifact::PreparedDependencyBinding;
+    use rspice_simulation::execution_artifact::ResolvedExecutionDependencies;
     let snapshot = ContentDigest::from_bytes([91; 32]);
     let binding = PreparedDependencyBinding::dc_operating_point_seed(
         AnalysisInstanceId::new(),
@@ -383,6 +384,8 @@ pub(in crate::simulation) fn op_dependencies(
     )
     .unwrap();
     dependencies.bind_source(consumer_deck, source);
-    let (metadata, buffers) = dependencies.encode_transfer().unwrap();
+    let (metadata, buffers) =
+        crate::simulation::runner::worker_contract::copy_dependency_transfer(&dependencies)
+            .unwrap();
     ResolvedExecutionDependencies::decode_transfer(&metadata, buffers).unwrap()
 }

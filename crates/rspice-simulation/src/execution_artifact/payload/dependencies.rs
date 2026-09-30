@@ -1,11 +1,11 @@
 //! Authenticated prerequisite artifacts and bounded worker transfer.
 
 use super::*;
-use rspice_simulation::execution_options::SpecExecutionOptions;
-use rspice_simulation::prepared_dependency::required_artifact_kinds;
+use crate::execution_options::SpecExecutionOptions;
+use crate::prepared_dependency::required_artifact_kinds;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub(in crate::simulation) struct ResolvedExecutionDependencies {
+pub struct ResolvedExecutionDependencies {
     pub(super) snapshot_digest: Option<ContentDigest>,
     pub(super) bindings: Vec<PreparedDependencyBinding>,
     pub(super) artifacts: Vec<ExecutionArtifactEnvelope>,
@@ -14,22 +14,22 @@ pub(in crate::simulation) struct ResolvedExecutionDependencies {
 }
 
 impl ResolvedExecutionDependencies {
-    pub(in crate::simulation) fn bind_source(&mut self, executable: &str, basis: ContentDigest) {
+    pub fn bind_source(&mut self, executable: &str, basis: ContentDigest) {
         if self.bindings.is_empty() {
             return;
         }
         self.source = Some(DependencySourceContext {
-            executable: crate::state::content_digest(executable),
+            executable: rspice_design::netlist_document::content_digest(executable),
             basis,
         });
     }
 
-    pub(in crate::simulation) fn validate_source_basis(
+    pub fn validate_source_basis(
         &self,
         source: &str,
         expected_basis: ContentDigest,
     ) -> Result<(), ExecutionArtifactError> {
-        let actual = crate::state::content_digest(source);
+        let actual = rspice_design::netlist_document::content_digest(source);
         let basis = match self.source {
             Some(context) if context.executable == actual => context.basis,
             Some(_) => {
@@ -48,7 +48,7 @@ impl ResolvedExecutionDependencies {
         Ok(())
     }
 
-    pub(in crate::simulation) fn resolve(
+    pub fn resolve(
         snapshot_digest: ContentDigest,
         bindings: Vec<PreparedDependencyBinding>,
         artifacts: &HashMap<AnalysisInstanceId, ExecutionArtifactEnvelope>,
@@ -75,7 +75,7 @@ impl ResolvedExecutionDependencies {
         })
     }
 
-    pub(in crate::simulation) fn validate_for_spec(
+    pub fn validate_for_spec(
         &self,
         spec: &AnalysisSpec,
         options: &SpecExecutionOptions,
@@ -126,11 +126,11 @@ impl ResolvedExecutionDependencies {
     /// the request, because the artifact is the thing that was actually
     /// produced; the request's own `FROM=` is checked against it inside the
     /// service, where a mismatch is one sentence naming both.
-    pub(in crate::simulation) fn artifact_kind(&self) -> Option<ExecutionArtifactKind> {
+    pub fn artifact_kind(&self) -> Option<ExecutionArtifactKind> {
         self.bindings.first().map(|binding| binding.kind)
     }
 
-    pub(in crate::simulation) fn validate_for_config(&self) -> Result<(), ExecutionArtifactError> {
+    pub fn validate_for_config(&self) -> Result<(), ExecutionArtifactError> {
         if self.snapshot_digest.is_none() && self.bindings.is_empty() && self.artifacts.is_empty() {
             Ok(())
         } else {
@@ -141,7 +141,7 @@ impl ResolvedExecutionDependencies {
         }
     }
 
-    pub(in crate::simulation) fn transient_trajectory(
+    pub fn transient_trajectory(
         &self,
     ) -> Result<&TransientTrajectoryArtifact, ExecutionArtifactError> {
         if self.artifacts.len() != 1
@@ -159,9 +159,7 @@ impl ResolvedExecutionDependencies {
         })
     }
 
-    pub(in crate::simulation) fn periodic_state(
-        &self,
-    ) -> Result<&PeriodicStateArtifact, ExecutionArtifactError> {
+    pub fn periodic_state(&self) -> Result<&PeriodicStateArtifact, ExecutionArtifactError> {
         if self.artifacts.len() != 1
             || self.bindings.len() != 1
             || self.bindings[0].kind != ExecutionArtifactKind::PeriodicState
@@ -177,9 +175,7 @@ impl ResolvedExecutionDependencies {
         })
     }
 
-    pub(in crate::simulation) fn hb_state(
-        &self,
-    ) -> Result<&HbStateArtifact, ExecutionArtifactError> {
+    pub fn hb_state(&self) -> Result<&HbStateArtifact, ExecutionArtifactError> {
         if self.artifacts.len() != 1
             || self.bindings.len() != 1
             || self.bindings[0].kind != ExecutionArtifactKind::HbState
@@ -195,7 +191,7 @@ impl ResolvedExecutionDependencies {
         })
     }
 
-    pub(in crate::simulation) fn dc_operating_point_seed(
+    pub fn dc_operating_point_seed(
         &self,
     ) -> Result<&DcOperatingPointSeedArtifact, ExecutionArtifactError> {
         if self.artifacts.len() != 1
@@ -221,7 +217,7 @@ impl ResolvedExecutionDependencies {
     /// per-sample string/JavaScript-object expansion while retaining their
     /// exact IEEE-754 bit patterns.
     #[cfg(test)]
-    pub(in crate::simulation) fn encode_transfer(
+    pub(crate) fn encode_transfer(
         &self,
     ) -> Result<(String, Vec<Vec<f64>>), ExecutionArtifactError> {
         let (encoded, buffers) = self.encode_transfer_borrowed()?;
@@ -241,8 +237,7 @@ impl ResolvedExecutionDependencies {
     /// above is useful for deterministic native transport round-trip tests,
     /// but must not introduce a second full payload allocation on the browser
     /// main thread.
-    #[cfg(any(target_arch = "wasm32", test))]
-    pub(in crate::simulation) fn encode_transfer_borrowed(
+    pub fn encode_transfer_borrowed(
         &self,
     ) -> Result<EncodedArtifactTransfer<'_>, ExecutionArtifactError> {
         self.validate_transport_integrity()?;
@@ -505,8 +500,7 @@ impl ResolvedExecutionDependencies {
     /// buffers. Every buffer must be referenced exactly once and every
     /// reconstructed artifact must still match its prepared binding and
     /// content digest.
-    #[cfg(any(target_arch = "wasm32", test))]
-    pub(in crate::simulation) fn decode_transfer(
+    pub fn decode_transfer(
         encoded: &str,
         buffers: Vec<Vec<f64>>,
     ) -> Result<Self, ExecutionArtifactError> {
@@ -581,7 +575,7 @@ impl ResolvedExecutionDependencies {
                         let mut spectra = Vec::with_capacity(metadata.spectra.len());
                         for spectrum in metadata.spectra {
                             spectra.push(Arc::new(
-                                rspice_simulation::results::RecordedFftSpectrum {
+                                crate::results::RecordedFftSpectrum {
                                     request_key: spectrum.request_key,
                                     evidence: spectrum.evidence,
                                     frequency: take_transfer_buffer(
@@ -883,7 +877,6 @@ impl ResolvedExecutionDependencies {
         Ok(resolved)
     }
 
-    #[cfg(any(target_arch = "wasm32", test))]
     fn validate_transport_integrity(&self) -> Result<(), ExecutionArtifactError> {
         if self.bindings.is_empty() && self.artifacts.is_empty() {
             return if self.snapshot_digest.is_none() {

@@ -9,9 +9,10 @@ use rspice_core::abort_signal::AbortSignal;
 use super::frequency::frequency_measurement;
 use crate::services::simulation_runner as svc_runner;
 use crate::simulation::dialog::IntegrationMethod;
-use crate::simulation::execution::{ResolvedExecutionDependencies, TransientTrajectoryArtifact};
 use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, PssMethod};
 use rspice_simulation::error::SimulationError;
+use rspice_simulation::execution_artifact::ResolvedExecutionDependencies;
+use rspice_simulation::execution_artifact::TransientTrajectoryArtifact;
 use rspice_simulation::results::{SimulationResult, WaveformData};
 
 pub(super) fn run_periodic_spec(

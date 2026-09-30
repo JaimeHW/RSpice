@@ -4,43 +4,21 @@
 //! expressions an analysis asks for, and the abort-aware wrappers every
 //! runner shares.
 
+#[cfg(test)]
 use std::path::Path;
 
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
-use rspice_core::netlist::{ElementKind, FreqVariation, StatisticalParamMode};
+#[cfg(test)]
+use rspice_core::netlist::StatisticalParamMode;
+use rspice_core::netlist::{ElementKind, FreqVariation};
 
 use super::{ServiceRunError, ServiceRunResult};
 use rspice_simulation::error::ensure_not_aborted;
 
-pub(crate) fn parse_runner_netlist_with_abort(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<rspice_core::Netlist> {
-    parse_runner_netlist_with_resource_limits_and_abort(
-        netlist_text,
-        source_path,
-        rspice_core::ResourceLimits::default(),
-        abort,
-    )
-}
-
-pub(crate) fn parse_runner_netlist_with_resource_limits_and_abort(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-    resource_limits: rspice_core::ResourceLimits,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<rspice_core::Netlist> {
-    parse_runner_netlist_with_mode_resource_limits_and_abort(
-        netlist_text,
-        source_path,
-        StatisticalParamMode::Nominal,
-        None,
-        resource_limits,
-        abort,
-    )
-}
+pub(crate) use rspice_simulation::netlist_preparation::parse_runner_netlist_with_abort;
+#[cfg(test)]
+use rspice_simulation::netlist_preparation::parse_runner_netlist_with_resource_limits_and_abort;
 
 #[cfg(test)]
 pub(crate) fn parse_runner_netlist_with_statistical_sampling_and_abort(
@@ -49,51 +27,16 @@ pub(crate) fn parse_runner_netlist_with_statistical_sampling_and_abort(
     seed: u64,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<rspice_core::Netlist> {
-    parse_runner_netlist_with_mode_resource_limits_and_abort(
+    rspice_simulation::netlist_preparation::parse_runner_netlist_with_options_and_abort(
         netlist_text,
         source_path,
-        StatisticalParamMode::Sample,
-        Some(seed),
-        rspice_core::ResourceLimits::default(),
+        rspice_core::netlist::NetlistParseOptions {
+            statistical_mode: StatisticalParamMode::Sample,
+            statistical_seed: Some(seed),
+            ..Default::default()
+        },
         abort,
     )
-}
-
-fn parse_runner_netlist_with_mode_resource_limits_and_abort(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-    statistical_mode: StatisticalParamMode,
-    statistical_seed: Option<u64>,
-    resource_limits: rspice_core::ResourceLimits,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<rspice_core::Netlist> {
-    ensure_not_aborted(abort)?;
-    let options = rspice_core::netlist::NetlistParseOptions {
-        statistical_mode,
-        statistical_seed,
-        resource_limits,
-        ..Default::default()
-    };
-    let parsed = match source_path {
-        Some(path) => rspice_core::Netlist::parse_with_path_and_options_and_abort(
-            netlist_text,
-            path,
-            options,
-            abort,
-        ),
-        None => rspice_core::Netlist::parse_with_options_and_abort(netlist_text, options, abort),
-    }
-    .map_err(|error| match error {
-        rspice_core::netlist::ParseWithAbortError::Aborted => ServiceRunError::Aborted,
-        rspice_core::netlist::ParseWithAbortError::Parse(
-            rspice_core::netlist::ParseError::ResourceLimit(error),
-        ) => ServiceRunError::ResourceLimit(error),
-        rspice_core::netlist::ParseWithAbortError::Parse(error) => {
-            ServiceRunError::Failure(format!("Parse error: {error}"))
-        }
-    });
-    ensure_not_aborted(abort)?;
-    parsed
 }
 
 pub(super) fn build_voltage_output_expr(output_node: &str, output_ref: Option<&str>) -> String {

@@ -109,7 +109,7 @@ pub(crate) struct WorkerRequest {
         rspice_simulation::measurement_references::PreparedMeasurementReferences,
     #[serde(default)]
     pub(in crate::simulation) dependencies:
-        crate::simulation::execution::ResolvedExecutionDependencies,
+        rspice_simulation::execution_artifact::ResolvedExecutionDependencies,
     #[serde(default)]
     pub(in crate::simulation) environment: Option<super::AnalysisExecutionEnvironment>,
     #[serde(default)]
@@ -157,14 +157,29 @@ pub(crate) struct WorkerOpPreviousStateTransport {
     solution_digest: crate::product::ContentDigest,
 }
 
+/// Own the production transfer buffers for native transport round-trip tests.
+#[cfg(test)]
+pub(in crate::simulation) fn copy_dependency_transfer(
+    dependencies: &rspice_simulation::execution_artifact::ResolvedExecutionDependencies,
+) -> Result<(String, Vec<Vec<f64>>), rspice_simulation::prepared_dependency::ExecutionArtifactError>
+{
+    let (metadata, buffers) = dependencies.encode_transfer_borrowed()?;
+    Ok((
+        metadata,
+        buffers
+            .into_iter()
+            .map(std::borrow::Cow::into_owned)
+            .collect(),
+    ))
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 impl WorkerRequestTransport {
     #[cfg(test)]
     pub(crate) fn from_request(mut request: WorkerRequest) -> Result<Self, String> {
         let dependencies = std::mem::take(&mut request.dependencies);
-        let (dependency_metadata, mut buffers) = dependencies
-            .encode_transfer()
-            .map_err(|error| error.to_string())?;
+        let (dependency_metadata, mut buffers) =
+            copy_dependency_transfer(&dependencies).map_err(|error| error.to_string())?;
         let dependency_buffer_count = buffers.len();
         let (op_previous_state, op_buffers) = take_worker_request_op_previous_state(&mut request)?;
         buffers.extend(op_buffers);
@@ -223,7 +238,7 @@ impl WorkerRequestTransport {
         let mut dependency_buffers = self.buffers;
         let op_buffers = dependency_buffers.split_off(dependency_buffer_count);
         request.dependencies =
-            crate::simulation::execution::ResolvedExecutionDependencies::decode_transfer(
+            rspice_simulation::execution_artifact::ResolvedExecutionDependencies::decode_transfer(
                 &dependency_metadata,
                 dependency_buffers,
             )

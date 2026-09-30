@@ -4,8 +4,8 @@
 //! carries: which combinations of the tones, truncated to the requested
 //! order, and in what index order the spectrum is stored.
 
-use rspice_simulation::error::ensure_not_aborted;
 use super::{HbToneRunConfig, ServiceRunError, ServiceRunResult};
+use crate::error::ensure_not_aborted;
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 

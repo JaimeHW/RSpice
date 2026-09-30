@@ -140,15 +140,16 @@ pub(super) fn run_trial(
     } else {
         waveforms.keys().cloned().collect()
     };
-    let trajectory = crate::simulation::execution::TransientTrajectoryArtifact::from_result(
-        &result,
-        &required,
-        carry_spectra,
-    )
-    .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?
-    .ok_or_else(|| {
-        SimulationError::InvalidConfig("Study producer returned no transient trajectory".into())
-    })?;
+    let trajectory =
+        rspice_simulation::execution_artifact::TransientTrajectoryArtifact::from_result(
+            &result,
+            &required,
+            carry_spectra,
+        )
+        .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?
+        .ok_or_else(|| {
+            SimulationError::InvalidConfig("Study producer returned no transient trajectory".into())
+        })?;
     super::super::spec::run_spectral_from_trajectory(
         postprocess.request.clone(),
         &trajectory,

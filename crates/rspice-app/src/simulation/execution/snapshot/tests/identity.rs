@@ -106,11 +106,11 @@ fn the_same_declaration_prepares_to_the_same_derived_identities() {
 
 #[test]
 fn periodic_op_handoff_snapshot_preserves_source_basis_and_distinct_numerics() {
-    use crate::simulation::execution::ExecutionArtifactEnvelope;
     use crate::simulation::plan::{
         AnalysisKind, AnalysisNumericOverride, NumericOverrideOption, QpssDraft,
         QuasiPeriodicAcDraft,
     };
+    use rspice_simulation::execution_artifact::ExecutionArtifactEnvelope;
     for hb in [false, true] {
         let source = "QP basis\nV1 out 0 1\nR1 out 0 1k\n.end\n";
         let make_numeric = |kind, value: &str| {
@@ -251,7 +251,11 @@ fn periodic_op_handoff_snapshot_preserves_source_basis_and_distinct_numerics() {
             .dependencies
             .validate_source_basis(&deck, op.source_basis_digest)
             .unwrap();
-        let (metadata, buffers) = resolved.dependencies.encode_transfer().unwrap();
+        let (metadata, buffers) =
+            crate::simulation::runner::worker_contract::copy_dependency_transfer(
+                &resolved.dependencies,
+            )
+            .unwrap();
         let restored = ResolvedExecutionDependencies::decode_transfer(&metadata, buffers).unwrap();
         restored
             .validate_source_basis(&deck, op.source_basis_digest)

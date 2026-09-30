@@ -412,7 +412,7 @@ mod tests {
                 *options,
                 deck,
                 None,
-                &crate::simulation::execution::ResolvedExecutionDependencies::default(),
+                &rspice_simulation::execution_artifact::ResolvedExecutionDependencies::default(),
                 Some(AnalysisExecutionEnvironment {
                     temperature_celsius: 75.0,
                     supply_voltage: Some(1.8),
@@ -480,7 +480,7 @@ mod tests {
                 SpecExecutionOptions::default(),
                 deck,
                 None,
-                &crate::simulation::execution::ResolvedExecutionDependencies::default(),
+                &rspice_simulation::execution_artifact::ResolvedExecutionDependencies::default(),
                 environment,
                 &NoAbort,
             )
@@ -576,7 +576,7 @@ mod tests {
                 *options,
                 deck,
                 None,
-                &crate::simulation::execution::ResolvedExecutionDependencies::default(),
+                &rspice_simulation::execution_artifact::ResolvedExecutionDependencies::default(),
                 &NoAbort,
             )
             .unwrap();
@@ -797,7 +797,7 @@ mod tests {
                 *options,
                 deck,
                 None,
-                &crate::simulation::execution::ResolvedExecutionDependencies::default(),
+                &rspice_simulation::execution_artifact::ResolvedExecutionDependencies::default(),
                 &NoAbort,
             )
             .unwrap();

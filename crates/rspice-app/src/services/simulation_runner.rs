@@ -5,9 +5,6 @@
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::{SimulationConfigOverrides, resolve_simulation_config};
 
-mod harmonic_basis;
-use harmonic_basis::build_multi_tone_hb_layout_with_abort;
-
 mod dcmatch;
 mod disto;
 mod envelope_fourier;
@@ -59,12 +56,12 @@ pub use envelope_fourier::{
 pub(crate) use envelope_fourier::{
     fourier_output_is_current, run_fourier_from_observation_with_abort, split_fourier_output,
 };
+pub(crate) use hb::HbData;
+pub(crate) use hb::HbSpectrum;
+pub(crate) use hb::run_hb_analysis_on_materialized_with_abort;
+pub(crate) use hb::run_hb_analysis_with_dc_seed_on_materialized_with_abort;
 #[cfg(test)]
 pub use hb::run_hb_analysis_with_source_path_and_abort;
-pub(crate) use hb::{
-    HbData, HbSpectrum, build_core_hb_config, run_hb_analysis_on_materialized_with_abort,
-    run_hb_analysis_with_dc_seed_on_materialized_with_abort,
-};
 pub use hb::{HbRunConfig, HbToneRunConfig};
 pub use hbnoise::{HbNoiseReference, HbnoiseFrequencySweep, HbnoiseRunConfig};
 pub(crate) use hbnoise::{integrate_psd, run_hbnoise_analysis_from_hb_on_materialized_with_abort};
@@ -109,9 +106,10 @@ pub(crate) use pnoise::run_pnoise_analysis_on_materialized_with_abort;
 pub(crate) use psp::run_psp_analysis_from_pss_on_materialized_with_abort;
 pub(crate) use psp::{PspData, run_hbsp_analysis_from_hb_on_materialized_with_abort};
 pub use psp::{PspRunConfig, PspSweep};
+pub(crate) use pss::PssData;
+pub(crate) use pss::run_pss_analysis_on_materialized_with_abort;
 #[cfg(test)]
 pub(crate) use pss::run_pss_analysis_with_config_and_source_path_and_abort;
-pub(crate) use pss::{PssData, build_core_pss_config, run_pss_analysis_on_materialized_with_abort};
 pub use pss::{
     PssRunConfig, run_pss_analysis_with_dc_seed_and_source_path_and_abort,
     run_pss_analysis_with_source_path_and_abort,

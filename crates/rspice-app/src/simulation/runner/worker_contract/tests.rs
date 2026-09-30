@@ -633,9 +633,9 @@ fn legacy_envelope_specs_migrate_identically_across_worker_transport() {
 #[test]
 fn fourier_worker_consumes_exact_transient_dependency_artifact() {
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
-    use crate::simulation::execution::{
-        ExecutionArtifactEnvelope, PreparedDependencyBinding, ResolvedExecutionDependencies,
-    };
+    use rspice_simulation::execution_artifact::ExecutionArtifactEnvelope;
+    use rspice_simulation::execution_artifact::PreparedDependencyBinding;
+    use rspice_simulation::execution_artifact::ResolvedExecutionDependencies;
 
     let producer = AnalysisInstanceId::new();
     let source_revision = ObjectRevision::new(4).unwrap();
@@ -1839,7 +1839,7 @@ fn worker_transport_retains_and_validates_resolved_port_references() {
 #[test]
 fn sp_noise_request_executes_and_retains_physical_results_through_worker_transport() {
     use crate::simulation::engine_bridge::EngineBridge;
-    use crate::simulation::execution::ResolvedExecutionDependencies;
+    use rspice_simulation::execution_artifact::ResolvedExecutionDependencies;
     for port_count in [1, 2] {
         for do_noise in [false, true] {
             let spec = AnalysisSpec::SParameter {

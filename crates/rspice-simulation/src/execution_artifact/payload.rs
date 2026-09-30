@@ -5,24 +5,22 @@ use rspice_simulation_contract::dependency_contract::{
     PeriodicStateCapability, validate_periodic_state_contract,
 };
 mod dependencies;
-pub(in crate::simulation) use dependencies::ResolvedExecutionDependencies;
+pub use dependencies::ResolvedExecutionDependencies;
 mod qpss;
-pub(in crate::simulation) use qpss::QpssStateArtifact;
+pub use qpss::QpssStateArtifact;
 
-#[cfg(any(target_arch = "wasm32", test))]
-pub(in crate::simulation) type EncodedArtifactTransfer<'a> =
-    (String, Vec<std::borrow::Cow<'a, [f64]>>);
+pub type EncodedArtifactTransfer<'a> = (String, Vec<std::borrow::Cow<'a, [f64]>>);
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(in crate::simulation) struct TransientTrajectoryArtifact {
+pub struct TransientTrajectoryArtifact {
     #[serde(with = "f64_bits_vec")]
     time: Vec<f64>,
     #[serde(default)]
-    current_impulses: Option<crate::state::CurrentImpulseHistoryEvidence>,
+    current_impulses: Option<rspice_results::current_impulses::CurrentImpulseHistoryEvidence>,
     #[serde(with = "f64_bits_map")]
     waveforms: BTreeMap<String, Vec<f64>>,
     #[serde(default)]
-    convergence: Option<Arc<crate::state::TransientConvergenceEvidence>>,
+    convergence: Option<Arc<rspice_results::convergence_quality::TransientConvergenceEvidence>>,
     /// Spectra the producing solve recorded for the `.fft` cards it carried.
     ///
     /// They ride this envelope rather than a sibling artifact kind because the
@@ -31,7 +29,7 @@ pub(in crate::simulation) struct TransientTrajectoryArtifact {
     /// Defaulted, so an artifact without spectra is byte-identical to one
     /// produced before they existed — including its digest.
     #[serde(default)]
-    spectra: Vec<Arc<rspice_simulation::results::RecordedFftSpectrum>>,
+    spectra: Vec<Arc<crate::results::RecordedFftSpectrum>>,
 }
 
 mod f64_bits_vec {
@@ -125,7 +123,7 @@ mod f64_bits_map {
 impl TransientTrajectoryArtifact {
     /// Project a fresh local solve through the same payload checks used for
     /// authenticated task handoffs. This does not create a task identity.
-    pub(in crate::simulation) fn from_result(
+    pub fn from_result(
         result: &SimulationResult,
         required_waveforms: &[String],
         carry_spectra: bool,
@@ -196,7 +194,7 @@ impl TransientTrajectoryArtifact {
         // Two FFT instances with identical requests put the same card in the
         // deck twice, so the engine returns the same spectrum twice. They are
         // equal numbers under one key, and one copy is what the artifact holds.
-        let mut carried: Vec<Arc<rspice_simulation::results::RecordedFftSpectrum>> = Vec::new();
+        let mut carried: Vec<Arc<crate::results::RecordedFftSpectrum>> = Vec::new();
         if carry_spectra {
             for spectrum in spectra {
                 if !carried
@@ -218,17 +216,17 @@ impl TransientTrajectoryArtifact {
         Ok(Some(trajectory))
     }
 
-    pub(in crate::simulation) fn convergence(
+    pub fn convergence(
         &self,
-    ) -> Option<&Arc<crate::state::TransientConvergenceEvidence>> {
+    ) -> Option<&Arc<rspice_results::convergence_quality::TransientConvergenceEvidence>> {
         self.convergence.as_ref()
     }
 
-    pub(in crate::simulation) fn time(&self) -> &[f64] {
+    pub fn time(&self) -> &[f64] {
         &self.time
     }
 
-    pub(in crate::simulation) fn waveform(&self, requested: &str) -> Option<&[f64]> {
+    pub fn waveform(&self, requested: &str) -> Option<&[f64]> {
         let requested = normalize_waveform_name(requested);
         self.waveforms
             .iter()
@@ -236,7 +234,7 @@ impl TransientTrajectoryArtifact {
             .map(|(_, values)| values.as_slice())
     }
 
-    pub(in crate::simulation) fn current_impulse_trace(
+    pub fn current_impulse_trace(
         &self,
         requested: &str,
     ) -> Result<Option<&rspice_core::CurrentImpulseTrace>, String> {
@@ -263,10 +261,7 @@ impl TransientTrajectoryArtifact {
     }
 
     /// The spectrum whose request key is `key`, if this solve recorded one.
-    pub(in crate::simulation) fn spectrum(
-        &self,
-        key: &str,
-    ) -> Option<&Arc<rspice_simulation::results::RecordedFftSpectrum>> {
+    pub fn spectrum(&self, key: &str) -> Option<&Arc<crate::results::RecordedFftSpectrum>> {
         self.spectra
             .iter()
             .find(|spectrum| spectrum.request_key == key)
@@ -281,7 +276,7 @@ impl TransientTrajectoryArtifact {
             })
             .saturating_add(self.convergence.as_deref().map_or(
                 0,
-                crate::state::TransientConvergenceEvidence::transfer_value_count,
+                rspice_results::convergence_quality::TransientConvergenceEvidence::transfer_value_count,
             ))
             .saturating_add(self.current_impulses.as_ref().map_or(0, |history| {
                 history.traces.iter().fold(2usize, |sum, trace| {
@@ -451,7 +446,7 @@ impl TransientTrajectoryArtifact {
 /// and before analysis-local numerical options. Voltage scaling and temperature
 /// let periodic solvers reproduce the OP physical environment exactly once.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(in crate::simulation) struct DcOperatingPointSeedArtifact {
+pub struct DcOperatingPointSeedArtifact {
     effective_source_content_digest: ContentDigest,
     temperature_celsius: f64,
     supply_voltage: Option<f64>,
@@ -466,7 +461,7 @@ pub(in crate::simulation) struct DcOperatingPointSeedArtifact {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(in crate::simulation) struct PeriodicOperatingEnvironment {
+pub struct PeriodicOperatingEnvironment {
     source_basis_digest: ContentDigest,
     temperature_celsius: f64,
     supply_voltage: Option<f64>,
@@ -518,30 +513,33 @@ impl PeriodicOperatingEnvironment {
         }
     }
 
-    pub(in crate::simulation) fn materialize(
+    pub fn materialize(
         &self,
         source: &str,
         source_path: Option<&std::path::Path>,
         dependencies: &ResolvedExecutionDependencies,
         abort: &dyn rspice_core::abort_signal::AbortSignal,
-    ) -> crate::services::simulation_runner::ServiceRunResult<rspice_core::Netlist> {
-        use crate::services::simulation_runner as services;
+    ) -> crate::error::ServiceRunResult<rspice_core::Netlist> {
+        use crate::error as services;
         self.validate()
             .map_err(|error| services::ServiceRunError::Failure(error.to_string()))?;
         dependencies
             .validate_source_basis(source, self.source_basis_digest)
             .map_err(|error| services::ServiceRunError::Failure(error.to_string()))?;
         let temperature_source =
-            rspice_simulation::netlist_preparation::source_with_run_temperature_with_abort(
+            crate::netlist_preparation::source_with_run_temperature_with_abort(
                 source,
                 self.temperature_celsius,
                 abort,
             )?;
-        let mut circuit =
-            services::parse_runner_netlist_with_abort(&temperature_source, source_path, abort)?;
+        let mut circuit = crate::netlist_preparation::parse_runner_netlist_with_abort(
+            &temperature_source,
+            source_path,
+            abort,
+        )?;
         circuit.source_text = Some(source.to_owned());
         if let (Some(supply), Some(nominal)) = (self.supply_voltage, self.nominal_supply_voltage) {
-            rspice_simulation::netlist_preparation::apply_voltage_corner(
+            crate::netlist_preparation::apply_voltage_corner(
                 &mut circuit,
                 supply,
                 nominal,
@@ -555,7 +553,7 @@ impl PeriodicOperatingEnvironment {
 }
 
 impl DcOperatingPointSeedArtifact {
-    pub(in crate::simulation) fn environment(&self) -> PeriodicOperatingEnvironment {
+    pub fn environment(&self) -> PeriodicOperatingEnvironment {
         PeriodicOperatingEnvironment {
             source_basis_digest: self.effective_source_content_digest,
             temperature_celsius: self.temperature_celsius,
@@ -565,27 +563,27 @@ impl DcOperatingPointSeedArtifact {
         }
     }
 
-    pub(in crate::simulation) const fn effective_source_content_digest(&self) -> ContentDigest {
+    pub const fn effective_source_content_digest(&self) -> ContentDigest {
         self.effective_source_content_digest
     }
 
-    pub(in crate::simulation) const fn temperature_celsius(&self) -> f64 {
+    pub const fn temperature_celsius(&self) -> f64 {
         self.temperature_celsius
     }
 
-    pub(in crate::simulation) const fn supply_voltage(&self) -> Option<f64> {
+    pub const fn supply_voltage(&self) -> Option<f64> {
         self.supply_voltage
     }
 
-    pub(in crate::simulation) const fn nominal_supply_voltage(&self) -> Option<f64> {
+    pub const fn nominal_supply_voltage(&self) -> Option<f64> {
         self.nominal_supply_voltage
     }
 
-    pub(in crate::simulation) fn supply_source_names(&self) -> &[String] {
+    pub fn supply_source_names(&self) -> &[String] {
         &self.supply_source_names
     }
 
-    pub(in crate::simulation) fn core_seed(
+    pub fn core_seed(
         &self,
     ) -> Result<rspice_core::engine::PssDcOperatingPointSeed, ExecutionArtifactError> {
         rspice_core::engine::PssDcOperatingPointSeed::try_new(
@@ -657,7 +655,7 @@ impl DcOperatingPointSeedArtifact {
 /// The payload is immutable and its digest covers the orbit, monodromy,
 /// Floquet data, and reactive phase-origin state bit-for-bit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(in crate::simulation) struct PeriodicStateArtifact {
+pub struct PeriodicStateArtifact {
     #[serde(default)]
     environment: Option<PeriodicOperatingEnvironment>,
     operating_point: Arc<rspice_core::engine::PssOperatingPoint>,
@@ -709,20 +707,20 @@ fn pss_floquet_contract_is_authenticated(
 impl PeriodicStateArtifact {
     const MAX_NUMERIC_VALUES: usize = 16_777_216;
 
-    pub(in crate::simulation) fn operating_point(&self) -> &rspice_core::engine::PssOperatingPoint {
+    pub fn operating_point(&self) -> &rspice_core::engine::PssOperatingPoint {
         &self.operating_point
     }
 
-    pub(in crate::simulation) fn materialize_consumer(
+    pub fn materialize_consumer(
         &self,
         source: &str,
         source_path: Option<&std::path::Path>,
         dependencies: &ResolvedExecutionDependencies,
         abort: &dyn rspice_core::abort_signal::AbortSignal,
-    ) -> crate::services::simulation_runner::ServiceRunResult<rspice_core::Netlist> {
+    ) -> crate::error::ServiceRunResult<rspice_core::Netlist> {
         match &self.environment {
             Some(environment) => environment.materialize(source, source_path, dependencies, abort),
-            None => crate::services::simulation_runner::parse_runner_netlist_with_abort(
+            None => crate::netlist_preparation::parse_runner_netlist_with_abort(
                 source,
                 source_path,
                 abort,
@@ -730,7 +728,7 @@ impl PeriodicStateArtifact {
         }
     }
 
-    pub(in crate::simulation) fn validate_consumer_basis(
+    pub fn validate_consumer_basis(
         &self,
         consumer: &str,
         fundamental_freq: f64,
@@ -748,7 +746,7 @@ impl PeriodicStateArtifact {
         )
     }
 
-    pub(in crate::simulation) fn validate_operating_point_consumer_basis(
+    pub fn validate_operating_point_consumer_basis(
         point: &rspice_core::engine::PssOperatingPoint,
         consumer: &str,
         fundamental_freq: f64,
@@ -1077,7 +1075,6 @@ fn split_complex_values(values: &[num_complex::Complex64]) -> (Vec<f64>, Vec<f64
         .unzip::<_, _, Vec<_>, Vec<_>>()
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 fn join_complex_values(
     label: &str,
     real: &[f64],
@@ -1107,7 +1104,7 @@ fn encode_complex_values(writer: &mut CanonicalWriter, values: &[num_complex::Co
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(in crate::simulation) struct HbStateArtifact {
+pub struct HbStateArtifact {
     #[serde(default)]
     environment: Option<PeriodicOperatingEnvironment>,
     operating_point: Arc<rspice_core::engine::HbOperatingPoint>,
@@ -1126,16 +1123,16 @@ pub(in crate::simulation) struct HbStateArtifact {
 impl HbStateArtifact {
     const MAX_NUMERIC_VALUES: usize = 16_777_216;
 
-    pub(in crate::simulation) fn materialize_consumer(
+    pub fn materialize_consumer(
         &self,
         source: &str,
         source_path: Option<&std::path::Path>,
         dependencies: &ResolvedExecutionDependencies,
         abort: &dyn rspice_core::abort_signal::AbortSignal,
-    ) -> crate::services::simulation_runner::ServiceRunResult<rspice_core::Netlist> {
+    ) -> crate::error::ServiceRunResult<rspice_core::Netlist> {
         match &self.environment {
             Some(environment) => environment.materialize(source, source_path, dependencies, abort),
-            None => crate::services::simulation_runner::parse_runner_netlist_with_abort(
+            None => crate::netlist_preparation::parse_runner_netlist_with_abort(
                 source,
                 source_path,
                 abort,
@@ -1143,7 +1140,7 @@ impl HbStateArtifact {
         }
     }
 
-    pub(in crate::simulation) fn operating_point(&self) -> &rspice_core::engine::HbOperatingPoint {
+    pub fn operating_point(&self) -> &rspice_core::engine::HbOperatingPoint {
         &self.operating_point
     }
 
@@ -1237,8 +1234,7 @@ impl HbStateArtifact {
     }
 
     fn digest(&self) -> ContentDigest {
-        let state =
-            rspice_simulation::execution_identity::hb_operating_point_digest(&self.operating_point);
+        let state = crate::execution_identity::hb_operating_point_digest(&self.operating_point);
         let Some(environment) = &self.environment else {
             return state;
         };
@@ -1259,7 +1255,7 @@ enum ExecutionArtifactPayload {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(in crate::simulation) struct ExecutionArtifactEnvelope {
+pub struct ExecutionArtifactEnvelope {
     snapshot_digest: ContentDigest,
     producer_instance_id: AnalysisInstanceId,
     producer_source_revision: ObjectRevision,
@@ -1270,7 +1266,7 @@ pub(in crate::simulation) struct ExecutionArtifactEnvelope {
 }
 
 impl ExecutionArtifactEnvelope {
-    pub(in crate::simulation) fn from_transient_result(
+    pub fn from_transient_result(
         snapshot_digest: ContentDigest,
         producer_instance_id: AnalysisInstanceId,
         producer_source_revision: ObjectRevision,
@@ -1296,7 +1292,7 @@ impl ExecutionArtifactEnvelope {
         }))
     }
     #[cfg(test)]
-    pub(in crate::simulation) fn from_periodic_result(
+    pub(crate) fn from_periodic_result(
         snapshot_digest: ContentDigest,
         producer_instance_id: AnalysisInstanceId,
         producer_source_revision: ObjectRevision,
@@ -1315,7 +1311,7 @@ impl ExecutionArtifactEnvelope {
         )
     }
 
-    pub(in crate::simulation) fn from_periodic_result_with_environment(
+    pub fn from_periodic_result_with_environment(
         snapshot_digest: ContentDigest,
         producer_instance_id: AnalysisInstanceId,
         producer_source_revision: ObjectRevision,
@@ -1371,7 +1367,7 @@ impl ExecutionArtifactEnvelope {
     }
 
     #[cfg(test)]
-    pub(in crate::simulation) fn from_hb_result(
+    pub(crate) fn from_hb_result(
         snapshot_digest: ContentDigest,
         producer_instance_id: AnalysisInstanceId,
         producer_source_revision: ObjectRevision,
@@ -1391,7 +1387,8 @@ impl ExecutionArtifactEnvelope {
         )
     }
 
-    pub(in crate::simulation) fn from_hb_result_with_environment(
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_hb_result_with_environment(
         snapshot_digest: ContentDigest,
         producer_instance_id: AnalysisInstanceId,
         producer_source_revision: ObjectRevision,
@@ -1455,13 +1452,13 @@ impl ExecutionArtifactEnvelope {
         }))
     }
 
-    pub(in crate::simulation) fn from_dc_operating_point_result(
+    pub fn from_dc_operating_point_result(
         snapshot_digest: ContentDigest,
         producer_instance_id: AnalysisInstanceId,
         producer_source_revision: ObjectRevision,
         producer_config_digest: ContentDigest,
         effective_source_content_digest: ContentDigest,
-        prepared_config: &crate::simulation::dialog::OpConfig,
+        prepared_config: &rspice_simulation_contract::config::OpConfig,
         result: &SimulationResult,
     ) -> Result<Option<Self>, ExecutionArtifactError> {
         let SimulationResult::DcOp(result) = result else {
@@ -1499,7 +1496,7 @@ impl ExecutionArtifactEnvelope {
         }))
     }
 
-    pub(in crate::simulation) fn trajectory(&self) -> Option<&TransientTrajectoryArtifact> {
+    pub fn trajectory(&self) -> Option<&TransientTrajectoryArtifact> {
         match &self.payload {
             ExecutionArtifactPayload::TransientTrajectory(trajectory) => Some(trajectory),
             ExecutionArtifactPayload::QpssState(_)
@@ -1509,7 +1506,7 @@ impl ExecutionArtifactEnvelope {
         }
     }
 
-    pub(in crate::simulation) fn periodic_state(&self) -> Option<&PeriodicStateArtifact> {
+    pub fn periodic_state(&self) -> Option<&PeriodicStateArtifact> {
         match &self.payload {
             ExecutionArtifactPayload::PeriodicState(state) => Some(state),
             ExecutionArtifactPayload::QpssState(_)
@@ -1519,7 +1516,7 @@ impl ExecutionArtifactEnvelope {
         }
     }
 
-    pub(in crate::simulation) fn hb_state(&self) -> Option<&HbStateArtifact> {
+    pub fn hb_state(&self) -> Option<&HbStateArtifact> {
         match &self.payload {
             ExecutionArtifactPayload::HbState(state) => Some(state),
             ExecutionArtifactPayload::QpssState(_)
@@ -1529,9 +1526,7 @@ impl ExecutionArtifactEnvelope {
         }
     }
 
-    pub(in crate::simulation) fn dc_operating_point_seed(
-        &self,
-    ) -> Option<&DcOperatingPointSeedArtifact> {
+    pub fn dc_operating_point_seed(&self) -> Option<&DcOperatingPointSeedArtifact> {
         match &self.payload {
             ExecutionArtifactPayload::DcOperatingPointSeed(seed) => Some(seed),
             ExecutionArtifactPayload::QpssState(_)
@@ -1642,18 +1637,16 @@ struct DependencySourceContext {
     basis: ContentDigest,
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 struct TransferBufferRef {
     buffer: usize,
     len: usize,
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct TransientTrajectoryTransferMetadata {
     #[serde(default)]
-    current_impulses: Option<crate::state::CurrentImpulseHistoryEvidence>,
+    current_impulses: Option<rspice_results::current_impulses::CurrentImpulseHistoryEvidence>,
     time: TransferBufferRef,
     waveforms: BTreeMap<String, TransferBufferRef>,
     #[serde(default)]
@@ -1664,24 +1657,21 @@ struct TransientTrajectoryTransferMetadata {
     spectra: Vec<RecordedFftSpectrumTransferMetadata>,
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct RecordedFftSpectrumTransferMetadata {
     request_key: String,
-    evidence: crate::state::FftSpectrumEvidence,
+    evidence: rspice_results::fft::spectrum::FftSpectrumEvidence,
     frequency: TransferBufferRef,
     real: TransferBufferRef,
     imaginary: TransferBufferRef,
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct PeriodicWaveformTransferMetadata {
     node_name: String,
     values: TransferBufferRef,
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct PeriodicStateTransferMetadata {
     #[serde(default)]
@@ -1738,7 +1728,6 @@ struct PeriodicStateTransferMetadata {
     shooting_state: TransferBufferRef,
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct HbSpectrumTransferMetadata {
     node_name: String,
@@ -1746,7 +1735,6 @@ struct HbSpectrumTransferMetadata {
     imaginary: TransferBufferRef,
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct HbBranchSpectrumTransferMetadata {
     branch_name: String,
@@ -1754,7 +1742,6 @@ struct HbBranchSpectrumTransferMetadata {
     imaginary: TransferBufferRef,
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct HbIntegralSpectrumTransferMetadata {
     name: String,
@@ -1762,7 +1749,6 @@ struct HbIntegralSpectrumTransferMetadata {
     imaginary: TransferBufferRef,
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct HbStateTransferMetadata {
     #[serde(default)]
@@ -1779,7 +1765,6 @@ struct HbStateTransferMetadata {
     residual_norm: f64,
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct DcOperatingPointSeedTransferMetadata {
     effective_source_content_digest: ContentDigest,
@@ -1793,7 +1778,6 @@ struct DcOperatingPointSeedTransferMetadata {
     solution: TransferBufferRef,
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 enum ExecutionArtifactPayloadTransferMetadata {
     TransientTrajectory(Box<TransientTrajectoryTransferMetadata>),
@@ -1803,7 +1787,6 @@ enum ExecutionArtifactPayloadTransferMetadata {
     DcOperatingPointSeed(DcOperatingPointSeedTransferMetadata),
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct ExecutionArtifactTransferMetadata {
     snapshot_digest: ContentDigest,
@@ -1815,7 +1798,6 @@ struct ExecutionArtifactTransferMetadata {
     payload: ExecutionArtifactPayloadTransferMetadata,
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct ResolvedExecutionDependenciesTransferMetadata {
     #[serde(default)]
@@ -1825,7 +1807,6 @@ struct ResolvedExecutionDependenciesTransferMetadata {
     artifacts: Vec<ExecutionArtifactTransferMetadata>,
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 fn push_transfer_slice<'a>(
     buffers: &mut Vec<std::borrow::Cow<'a, [f64]>>,
     values: &'a [f64],
@@ -1838,7 +1819,6 @@ fn push_transfer_slice<'a>(
     reference
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 fn take_transfer_buffer(
     buffers: &mut [Option<Vec<f64>>],
     reference: TransferBufferRef,

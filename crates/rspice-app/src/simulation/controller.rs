@@ -22,7 +22,6 @@ use crate::simulation::config::{
     AcAnalysisConfig, AcSweepType, DcSweepConfig, NoiseAnalysisConfig, NoiseSweepType,
     PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
 };
-use crate::simulation::execution::ExecutionArtifactEnvelope;
 use crate::simulation::execution::TouchstoneExportPolicy;
 use crate::simulation::multi_run::PssMethod;
 #[cfg(test)]
@@ -45,6 +44,7 @@ use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCache
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 use rspice_results::yield_analysis::YieldAnalysisManager;
 use rspice_simulation::error::SimulationError;
+use rspice_simulation::execution_artifact::ExecutionArtifactEnvelope;
 use rspice_simulation::execution_identity::canonical_analysis_kind;
 use rspice_simulation::execution_options::SpecExecutionOptions;
 use rspice_simulation::live_transient::{
@@ -157,7 +157,7 @@ pub struct SimulationController {
     /// wrong number to publish as the carrier a result was measured against.
     current_periodic_carrier_hz: Option<f64>,
     current_periodic_environment:
-        Option<crate::simulation::execution::PeriodicOperatingEnvironment>,
+        Option<rspice_simulation::execution_artifact::PeriodicOperatingEnvironment>,
     /// Exact prepared deck retained independently of the returned HB result.
     current_hb_producer_source: Option<std::sync::Arc<str>>,
     /// Frozen identity of the prepared task currently owned by the runner.

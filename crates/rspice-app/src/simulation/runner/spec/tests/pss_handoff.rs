@@ -89,7 +89,9 @@ fn pss_op_handoff_preserves_environment_for_all_consumers() {
     )
     .unwrap();
     dependencies.bind_source(&consumer_deck, crate::state::content_digest(basis));
-    let (metadata, buffers) = dependencies.encode_transfer().unwrap();
+    let (metadata, buffers) =
+        crate::simulation::runner::worker_contract::copy_dependency_transfer(&dependencies)
+            .unwrap();
     let changed = metadata.replace(
         "\"temperature_celsius\":37.0",
         "\"temperature_celsius\":47.0",

@@ -1530,10 +1530,14 @@ fn failed_completion_retains_exact_prepared_task_provenance() {
 fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
     use crate::product::ProcessCorner;
     use crate::product::{ContentDigest, ObjectRevision};
-    use crate::simulation::execution::{
-        ExecutionPermitIssuer, ExecutionTargetCapabilities, PreparedDependencyBinding,
-        PreparedRunSnapshot, PreparedTask, RunSourceReceipt, SavePolicy, SnapshotParts,
-    };
+    use crate::simulation::execution::ExecutionPermitIssuer;
+    use crate::simulation::execution::ExecutionTargetCapabilities;
+    use crate::simulation::execution::PreparedRunSnapshot;
+    use crate::simulation::execution::PreparedTask;
+    use crate::simulation::execution::RunSourceReceipt;
+    use crate::simulation::execution::SavePolicy;
+    use crate::simulation::execution::SnapshotParts;
+    use rspice_simulation::execution_artifact::PreparedDependencyBinding;
 
     let prerequisite_id = crate::product::AnalysisInstanceId::new();
     let dependent_id = crate::product::AnalysisInstanceId::new();

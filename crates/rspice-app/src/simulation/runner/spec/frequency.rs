@@ -5,9 +5,9 @@ use std::{collections::HashMap, path::Path};
 use rspice_core::abort_signal::AbortSignal;
 
 use crate::services::simulation_runner as svc_runner;
-use crate::simulation::execution::ResolvedExecutionDependencies;
 use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, SpPort};
 use rspice_simulation::error::SimulationError;
+use rspice_simulation::execution_artifact::ResolvedExecutionDependencies;
 use rspice_simulation::execution_options::SpecExecutionOptions;
 use rspice_simulation::results::{PstbFloquetMode, SimulationResult, WaveformData};
 
@@ -1486,7 +1486,7 @@ pub(super) fn run_periodic_study_consumer(
                 false,
             ),
         };
-        crate::simulation::execution::PeriodicStateArtifact::validate_operating_point_consumer_basis(point, name, frequency, harmonics, tolerance, phase)
+        rspice_simulation::execution_artifact::PeriodicStateArtifact::validate_operating_point_consumer_basis(point, name, frequency, harmonics, tolerance, phase)
             .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
     }
     match options {
