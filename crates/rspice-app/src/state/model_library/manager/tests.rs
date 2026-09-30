@@ -316,8 +316,9 @@ fn browser_bundle_retains_native_spectre_ahdl_dependency_without_parsing_it_as_s
         .expect("sealed AHDL authority is valid")
         .expect("AHDL authority is present");
     assert_eq!(authority.roots().len(), 1);
-    let runtimes = crate::simulation::veriloga::compile_model_library_source_runtimes(&authority)
-        .expect("retained Spectre AHDL compiles through the sealed runtime path");
+    let runtimes =
+        rspice_simulation::project_veriloga::compile_model_library_source_runtimes(&authority)
+            .expect("retained Spectre AHDL compiles through the sealed runtime path");
     assert_eq!(runtimes.len(), 1);
     let runtime = runtimes.device_runtimes().next().expect("compiled runtime");
     assert_eq!(runtime.netlist_alias(), "device");
@@ -371,8 +372,9 @@ fn native_spectre_import_captures_transitive_veriloga_preprocessor_dependencies(
         .model_library_veriloga_authority()
         .expect("native authority is valid")
         .expect("native authority is present");
-    let runtimes = crate::simulation::veriloga::compile_model_library_source_runtimes(&authority)
-        .expect("native retained AHDL compiles without reopening host paths");
+    let runtimes =
+        rspice_simulation::project_veriloga::compile_model_library_source_runtimes(&authority)
+            .expect("native retained AHDL compiles without reopening host paths");
     assert_eq!(runtimes.len(), 1);
 
     fs::remove_dir_all(&directory).expect("remove native Spectre AHDL fixture");

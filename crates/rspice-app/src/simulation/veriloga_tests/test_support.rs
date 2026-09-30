@@ -6,13 +6,13 @@ use super::{
 };
 
 pub(crate) fn standalone_connection_authority()
--> crate::state::model_library::SealedModelLibraryVerilogAAuthority {
+-> rspice_simulation::model_sources::SealedModelLibraryVerilogAAuthority {
     standalone_connection_authority_with_directive(".va \"rules.vams\" UI_CONNECTIONS\n")
 }
 
 pub(super) fn standalone_connection_authority_with_directive(
     rules_directive: &str,
-) -> crate::state::model_library::SealedModelLibraryVerilogAAuthority {
+) -> rspice_simulation::model_sources::SealedModelLibraryVerilogAAuthority {
     let mut rules = rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES
         .iter()
         .map(|(_, source)| *source)

@@ -166,7 +166,7 @@ pub(crate) enum SimulationRequest {
 pub(crate) struct NetlistInput {
     netlist: String,
     source_path: Option<PathBuf>,
-    project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
+    project_veriloga_runtimes: rspice_simulation::veriloga::PreparedVerilogARuntimeSet,
     measurement_references:
         rspice_simulation::measurement_references::PreparedMeasurementReferences,
     dependencies: ResolvedExecutionDependencies,

@@ -32,7 +32,8 @@ pub(crate) mod runner;
 pub(crate) mod status;
 pub(crate) mod stimulus_realize;
 pub(crate) mod table_route;
-pub(crate) mod veriloga;
+#[cfg(test)]
+pub(crate) mod veriloga_tests;
 
 // The optimizer, netlist generator, options translator, and
 // engine bridge are all reached through their own modules; flattening their

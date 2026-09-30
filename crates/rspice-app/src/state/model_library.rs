@@ -48,10 +48,10 @@ pub use rspice_model_library::{StatisticalDefinition, StatisticalVariableDefinit
 // `state` may not reference `workbench`.
 #[cfg(test)]
 pub(crate) use device_class::DEVICE_CLASS;
+pub(crate) use manager::model_library_source_digest;
 pub use manager::{
     ModelLibraryManager, PackModelHit, ProjectModelCommit, SealedModelExecutionSources,
 };
-pub(crate) use manager::{SealedModelLibraryVerilogAAuthority, model_library_source_digest};
 pub use rspice_model_library::DeviceModel;
 pub use rspice_model_library::ProjectModelRevisionDefinition;
 pub(crate) use rspice_model_library::first_unreachable_source;

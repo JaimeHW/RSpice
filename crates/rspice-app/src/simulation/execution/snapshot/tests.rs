@@ -734,7 +734,7 @@ fn reference_only_run_set_preserves_an_analysis_owned_temperature_declaration() 
     ));
 }
 
-fn project_runtime() -> crate::simulation::veriloga::PreparedVerilogARuntime {
+fn project_runtime() -> rspice_simulation::veriloga::PreparedVerilogARuntime {
     let project_id = crate::product::ProjectId::new();
     let bundle = crate::state::ProjectSourceBundle::try_new(
             crate::state::ProjectSourceOwner::code_workspace(
@@ -756,7 +756,7 @@ fn project_runtime() -> crate::simulation::veriloga::PreparedVerilogARuntime {
     receipt.prepare_runtime(project_id, &bundle).unwrap()
 }
 
-fn signed_pdk_runtime() -> crate::simulation::veriloga::PreparedVerilogARuntime {
+fn signed_pdk_runtime() -> rspice_simulation::veriloga::PreparedVerilogARuntime {
     let (archive, trust, authority) =
         crate::state::pdk_config::signed_veriloga_technology_test_fixture();
     let mut registry = crate::state::pdk_config::PdkTechnologyRegistry::default();
@@ -772,7 +772,7 @@ fn signed_pdk_runtime() -> crate::simulation::veriloga::PreparedVerilogARuntime 
     let sealed = registry
         .seal_model_sources_for_binding(&package.binding(), package.archive_digest())
         .unwrap();
-    crate::simulation::veriloga::compile_signed_pdk_source_runtime(
+    rspice_simulation::veriloga::compile_signed_pdk_source_runtime(
         &sealed.as_parts().binding,
         sealed.as_parts().archive_digest,
         &sealed.as_parts().veriloga_artifacts,
@@ -803,7 +803,7 @@ fn snapshot_rejects_positive_area_model_bin_overlap_before_dispatch() {
 #[test]
 fn standalone_connection_snapshot_requires_library_binding_and_provenance() {
     let (sources, deck) =
-        crate::simulation::veriloga::test_support::standalone_connection_fixture();
+        crate::simulation::veriloga_tests::test_support::standalone_connection_fixture();
     let exact = || {
         let mut input = parts();
         input.tasks = vec![prepared("tran", "Transient", transient_task())];
@@ -821,7 +821,7 @@ fn standalone_connection_snapshot_requires_library_binding_and_provenance() {
 
     let mut missing_payload = exact();
     missing_payload.project_veriloga_runtimes =
-        crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(
+        rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(
             sources.device_runtimes().cloned().collect(),
         )
         .unwrap();
@@ -851,7 +851,7 @@ fn snapshot_requires_the_exact_aliased_project_runtime_directive() {
     let runtime = project_runtime();
     let mut missing = parts();
     missing.project_veriloga_runtimes =
-        crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])
+        rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])
             .unwrap();
     assert!(matches!(
         PreparedRunSnapshot::new(missing),
@@ -861,21 +861,21 @@ fn snapshot_requires_the_exact_aliased_project_runtime_directive() {
         })
     ));
 
-    let directive = crate::simulation::veriloga::project_veriloga_directive(
+    let directive = rspice_simulation::netlist_preparation::project_veriloga_directive(
         runtime.source_key(),
         runtime.netlist_alias(),
     );
     let mut suffixed = parts();
     suffixed.executable_netlist = format!("deck\n{directive} unexpected\n.op\n.end\n");
     suffixed.project_veriloga_runtimes =
-        crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])
+        rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])
             .unwrap();
     assert!(PreparedRunSnapshot::new(suffixed).is_err());
 
     let mut exact = parts();
     exact.executable_netlist = format!("deck\n{directive}\n.op\n.end\n");
     exact.project_veriloga_runtimes =
-        crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime]).unwrap();
+        rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime]).unwrap();
     assert!(PreparedRunSnapshot::new(exact).is_ok());
 }
 
@@ -887,14 +887,14 @@ fn snapshot_binds_signed_pdk_veriloga_runtime_and_archive_provenance() {
             .provenance_label()
             .starts_with("signed-pdk-veriloga:__rspice_pdk__/")
     );
-    let directive = crate::simulation::veriloga::project_veriloga_directive(
+    let directive = rspice_simulation::netlist_preparation::project_veriloga_directive(
         runtime.source_key(),
         runtime.netlist_alias(),
     );
     let mut prepared = parts();
     prepared.executable_netlist = format!("signed PDK runtime\n{directive}\n.op\n.end\n");
     prepared.project_veriloga_runtimes =
-        crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime]).unwrap();
+        rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime]).unwrap();
     let snapshot = PreparedRunSnapshot::new(prepared).expect("signed runtime snapshot validates");
     assert_eq!(snapshot.metadata().model_identity_count, 1);
 }
@@ -902,12 +902,12 @@ fn snapshot_binds_signed_pdk_veriloga_runtime_and_archive_provenance() {
 #[test]
 fn snapshot_rejects_unsealed_or_duplicate_veriloga_directives() {
     let runtime = project_runtime();
-    let directive = crate::simulation::veriloga::project_veriloga_directive(
+    let directive = rspice_simulation::netlist_preparation::project_veriloga_directive(
         runtime.source_key(),
         runtime.netlist_alias(),
     );
     let runtime_set =
-        crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime]).unwrap();
+        rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime]).unwrap();
 
     let mut unsealed = parts();
     unsealed.executable_netlist = format!(

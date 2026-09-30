@@ -329,6 +329,30 @@ fn dc_value_from_source(spec: &SourceSpec) -> Option<Value> {
     }
 }
 
+/// Insert one sealed Verilog-A directive before the terminal `.end` card.
+/// The exact same helper is used by the retained generated artifact and the
+/// immutable prepared-run source, preventing display/execution drift.
+pub fn project_veriloga_directive(source_key: &str, netlist_alias: &str) -> String {
+    format!(".veriloga \"{source_key}\" {netlist_alias}")
+}
+
+pub fn append_project_veriloga_directive(
+    source: &mut String,
+    source_key: &str,
+    netlist_alias: &str,
+) {
+    let directive = project_veriloga_directive(source_key, netlist_alias);
+    let end = terminal_end_card_offset(source).unwrap_or(source.len());
+    if source[..end]
+        .lines()
+        .skip(1)
+        .any(|line| line.trim().eq_ignore_ascii_case(&directive))
+    {
+        return;
+    }
+    *source = splice_before_terminal_end_card(source, &directive);
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -538,5 +562,32 @@ mod tests {
             splice_before_terminal_end_card_with_abort("title\n.end\n", &block, &payload_abort),
             Err(ServiceRunError::Aborted)
         ));
+    }
+
+    #[test]
+    fn projected_veriloga_cards_reach_the_parser_before_commented_termination() {
+        for title in [".end", ".veriloga \"sealed.va\" device", "title"] {
+            for terminal in [".end; done", ".END // done", ".end"] {
+                let mut source = format!("{title}\r\nR1 1 0 1k\r\n{terminal}\r\n");
+                super::append_project_veriloga_directive(&mut source, "sealed.va", "device");
+                super::append_project_veriloga_directive(&mut source, "sealed.va", "device");
+                let parsed = rspice_core::Netlist::parse(&source).expect("projected deck parses");
+                assert_eq!(parsed.title, title, "{source}");
+                assert_eq!(parsed.veriloga_includes.len(), 1, "{source}");
+                assert_eq!(
+                    parsed.veriloga_includes[0].model_name.as_deref(),
+                    Some("device")
+                );
+                assert!(
+                    source.starts_with(&format!("{title}\r\nR1 1 0 1k\r\n")),
+                    "{source:?}"
+                );
+            }
+        }
+        let mut source = "title\n.end; done\n.veriloga \"sealed.va\" device\n".to_owned();
+        super::append_project_veriloga_directive(&mut source, "sealed.va", "device");
+        let parsed =
+            rspice_core::Netlist::parse(&source).expect("a tail directive is not executable");
+        assert_eq!(parsed.veriloga_includes.len(), 1, "{source}");
     }
 }

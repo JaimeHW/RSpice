@@ -528,7 +528,7 @@ fn run_decoded_worker_request(
 #[serde(rename_all = "camelCase")]
 struct WasmJitRequestPreparation {
     dispatch_token: u32,
-    artifacts: Vec<crate::simulation::veriloga::WasmJitWorkerArtifact>,
+    artifacts: Vec<rspice_simulation::project_veriloga::worker::WasmJitWorkerArtifact>,
     errors: Vec<String>,
 }
 
@@ -557,9 +557,11 @@ pub(crate) fn prepare_wasm_jit_request_value(
     };
     for runtime in request.project_veriloga_runtimes.device_runtimes() {
         match runtime.compile_wasm_jit_artifact() {
-            Ok(artifact) => preparation
-                .artifacts
-                .push(crate::simulation::veriloga::WasmJitWorkerArtifact::from_compiled(&artifact)),
+            Ok(artifact) => preparation.artifacts.push(
+                rspice_simulation::project_veriloga::worker::WasmJitWorkerArtifact::from_compiled(
+                    &artifact,
+                ),
+            ),
             Err(error) => preparation.errors.push(format!(
                 "Verilog-A runtime '{}' could not qualify for the browser JIT: {error}",
                 runtime.netlist_alias()

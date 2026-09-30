@@ -766,7 +766,7 @@ pub(in crate::simulation) struct AuthorizedTaskDispatch {
     saved_output_contracts: Vec<PreparedSavedOutput>,
     executable_netlist: Arc<str>,
     source_basis_digest: ContentDigest,
-    project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
+    project_veriloga_runtimes: rspice_simulation::veriloga::PreparedVerilogARuntimeSet,
     measurement_references:
         rspice_simulation::measurement_references::PreparedMeasurementReferences,
     touchstone_export: TouchstoneExportPolicy,
@@ -927,7 +927,7 @@ impl ResolvedTaskDispatch {
     ) -> (
         QueuedAnalysis,
         Arc<str>,
-        crate::simulation::veriloga::PreparedVerilogARuntimeSet,
+        rspice_simulation::veriloga::PreparedVerilogARuntimeSet,
         rspice_simulation::measurement_references::PreparedMeasurementReferences,
         ResolvedExecutionDependencies,
         Option<crate::simulation::runner::AnalysisExecutionEnvironment>,
@@ -964,7 +964,7 @@ pub(in crate::simulation) struct SnapshotParts {
     pub(in crate::simulation) specifications: Vec<PreparedSpecification>,
     pub(in crate::simulation) specification_policy: PreparedSpecificationPolicy,
     pub(in crate::simulation) project_veriloga_runtimes:
-        crate::simulation::veriloga::PreparedVerilogARuntimeSet,
+        rspice_simulation::veriloga::PreparedVerilogARuntimeSet,
     pub(in crate::simulation) measurement_references:
         rspice_simulation::measurement_references::PreparedMeasurementReferences,
     pub(in crate::simulation) target: ExecutionTargetCapabilities,
@@ -1019,7 +1019,7 @@ pub(in crate::simulation) struct PreparedRunSnapshot {
     project_model_sources: Vec<PreparedModelSourceIdentity>,
     specifications: Vec<PreparedSpecification>,
     specification_policy: PreparedSpecificationPolicy,
-    project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
+    project_veriloga_runtimes: rspice_simulation::veriloga::PreparedVerilogARuntimeSet,
     measurement_references:
         rspice_simulation::measurement_references::PreparedMeasurementReferences,
     target: ExecutionTargetCapabilities,
@@ -1476,7 +1476,7 @@ impl PreparedRunSnapshot {
             ));
         }
         for runtime in parts.project_veriloga_runtimes.sources() {
-            let directive = crate::simulation::veriloga::project_veriloga_directive(
+            let directive = rspice_simulation::netlist_preparation::project_veriloga_directive(
                 runtime.source_key(),
                 runtime.netlist_alias(),
             );

@@ -13,7 +13,6 @@ mod source_bundle;
 use rspice_model_library::source_paths::portable_path_key;
 pub(crate) use rspice_model_library::{ModelDefinitionProvider, model_library_source_digest};
 pub use rspice_simulation::model_sources::SealedModelExecutionSources;
-pub(crate) use rspice_simulation::model_sources::SealedModelLibraryVerilogAAuthority;
 
 use serde::{Deserialize, Serialize};
 #[cfg(any(test, not(target_arch = "wasm32")))]

@@ -478,7 +478,10 @@ pub fn rspice_ui_wasm_jit_kernel_probe_artifact()
     let artifact =
         rspice_veriloga::wasm_jit::compile_model_value_module(&report.model, &report.canonical_ir)
             .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))?;
-    let artifact = simulation::veriloga::WasmJitWorkerArtifact::from_compiled(&artifact);
+    let artifact =
+        rspice_simulation::project_veriloga::worker::WasmJitWorkerArtifact::from_compiled(
+            &artifact,
+        );
     serde_wasm_bindgen::to_value(&artifact)
         .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))
 }
@@ -593,7 +596,10 @@ pub fn rspice_ui_wasm_jit_solver_probe_artifact()
     let artifact =
         rspice_veriloga::wasm_jit::compile_model_value_module(&report.model, &report.canonical_ir)
             .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))?;
-    let artifact = simulation::veriloga::WasmJitWorkerArtifact::from_compiled(&artifact);
+    let artifact =
+        rspice_simulation::project_veriloga::worker::WasmJitWorkerArtifact::from_compiled(
+            &artifact,
+        );
     serde_wasm_bindgen::to_value(&artifact)
         .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))
 }

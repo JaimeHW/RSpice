@@ -377,7 +377,7 @@ impl SimulationController {
             .try_merge(prepared_model_library_veriloga_runtimes(&sealed_models)?)
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         for runtime in external_veriloga_runtimes.sources() {
-            crate::simulation::veriloga::append_project_veriloga_directive(
+            rspice_simulation::netlist_preparation::append_project_veriloga_directive(
                 &mut source,
                 runtime.source_key(),
                 runtime.netlist_alias(),
@@ -1032,7 +1032,7 @@ impl SimulationController {
         let mut netlist =
             Self::apply_reference_model_bindings_to_netlist(&generated_source, &model_cards);
         for runtime in external_veriloga_runtimes.sources() {
-            crate::simulation::veriloga::append_project_veriloga_directive(
+            rspice_simulation::netlist_preparation::append_project_veriloga_directive(
                 &mut netlist,
                 runtime.source_key(),
                 runtime.netlist_alias(),
@@ -1239,7 +1239,7 @@ impl SimulationController {
             .try_merge(prepared_model_library_veriloga_runtimes(&sealed_models)?)
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         for runtime in external_veriloga_runtimes.sources() {
-            crate::simulation::veriloga::append_project_veriloga_directive(
+            rspice_simulation::netlist_preparation::append_project_veriloga_directive(
                 &mut composed,
                 runtime.source_key(),
                 runtime.netlist_alias(),
@@ -1695,9 +1695,9 @@ fn reject_unresolved_device_models(
 fn prepared_configuration_veriloga_runtimes(
     state: &AppState,
     projection: &crate::state::workspace::ConfigurationExecutionProjection,
-) -> Result<crate::simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
+) -> Result<rspice_simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
     let mut prepared =
-        HashMap::<String, crate::simulation::veriloga::PreparedVerilogARuntime>::new();
+        HashMap::<String, rspice_simulation::veriloga::PreparedVerilogARuntime>::new();
     for execution in projection.plan().bindings() {
         let Some(binding) = execution.project_veriloga() else {
             continue;
@@ -1726,7 +1726,7 @@ fn prepared_configuration_veriloga_runtimes(
                 ),
             ));
         }
-        let runtime = crate::simulation::veriloga::compile_project_source_bundle_runtime(
+        let runtime = rspice_simulation::project_veriloga::compile_project_source_bundle_runtime(
             state.workspace.content.project.id(),
             bundle,
             binding.selected_module(),
@@ -1787,7 +1787,7 @@ fn prepared_configuration_veriloga_runtimes(
             prepared.insert(runtime.source_key().to_owned(), runtime);
         }
     }
-    crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(
+    rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(
         prepared.into_values().collect(),
     )
     .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
@@ -1795,7 +1795,7 @@ fn prepared_configuration_veriloga_runtimes(
 
 fn prepared_project_veriloga_runtimes(
     state: &AppState,
-) -> Result<crate::simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
+) -> Result<rspice_simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
     let Some(bundle) = state.workspace.content.project_sources.bundle_for_owner(
         &crate::state::ProjectSourceOwner::code_workspace(
             crate::state::ProjectSourceLanguage::VerilogA,
@@ -1811,7 +1811,7 @@ fn prepared_project_veriloga_runtimes(
         && receipt.token.revision == bundle.revision().get()
         && receipt.token.closure_digest == bundle.closure_digest()
     {
-        let runtime = crate::simulation::veriloga::prepare_project_runtime(
+        let runtime = rspice_simulation::project_veriloga::prepare_project_runtime(
             state.workspace.content.project.id(),
             bundle,
             &receipt.token,
@@ -1820,7 +1820,7 @@ fn prepared_project_veriloga_runtimes(
             receipt.module_name.clone(),
         )
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-        return crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
+        return rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error));
     }
     if !document.validation_is_current() {
@@ -1856,13 +1856,13 @@ fn prepared_project_veriloga_runtimes(
     let runtime = receipt
         .prepare_runtime(state.workspace.content.project.id(), bundle)
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-    crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
+    rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
 }
 
 fn prepared_signed_pdk_veriloga_runtimes(
     sealed_models: &crate::state::model_library::SealedModelExecutionSources,
-) -> Result<crate::simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
+) -> Result<rspice_simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
     let Some((package, archive_digest, artifacts, bindings)) =
         sealed_models.pdk_veriloga_authority()
     else {
@@ -1871,7 +1871,7 @@ fn prepared_signed_pdk_veriloga_runtimes(
     let runtimes = bindings
         .iter()
         .map(|binding| {
-            crate::simulation::veriloga::compile_signed_pdk_source_runtime(
+            rspice_simulation::veriloga::compile_signed_pdk_source_runtime(
                 package,
                 archive_digest,
                 artifacts,
@@ -1880,27 +1880,27 @@ fn prepared_signed_pdk_veriloga_runtimes(
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(runtimes)
+    rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(runtimes)
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
 }
 
 fn prepared_model_library_veriloga_runtimes(
     sealed_models: &crate::state::model_library::SealedModelExecutionSources,
-) -> Result<crate::simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
+) -> Result<rspice_simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
     let Some(authority) = sealed_models
         .model_library_veriloga_authority()
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?
     else {
         return Ok(Default::default());
     };
-    crate::simulation::veriloga::compile_model_library_source_runtimes(&authority)
+    rspice_simulation::project_veriloga::compile_model_library_source_runtimes(&authority)
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
 }
 
 fn project_veriloga_runtimes_referenced_by(
     state: &AppState,
     source: &str,
-) -> Result<crate::simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
+) -> Result<rspice_simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
     let Some(bundle) = state.workspace.content.project_sources.bundle_for_owner(
         &crate::state::ProjectSourceOwner::code_workspace(
             crate::state::ProjectSourceLanguage::VerilogA,
@@ -2224,7 +2224,7 @@ fn reject_deferred_external_sources(netlist: &str) -> Result<(), PreparationErro
 
 fn reject_deferred_external_sources_with_project_runtimes(
     netlist: &str,
-    project_runtimes: &crate::simulation::veriloga::PreparedVerilogARuntimeSet,
+    project_runtimes: &rspice_simulation::veriloga::PreparedVerilogARuntimeSet,
     measurement_references: &rspice_simulation::measurement_references::PreparedMeasurementReferences,
 ) -> Result<(), PreparationError> {
     measurement_references

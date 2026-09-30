@@ -1309,7 +1309,7 @@ endmodule
             .expect("signed runtime authority retained");
         assert_eq!(binding, &package.binding());
         assert_eq!(archive_digest, package.archive_digest());
-        let runtime = crate::simulation::veriloga::compile_signed_pdk_source_runtime(
+        let runtime = rspice_simulation::veriloga::compile_signed_pdk_source_runtime(
             binding,
             archive_digest,
             artifacts,
@@ -1322,7 +1322,7 @@ endmodule
         assert_eq!(runtime.netlist_alias(), "pdk_resistor_model");
         assert_eq!(runtime.terminal_names().unwrap(), ["p", "n"]);
         let encoded = serde_json::to_vec(&runtime).unwrap();
-        let restored: crate::simulation::veriloga::PreparedVerilogARuntime =
+        let restored: rspice_simulation::veriloga::PreparedVerilogARuntime =
             serde_json::from_slice(&encoded).unwrap();
         restored.validate().expect("worker payload revalidates");
         assert_eq!(restored, runtime);

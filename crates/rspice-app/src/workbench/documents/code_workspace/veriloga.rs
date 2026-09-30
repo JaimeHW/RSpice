@@ -16,7 +16,7 @@ use crate::state::{
 };
 use crate::workbench::RSpiceApp;
 
-use crate::simulation::veriloga::VerilogASourceOperationToken;
+use rspice_simulation::project_veriloga::VerilogASourceOperationToken;
 #[cfg(test)]
 use rspice_veriloga::{VerilogACompiler, VirtualSourceBundle};
 
@@ -95,7 +95,7 @@ impl SelectedVerilogASource {
             requested_module_digest: self
                 .selected_module
                 .as_deref()
-                .map(crate::simulation::veriloga::veriloga_selected_module_digest),
+                .map(rspice_simulation::project_veriloga::veriloga_selected_module_digest),
         }
     }
 
@@ -1378,7 +1378,7 @@ pub(crate) fn compile_project_bundle_virtual_for_provenance(
     bundle: &ProjectSourceBundle,
     selected_module: &str,
 ) -> Result<VirtualRuntimeCompilation, String> {
-    crate::simulation::veriloga::compile_project_virtual_runtime(bundle, selected_module)
+    rspice_simulation::project_veriloga::compile_project_virtual_runtime(bundle, selected_module)
         .map_err(|error| error.to_string())
 }
 
@@ -1606,7 +1606,7 @@ mod tests {
 
     #[test]
     fn editor_and_execution_share_the_project_macro_expansion_contract() {
-        let limits = crate::simulation::veriloga::project_virtual_compile_limits();
+        let limits = rspice_simulation::project_veriloga::project_virtual_compile_limits();
         assert_eq!(
             limits.max_expanded_bytes,
             crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES.saturating_mul(2)

@@ -109,7 +109,7 @@ pub use project_sources::{
     ProjectSourceDocument, ProjectSourceFile, ProjectSourceId, ProjectSourceLanguage,
     ProjectSourceOwner, ProjectSourceQualificationAttempt, ProjectSourceQualificationCheck,
     ProjectSourceQualificationDisposition, ProjectSourceQualificationTarget, ProjectSourceRegistry,
-    ProjectSourceRole, ProjectSourceRoleBinding, project_veriloga_bundle_source_key,
+    ProjectSourceRole, ProjectSourceRoleBinding,
 };
 pub(crate) use project_sources::{
     CanonicalCellViewOwnerKey, canonical_cell_view_owner_key, project_source_path_key,

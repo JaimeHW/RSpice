@@ -2,8 +2,9 @@
 
 use rspice_design::project_sources::{ProjectSourceBundle, ProjectSourceRole};
 use rspice_veriloga::{RuntimeCompileReport, VerilogACompiler};
+use sha2::{Digest as _, Sha256};
 
-use crate::veriloga::{PreparedRuntimeError, PreparedVerilogARuntime};
+use crate::veriloga::{PreparedRuntimeError, PreparedVerilogARuntime, PreparedVerilogARuntimeSet};
 
 pub mod build_profile;
 pub mod worker;
@@ -139,5 +140,93 @@ pub fn project_virtual_compile_limits() -> rspice_veriloga::VirtualCompileLimits
         max_expanded_bytes: rspice_design::project_sources::MAX_PROJECT_SOURCE_BUNDLE_BYTES
             .saturating_mul(2),
         ..rspice_veriloga::VirtualCompileLimits::default()
+    }
+}
+
+/// Exact project-owned Verilog-A closure captured when compilation starts.
+///
+/// Unlike automation's single-document token, this identity includes the
+/// stable bundle owner and the digest of every file in its sealed dependency
+/// closure. A result can therefore never cross-publish between two cell views
+/// that happen to contain identical root text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VerilogASourceOperationToken {
+    pub project_id: rspice_app_types::product::ProjectId,
+    pub bundle_id: rspice_design::project_sources::ProjectSourceId,
+    pub revision: u64,
+    pub closure_digest: rspice_app_types::product::ContentDigest,
+    /// Exact explicit module selection requested by a cell-view contract.
+    /// `None` preserves the Code Workspace's compiler-selected module mode.
+    pub requested_module_digest: Option<rspice_app_types::product::ContentDigest>,
+}
+
+/// Bind a compile report only after checking its current project source token.
+pub fn prepare_project_runtime(
+    project_id: rspice_app_types::product::ProjectId,
+    bundle: &rspice_design::project_sources::ProjectSourceBundle,
+    token: &VerilogASourceOperationToken,
+    module_name: &str,
+    report: &rspice_veriloga::RuntimeCompileReport,
+    netlist_alias: impl Into<String>,
+) -> Result<PreparedVerilogARuntime, PreparedRuntimeError> {
+    if token.project_id != project_id
+        || token.bundle_id != bundle.id()
+        || token.revision != bundle.revision().get()
+        || token.closure_digest != bundle.closure_digest()
+        || token
+            .requested_module_digest
+            .is_some_and(|expected| expected != veriloga_selected_module_digest(module_name))
+    {
+        return Err(PreparedRuntimeError::SourceIdentity(
+            "The retained Verilog-A runtime does not identify the exact current project source"
+                .to_owned(),
+        ));
+    }
+    let source_key = rspice_design::project_sources::project_veriloga_bundle_source_key(
+        project_id,
+        bundle,
+        module_name,
+    )
+    .map_err(|error| PreparedRuntimeError::SourceIdentity(error.to_string()))?;
+    PreparedVerilogARuntime::try_from_runtime_report(
+        source_key,
+        bundle.closure_digest(),
+        module_name,
+        report,
+        netlist_alias,
+    )
+}
+
+pub fn veriloga_selected_module_digest(
+    module_name: &str,
+) -> rspice_app_types::product::ContentDigest {
+    let mut hasher = Sha256::new();
+    let domain = b"rspice.veriloga-selected-module/v1";
+    hasher.update((domain.len() as u64).to_be_bytes());
+    hasher.update(domain);
+    hasher.update((module_name.len() as u64).to_be_bytes());
+    hasher.update(module_name.as_bytes());
+    rspice_app_types::product::ContentDigest::from_bytes(hasher.finalize().into())
+}
+
+pub fn compile_model_library_source_runtimes(
+    authority: &crate::model_sources::SealedModelLibraryVerilogAAuthority,
+) -> Result<PreparedVerilogARuntimeSet, PreparedRuntimeError> {
+    crate::veriloga::compile_model_library_source_runtimes(
+        authority,
+        model_library_virtual_compile_limits(),
+    )
+}
+
+fn model_library_virtual_compile_limits() -> rspice_veriloga::VirtualCompileLimits {
+    rspice_veriloga::VirtualCompileLimits {
+        max_files: rspice_design::project_sources::MAX_PROJECT_SOURCE_FILES,
+        max_path_bytes: rspice_design::project_sources::MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES,
+        max_file_bytes: rspice_design::project_sources::MAX_PROJECT_CODE_SOURCE_BYTES,
+        max_total_source_bytes: rspice_design::project_sources::MAX_PROJECT_SOURCE_BUNDLE_BYTES,
+        max_include_depth: rspice_design::project_sources::MAX_PROJECT_SOURCE_DEPENDENCY_DEPTH,
+        max_expanded_bytes: rspice_design::project_sources::MAX_PROJECT_SOURCE_BUNDLE_BYTES
+            .saturating_mul(2),
+        max_module_name_bytes: 128,
     }
 }

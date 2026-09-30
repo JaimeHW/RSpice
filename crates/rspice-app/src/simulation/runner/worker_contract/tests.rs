@@ -736,7 +736,7 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
 #[test]
 fn standalone_connection_worker_transport_retains_selected_physics() {
     let (sources, deck) =
-        crate::simulation::veriloga::test_support::standalone_connection_fixture();
+        crate::simulation::veriloga_tests::test_support::standalone_connection_fixture();
     let request = WorkerRequest {
         measurement_references: Default::default(),
         id: 18,
@@ -830,14 +830,14 @@ fn worker_request_round_trips_project_veriloga_runtime_artifacts() {
         })),
         netlist: format!(
             "{}\n.end\n",
-            crate::simulation::veriloga::project_veriloga_directive(
+            rspice_simulation::netlist_preparation::project_veriloga_directive(
                 runtime.source_key(),
                 runtime.module_name()
             )
         ),
         source_path: None,
         project_veriloga_runtimes:
-            crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime]).unwrap(),
+            rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime]).unwrap(),
         dependencies: Default::default(),
         environment: None,
         stream_transient_samples: false,

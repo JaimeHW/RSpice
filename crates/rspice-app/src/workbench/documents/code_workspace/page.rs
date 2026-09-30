@@ -4,11 +4,12 @@
 //! This module owns only the currently visible page and asynchronous operation
 //! receipts that must never survive a process restart.
 
-use crate::simulation::veriloga::{PreparedVerilogARuntime, VerilogASourceOperationToken};
 use crate::{
     product::{ContentDigest, ProjectId},
     state::{ProjectSourceId, ProjectSourceLanguage},
 };
+use rspice_simulation::project_veriloga::VerilogASourceOperationToken;
+use rspice_simulation::veriloga::PreparedVerilogARuntime;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, mpsc};
@@ -197,14 +198,14 @@ pub struct VerilogACompileReceipt {
 
 /// Unpack an editor compile receipt into the identity facts the engine layer
 /// validates. The receipt also carries `CodeEditorDiagnostic`, so it stays
-/// here rather than travelling down to `simulation::veriloga` with the
+/// here rather than travelling down to `rspice_simulation::veriloga` with the
 /// runtime it produces.
 impl VerilogACompileReceipt {
     pub fn prepare_runtime(
         &self,
         project_id: crate::product::ProjectId,
         bundle: &crate::state::ProjectSourceBundle,
-    ) -> Result<PreparedVerilogARuntime, crate::simulation::veriloga::PreparedRuntimeError> {
+    ) -> Result<PreparedVerilogARuntime, rspice_simulation::veriloga::PreparedRuntimeError> {
         self.prepare_runtime_with_alias(project_id, bundle, self.module_name.clone())
     }
 
@@ -213,8 +214,8 @@ impl VerilogACompileReceipt {
         project_id: crate::product::ProjectId,
         bundle: &crate::state::ProjectSourceBundle,
         netlist_alias: impl Into<String>,
-    ) -> Result<PreparedVerilogARuntime, crate::simulation::veriloga::PreparedRuntimeError> {
-        crate::simulation::veriloga::prepare_project_runtime(
+    ) -> Result<PreparedVerilogARuntime, rspice_simulation::veriloga::PreparedRuntimeError> {
+        rspice_simulation::project_veriloga::prepare_project_runtime(
             project_id,
             bundle,
             &self.token,
@@ -817,9 +818,10 @@ mod tests {
     // These cover the receipt -> runtime adapter, so they stay with the
     // receipt. What they assert about the runtime itself now comes from
     // the engine layer.
-    use crate::simulation::veriloga::{
-        PreparedVerilogARuntimeSet, append_project_veriloga_directive, project_veriloga_directive,
+    use rspice_simulation::netlist_preparation::{
+        append_project_veriloga_directive, project_veriloga_directive,
     };
+    use rspice_simulation::veriloga::PreparedVerilogARuntimeSet;
 
     fn compiled_runtime(file_name: &str, module_name: &str) -> PreparedVerilogARuntime {
         compiled_runtime_with_alias(file_name, module_name, module_name)
@@ -909,7 +911,7 @@ mod tests {
         assert!(restored.validate().is_ok());
 
         // Tamper through the serialized form rather than the field. The
-        // payload is private to `simulation::veriloga` now, and a persisted
+        // payload is private to `rspice_simulation::veriloga` now, and a persisted
         // artifact edited on disk is the case that actually matters.
         let mut document: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
         let model_json = document["model_json"].as_str().unwrap().to_owned();

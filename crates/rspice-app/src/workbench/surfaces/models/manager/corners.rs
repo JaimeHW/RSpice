@@ -971,7 +971,7 @@ fn validate_current_model_execution_plan(
     let mut veriloga_count = 0_usize;
     if let Some((package, archive_digest, artifacts, bindings)) = sealed.pdk_veriloga_authority() {
         for binding in bindings {
-            crate::simulation::veriloga::compile_signed_pdk_source_runtime(
+            rspice_simulation::veriloga::compile_signed_pdk_source_runtime(
                 package,
                 archive_digest,
                 artifacts,

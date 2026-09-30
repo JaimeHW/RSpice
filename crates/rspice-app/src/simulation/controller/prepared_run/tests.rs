@@ -24,7 +24,7 @@ static FIXTURE_NONCE: AtomicU64 = AtomicU64::new(0);
 #[test]
 fn standalone_connection_directive_is_an_authenticated_prepared_dependency() {
     let (sources, deck) =
-        crate::simulation::veriloga::test_support::standalone_connection_fixture();
+        crate::simulation::veriloga_tests::test_support::standalone_connection_fixture();
     reject_deferred_external_sources_with_project_runtimes(&deck, &sources, &Default::default())
         .unwrap();
     let altered = deck.replace(" UI_CONNECTIONS", " OTHER_CONNECTIONS");
@@ -109,7 +109,7 @@ fn spectre_model_library_ahdl_is_compiled_and_emitted_as_a_sealed_runtime_direct
     assert_eq!(runtimes.len(), 1);
     let runtime = runtimes.device_runtimes().next().expect("one AHDL runtime");
     let mut executable = "prepared Spectre AHDL\n.end\n".to_owned();
-    crate::simulation::veriloga::append_project_veriloga_directive(
+    rspice_simulation::netlist_preparation::append_project_veriloga_directive(
         &mut executable,
         runtime.source_key(),
         runtime.netlist_alias(),
@@ -1356,14 +1356,14 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
             crate::state::ProjectSourceLanguage::VerilogA,
         ))
         .expect("installed project source bundle");
-    let source_key = crate::state::project_veriloga_bundle_source_key(
+    let source_key = rspice_design::project_sources::project_veriloga_bundle_source_key(
         state.workspace.content.project.id(),
         bundle,
         "owned",
     )
     .expect("derive exact project source key");
     let exact_directive =
-        crate::simulation::veriloga::project_veriloga_directive(&source_key, "owned");
+        rspice_simulation::netlist_preparation::project_veriloga_directive(&source_key, "owned");
     let exact_runtimes = project_veriloga_runtimes_referenced_by(&state, &exact_directive)
         .expect("inspect exact project directive");
     assert_eq!(exact_runtimes.len(), 1);
@@ -1376,7 +1376,7 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
 
     let altered_key = source_key.replacen("__rspice_project__", "__RSPICE_PROJECT__", 1);
     let altered_directive =
-        crate::simulation::veriloga::project_veriloga_directive(&altered_key, "owned");
+        rspice_simulation::netlist_preparation::project_veriloga_directive(&altered_key, "owned");
     let altered_runtimes = project_veriloga_runtimes_referenced_by(&state, &altered_directive)
         .expect("inspect altered project directive");
     assert!(
@@ -1509,7 +1509,7 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
             .netlist
             .lines()
             .filter(|line| line.trim().eq_ignore_ascii_case(
-                &crate::simulation::veriloga::project_veriloga_directive(
+                &rspice_simulation::netlist_preparation::project_veriloga_directive(
                     runtime.source_key(),
                     runtime.netlist_alias(),
                 )
@@ -1518,7 +1518,7 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
         1,
         "configured netlist must reference the exact prepared runtime once"
     );
-    crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])
+    rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])
         .unwrap()
         .install()
         .expect("sealed configured runtime installs in the session cache");

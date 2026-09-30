@@ -177,13 +177,12 @@ endmodule
     runtime.validate().unwrap();
     assert_eq!(runtime.source_digest(), package.archive_digest());
     assert_eq!(runtime.terminal_names().unwrap(), ["p", "n"]);
-    let canonical: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
-        serde_json::from_str(
-            serde_json::to_value(&runtime).unwrap()["canonical_ir_json"]
-                .as_str()
-                .unwrap(),
-        )
-        .unwrap();
+    let canonical: rspice_veriloga::canonical_ir::CanonicalIrArtifact = serde_json::from_str(
+        serde_json::to_value(&runtime).unwrap()["canonical_ir_json"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
     assert!(!canonical.digital.processes.is_empty());
     assert_controlled_conductance(&runtime, 250.0);
 

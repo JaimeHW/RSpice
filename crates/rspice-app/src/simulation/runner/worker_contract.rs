@@ -101,7 +101,7 @@ pub(crate) struct WorkerRequest {
     pub request: WorkerSimulationRequest,
     pub netlist: String,
     pub source_path: Option<String>,
-    pub project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
+    pub project_veriloga_runtimes: rspice_simulation::veriloga::PreparedVerilogARuntimeSet,
     #[serde(default)]
     pub measurement_references:
         rspice_simulation::measurement_references::PreparedMeasurementReferences,

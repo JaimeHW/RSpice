@@ -10,7 +10,7 @@ use rspice_simulation::project_veriloga::worker::{WorkerCompileRequest, WorkerCo
 use serde::{Deserialize, Serialize};
 
 use super::{SelectedVerilogASource, VerilogACompileOutcome};
-use crate::simulation::veriloga::WasmJitWorkerArtifact;
+use rspice_simulation::project_veriloga::worker::WasmJitWorkerArtifact;
 
 const VERILOGA_WORKER_PROTOCOL_VERSION: u32 = 2;
 const MAX_VERILOGA_WORKER_RESPONSE_BYTES: usize = 128 * 1024 * 1024;
