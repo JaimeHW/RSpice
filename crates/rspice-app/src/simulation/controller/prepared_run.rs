@@ -14,7 +14,6 @@ use rspice_core::netlist::{parse_include_directive, parse_lib_directive};
 
 use super::*;
 use crate::simulation::execution::AuthorizedRunDispatch;
-use crate::simulation::execution::ExecutionPermit;
 use crate::simulation::execution::ExecutionTargetCapabilities;
 use crate::simulation::execution::ModelSourceIdentity;
 use crate::simulation::execution::PreparationError;
@@ -50,11 +49,6 @@ use dependency_expansion::{expand_manual_dependencies, validated_executable_hier
 use model_sources::{prepared_project_model_sources, validate_projected_model_binding_authority};
 use occurrence_outputs::{effective_plan_capture, projection_occurrence_nets};
 use periodic_sources::validate_prepared_periodic_sources;
-
-pub(super) struct PendingPreparedRun {
-    snapshot: PreparedRunSnapshot,
-    permit: ExecutionPermit,
-}
 
 /// Let the deck find the data files its sources name.
 ///
@@ -457,9 +451,9 @@ impl SimulationController {
         state: &AppState,
     ) -> Result<PreparedRunMetadata, PreparationError> {
         self.clear_prepared_run();
-        let snapshot = self.build_prepared_snapshot(state, SimulationRunIntent::ManualDeck)?;
+        let snapshot = Self::build_prepared_snapshot(state, SimulationRunIntent::ManualDeck)?;
         let metadata = snapshot.metadata();
-        self.authorize_snapshot(snapshot)?;
+        self.run_authorization.retain(snapshot)?;
         Ok(metadata)
     }
 
@@ -469,9 +463,9 @@ impl SimulationController {
         &mut self,
         state: &AppState,
     ) -> Result<PreparedRunMetadata, PreparationError> {
-        let snapshot = self.build_prepared_snapshot(state, SimulationRunIntent::SimulateRunSet)?;
+        let snapshot = Self::build_prepared_snapshot(state, SimulationRunIntent::SimulateRunSet)?;
         let metadata = snapshot.metadata();
-        self.authorize_snapshot(snapshot)?;
+        self.run_authorization.retain(snapshot)?;
         Ok(metadata)
     }
 
@@ -520,9 +514,9 @@ impl SimulationController {
         let mut task_count = 0_usize;
         for plan_id in member_ids {
             let plan_name = activate_campaign_plan(&mut frozen_state, plan_id)?;
-            let snapshot = self
-                .build_prepared_snapshot(&frozen_state, SimulationRunIntent::SimulateRunSet)
-                .map_err(|error| {
+            let snapshot =
+                Self::build_prepared_snapshot(&frozen_state, SimulationRunIntent::SimulateRunSet)
+                    .map_err(|error| {
                     format!("Campaign member '{plan_name}' is not runnable: {error}")
                 })?;
             if snapshot.simulation_plan_id() != Some(plan_id) {
@@ -606,20 +600,9 @@ impl SimulationController {
                 }
             };
             let member_name = member.plan_name;
-            let digest = member.snapshot.digest();
-            let dispatch = (|| {
-                let permit = self
-                    .execution_permits
-                    .issue(digest)
-                    .map_err(|error| format!("could not authorize member: {error}"))?;
-                let proof = permit
-                    .consume(digest, digest)
-                    .map_err(|error| format!("could not consume member authorization: {error}"))?;
-                member
-                    .snapshot
-                    .authorize_dispatch(proof)
-                    .map_err(|error| error.to_string())
-            })();
+            let dispatch = self
+                .run_authorization
+                .authorize_campaign_member(member.snapshot);
             self.active_campaign = Some(campaign);
             let dispatch = match dispatch {
                 Ok(dispatch) => dispatch,
@@ -687,7 +670,7 @@ impl SimulationController {
         expected_snapshot_digest: crate::product::ContentDigest,
         expected_source_digest: crate::product::ContentDigest,
     ) -> Result<(), PreparationError> {
-        let current = self.build_prepared_snapshot(state, SimulationRunIntent::SimulateRunSet)?;
+        let current = Self::build_prepared_snapshot(state, SimulationRunIntent::SimulateRunSet)?;
         let metadata = current.metadata();
         if metadata.snapshot_digest != expected_snapshot_digest
             || metadata.source_digest != expected_source_digest
@@ -701,20 +684,19 @@ impl SimulationController {
     }
 
     pub(crate) fn clear_prepared_run(&mut self) {
-        self.pending_prepared_run = None;
-        if let Err(error) = self.execution_permits.invalidate() {
-            log::error!("Failed to invalidate prepared execution permit: {error}");
-        }
+        self.run_authorization.clear();
     }
 
     pub(crate) fn has_retained_manual_authorization(
         &self,
         expected_snapshot_digest: crate::product::ContentDigest,
     ) -> bool {
-        self.pending_prepared_run.as_ref().is_some_and(|pending| {
-            pending.snapshot.intent() == SimulationRunIntent::ManualDeck
-                && pending.snapshot.digest() == expected_snapshot_digest
-        })
+        self.run_authorization
+            .retained_snapshot()
+            .is_some_and(|snapshot| {
+                snapshot.intent() == SimulationRunIntent::ManualDeck
+                    && snapshot.digest() == expected_snapshot_digest
+            })
     }
 
     /// Validate and consume an explicitly retained preflight snapshot. Run,
@@ -723,95 +705,24 @@ impl SimulationController {
     /// manufactures hidden authorization at this final boundary.
     pub(super) fn consume_snapshot_for_dispatch(
         &mut self,
-        state: &mut AppState,
+        state: &AppState,
     ) -> Result<AuthorizedRunDispatch, PreparationError> {
         let intent = state.simulation.run_intent;
-        if self
-            .pending_prepared_run
-            .as_ref()
-            .is_some_and(|pending| pending.snapshot.intent() != intent)
-        {
-            self.clear_prepared_run();
-        }
-
-        if self.pending_prepared_run.is_none() {
-            let message = match intent {
-                SimulationRunIntent::ManualDeck => {
-                    "Validate the exact current netlist before running; manual decks are never auto-authorized"
-                }
-                SimulationRunIntent::SimulateRunSet => {
-                    "Run Simulation preflight before dispatch; Studio runs are never auto-authorized"
-                }
-            };
-            return Err(PreparationError::new(
-                PreparationStage::Authorization,
-                message,
-            ));
-        }
-
-        let pending = self.pending_prepared_run.take().ok_or_else(|| {
-            PreparationError::new(
-                PreparationStage::Authorization,
-                "No authorized prepared run is available",
-            )
-        })?;
-
-        let current = match self.build_prepared_snapshot(state, intent) {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                let _ = self.execution_permits.invalidate();
-                return Err(error);
-            }
-        };
-        let retained_digest = pending.snapshot.digest();
-        let current_digest = current.digest();
-        let proof = match pending.permit.consume(retained_digest, current_digest) {
-            Ok(proof) => proof,
-            Err(error) => {
-                let _ = self.execution_permits.invalidate();
-                return Err(PreparationError::new(
-                    PreparationStage::Authorization,
-                    format!(
-                        "Prepared run expired because a bound input, capability, or check receipt changed ({error})"
-                    ),
-                ));
-            }
-        };
-        pending.snapshot.authorize_dispatch(proof)
-    }
-
-    fn authorize_snapshot(
-        &mut self,
-        snapshot: PreparedRunSnapshot,
-    ) -> Result<(), PreparationError> {
-        let permit = self
-            .execution_permits
-            .issue(snapshot.digest())
-            .map_err(|error| {
-                PreparationError::new(
-                    PreparationStage::Authorization,
-                    format!("Could not authorize prepared run: {error}"),
-                )
-            })?;
-        self.pending_prepared_run = Some(PendingPreparedRun { snapshot, permit });
-        Ok(())
+        self.run_authorization
+            .consume(intent, || Self::build_prepared_snapshot(state, intent))
     }
 
     fn build_prepared_snapshot(
-        &self,
         state: &AppState,
         intent: SimulationRunIntent,
     ) -> Result<PreparedRunSnapshot, PreparationError> {
         match intent {
-            SimulationRunIntent::SimulateRunSet => self.build_prepared_run_set(state),
-            SimulationRunIntent::ManualDeck => self.build_prepared_manual_deck(state),
+            SimulationRunIntent::SimulateRunSet => Self::build_prepared_run_set(state),
+            SimulationRunIntent::ManualDeck => Self::build_prepared_manual_deck(state),
         }
     }
 
-    fn build_prepared_run_set(
-        &self,
-        state: &AppState,
-    ) -> Result<PreparedRunSnapshot, PreparationError> {
+    fn build_prepared_run_set(state: &AppState) -> Result<PreparedRunSnapshot, PreparationError> {
         let execution_projection = state
             .workspace
             .configuration_execution_projection(
@@ -868,11 +779,9 @@ impl SimulationController {
         }
         validate_projected_model_binding_authority(state, &execution_projection)?;
 
-        let plan = self
-            .build_analysis_plan(&state.sim_setup)
-            .map_err(|errors| {
-                PreparationError::new(PreparationStage::AnalysisPlan, errors.join("; "))
-            })?;
+        let plan = Self::build_analysis_plan(&state.sim_setup).map_err(|errors| {
+            PreparationError::new(PreparationStage::AnalysisPlan, errors.join("; "))
+        })?;
         let plan_payload = state.workspace.content.plan_data(plan.plan_id()).ok_or_else(|| {
             PreparationError::new(
                 PreparationStage::AnalysisPlan,
@@ -927,9 +836,8 @@ impl SimulationController {
                 .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
         }
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-        let tasks = self
-            .build_queue_from_plan(state, &plan, &sealed_models)
-            .map_err(|errors| {
+        let tasks =
+            Self::build_queue_from_plan(state, &plan, &sealed_models).map_err(|errors| {
                 PreparationError::new(PreparationStage::AnalysisPlan, errors.join("; "))
             })?;
         let design_nets = std::sync::Arc::new(
@@ -1189,7 +1097,6 @@ impl SimulationController {
     }
 
     fn build_prepared_manual_deck(
-        &self,
         state: &AppState,
     ) -> Result<PreparedRunSnapshot, PreparationError> {
         if state.ui.netlist.active_document_initialized
@@ -1328,7 +1235,7 @@ impl SimulationController {
                 PreparationError::new(PreparationStage::SourceChecks, errors.join("; "))
             })?;
         let source_digest = manual_executable_source_digest(&expanded);
-        let tasks = self.prepare_manual_tasks(
+        let tasks = Self::prepare_manual_tasks(
             source_digest,
             state.workspace.content.project.revision(),
             queued_tasks,
@@ -1405,7 +1312,6 @@ impl SimulationController {
     }
 
     fn prepare_manual_tasks(
-        &self,
         expanded_source_identity: crate::product::ContentDigest,
         source_revision: crate::product::ObjectRevision,
         tasks: Vec<QueuedAnalysis>,
@@ -1424,7 +1330,7 @@ impl SimulationController {
                     &task.spec,
                     current_occurrence,
                 );
-                let label = self.analysis_name_for_spec(&task.spec);
+                let label = Self::analysis_name_for_spec(&task.spec);
                 PreparedTask::new(instance_id, source_revision, Vec::new(), label, task)
             })
             .collect::<Vec<_>>();

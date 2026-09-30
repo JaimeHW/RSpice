@@ -41,8 +41,7 @@ fn every_configured_analysis_survives_save_prepare_and_dispatch() {
             plan_mut(&mut state).prepare_after_restore();
 
             let mut controller = SimulationController::new();
-            let frozen = controller
-                .build_analysis_plan(&state.sim_setup)
+            let frozen = SimulationController::build_analysis_plan(&state.sim_setup)
                 .map_err(|e| e.join("; "))?;
             let queue = compiled_queue(&state).map_err(|e| e.join("; "))?;
             let own_task = queue
@@ -70,17 +69,20 @@ fn every_configured_analysis_survives_save_prepare_and_dispatch() {
                 assert_eq!(task.queued_analysis().analysis_line, displayed, "{kind:?}");
             }
 
-            let snapshot = controller
-                .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-                .map_err(|error| error.to_string())?;
+            let snapshot = SimulationController::build_prepared_snapshot(
+                &state,
+                SimulationRunIntent::SimulateRunSet,
+            )
+            .map_err(|error| error.to_string())?;
             let receipt = snapshot
                 .prepared_run_receipt()
                 .map_err(|error| error.to_string())?;
             controller
-                .authorize_snapshot(snapshot)
+                .run_authorization
+                .retain(snapshot)
                 .map_err(|error| error.to_string())?;
             let dispatch = controller
-                .consume_snapshot_for_dispatch(&mut state)
+                .consume_snapshot_for_dispatch(&state)
                 .map_err(|error| error.to_string())?;
             assert_eq!(
                 receipt,

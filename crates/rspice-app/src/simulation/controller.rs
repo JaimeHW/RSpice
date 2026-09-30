@@ -210,12 +210,10 @@ pub struct SimulationController {
     transient_post: transient_post::TransientPostCoordinator,
     /// App-state design epoch this controller's runner/queue belong to.
     design_execution_epoch: u64,
-    /// Single outstanding immutable preflight result, if any.
-    pending_prepared_run: Option<prepared_run::PendingPreparedRun>,
+    /// Retained preflight and generation-safe dispatch authority.
+    run_authorization: crate::simulation::execution::PreparedRunAuthorization,
     /// Run-bound automatic export policy captured by immutable preflight.
     touchstone_export_policy: TouchstoneExportPolicy,
-    /// Generation-safe authority shared by every prepared dispatch token.
-    execution_permits: crate::simulation::execution::ExecutionPermitIssuer,
     /// Frozen, declared-order multi-plan campaign. Each member is an
     /// independent prepared run; this record only schedules and rolls them up.
     active_campaign: Option<ActiveSimulationCampaign>,
@@ -259,9 +257,8 @@ impl SimulationController {
             cached_netlist: None,
             transient_post: transient_post::TransientPostCoordinator::default(),
             design_execution_epoch: 0,
-            pending_prepared_run: None,
+            run_authorization: crate::simulation::execution::PreparedRunAuthorization::default(),
             touchstone_export_policy: TouchstoneExportPolicy::disabled(),
-            execution_permits: crate::simulation::execution::ExecutionPermitIssuer::default(),
             active_campaign: None,
         }
     }
@@ -1289,11 +1286,7 @@ impl SimulationController {
         let label = self
             .current_analysis_label
             .as_deref()
-            .or_else(|| {
-                self.current_spec
-                    .as_ref()
-                    .map(|spec| self.analysis_name_for_spec(spec))
-            })
+            .or_else(|| self.current_spec.as_ref().map(Self::analysis_name_for_spec))
             .or_else(|| {
                 self.current_config
                     .as_ref()
@@ -1648,7 +1641,7 @@ impl SimulationController {
         }
     }
 
-    fn analysis_name_for_spec(&self, spec: &AnalysisSpec) -> &'static str {
+    fn analysis_name_for_spec(spec: &AnalysisSpec) -> &'static str {
         spec.run_type().display_name()
     }
 
@@ -1735,7 +1728,7 @@ impl SimulationController {
                         .or_else(|| {
                             self.current_spec
                                 .as_ref()
-                                .map(|spec| self.analysis_name_for_spec(spec).to_owned())
+                                .map(|spec| Self::analysis_name_for_spec(spec).to_owned())
                         })
                         .or_else(|| {
                             self.current_config
@@ -2147,7 +2140,7 @@ impl SimulationController {
                             .or_else(|| {
                                 self.current_spec
                                     .as_ref()
-                                    .map(|spec| self.analysis_name_for_spec(spec).to_owned())
+                                    .map(|spec| Self::analysis_name_for_spec(spec).to_owned())
                             })
                             .or_else(|| {
                                 self.current_config
@@ -2219,7 +2212,7 @@ impl SimulationController {
                         .or_else(|| {
                             self.current_spec
                                 .as_ref()
-                                .map(|spec| self.analysis_name_for_spec(spec).to_owned())
+                                .map(|spec| Self::analysis_name_for_spec(spec).to_owned())
                         })
                         .or_else(|| {
                             self.current_config

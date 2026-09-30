@@ -4,12 +4,15 @@
 //! every execution input into a [`PreparedRunSnapshot`], then consumes the
 //! snapshot's generation-bound permit immediately before dispatch.
 
+mod authorization;
 mod permit;
 #[cfg(test)]
 mod qpss_artifact_tests;
 mod snapshot;
 
-pub(in crate::simulation) use permit::{ExecutionPermit, ExecutionPermitIssuer};
+pub(in crate::simulation) use authorization::PreparedRunAuthorization;
+#[cfg(test)]
+pub(in crate::simulation) use permit::ExecutionPermitIssuer;
 pub(in crate::simulation) use snapshot::bound_cards;
 pub(in crate::simulation) use snapshot::{
     AuthorizedRunDispatch, AuthorizedTaskDispatch, ExecutionTargetCapabilities,

@@ -234,9 +234,7 @@ fn monte_carlo_checkpoint_controls_resolve_evidence_before_preparation() {
         .model_library_manager
         .seal_execution_sources()
         .unwrap();
-    let queue = controller
-        .build_queue_from_plan(&state, &frozen, &sealed)
-        .unwrap();
+    let queue = SimulationController::build_queue_from_plan(&state, &frozen, &sealed).unwrap();
     let task = queue.iter().find(|task| task.instance_id() == mc).unwrap();
     let options = &task.queued_analysis().spec_options;
     assert_eq!(options.study_base.as_ref().unwrap().instance_id, op);
@@ -259,8 +257,7 @@ fn monte_carlo_checkpoint_controls_resolve_evidence_before_preparation() {
         "prepared bytes outlive retained history"
     );
     assert!(
-        controller
-            .build_queue_from_plan(&state, &frozen, &sealed)
+        SimulationController::build_queue_from_plan(&state, &frozen, &sealed)
             .unwrap_err()
             .iter()
             .any(|error| error.contains("no longer retained"))
@@ -271,9 +268,7 @@ fn monte_carlo_checkpoint_controls_resolve_evidence_before_preparation() {
         .imported_monte_carlo_checkpoints
         .insert("import.rspice-mc".into(), imported)
         .unwrap();
-    let imported = controller
-        .build_queue_from_plan(&state, &frozen, &sealed)
-        .unwrap();
+    let imported = SimulationController::build_queue_from_plan(&state, &frozen, &sealed).unwrap();
     let imported = imported
         .iter()
         .find(|task| task.instance_id() == mc)

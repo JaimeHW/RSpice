@@ -55,10 +55,9 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
         .workspace
         .content
         .replace_active_specification_definitions(plan_id, vec![spec.clone()]);
-    let controller = SimulationController::new();
-    let snapshot = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .unwrap();
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .unwrap();
     let digest = snapshot.digest();
     let generation =
         crate::workbench::lifecycle::project_lifecycle::generated_netlist_input_digest(&state)
@@ -86,9 +85,9 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
         .workspace
         .content
         .replace_active_specification_definitions(plan_id, vec![spec.clone()]);
-    let changed = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .unwrap();
+    let changed =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .unwrap();
     assert_eq!(changed.executable_netlist(), source);
     assert_ne!(changed.digest(), digest);
     assert_ne!(
@@ -135,9 +134,9 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
         .replace_active_specification_definitions(plan_id, vec![spec.clone()]);
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
     state.workspace.content.netlist_source = Some("Manual reference\nV1 out 0 2.5\nR1 out 0 1k\n.tran 100n 1u\n.MEAS TRAN fit ERROR V(out) FILE=studio-reference.csv COMP_FUNCTION=INFNORM INDEPVARCOL=0 DEPVARCOL=1\n.end\n".into());
-    let manual = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
-        .unwrap();
+    let manual =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .unwrap();
     assert_eq!(manual.executable_netlist().matches(".MEAS").count(), 1);
     for reference in [
         None,
@@ -152,8 +151,7 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
             .content
             .replace_active_specification_definitions(plan_id, vec![spec.clone()]);
         assert!(
-            controller
-                .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
                 .is_err()
         );
     }
@@ -179,10 +177,9 @@ fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
     })
     .unwrap();
     let plan_id = plan.id();
-    let controller = SimulationController::new();
-    let baseline = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .unwrap();
+    let baseline =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .unwrap();
     let baseline_generation =
         crate::workbench::lifecycle::project_lifecycle::generated_netlist_input_digest(&state)
             .unwrap();
@@ -204,9 +201,9 @@ fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
         .workspace
         .content
         .replace_active_specification_definitions(plan_id, definitions.clone());
-    let snapshot = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .unwrap();
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .unwrap();
     let generated =
         crate::workbench::menu_bar::build_menu_netlist(&mut state, crate::io::NetlistFormat::Spice)
             .unwrap();
@@ -284,9 +281,9 @@ fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
         .workspace
         .content
         .replace_active_specification_definitions(plan_id, legacy);
-    let reference = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .unwrap();
+    let reference =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .unwrap();
     assert_eq!(
         baseline.metadata().source_digest,
         reference.metadata().source_digest

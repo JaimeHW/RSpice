@@ -710,16 +710,13 @@ fn every_authored_advanced_option_moves_the_prepared_task_identity() {
         .expect("a fresh plan holds one enabled transient");
 
     let digest_of = |state: &AppState| -> Vec<u8> {
-        let controller = SimulationController::new();
-        let plan = controller
-            .build_analysis_plan(&state.sim_setup)
+        let plan = SimulationController::build_analysis_plan(&state.sim_setup)
             .unwrap_or_else(|errors| panic!("the fixture plan compiles: {}", errors.join("; ")));
         let sealed = state
             .model_library_manager
             .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
             .expect("the fixture library seals");
-        controller
-            .build_queue_from_plan(state, &plan, &sealed)
+        SimulationController::build_queue_from_plan(state, &plan, &sealed)
             .unwrap_or_else(|errors| panic!("the fixture queue builds: {}", errors.join("; ")))
             .iter()
             .flat_map(|task| task.config_digest().as_bytes().to_vec())
@@ -845,16 +842,13 @@ fn the_step_ceiling_a_transient_cannot_carry_is_judged_through_a_kind_that_can()
     };
 
     let digest_of = |state: &AppState| -> Vec<u8> {
-        let controller = SimulationController::new();
-        let plan = controller
-            .build_analysis_plan(&state.sim_setup)
+        let plan = SimulationController::build_analysis_plan(&state.sim_setup)
             .unwrap_or_else(|errors| panic!("the fixture plan compiles: {}", errors.join("; ")));
         let sealed = state
             .model_library_manager
             .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
             .expect("the fixture library seals");
-        controller
-            .build_queue_from_plan(state, &plan, &sealed)
+        SimulationController::build_queue_from_plan(state, &plan, &sealed)
             .unwrap_or_else(|errors| panic!("the fixture queue builds: {}", errors.join("; ")))
             .iter()
             .flat_map(|task| task.config_digest().as_bytes().to_vec())
@@ -943,16 +937,13 @@ fn the_harmonic_balance_initial_state_a_transient_cannot_carry_is_judged_through
     };
 
     let digest_of = |state: &AppState| -> Vec<u8> {
-        let controller = SimulationController::new();
-        let plan = controller
-            .build_analysis_plan(&state.sim_setup)
+        let plan = SimulationController::build_analysis_plan(&state.sim_setup)
             .unwrap_or_else(|errors| panic!("the fixture plan compiles: {}", errors.join("; ")));
         let sealed = state
             .model_library_manager
             .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
             .expect("the fixture library seals");
-        controller
-            .build_queue_from_plan(state, &plan, &sealed)
+        SimulationController::build_queue_from_plan(state, &plan, &sealed)
             .unwrap_or_else(|errors| panic!("the fixture queue builds: {}", errors.join("; ")))
             .iter()
             .flat_map(|task| task.config_digest().as_bytes().to_vec())

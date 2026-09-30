@@ -11,7 +11,7 @@ use std::sync::{
 
 use crate::product::ContentDigest;
 
-/// Controller-owned issuer for single-use execution permits.
+/// Authorization-owned issuer for single-use execution permits.
 ///
 /// Even values are idle generations and odd values are outstanding permits.
 /// Issuing a replacement first invalidates any prior odd generation. A permit

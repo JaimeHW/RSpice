@@ -66,17 +66,12 @@ fn plan_with_bound_fft(with_fft: Option<Option<&str>>) -> AppState {
 }
 
 fn compile(state: &AppState) -> Vec<crate::simulation::execution::PreparedTask> {
-    let controller = SimulationController::new();
-    let frozen = controller
-        .build_analysis_plan(&state.sim_setup)
-        .expect("plan freezes");
+    let frozen = SimulationController::build_analysis_plan(&state.sim_setup).expect("plan freezes");
     let sealed = state
         .model_library_manager
         .seal_execution_sources()
         .expect("model sources seal");
-    controller
-        .build_queue_from_plan(state, &frozen, &sealed)
-        .expect("plan compiles")
+    SimulationController::build_queue_from_plan(state, &frozen, &sealed).expect("plan compiles")
 }
 
 fn transient_digest(tasks: &[crate::simulation::execution::PreparedTask]) -> ContentDigest {
@@ -96,11 +91,11 @@ type DispatchedTask = (
 
 fn dispatch_tasks(state: &mut AppState, intent: SimulationRunIntent) -> Vec<DispatchedTask> {
     let mut controller = SimulationController::new();
-    let snapshot = controller
-        .build_prepared_snapshot(state, intent)
-        .expect("the plan prepares");
+    let snapshot =
+        SimulationController::build_prepared_snapshot(state, intent).expect("the plan prepares");
     controller
-        .authorize_snapshot(snapshot)
+        .run_authorization
+        .retain(snapshot)
         .expect("the prepared snapshot authorizes");
     let dispatch = controller
         .consume_snapshot_for_dispatch(state)
@@ -272,9 +267,7 @@ fn an_fft_analysis_without_an_earlier_transient_is_refused_before_the_run() {
     plan.insert(AnalysisKind::Fft).expect("FFT inserts");
     // An unbound FFT is a plan the studio will not freeze, so the refusal
     // arrives before a queue is ever compiled.
-    let controller = SimulationController::new();
-    let errors = controller
-        .build_analysis_plan(&state.sim_setup)
+    let errors = SimulationController::build_analysis_plan(&state.sim_setup)
         .expect_err("an unbound FFT cannot freeze");
     assert!(
         errors
@@ -414,10 +407,9 @@ fn a_hand_written_fft_without_a_transient_is_refused_in_the_engine_s_words() {
          .fft V(out) NP=256 WINDOW=RECT\n.end\n"
             .to_owned(),
     );
-    let controller = SimulationController::new();
-    let error = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
-        .expect_err("a card with no transient to post-process is refused");
+    let error =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect_err("a card with no transient to post-process is refused");
     let message = error.to_string();
     assert!(
         message

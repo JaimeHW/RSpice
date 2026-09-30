@@ -23,14 +23,12 @@ fn multirate_envelope_saved_plan_retains_its_solver_through_authorized_dispatch(
     state.sim_setup.analysis_plan = Some(serde_json::from_slice(&saved).unwrap());
     plan_mut(&mut state).prepare_after_restore();
     let mut controller = SimulationController::new();
-    let snapshot = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .unwrap();
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .unwrap();
     let receipt = snapshot.prepared_run_receipt().unwrap();
-    controller.authorize_snapshot(snapshot).unwrap();
-    let dispatch = controller
-        .consume_snapshot_for_dispatch(&mut state)
-        .unwrap();
+    controller.run_authorization.retain(snapshot).unwrap();
+    let dispatch = controller.consume_snapshot_for_dispatch(&state).unwrap();
     assert_eq!(
         receipt,
         dispatch

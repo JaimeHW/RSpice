@@ -66,13 +66,11 @@ fn independent_ac_data_instances_keep_their_own_parameter_tables() {
             .unwrap();
     }
     let mut controller = SimulationController::new();
-    let snapshot = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .unwrap();
-    controller.authorize_snapshot(snapshot).unwrap();
-    let dispatch = controller
-        .consume_snapshot_for_dispatch(&mut state)
-        .unwrap();
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .unwrap();
+    controller.run_authorization.retain(snapshot).unwrap();
+    let dispatch = controller.consume_snapshot_for_dispatch(&state).unwrap();
     assert!(!dispatch.executable_netlist().contains(".DATA"));
     let mut ac_count = 0;
     for task in dispatch.into_tasks() {
@@ -232,13 +230,12 @@ fn queued_tags(state: &AppState) -> Result<Vec<u8>, Vec<String>> {
 fn compiled_queue(
     state: &AppState,
 ) -> Result<Vec<crate::simulation::execution::PreparedTask>, Vec<String>> {
-    let controller = SimulationController::new();
-    let plan = controller.build_analysis_plan(&state.sim_setup)?;
+    let plan = SimulationController::build_analysis_plan(&state.sim_setup)?;
     let sealed = state
         .model_library_manager
         .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
         .map_err(|error| vec![error])?;
-    controller.build_queue_from_plan(state, &plan, &sealed)
+    SimulationController::build_queue_from_plan(state, &plan, &sealed)
 }
 
 /// Seal the receipt rows a compiled queue authenticates, which is the step
@@ -275,16 +272,17 @@ fn a_retaining_pss_plan_prepares_to_one_identity_every_time() {
     only(&mut state, &with_prerequisites(AnalysisKind::Pss));
     drive_pss_from_the_fixture_supply(&mut state);
 
-    let controller = SimulationController::new();
-    let baseline = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .expect("baseline snapshot")
-        .metadata();
-    for attempt in 0..8 {
-        let rebuilt = controller
-            .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-            .expect("rebuilt snapshot")
+    let baseline =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("baseline snapshot")
             .metadata();
+    for attempt in 0..8 {
+        let rebuilt = SimulationController::build_prepared_snapshot(
+            &state,
+            SimulationRunIntent::SimulateRunSet,
+        )
+        .expect("rebuilt snapshot")
+        .metadata();
         assert_eq!(
             rebuilt.snapshot_digest, baseline.snapshot_digest,
             "rebuild {attempt} of an unchanged PSS plan moved the prepared identity"
@@ -304,18 +302,19 @@ fn the_receipt_preflight_seals_is_the_receipt_dispatch_seals() {
     drive_pss_from_the_fixture_supply(&mut state);
 
     let mut controller = SimulationController::new();
-    let snapshot = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .expect("the plan prepares");
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("the plan prepares");
     let preflight_receipt = snapshot
         .prepared_run_receipt()
         .expect("preflight seals a receipt");
 
     controller
-        .authorize_snapshot(snapshot)
+        .run_authorization
+        .retain(snapshot)
         .expect("the snapshot authorizes");
     let dispatch = controller
-        .consume_snapshot_for_dispatch(&mut state)
+        .consume_snapshot_for_dispatch(&state)
         .expect("the permit is consumed");
     let dispatch_receipt = dispatch
         .prepared_run_receipt(crate::state::AnalysisResultSourceDomain::SimulationPlan)
@@ -346,9 +345,9 @@ fn a_default_pss_plan_prepares_a_receipt_instead_of_being_refused_at_dispatch() 
     );
 
     let mut controller = SimulationController::new();
-    let snapshot = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .expect("a default PSS plan prepares");
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("a default PSS plan prepares");
     let receipt = snapshot
         .prepared_run_receipt()
         .expect("preflight seals the receipt dispatch will seal");
@@ -442,10 +441,9 @@ fn a_psp_plan_prepares_a_whole_receipt() {
     only(&mut state, &with_prerequisites(AnalysisKind::Psp));
     drive_pss_from_the_fixture_supply(&mut state);
 
-    let controller = SimulationController::new();
-    let snapshot = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .expect("a PSP plan prepares");
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("a PSP plan prepares");
     let receipt = snapshot
         .prepared_run_receipt()
         .expect("a PSP plan seals the receipt dispatch will seal");
@@ -477,9 +475,11 @@ fn an_hb_rooted_plan_prepares_a_whole_receipt() {
         only(&mut state, &with_prerequisites(kind));
 
         let mut controller = SimulationController::new();
-        let snapshot = controller
-            .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-            .unwrap_or_else(|error| panic!("a default {kind:?} plan prepares: {error}"));
+        let snapshot = SimulationController::build_prepared_snapshot(
+            &state,
+            SimulationRunIntent::SimulateRunSet,
+        )
+        .unwrap_or_else(|error| panic!("a default {kind:?} plan prepares: {error}"));
         let receipt = snapshot
             .prepared_run_receipt()
             .unwrap_or_else(|error| panic!("{kind:?} seals a prepared-run receipt: {error}"));

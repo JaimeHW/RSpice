@@ -47,11 +47,12 @@ fn exhausted_run_sequence_blocks_dispatch_without_starting_a_batch() {
     state.simulation.next_run_id = u64::MAX;
     let baseline = crate::io::capture_simulation_results(&state.simulation);
     let mut controller = SimulationController::new();
-    let snapshot = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
-        .expect("prepare manual run");
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect("prepare manual run");
     controller
-        .authorize_snapshot(snapshot)
+        .run_authorization
+        .retain(snapshot)
         .expect("authorize run");
 
     controller.start_authorized_snapshot(&mut state);
@@ -629,16 +630,17 @@ fn frozen_hierarchy_rejects_stale_instance_model_library_metadata() {
 
 #[test]
 fn prepared_project_run_materializes_exact_signed_pdk_reference_models() {
-    let mut state = runnable_state();
+    let state = runnable_state();
     let mut controller = SimulationController::new();
-    let snapshot = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .expect("project run seals signed PDK model sources");
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("project run seals signed PDK model sources");
     controller
-        .authorize_snapshot(snapshot)
+        .run_authorization
+        .retain(snapshot)
         .expect("authorize exact project snapshot");
     let dispatch = controller
-        .consume_snapshot_for_dispatch(&mut state)
+        .consume_snapshot_for_dispatch(&state)
         .expect("freeze project dispatch");
     let executable = dispatch.executable_netlist();
     assert!(executable.contains(".model nmos_demo nmos level=1 vto=0.55"));
@@ -655,14 +657,15 @@ fn receipt_backed_manual_project_deck_uses_signed_pdk_models_without_host_paths(
     state.workspace.content.netlist_source =
         Some("signed project deck\nV1 d 0 1\nM1 d d 0 0 nmos_demo\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
-    let snapshot = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
-        .expect("governed manual project deck seals signed PDK sources");
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect("governed manual project deck seals signed PDK sources");
     controller
-        .authorize_snapshot(snapshot)
+        .run_authorization
+        .retain(snapshot)
         .expect("authorize exact governed manual deck");
     let dispatch = controller
-        .consume_snapshot_for_dispatch(&mut state)
+        .consume_snapshot_for_dispatch(&state)
         .expect("freeze governed manual dispatch");
     let executable = dispatch.executable_netlist();
     assert!(executable.contains(".model nmos_demo nmos level=1 vto=0.55"));
@@ -679,14 +682,15 @@ fn governed_manual_deck_dispatches_signed_pdk_veriloga_runtime_without_host_path
     state.workspace.content.netlist_source =
         Some("signed Verilog-A project deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
-    let snapshot = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
-        .expect("governed manual deck prepares the signed Verilog-A runtime");
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect("governed manual deck prepares the signed Verilog-A runtime");
     controller
-        .authorize_snapshot(snapshot)
+        .run_authorization
+        .retain(snapshot)
         .expect("authorize exact signed Verilog-A snapshot");
     let dispatch = controller
-        .consume_snapshot_for_dispatch(&mut state)
+        .consume_snapshot_for_dispatch(&state)
         .expect("freeze signed Verilog-A dispatch");
     let executable = dispatch.executable_netlist();
     assert!(executable.contains(".veriloga \"__rspice_pdk__/"));
@@ -777,15 +781,14 @@ fn edit_frozen_transient_stop(state: &mut AppState, stop: &str) {
 #[test]
 fn prepared_snapshot_detects_analysis_mutation_without_revision_change() {
     let mut state = runnable_state();
-    let controller = SimulationController::new();
-    let prepared = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .expect("prepare first snapshot");
+    let prepared =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("prepare first snapshot");
     let revision = state.workspace.content.project.revision().get();
     edit_frozen_transient_stop(&mut state, "2m");
-    let changed = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .expect("prepare changed snapshot");
+    let changed =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("prepare changed snapshot");
     assert_eq!(state.workspace.content.project.revision().get(), revision);
     assert_ne!(prepared.digest(), changed.digest());
 }
@@ -793,15 +796,14 @@ fn prepared_snapshot_detects_analysis_mutation_without_revision_change() {
 #[test]
 fn prepared_snapshot_detects_non_topology_source_mutation() {
     let mut state = runnable_state();
-    let controller = SimulationController::new();
-    let prepared = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .expect("prepare first snapshot");
+    let prepared =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("prepare first snapshot");
     let topology = state.schematic.topology_version();
     state.schematic.document_mut_for_test().components[0].value = "2k".to_owned();
-    let changed = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .expect("prepare changed snapshot");
+    let changed =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("prepare changed snapshot");
     assert_eq!(state.schematic.topology_version(), topology);
     assert_ne!(prepared.digest(), changed.digest());
 }
@@ -811,10 +813,9 @@ fn prepared_snapshot_authenticates_plan_owned_saved_outputs() {
     let mut state = runnable_state();
     state.sim_setup.save_policy.output_selection_mode =
         crate::state::OutputSelectionMode::ExplicitOnly;
-    let controller = SimulationController::new();
-    let without_output = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .expect("prepare baseline snapshot");
+    let without_output =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("prepare baseline snapshot");
     assert_eq!(without_output.metadata().saved_output_contract_count, 0);
 
     let plan_id = state
@@ -838,9 +839,9 @@ fn prepared_snapshot_authenticates_plan_owned_saved_outputs() {
         .add_saved_output(plan_id, output)
         .expect("plan owns output");
 
-    let with_output = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .expect("prepare output snapshot");
+    let with_output =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("prepare output snapshot");
     assert_eq!(with_output.metadata().saved_output_contract_count, 1);
     assert_ne!(without_output.digest(), with_output.digest());
 }
@@ -911,14 +912,15 @@ fn manual_touchstone_export_uses_imported_deck_origin_not_stale_schematic_path()
     );
 
     let mut controller = SimulationController::new();
-    let snapshot = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
-        .expect("prepare imported RF deck");
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect("prepare imported RF deck");
     controller
-        .authorize_snapshot(snapshot)
+        .run_authorization
+        .retain(snapshot)
         .expect("authorize imported RF deck");
     let dispatch = controller
-        .consume_snapshot_for_dispatch(&mut state)
+        .consume_snapshot_for_dispatch(&state)
         .expect("dispatch imported RF deck");
     let policy = dispatch
         .tasks()
@@ -941,14 +943,15 @@ fn manual_fourier_is_topologically_bound_to_its_exact_transient_task() {
     );
 
     let mut controller = SimulationController::new();
-    let snapshot = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
-        .expect("prepare manual Fourier dependency graph");
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect("prepare manual Fourier dependency graph");
     controller
-        .authorize_snapshot(snapshot)
+        .run_authorization
+        .retain(snapshot)
         .expect("authorize manual Fourier dependency graph");
     let dispatch = controller
-        .consume_snapshot_for_dispatch(&mut state)
+        .consume_snapshot_for_dispatch(&state)
         .expect("dispatch manual Fourier dependency graph");
     let tasks = dispatch.tasks().collect::<Vec<_>>();
 
@@ -1037,17 +1040,16 @@ fn campaign_freezes_distinct_plan_members_without_switching_the_live_editor() {
 #[test]
 fn prepared_snapshot_authenticates_and_enforces_plan_owned_save_policy() {
     let mut state = runnable_state();
-    let controller = SimulationController::new();
-    let baseline = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .expect("baseline save policy prepares");
+    let baseline =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("baseline save policy prepares");
 
     state.sim_setup.save_policy.live_streaming_enabled = false;
     state.sim_setup.save_policy.retain_failure_diagnostics = false;
     state.sim_setup.save_policy.retained_dataset_limit = 5;
-    let changed = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .expect("changed save policy prepares");
+    let changed =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("changed save policy prepares");
     assert_ne!(baseline.digest(), changed.digest());
     assert_eq!(
         changed.metadata().save_policy,
@@ -1077,9 +1079,9 @@ fn prepared_snapshot_authenticates_and_enforces_plan_owned_save_policy() {
         )
         .expect("plan owns output");
     state.sim_setup.save_policy.maximum_storage_bytes = 1;
-    let error = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .expect_err("one-byte plan budget must refuse retained output");
+    let error =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect_err("one-byte plan budget must refuse retained output");
     assert!(error.message().contains("storage budget"), "{error}");
 }
 
@@ -1113,16 +1115,14 @@ fn deferred_outputs_share_one_sealed_engine_source_budget_per_analysis() {
     let one_source =
         rspice_simulation::output_contract::retained_engine_source_upper_bound_bytes(1);
     state.sim_setup.save_policy.maximum_storage_bytes = one_source;
-    let controller = SimulationController::new();
 
-    controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+    SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
         .expect("two deferred outputs share the same prepared analysis source state");
 
     state.sim_setup.save_policy.maximum_storage_bytes = one_source - 1;
-    let error = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .expect_err("the shared source-state ceiling is still enforced");
+    let error =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect_err("the shared source-state ceiling is still enforced");
     assert!(error.message().contains("storage budget"), "{error}");
 }
 
@@ -1136,14 +1136,15 @@ fn manual_periodic_analyses_are_topologically_bound_to_seed_and_pss() {
     );
 
     let mut controller = SimulationController::new();
-    let snapshot = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
-        .expect("prepare manual periodic dependency graph");
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect("prepare manual periodic dependency graph");
     controller
-        .authorize_snapshot(snapshot)
+        .run_authorization
+        .retain(snapshot)
         .expect("authorize manual periodic dependency graph");
     let dispatch = controller
-        .consume_snapshot_for_dispatch(&mut state)
+        .consume_snapshot_for_dispatch(&state)
         .expect("dispatch manual periodic dependency graph");
     let tasks = dispatch.tasks().collect::<Vec<_>>();
 
@@ -1173,7 +1174,7 @@ fn dispatch_rejects_mutation_after_explicit_preflight() {
         .expect("preflight");
     edit_frozen_transient_stop(&mut state, "3m");
     let error = controller
-        .consume_snapshot_for_dispatch(&mut state)
+        .consume_snapshot_for_dispatch(&state)
         .expect_err("changed input must fail closed");
     assert_eq!(error.stage(), PreparationStage::Authorization);
     assert!(error.message().contains("expired"));
@@ -1207,10 +1208,9 @@ fn manual_include_without_origin_fails_closed() {
     let mut state = AppState::default();
     state.workspace.content.netlist_source =
         Some("deck\n.include models.lib\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
-    let controller = SimulationController::new();
-    let error = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
-        .expect_err("unbound include must fail");
+    let error =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect_err("unbound include must fail");
     assert_eq!(error.stage(), PreparationStage::SourceChecks);
     assert!(error.message().contains("origin"));
 }
@@ -1262,8 +1262,7 @@ fn prepared_waveforms_distinguish_inline_names_from_file_inputs() {
     for body in inline {
         let source = format!("PWL FILE notes\n{body}\n.op\n.end\n");
         let state = manual_deck_state(&source);
-        SimulationController::new()
-            .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
             .unwrap_or_else(|error| panic!("{source}: {error}"));
     }
     for body in [
@@ -1273,9 +1272,9 @@ fn prepared_waveforms_distinguish_inline_names_from_file_inputs() {
     ] {
         let source = format!("deck\n{body}\nR1 out 0 1k\n.op\n.end\n");
         let state = manual_deck_state(&source);
-        let error = SimulationController::new()
-            .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
-            .expect_err("a real file dependency cannot reach dispatch");
+        let error =
+            SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+                .expect_err("a real file dependency cannot reach dispatch");
         assert_eq!(
             error.stage(),
             PreparationStage::SourceChecks,
@@ -1573,8 +1572,8 @@ fn statistical_deferred_file_waveforms_are_rejected_before_dispatch() {
         fs::write(&path, &source).unwrap();
         let mut state = manual_deck_state(&source);
         state.workspace.content.netlist_source_path = Some(path.clone());
-        let result = SimulationController::new()
-            .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck);
+        let result =
+            SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck);
         if file_backed {
             let error = result.expect_err("statistical deferral cannot hide an input file");
             assert_eq!(error.stage(), PreparationStage::SourceChecks);
@@ -1677,12 +1676,13 @@ fn active_batch_reentry_preserves_prepared_authorization_and_batch_metadata() {
     state.workspace.content.netlist_source =
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
-    let snapshot = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
-        .expect("prepare replacement request");
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect("prepare replacement request");
     let prepared_digest = snapshot.digest();
     controller
-        .authorize_snapshot(snapshot)
+        .run_authorization
+        .retain(snapshot)
         .expect("authorize replacement request");
 
     let active_run_id = state.simulation.start_run().id;
@@ -1705,9 +1705,9 @@ fn active_batch_reentry_preserves_prepared_authorization_and_batch_metadata() {
     assert_eq!(state.simulation.runs.len(), 1);
     assert_eq!(
         controller
-            .pending_prepared_run
-            .as_ref()
-            .map(|pending| pending.snapshot.digest()),
+            .run_authorization
+            .retained_snapshot()
+            .map(|snapshot| snapshot.digest()),
         Some(prepared_digest)
     );
 }
@@ -1719,12 +1719,13 @@ fn unpolled_completion_reentry_does_not_consume_or_replace_authorization() {
     state.workspace.content.netlist_source =
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
-    let snapshot = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
-        .expect("prepare replacement request");
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect("prepare replacement request");
     let prepared_digest = snapshot.digest();
     controller
-        .authorize_snapshot(snapshot)
+        .run_authorization
+        .retain(snapshot)
         .expect("authorize replacement request");
     controller
         .runner
@@ -1737,9 +1738,9 @@ fn unpolled_completion_reentry_does_not_consume_or_replace_authorization() {
     assert_eq!(controller.total_analyses, 0);
     assert_eq!(
         controller
-            .pending_prepared_run
-            .as_ref()
-            .map(|pending| pending.snapshot.digest()),
+            .run_authorization
+            .retained_snapshot()
+            .map(|snapshot| snapshot.digest()),
         Some(prepared_digest)
     );
     assert!(!controller.runner.can_accept_prepared_task());
@@ -1815,7 +1816,7 @@ fn direct_manual_run_cannot_bypass_internal_prepare_and_permit_consumption() {
 
     controller.start_simulation(&mut state);
 
-    assert!(controller.pending_prepared_run.is_none());
+    assert!(controller.run_authorization.retained_snapshot().is_none());
     assert_eq!(controller.total_analyses, 0);
     assert!(controller.cached_netlist.is_none());
 
@@ -1824,7 +1825,7 @@ fn direct_manual_run_cannot_bypass_internal_prepare_and_permit_consumption() {
         .expect("explicit validation authorizes the exact manual deck");
     controller.start_simulation(&mut state);
 
-    assert!(controller.pending_prepared_run.is_none());
+    assert!(controller.run_authorization.retained_snapshot().is_none());
     assert_eq!(controller.total_analyses, 1);
     assert!(
         controller
@@ -1854,13 +1855,13 @@ fn included_source_mutation_after_prepare_is_rejected() {
         .expect("validate and retain first include closure");
 
     fs::write(&include, "R1 out 0 2k\n").expect("mutate include");
-    let changed = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
-        .expect("prepare changed include closure")
-        .metadata();
+    let changed =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
+            .expect("prepare changed include closure")
+            .metadata();
     assert_ne!(metadata.source_digest, changed.source_digest);
     let error = controller
-        .consume_snapshot_for_dispatch(&mut state)
+        .consume_snapshot_for_dispatch(&state)
         .expect_err("changed include must invalidate authorization");
     assert_eq!(error.stage(), PreparationStage::Authorization);
 
@@ -1885,7 +1886,7 @@ fn dispatched_include_closure_never_reopens_mutated_source_files() {
         .validate_manual_deck_document(&state)
         .expect("validate the exact include closure");
     let dispatch = controller
-        .consume_snapshot_for_dispatch(&mut state)
+        .consume_snapshot_for_dispatch(&state)
         .expect("freeze the authorized dispatch");
 
     fs::write(&include, "R1 out 0 2k\n").expect("mutate source after dispatch");
@@ -1936,7 +1937,7 @@ fn accepted_model_file_mutation_after_prepare_fails_closed() {
     )
     .expect("mutate model");
     let error = controller
-        .consume_snapshot_for_dispatch(&mut state)
+        .consume_snapshot_for_dispatch(&state)
         .expect_err("changed accepted model bytes must block dispatch");
     assert_eq!(error.stage(), PreparationStage::ModelBindings);
     assert!(error.message().contains("changed"));
@@ -1947,10 +1948,9 @@ fn accepted_model_file_mutation_after_prepare_fails_closed() {
 #[test]
 fn rebuilt_prepared_snapshots_are_deterministic() {
     let state = runnable_state();
-    let controller = SimulationController::new();
-    let first = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .expect("baseline snapshot");
+    let first =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("baseline snapshot");
     let baseline_netlist = first.executable_netlist().to_owned();
     let baseline = first.metadata();
 
@@ -1959,9 +1959,11 @@ fn rebuilt_prepared_snapshots_are_deterministic() {
     // sampled from the clock or from a per-instance hash seed shows up here as
     // drift between two builds that saw exactly the same inputs.
     for attempt in 0..16 {
-        let snapshot = controller
-            .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-            .expect("rebuilt snapshot");
+        let snapshot = SimulationController::build_prepared_snapshot(
+            &state,
+            SimulationRunIntent::SimulateRunSet,
+        )
+        .expect("rebuilt snapshot");
         assert_eq!(
             snapshot.executable_netlist(),
             baseline_netlist,
@@ -1990,16 +1992,19 @@ fn rebuilt_prepared_snapshots_are_deterministic() {
 #[test]
 fn repeated_authorize_and_dispatch_cycles_never_expire_an_unchanged_run() {
     for attempt in 0..16 {
-        let mut state = runnable_state();
+        let state = runnable_state();
         let mut controller = SimulationController::new();
-        let snapshot = controller
-            .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-            .expect("project run seals signed PDK model sources");
+        let snapshot = SimulationController::build_prepared_snapshot(
+            &state,
+            SimulationRunIntent::SimulateRunSet,
+        )
+        .expect("project run seals signed PDK model sources");
         controller
-            .authorize_snapshot(snapshot)
+            .run_authorization
+            .retain(snapshot)
             .expect("authorize exact project snapshot");
         controller
-            .consume_snapshot_for_dispatch(&mut state)
+            .consume_snapshot_for_dispatch(&state)
             .unwrap_or_else(|error| {
                 panic!("attempt {attempt}: unchanged run was rejected: {error:?}")
             });
@@ -2052,7 +2057,7 @@ fn reviewed_foreign_profile_is_applied_when_the_owned_deck_is_prepared() {
         .validate_manual_deck_document(&state)
         .expect("the accepted adapter must also reach run preparation");
     let dispatch = controller
-        .consume_snapshot_for_dispatch(&mut state)
+        .consume_snapshot_for_dispatch(&state)
         .expect("validated source dispatches");
     assert_eq!(dispatch.manual_source(), Some(source));
     let parsed =
@@ -2082,7 +2087,7 @@ fn an_unreviewed_owned_profile_cannot_acquire_a_manual_execution_permit() {
     descriptor.compatibility_reviewed = false;
     let mut controller = SimulationController::new();
     assert!(controller.validate_manual_deck_document(&state).is_err());
-    assert!(controller.pending_prepared_run.is_none());
+    assert!(controller.run_authorization.retained_snapshot().is_none());
 }
 
 #[test]
@@ -2101,9 +2106,7 @@ fn reviewed_ngspice_profile_binds_engine_defaults_and_revalidates_edits() {
     descriptor.compatibility_reviewed = true;
     let mut controller = SimulationController::new();
     controller.validate_manual_deck_document(&state).unwrap();
-    let dispatch = controller
-        .consume_snapshot_for_dispatch(&mut state)
-        .unwrap();
+    let dispatch = controller.consume_snapshot_for_dispatch(&state).unwrap();
     assert_eq!(dispatch.manual_source(), Some(source));
     assert!(
         dispatch
@@ -2128,7 +2131,7 @@ fn reviewed_ngspice_profile_binds_engine_defaults_and_revalidates_edits() {
     ] {
         state.workspace.content.netlist_source = Some(edit);
         assert!(controller.validate_manual_deck_document(&state).is_err());
-        assert!(controller.pending_prepared_run.is_none());
+        assert!(controller.run_authorization.retained_snapshot().is_none());
     }
 }
 
@@ -2139,17 +2142,19 @@ fn a_project_without_a_technology_prepares_its_run_set_against_the_plain_model_l
     let metadata = controller
         .prepare_run_set_for_preflight(&state)
         .expect("a project owing nothing to a technology prepares its run set");
-    let snapshot = controller
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .expect("the same technology-free contract rebuilds");
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("the same technology-free contract rebuilds");
     let executable = snapshot.executable_netlist();
     assert!(!executable.contains("nmos_demo"), "{executable}");
     assert!(!executable.contains("demo180"), "{executable}");
 
     let attached = runnable_state();
-    let with_technology = controller
-        .build_prepared_snapshot(&attached, SimulationRunIntent::SimulateRunSet)
-        .expect("the same design prepares with a technology attached");
+    let with_technology = SimulationController::build_prepared_snapshot(
+        &attached,
+        SimulationRunIntent::SimulateRunSet,
+    )
+    .expect("the same design prepares with a technology attached");
     assert!(with_technology.executable_netlist().contains("demo180"));
     assert!(
         metadata.model_identity_count < with_technology.metadata().model_identity_count,
@@ -2364,9 +2369,9 @@ fn the_prepared_snapshot_carries_the_decks_emission_map() {
     );
     assert!(generated.errors.is_empty(), "{:?}", generated.errors);
 
-    let snapshot = SimulationController::new()
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .expect("the authored hierarchy prepares");
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("the authored hierarchy prepares");
 
     let rows = |map: &[rspice_simulation::netlist_gen::EmissionRow]| {
         map.iter()
@@ -2405,9 +2410,9 @@ fn the_authorized_run_receipt_seals_the_decks_hierarchy_map() {
     let mut state = runnable_state();
     author_two_occurrences_of_one_cell(&mut state);
 
-    let snapshot = SimulationController::new()
-        .build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
-        .expect("the authored hierarchy prepares");
+    let snapshot =
+        SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
+            .expect("the authored hierarchy prepares");
     let emitted = snapshot
         .emission_map()
         .iter()
@@ -2473,9 +2478,7 @@ fn reviewed_spectre_header_survives_path_based_dependency_expansion() {
         descriptor.compatibility_reviewed = true;
         let mut controller = SimulationController::new();
         controller.validate_manual_deck_document(&state).unwrap();
-        let dispatch = controller
-            .consume_snapshot_for_dispatch(&mut state)
-            .unwrap();
+        let dispatch = controller.consume_snapshot_for_dispatch(&state).unwrap();
         assert_eq!(dispatch.manual_source(), Some(source));
         let parsed = rspice_core::Netlist::parse(dispatch.executable_netlist()).unwrap();
         assert_eq!(parsed.elements.len(), 2);

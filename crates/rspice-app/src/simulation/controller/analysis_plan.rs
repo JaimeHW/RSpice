@@ -37,7 +37,7 @@ impl SimulationController {
         if outputs.is_empty() {
             return Vec::new();
         }
-        let plan = match self.build_analysis_plan(&state.sim_setup) {
+        let plan = match Self::build_analysis_plan(&state.sim_setup) {
             Ok(plan) => plan,
             Err(errors) => {
                 return invalid_saved_output_reports(outputs.len(), errors.join("; "));
@@ -58,7 +58,7 @@ impl SimulationController {
                 return invalid_saved_output_reports(outputs.len(), error);
             }
         };
-        let tasks = match self.build_queue_from_plan(state, &plan, &sealed_models) {
+        let tasks = match Self::build_queue_from_plan(state, &plan, &sealed_models) {
             Ok(tasks) => tasks,
             Err(errors) => {
                 return invalid_saved_output_reports(outputs.len(), errors.join("; "));
@@ -79,7 +79,6 @@ impl SimulationController {
     }
 
     pub(super) fn build_analysis_plan(
-        &self,
         state: &SimulationSetup,
     ) -> Result<FrozenSimulationPlan, Vec<String>> {
         let plan = state.analysis_plan.as_ref().ok_or_else(|| {
@@ -91,7 +90,6 @@ impl SimulationController {
     }
 
     pub(super) fn build_queue_from_plan(
-        &self,
         state: &AppState,
         plan: &FrozenSimulationPlan,
         sealed_model_sources: &crate::state::model_library::SealedModelExecutionSources,

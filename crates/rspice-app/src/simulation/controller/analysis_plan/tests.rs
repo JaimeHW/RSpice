@@ -296,10 +296,8 @@ fn pvt_selected_bases_persist_clone_and_freeze_exact_settings() {
                 .model_library_manager
                 .seal_execution_sources()
                 .unwrap();
-            let controller = SimulationController::new();
-            let tasks = controller
-                .build_queue_from_plan(&state, &frozen, &sealed)
-                .unwrap();
+            let tasks =
+                SimulationController::build_queue_from_plan(&state, &frozen, &sealed).unwrap();
             let task = tasks
                 .iter()
                 .find(|task| task.instance_id() == study)
@@ -382,9 +380,12 @@ fn pvt_selected_bases_persist_clone_and_freeze_exact_settings() {
             assert!(numeric.stated(O::Gmin).is_some());
             assert!(numeric.stated(O::Pivrel).is_some());
             restored.set_enabled(base, false).unwrap();
-            let errors = controller
-                .build_queue_from_plan(&state, &restored.freeze().unwrap(), &sealed)
-                .unwrap_err();
+            let errors = SimulationController::build_queue_from_plan(
+                &state,
+                &restored.freeze().unwrap(),
+                &sealed,
+            )
+            .unwrap_err();
             assert!(
                 errors
                     .iter()
@@ -499,9 +500,7 @@ fn qp_study_freezes_the_exact_producer_and_complete_consumer_controls() {
             .model_library_manager
             .seal_execution_sources()
             .unwrap();
-        let queue = SimulationController::new()
-            .build_queue_from_plan(&state, &frozen, &sealed)
-            .unwrap();
+        let queue = SimulationController::build_queue_from_plan(&state, &frozen, &sealed).unwrap();
         let inherited = &queue
             .iter()
             .find(|task| task.instance_id() == consumer)
@@ -697,9 +696,7 @@ fn periodic_rf_study_freezes_all_consumer_options_and_exact_pss_op_chain() {
             .model_library_manager
             .seal_execution_sources()
             .unwrap();
-        let queue = SimulationController::new()
-            .build_queue_from_plan(&state, &frozen, &sealed)
-            .unwrap();
+        let queue = SimulationController::build_queue_from_plan(&state, &frozen, &sealed).unwrap();
         let inherited = &queue
             .iter()
             .find(|task| task.instance_id() == consumer)
@@ -846,9 +843,7 @@ fn preceding_pac_basis_uses_its_exact_frozen_hb_producer() {
         .model_library_manager
         .seal_execution_sources()
         .unwrap();
-    let queue = SimulationController::new()
-        .build_queue_from_plan(&state, &frozen, &sealed)
-        .unwrap();
+    let queue = SimulationController::build_queue_from_plan(&state, &frozen, &sealed).unwrap();
     let pac_task = queue.iter().find(|task| task.instance_id() == pac).unwrap();
     let pac_options = pac_task
         .queued_analysis()
@@ -926,9 +921,7 @@ fn pss_study_freezes_its_exact_op_producer_and_complete_shooting_configuration()
         .model_library_manager
         .seal_execution_sources()
         .unwrap();
-    let queue = SimulationController::new()
-        .build_queue_from_plan(&state, &frozen, &sealed)
-        .unwrap();
+    let queue = SimulationController::build_queue_from_plan(&state, &frozen, &sealed).unwrap();
     let task = queue.iter().find(|task| task.instance_id() == mc).unwrap();
     let base = task
         .queued_analysis()
@@ -1032,9 +1025,7 @@ fn hb_study_freezes_the_selected_instance_and_authenticates_its_native_settings(
         .model_library_manager
         .seal_execution_sources()
         .unwrap();
-    let queue = SimulationController::new()
-        .build_queue_from_plan(&state, &frozen, &sealed)
-        .unwrap();
+    let queue = SimulationController::build_queue_from_plan(&state, &frozen, &sealed).unwrap();
     let task = queue.iter().find(|task| task.instance_id() == mc).unwrap();
     let base = task
         .queued_analysis()
@@ -1163,9 +1154,7 @@ fn hb_rf_study_freezes_exact_producer_consumer_and_noise_references() {
             .model_library_manager
             .seal_execution_sources()
             .unwrap();
-        let queue = SimulationController::new()
-            .build_queue_from_plan(&state, &frozen, &sealed)
-            .unwrap();
+        let queue = SimulationController::build_queue_from_plan(&state, &frozen, &sealed).unwrap();
         let inherited = &queue
             .iter()
             .find(|task| task.instance_id() == consumer)
@@ -1350,9 +1339,7 @@ fn spectral_study_freezes_the_bound_transient_and_all_postprocess_settings() {
             .model_library_manager
             .seal_execution_sources()
             .unwrap();
-        let queue = SimulationController::new()
-            .build_queue_from_plan(&state, &frozen, &sealed)
-            .unwrap();
+        let queue = SimulationController::build_queue_from_plan(&state, &frozen, &sealed).unwrap();
         let task = queue.iter().find(|task| task.instance_id() == mc).unwrap();
         let base = task
             .queued_analysis()
@@ -1491,10 +1478,7 @@ fn configured_study_freezes_exact_base_and_survives_persistence_and_identity() {
         .model_library_manager
         .seal_execution_sources()
         .unwrap();
-    let controller = SimulationController::new();
-    let tasks = controller
-        .build_queue_from_plan(&state, &frozen, &sealed)
-        .unwrap();
+    let tasks = SimulationController::build_queue_from_plan(&state, &frozen, &sealed).unwrap();
     let task = tasks.iter().find(|task| task.instance_id() == mc).unwrap();
     let base = task
         .queued_analysis()
@@ -1560,9 +1544,7 @@ fn configured_study_freezes_exact_base_and_survives_persistence_and_identity() {
     let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
     plan.set_enabled(ac, false).unwrap();
     let frozen = plan.freeze().unwrap();
-    let errors = controller
-        .build_queue_from_plan(&state, &frozen, &sealed)
-        .unwrap_err();
+    let errors = SimulationController::build_queue_from_plan(&state, &frozen, &sealed).unwrap_err();
     assert!(
         errors
             .iter()
@@ -1642,9 +1624,7 @@ fn configured_optimization_base_persists_and_freezes_before_live_edits() {
         .model_library_manager
         .seal_execution_sources()
         .unwrap();
-    let tasks = SimulationController::new()
-        .build_queue_from_plan(&state, &frozen, &sealed)
-        .unwrap();
+    let tasks = SimulationController::build_queue_from_plan(&state, &frozen, &sealed).unwrap();
     let task = tasks.iter().find(|task| task.instance_id() == opt).unwrap();
     let base = task
         .queued_analysis()
@@ -1728,16 +1708,12 @@ fn frozen_noise_task_keeps_exact_draft_and_reference_pvt() {
     plan.bind_dependency(noise, AnalysisKind::OperatingPoint, op)
         .expect("noise binds OP");
 
-    let controller = SimulationController::new();
-    let frozen = controller
-        .build_analysis_plan(&state.sim_setup)
-        .expect("plan freezes");
+    let frozen = SimulationController::build_analysis_plan(&state.sim_setup).expect("plan freezes");
     let sealed = state
         .model_library_manager
         .seal_execution_sources()
         .expect("model sources seal");
-    let tasks = controller
-        .build_queue_from_plan(&state, &frozen, &sealed)
+    let tasks = SimulationController::build_queue_from_plan(&state, &frozen, &sealed)
         .expect("noise plan compiles");
     let task = tasks
         .iter()
@@ -1808,16 +1784,12 @@ fn frozen_plan_ids_revisions_and_exact_dependency_bindings_reach_prepared_tasks(
         .expect("PAC binds exact first PSS");
     let expected_revision = plan.revision();
 
-    let controller = SimulationController::new();
-    let frozen = controller
-        .build_analysis_plan(&state.sim_setup)
-        .expect("plan freezes");
+    let frozen = SimulationController::build_analysis_plan(&state.sim_setup).expect("plan freezes");
     let sealed = state
         .model_library_manager
         .seal_execution_sources()
         .expect("default model sources seal");
-    let tasks = controller
-        .build_queue_from_plan(&state, &frozen, &sealed)
+    let tasks = SimulationController::build_queue_from_plan(&state, &frozen, &sealed)
         .expect("frozen plan compiles");
     let pac_task = tasks
         .iter()
@@ -1875,16 +1847,12 @@ fn same_kind_sparameter_instances_freeze_independent_export_policies() {
     })
     .expect("second policy edits");
 
-    let controller = SimulationController::new();
-    let frozen = controller
-        .build_analysis_plan(&state.sim_setup)
-        .expect("plan freezes");
+    let frozen = SimulationController::build_analysis_plan(&state.sim_setup).expect("plan freezes");
     let sealed = state
         .model_library_manager
         .seal_execution_sources()
         .expect("default model sources seal");
-    let tasks = controller
-        .build_queue_from_plan(&state, &frozen, &sealed)
+    let tasks = SimulationController::build_queue_from_plan(&state, &frozen, &sealed)
         .expect("same-kind S-parameter tasks compile");
     let first_policy = tasks
         .iter()
