@@ -36,8 +36,7 @@ pub struct DiagnosticFix {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Diagnostic {
     #[serde(flatten)]
-    pub(crate) canonical:
-        crate::workbench::documents::canonical_diagnostics::CanonicalDiagnosticMetadata,
+    pub(crate) canonical: rspice_app_types::diagnostics::CanonicalDiagnosticMetadata,
     pub severity: DiagnosticSeverity,
     /// Physical source that owns this diagnostic. `None` identifies the
     /// in-memory editor buffer. Included-source diagnostics retain their path
@@ -69,7 +68,7 @@ impl Diagnostic {
     ) -> Self {
         let message = message.into();
         Self {
-            canonical: crate::workbench::documents::canonical_diagnostics::CanonicalDiagnosticMetadata::current(
+            canonical: rspice_app_types::diagnostics::CanonicalDiagnosticMetadata::current(
                 std::sync::Arc::<str>::from(producer.into()),
                 std::sync::Arc::<str>::from(code.into()),
                 "netlist-editor",
@@ -151,7 +150,7 @@ impl Diagnostic {
             self.column,
         );
         let old = self.canonical.clone();
-        self.canonical = crate::workbench::documents::canonical_diagnostics::CanonicalDiagnosticMetadata::current(
+        self.canonical = rspice_app_types::diagnostics::CanonicalDiagnosticMetadata::current(
             old.source,
             old.code,
             document_id.clone(),
@@ -161,25 +160,27 @@ impl Diagnostic {
             &self.message,
         );
         self.canonical.related_locations = old.related_locations;
-        self.canonical.quick_fixes = self.fix.as_ref().and_then(|fix| {
-            let range = rspice_app_types::diagnostics::diagnostic_range(
-                Some(&fix.span),
-                self.line.or(self.source_line),
-                self.column,
-            )?;
-            Some(vec![
-                crate::workbench::documents::canonical_diagnostics::CanonicalQuickFix {
+        self.canonical.quick_fixes = self
+            .fix
+            .as_ref()
+            .and_then(|fix| {
+                let range = rspice_app_types::diagnostics::diagnostic_range(
+                    Some(&fix.span),
+                    self.line.or(self.source_line),
+                    self.column,
+                )?;
+                Some(vec![rspice_app_types::diagnostics::CanonicalQuickFix {
                     fix_id: format!("{}:fix:0", self.canonical.diagnostic_id),
                     label: fix.label.clone(),
                     preferred: true,
-                    edits: vec![crate::workbench::documents::canonical_diagnostics::DiagnosticTextEdit {
+                    edits: vec![rspice_app_types::diagnostics::DiagnosticTextEdit {
                         document_id,
                         range,
                         replacement: fix.replacement.clone(),
                     }],
-                },
-            ])
-        }).unwrap_or(old.quick_fixes);
+                }])
+            })
+            .unwrap_or(old.quick_fixes);
         self.canonical.suppression = old.suppression;
         self.canonical.currentness = old.currentness;
         self.canonical.affected_consumers = old.affected_consumers;
@@ -290,7 +291,7 @@ impl NetlistDiagnosticCollection {
     pub fn mark_all_stale(&mut self) {
         for diagnostic in &mut self.records {
             diagnostic.canonical.mark_currentness(
-                crate::workbench::documents::canonical_diagnostics::DiagnosticCurrentness::StaleSource,
+                rspice_app_types::diagnostics::DiagnosticCurrentness::StaleSource,
             );
         }
         self.severity_by_line.clear();
@@ -705,9 +706,9 @@ mod tests {
                 "stale information",
             ),
         ];
-        records[2].canonical.mark_currentness(
-            crate::workbench::documents::canonical_diagnostics::DiagnosticCurrentness::StaleSource,
-        );
+        records[2]
+            .canonical
+            .mark_currentness(rspice_app_types::diagnostics::DiagnosticCurrentness::StaleSource);
         let diagnostics = NetlistDiagnosticCollection::try_new(records, "").unwrap();
 
         assert_eq!(
@@ -861,9 +862,9 @@ mod tests {
     #[test]
     fn indexed_collection_uses_current_zero_based_lines() {
         let mut stale = Diagnostic::error("old").with_line(Some(3));
-        stale.canonical.mark_currentness(
-            crate::workbench::documents::canonical_diagnostics::DiagnosticCurrentness::StaleSource,
-        );
+        stale
+            .canonical
+            .mark_currentness(rspice_app_types::diagnostics::DiagnosticCurrentness::StaleSource);
         let diagnostics = NetlistDiagnosticCollection::try_new(
             vec![
                 Diagnostic::current(

@@ -5727,6 +5727,7 @@ dependencies = [
  "rspice-veriloga",
  "semver",
  "serde",
+ "serde-wasm-bindgen",
  "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.20",

@@ -2,6 +2,14 @@
 
 use std::collections::HashSet;
 
+mod metadata;
+mod source;
+pub use metadata::{
+    CanonicalDiagnosticMetadata, CanonicalQuickFix, DiagnosticConsumer, DiagnosticCurrentness,
+    DiagnosticRelatedLocation, DiagnosticSuppression, DiagnosticTextEdit,
+};
+pub use source::{DiagnosticSeverity, SourceDiagnostic};
+
 pub const MAX_DIAGNOSTICS: usize = 1_000_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

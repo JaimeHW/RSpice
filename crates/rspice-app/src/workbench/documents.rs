@@ -33,7 +33,6 @@ pub enum CodeSourceFileAction {
     Delete,
 }
 
-pub(crate) mod canonical_diagnostics;
 pub(crate) mod code_workspace;
 pub(crate) mod model_correlation;
 pub(crate) mod model_editor;

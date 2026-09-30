@@ -770,7 +770,10 @@ pub fn cancel_prepared_rspice_ui_wasm_jit_request(
 pub fn run_rspice_ui_veriloga_compile_request(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    workbench::documents::code_workspace::run_veriloga_worker_request_value(value)
+    rspice_simulation::project_veriloga::compile_service::run_worker_request_value(
+        value,
+        rspice_simulation::project_veriloga::worker::WorkerCompileTarget::WasmJit,
+    )
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]

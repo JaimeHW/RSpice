@@ -4,12 +4,12 @@
 //! are projections of these records. They must never invent their own count or
 //! strip revision/currentness data while copying a message between views.
 
-use rspice_app_types::diagnostics::{DiagnosticRange, stable_diagnostic_id};
+use super::{DiagnosticRange, stable_diagnostic_id};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub(crate) enum DiagnosticCurrentness {
+pub enum DiagnosticCurrentness {
     Current,
     StaleSource,
     StaleEnvironment,
@@ -19,7 +19,7 @@ pub(crate) enum DiagnosticCurrentness {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub(crate) enum DiagnosticConsumer {
+pub enum DiagnosticConsumer {
     EditorDecoration,
     ProblemsGrid,
     InspectorSummary,
@@ -29,7 +29,7 @@ pub(crate) enum DiagnosticConsumer {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct DiagnosticRelatedLocation {
+pub struct DiagnosticRelatedLocation {
     pub document_id: String,
     pub range: Option<DiagnosticRange>,
     pub message: String,
@@ -37,7 +37,7 @@ pub(crate) struct DiagnosticRelatedLocation {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct DiagnosticTextEdit {
+pub struct DiagnosticTextEdit {
     pub document_id: String,
     pub range: DiagnosticRange,
     pub replacement: String,
@@ -45,7 +45,7 @@ pub(crate) struct DiagnosticTextEdit {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct CanonicalQuickFix {
+pub struct CanonicalQuickFix {
     pub fix_id: String,
     pub label: String,
     pub preferred: bool,
@@ -54,7 +54,7 @@ pub(crate) struct CanonicalQuickFix {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct DiagnosticSuppression {
+pub struct DiagnosticSuppression {
     pub rule: String,
     pub scope: String,
     pub justification_required: bool,
@@ -62,7 +62,7 @@ pub(crate) struct DiagnosticSuppression {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct CanonicalDiagnosticMetadata {
+pub struct CanonicalDiagnosticMetadata {
     pub diagnostic_id: uuid::Uuid,
     pub code: Arc<str>,
     /// Producer identity, for example `rspice.veriloga.compiler`.
@@ -79,7 +79,7 @@ pub(crate) struct CanonicalDiagnosticMetadata {
 }
 
 impl CanonicalDiagnosticMetadata {
-    pub(crate) fn current(
+    pub fn current(
         source: impl Into<Arc<str>>,
         code: impl Into<Arc<str>>,
         document_id: impl Into<Arc<str>>,
@@ -123,11 +123,11 @@ impl CanonicalDiagnosticMetadata {
         }
     }
 
-    pub(crate) fn mark_currentness(&mut self, currentness: DiagnosticCurrentness) {
+    pub fn mark_currentness(&mut self, currentness: DiagnosticCurrentness) {
         self.currentness = currentness;
     }
 
-    pub(crate) const fn is_current(&self) -> bool {
+    pub const fn is_current(&self) -> bool {
         matches!(self.currentness, DiagnosticCurrentness::Current)
     }
 }
@@ -142,7 +142,7 @@ mod tests {
             "rspice.parser",
             "SPICE-001",
             "top.sp",
-            rspice_app_types::diagnostics::diagnostic_range(Some(&(4..7)), Some(2), Some(1)),
+            crate::diagnostics::diagnostic_range(Some(&(4..7)), Some(2), Some(1)),
             8,
             "validation-4",
             "unknown model",

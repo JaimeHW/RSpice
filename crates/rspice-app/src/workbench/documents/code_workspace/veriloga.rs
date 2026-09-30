@@ -872,21 +872,17 @@ pub(crate) fn start_veriloga_compile(app: &mut RSpiceApp, repaint: egui::Context
         receiver: Arc::new(Mutex::new(receiver)),
     });
 
-    #[cfg(not(target_arch = "wasm32"))]
-    std::thread::spawn(move || {
-        let outcome = compile_selected_source(&selected);
-        let _ = sender.send(outcome);
+    let wake = repaint.clone();
+    if let Err(error) = rspice_simulation::project_veriloga::compile_service::start_compile(
+        selected.bundle,
+        selected.selected_module,
+        sender.clone(),
+        move || wake.request_repaint(),
+    ) {
+        let _ = sender.send(
+            rspice_simulation::project_veriloga::compile_service::transport_failure_outcome(error),
+        );
         repaint.request_repaint();
-    });
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        if let Err(error) =
-            super::veriloga_worker::start(&selected, sender.clone(), repaint.clone())
-        {
-            let _ = sender.send(super::veriloga_worker::transport_failure_outcome(error));
-            repaint.request_repaint();
-        }
     }
 }
 
@@ -895,7 +891,7 @@ pub(crate) fn start_veriloga_compile(app: &mut RSpiceApp, repaint: egui::Context
 /// so abandoned compilation cannot consume CPU or block the next request.
 pub(crate) fn cancel_veriloga_compile(app: &mut RSpiceApp) {
     #[cfg(target_arch = "wasm32")]
-    super::veriloga_worker::cancel();
+    rspice_simulation::project_veriloga::compile_service::cancel_compile();
     app.state.ui.code_workspace.veriloga.pending = None;
 }
 
@@ -1220,60 +1216,12 @@ const fn specialist_disposition_label(
     }
 }
 
-impl From<rspice_simulation::project_veriloga::diagnostics::ProjectCompileDiagnostic>
-    for CodeEditorDiagnostic
-{
-    fn from(
-        diagnostic: rspice_simulation::project_veriloga::diagnostics::ProjectCompileDiagnostic,
-    ) -> Self {
-        use rspice_simulation::project_veriloga::diagnostics::ProjectDiagnosticSeverity;
-        let severity = match diagnostic.severity {
-            ProjectDiagnosticSeverity::Info => CodeEditorSeverity::Info,
-            ProjectDiagnosticSeverity::Warning => CodeEditorSeverity::Warning,
-            ProjectDiagnosticSeverity::Error => CodeEditorSeverity::Error,
-        };
-        Self::current(
-            diagnostic.producer,
-            diagnostic.code,
-            severity,
-            diagnostic.message,
-            diagnostic.detail,
-            diagnostic.source_path,
-            diagnostic.source,
-            diagnostic.byte_range,
-            diagnostic.line,
-            diagnostic.column,
-        )
-    }
-}
-
+#[cfg(test)]
 fn compile_selected_source(selected: &SelectedVerilogASource) -> VerilogACompileOutcome {
-    project_compile_outcome(
+    rspice_simulation::project_veriloga::compile_service::compile_source(
         selected.bundle(),
-        rspice_simulation::project_veriloga::compile_project_bundle_source(
-            selected.bundle(),
-            selected.selected_module(),
-        ),
+        selected.selected_module(),
     )
-}
-
-pub(super) fn project_compile_outcome(
-    bundle: &ProjectSourceBundle,
-    outcome: Result<
-        Box<RuntimeCompileReport>,
-        rspice_simulation::project_veriloga::ProjectVerilogACompileError,
-    >,
-) -> VerilogACompileOutcome {
-    match rspice_simulation::project_veriloga::diagnostics::project_compile_outcome(bundle, outcome)
-    {
-        Ok(report) => VerilogACompileOutcome::Success(report),
-        Err(diagnostics) => VerilogACompileOutcome::Failure(
-            diagnostics
-                .into_iter()
-                .map(CodeEditorDiagnostic::from)
-                .collect(),
-        ),
-    }
 }
 
 pub(crate) fn compile_project_bundle_virtual_for_provenance(

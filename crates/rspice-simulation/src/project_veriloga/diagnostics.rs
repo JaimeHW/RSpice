@@ -1,7 +1,9 @@
 //! Compiler findings independent of editor state and transport metadata.
 
 use super::VerilogASourceOperationToken;
-use rspice_app_types::diagnostics::{diagnostic_range, stable_diagnostic_id};
+use rspice_app_types::diagnostics::{
+    DiagnosticSeverity, SourceDiagnostic, diagnostic_range, stable_diagnostic_id,
+};
 use rspice_design::project_sources::ProjectSourceBundle;
 use rspice_veriloga::{CompileDiagnosticPhase, CompileDiagnosticSeverity, RuntimeCompileReport};
 use std::sync::Arc;
@@ -284,6 +286,28 @@ const fn diagnostic_phase_label(phase: CompileDiagnosticPhase) -> &'static str {
         CompileDiagnosticPhase::BackendQualification => "backend qualification",
         CompileDiagnosticPhase::PerformanceBudget => "performance budget",
         CompileDiagnosticPhase::ModuleSelection => "module selection",
+    }
+}
+
+impl From<ProjectCompileDiagnostic> for SourceDiagnostic {
+    fn from(diagnostic: ProjectCompileDiagnostic) -> Self {
+        let severity = match diagnostic.severity {
+            ProjectDiagnosticSeverity::Info => DiagnosticSeverity::Info,
+            ProjectDiagnosticSeverity::Warning => DiagnosticSeverity::Warning,
+            ProjectDiagnosticSeverity::Error => DiagnosticSeverity::Error,
+        };
+        Self::current(
+            diagnostic.producer,
+            diagnostic.code,
+            severity,
+            diagnostic.message,
+            diagnostic.detail,
+            diagnostic.source_path,
+            diagnostic.source,
+            diagnostic.byte_range,
+            diagnostic.line,
+            diagnostic.column,
+        )
     }
 }
 

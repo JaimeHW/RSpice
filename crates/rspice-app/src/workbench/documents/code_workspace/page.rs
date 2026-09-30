@@ -172,11 +172,7 @@ impl Clone for PendingVerilogACompile {
     }
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub enum VerilogACompileOutcome {
-    Success(Box<rspice_veriloga::RuntimeCompileReport>),
-    Failure(Vec<CodeEditorDiagnostic>),
-}
+pub use rspice_simulation::project_veriloga::compile_service::VerilogACompileOutcome;
 
 /// Retained metadata from the latest compile of the exact current source.
 #[derive(Debug, Clone)]
@@ -775,8 +771,6 @@ pub struct CodeWorkspaceRuntimeState {
         ),
     >,
 }
-
-use super::CodeEditorDiagnostic;
 
 #[cfg(test)]
 mod tests {

@@ -14,10 +14,6 @@ mod source_files;
 mod source_search;
 mod veriloga;
 use rspice_simulation::project_veriloga::build_profile as veriloga_profile;
-#[cfg(any(target_arch = "wasm32", test))]
-mod veriloga_worker;
-#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
-pub(crate) use veriloga_worker::run_worker_request_value as run_veriloga_worker_request_value;
 
 pub use super::{CodeSourceFileAction, CodeWorkspacePage};
 
@@ -217,6 +213,15 @@ fn source_bundle_document_label(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_worker_script_has_a_separate_compile_protocol() {
+        let source = include_str!("../../../web/simulation-worker.js");
+        assert!(source.contains("compile-veriloga"));
+        assert!(source.contains("runRspiceUiVerilogACompileRequest"));
+        assert!(source.contains("veriloga-result"));
+        assert!(source.contains("veriloga-error"));
+    }
 
     /// The function takes exactly the state it reads, so the fixture is that
     /// state and not a whole application.

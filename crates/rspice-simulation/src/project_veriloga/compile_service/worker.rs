@@ -1,16 +1,17 @@
 //! Browser-worker transport for governed Verilog-A compilation.
 //!
 //! Browser builds cannot use `std::thread`, and running the compiler from an
-//! egui callback stalls input and rendering. This protocol transfers the exact
+//! editor callback stalls input and rendering. This protocol transfers the exact
 //! sealed project bundle to a dedicated module worker. The ordinary simulation
 //! worker uses the same immutable JavaScript/Wasm assets, but a separate worker
 //! instance and message namespace keep both operation lifecycles independent.
 
-use rspice_simulation::project_veriloga::worker::{WorkerCompileRequest, WorkerCompileTarget};
+use crate::project_veriloga::worker::{WorkerCompileRequest, WorkerCompileTarget};
 use serde::{Deserialize, Serialize};
 
-use super::{SelectedVerilogASource, VerilogACompileOutcome};
-use rspice_simulation::project_veriloga::worker::WasmJitWorkerArtifact;
+use super::{VerilogACompileOutcome, project_compile_outcome, transport_failure_outcome};
+use crate::project_veriloga::worker::WasmJitWorkerArtifact;
+use rspice_design::project_sources::ProjectSourceBundle;
 
 const VERILOGA_WORKER_PROTOCOL_VERSION: u32 = 2;
 const MAX_VERILOGA_WORKER_RESPONSE_BYTES: usize = 128 * 1024 * 1024;
@@ -20,17 +21,21 @@ const MAX_VERILOGA_WORKER_RESPONSE_BYTES: usize = 128 * 1024 * 1024;
 pub(crate) struct VerilogAWorkerRequest {
     protocol: u32,
     id: u32,
-    bundle: crate::state::ProjectSourceBundle,
+    bundle: ProjectSourceBundle,
     selected_module: Option<String>,
 }
 
 impl VerilogAWorkerRequest {
-    fn try_new(id: u32, selected: &SelectedVerilogASource) -> Result<Self, String> {
+    fn try_new(
+        id: u32,
+        bundle: &ProjectSourceBundle,
+        selected_module: Option<&str>,
+    ) -> Result<Self, String> {
         let request = Self {
             protocol: VERILOGA_WORKER_PROTOCOL_VERSION,
             id,
-            bundle: selected.bundle().clone(),
-            selected_module: selected.selected_module().map(str::to_owned),
+            bundle: bundle.clone(),
+            selected_module: selected_module.map(str::to_owned),
         };
         request.validated_source()?;
         Ok(request)
@@ -64,14 +69,13 @@ pub(crate) struct VerilogAWorkerResponse {
 }
 
 impl VerilogAWorkerResponse {
-    fn from_request(request: VerilogAWorkerRequest) -> Result<Self, String> {
+    fn from_request(
+        request: VerilogAWorkerRequest,
+        target: WorkerCompileTarget,
+    ) -> Result<Self, String> {
         let source = request.validated_source()?;
-        #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
-        let target = WorkerCompileTarget::WasmJit;
-        #[cfg(not(all(target_arch = "wasm32", feature = "browser-worker")))]
-        let target = WorkerCompileTarget::Bytecode;
         let compiled = source.compile(target);
-        #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+        #[cfg(feature = "wasm-jit")]
         let (wasm_jit_artifact, wasm_jit_error) = match compiled
             .as_ref()
             .ok()
@@ -81,12 +85,10 @@ impl VerilogAWorkerResponse {
             Some(Err(error)) => (None, Some(error.to_string())),
             None => (None, None),
         };
-        #[cfg(not(all(target_arch = "wasm32", feature = "browser-worker")))]
+        #[cfg(not(feature = "wasm-jit"))]
         let (wasm_jit_artifact, wasm_jit_error) = (None, None);
-        let outcome = super::veriloga::project_compile_outcome(
-            &request.bundle,
-            compiled.map(|compiled| compiled.report),
-        );
+        let outcome =
+            project_compile_outcome(&request.bundle, compiled.map(|compiled| compiled.report));
         let response = Self {
             protocol: VERILOGA_WORKER_PROTOCOL_VERSION,
             id: request.id,
@@ -134,12 +136,13 @@ impl VerilogAWorkerResponse {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn run_worker_request_value(
+pub fn run_worker_request_value(
     value: wasm_bindgen::JsValue,
+    target: WorkerCompileTarget,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
     let request: VerilogAWorkerRequest = serde_wasm_bindgen::from_value(value)
         .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))?;
-    let response = VerilogAWorkerResponse::from_request(request)
+    let response = VerilogAWorkerResponse::from_request(request, target)
         .map_err(|error| wasm_bindgen::JsValue::from_str(&error))?;
     serde_wasm_bindgen::to_value(&response)
         .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))
@@ -155,7 +158,7 @@ mod browser {
     use wasm_bindgen::JsCast as _;
     use wasm_bindgen::prelude::*;
 
-    use super::{SelectedVerilogASource, VerilogACompileOutcome, VerilogAWorkerRequest};
+    use super::{ProjectSourceBundle, VerilogACompileOutcome, VerilogAWorkerRequest};
 
     struct ActiveCompileWorker {
         id: u32,
@@ -180,16 +183,17 @@ mod browser {
     }
 
     pub(crate) fn start(
-        selected: &SelectedVerilogASource,
+        bundle: &ProjectSourceBundle,
+        selected_module: Option<&str>,
         sender: mpsc::Sender<VerilogACompileOutcome>,
-        repaint: egui::Context,
+        wake: Rc<dyn Fn()>,
     ) -> Result<(), String> {
         if ACTIVE_WORKER.with(|active| active.borrow().is_some()) {
             return Err("A browser Verilog-A compile is already active.".to_owned());
         }
 
         let id = allocate_request_id();
-        let request = VerilogAWorkerRequest::try_new(id, selected)?;
+        let request = VerilogAWorkerRequest::try_new(id, bundle, selected_module)?;
         let request = serde_wasm_bindgen::to_value(&request)
             .map_err(|error| format!("Could not encode Verilog-A worker request: {error}"))?;
         let worker_url = worker_url()?;
@@ -200,7 +204,7 @@ mod browser {
         let completed = Rc::new(Cell::new(false));
 
         let completion_sender = sender.clone();
-        let completion_repaint = repaint.clone();
+        let completion_wake = wake.clone();
         let completion_guard = Rc::clone(&completed);
         let onmessage = Closure::<dyn FnMut(web_sys::MessageEvent)>::wrap(Box::new(
             move |event: web_sys::MessageEvent| {
@@ -221,7 +225,7 @@ mod browser {
                             .and_then(|response| response.into_outcome(id));
                         complete_once(
                             &completion_sender,
-                            &completion_repaint,
+                            &completion_wake,
                             &completion_guard,
                             outcome,
                         );
@@ -238,7 +242,7 @@ mod browser {
                             });
                         complete_once(
                             &completion_sender,
-                            &completion_repaint,
+                            &completion_wake,
                             &completion_guard,
                             Err(message),
                         );
@@ -250,7 +254,7 @@ mod browser {
         worker.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
 
         let completion_sender = sender.clone();
-        let completion_repaint = repaint.clone();
+        let completion_wake = wake.clone();
         let completion_guard = Rc::clone(&completed);
         let onerror = Closure::<dyn FnMut(web_sys::ErrorEvent)>::wrap(Box::new(
             move |event: web_sys::ErrorEvent| {
@@ -261,7 +265,7 @@ mod browser {
                 };
                 complete_once(
                     &completion_sender,
-                    &completion_repaint,
+                    &completion_wake,
                     &completion_guard,
                     Err(message),
                 );
@@ -270,13 +274,13 @@ mod browser {
         worker.set_onerror(Some(onerror.as_ref().unchecked_ref()));
 
         let completion_sender = sender;
-        let completion_repaint = repaint;
+        let completion_wake = wake;
         let completion_guard = completed;
         let onmessageerror = Closure::<dyn FnMut(web_sys::MessageEvent)>::wrap(Box::new(
             move |_event: web_sys::MessageEvent| {
                 complete_once(
                     &completion_sender,
-                    &completion_repaint,
+                    &completion_wake,
                     &completion_guard,
                     Err(
                         "Browser Verilog-A compiler worker returned an unreadable message."
@@ -334,7 +338,7 @@ mod browser {
         });
     }
 
-    pub(crate) fn cancel() {
+    pub fn cancel() {
         finish(None);
     }
 
@@ -359,7 +363,7 @@ mod browser {
 
     fn complete_once(
         sender: &mpsc::Sender<VerilogACompileOutcome>,
-        repaint: &egui::Context,
+        wake: &Rc<dyn Fn()>,
         completed: &Cell<bool>,
         result: Result<VerilogACompileOutcome, String>,
     ) {
@@ -368,7 +372,7 @@ mod browser {
         }
         let outcome = result.unwrap_or_else(super::transport_failure_outcome);
         let _ = sender.send(outcome);
-        repaint.request_repaint();
+        wake();
     }
 
     fn string_property(value: &JsValue, property: &str) -> Option<String> {
@@ -403,60 +407,67 @@ mod browser {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) use browser::{cancel, start};
-
-pub(super) fn transport_failure_outcome(message: String) -> VerilogACompileOutcome {
-    VerilogACompileOutcome::Failure(vec![super::CodeEditorDiagnostic::current(
-        "rspice.veriloga.browser-worker",
-        "VA-WORKER-TRANSPORT",
-        super::CodeEditorSeverity::Error,
-        "Browser compiler worker failed",
-        message,
-        None,
-        None,
-        None,
-        None,
-        None,
-    )])
-}
+pub use browser::cancel;
+#[cfg(target_arch = "wasm32")]
+pub(super) use browser::start;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
+    use rspice_design::project_sources::{ProjectSourceLanguage, ProjectSourceOwner};
 
-    fn selected_source() -> SelectedVerilogASource {
-        SelectedVerilogASource {
-            bundle: crate::state::ProjectSourceBundle::try_new(
-                ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-                ProjectSourceLanguage::VerilogA,
-                "worker.va",
-                "module worker(p, n); inout p, n; electrical p, n; endmodule\n",
-                [],
-                [],
-            )
-            .unwrap(),
-            selected_module: Some("worker".to_owned()),
-        }
+    fn selected_source() -> ProjectSourceBundle {
+        ProjectSourceBundle::try_new(
+            ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
+            ProjectSourceLanguage::VerilogA,
+            "worker.va",
+            "module worker(p, n); inout p, n; electrical p, n; endmodule\n",
+            [],
+            [],
+        )
+        .unwrap()
     }
 
-    fn selected_source_with_profile() -> SelectedVerilogASource {
-        SelectedVerilogASource {
-            bundle: super::super::source_files::new_imported_veriloga_workspace_bundle(
-                "worker.va",
-                "module worker(p, n); inout p, n; electrical p, n; endmodule\n".to_owned(),
+    fn selected_source_with_profile() -> ProjectSourceBundle {
+        use rspice_design::project_sources::{
+            ProjectSourceDependency, ProjectSourceFile, ProjectSourceRole, ProjectSourceRoleBinding,
+        };
+        let mut profile =
+            crate::project_veriloga::build_profile::VerilogABuildProfile::starter("worker");
+        profile.entry_modules.clear();
+        ProjectSourceBundle::try_new_with_roles(
+            ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
+            ProjectSourceLanguage::VerilogA,
+            "worker.va",
+            "module worker(p, n); inout p, n; electrical p, n; endmodule\n",
+            [
+                ProjectSourceFile::try_new(
+                    ".rspice/veriloga-build.toml",
+                    profile.to_toml().unwrap(),
+                )
+                .unwrap(),
+            ],
+            [
+                ProjectSourceDependency::try_new("worker.va", ".rspice/veriloga-build.toml")
+                    .unwrap(),
+            ],
+            [ProjectSourceRoleBinding::try_new(
+                ".rspice/veriloga-build.toml",
+                ProjectSourceRole::VerilogABuildProfile,
             )
-            .unwrap(),
-            selected_module: Some("worker".to_owned()),
-        }
+            .unwrap()],
+        )
+        .unwrap()
     }
 
     #[test]
     fn request_and_response_round_trip_exact_compiled_artifacts() {
-        let request = VerilogAWorkerRequest::try_new(7, &selected_source()).unwrap();
+        let request =
+            VerilogAWorkerRequest::try_new(7, &selected_source(), Some("worker")).unwrap();
         let request: VerilogAWorkerRequest =
             serde_json::from_slice(&serde_json::to_vec(&request).unwrap()).unwrap();
-        let response = VerilogAWorkerResponse::from_request(request).unwrap();
+        let response =
+            VerilogAWorkerResponse::from_request(request, WorkerCompileTarget::Bytecode).unwrap();
         let response: VerilogAWorkerResponse =
             serde_json::from_slice(&serde_json::to_vec(&response).unwrap()).unwrap();
 
@@ -469,15 +480,19 @@ mod tests {
 
     #[test]
     fn stale_worker_response_ids_are_rejected() {
-        let request = VerilogAWorkerRequest::try_new(9, &selected_source()).unwrap();
-        let response = VerilogAWorkerResponse::from_request(request).unwrap();
+        let request =
+            VerilogAWorkerRequest::try_new(9, &selected_source(), Some("worker")).unwrap();
+        let response =
+            VerilogAWorkerResponse::from_request(request, WorkerCompileTarget::Bytecode).unwrap();
         assert!(response.into_outcome(10).is_err());
     }
 
     #[test]
     fn malformed_transferred_target_matrix_is_rejected_without_panicking() {
-        let request = VerilogAWorkerRequest::try_new(11, &selected_source()).unwrap();
-        let response = VerilogAWorkerResponse::from_request(request).unwrap();
+        let request =
+            VerilogAWorkerRequest::try_new(11, &selected_source(), Some("worker")).unwrap();
+        let response =
+            VerilogAWorkerResponse::from_request(request, WorkerCompileTarget::Bytecode).unwrap();
         let mut encoded = serde_json::to_value(response).unwrap();
         encoded["outcome"]["Success"]["targets"]["entries"] = serde_json::json!([]);
         let response: VerilogAWorkerResponse = serde_json::from_value(encoded).unwrap();
@@ -488,20 +503,25 @@ mod tests {
 
     #[test]
     fn transferred_build_profile_is_revalidated_after_deserialization() {
-        let request = VerilogAWorkerRequest::try_new(12, &selected_source_with_profile()).unwrap();
+        let request =
+            VerilogAWorkerRequest::try_new(12, &selected_source_with_profile(), Some("worker"))
+                .unwrap();
         let mut encoded = serde_json::to_value(request).unwrap();
         encoded["bundle"]["files"][0]["content"] =
             serde_json::json!("schema = \"untrusted.profile/v99\"");
         let request: VerilogAWorkerRequest = serde_json::from_value(encoded).unwrap();
 
-        let error = VerilogAWorkerResponse::from_request(request).unwrap_err();
+        let error = VerilogAWorkerResponse::from_request(request, WorkerCompileTarget::Bytecode)
+            .unwrap_err();
         assert!(error.contains("build profile is invalid"), "{error}");
     }
 
     #[test]
     fn malformed_transferred_specialist_evidence_is_rejected() {
-        let request = VerilogAWorkerRequest::try_new(13, &selected_source()).unwrap();
-        let response = VerilogAWorkerResponse::from_request(request).unwrap();
+        let request =
+            VerilogAWorkerRequest::try_new(13, &selected_source(), Some("worker")).unwrap();
+        let response =
+            VerilogAWorkerResponse::from_request(request, WorkerCompileTarget::Bytecode).unwrap();
         let mut encoded = serde_json::to_value(response).unwrap();
         encoded["outcome"]["Success"]["specialist"]["module_name"] =
             serde_json::json!("different_module");
@@ -509,15 +529,6 @@ mod tests {
 
         let error = response.into_outcome(13).unwrap_err();
         assert!(error.contains("specialist report"), "{error}");
-    }
-
-    #[test]
-    fn browser_worker_script_has_a_separate_compile_protocol() {
-        let source = include_str!("../../../../web/simulation-worker.js");
-        assert!(source.contains("compile-veriloga"));
-        assert!(source.contains("runRspiceUiVerilogACompileRequest"));
-        assert!(source.contains("veriloga-result"));
-        assert!(source.contains("veriloga-error"));
     }
 
     #[test]

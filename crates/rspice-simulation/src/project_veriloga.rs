@@ -7,6 +7,7 @@ use sha2::{Digest as _, Sha256};
 use crate::veriloga::{PreparedRuntimeError, PreparedVerilogARuntime, PreparedVerilogARuntimeSet};
 
 pub mod build_profile;
+pub mod compile_service;
 pub mod diagnostics;
 pub mod preparation;
 pub mod receipt;
