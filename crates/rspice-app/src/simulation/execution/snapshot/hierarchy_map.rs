@@ -10,7 +10,8 @@
 
 use crate::state::HierarchyMapRow;
 
-use super::{EmissionRow, PreparedRunSnapshot};
+use super::PreparedRunSnapshot;
+use rspice_simulation::netlist_gen::EmissionRow;
 
 impl PreparedRunSnapshot {
     /// The master each occurrence was emitted against; a manual deck has none.

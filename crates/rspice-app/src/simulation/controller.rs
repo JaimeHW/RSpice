@@ -465,7 +465,13 @@ impl SimulationController {
         if let Some(cross_probe) = dispatch.take_cross_probe()
             && campaign_membership.is_none()
         {
-            cross_probe.apply(state);
+            state.simulation.cross_probe.update(
+                cross_probe.source_reference,
+                cross_probe.point_to_net,
+                cross_probe.nets,
+                cross_probe.net_segments,
+                cross_probe.topology_version,
+            );
         }
         self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
         for advisory in dispatch.advisories() {

@@ -25,7 +25,7 @@ pub(in crate::simulation) use canonical::{
 pub(in crate::simulation) use permit::{ExecutionPermit, ExecutionPermitIssuer};
 pub(in crate::simulation) use snapshot::bound_cards;
 pub(in crate::simulation) use snapshot::{
-    AuthorizedRunDispatch, AuthorizedTaskDispatch, CrossProbeSnapshot, ExecutionTargetCapabilities,
+    AuthorizedRunDispatch, AuthorizedTaskDispatch, ExecutionTargetCapabilities,
     ModelSourceIdentity, PSS_SPECTRUM_ROLE, PreparedMonteCarloResume, PreparedRunSet,
     PreparedRunSnapshot, PreparedTask, ResolvedTaskDispatch, RunSourceReceipt, SavePolicy,
     SnapshotParts, TouchstoneExportPolicy, result_source_domain,

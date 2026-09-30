@@ -14,14 +14,15 @@ use rspice_core::netlist::{parse_include_directive, parse_lib_directive};
 
 use super::*;
 use crate::simulation::execution::{
-    AuthorizedRunDispatch, CrossProbeSnapshot, ExecutionArtifactKind, ExecutionPermit,
-    ExecutionTargetCapabilities, ModelSourceIdentity, PreparationError, PreparationStage,
-    PreparedDependencyBinding, PreparedRunMetadata, PreparedRunSnapshot, PreparedTask,
-    RunSourceReceipt, SavePolicy, SnapshotParts, TouchstoneExportPolicy, analysis_kind_tag,
-    drc_receipt_digest, manual_deck_analysis_instance_id, manual_source_receipt_digest,
+    AuthorizedRunDispatch, ExecutionArtifactKind, ExecutionPermit, ExecutionTargetCapabilities,
+    ModelSourceIdentity, PreparationError, PreparationStage, PreparedDependencyBinding,
+    PreparedRunMetadata, PreparedRunSnapshot, PreparedTask, RunSourceReceipt, SavePolicy,
+    SnapshotParts, TouchstoneExportPolicy, analysis_kind_tag, drc_receipt_digest,
+    manual_deck_analysis_instance_id, manual_source_receipt_digest,
 };
 use crate::simulation::run_set::RunSetCornerProjection;
 use rspice_app_types::canonical::content_digest;
+use rspice_simulation::netlist_gen::CrossProbeSnapshot;
 use rspice_simulation::sealed_source::{
     generated_executable_source_digest, manual_executable_source_digest,
 };

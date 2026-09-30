@@ -19,10 +19,10 @@ use crate::simulation::plan::AnalysisNumericOverride;
 use crate::simulation::run_set::{RunSetDimensionKind, RunSetState};
 use crate::simulation::{controller::QueuedAnalysis, multi_run::AnalysisSpec};
 use crate::state::{
-    HierarchyMapRow, Point, PreparedModelSourceIdentity, PreparedSourceCheckReceipt,
+    HierarchyMapRow, PreparedModelSourceIdentity, PreparedSourceCheckReceipt,
     PreparedSpecification, PreparedSpecificationPolicy, SimulationRunIntent,
 };
-use rspice_simulation::netlist_gen::EmissionRow;
+use rspice_simulation::netlist_gen::CrossProbeSnapshot;
 // The receipt's source domain is named by `snapshot/run_receipt.rs`; the
 // snapshot suite reaches it through this module's glob.
 #[cfg(test)]
@@ -701,33 +701,6 @@ struct PreparedPvtPoint {
     /// expansion mints one; a corner or temperature declaration owns its own
     /// space, which no per-analysis participation addresses.
     run_set_point_key: Option<String>,
-}
-
-/// What one generation pass learned about the design it netlisted. The one
-/// site that builds this names its fields: four of them are maps over the same
-/// handful of types, and a positional list of those swaps silently.
-#[derive(Debug, Clone)]
-pub(in crate::simulation) struct CrossProbeSnapshot {
-    pub(in crate::simulation) source_reference: crate::state::CellViewRef,
-    pub(in crate::simulation) point_to_net: HashMap<Point, String>,
-    pub(in crate::simulation) nets: HashMap<String, Vec<Point>>,
-    pub(in crate::simulation) net_segments: HashMap<String, Vec<(Point, Point)>>,
-    pub(in crate::simulation) topology_version: u64,
-    /// The master each occurrence was emitted against. Cross probing never
-    /// reads it; it is captured here because the same pass produces it.
-    pub(in crate::simulation) emission_map: Vec<EmissionRow>,
-}
-
-impl CrossProbeSnapshot {
-    pub(in crate::simulation) fn apply(self, state: &mut crate::workbench::app_state::AppState) {
-        state.simulation.cross_probe.update(
-            self.source_reference,
-            self.point_to_net,
-            self.nets,
-            self.net_segments,
-            self.topology_version,
-        );
-    }
 }
 
 /// Read-only fields rendered by the existing mockup preflight surface.

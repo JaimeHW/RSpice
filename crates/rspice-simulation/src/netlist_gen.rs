@@ -92,6 +92,21 @@ pub struct NetlistResult {
     pub emission_map: Vec<EmissionRow>,
 }
 
+/// What one generation pass learned about the design it netlisted. The one
+/// site that builds this names its fields: four of them are maps over the same
+/// handful of types, and a positional list of those swaps silently.
+#[derive(Debug, Clone)]
+pub struct CrossProbeSnapshot {
+    pub source_reference: CellViewRef,
+    pub point_to_net: HashMap<Point, String>,
+    pub nets: HashMap<String, Vec<Point>>,
+    pub net_segments: HashMap<String, Vec<(Point, Point)>>,
+    pub topology_version: u64,
+    /// The master each occurrence was emitted against. Cross probing never
+    /// reads it; it is captured here because the same pass produces it.
+    pub emission_map: Vec<EmissionRow>,
+}
+
 /// Generate a flat SPICE netlist from a schematic.
 ///
 /// Execution always goes through [`generate_netlist_hierarchical`], which

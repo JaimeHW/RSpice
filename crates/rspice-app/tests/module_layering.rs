@@ -196,7 +196,7 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // AnalysisPresentationKey}`. They retire the way `state -> workbench` did
     // — by moving the persisted contract down, not by narrowing a signature.
     ("schematic", "workbench", 108),
-    ("simulation", "workbench", 28),
+    ("simulation", "workbench", 26),
     // 19 -> 15: result presentation now has one durable owner in state;
     // project I/O no longer imports its keys, markers, or expression types
     // from the Results renderer. Simulation-plan ownership remains open.
