@@ -199,9 +199,9 @@ pub(crate) struct WorkerStudyRunConfig {
     measurements: Vec<String>,
     histogram_bins: usize,
     #[serde(default)]
-    objective_terms: Vec<crate::simulation::optimizer::OptimizationObjectiveTerm>,
+    objective_terms: Vec<rspice_results::optimization::OptimizationObjectiveTerm>,
     #[serde(default)]
-    constraints: Vec<crate::simulation::optimizer::OptimizationConstraint>,
+    constraints: Vec<rspice_results::optimization::OptimizationConstraint>,
 }
 
 impl From<&crate::simulation::runner::study::StudyRunConfig> for WorkerStudyRunConfig {

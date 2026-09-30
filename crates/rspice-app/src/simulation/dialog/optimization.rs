@@ -52,11 +52,11 @@ mod search_tests {
             variable_domains: std::collections::BTreeMap::from([
                 (
                     "RLOAD".into(),
-                    crate::simulation::optimizer::OptimizationVariableDomain::Logarithmic,
+                    rspice_simulation_contract::optimization_search::OptimizationVariableDomain::Logarithmic,
                 ),
                 (
                     "VDD".into(),
-                    crate::simulation::optimizer::OptimizationVariableDomain::Quantized {
+                    rspice_simulation_contract::optimization_search::OptimizationVariableDomain::Quantized {
                         step: 0.1,
                     },
                 ),

@@ -1283,9 +1283,9 @@ pub(crate) enum WorkerSimulationResultTransport {
         best_cost: f64,
         best_variables: HashMap<String, f64>,
         #[serde(default)]
-        best_objectives: Vec<crate::simulation::optimizer::OptimizationObjectiveObservation>,
+        best_objectives: Vec<rspice_results::optimization::OptimizationObjectiveObservation>,
         #[serde(default)]
-        best_constraints: Vec<crate::simulation::optimizer::OptimizationConstraintObservation>,
+        best_constraints: Vec<rspice_results::optimization::OptimizationConstraintObservation>,
         converged: bool,
     },
     Soa {

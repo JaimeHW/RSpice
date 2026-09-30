@@ -808,7 +808,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                 writer.string("optimization-variable-domains-v1");
                 writer.sequence(search.variable_domains.len());
                 for (name, domain) in &search.variable_domains {
-                    use crate::simulation::optimizer::OptimizationVariableDomain as Domain;
+                    use rspice_simulation_contract::optimization_search::OptimizationVariableDomain as Domain;
                     writer.string(name);
                     match domain {
                         Domain::Linear => writer.u8(0),

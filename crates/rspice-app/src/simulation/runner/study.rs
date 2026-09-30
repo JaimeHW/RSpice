@@ -42,8 +42,8 @@ use std::sync::{
 pub struct StudyRunConfig {
     /// Optional consumer of `analysis`, which is its exact transient, PSS or HB producer.
     pub postprocess: Option<StudyPostprocess>,
-    pub constraints: Vec<crate::simulation::optimizer::OptimizationConstraint>,
-    pub objective_terms: Vec<crate::simulation::optimizer::OptimizationObjectiveTerm>,
+    pub constraints: Vec<rspice_results::optimization::OptimizationConstraint>,
+    pub objective_terms: Vec<rspice_results::optimization::OptimizationObjectiveTerm>,
     pub instance_id: AnalysisInstanceId,
     pub source_revision: ObjectRevision,
     pub analysis: StudyAnalysis,

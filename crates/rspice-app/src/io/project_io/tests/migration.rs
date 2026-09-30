@@ -2178,7 +2178,7 @@ fn native_scalar_units_persist_authenticate_and_preserve_schema_37_history() {
 
 #[test]
 fn optimization_units_persist_authenticate_and_preserve_schema_38_history() {
-    use crate::simulation::optimizer::{
+    use rspice_results::optimization::{
         OptimizationConstraint, OptimizationConstraintObservation, OptimizationObjectiveGoal,
         OptimizationObjectiveObservation, OptimizationObjectiveTerm,
     };

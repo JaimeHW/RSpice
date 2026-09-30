@@ -2209,7 +2209,7 @@ fn configured_study_worker_transfers_and_authenticates_nested_op_seed() {
 
 #[test]
 fn weighted_optimization_components_survive_transfer_and_reject_corruption() {
-    use crate::simulation::optimizer::{
+    use rspice_results::optimization::{
         OptimizationObjectiveGoal, OptimizationObjectiveObservation, OptimizationObjectiveTerm,
     };
     let result = SimulationResult::Optimization {
@@ -2222,8 +2222,8 @@ fn weighted_optimization_components_survive_transfer_and_reject_corruption() {
         best_variables: HashMap::from([("X".into(), 2.0)]),
         converged: true,
         best_constraints: vec![
-            crate::simulation::optimizer::OptimizationConstraintObservation {
-                constraint: crate::simulation::optimizer::OptimizationConstraint {
+            rspice_results::optimization::OptimizationConstraintObservation {
+                constraint: rspice_results::optimization::OptimizationConstraint {
                     measurement: "gain".into(),
                     unit: "mV".into(),
                     lower: Some(1.0),

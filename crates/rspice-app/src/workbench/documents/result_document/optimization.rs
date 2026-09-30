@@ -747,7 +747,7 @@ mod tests {
     }
     #[test]
     fn weighted_optimization_evidence_persists_exports_and_rejects_inconsistent_costs() {
-        use crate::simulation::optimizer::{
+        use rspice_results::optimization::{
             OptimizationObjectiveGoal, OptimizationObjectiveObservation, OptimizationObjectiveTerm,
         };
         let mut state = optimization_state(4);
@@ -790,7 +790,7 @@ mod tests {
     }
     #[test]
     fn constraint_optimization_evidence_persists_exports_and_rejects_false_feasibility() {
-        use crate::simulation::optimizer::{
+        use rspice_results::optimization::{
             OptimizationConstraint, OptimizationConstraintObservation,
         };
         let mut state = optimization_state(4);

@@ -974,9 +974,9 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
                     writer.string(&term.unit);
                 }
                 writer.u8(match term.goal {
-                    crate::simulation::optimizer::OptimizationObjectiveGoal::Minimize => 0,
-                    crate::simulation::optimizer::OptimizationObjectiveGoal::Maximize => 1,
-                    crate::simulation::optimizer::OptimizationObjectiveGoal::Target => 2,
+                    rspice_results::optimization::OptimizationObjectiveGoal::Minimize => 0,
+                    rspice_results::optimization::OptimizationObjectiveGoal::Maximize => 1,
+                    rspice_results::optimization::OptimizationObjectiveGoal::Target => 2,
                 });
                 writer.option(term.target.as_ref(), |writer, value| writer.f64(*value));
                 writer.f64(term.scale);

@@ -629,11 +629,11 @@ impl WorkerSimulationResultTransport {
                 best_constraints,
                 converged,
             } => {
-                crate::simulation::optimizer::validate_optimization_objectives(
+                rspice_results::optimization::validate_optimization_objectives(
                     &best_objectives,
                     best_cost,
                 )?;
-                crate::simulation::optimizer::validate_optimization_constraint_result(
+                rspice_results::optimization::validate_optimization_constraint_result(
                     &best_constraints,
                     converged,
                 )?;

@@ -18,15 +18,8 @@ mod design_var;
 mod engine_core;
 mod lifecycle;
 pub use design_var::DesignVar;
-// Runtime callers use these exact result-owned types until R11 extracts execution.
-pub use rspice_results::optimization::{
-    OptimizationConstraint, OptimizationConstraintObservation, OptimizationObjectiveGoal,
-    OptimizationObjectiveObservation, OptimizationObjectiveTerm, OptimizationScore,
-    validate_optimization_constraint_result, validate_optimization_objectives,
-};
-pub use rspice_simulation_contract::optimization_search::{
-    OptimizationVariableDomain, OptimizerAlgo, OptimizerConfig,
-};
+pub use rspice_results::optimization::OptimizationScore;
+pub use rspice_simulation_contract::optimization_search::{OptimizerAlgo, OptimizerConfig};
 
 /// Core engine for executing optimization runs
 ///

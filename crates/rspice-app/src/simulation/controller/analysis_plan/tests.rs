@@ -1560,7 +1560,7 @@ fn configured_study_freezes_exact_base_and_survives_persistence_and_identity() {
 #[test]
 fn configured_optimization_base_persists_and_freezes_before_live_edits() {
     use crate::simulation::dialog::optimization::{OptimizationConfig, OptimizationDialogState};
-    use crate::simulation::optimizer::{OptimizationObjectiveGoal, OptimizationObjectiveTerm};
+    use rspice_results::optimization::{OptimizationObjectiveGoal, OptimizationObjectiveTerm};
     let objectives = vec![OptimizationObjectiveTerm {
         measurement: "gain".into(),
         unit: "mV".into(),
@@ -1580,7 +1580,7 @@ fn configured_optimization_base_persists_and_freezes_before_live_edits() {
         base_analysis: Some(ac),
         objective_measurement: "gain".into(),
         objective_terms: objectives.clone(),
-        constraints: vec![crate::simulation::optimizer::OptimizationConstraint {
+        constraints: vec![rspice_results::optimization::OptimizationConstraint {
             measurement: "gain".into(),
             unit: "mV".into(),
             lower: Some(1.0),
@@ -1663,7 +1663,7 @@ fn configured_optimization_base_persists_and_freezes_before_live_edits() {
                 };
                 search.variable_domains.insert(
                     "RLOAD".into(),
-                    crate::simulation::optimizer::OptimizationVariableDomain::Logarithmic,
+                    rspice_simulation_contract::optimization_search::OptimizationVariableDomain::Logarithmic,
                 );
             }
             _ => {

@@ -155,7 +155,7 @@ pub(crate) fn run_optimization(
                 })?;
             let value = measurement_value(observation, &constraint.unit)?;
             constraints.push(
-                crate::simulation::optimizer::OptimizationConstraintObservation {
+                rspice_results::optimization::OptimizationConstraintObservation {
                     constraint: constraint.clone(),
                     value,
                     violation: constraint
@@ -182,7 +182,7 @@ pub(crate) fn run_optimization(
                     .map_err(services::ServiceRunError::Failure)?;
                 total += contribution;
                 observations.push(
-                    crate::simulation::optimizer::OptimizationObjectiveObservation {
+                    rspice_results::optimization::OptimizationObjectiveObservation {
                         objective: objective.clone(),
                         value,
                         contribution,
@@ -222,7 +222,7 @@ pub(crate) fn run_optimization(
         base.objective_terms
             .iter()
             .all(|term| {
-                term.goal == crate::simulation::optimizer::OptimizationObjectiveGoal::Target
+                term.goal == rspice_results::optimization::OptimizationObjectiveGoal::Target
             })
             .then_some(0.0)
     };
@@ -237,12 +237,12 @@ pub(crate) fn run_optimization(
         return Err(error);
     }
     let data = super::super::spec::run_abort_aware_service(abort, || response)?;
-    crate::simulation::optimizer::validate_optimization_objectives(
+    rspice_results::optimization::validate_optimization_objectives(
         &data.best_objectives,
         data.best_cost,
     )
     .map_err(SimulationError::InvalidConfig)?;
-    crate::simulation::optimizer::validate_optimization_constraint_result(
+    rspice_results::optimization::validate_optimization_constraint_result(
         &data.best_constraints,
         data.converged,
     )
@@ -279,7 +279,7 @@ mod tests {
 
     #[test]
     fn optimization_units_convert_configured_objectives_and_constraints() {
-        use crate::simulation::optimizer::{
+        use rspice_results::optimization::{
             OptimizationConstraint, OptimizationObjectiveGoal, OptimizationObjectiveTerm,
         };
         let deck = "Units\n.param X=0.35\nV1 out 0 {X}\nR1 out 0 1k\n.end\n";
@@ -370,7 +370,7 @@ mod tests {
                     rspice_simulation_contract::optimization_search::OptimizationSearchControls {
                         variable_domains: std::collections::BTreeMap::from([(
                             "RLOAD".into(),
-                            crate::simulation::optimizer::OptimizationVariableDomain::Logarithmic,
+                            rspice_simulation_contract::optimization_search::OptimizationVariableDomain::Logarithmic,
                         )]),
                         ..Default::default()
                     },
@@ -505,10 +505,10 @@ mod tests {
 
     #[test]
     fn weighted_optimization_executes_scaled_goals_and_retains_best_components() {
-        use crate::simulation::optimizer::{
+        use crate::simulation::runner::worker_contract::WorkerSimulationResult;
+        use rspice_results::optimization::{
             OptimizationObjectiveGoal as Goal, OptimizationObjectiveTerm as Term,
         };
-        use crate::simulation::runner::worker_contract::WorkerSimulationResult;
         let deck = "Weighted targets\n.param X=0.8\nV1 a 0 {X}\nV2 b 0 {2*X}\nR1 a 0 1k\nR2 b 0 1k\n.end\n";
         for (weight, scale, expected, algorithm) in [
             (3.0, 2.0, 0.25, OptimizationAlgorithm::PatternSearch),
@@ -611,7 +611,7 @@ mod tests {
                 (best_cost - expected_cost).abs() < 1e-10,
                 "{best_cost} vs {expected_cost}"
             );
-            crate::simulation::optimizer::validate_optimization_objectives(
+            rspice_results::optimization::validate_optimization_objectives(
                 &best_objectives,
                 best_cost,
             )
@@ -619,7 +619,7 @@ mod tests {
             let mut corrupted = best_objectives;
             corrupted[0].contribution += 1.0;
             assert!(
-                crate::simulation::optimizer::validate_optimization_objectives(
+                rspice_results::optimization::validate_optimization_objectives(
                     &corrupted, best_cost
                 )
                 .is_err()
@@ -679,11 +679,12 @@ mod tests {
     }
     #[test]
     fn constrained_optimization_recovers_feasibility_and_preserves_physical_objectives() {
-        use crate::simulation::optimizer::{
-            OptimizationConstraint as Constraint, OptimizationObjectiveGoal as Goal,
-            OptimizationObjectiveTerm as Term, OptimizationVariableDomain as Domain,
-        };
         use crate::simulation::runner::worker_contract::WorkerSimulationResult;
+        use rspice_results::optimization::{
+            OptimizationConstraint as Constraint, OptimizationObjectiveGoal as Goal,
+            OptimizationObjectiveTerm as Term,
+        };
+        use rspice_simulation_contract::optimization_search::OptimizationVariableDomain as Domain;
         let deck = "Constrained design\n.param X=0.8\nV1 a 0 {X}\nV2 b 0 {2*X}\nR1 a 0 1k\nR2 b 0 1k\n.end\n";
         for (algorithm, lower, upper, tolerance, expected, feasible, weighted) in [
             (
@@ -828,7 +829,7 @@ mod tests {
             assert_eq!(best_constraints[0].violation == 0.0, feasible);
             let expected_cost = -best_variables["X"] * if weighted { 1e30 } else { 1.0 };
             assert!((best_cost - expected_cost).abs() < 1e-12 * expected_cost.abs().max(1.0));
-            crate::simulation::optimizer::validate_optimization_constraint_result(
+            rspice_results::optimization::validate_optimization_constraint_result(
                 &best_constraints,
                 converged,
             )

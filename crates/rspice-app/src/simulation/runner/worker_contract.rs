@@ -707,9 +707,9 @@ pub(crate) enum WorkerSimulationResult {
         best_cost: f64,
         best_variables: HashMap<String, f64>,
         #[serde(default)]
-        best_objectives: Vec<crate::simulation::optimizer::OptimizationObjectiveObservation>,
+        best_objectives: Vec<rspice_results::optimization::OptimizationObjectiveObservation>,
         #[serde(default)]
-        best_constraints: Vec<crate::simulation::optimizer::OptimizationConstraintObservation>,
+        best_constraints: Vec<rspice_results::optimization::OptimizationConstraintObservation>,
         converged: bool,
     },
     Soa {
@@ -1679,12 +1679,12 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 best_constraints,
                 converged,
             } => {
-                crate::simulation::optimizer::validate_optimization_objectives(
+                rspice_results::optimization::validate_optimization_objectives(
                     &best_objectives,
                     best_cost,
                 )
                 .map_err(SimulationError::InvalidConfig)?;
-                crate::simulation::optimizer::validate_optimization_constraint_result(
+                rspice_results::optimization::validate_optimization_constraint_result(
                     &best_constraints,
                     converged,
                 )
