@@ -72,7 +72,7 @@ pub(super) fn bind_execution_profile(
         rspice_core::SpiceDialect::Xyce => "XYCE",
     };
     Ok(
-        crate::services::simulation_runner::splice_before_terminal_end_card(
+        rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
             &source,
             &format!(
                 "* RSpice execution profile: {}\n.OPTIONS RSPICE_DIALECT={dialect}",
@@ -664,7 +664,8 @@ fn command_name(command: &AnalysisCommand) -> &'static str {
 }
 
 pub(super) fn compose_manual_deck_source(source: &str) -> String {
-    let has_end = crate::services::simulation_runner::terminal_end_card_offset(source).is_some();
+    let has_end =
+        rspice_simulation::netlist_preparation::terminal_end_card_offset(source).is_some();
     if has_end {
         source.to_string()
     } else if source.ends_with('\n') {

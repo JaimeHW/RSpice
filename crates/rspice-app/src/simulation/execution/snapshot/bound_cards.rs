@@ -15,8 +15,8 @@
 
 use super::{
     AnalysisSpec, CanonicalWriter, ContentDigest, PreparationError, PreparationStage, PreparedTask,
-    splice_before_terminal_end_card,
 };
+use rspice_simulation::netlist_preparation::splice_before_terminal_end_card;
 
 impl PreparedTask {
     /// Declare the observation cards this task's deck carries.

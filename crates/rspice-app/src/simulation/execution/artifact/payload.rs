@@ -528,16 +528,17 @@ impl PeriodicOperatingEnvironment {
         dependencies
             .validate_source_basis(source, self.source_basis_digest)
             .map_err(|error| services::ServiceRunError::Failure(error.to_string()))?;
-        let temperature_source = services::source_with_run_temperature_with_abort(
-            source,
-            self.temperature_celsius,
-            abort,
-        )?;
+        let temperature_source =
+            rspice_simulation::netlist_preparation::source_with_run_temperature_with_abort(
+                source,
+                self.temperature_celsius,
+                abort,
+            )?;
         let mut circuit =
             services::parse_runner_netlist_with_abort(&temperature_source, source_path, abort)?;
         circuit.source_text = Some(source.to_owned());
         if let (Some(supply), Some(nominal)) = (self.supply_voltage, self.nominal_supply_voltage) {
-            services::apply_voltage_corner(
+            rspice_simulation::netlist_preparation::apply_voltage_corner(
                 &mut circuit,
                 supply,
                 nominal,

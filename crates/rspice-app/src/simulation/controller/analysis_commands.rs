@@ -6,8 +6,8 @@
 
 use super::*;
 
-use crate::services::simulation_runner::splice_before_terminal_end_card;
 use crate::simulation::plan::AnalysisDraft;
+use rspice_simulation::netlist_preparation::splice_before_terminal_end_card;
 
 impl SimulationController {
     /// The engine directive one frozen draft emits. `state` supplies live
@@ -764,11 +764,11 @@ impl SimulationController {
         let mut block = Vec::with_capacity(payload.len() + 2);
         block.push(format!(
             "{} {}",
-            crate::services::simulation_runner::REFERENCE_MODEL_BINDING_BEGIN,
+            rspice_simulation::netlist_preparation::REFERENCE_MODEL_BINDING_BEGIN,
             payload.len()
         ));
         block.extend(payload);
-        block.push(crate::services::simulation_runner::REFERENCE_MODEL_BINDING_END.to_owned());
+        block.push(rspice_simulation::netlist_preparation::REFERENCE_MODEL_BINDING_END.to_owned());
         splice_before_terminal_end_card(netlist, &block.join("\n"))
     }
 }
@@ -1033,7 +1033,7 @@ mod tests {
 
         let subckt_end = bound.find(".ends child").expect("subcircuit end remains");
         let binding = bound
-            .find(crate::services::simulation_runner::REFERENCE_MODEL_BINDING_BEGIN)
+            .find(rspice_simulation::netlist_preparation::REFERENCE_MODEL_BINDING_BEGIN)
             .expect("binding marker inserted");
         let terminal_end = bound.rfind("\n.end\n").expect("terminal end remains");
         assert!(subckt_end < binding, "{bound}");

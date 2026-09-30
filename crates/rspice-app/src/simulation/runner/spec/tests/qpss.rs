@@ -472,11 +472,18 @@ fn qpss_op_handoff_preserves_environment_and_consumers_across_worker_transport()
         QuasiPeriodicTransferDraft,
     };
     let basis = "Bound QP OP\nV1 in 0 DC .2 AC .3 30\nI1 0 out DC 0 AC .001 -20\nRS in out {1000+10*(TEMP-37)} TC1=.01\nRL out 0 1k\nC1 out 0 100n\n.options TEMP=12 TNOM=27 GMIN=1e-10\n.end\n";
-    let op_deck =
-        svc_runner::splice_before_terminal_end_card(basis, ".options GMIN=1e-7 RELTOL=1e-8");
-    let qp_deck = svc_runner::splice_before_terminal_end_card(basis, ".options GMIN=0 TEMP=12");
-    let consumer_deck =
-        svc_runner::splice_before_terminal_end_card(basis, ".options GMIN=0 TEMP=77");
+    let op_deck = rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
+        basis,
+        ".options GMIN=1e-7 RELTOL=1e-8",
+    );
+    let qp_deck = rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
+        basis,
+        ".options GMIN=0 TEMP=12",
+    );
+    let consumer_deck = rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
+        basis,
+        ".options GMIN=0 TEMP=77",
+    );
     let mut op = OpConfig {
         temperature_celsius: 37.0,
         temperature_mode: OpTemperatureMode::Explicit,

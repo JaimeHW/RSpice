@@ -113,10 +113,15 @@ pub(super) fn strip_selected_cards(source: &str, remove: impl Fn(&str) -> bool) 
 }
 
 pub(super) fn insert_before_end(base: &str, override_source: &str) -> Result<String, String> {
-    if crate::services::simulation_runner::terminal_end_card_offset(base).is_none() {
+    if rspice_simulation::netlist_preparation::terminal_end_card_offset(base).is_none() {
         return Err("Retained generated base has no .end terminator.".to_owned());
     }
-    Ok(crate::services::simulation_runner::splice_before_terminal_end_card(base, override_source))
+    Ok(
+        rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
+            base,
+            override_source,
+        ),
+    )
 }
 
 pub(super) fn is_analysis_directive(head: &str) -> bool {

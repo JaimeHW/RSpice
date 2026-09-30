@@ -6,7 +6,6 @@
 
 #![allow(clippy::type_complexity)]
 
-use rspice_simulation::error::{ensure_not_aborted, poll_periodically};
 use super::{
     ServiceRunError, ServiceRunResult, build_engine_config, parse_runner_netlist_with_abort,
 };
@@ -16,6 +15,7 @@ use rspice_core::abort_signal::AbortSignal;
 use rspice_core::abort_signal::NoAbort;
 use rspice_core::analysis::PssConfig;
 use rspice_core::engine::{Engine, PssDcOperatingPointSeed};
+use rspice_simulation::error::{ensure_not_aborted, poll_periodically};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -216,7 +216,7 @@ fn run_pss_analysis_internal(
     let temperature_source = seed_environment
         .as_ref()
         .map(|environment| {
-            super::source_with_run_temperature_with_abort(
+            rspice_simulation::netlist_preparation::source_with_run_temperature_with_abort(
                 netlist_text,
                 environment.temperature_celsius,
                 abort,
@@ -385,7 +385,13 @@ fn apply_seed_environment(
     match (supply_voltage, nominal_supply_voltage) {
         (None, None) => {}
         (Some(supply), Some(nominal)) => {
-            super::apply_voltage_corner(netlist, supply, nominal, supply_source_names, abort)?;
+            rspice_simulation::netlist_preparation::apply_voltage_corner(
+                netlist,
+                supply,
+                nominal,
+                supply_source_names,
+                abort,
+            )?;
         }
         _ => {
             return Err(ServiceRunError::Failure(

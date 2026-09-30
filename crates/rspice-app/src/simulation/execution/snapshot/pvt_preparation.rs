@@ -334,7 +334,7 @@ pub(super) fn prepare_pvt_point_source(
         return Ok(((source != executable_netlist).then_some(source), None));
     };
 
-    let source = crate::services::simulation_runner::materialize_corner_process_source(
+    let source = rspice_simulation::netlist_preparation::materialize_corner_process_source(
         executable_netlist,
         contract,
         point.process,
@@ -360,7 +360,7 @@ pub(super) fn prepare_pvt_point_source(
         })?;
         Some(match contract.nominal_voltage {
             Some(voltage) => voltage,
-            None => crate::services::simulation_runner::infer_nominal_supply_voltage(
+            None => rspice_simulation::netlist_preparation::infer_nominal_supply_voltage(
                 &parsed,
                 &point.supply_source_names,
                 &rspice_core::NoAbort,

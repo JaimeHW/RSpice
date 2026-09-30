@@ -578,7 +578,7 @@ fn soa_directional_limits_survive_studio_preparation_worker_requests_and_saved_r
     declaration.spec = restored;
     // Both transistor polarities are driven at known signed terminal voltages.
     // Conduction flows into N-device drain/collector and out of P devices.
-    let deck = crate::services::simulation_runner::splice_before_terminal_end_card(
+    let deck = rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
         "directional limits\nVd d 0 1\nVg g 0 2\nVs s 0 2\nVpg pg 0 0\nVpd pd 0 1\nVc c 0 1.5\nVb b 0 0.65\nVpc pc 0 0.5\nVpb pb 0 1.35\nMN d g 0 0 NM W=10u L=1u\nMP pd pg s s PM W=10u L=1u\nQN c b 0 NPN\nQP pc pb s PNP\n.model NM NMOS LEVEL=1 VTO=1 KP=1m\n.model PM PMOS LEVEL=1 VTO=-1 KP=1m\n.model NPN NPN IS=1e-14 BF=100\n.model PNP PNP IS=1e-14 BF=100\n.end\n",
         &declaration.analysis_line,
     );
@@ -753,7 +753,7 @@ fn soa_temperature_limits_survive_studio_worker_execution_and_saved_results() {
         serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
     assert_eq!(AnalysisSpec::from(decoded.clone()), declaration.spec);
     declaration.spec = AnalysisSpec::from(decoded);
-    let deck = crate::services::simulation_runner::splice_before_terminal_end_card(
+    let deck = rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
         "temperature limits\nVd d 0 1\nVg g 0 2\nVb b 0 .5\nM1 d g 0 0 mm TEMP=-40\nQ1 d b 0 qm TEMP=85\n.model mm NMOS LEVEL=1 VTO=1 KP=1m\n.model qm NPN IS=1e-16 BF=100\n.end\n",
         &declaration.analysis_line,
     );
@@ -866,7 +866,7 @@ fn soa_body_and_backgate_limits_follow_model_pins_through_studio_and_saved_resul
         let deck = format!(
             "Body terminal roles\nVd d 0 1\nVg g 0 1\nVb b 0 -0.1\nVe e 0 0.2\nMN d g 0 b NM W=4u L=1u\nX1 d g b e CELL\n.subckt CELL d g b e\nMT d g 0 e b NS W=4u L=1u\nMF d g 0 e NS W=4u L=1u\n.model NS NMOS LEVEL={level} CAPMOD=2\n.ends CELL\n.model NM NMOS LEVEL=1 VTO=0.7 KP=100u\n.end\n"
         );
-        let deck = crate::services::simulation_runner::splice_before_terminal_end_card(
+        let deck = rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
             &deck,
             &declaration.analysis_line,
         );
@@ -1037,7 +1037,7 @@ fn soa_diode_and_bjt_substrate_limits_survive_studio_worker_and_saved_results() 
     assert_eq!(restored, declaration.spec);
     declaration.spec = restored;
     let deck = "Diode and substrate rules\nVc c 0 1.5\nVb b 0 0.65\nVs sub 0 -0.2\nVa a 0 0.4\nVr r 0 -2\nQG c b 0 sub GP\nQV c b 0 sub VB\nQT c b 0 0 VT\nQ3 c b 0 GP\nD1 a 0 DM TEMP=85\nX1 r CELL\n.subckt CELL a\nD2 a 0 DM DTEMP=10\n.model DM D IS=1e-12 RS=10\n.ends CELL\n.model GP NPN IS=1e-14 BF=100\n.model VB NPN LEVEL=12 IS=1e-16 BF=100\n.model VT NPN LEVEL=11 IS=1e-16 BF=100\n.model DM D IS=1e-12 RS=10\n.end\n";
-    let deck = crate::services::simulation_runner::splice_before_terminal_end_card(
+    let deck = rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
         deck,
         &declaration.analysis_line,
     );
@@ -1228,7 +1228,7 @@ fn soa_intrinsic_voltage_rules_survive_studio_worker_and_saved_results() {
         Va a 0 0.8\nD1 a 0 DM\n.model DM D IS=1e-12 RS=100\n\
         Ve e 0 0.2\nVn n 0 1\nMF n n 0 e SOI W=10u L=1u\n\
         .model SOI NMOS LEVEL=55 VTH0=0.4 U0=0.02 TOX=10n TSI=100n TBOX=300n\n.end\n";
-    let deck = crate::services::simulation_runner::splice_before_terminal_end_card(
+    let deck = rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
         deck,
         &declaration.analysis_line,
     );
@@ -1372,7 +1372,7 @@ fn soa_model_voltage_ratings_survive_studio_worker_and_saved_results() {
         MVN dn gn 0 NV\nMVP d gp 0 PV\n\
         .model NV NMOS LEVEL=18 VTO=2 VGS_MAX=1 VGSR_MAX=0.5\n\
         .model PV VDMOS PCHAN=1 VTO=-2 VGS_MAX=1 VGSR_MAX=0.5\n.end\n";
-    let deck = crate::services::simulation_runner::splice_before_terminal_end_card(
+    let deck = rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
         deck,
         &declaration.analysis_line,
     );
@@ -1544,7 +1544,7 @@ fn soa_derating_survives_studio_worker_thermal_transient_and_saved_results() {
     assert_eq!(AnalysisSpec::from(wire.clone()), declaration.spec);
     declaration.spec = AnalysisSpec::from(wire);
     let deck = "Derating\nVc c 0 1.2\nVb b 0 .5\nVth th 0 PWL(0 0 1n 74)\nQ1 c b 0 th vm SW_ET=0\n.model vm NPN LEVEL=11 IS=1e-16 IBEI=1e-18 IBCI=1e-18 RCI=0 RBI=0 RTH=1000 TMINCLIP=-50 TMAXCLIP=100\n.temp 27\n.end\n";
-    let deck = crate::services::simulation_runner::splice_before_terminal_end_card(
+    let deck = rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
         deck,
         &declaration.analysis_line,
     );
@@ -1678,7 +1678,7 @@ fn soa_vbic_model_ratings_survive_studio_worker_and_saved_results() {
     }
     // Parameter inference must use the same external convention without LEVEL.
     deck.push_str("QI cn bn 0 sn inferred\n.model inferred NPN IS=1e-16 RCI=5 VBE_MAX=.5 VBC_MAX=.4 VCE_MAX=1.1 VSUB_MAX=.15 VSUBFWD=.1\n.end\n");
-    let deck = crate::services::simulation_runner::splice_before_terminal_end_card(
+    let deck = rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
         &deck,
         &declaration.analysis_line,
     );
@@ -1802,7 +1802,7 @@ fn soa_thresholds_survive_studio_worker_execution_and_saved_results() {
         assert_eq!(AnalysisSpec::from(wire.clone()), declaration.spec);
         declaration.spec = AnalysisSpec::from(wire);
         let deck = "SOA thresholds\nV1 a 0 PWL(0 .4 1n 1.5)\nD1 a 0 DM\n.model DM D IS=1e-30 FV_MAX=1\n.end\n";
-        let deck = crate::services::simulation_runner::splice_before_terminal_end_card(
+        let deck = rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
             deck,
             &declaration.analysis_line,
         );
@@ -1967,7 +1967,7 @@ fn check_soa_duration_round_trip(
     assert_eq!(AnalysisSpec::from(wire.clone()), declaration.spec);
     declaration.spec = AnalysisSpec::from(wire);
     let deck = "SOA durations\nV1 d 0 PWL(0 0 1n 4 2n 0 3n 2 5n 2 6n 0)\nM1 d 0 0 0 NM\n.model NM NMOS LEVEL=1 VTO=1\n.end\n";
-    let deck = crate::services::simulation_runner::splice_before_terminal_end_card(
+    let deck = rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
         deck,
         &declaration.analysis_line,
     );

@@ -121,7 +121,7 @@ fn append_statements(
         return Ok(source.to_owned());
     }
     Ok(
-        crate::services::simulation_runner::splice_before_terminal_end_card(
+        rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
             source,
             &statements.join("\n"),
         ),

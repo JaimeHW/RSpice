@@ -53,7 +53,7 @@ fn soa_current_envelope_studio_dispatch_retains_limits_and_saved_configuration()
         assert_eq!(AnalysisSpec::from(wire.clone()), declaration.spec);
         declaration.spec = AnalysisSpec::from(wire);
         let deck = "Current curve\nVg g 0 1\nVd d 0 PWL(0 .5 1n 12)\nX1 d g cell\n.subckt cell d g\nM1 d g 0 0 nm W=1u L=1u\n.model nm NMOS LEVEL=1 VTO=0 KP=.02\n.ends\n.end\n";
-        let deck = crate::services::simulation_runner::splice_before_terminal_end_card(
+        let deck = rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
             deck,
             &declaration.analysis_line,
         );

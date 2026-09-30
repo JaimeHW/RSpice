@@ -446,5 +446,8 @@ pub(crate) fn source_with_statistics<'a>(
     let directive = statistics
         .parser_directive()
         .map_err(SimulationError::InvalidConfig)?;
-    Ok(services::splice_before_terminal_end_card(source, &directive).into())
+    Ok(
+        rspice_simulation::netlist_preparation::splice_before_terminal_end_card(source, &directive)
+            .into(),
+    )
 }

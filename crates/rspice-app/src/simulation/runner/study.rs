@@ -739,7 +739,7 @@ fn study_source_at_environment(
     let source = base.execution_source(source)?;
     match environment {
         Some(point) => super::spec::run_abort_aware_service(abort, || {
-            services::source_with_run_temperature_with_abort(
+            rspice_simulation::netlist_preparation::source_with_run_temperature_with_abort(
                 &source,
                 point.temperature_celsius,
                 abort,

@@ -9,6 +9,7 @@ pub mod measurement_references;
 pub mod model_import;
 pub mod model_sources;
 pub mod netlist_gen;
+pub mod netlist_preparation;
 pub mod netlist_sources;
 pub mod pdk;
 pub mod project_veriloga;

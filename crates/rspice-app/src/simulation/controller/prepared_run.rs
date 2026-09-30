@@ -2322,7 +2322,7 @@ fn reject_deferred_corner_model_sources<'a>(
         for &process in &corner.process_corners {
             // Use the runner's own composition so root parameters and active
             // subcircuit instances resolve against this corner's actual cards.
-            let source = crate::services::simulation_runner::materialize_corner_process_source(
+            let source = rspice_simulation::netlist_preparation::materialize_corner_process_source(
                 executable_netlist,
                 corner,
                 process,

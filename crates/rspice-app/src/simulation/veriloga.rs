@@ -155,7 +155,7 @@ pub fn append_project_veriloga_directive(
     netlist_alias: &str,
 ) {
     let directive = project_veriloga_directive(source_key, netlist_alias);
-    let end = crate::services::simulation_runner::terminal_end_card_offset(source)
+    let end = rspice_simulation::netlist_preparation::terminal_end_card_offset(source)
         .unwrap_or(source.len());
     if source[..end]
         .lines()
@@ -165,7 +165,7 @@ pub fn append_project_veriloga_directive(
         return;
     }
     *source =
-        crate::services::simulation_runner::splice_before_terminal_end_card(source, &directive);
+        rspice_simulation::netlist_preparation::splice_before_terminal_end_card(source, &directive);
 }
 
 fn model_library_virtual_compile_limits() -> rspice_veriloga::VirtualCompileLimits {

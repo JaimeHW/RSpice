@@ -7,13 +7,15 @@
 mod objective;
 pub use objective::validate_optimization_expression;
 
-use rspice_simulation::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use super::{build_engine_config, is_ground_like, parse_runner_netlist_with_abort};
 use crate::simulation::optimizer::{DesignVar, OptimizerEngine};
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::Engine;
 use rspice_results::optimization::OptimizationScore;
+use rspice_simulation::error::{
+    ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically,
+};
 use rspice_simulation_contract::optimization_search::{OptimizerAlgo, OptimizerConfig};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -821,7 +823,7 @@ pub(crate) fn materialize_optimization_candidate(
     if let Some(point) = environment
         && let (Some(supply), Some(nominal)) = (point.supply_voltage, point.nominal_supply_voltage)
     {
-        super::apply_voltage_corner(
+        rspice_simulation::netlist_preparation::apply_voltage_corner(
             &mut candidate,
             supply,
             nominal,

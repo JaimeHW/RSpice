@@ -2,6 +2,7 @@
 use super::*;
 use crate::simulation::dialog::{OpConfig, OpTemperatureMode};
 use crate::simulation::multi_run::FrequencySweep;
+use rspice_simulation::netlist_preparation::splice_before_terminal_end_card;
 use svc_runner::*;
 
 #[test]

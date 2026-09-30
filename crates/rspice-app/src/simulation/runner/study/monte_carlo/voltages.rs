@@ -120,7 +120,7 @@ fn prepare(
     }
     let source = match &environment {
         Some(point) => spec::run_abort_aware_service(abort, || {
-            services::source_with_run_temperature_with_abort(
+            rspice_simulation::netlist_preparation::source_with_run_temperature_with_abort(
                 source,
                 point.temperature_celsius,
                 abort,

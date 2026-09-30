@@ -1,9 +1,6 @@
-//! Intermediate sweep results and reference-deck markers.
+//! Intermediate sweep results.
 
 use rspice_core::Value;
-
-pub(crate) const REFERENCE_MODEL_BINDING_BEGIN: &str = "* RSPICE REFERENCE MODEL BINDING BEGIN";
-pub(crate) const REFERENCE_MODEL_BINDING_END: &str = "* RSPICE REFERENCE MODEL BINDING END";
 
 /// Parametric sweep data.
 #[derive(Debug, Clone)]

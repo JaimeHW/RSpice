@@ -54,7 +54,8 @@ impl StudyPssConfig {
                 continue;
             }
             if mode.eq_ignore_ascii_case("bin") {
-                let (index, _, signal) = rspice_simulation_contract::study_measurement::parse_study_bin(key)?;
+                let (index, _, signal) =
+                    rspice_simulation_contract::study_measurement::parse_study_bin(key)?;
                 if index <= num_harmonics && signal.is_some() {
                     continue;
                 }
@@ -155,7 +156,7 @@ impl StudyOperatingPoint {
             op.run_point.nominal_supply_voltage,
         ) {
             super::super::spec::run_abort_aware_service(abort, || {
-                services::apply_voltage_corner(
+                rspice_simulation::netlist_preparation::apply_voltage_corner(
                     &mut physical,
                     supply,
                     nominal,

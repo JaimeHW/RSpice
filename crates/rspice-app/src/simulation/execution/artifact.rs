@@ -17,9 +17,9 @@ use crate::simulation::dependency_contract::{
 };
 use crate::simulation::multi_run::AnalysisSpec;
 use crate::simulation::multi_run::PssMethod;
-use rspice_simulation::results::SimulationResult;
 use crate::simulation::runner::SpecExecutionOptions;
 use rspice_app_types::canonical::CanonicalWriter;
+use rspice_simulation::results::SimulationResult;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::simulation) enum ExecutionArtifactKind {
@@ -561,7 +561,7 @@ fn validate_hb_producer_config(
     })?;
     let source = match environment {
         Some(environment) => {
-            crate::services::simulation_runner::source_with_run_temperature_with_abort(
+            rspice_simulation::netlist_preparation::source_with_run_temperature_with_abort(
                 source,
                 environment.temperature_celsius(),
                 &rspice_core::NoAbort,

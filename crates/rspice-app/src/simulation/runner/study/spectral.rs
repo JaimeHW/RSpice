@@ -152,23 +152,29 @@ impl StudyRunConfig {
             }
             if let Some(post) = &self.postprocess {
                 post.validate(self)?;
-                return Ok(services::splice_before_terminal_end_card(
-                    source,
-                    &format!("{}\n{}", post.producer_analysis_line, self.analysis_line),
-                ));
+                return Ok(
+                    rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
+                        source,
+                        &format!("{}\n{}", post.producer_analysis_line, self.analysis_line),
+                    ),
+                );
             }
             // Each stage overlays its own numerical controls after variation.
-            return Ok(services::splice_before_terminal_end_card(
-                source,
-                &self.analysis_line,
-            ));
+            return Ok(
+                rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
+                    source,
+                    &self.analysis_line,
+                ),
+            );
         }
         if let Some(post) = self.postprocess.as_ref().filter(|post| post.is_periodic()) {
             post.validate(self)?;
-            return Ok(services::splice_before_terminal_end_card(
-                source,
-                &format!("{}\n{}", post.producer_analysis_line, self.analysis_line),
-            ));
+            return Ok(
+                rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
+                    source,
+                    &format!("{}\n{}", post.producer_analysis_line, self.analysis_line),
+                ),
+            );
         }
         let mut block = String::new();
         if let Some(postprocess) = &self.postprocess {
@@ -181,7 +187,7 @@ impl StudyRunConfig {
         block.push_str(&self.analysis_line);
         block.push('\n');
         block.push_str(&self.numeric_options);
-        Ok(services::splice_before_terminal_end_card(source, &block))
+        Ok(rspice_simulation::netlist_preparation::splice_before_terminal_end_card(source, &block))
     }
 
     pub(super) fn run_trial(

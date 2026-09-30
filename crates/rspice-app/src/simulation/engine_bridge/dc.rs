@@ -86,7 +86,7 @@ impl EngineBridge {
             config.run_point.supply_voltage,
             config.run_point.nominal_supply_voltage,
         ) {
-            crate::services::simulation_runner::apply_voltage_corner(
+            rspice_simulation::netlist_preparation::apply_voltage_corner(
                 &mut execution_netlist,
                 supply,
                 nominal,

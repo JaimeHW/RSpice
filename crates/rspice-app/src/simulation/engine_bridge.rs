@@ -250,7 +250,7 @@ impl EngineBridge {
         };
         let temperature_source = temperature
             .map(|temperature| {
-                crate::services::simulation_runner::source_with_run_temperature_with_abort(
+                rspice_simulation::netlist_preparation::source_with_run_temperature_with_abort(
                     input.netlist_str,
                     temperature,
                     abort_flag,
@@ -290,7 +290,7 @@ impl EngineBridge {
                 environment.nominal_supply_voltage,
             ) {
                 (Some(supply), Some(nominal)) => {
-                    crate::services::simulation_runner::apply_voltage_corner(
+                    rspice_simulation::netlist_preparation::apply_voltage_corner(
                         &mut netlist,
                         supply,
                         nominal,
@@ -315,7 +315,7 @@ impl EngineBridge {
                 }
             }
         } else if let Some(corner) = input.supply_corner {
-            crate::services::simulation_runner::apply_voltage_corner(
+            rspice_simulation::netlist_preparation::apply_voltage_corner(
                 &mut netlist,
                 corner.corner_voltage,
                 corner.nominal_voltage,
