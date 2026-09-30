@@ -1232,11 +1232,12 @@ fn an_executed_deck_claims_verification_only_when_it_reproduces_the_sealed_diges
             simulation_plan_id: Some(crate::product::SimulationPlanId::new()),
             project_revision: ObjectRevision::INITIAL,
             prepared_snapshot_digest: digest(0xa0),
-            source_content_digest: crate::simulation::execution::sealed_executable_source_digest(
-                AnalysisResultSourceDomain::SimulationPlan,
-                source,
-            )
-            .expect("a plan run seals its executable source"),
+            source_content_digest:
+                rspice_simulation::sealed_source::sealed_executable_source_digest(
+                    AnalysisResultSourceDomain::SimulationPlan,
+                    source,
+                )
+                .expect("a plan run seals its executable source"),
             source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest(0xa2)),
             project_model_sources: Vec::new(),
             specifications: Vec::new(),

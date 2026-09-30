@@ -71,7 +71,7 @@ impl ExecutedDeckVerification {
     /// retained bytes.
     ///
     /// `source_content_digest` is the one receipt field that authenticates
-    /// deck text — see [`crate::simulation::execution::sealed_executable_source_digest`]
+    /// deck text — see [`rspice_simulation::sealed_source::sealed_executable_source_digest`]
     /// — so it is the one thing a retained deck can be checked against.
     #[must_use]
     pub fn of(state: &AppState, run_id: u64, point: usize) -> Option<Self> {
@@ -86,8 +86,10 @@ impl ExecutedDeckVerification {
         };
         let domain = receipt.source_domain();
         let sealed = receipt.source_content_digest();
-        let recomputed =
-            crate::simulation::execution::sealed_executable_source_digest(domain, &selected.deck);
+        let recomputed = rspice_simulation::sealed_source::sealed_executable_source_digest(
+            domain,
+            &selected.deck,
+        );
         let Some(recomputed) = recomputed else {
             return Some(Self::NotRecorded);
         };
@@ -104,7 +106,7 @@ impl ExecutedDeckVerification {
                 return false;
             }
             hashed.push(identity);
-            crate::simulation::execution::sealed_executable_source_digest(domain, &other.deck)
+            rspice_simulation::sealed_source::sealed_executable_source_digest(domain, &other.deck)
                 == Some(sealed)
         });
         Some(if run_source_retained {

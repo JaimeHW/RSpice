@@ -24,8 +24,8 @@ use rspice_core::abort_signal::AbortSignal;
 use rspice_core::abort_signal::NoAbort;
 
 use super::config::AnalysisConfig;
-use rspice_simulation::results::SimulationResult;
 use super::runner::SimulationError;
+use rspice_simulation::results::SimulationResult;
 
 #[cfg(test)]
 mod ac_grid_tests;
@@ -60,7 +60,7 @@ pub struct EngineBridge {
     /// Core engine instance
     engine: rspice_core::Engine,
     measurement_references:
-        crate::simulation::measurement_references::PreparedMeasurementReferences,
+        rspice_simulation::measurement_references::PreparedMeasurementReferences,
 }
 
 /// The supply corner one PVT point is solved at.
@@ -95,7 +95,7 @@ impl Default for EngineBridge {
 impl EngineBridge {
     pub(crate) fn with_measurement_references(
         mut self,
-        references: crate::simulation::measurement_references::PreparedMeasurementReferences,
+        references: rspice_simulation::measurement_references::PreparedMeasurementReferences,
     ) -> Self {
         self.measurement_references = references;
         self

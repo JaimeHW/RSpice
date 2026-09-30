@@ -18,11 +18,13 @@ use crate::simulation::execution::{
     ExecutionTargetCapabilities, ModelSourceIdentity, PreparationError, PreparationStage,
     PreparedDependencyBinding, PreparedRunMetadata, PreparedRunSnapshot, PreparedTask,
     RunSourceReceipt, SavePolicy, SnapshotParts, TouchstoneExportPolicy, analysis_kind_tag,
-    drc_receipt_digest, generated_executable_source_digest, manual_deck_analysis_instance_id,
-    manual_executable_source_digest, manual_source_receipt_digest,
+    drc_receipt_digest, manual_deck_analysis_instance_id, manual_source_receipt_digest,
 };
 use crate::simulation::run_set::RunSetCornerProjection;
 use rspice_app_types::canonical::content_digest;
+use rspice_simulation::sealed_source::{
+    generated_executable_source_digest, manual_executable_source_digest,
+};
 
 mod deferred_sources;
 mod dependency_expansion;
@@ -1052,7 +1054,7 @@ impl SimulationController {
                 .collect(),
         )?;
         let measurement_references =
-            crate::simulation::measurement_references::PreparedMeasurementReferences::capture(
+            rspice_simulation::measurement_references::PreparedMeasurementReferences::capture(
                 &netlist,
                 &plan_payload.specification_definitions,
             )
@@ -1277,7 +1279,7 @@ impl SimulationController {
                 payload.specification_definitions.as_slice()
             });
         let measurement_references =
-            crate::simulation::measurement_references::PreparedMeasurementReferences::capture(
+            rspice_simulation::measurement_references::PreparedMeasurementReferences::capture(
                 &expanded,
                 definitions,
             )
@@ -2221,7 +2223,7 @@ fn reject_deferred_external_sources(netlist: &str) -> Result<(), PreparationErro
 fn reject_deferred_external_sources_with_project_runtimes(
     netlist: &str,
     project_runtimes: &crate::simulation::veriloga::PreparedVerilogARuntimeSet,
-    measurement_references: &crate::simulation::measurement_references::PreparedMeasurementReferences,
+    measurement_references: &rspice_simulation::measurement_references::PreparedMeasurementReferences,
 ) -> Result<(), PreparationError> {
     measurement_references
         .validate_source(netlist)

@@ -21,8 +21,8 @@ use crate::diagnostics::engine_log::{EngineLogLine, EngineLogQueue, RunLogSink};
 use super::config::AnalysisConfig;
 use super::execution::{ResolvedExecutionDependencies, ResolvedTaskDispatch};
 use super::multi_run::AnalysisSpec;
-use rspice_simulation::results::SimulationResult;
 use super::status::{SimulationProgress, SimulationStatus};
+use rspice_simulation::results::SimulationResult;
 
 /// Maximum UI-only transient deltas waiting for an application frame.
 ///
@@ -164,7 +164,7 @@ pub(crate) struct NetlistInput {
     source_path: Option<PathBuf>,
     project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
     measurement_references:
-        crate::simulation::measurement_references::PreparedMeasurementReferences,
+        rspice_simulation::measurement_references::PreparedMeasurementReferences,
     dependencies: ResolvedExecutionDependencies,
     environment: Option<AnalysisExecutionEnvironment>,
     stream_transient_samples: bool,

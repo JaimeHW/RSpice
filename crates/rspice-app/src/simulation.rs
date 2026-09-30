@@ -14,7 +14,6 @@ pub(crate) use rspice_simulation_contract::dependency_contract;
 pub(crate) mod dialog;
 pub(crate) mod engine_bridge;
 pub(crate) mod execution;
-pub(crate) mod measurement_references;
 pub(crate) mod multi_run;
 #[cfg(test)]
 pub(crate) mod netlist_gen;

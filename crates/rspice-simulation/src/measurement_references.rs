@@ -1,9 +1,8 @@
 //! Immutable comparison-table inputs shared by preparation and workers.
 
-use crate::product::ContentDigest;
-use crate::state::SpecificationDefinition;
-use crate::state::workspace::MeasurementReferenceSource;
+use rspice_app_types::product::ContentDigest;
 use rspice_core::netlist::measure::MeasureType;
+use rspice_results::specification::{MeasurementReferenceSource, SpecificationDefinition};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -15,21 +14,21 @@ struct PreparedReference {
     digest: ContentDigest,
 }
 
+/// Captured reference tables carried with prepared execution inputs.
+///
+/// Deserialized entries are checked by `validate_source` or `bind` before use.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct PreparedMeasurementReferences {
+pub struct PreparedMeasurementReferences {
     entries: Vec<PreparedReference>,
 }
 
 impl PreparedMeasurementReferences {
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    pub(crate) fn capture(
-        source: &str,
-        definitions: &[SpecificationDefinition],
-    ) -> Result<Self, String> {
+    pub fn capture(source: &str, definitions: &[SpecificationDefinition]) -> Result<Self, String> {
         if !may_reference_file(source) {
             return Ok(Self::default());
         }
@@ -74,14 +73,14 @@ impl PreparedMeasurementReferences {
         Ok(prepared)
     }
 
-    pub(crate) fn validate_source(&self, source: &str) -> Result<(), String> {
+    pub fn validate_source(&self, source: &str) -> Result<(), String> {
         if self.is_empty() && !may_reference_file(source) {
             return Ok(());
         }
         self.bind(&mut parse(source)?)
     }
 
-    pub(crate) fn bind(&self, netlist: &mut rspice_core::Netlist) -> Result<(), String> {
+    pub fn bind(&self, netlist: &mut rspice_core::Netlist) -> Result<(), String> {
         let mut names = HashSet::new();
         let mut bytes = 0usize;
         for entry in &self.entries {
@@ -134,7 +133,7 @@ impl PreparedMeasurementReferences {
         Ok(())
     }
 
-    pub(crate) fn digest(&self) -> ContentDigest {
+    pub fn digest(&self) -> ContentDigest {
         rspice_app_types::canonical::content_digest(
             "rspice.prepared-measurement-references/v1",
             &serde_json::to_vec(&self.entries).expect("reference entries serialize"),
@@ -142,9 +141,7 @@ impl PreparedMeasurementReferences {
     }
 }
 
-pub(in crate::simulation) fn reference_digest(
-    reference: &MeasurementReferenceSource,
-) -> ContentDigest {
+pub fn reference_digest(reference: &MeasurementReferenceSource) -> ContentDigest {
     rspice_app_types::canonical::content_digest(
         "rspice.measurement-reference/v1",
         &serde_json::to_vec(reference).expect("reference text serializes"),

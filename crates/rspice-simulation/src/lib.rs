@@ -5,6 +5,7 @@
 
 pub mod compilation;
 pub mod error;
+pub mod measurement_references;
 pub mod model_import;
 pub mod model_sources;
 pub mod netlist_gen;
@@ -12,4 +13,5 @@ pub mod netlist_sources;
 pub mod pdk;
 pub mod project_veriloga;
 pub mod results;
+pub mod sealed_source;
 pub mod veriloga;

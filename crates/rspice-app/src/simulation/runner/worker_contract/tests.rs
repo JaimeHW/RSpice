@@ -14,8 +14,8 @@ mod result_round_trip;
 
 #[test]
 fn studio_measurement_reference_worker_validates_and_executes_captured_data() {
-    use crate::simulation::measurement_references::PreparedMeasurementReferences;
     use crate::state::{SpecEntry, SpecificationDefinition};
+    use rspice_simulation::measurement_references::PreparedMeasurementReferences;
     let source = "Captured worker reference\nV1 out 0 2.5\nR1 out 0 1k\n.MEAS TRAN fit ERROR V(out) FILE=worker-reference.csv COMP_FUNCTION=INFNORM INDEPVARCOL=0 DEPVARCOL=1\n.end\n";
     let mut definition = SpecificationDefinition::new_from_projection(&SpecEntry {
         measurement: "fit".into(),

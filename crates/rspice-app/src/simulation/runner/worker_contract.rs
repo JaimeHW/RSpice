@@ -86,12 +86,12 @@ use crate::simulation::config::AnalysisConfig;
 use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
 use crate::simulation::multi_run::{AnalysisSpec, TfAccuracy, TfNormalization};
 
+use crate::simulation::status::{SimulationProgress, SimulationStatus};
+use rspice_results::noise::NoiseSummary;
 use rspice_simulation::results::{
     DcOpResult, MonteCarloVariableResult, SimulationResult, TransferFunctionQuantity,
     TransferFunctionScalar, TransientEventHistory, WaveformData,
 };
-use crate::simulation::status::{SimulationProgress, SimulationStatus};
-use rspice_results::noise::NoiseSummary;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerRequest {
@@ -102,7 +102,7 @@ pub(crate) struct WorkerRequest {
     pub project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
     #[serde(default)]
     pub measurement_references:
-        crate::simulation::measurement_references::PreparedMeasurementReferences,
+        rspice_simulation::measurement_references::PreparedMeasurementReferences,
     #[serde(default)]
     pub(in crate::simulation) dependencies:
         crate::simulation::execution::ResolvedExecutionDependencies,

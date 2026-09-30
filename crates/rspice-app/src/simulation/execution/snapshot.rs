@@ -795,7 +795,7 @@ pub(in crate::simulation) struct AuthorizedTaskDispatch {
     source_basis_digest: ContentDigest,
     project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
     measurement_references:
-        crate::simulation::measurement_references::PreparedMeasurementReferences,
+        rspice_simulation::measurement_references::PreparedMeasurementReferences,
     touchstone_export: TouchstoneExportPolicy,
     pvt_point: Option<crate::state::AnalysisResultPvtPoint>,
     declared_point: Option<crate::simulation::point_family::DeclaredRunPoint>,
@@ -955,7 +955,7 @@ impl ResolvedTaskDispatch {
         QueuedAnalysis,
         Arc<str>,
         crate::simulation::veriloga::PreparedVerilogARuntimeSet,
-        crate::simulation::measurement_references::PreparedMeasurementReferences,
+        rspice_simulation::measurement_references::PreparedMeasurementReferences,
         ResolvedExecutionDependencies,
         Option<crate::simulation::runner::AnalysisExecutionEnvironment>,
     ) {
@@ -993,7 +993,7 @@ pub(in crate::simulation) struct SnapshotParts {
     pub(in crate::simulation) project_veriloga_runtimes:
         crate::simulation::veriloga::PreparedVerilogARuntimeSet,
     pub(in crate::simulation) measurement_references:
-        crate::simulation::measurement_references::PreparedMeasurementReferences,
+        rspice_simulation::measurement_references::PreparedMeasurementReferences,
     pub(in crate::simulation) target: ExecutionTargetCapabilities,
     pub(in crate::simulation) receipt: RunSourceReceipt,
     pub(in crate::simulation) advisories: Vec<String>,
@@ -1048,7 +1048,7 @@ pub(in crate::simulation) struct PreparedRunSnapshot {
     specification_policy: PreparedSpecificationPolicy,
     project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
     measurement_references:
-        crate::simulation::measurement_references::PreparedMeasurementReferences,
+        rspice_simulation::measurement_references::PreparedMeasurementReferences,
     target: ExecutionTargetCapabilities,
     receipt: RunSourceReceipt,
     advisories: Vec<String>,
@@ -2152,7 +2152,7 @@ fn snapshot_digest(
     receipt: RunSourceReceipt,
     touchstone_export: &TouchstoneExportPolicy,
     executable_netlist: &str,
-    measurement_references: &crate::simulation::measurement_references::PreparedMeasurementReferences,
+    measurement_references: &rspice_simulation::measurement_references::PreparedMeasurementReferences,
 ) -> ContentDigest {
     let mut writer = CanonicalWriter::new("rspice.prepared-run-snapshot/v9");
     writer.domain("run-intent");
@@ -2316,7 +2316,7 @@ fn snapshot_digest(
             }
             if let Some(reference) = &definition.measurement_reference {
                 writer.domain("rspice.specification-reference/v1");
-                writer.digest(crate::simulation::measurement_references::reference_digest(
+                writer.digest(rspice_simulation::measurement_references::reference_digest(
                     reference,
                 ));
             }

@@ -2,7 +2,7 @@
 //!
 //! Preparation freezes the exact bytes it is about to hand the engine and
 //! records their digest on the run receipt as
-//! [`crate::state::PreparedRunReceipt::source_content_digest`]. That digest is
+//! [`rspice_results::run_receipt::PreparedRunReceipt::source_content_digest`]. That digest is
 //! the only field of the receipt that authenticates deck *text*: the per-task
 //! `config_digest` covers an analysis configuration, and the prepared-snapshot
 //! digest covers the whole authorization — a graph, a policy set, and a target
@@ -15,8 +15,8 @@
 //! the sealer silently, and every deck in the project would quietly stop
 //! verifying.
 
-use crate::product::ContentDigest;
-use crate::state::AnalysisResultSourceDomain;
+use rspice_app_types::product::ContentDigest;
+use rspice_results::provenance::AnalysisResultSourceDomain;
 
 use rspice_app_types::canonical::content_digest;
 
@@ -27,12 +27,12 @@ const GENERATED_EXECUTABLE_SOURCE: &str = "rspice.generated-executable-source/v1
 const MANUAL_EXECUTABLE_SOURCE: &str = "rspice.manual-executable-source/v1";
 
 /// Seal the executable source a schematic-derived run will execute.
-pub(in crate::simulation) fn generated_executable_source_digest(source: &str) -> ContentDigest {
+pub fn generated_executable_source_digest(source: &str) -> ContentDigest {
     content_digest(GENERATED_EXECUTABLE_SOURCE, source.as_bytes())
 }
 
 /// Seal the executable source a manual-deck run will execute.
-pub(in crate::simulation) fn manual_executable_source_digest(source: &str) -> ContentDigest {
+pub fn manual_executable_source_digest(source: &str) -> ContentDigest {
     content_digest(MANUAL_EXECUTABLE_SOURCE, source.as_bytes())
 }
 
@@ -48,7 +48,7 @@ pub(in crate::simulation) fn manual_executable_source_digest(source: &str) -> Co
 /// run-level source and was never sealed individually — and that judgment
 /// belongs to the surface making the statement, not here.
 #[must_use]
-pub(crate) fn sealed_executable_source_digest(
+pub fn sealed_executable_source_digest(
     domain: AnalysisResultSourceDomain,
     source: &str,
 ) -> Option<ContentDigest> {

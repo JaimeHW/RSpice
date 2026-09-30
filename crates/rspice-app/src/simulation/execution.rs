@@ -7,7 +7,6 @@
 mod artifact;
 mod canonical;
 mod permit;
-mod sealed_source;
 mod snapshot;
 
 pub(in crate::simulation) use artifact::{
@@ -24,10 +23,6 @@ pub(in crate::simulation) use canonical::{
     operating_point_effective_source_digest, sealed_dependency_closure_digest,
 };
 pub(in crate::simulation) use permit::{ExecutionPermit, ExecutionPermitIssuer};
-pub(crate) use sealed_source::sealed_executable_source_digest;
-pub(in crate::simulation) use sealed_source::{
-    generated_executable_source_digest, manual_executable_source_digest,
-};
 pub(in crate::simulation) use snapshot::bound_cards;
 pub(in crate::simulation) use snapshot::{
     AuthorizedRunDispatch, AuthorizedTaskDispatch, CrossProbeSnapshot, ExecutionTargetCapabilities,
