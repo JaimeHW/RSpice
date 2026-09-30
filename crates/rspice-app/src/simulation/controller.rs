@@ -27,7 +27,9 @@ use crate::simulation::execution::{
     canonical_analysis_kind,
 };
 use crate::simulation::multi_run::PssMethod;
-use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, HbToneSpec, SpPort};
+#[cfg(test)]
+use crate::simulation::multi_run::SpPort;
+use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, HbToneSpec};
 use crate::simulation::output_contract::{
     PreparedSavedOutput, materialize_live_saved_outputs, retain_plan_saved_outputs,
 };
@@ -77,7 +79,6 @@ mod transient_post;
 pub(crate) use transient_post::{DerivedViewerLoadState, build_eye_from_waveform};
 
 use self::live_transient::LiveTransientAccumulator;
-use crate::quantity::spice_value::parse_spice_value_checked;
 
 #[derive(Debug, Clone)]
 pub(super) struct QueuedAnalysis {

@@ -176,6 +176,15 @@ fn migrate_legacy_space(repr: &CornerDialogStateRepr) -> Option<RunSetState> {
 }
 
 impl CornerDialogState {
+    /// Project this draft through the plan's declared run space.
+    pub fn to_config(
+        &self,
+        run_set: &RunSetState,
+        reference: crate::run_set::ReferencePoint,
+    ) -> Result<CornerConfig, String> {
+        run_set.to_corner_config(self.base_analysis(), reference)
+    }
+
     /// Initialize from config.
     ///
     /// Only the base analysis is read: the space the configuration carries

@@ -177,7 +177,7 @@ fn simulation_compatibility_commits_through_the_solver_transaction() {
         app.state.sim_setup.options.compatibility,
         SimulationCompatibility::Xyce
     );
-    let deck = crate::simulation::SimulationController::apply_simulation_options_to_netlist(
+    let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
         "solver choice\nV1 in 0 1\nR1 in 0 1k\n.end\n",
         &app.state.sim_setup.options,
     );

@@ -225,8 +225,6 @@ fn a_manual_deck_with_noisefmax_is_read_as_transient_noise() {
 /// silently are exactly the ones the card spells as optional keywords.
 #[test]
 fn the_studio_card_round_trips_through_the_manual_deck_reader() {
-    use crate::simulation::controller::SimulationController;
-
     for noise_fmin in [None, Some(1.0e3)] {
         for scale in [1.0, 0.5, 0.0] {
             let authored = AnalysisSpec::TransientNoise {
@@ -240,8 +238,9 @@ fn the_studio_card_round_trips_through_the_manual_deck_reader() {
                 scale,
                 uic: false,
             };
-            let card = SimulationController::build_transient_noise_command(&authored)
-                .expect("the plan writes its card");
+            let card =
+                rspice_simulation::analysis_preparation::build_transient_noise_command(&authored)
+                    .expect("the plan writes its card");
             let specs = specs_for(&format!(
                 "round trip\n\
                      V1 in 0 DC 1\n\
@@ -301,14 +300,12 @@ fn a_hand_written_ac_data_deck_is_read_as_the_frequency_table_analysis() {
 /// hand-written deck goes through, is the specification it came from.
 #[test]
 fn the_studio_ac_frequency_table_cards_round_trip_through_the_manual_deck_reader() {
-    use crate::simulation::controller::SimulationController;
-
     let authored = AnalysisSpec::AcData {
         table_name: crate::simulation::config::AC_FREQUENCY_TABLE.to_owned(),
         frequencies: vec![37.0, 74.0, 148.5],
         table_options: Default::default(),
     };
-    let cards = SimulationController::build_ac_data_command(&authored)
+    let cards = rspice_simulation::analysis_preparation::build_ac_data_command(&authored)
         .expect("the plan writes its card and its table");
     let specs = specs_for(&format!(
         "round trip\n\

@@ -13,7 +13,7 @@ use super::*;
 /// instead would pass for a key the parser does not know, which is how
 /// fields drifted out of the engine in the first place.
 fn parse_through_the_deck(options: &SimulationOptions) -> rspice_core::Netlist {
-    let deck = crate::simulation::SimulationController::apply_simulation_options_to_netlist(
+    let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
         "round trip\nV1 1 0 1\nR1 1 0 1k\n.op\n.end\n",
         options,
     );
@@ -47,7 +47,7 @@ fn simulation_compatibility_survives_draft_persistence_and_execution_routes() {
         // override it through both the prepared deck and direct API path.
         let source = "compatibility\nV1 in 0 1\nR1 in 0 1k\n.options RSPICE_DIALECT=XYCE\n.end\n";
         let authored = rspice_core::Netlist::parse(source).unwrap();
-        let deck = crate::simulation::SimulationController::apply_simulation_options_to_netlist(
+        let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
             source, &restored,
         );
         let parsed = rspice_core::Netlist::parse(&deck).unwrap();
@@ -483,7 +483,7 @@ fn an_authored_option_wins_over_the_plan_block_that_states_the_same_key() {
     }
 
     // The plan's block first, the analysis's second, as a run splices them.
-    let deck = crate::simulation::SimulationController::apply_simulation_options_to_netlist(
+    let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
         "two blocks\nV1 1 0 1\nR1 1 0 1k\n.op\n.end\n",
         &options,
     );

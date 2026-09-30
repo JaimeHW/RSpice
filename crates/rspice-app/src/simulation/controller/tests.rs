@@ -20,7 +20,6 @@ fn studio_ac_data_authored_columns_and_netlist_tables_reach_results() {
     use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
     use rspice_simulation::results::SimulationResult;
 
-    let controller = SimulationController::new();
     let state = AppState::default();
     let mut draft = AcDataDraft {
         table_name: "points:1".into(),
@@ -37,9 +36,11 @@ fn studio_ac_data_authored_columns_and_netlist_tables_reach_results() {
         let json = serde_json::to_value(draft).unwrap();
         let restored: AcDataDraft = serde_json::from_value(json.clone()).unwrap();
         assert_eq!(serde_json::to_value(&restored).unwrap(), json);
-        let spec = controller
-            .analysis_draft_spec(&analysis_inputs(&state), &AnalysisDraft::AcData(restored))
-            .unwrap();
+        let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+            &analysis_inputs(&state),
+            &AnalysisDraft::AcData(restored),
+        )
+        .unwrap();
         spec.validate().unwrap();
         let worker = WorkerAnalysisSpec::try_from(&spec).unwrap();
         let worker: WorkerAnalysisSpec =
@@ -53,7 +54,7 @@ fn studio_ac_data_authored_columns_and_netlist_tables_reach_results() {
         assert!(invalid.to_config().is_err(), "accepted table name {name}");
     }
     let authored = spec_for(&draft);
-    let cards = SimulationController::build_ac_data_command(&authored).unwrap();
+    let cards = rspice_simulation::analysis_preparation::build_ac_data_command(&authored).unwrap();
     let source = format!(
         "AC row controls\n.param load=900\nV1 in 0 AC 1\nR1 in out 900\nR2 out 0 {{load}}\n{cards}\n.end\n"
     );
@@ -65,7 +66,8 @@ fn studio_ac_data_authored_columns_and_netlist_tables_reach_results() {
             selected.parameter_columns[0].values = "unfinished value".into();
         }
         let spec = spec_for(&selected);
-        let command = SimulationController::build_ac_data_command(&spec).unwrap();
+        let command =
+            rspice_simulation::analysis_preparation::build_ac_data_command(&spec).unwrap();
         if from_netlist {
             assert_eq!(command, ".ac DATA=points:1");
         }
@@ -176,7 +178,6 @@ fn transient_noise_seed_inheritance_and_zero_scale_reach_the_solver() {
     use crate::simulation::plan::{AnalysisDraft, TransientNoiseDraft};
     use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
 
-    let controller = SimulationController::new();
     let state = AppState::default();
     let draft = |seed: &str, scale: &str| TransientNoiseDraft {
         stop_time: "64n".into(),
@@ -199,16 +200,20 @@ fn transient_noise_seed_inheritance_and_zero_scale_reach_the_solver() {
             unreachable!()
         };
         assert_eq!(serde_json::to_value(settings).unwrap(), json);
-        let spec = controller
-            .analysis_draft_spec(&analysis_inputs(&state), &restored)
-            .unwrap();
+        let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+            &analysis_inputs(&state),
+            &restored,
+        )
+        .unwrap();
         spec.validate().unwrap();
         let wire = WorkerAnalysisSpec::try_from(&spec).unwrap();
         let wire: WorkerAnalysisSpec =
             serde_json::from_value(serde_json::to_value(wire).unwrap()).unwrap();
         let restored = AnalysisSpec::from(wire);
         assert_eq!(spec, restored);
-        let card = SimulationController::build_transient_noise_command(&restored).unwrap();
+        let card =
+            rspice_simulation::analysis_preparation::build_transient_noise_command(&restored)
+                .unwrap();
         assert_eq!(card.contains("NOISESEED="), !seed.trim().is_empty());
         let source = format!(
             "transient noise controls\n.options seed=0\nV1 in 0 1\nR1 in out 10k\nR2 out 0 10k\n{card}\n.end\n"
@@ -283,33 +288,30 @@ fn transient_noise_seed_inheritance_and_zero_scale_reach_the_solver() {
 
     for seed in ["", "0", "18446744073709551615"] {
         assert!(
-            controller
-                .analysis_draft_spec(
-                    &analysis_inputs(&state),
-                    &AnalysisDraft::TransientNoise(draft(seed, "0"))
-                )
-                .is_ok()
+            rspice_simulation::analysis_preparation::analysis_draft_spec(
+                &analysis_inputs(&state),
+                &AnalysisDraft::TransientNoise(draft(seed, "0"))
+            )
+            .is_ok()
         );
     }
     for seed in ["-1", "1.5", "18446744073709551616", "unfinished"] {
         assert!(
-            controller
-                .analysis_draft_spec(
-                    &analysis_inputs(&state),
-                    &AnalysisDraft::TransientNoise(draft(seed, "1"))
-                )
-                .is_err(),
+            rspice_simulation::analysis_preparation::analysis_draft_spec(
+                &analysis_inputs(&state),
+                &AnalysisDraft::TransientNoise(draft(seed, "1"))
+            )
+            .is_err(),
             "{seed}"
         );
     }
     for scale in ["-1", "NaN", "inf"] {
         assert!(
-            controller
-                .analysis_draft_spec(
-                    &analysis_inputs(&state),
-                    &AnalysisDraft::TransientNoise(draft("0", scale))
-                )
-                .is_err(),
+            rspice_simulation::analysis_preparation::analysis_draft_spec(
+                &analysis_inputs(&state),
+                &AnalysisDraft::TransientNoise(draft("0", scale))
+            )
+            .is_err(),
             "{scale}"
         );
     }
@@ -323,7 +325,6 @@ fn sensitivity_dc_limit_and_disabled_ac_fields_reach_the_solver_and_results() {
     use crate::state::SensitivityBasisEvidence;
     use rspice_simulation::results::SimulationResult;
     let source = "DC-limit sensitivity\n.param rt=1k\nV1 in 0 DC 1 AC 1\nR1 in out {rt}\nR2 out 0 1k\n.end\n";
-    let controller = SimulationController::new();
     for (ac_mode, stop, expected_frequencies) in [
         (true, "", vec![0.0]),
         (true, "1000", vec![0.0, 500.0, 1000.0]),
@@ -354,9 +355,11 @@ fn sensitivity_dc_limit_and_disabled_ac_fields_reach_the_solver_and_results() {
         restored.prepare_after_restore();
         let mut state = AppState::default();
         state.sim_setup.apply_analysis_draft_projection(&restored);
-        let spec = controller
-            .analysis_draft_spec(&analysis_inputs(&state), &restored)
-            .unwrap();
+        let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+            &analysis_inputs(&state),
+            &restored,
+        )
+        .unwrap();
         spec.validate().unwrap();
         assert_eq!(serde_json::to_value(&state.sim_setup.sens).unwrap(), json);
         let wire = WorkerAnalysisSpec::try_from(&spec).unwrap();

@@ -1731,12 +1731,14 @@ fn execution_preview(app: &RSpiceApp) -> ExecutionPreview {
         })
         .unwrap_or_default();
     let pvt_points = if corner_enabled {
-        crate::simulation::dialog::corner::to_config(
-            &app.state.sim_setup.corner,
-            &app.state.sim_setup.run_set,
-            app.state.sim_setup.reference_pvt,
-        )
-        .map_or(0, |config| config.num_corners())
+        app.state
+            .sim_setup
+            .corner
+            .to_config(
+                &app.state.sim_setup.run_set,
+                app.state.sim_setup.reference_pvt,
+            )
+            .map_or(0, |config| config.num_corners())
     } else {
         0
     };

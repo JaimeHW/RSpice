@@ -10,9 +10,6 @@ mod config;
 mod model_app_tests;
 mod numeric_override;
 
-/// One account of the share threshold's two equivalent spellings, read by the
-/// draft validator and by the specification builder alike.
-pub(crate) use config::dc_mismatch_share_threshold;
 pub use config::{
     AcDataDraft, AnalysisDependencyRepairContext, AnalysisDraft, DcMismatchDraft, DistoDraft,
     FftDraft, FrequencySweepDraft, HbNoiseDraft, NetworkPortDraft, NoiseDraft,

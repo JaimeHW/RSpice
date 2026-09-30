@@ -28,7 +28,8 @@ pub use rspice_simulation_contract::quasi_periodic_draft::{
 
 pub use periodic_network::PeriodicNetworkDraft;
 pub use rspice_simulation_contract::drafts::DistoDraft;
-pub(crate) use rspice_simulation_contract::drafts::dc_mismatch_share_threshold;
+#[cfg(test)]
+use rspice_simulation_contract::drafts::dc_mismatch_share_threshold;
 pub use rspice_simulation_contract::drafts::{
     AcDataDraft, DcMismatchDraft, FftDraft, FrequencySweepDraft, NoiseDraft, TransientNoiseDraft,
 };

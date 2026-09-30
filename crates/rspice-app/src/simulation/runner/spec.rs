@@ -1383,10 +1383,7 @@ R2 out 0 1k\n\
         // by the same builder the Analyses page displays. Writing a `.tran`
         // line here by hand would prove the engine can be asked for noise and
         // say nothing about whether the Studio asks for it.
-        let card =
-            crate::simulation::controller::SimulationController::build_transient_noise_command(
-                &spec,
-            )
+        let card = rspice_simulation::analysis_preparation::build_transient_noise_command(&spec)
             .expect("the specification writes its card");
         let deck = DECK.replace(".end\n", &format!("{card}\n.end\n"));
 
@@ -1992,9 +1989,8 @@ R2 out 0 1k\n\
             frequencies: authored.clone(),
             table_options: Default::default(),
         };
-        let cards =
-            crate::simulation::controller::SimulationController::build_ac_data_command(&spec)
-                .expect("the specification writes its card and its table");
+        let cards = rspice_simulation::analysis_preparation::build_ac_data_command(&spec)
+            .expect("the specification writes its card and its table");
         let deck = DECK.replace(".end\n", &format!("{cards}\n.end\n"));
 
         let result = run_spec_request(

@@ -1,8 +1,4 @@
-//! Assembling the analysis specification for a run.
-//!
-//! Resolves one row of the configured run set into a fully-determined
-//! [`AnalysisSpec`]: the analysis itself, its sweep, its outputs, and the
-//! manifest entry that records what was executed.
+//! Borrow application context for headless analysis preparation.
 
 use super::*;
 
@@ -24,361 +20,6 @@ pub(super) fn analysis_inputs(state: &AppState) -> AnalysisInputs<'_> {
     }
 }
 
-impl SimulationController {
-    pub(super) fn analysis_draft_spec(
-        &self,
-        state: &AnalysisInputs<'_>,
-        draft: &crate::simulation::plan::AnalysisDraft,
-    ) -> Result<AnalysisSpec, String> {
-        use crate::simulation::plan::AnalysisDraft;
-
-        if let Some(error) = draft.manifest_configuration_error() {
-            return Err(error);
-        }
-        let spec = match draft {
-            AnalysisDraft::OperatingPoint(draft) => {
-                rspice_simulation::analysis_preparation::build_op_spec(state, draft)?
-            }
-            AnalysisDraft::Transient(draft) => AnalysisSpec::Transient {
-                stop_time: parse_spice_value_checked(&draft.stop)
-                    .map_err(|e| format!("invalid stop time: {}", e))?,
-                step_time: parse_spice_value_checked(&draft.step)
-                    .map_err(|e| format!("invalid step time: {}", e))?,
-                start_time: parse_spice_value_checked(&draft.start)
-                    .map_err(|e| format!("invalid start time: {}", e))?,
-                max_timestep: rspice_simulation::analysis_preparation::parse_optional_spice_value(
-                    &draft.max_step,
-                )
-                .map_err(|e| format!("invalid max step: {}", e))?,
-                uic: draft.uic,
-            },
-            AnalysisDraft::Ac(draft) => AnalysisSpec::Ac {
-                start_freq: parse_spice_value_checked(&draft.fstart)
-                    .map_err(|e| format!("invalid start frequency: {}", e))?,
-                stop_freq: parse_spice_value_checked(&draft.fstop)
-                    .map_err(|e| format!("invalid stop frequency: {}", e))?,
-                points_per_unit: rspice_simulation::analysis_preparation::parse_positive_points(
-                    &draft.points,
-                    "ac_points",
-                )?,
-                sweep: rspice_simulation::analysis_preparation::map_frequency_sweep(draft.sweep),
-            },
-            AnalysisDraft::DcSweep(draft) => {
-                let config = draft.to_config()?;
-                AnalysisSpec::DcSweep {
-                    source_name: config.source,
-                    start: config.start,
-                    stop: config.stop,
-                    step: config.step,
-                    source2: config.source2,
-                    start2: config.start2,
-                    stop2: config.stop2,
-                    step2: config.step2,
-                    hysteresis: config.hysteresis,
-                    modes: config.modes,
-                }
-            }
-            AnalysisDraft::MonteCarlo(draft) => {
-                let mut draft = draft.clone();
-                draft.ensure_initialized();
-                let config = draft
-                    .to_config()
-                    .map_err(|error| format!("invalid Monte Carlo settings: {error}"))?;
-                AnalysisSpec::MonteCarlo {
-                    variation_source: config.variation_source,
-                    params: config.params,
-                }
-            }
-            AnalysisDraft::Pss(draft) => {
-                rspice_simulation::analysis_preparation::build_pss_spec(draft)?
-            }
-            AnalysisDraft::HarmonicBalance(draft) => {
-                rspice_simulation::analysis_preparation::build_harmonic_balance_spec(draft)?
-            }
-            AnalysisDraft::Stb(draft) => {
-                rspice_simulation::analysis_preparation::build_stb_spec(draft)?
-            }
-            AnalysisDraft::SParameter(draft) => {
-                rspice_simulation::analysis_preparation::build_sp_spec(state.schematic, draft)?
-            }
-            AnalysisDraft::Envelope(draft) => {
-                rspice_simulation::analysis_preparation::build_envelope_spec(draft)?
-            }
-            AnalysisDraft::Fourier(draft) => {
-                rspice_simulation::analysis_preparation::build_fourier_spec(draft)?
-            }
-            AnalysisDraft::Optimization(draft) => {
-                rspice_simulation::analysis_preparation::build_optimization_spec(
-                    state.sim_setup,
-                    state.plan_payloads,
-                    draft,
-                )?
-            }
-            AnalysisDraft::Soa(draft) => {
-                rspice_simulation::analysis_preparation::build_soa_spec(draft)?
-            }
-            AnalysisDraft::PoleZero(draft) => {
-                rspice_simulation::analysis_preparation::build_pole_zero_spec(draft)?
-            }
-            AnalysisDraft::Sensitivity(draft) => {
-                rspice_simulation::analysis_preparation::build_sensitivity_spec(draft)?
-            }
-            AnalysisDraft::TransferFunction(draft) => {
-                rspice_simulation::analysis_preparation::build_tf_spec(draft)?
-            }
-            AnalysisDraft::Pac(draft) => {
-                let mut draft = draft.clone();
-                draft.ensure_initialized();
-                draft
-                    .to_config()
-                    .map_err(|error| format!("invalid PAC settings: {error}"))?;
-                AnalysisSpec::Pac
-            }
-            AnalysisDraft::Pnoise(draft) => {
-                let mut draft = draft.clone();
-                draft.ensure_initialized();
-                draft
-                    .to_config()
-                    .map_err(|error| format!("invalid PNOISE settings: {error}"))?;
-                AnalysisSpec::Pnoise
-            }
-            AnalysisDraft::Pxf(draft) => {
-                let mut draft = draft.clone();
-                draft.ensure_initialized();
-                draft
-                    .to_config()
-                    .map_err(|error| format!("invalid PXF settings: {error}"))?;
-                AnalysisSpec::Pxf
-            }
-            AnalysisDraft::Pstb(draft) => {
-                let mut draft = draft.clone();
-                draft.ensure_initialized();
-                draft
-                    .to_config()
-                    .map_err(|error| format!("invalid PSTB settings: {error}"))?;
-                AnalysisSpec::Pstb
-            }
-            AnalysisDraft::Temperature(draft) => {
-                let mut draft = draft.clone();
-                draft.ensure_initialized();
-                draft
-                    .to_config(&state.sim_setup.run_set, state.sim_setup.reference_pvt)
-                    .map_err(|error| format!("invalid temperature sweep settings: {error}"))?;
-                AnalysisSpec::Parametric
-            }
-            AnalysisDraft::Corner(draft) => {
-                let mut draft = draft.clone();
-                draft.ensure_initialized();
-                crate::simulation::dialog::corner::to_config(
-                    &draft,
-                    &state.sim_setup.run_set,
-                    state.sim_setup.reference_pvt,
-                )
-                .map_err(|error| format!("invalid corner settings: {error}"))?;
-                AnalysisSpec::Corner
-            }
-            AnalysisDraft::Disto(draft) => AnalysisSpec::Disto {
-                start_freq: parse_spice_value_checked(&draft.sweep.fstart)
-                    .map_err(|e| format!("invalid DISTO start frequency: {e}"))?,
-                stop_freq: parse_spice_value_checked(&draft.sweep.fstop)
-                    .map_err(|e| format!("invalid DISTO stop frequency: {e}"))?,
-                points_per_unit: rspice_simulation::analysis_preparation::parse_positive_points(
-                    &draft.sweep.points,
-                    "disto_points",
-                )?,
-                sweep: rspice_simulation::analysis_preparation::map_frequency_sweep(
-                    draft.sweep.sweep,
-                ),
-                f2_over_f1: rspice_simulation::analysis_preparation::parse_optional_spice_value(
-                    &draft.f2_over_f1,
-                )
-                .map_err(|e| format!("invalid DISTO f2/f1 ratio: {e}"))?,
-            },
-            AnalysisDraft::Noise(draft) => {
-                let mut config = draft.to_config()?;
-                config.temperature_kelvin =
-                    state.sim_setup.reference_pvt.temperature_celsius + 273.15;
-                config.validate().map_err(|errors| errors.join("; "))?;
-                AnalysisSpec::Noise {
-                    output_node: config.output_node,
-                    reference_node: config.reference_node,
-                    input_source: config.input_source,
-                    start_freq: config.start_freq,
-                    stop_freq: config.stop_freq,
-                    points_per_decade: config.num_points,
-                    sweep: draft.sweep,
-                    explicit_frequencies: config.explicit_frequencies,
-                    data_table_name: None,
-                    contribution_detail: config.contribution_detail,
-                    integration_mode: config.integration_mode,
-                    temperature: config.temperature_kelvin,
-                }
-            }
-            AnalysisDraft::Qpss(draft) => draft.to_spec()?,
-            AnalysisDraft::Hbsp(draft) => {
-                let (start_freq, stop_freq, points_per_unit, sweep) =
-                    parse_manifest_sweep(&draft.sweep)?;
-                AnalysisSpec::Hbsp {
-                    start_freq,
-                    stop_freq,
-                    points_per_unit,
-                    sweep,
-                    ports: parse_manifest_ports(&draft.ports)?,
-                    max_sideband: parse_usize(&draft.max_sideband, "HBSP max sideband")?,
-                    reltol: parse_positive_value(&draft.reltol, "HBSP relative tolerance")?,
-                    abstol: parse_positive_value(&draft.abstol, "HBSP absolute tolerance")?,
-                    mixed_mode: draft.mixed_mode,
-                    noise_parameters: draft.noise_parameters,
-                    noise_reference: draft.noise_reference()?,
-                }
-            }
-            AnalysisDraft::Hbnoise(draft) => {
-                let (start_freq, stop_freq, points_per_unit, sweep) =
-                    parse_manifest_sweep(&draft.sweep)?;
-                AnalysisSpec::Hbnoise {
-                    input_sideband: draft.sidebands()?.0,
-                    output_sideband: draft.sidebands()?.1,
-                    noise_reference: draft.noise_reference()?,
-                    start_freq,
-                    stop_freq,
-                    points_per_unit,
-                    sweep,
-                    output_node: draft.output_node.trim().to_owned(),
-                    output_ref: draft.output_ref.trim().to_owned(),
-                    input_source: draft.input_source.trim().to_owned(),
-                    max_sideband: parse_usize(&draft.max_sideband, "HBNOISE max sideband")?,
-                    integrated_noise: draft.integrated_noise,
-                    noise_figure: draft.noise_figure,
-                    contributor_ranking: draft.contributor_ranking,
-                }
-            }
-            AnalysisDraft::Psp(draft) => {
-                let (start_freq, stop_freq, points_per_unit, sweep) =
-                    parse_manifest_sweep(&draft.sweep)?;
-                AnalysisSpec::Psp {
-                    start_freq,
-                    stop_freq,
-                    points_per_unit,
-                    sweep,
-                    ports: parse_manifest_ports(&draft.ports)?,
-                    max_sideband: parse_usize(&draft.max_sideband, "PSP max sideband")?,
-                    reltol: parse_positive_value(&draft.reltol, "PSP relative tolerance")?,
-                    abstol: parse_positive_value(&draft.abstol, "PSP absolute tolerance")?,
-                    mixed_mode: draft.mixed_mode,
-                    noise_parameters: draft.noise_parameters,
-                    noise_reference: draft.noise_reference()?,
-                }
-            }
-            AnalysisDraft::Qpac(draft) => draft.to_spec()?,
-            AnalysisDraft::Qpnoise(draft) => draft.to_spec()?,
-            AnalysisDraft::Qpxf(draft) => draft.to_spec()?,
-            AnalysisDraft::TransientNoise(draft) => AnalysisSpec::TransientNoise {
-                stop_time: parse_si(&draft.stop_time, "TNOISE stop time")?,
-                step_time: parse_si(&draft.step_time, "TNOISE step time")?,
-                start_time: parse_si(&draft.start_time, "TNOISE start time")?,
-                max_timestep: parse_si(&draft.max_step, "TNOISE max step")?,
-                seed: draft.parsed_seed()?,
-                noise_fmax: parse_si(&draft.noise_fmax, "TNOISE maximum noise frequency")?,
-                // Empty is not a missing value: it is the run asking the
-                // engine for its own `1/tstop` floor, which is the widest
-                // band the window can represent.
-                noise_fmin: if draft.noise_fmin.trim().is_empty() {
-                    None
-                } else {
-                    Some(parse_si(
-                        &draft.noise_fmin,
-                        "TNOISE minimum noise frequency",
-                    )?)
-                },
-                scale: parse_si(&draft.scale, "TNOISE noise scale")?,
-                uic: draft.use_initial_conditions,
-            },
-            AnalysisDraft::AcData(draft) => {
-                let config = draft.to_config()?;
-                AnalysisSpec::AcData {
-                    table_options: crate::simulation::config::AcDataTableOptions {
-                        from_netlist: !config.authored,
-                        parameter_columns: config.parameter_columns,
-                    },
-                    table_name: config.table_name,
-                    frequencies: config.frequencies,
-                }
-            }
-            AnalysisDraft::Fft(draft) => AnalysisSpec::Fft {
-                request: draft.to_request()?,
-            },
-            AnalysisDraft::DcMismatch(draft) => AnalysisSpec::DcMismatch {
-                moment_options: draft.moment_options()?,
-                output_expression: draft.output_expression.trim().to_owned(),
-                sigma_multiplier: parse_si(&draft.sigma_multiplier, "DCMATCH sigma multiplier")?,
-                contributor_limit: parse_usize(
-                    &draft.contributor_limit,
-                    "DCMATCH contributor limit",
-                )?,
-                include_process: draft.include_process,
-                include_mismatch: draft.include_mismatch,
-                normalized_contributions: draft.normalized_contributions,
-                contribution_threshold: crate::simulation::plan::dc_mismatch_share_threshold(
-                    &draft.share_threshold,
-                )?,
-            },
-        };
-        spec.validate()?;
-        Ok(spec)
-    }
-}
-
-fn parse_si(text: &str, field: &str) -> Result<f64, String> {
-    crate::simulation::dialog::options::parse_si_value(text)
-        .map_err(|error| format!("invalid {field}: {error}"))
-}
-
-fn parse_positive_value(text: &str, field: &str) -> Result<f64, String> {
-    let value = parse_si(text, field)?;
-    if !value.is_finite() || value <= 0.0 {
-        return Err(format!("{field} must be finite and positive"));
-    }
-    Ok(value)
-}
-
-fn parse_usize(text: &str, field: &str) -> Result<usize, String> {
-    text.trim()
-        .parse::<usize>()
-        .map_err(|_| format!("{field} must be a positive integer"))
-}
-
-fn parse_manifest_sweep(
-    draft: &crate::simulation::plan::FrequencySweepDraft,
-) -> Result<(f64, f64, usize, FrequencySweep), String> {
-    let sweep = match draft.sweep {
-        0 => FrequencySweep::Decade,
-        1 => FrequencySweep::Octave,
-        2 => FrequencySweep::Linear,
-        _ => return Err("frequency sweep mode is outside the supported schema".to_owned()),
-    };
-    Ok((
-        parse_si(&draft.start, "start frequency")?,
-        parse_si(&draft.stop, "stop frequency")?,
-        parse_usize(&draft.points, "sweep point count")?,
-        sweep,
-    ))
-}
-
-fn parse_manifest_ports(
-    ports: &[crate::simulation::plan::NetworkPortDraft],
-) -> Result<Vec<SpPort>, String> {
-    ports
-        .iter()
-        .map(|port| {
-            Ok(SpPort {
-                node_pos: port.node_pos.trim().to_owned(),
-                node_neg: port.node_neg.trim().to_owned(),
-                z0: Some(parse_si(&port.z0, "port reference impedance")?),
-            })
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod manifest_tests {
     use super::*;
@@ -391,7 +32,6 @@ mod manifest_tests {
     fn single_frequency_noise_stb_and_disto_drafts_reach_valid_worker_specs() {
         use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
 
-        let controller = SimulationController::new();
         let mut state = AppState::default();
         for (index, noise_sweep) in [
             NoiseSweepType::Decade,
@@ -424,12 +64,16 @@ mod manifest_tests {
             state.sim_setup.stb.sweep_type_idx = index;
 
             let specs = [
-                controller
-                    .analysis_draft_spec(&analysis_inputs(&state), &AnalysisDraft::Noise(noise))
-                    .unwrap(),
-                controller
-                    .analysis_draft_spec(&analysis_inputs(&state), &AnalysisDraft::Disto(disto))
-                    .unwrap(),
+                rspice_simulation::analysis_preparation::analysis_draft_spec(
+                    &analysis_inputs(&state),
+                    &AnalysisDraft::Noise(noise),
+                )
+                .unwrap(),
+                rspice_simulation::analysis_preparation::analysis_draft_spec(
+                    &analysis_inputs(&state),
+                    &AnalysisDraft::Disto(disto),
+                )
+                .unwrap(),
                 rspice_simulation::analysis_preparation::build_stb_spec(&state.sim_setup.stb)
                     .unwrap(),
             ];
@@ -462,7 +106,6 @@ mod manifest_tests {
 
     #[test]
     fn noise_manifest_freezes_every_selected_field_without_singleton_fallback() {
-        let controller = SimulationController::new();
         let mut state = AppState::default();
         state.sim_setup.reference_pvt.temperature_celsius = 125.0;
         state.sim_setup.noise.output = "wrong_singleton".to_owned();
@@ -476,9 +119,11 @@ mod manifest_tests {
             crate::simulation::config::NoiseContributionDetail::AllContributors;
         draft.integration_mode = crate::simulation::config::NoiseIntegrationMode::OutputNoiseOnly;
 
-        let spec = controller
-            .analysis_draft_spec(&analysis_inputs(&state), &AnalysisDraft::Noise(draft))
-            .expect("exact noise draft parses");
+        let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+            &analysis_inputs(&state),
+            &AnalysisDraft::Noise(draft),
+        )
+        .expect("exact noise draft parses");
         assert!(matches!(
             spec,
             AnalysisSpec::Noise {
@@ -503,7 +148,6 @@ mod manifest_tests {
 
     #[test]
     fn disto_manifest_freezes_its_owned_sweep_without_singleton_fallback() {
-        let controller = SimulationController::new();
         let mut state = AppState::default();
         state.sim_setup.ac.fstart = "900".to_owned();
         state.sim_setup.ac.fstop = "2k".to_owned();
@@ -517,9 +161,11 @@ mod manifest_tests {
         draft.sweep.sweep = 2;
         draft.f2_over_f1 = "0.8".to_owned();
 
-        let spec = controller
-            .analysis_draft_spec(&analysis_inputs(&state), &AnalysisDraft::Disto(draft))
-            .expect("exact DISTO draft parses");
+        let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+            &analysis_inputs(&state),
+            &AnalysisDraft::Disto(draft),
+        )
+        .expect("exact DISTO draft parses");
         assert!(matches!(
             spec,
             AnalysisSpec::Disto {
@@ -546,7 +192,6 @@ mod manifest_tests {
     /// and one second with `A` as a neutral unit designator.
     #[test]
     fn a_transient_stop_time_is_the_number_a_deck_would_read_from_the_same_text() {
-        let controller = SimulationController::new();
         for (typed, expected) in [
             ("1ns", 1e-9),
             ("1A", 1.0),
@@ -560,9 +205,11 @@ mod manifest_tests {
             draft.stop = typed.to_owned();
             state.sim_setup.tran.stop = "stale singleton".to_owned();
 
-            let spec = controller
-                .analysis_draft_spec(&analysis_inputs(&state), &AnalysisDraft::Transient(draft))
-                .unwrap_or_else(|error| panic!("a stop time of {typed} must be accepted: {error}"));
+            let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+                &analysis_inputs(&state),
+                &AnalysisDraft::Transient(draft),
+            )
+            .unwrap_or_else(|error| panic!("a stop time of {typed} must be accepted: {error}"));
             let AnalysisSpec::Transient { stop_time, .. } = spec else {
                 panic!("the authored transient draft builds a transient analysis");
             };
@@ -579,9 +226,11 @@ mod manifest_tests {
             let mut draft = state.sim_setup.tran.clone();
             draft.stop = typed.to_owned();
             assert!(
-                controller
-                    .analysis_draft_spec(&analysis_inputs(&state), &AnalysisDraft::Transient(draft))
-                    .is_err(),
+                rspice_simulation::analysis_preparation::analysis_draft_spec(
+                    &analysis_inputs(&state),
+                    &AnalysisDraft::Transient(draft)
+                )
+                .is_err(),
                 "a stop time of {typed} must not reach a run"
             );
         }
@@ -589,7 +238,6 @@ mod manifest_tests {
 
     #[test]
     fn ac_and_dc_specs_read_exact_authored_drafts() {
-        let controller = SimulationController::new();
         let mut state = AppState::default();
         let mut ac = state.sim_setup.ac.clone();
         ac.fstart = "3k".to_owned();
@@ -597,9 +245,11 @@ mod manifest_tests {
         ac.points = "41".to_owned();
         ac.sweep = 2;
         state.sim_setup.ac.fstart = "stale singleton".to_owned();
-        let spec = controller
-            .analysis_draft_spec(&analysis_inputs(&state), &AnalysisDraft::Ac(ac))
-            .expect("the authored AC draft builds its spec");
+        let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+            &analysis_inputs(&state),
+            &AnalysisDraft::Ac(ac),
+        )
+        .expect("the authored AC draft builds its spec");
         assert!(matches!(
             spec,
             AnalysisSpec::Ac {
@@ -614,9 +264,11 @@ mod manifest_tests {
         dc.source = "VEXACT".to_owned();
         dc.stop = "3".to_owned();
         state.sim_setup.dc.source = "stale singleton".to_owned();
-        let spec = controller
-            .analysis_draft_spec(&analysis_inputs(&state), &AnalysisDraft::DcSweep(dc))
-            .expect("the authored DC draft builds its spec");
+        let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+            &analysis_inputs(&state),
+            &AnalysisDraft::DcSweep(dc),
+        )
+        .expect("the authored DC draft builds its spec");
         assert!(matches!(
             spec,
             AnalysisSpec::DcSweep {
@@ -639,7 +291,6 @@ mod manifest_tests {
     /// would pass just as well if the form were still ignored.
     #[test]
     fn the_optimizer_step_sizes_are_authorable_and_reach_the_run() {
-        let controller = SimulationController::new();
         let mut state = AppState::default();
         state.sim_setup.optimization.ensure_initialized();
 
@@ -655,12 +306,17 @@ mod manifest_tests {
         let draft = AnalysisDraft::Optimization(state.sim_setup.optimization.clone());
         state.sim_setup.optimization.fd_step = "not a number".to_owned();
 
-        let spec = controller
-            .analysis_draft_spec(&analysis_inputs(&state), &draft)
-            .expect("an authored optimization draft builds its spec");
-        let line = controller
-            .analysis_spec_to_spice_line(&analysis_inputs(&state), &draft, &spec)
-            .expect("the authored optimization draft builds its card");
+        let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+            &analysis_inputs(&state),
+            &draft,
+        )
+        .expect("an authored optimization draft builds its spec");
+        let line = rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
+            &analysis_inputs(&state),
+            &draft,
+            &spec,
+        )
+        .expect("the authored optimization draft builds its card");
         assert!(line.contains("fd=2.500000e-3"), "{line}");
         let AnalysisSpec::Optimization {
             fd_step,
@@ -690,9 +346,11 @@ mod manifest_tests {
             unreachable!()
         };
         invalid.min_step = "0.5".to_owned();
-        let error = controller
-            .analysis_draft_spec(&analysis_inputs(&state), &invalid_draft)
-            .expect_err("a smallest step above the first step is not a search");
+        let error = rspice_simulation::analysis_preparation::analysis_draft_spec(
+            &analysis_inputs(&state),
+            &invalid_draft,
+        )
+        .expect_err("a smallest step above the first step is not a search");
         assert!(
             error.contains("min_step"),
             "the refusal must name the control it is about: {error}"
@@ -701,7 +359,6 @@ mod manifest_tests {
 
     #[test]
     fn sp_noise_dialog_reaches_the_typed_request() {
-        let controller = SimulationController::new();
         let mut state = AppState::default();
         state.sim_setup.sp.port_source_idx = Some(1);
         for requested in [false, true] {
@@ -709,22 +366,26 @@ mod manifest_tests {
             draft.do_noise = requested;
             state.sim_setup.sp.do_noise = !requested;
             let draft = AnalysisDraft::SParameter(draft);
-            let spec = controller
-                .analysis_draft_spec(&analysis_inputs(&state), &draft)
-                .unwrap();
+            let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+                &analysis_inputs(&state),
+                &draft,
+            )
+            .unwrap();
             assert!(
                 matches!(&spec, AnalysisSpec::SParameter { do_noise, .. } if *do_noise == requested)
             );
-            let line = controller
-                .analysis_spec_to_spice_line(&analysis_inputs(&state), &draft, &spec)
-                .unwrap();
+            let line = rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
+                &analysis_inputs(&state),
+                &draft,
+                &spec,
+            )
+            .unwrap();
             assert_eq!(line.split_whitespace().nth(5) == Some("1"), requested);
         }
     }
 
     #[test]
     fn every_new_manifest_draft_builds_its_exact_typed_spec() {
-        let controller = SimulationController::new();
         for kind in [
             AnalysisKind::Qpss,
             AnalysisKind::Hbsp,
@@ -738,9 +399,11 @@ mod manifest_tests {
             AnalysisKind::Fft,
         ] {
             let draft = AnalysisDraft::for_kind(kind);
-            let spec = controller
-                .analysis_draft_spec(&analysis_inputs(&AppState::default()), &draft)
-                .expect("default draft parses");
+            let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+                &analysis_inputs(&AppState::default()),
+                &draft,
+            )
+            .expect("default draft parses");
             assert!(matches!(
                 (kind, &spec),
                 (AnalysisKind::Qpss, AnalysisSpec::Qpss { .. })
@@ -763,7 +426,6 @@ mod manifest_tests {
 
     #[test]
     fn periodic_network_tolerances_reach_both_typed_specs() {
-        let controller = SimulationController::new();
         for kind in [AnalysisKind::Hbsp, AnalysisKind::Psp] {
             let mut draft = AnalysisDraft::for_kind(kind);
             let (AnalysisDraft::Hbsp(network) | AnalysisDraft::Psp(network)) = &mut draft else {
@@ -771,9 +433,11 @@ mod manifest_tests {
             };
             network.reltol = "2.5e-6".into();
             network.abstol = "7e-13".into();
-            let spec = controller
-                .analysis_draft_spec(&analysis_inputs(&AppState::default()), &draft)
-                .expect("periodic network draft parses");
+            let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+                &analysis_inputs(&AppState::default()),
+                &draft,
+            )
+            .expect("periodic network draft parses");
             match spec {
                 AnalysisSpec::Hbsp { reltol, abstol, .. }
                 | AnalysisSpec::Psp { reltol, abstol, .. } => {
@@ -857,7 +521,6 @@ mod manifest_tests {
 
     #[test]
     fn fourier_spec_and_command_use_frozen_draft() {
-        let controller = SimulationController::new();
         let mut state = AppState::default();
         state.sim_setup.fourier.ensure_initialized();
         state.sim_setup.fourier.compute_thd = false;
@@ -867,9 +530,11 @@ mod manifest_tests {
         let draft = AnalysisDraft::Fourier(state.sim_setup.fourier.clone());
         state.sim_setup.fourier.fundamental = "3k".into();
 
-        let spec = controller
-            .analysis_draft_spec(&analysis_inputs(&state), &draft)
-            .expect("Fourier spec builds");
+        let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+            &analysis_inputs(&state),
+            &draft,
+        )
+        .expect("Fourier spec builds");
         assert!(matches!(
             &spec,
             AnalysisSpec::Fourier {
@@ -879,16 +544,18 @@ mod manifest_tests {
             }
         ));
         assert!(
-            controller
-                .analysis_spec_to_spice_line(&analysis_inputs(&state), &draft, &spec)
-                .unwrap()
-                .starts_with(".four 2000 ")
+            rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
+                &analysis_inputs(&state),
+                &draft,
+                &spec
+            )
+            .unwrap()
+            .starts_with(".four 2000 ")
         );
     }
 
     #[test]
     fn envelope_spec_uses_frozen_draft_execution_fields() {
-        let controller = SimulationController::new();
         let mut state = AppState::default();
         state.sim_setup.envelope.ensure_initialized();
         state.sim_setup.envelope.carrier_tones = "1Meg, 2.5Meg".to_owned();
@@ -901,9 +568,11 @@ mod manifest_tests {
         let draft = AnalysisDraft::Envelope(Box::new(state.sim_setup.envelope.clone()));
         state.sim_setup.envelope.carrier_tones = "not a frequency".into();
 
-        let spec = controller
-            .analysis_draft_spec(&analysis_inputs(&state), &draft)
-            .expect("Envelope spec builds");
+        let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+            &analysis_inputs(&state),
+            &draft,
+        )
+        .expect("Envelope spec builds");
         assert_eq!(
             spec,
             AnalysisSpec::Envelope {
@@ -921,16 +590,18 @@ mod manifest_tests {
             }
         );
         assert!(
-            controller
-                .analysis_spec_to_spice_line(&analysis_inputs(&state), &draft, &spec)
-                .unwrap()
-                .starts_with(".envlp carriers=[1Meg,2.5Meg] ")
+            rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
+                &analysis_inputs(&state),
+                &draft,
+                &spec
+            )
+            .unwrap()
+            .starts_with(".envlp carriers=[1Meg,2.5Meg] ")
         );
     }
 
     #[test]
     fn soa_spec_and_command_use_frozen_draft() {
-        let controller = SimulationController::new();
         let mut state = AppState::default();
         state.sim_setup.soa.ensure_initialized();
         state.sim_setup.soa.stop_time = "2m".into();
@@ -938,9 +609,11 @@ mod manifest_tests {
         let draft = AnalysisDraft::Soa(state.sim_setup.soa.clone());
         state.sim_setup.soa.stop_time = "not a time".into();
 
-        let spec = controller
-            .analysis_draft_spec(&analysis_inputs(&state), &draft)
-            .unwrap();
+        let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+            &analysis_inputs(&state),
+            &draft,
+        )
+        .unwrap();
         assert!(matches!(
             &spec,
             AnalysisSpec::Soa {
@@ -950,52 +623,64 @@ mod manifest_tests {
             } if *stop_time == 2e-3 && *step_time == 2e-6
         ));
         assert!(
-            controller
-                .analysis_spec_to_spice_line(&analysis_inputs(&state), &draft, &spec)
-                .unwrap()
-                .starts_with(".soa stop=0.002 step=0.000002 ")
+            rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
+                &analysis_inputs(&state),
+                &draft,
+                &spec
+            )
+            .unwrap()
+            .starts_with(".soa stop=0.002 step=0.000002 ")
         );
     }
 
     #[test]
     fn pole_zero_sensitivity_and_transfer_function_use_frozen_drafts() {
-        let controller = SimulationController::new();
         let mut state = AppState::default();
 
         state.sim_setup.pz.ensure_initialized();
         state.sim_setup.pz.input_pos = "PZ_IN".into();
         let pz_draft = AnalysisDraft::PoleZero(state.sim_setup.pz.clone());
         state.sim_setup.pz.input_pos.clear();
-        let pz_spec = controller
-            .analysis_draft_spec(&analysis_inputs(&state), &pz_draft)
-            .unwrap();
+        let pz_spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+            &analysis_inputs(&state),
+            &pz_draft,
+        )
+        .unwrap();
         assert!(matches!(
             &pz_spec,
             AnalysisSpec::PoleZero { input_node, .. } if input_node == "PZ_IN"
         ));
         assert!(
-            controller
-                .analysis_spec_to_spice_line(&analysis_inputs(&state), &pz_draft, &pz_spec)
-                .unwrap()
-                .contains("PZ_IN")
+            rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
+                &analysis_inputs(&state),
+                &pz_draft,
+                &pz_spec
+            )
+            .unwrap()
+            .contains("PZ_IN")
         );
 
         state.sim_setup.sens.ensure_initialized();
         state.sim_setup.sens.output_expr = "V(SENS_OUT)".into();
         let sens_draft = AnalysisDraft::Sensitivity(state.sim_setup.sens.clone());
         state.sim_setup.sens.output_expr.clear();
-        let sens_spec = controller
-            .analysis_draft_spec(&analysis_inputs(&state), &sens_draft)
-            .unwrap();
+        let sens_spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+            &analysis_inputs(&state),
+            &sens_draft,
+        )
+        .unwrap();
         assert!(matches!(
             &sens_spec,
             AnalysisSpec::Sensitivity { output_var, .. } if output_var == "V(SENS_OUT)"
         ));
         assert!(
-            controller
-                .analysis_spec_to_spice_line(&analysis_inputs(&state), &sens_draft, &sens_spec)
-                .unwrap()
-                .contains("V(SENS_OUT)")
+            rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
+                &analysis_inputs(&state),
+                &sens_draft,
+                &sens_spec
+            )
+            .unwrap()
+            .contains("V(SENS_OUT)")
         );
 
         state.sim_setup.xf.ensure_initialized();
@@ -1003,24 +688,28 @@ mod manifest_tests {
         state.sim_setup.xf.output_expression = "V(TF_OUT)".into();
         let tf_draft = AnalysisDraft::TransferFunction(state.sim_setup.xf.clone());
         state.sim_setup.xf.input_source.clear();
-        let tf_spec = controller
-            .analysis_draft_spec(&analysis_inputs(&state), &tf_draft)
-            .unwrap();
+        let tf_spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+            &analysis_inputs(&state),
+            &tf_draft,
+        )
+        .unwrap();
         assert!(matches!(
             &tf_spec,
             AnalysisSpec::Tf { input_source, .. } if input_source == "VTF"
         ));
         assert!(
-            controller
-                .analysis_spec_to_spice_line(&analysis_inputs(&state), &tf_draft, &tf_spec)
-                .unwrap()
-                .contains("VTF")
+            rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
+                &analysis_inputs(&state),
+                &tf_draft,
+                &tf_spec
+            )
+            .unwrap()
+            .contains("VTF")
         );
     }
 
     #[test]
     fn operating_point_uses_frozen_draft_and_live_reference_temperature() {
-        let controller = SimulationController::new();
         let mut state = AppState::default();
         state.sim_setup.reference_pvt.temperature_celsius = 42.0;
         let mut authored = state.sim_setup.op.clone();
@@ -1028,9 +717,11 @@ mod manifest_tests {
         authored.temperature = "unfinished edit".into();
         state.sim_setup.op.temperature_mode_idx = usize::MAX;
         let draft = AnalysisDraft::OperatingPoint(authored.clone());
-        let spec = controller
-            .analysis_draft_spec(&analysis_inputs(&state), &draft)
-            .unwrap();
+        let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+            &analysis_inputs(&state),
+            &draft,
+        )
+        .unwrap();
         assert!(matches!(
             spec,
             AnalysisSpec::DcOp {
@@ -1041,12 +732,11 @@ mod manifest_tests {
 
         authored.temperature_mode_idx = 2;
         authored.temperature = "-15".into();
-        let spec = controller
-            .analysis_draft_spec(
-                &analysis_inputs(&state),
-                &AnalysisDraft::OperatingPoint(authored),
-            )
-            .unwrap();
+        let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+            &analysis_inputs(&state),
+            &AnalysisDraft::OperatingPoint(authored),
+        )
+        .unwrap();
         assert!(matches!(
             spec,
             AnalysisSpec::DcOp {

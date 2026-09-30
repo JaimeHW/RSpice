@@ -1410,10 +1410,7 @@ mod tests {
         };
         // The deck the run executes is the card the Studio writes, spliced in
         // by the same builder the Analyses page displays.
-        let card =
-            crate::simulation::controller::SimulationController::build_transient_noise_command(
-                &spec,
-            )
+        let card = rspice_simulation::analysis_preparation::build_transient_noise_command(&spec)
             .expect("the specification writes its card");
         let deck = DECK.replace(".end\n", &format!("{card}\n.end\n"));
 

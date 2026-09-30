@@ -1,0 +1,1503 @@
+//! Serialize exact analysis directives and prepare deck option/model blocks.
+
+use super::AnalysisInputs;
+use crate::netlist_preparation::splice_before_terminal_end_card;
+use rspice_simulation_contract::analysis_draft::AnalysisDraft;
+use rspice_simulation_contract::analysis_spec::AnalysisSpec;
+use rspice_simulation_contract::config::{FrequencySweep, TransientAnalysisConfig};
+
+pub fn analysis_spec_to_spice_line<R, A>(
+    state: &AnalysisInputs<'_, R, A>,
+    draft: &AnalysisDraft,
+    spec: &AnalysisSpec,
+) -> Result<String, String> {
+    match spec {
+        AnalysisSpec::MonteCarlo { .. } => {
+            let AnalysisDraft::MonteCarlo(draft) = draft else {
+                return Err("Monte Carlo specification requires its authored draft".into());
+            };
+            build_monte_carlo_command(draft)
+        }
+        AnalysisSpec::Parametric => {
+            let AnalysisDraft::Temperature(draft) = draft else {
+                return Err("Temperature specification requires its authored draft".into());
+            };
+            build_temperature_step_command(state, draft)
+        }
+        AnalysisSpec::Corner => {
+            let AnalysisDraft::Corner(draft) = draft else {
+                return Err("Corner specification requires its authored draft".into());
+            };
+            build_corner_temp_command(state, draft)
+        }
+        AnalysisSpec::Pss { .. } => {
+            let AnalysisDraft::Pss(draft) = draft else {
+                return Err("PSS specification requires its authored draft".into());
+            };
+            build_pss_command(draft)
+        }
+        AnalysisSpec::Stb { .. } => {
+            let AnalysisDraft::Stb(draft) = draft else {
+                return Err("STB specification requires its authored draft".into());
+            };
+            build_stb_command(state.schematic, draft)
+        }
+        AnalysisSpec::HarmonicBalance { .. } => {
+            let AnalysisDraft::HarmonicBalance(draft) = draft else {
+                return Err("Harmonic balance specification requires its authored draft".into());
+            };
+            build_harmonic_balance_command(draft)
+        }
+        AnalysisSpec::SParameter { .. } => {
+            let AnalysisDraft::SParameter(draft) = draft else {
+                return Err("S-parameter specification requires its authored draft".into());
+            };
+            build_sp_command(state, draft)
+        }
+        AnalysisSpec::Envelope { .. } => {
+            let AnalysisDraft::Envelope(draft) = draft else {
+                return Err("Envelope specification requires its authored draft".into());
+            };
+            build_envelope_command(draft)
+        }
+        AnalysisSpec::Fourier { .. } => {
+            let AnalysisDraft::Fourier(draft) = draft else {
+                return Err("Fourier specification requires its authored draft".into());
+            };
+            build_fourier_command(draft)
+        }
+        AnalysisSpec::Optimization { .. } => {
+            let AnalysisDraft::Optimization(draft) = draft else {
+                return Err("Optimization specification requires its authored draft".into());
+            };
+            build_optimization_command(draft)
+        }
+        AnalysisSpec::Soa { .. } => {
+            let AnalysisDraft::Soa(draft) = draft else {
+                return Err("SOA specification requires its authored draft".into());
+            };
+            build_soa_command(draft)
+        }
+        AnalysisSpec::Disto { .. } => build_disto_command(spec),
+        AnalysisSpec::Pac => {
+            let AnalysisDraft::Pac(draft) = draft else {
+                return Err("PAC specification requires its authored draft".into());
+            };
+            build_pac_command(draft)
+        }
+        AnalysisSpec::Pnoise => {
+            let AnalysisDraft::Pnoise(draft) = draft else {
+                return Err("PNOISE specification requires its authored draft".into());
+            };
+            build_pnoise_command(draft)
+        }
+        AnalysisSpec::Pxf => {
+            let AnalysisDraft::Pxf(draft) = draft else {
+                return Err("PXF specification requires its authored draft".into());
+            };
+            build_pxf_command(draft)
+        }
+        AnalysisSpec::Pstb => {
+            let AnalysisDraft::Pstb(draft) = draft else {
+                return Err("PSTB specification requires its authored draft".into());
+            };
+            build_pstb_command(state.schematic, draft)
+        }
+        AnalysisSpec::Psp { .. } => build_psp_command(spec),
+        AnalysisSpec::Hbsp { .. } => build_hbsp_command(spec),
+        AnalysisSpec::Hbnoise { .. } => build_hbnoise_command(spec),
+        AnalysisSpec::Tf { .. } => build_tf_command(spec),
+        AnalysisSpec::TransientNoise { .. } => build_transient_noise_command(spec),
+        AnalysisSpec::AcData { .. } => build_ac_data_command(spec),
+        AnalysisSpec::DcMismatch { .. } => build_dc_mismatch_command(spec),
+        // The request *is* the card, so there is nothing to build: the one
+        // writer of a `.fft` line is the request itself.
+        AnalysisSpec::Fft { request } => Ok(request.to_card()),
+        AnalysisSpec::Qpss { .. } => spec
+            .qpss_config()?
+            .to_spice()
+            .map_err(|error| error.to_string()),
+        AnalysisSpec::Qpac { .. } => Ok(spec.qpac_card()?.to_spice()),
+        AnalysisSpec::Qpxf { .. } => Ok(spec.qpxf_card()?.to_spice()),
+        AnalysisSpec::Qpnoise { .. } => Ok(spec.qpnoise_card()?.to_spice()),
+        _ => crate::analysis_preparation::analysis_spec_to_config(spec).map(|cfg| cfg.to_spice()),
+    }
+}
+
+fn build_monte_carlo_command(
+    draft: &rspice_simulation_contract::mc_draft::McDialogState,
+) -> Result<String, String> {
+    let mut mc_state = draft.clone();
+    mc_state.ensure_initialized();
+    let mc_cfg = mc_state
+        .to_config()
+        .map_err(|e| format!("invalid Monte Carlo settings: {}", e))?;
+
+    let mut cmd = format!(".mc {}", mc_cfg.num_runs);
+    if mc_cfg.first_trial != 0 {
+        cmd.push_str(&format!(" START {}", mc_cfg.first_trial));
+    }
+    if mc_cfg.variation_source.uses_stated_spread() {
+        let dist_keyword = match mc_cfg.distribution {
+            rspice_simulation_contract::mc_draft::McDistribution::Gaussian => "GAUSS",
+            rspice_simulation_contract::mc_draft::McDistribution::Uniform => "UNIFORM",
+            rspice_simulation_contract::mc_draft::McDistribution::WorstCase => "WORSTCASE",
+        };
+        let relative_spread = mc_cfg.variation_pct / 100.0;
+        cmd.push_str(&format!(" DIST {dist_keyword} SPREAD {relative_spread}"));
+    }
+    if let Some(seed) = mc_cfg.seed {
+        cmd.push_str(&format!(" SEED {seed}"));
+    }
+    if mc_cfg.confidence_pct != 95.0 {
+        cmd.push_str(&format!(" CONFIDENCE {}", mc_cfg.confidence_pct));
+    }
+    if let rspice_results::monte_carlo::MonteCarloMeanMethod::PercentileBootstrap {
+        resamples,
+        seed,
+    } = mc_cfg.confidence_method
+    {
+        cmd.push_str(&format!(
+            " CI BOOTSTRAP RESAMPLES {resamples} BOOTSEED {seed}"
+        ));
+    }
+    // `PARAMS` is written only when a subset was named. The card refuses
+    // the keyword with an empty list, and an absent keyword is how it
+    // spells "every eligible parameter", so this stays a conditional tail.
+    if !mc_cfg.params.is_empty() {
+        cmd.push_str(&format!(" PARAMS {}", mc_cfg.params.join(" ")));
+    }
+    Ok(cmd)
+}
+
+/// A temperature as a directive spells it: the shortest decimal that reads
+/// back as the same value.
+///
+/// `{:.12e}` wrote `-4.000000000000e1` for minus forty. This card is
+/// emitted into a deck *and* shown to the reader as the instance's plan
+/// statement, and neither audience gains anything from twelve mantissa
+/// digits on a value the author typed as `-40`. Rust's default `f64`
+/// display is the shortest decimal that round-trips, so the card still
+/// names the exact value the configuration holds.
+fn directive_temperature(value: f64) -> String {
+    value.to_string()
+}
+
+fn build_temperature_step_command<R, A>(
+    state: &AnalysisInputs<'_, R, A>,
+    draft: &rspice_simulation_contract::temp_draft::TempDialogState,
+) -> Result<String, String> {
+    let mut temp_state = draft.clone();
+    temp_state.ensure_initialized();
+    if temp_state.base_analysis.is_some() {
+        temp_state.base_idx = state.sim_setup.temp.base_idx;
+    }
+    let temp_cfg = temp_state
+        .to_config(&state.sim_setup.run_set, state.sim_setup.reference_pvt)
+        .map_err(|e| format!("invalid temperature sweep settings: {}", e))?;
+
+    if !temp_cfg.specific_temps.is_empty() {
+        let values: Vec<String> = temp_cfg
+            .specific_temps
+            .iter()
+            .copied()
+            .map(directive_temperature)
+            .collect();
+        Ok(format!(".step temp list {}", values.join(" ")))
+    } else {
+        Ok(format!(
+            ".step temp {} {} {}",
+            directive_temperature(temp_cfg.temp_start),
+            directive_temperature(temp_cfg.temp_stop),
+            directive_temperature(temp_cfg.temp_step),
+        ))
+    }
+}
+
+fn build_corner_temp_command<R, A>(
+    state: &AnalysisInputs<'_, R, A>,
+    draft: &rspice_simulation_contract::corner_draft::CornerDialogState,
+) -> Result<String, String> {
+    let mut corner_state = draft.clone();
+    corner_state.ensure_initialized();
+    if corner_state.base_analysis.is_some() {
+        corner_state.base_analysis_idx = state.sim_setup.corner.base_analysis_idx;
+    }
+    let corner_cfg = corner_state
+        .to_config(&state.sim_setup.run_set, state.sim_setup.reference_pvt)
+        .map_err(|e| format!("invalid corner settings: {}", e))?;
+
+    if corner_cfg.temperatures.is_empty() {
+        return Err("corner analysis requires at least one temperature".to_string());
+    }
+    let temps: Vec<String> = corner_cfg
+        .temperatures
+        .iter()
+        .copied()
+        .map(directive_temperature)
+        .collect();
+    Ok(format!(".temp {}", temps.join(" ")))
+}
+
+fn build_pss_command(
+    draft: &rspice_simulation_contract::pss_draft::PssDialogState,
+) -> Result<String, String> {
+    let mut pss_state = draft.clone();
+    pss_state.ensure_initialized();
+    let pss_cfg = pss_state
+        .to_config()
+        .map_err(|e| format!("invalid PSS settings: {}", e))?;
+    Ok(pss_cfg.to_spice())
+}
+
+fn build_stb_command(
+    schematic: &rspice_design::schematic::document::SchematicDocument,
+    draft: &rspice_simulation_contract::stb_draft::StbDialogState,
+) -> Result<String, String> {
+    let mut stb_state = draft.clone();
+    stb_state.ensure_initialized();
+    let stb_cfg = stb_state
+        .to_config()
+        .map_err(|e| format!("invalid STB settings: {}", e))?;
+    // A probe chosen from the drawing has to still be on it. Checked here
+    // because this is the one path every surface takes to a directive, so
+    // the plan refuses by name instead of writing a deck the engine will
+    // reject for a reason that no longer mentions the schematic.
+    if let Some(error) = stb_cfg.deleted_probe_error(
+        &rspice_design::schematic::component_edit::placed_loop_probe_names(schematic),
+    ) {
+        return Err(error);
+    }
+    Ok(stb_cfg.to_spice())
+}
+
+fn build_harmonic_balance_command(
+    draft: &rspice_simulation_contract::hb_draft::HbDialogState,
+) -> Result<String, String> {
+    let mut hb_state = draft.clone();
+    hb_state.ensure_initialized();
+    let hb_cfg = hb_state
+        .to_config()
+        .map_err(|e| format!("invalid harmonic balance settings: {}", e))?;
+    Ok(hb_cfg.to_spice())
+}
+
+fn build_sp_command<R, A>(
+    state: &AnalysisInputs<'_, R, A>,
+    draft: &rspice_simulation_contract::sp_draft::SpDialogState,
+) -> Result<String, String> {
+    let mut sp_state = draft.clone();
+    sp_state.ensure_initialized();
+    let ports = rspice_design::rf_ports::rf_ports(state.schematic);
+    let placed: Vec<_> = ports
+        .iter()
+        .map(|port| rspice_simulation_contract::sp_draft::SpPlacedPort {
+            reference: &port.reference,
+            port_number: port.port_number,
+            z0: &port.z0,
+            nets: &port.nets,
+        })
+        .collect();
+    let sp_cfg = sp_state
+        .to_config(Some(&placed))
+        .map_err(|e| format!("invalid S-parameter settings: {}", e))?;
+    Ok(sp_cfg.to_spice())
+}
+
+fn build_envelope_command(
+    draft: &rspice_simulation_contract::envelope_draft::EnvelopeDialogState,
+) -> Result<String, String> {
+    let mut envelope_state = draft.clone();
+    envelope_state.ensure_initialized();
+    let envelope_cfg = envelope_state
+        .to_config()
+        .map_err(|e| format!("invalid envelope settings: {}", e))?;
+    Ok(envelope_cfg.to_spice())
+}
+
+fn build_fourier_command(
+    draft: &rspice_simulation_contract::fourier_draft::FourierDialogState,
+) -> Result<String, String> {
+    let mut fourier_state = draft.clone();
+    fourier_state.ensure_initialized();
+    let fourier_cfg = fourier_state
+        .to_config()
+        .map_err(|e| format!("invalid Fourier settings: {}", e))?;
+    Ok(fourier_cfg.to_spice())
+}
+
+fn build_optimization_command(
+    draft: &rspice_simulation_contract::optimization_draft::OptimizationDialogState,
+) -> Result<String, String> {
+    let mut optimization_state = draft.clone();
+    optimization_state.ensure_initialized();
+    let optimization_cfg = optimization_state
+        .to_config()
+        .map_err(|e| format!("invalid optimization settings: {}", e))?;
+    Ok(optimization_cfg.to_spice())
+}
+
+fn build_soa_command(
+    draft: &rspice_simulation_contract::soa_draft::SoaDialogState,
+) -> Result<String, String> {
+    let mut soa_state = draft.clone();
+    soa_state.ensure_initialized();
+    let soa_cfg = soa_state
+        .to_config()
+        .map_err(|e| format!("invalid SOA settings: {}", e))?;
+    Ok(soa_cfg.to_spice())
+}
+
+fn build_pac_command(
+    draft: &rspice_simulation_contract::pac_draft::PacDialogState,
+) -> Result<String, String> {
+    let mut pac_state = draft.clone();
+    pac_state.ensure_initialized();
+    let pac_cfg = pac_state
+        .to_config()
+        .map_err(|e| format!("invalid PAC settings: {}", e))?;
+    Ok(pac_cfg.to_spice())
+}
+
+fn build_pnoise_command(
+    draft: &rspice_simulation_contract::pnoise_draft::PnoiseDialogState,
+) -> Result<String, String> {
+    let mut pnoise_state = draft.clone();
+    pnoise_state.ensure_initialized();
+    let pnoise_cfg = pnoise_state
+        .to_config()
+        .map_err(|e| format!("invalid PNOISE settings: {}", e))?;
+    Ok(pnoise_cfg.to_spice())
+}
+
+fn build_pxf_command(
+    draft: &rspice_simulation_contract::pxf_draft::PxfDialogState,
+) -> Result<String, String> {
+    let mut pxf_state = draft.clone();
+    pxf_state.ensure_initialized();
+    let pxf_cfg = pxf_state
+        .to_config()
+        .map_err(|e| format!("invalid PXF settings: {}", e))?;
+    Ok(pxf_cfg.to_spice())
+}
+
+fn build_pstb_command(
+    schematic: &rspice_design::schematic::document::SchematicDocument,
+    draft: &rspice_simulation_contract::pstb_draft::PstbDialogState,
+) -> Result<String, String> {
+    let mut pstb_state = draft.clone();
+    pstb_state.ensure_initialized();
+    let pstb_cfg = pstb_state
+        .to_config()
+        .map_err(|e| format!("invalid PSTB settings: {}", e))?;
+    // The same check the stability directive makes, at the same seam and
+    // for the same reason: this is the one path every surface takes to a
+    // directive, so a plan pointing at a probe the drawing no longer holds
+    // is refused by name here rather than in the solver.
+    if let Some(error) = pstb_cfg.deleted_probe_error(
+        &rspice_design::schematic::component_edit::placed_loop_probe_names(schematic),
+    ) {
+        return Err(error);
+    }
+    Ok(pstb_cfg.to_spice())
+}
+
+fn build_disto_command(spec: &AnalysisSpec) -> Result<String, String> {
+    if let AnalysisSpec::Disto {
+        start_freq,
+        stop_freq,
+        points_per_unit,
+        sweep,
+        f2_over_f1,
+    } = spec
+    {
+        let mut command = format!(
+            ".disto {} {} {} {}",
+            sweep.runner_keyword(),
+            points_per_unit,
+            start_freq,
+            stop_freq
+        );
+        if let Some(ratio) = f2_over_f1 {
+            command.push(' ');
+            command.push_str(&ratio.to_string());
+        }
+        Ok(command)
+    } else {
+        Err("failed to build DISTO command".to_string())
+    }
+}
+
+/// The PSP directive: a periodic scattering sweep, in the marker form the
+/// runner reads.
+///
+/// Takes the specification rather than the session, as the three builders
+/// below it do. These four kinds have no `sim_setup` slot to read — the
+/// draft is projected into a specification and the specification is the
+/// whole input — which is also why the destructure carries an `else` the
+/// way `build_disto_command` does.
+fn build_psp_command(spec: &AnalysisSpec) -> Result<String, String> {
+    let AnalysisSpec::Psp {
+        start_freq,
+        stop_freq,
+        points_per_unit,
+        sweep,
+        max_sideband,
+        reltol,
+        abstol,
+        ..
+    } = spec
+    else {
+        return Err("failed to build PSP command".to_string());
+    };
+    Ok(format!(
+        "* RSPICE PSP {} {} {:.16e} {:.16e} MAXSIDEBAND={} RELTOL={:.16e} ABSTOL={:.16e}",
+        match sweep {
+            FrequencySweep::Decade => "DEC",
+            FrequencySweep::Octave => "OCT",
+            FrequencySweep::Linear => "LIN",
+        },
+        points_per_unit,
+        start_freq,
+        stop_freq,
+        max_sideband,
+        reltol,
+        abstol
+    ))
+}
+
+/// The HBSP directive: the same scattering sweep, about a harmonic-balance
+/// point rather than a shooting one.
+fn build_hbsp_command(spec: &AnalysisSpec) -> Result<String, String> {
+    let AnalysisSpec::Hbsp {
+        start_freq,
+        stop_freq,
+        points_per_unit,
+        sweep,
+        max_sideband,
+        reltol,
+        abstol,
+        ..
+    } = spec
+    else {
+        return Err("failed to build HBSP command".to_string());
+    };
+    Ok(format!(
+        "* RSPICE HBSP {} {} {:.16e} {:.16e} MAXSIDEBAND={} RELTOL={:.16e} ABSTOL={:.16e}",
+        match sweep {
+            FrequencySweep::Decade => "DEC",
+            FrequencySweep::Octave => "OCT",
+            FrequencySweep::Linear => "LIN",
+        },
+        points_per_unit,
+        start_freq,
+        stop_freq,
+        max_sideband,
+        reltol,
+        abstol
+    ))
+}
+
+/// The HBNOISE directive: the noise measured about a harmonic-balance
+/// point, with both ends of the measurement and what is reported of it.
+fn build_hbnoise_command(spec: &AnalysisSpec) -> Result<String, String> {
+    let AnalysisSpec::Hbnoise {
+        start_freq,
+        stop_freq,
+        points_per_unit,
+        sweep,
+        output_node,
+        output_ref,
+        input_source,
+        max_sideband,
+        integrated_noise,
+        contributor_ranking,
+        ..
+    } = spec
+    else {
+        return Err("failed to build HBNOISE command".to_string());
+    };
+    Ok(format!(
+        "* RSPICE HBNOISE {} {} {:.16e} {:.16e} OUT={} REF={} IN={} MAXSIDEBAND={} INTEGRATED={} CONTRIBUTORS={}",
+        match sweep {
+            FrequencySweep::Decade => "DEC",
+            FrequencySweep::Octave => "OCT",
+            FrequencySweep::Linear => "LIN",
+        },
+        points_per_unit,
+        start_freq,
+        stop_freq,
+        output_node.trim(),
+        output_ref.trim(),
+        input_source.trim(),
+        max_sideband,
+        integrated_noise,
+        contributor_ranking
+    ))
+}
+
+/// The `.tran` directive a transient-noise run executes: the window the
+/// ordinary transient card states, then the noise this run injects into
+/// it.
+///
+/// The window half is written by [`TransientAnalysisConfig::to_spice`]
+/// rather than formatted again here. Two spellings of the same four
+/// positional fields is how a studio ends up dispatching a window it did
+/// not display, and the noise keywords are the only thing this card adds
+/// to the one the Transient kind already writes.
+///
+/// An explicit seed is written verbatim, including zero. An inherited
+/// seed omits `NOISESEED` so `.OPTIONS SEED` or the engine default applies.
+/// `NOISESCALE=1` is omitted for the same reason the positional start is:
+/// it is the card's own default and says nothing.
+///
+/// `NOISEFMIN=` is written only when the form authored one, because its
+/// absence is itself a value — the engine derives `1/tstop`, the longest
+/// period the run can resolve — and a card stating that number would
+/// freeze a derivation the window is still allowed to move.
+///
+/// Visible across `simulation` rather than to the controller alone, which
+/// the rest of this family is. The runner's dispatch test executes the
+/// card this writes instead of a hand-spelled one, because the seed and
+/// the bandwidth reach the solver *only* through this line — the transient
+/// configuration carries the window and nothing else — so a run fixture
+/// that spelled its own card would prove the engine can be asked for noise
+/// while proving nothing about whether the Studio asks for it.
+pub fn build_transient_noise_command(spec: &AnalysisSpec) -> Result<String, String> {
+    let AnalysisSpec::TransientNoise {
+        stop_time,
+        step_time,
+        start_time,
+        max_timestep,
+        seed,
+        noise_fmax,
+        noise_fmin,
+        scale,
+        uic,
+    } = spec
+    else {
+        return Err("failed to build transient noise command".to_string());
+    };
+    let mut command = TransientAnalysisConfig {
+        stop_time: *stop_time,
+        step_time: *step_time,
+        start_time: *start_time,
+        max_timestep: Some(*max_timestep),
+        uic: *uic,
+    }
+    .to_spice();
+    command.push_str(&format!(" NOISEFMAX={noise_fmax}"));
+    if let Some(noise_fmin) = noise_fmin {
+        command.push_str(&format!(" NOISEFMIN={noise_fmin}"));
+    }
+    if let Some(seed) = seed {
+        command.push_str(&format!(" NOISESEED={seed}"));
+    }
+    if *scale != 1.0 {
+        command.push_str(&format!(" NOISESCALE={scale}"));
+    }
+    Ok(command)
+}
+
+/// The `.ac DATA=` directive and the `.DATA` table it reads.
+///
+/// This is the one analysis card that is two cards: the sweep refers to a
+/// table by name, and for an authored axis that table does not otherwise
+/// exist in the deck, so the writer emits both and the table body comes
+/// from the writer noise shares (`config::explicit_frequency_table`).
+///
+/// Visible across `simulation` rather than to the controller alone, for
+/// the same reason the transient-noise writer is: the axis reaches the
+/// solver *only* through this pair of cards, so a run fixture that spelled
+/// its own table would prove the engine can sweep a table while proving
+/// nothing about whether the Studio writes one.
+pub fn build_ac_data_command(spec: &AnalysisSpec) -> Result<String, String> {
+    let AnalysisSpec::AcData {
+        table_name,
+        frequencies,
+        table_options,
+    } = spec
+    else {
+        return Err("failed to build AC frequency-table command".to_string());
+    };
+    let config = table_options.config(table_name, frequencies.clone());
+    config.validate().map_err(|errors| errors.join("; "))?;
+    Ok(config.to_spice())
+}
+
+/// The `.tf` directive: the output expression, then the source it is
+/// measured against, which is the order the card is read in.
+fn build_tf_command(spec: &AnalysisSpec) -> Result<String, String> {
+    let AnalysisSpec::Tf {
+        input_source,
+        output_expression,
+        ..
+    } = spec
+    else {
+        return Err("failed to build TF command".to_string());
+    };
+    Ok(format!(
+        ".tf {} {}",
+        output_expression.trim(),
+        input_source.trim()
+    ))
+}
+
+/// The `.dcmatch` directive: the probe, both statistical scopes, the
+/// report's trimming controls and the multiple of sigma it quotes.
+///
+/// Every keyword but `THRESHOLD` is always written. A Studio-dispatched
+/// run states what it ran so the card cannot change meaning because an engine default
+/// moved under a saved plan. `THRESHOLD=` is written only when the form
+/// authored one: the engine's default share is exactly zero, so an
+/// unauthored threshold and `THRESHOLD=0` are the same analysis and share
+/// one spelling.
+///
+/// There is no keyword for the run's report basis. `.DCMATCH` always
+/// computes both the signed contribution and the share; whether the sheet
+/// draws one or the other is a presentation choice the result carries, not
+/// something the engine is asked for.
+///
+/// The expression is written verbatim after trimming. The engine's parser
+/// is the only probe grammar in this build — it accepts `V(node)`,
+/// `V(node,ref)`, `I(element)` and a bare node name — and a second
+/// Studio-side grammar would refuse decks the engine reads.
+///
+/// Visible across `simulation` rather than to the controller alone,
+/// because the DC mismatch service executes the line this writes rather
+/// than one it spells itself: the probe and every trimming control reach
+/// the engine *only* through this card.
+pub fn build_dc_mismatch_command(spec: &AnalysisSpec) -> Result<String, String> {
+    let AnalysisSpec::DcMismatch {
+        moment_options,
+        output_expression,
+        sigma_multiplier,
+        contributor_limit,
+        include_process,
+        include_mismatch,
+        contribution_threshold,
+        ..
+    } = spec
+    else {
+        return Err("failed to build DC mismatch command".to_string());
+    };
+    let mut command = format!(
+        ".dcmatch OUT={} MISMATCH={} PROCESS={} CONTRIBUTORS={contributor_limit} \
+         SIGMA={sigma_multiplier}",
+        output_expression.trim(),
+        yes_or_no(*include_mismatch),
+        yes_or_no(*include_process),
+    );
+    moment_options
+        .validate()
+        .map_err(|error| error.to_string())?;
+    if *moment_options != rspice_core::netlist::StatisticalMomentOptions::default() {
+        command.push_str(&format!(
+            " MOMENT_RELTOL={} MOMENT_MAX_POINTS={}",
+            moment_options.relative_tolerance, moment_options.max_points
+        ));
+    }
+    if let Some(threshold) = contribution_threshold {
+        command.push_str(&format!(" THRESHOLD={threshold}"));
+    }
+    Ok(command)
+}
+
+/// Inject non-default UI simulation options before `.end`.
+pub fn apply_simulation_options_to_netlist(
+    netlist: &str,
+    options: &rspice_simulation_contract::options::SimulationOptions,
+) -> String {
+    let options_block = options.to_spice_options();
+    // A lone `.OPTIONS` header states nothing, so an all-default option set
+    // leaves the deck alone rather than adding an empty card.
+    if options_block.lines().count() <= 1 {
+        return netlist.to_string();
+    }
+    splice_before_terminal_end_card(netlist, &options_block)
+}
+
+/// Inject the exact model sources selected for the nominal/reference PVT
+/// point. The marker block lets the corner executor replace this binding
+/// per process without retaining or double-applying the reference models.
+pub fn apply_reference_model_bindings_to_netlist(netlist: &str, model_cards: &[String]) -> String {
+    if model_cards.is_empty() {
+        return netlist.to_owned();
+    }
+
+    let payload = model_cards
+        .iter()
+        .flat_map(|cards| cards.lines().map(str::to_owned))
+        .collect::<Vec<_>>();
+    let mut block = Vec::with_capacity(payload.len() + 2);
+    block.push(format!(
+        "{} {}",
+        crate::netlist_preparation::REFERENCE_MODEL_BINDING_BEGIN,
+        payload.len()
+    ));
+    block.extend(payload);
+    block.push(crate::netlist_preparation::REFERENCE_MODEL_BINDING_END.to_owned());
+    splice_before_terminal_end_card(netlist, &block.join("\n"))
+}
+
+/// How a keyword card spells a switch the engine reads with `card_bool`.
+const fn yes_or_no(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn monte_carlo_trial_range_persists_and_reaches_the_generated_card() {
+        use rspice_simulation_contract::mc_draft::{McConfig, McDialogState};
+        let mut setup = rspice_simulation_contract::setup_state::SimulationSetup::new();
+        setup.mc = McDialogState::from_config(&McConfig {
+            first_trial: 37,
+            num_runs: 5,
+            ..Default::default()
+        });
+        for restored in [
+            serde_json::from_str::<McDialogState>(&serde_json::to_string(&setup.mc).unwrap())
+                .unwrap(),
+            ron::from_str::<McDialogState>(&ron::to_string(&setup.mc).unwrap()).unwrap(),
+        ] {
+            assert_eq!(restored.to_config().unwrap().first_trial, 37);
+        }
+        let command = build_monte_carlo_command(&setup.mc).unwrap();
+        let parsed = rspice_core::Netlist::parse(&format!("range\n{command}\n.end\n")).unwrap();
+        let rspice_core::netlist::AnalysisCommand::MonteCarlo(card) = &parsed.analyses[0] else {
+            panic!("MC");
+        };
+        assert_eq!((card.first_trial, card.runs), (37, 5));
+        let legacy: McDialogState = serde_json::from_str(r#"{"num_runs":"5"}"#).unwrap();
+        assert_eq!(legacy.first_trial, "0");
+        setup.mc.first_trial = u32::MAX.to_string();
+        assert!(setup.mc.to_config().is_err());
+    }
+
+    #[test]
+    fn monte_carlo_seed_draft_reaches_the_engine_at_full_width_including_zero() {
+        for seed in [
+            0_u64,
+            (1_u64 << 32) + 1,
+            (1_u64 << 53) + 1,
+            u64::MAX - 1,
+            u64::MAX,
+        ] {
+            let mut setup = rspice_simulation_contract::setup_state::SimulationSetup::new();
+            setup.mc.ensure_initialized();
+            setup.mc.seed = seed.to_string();
+            let command =
+                build_monte_carlo_command(&setup.mc).expect("all u64 seeds are authorable");
+            let netlist =
+                rspice_core::netlist::Netlist::parse(&format!("MC seed\n{command}\n.end\n"))
+                    .unwrap();
+            let rspice_core::netlist::AnalysisCommand::MonteCarlo(mc) = &netlist.analyses[0] else {
+                panic!("missing MC command")
+            };
+            assert_eq!(mc.seed, Some(seed), "{command}");
+        }
+    }
+
+    #[test]
+    fn monte_carlo_confidence_draft_emits_exact_reproducible_card() {
+        use rspice_results::monte_carlo::MonteCarloMeanMethod;
+        use rspice_simulation_contract::mc_draft::McConfig;
+        use rspice_simulation_contract::mc_draft::McDialogState;
+        for method in [
+            MonteCarloMeanMethod::StudentT,
+            MonteCarloMeanMethod::PercentileBootstrap {
+                resamples: 257,
+                seed: u64::MAX,
+            },
+        ] {
+            let mut setup = rspice_simulation_contract::setup_state::SimulationSetup::new();
+            setup.mc = McDialogState::from_config(&McConfig {
+                confidence_pct: 90.12345678912345,
+                confidence_method: method,
+                params: vec!["rload".into()],
+                ..Default::default()
+            });
+            let command = build_monte_carlo_command(&setup.mc).unwrap();
+            let parsed =
+                rspice_core::Netlist::parse(&format!("MC confidence\n{command}\n.end\n")).unwrap();
+            let rspice_core::netlist::AnalysisCommand::MonteCarlo(card) = &parsed.analyses[0]
+            else {
+                panic!("MC")
+            };
+            assert_eq!(card.confidence_pct, 90.12345678912345);
+            assert_eq!(card.params, ["RLOAD"]);
+            match (method, card.confidence_method) {
+                (
+                    MonteCarloMeanMethod::StudentT,
+                    rspice_core::netlist::MonteCarloMeanConfidenceMethod::StudentT,
+                ) => (),
+                (
+                    MonteCarloMeanMethod::PercentileBootstrap { resamples, seed },
+                    rspice_core::netlist::MonteCarloMeanConfidenceMethod::PercentileBootstrap {
+                        resamples: actual,
+                        seed: actual_seed,
+                    },
+                ) => {
+                    assert_eq!(actual, resamples);
+                    assert_eq!(actual_seed, seed);
+                }
+                _ => panic!("method changed"),
+            }
+        }
+    }
+
+    #[test]
+    fn monte_carlo_spread_preserves_the_computed_engine_value() {
+        let mut setup = rspice_simulation_contract::setup_state::SimulationSetup::new();
+        setup.mc.ensure_initialized();
+        setup.mc.variation_pct = "1.234567891234567".to_owned();
+        let command = build_monte_carlo_command(&setup.mc).unwrap();
+        let netlist =
+            rspice_core::netlist::Netlist::parse(&format!("MC spread\n{command}\n.end\n")).unwrap();
+        let rspice_core::netlist::AnalysisCommand::MonteCarlo(mc) = &netlist.analyses[0] else {
+            panic!("missing MC command")
+        };
+        assert_eq!(
+            mc.relative_spread.to_bits(),
+            (1.234567891234567_f64 / 100.0).to_bits(),
+            "{command}"
+        );
+    }
+
+    #[test]
+    fn monte_carlo_deck_statistics_preserve_inactive_buffers_without_emitting_them() {
+        let mut setup = rspice_simulation_contract::setup_state::SimulationSetup::new();
+        setup.mc.ensure_initialized();
+        setup.mc.variation_source_idx = 1;
+        setup.mc.variation_pct = "unfinished(".to_owned();
+        setup.mc.distribution_idx = usize::MAX;
+        let command = build_monte_carlo_command(&setup.mc).unwrap();
+        assert!(!command.contains("DIST"), "{command}");
+        assert!(!command.contains("SPREAD"), "{command}");
+        assert!(!command.contains("SEED"), "{command}");
+        assert_eq!(setup.mc.variation_pct, "unfinished(");
+        assert_eq!(setup.mc.distribution_idx, usize::MAX);
+        setup.mc.variation_source_idx = 0;
+        assert!(build_monte_carlo_command(&setup.mc).is_err());
+    }
+
+    /// The directive builder is the one path every surface takes, so it is
+    /// where a stale probe reference has to be caught. Checking only in the
+    /// form would leave a plan built before the probe was deleted still able
+    /// to write a deck naming it.
+    #[test]
+    fn a_plan_referencing_a_deleted_loop_probe_is_refused_by_name() {
+        use rspice_design::schematic::{component::Component, component_type::ComponentType};
+        use rspice_design_model::primitives::Point;
+        use rspice_simulation_contract::stb_draft::StbProbeReference;
+
+        let mut setup = rspice_simulation_contract::setup_state::SimulationSetup::new();
+        let mut schematic = rspice_design::schematic::document::SchematicDocument::default();
+        setup.stb.ensure_initialized();
+        setup.stb.probe_source = "VLOOP1".to_owned();
+        setup.stb.probe_reference = StbProbeReference::Placed;
+        // Another probe is drawn, so the remedy has something to offer.
+        schematic.components.push(
+            Component::new(1, ComponentType::LoopProbe, Point::new(0, 0))
+                .with_name_value("VLOOP2", ""),
+        );
+
+        let error = build_stb_command(&schematic, &setup.stb)
+            .expect_err("a probe that is not on the schematic is refused");
+
+        assert!(error.contains("VLOOP1"), "{error}");
+        assert!(error.contains("VLOOP2"), "{error}");
+    }
+
+    /// And the same builder writes the card when the probe is still drawn.
+    #[test]
+    fn a_plan_referencing_a_placed_loop_probe_writes_its_directive() {
+        use rspice_design::schematic::{component::Component, component_type::ComponentType};
+        use rspice_design_model::primitives::Point;
+        use rspice_simulation_contract::stb_draft::StbProbeReference;
+
+        let mut setup = rspice_simulation_contract::setup_state::SimulationSetup::new();
+        let mut schematic = rspice_design::schematic::document::SchematicDocument::default();
+        setup.stb.ensure_initialized();
+        setup.stb.probe_source = "VLOOP1".to_owned();
+        setup.stb.probe_reference = StbProbeReference::Placed;
+        schematic.components.push(
+            Component::new(1, ComponentType::LoopProbe, Point::new(0, 0))
+                .with_name_value("VLOOP1", ""),
+        );
+
+        let directive =
+            build_stb_command(&schematic, &setup.stb).expect("a placed probe reaches the deck");
+
+        assert!(directive.contains("probe=VLOOP1"), "{directive}");
+    }
+
+    /// PSTB designates the same element, so it is refused the same way.
+    ///
+    /// Its field was free text until the picker reached it, which meant a
+    /// periodic stability plan could name a probe the drawing had never held
+    /// and only find out in the solver. Both directions are checked here
+    /// because a refusal that fires unconditionally is as wrong as one that
+    /// never fires: a name entered by hand is a claim about someone else's
+    /// deck and must still reach the card.
+    #[test]
+    fn a_periodic_stability_plan_is_refused_by_the_same_probe_name() {
+        use rspice_design::schematic::{component::Component, component_type::ComponentType};
+        use rspice_design_model::primitives::Point;
+        use rspice_simulation_contract::stb_draft::StbProbeReference;
+
+        let mut setup = rspice_simulation_contract::setup_state::SimulationSetup::new();
+        let mut schematic = rspice_design::schematic::document::SchematicDocument::default();
+        setup.pstb.ensure_initialized();
+        setup.pstb.probe = "VLOOP1".to_owned();
+        setup.pstb.probe_reference = StbProbeReference::Placed;
+        schematic.components.push(
+            Component::new(1, ComponentType::LoopProbe, Point::new(0, 0))
+                .with_name_value("VLOOP2", ""),
+        );
+
+        let error = build_pstb_command(&schematic, &setup.pstb)
+            .expect_err("a probe that is not on the schematic is refused");
+        assert!(error.contains("VLOOP1"), "{error}");
+        assert!(error.contains("VLOOP2"), "{error}");
+
+        setup.pstb.probe_reference = StbProbeReference::Entered;
+        let directive = build_pstb_command(&schematic, &setup.pstb)
+            .expect("a name entered by hand is the deck's claim, not this design's");
+        assert!(directive.contains("probe=VLOOP1"), "{directive}");
+
+        setup.pstb.probe = "VLOOP2".to_owned();
+        setup.pstb.probe_reference = StbProbeReference::Placed;
+        let directive =
+            build_pstb_command(&schematic, &setup.pstb).expect("a placed probe reaches the deck");
+        assert!(directive.contains("probe=VLOOP2"), "{directive}");
+    }
+    #[test]
+    fn model_binding_is_inserted_after_hierarchical_subcircuits() {
+        let deck = "hierarchical\n.subckt child in out\nR1 in out 1k\n.ends child\nX1 in out child\n.op\n.end\n";
+        let bound = apply_reference_model_bindings_to_netlist(
+            deck,
+            &[".model sealed D (IS=1e-12)".to_owned()],
+        );
+
+        let subckt_end = bound.find(".ends child").expect("subcircuit end remains");
+        let binding = bound
+            .find(crate::netlist_preparation::REFERENCE_MODEL_BINDING_BEGIN)
+            .expect("binding marker inserted");
+        let terminal_end = bound.rfind("\n.end\n").expect("terminal end remains");
+        assert!(subckt_end < binding, "{bound}");
+        assert!(binding < terminal_end, "{bound}");
+    }
+
+    #[test]
+    fn generated_cards_preserve_end_titles_and_reach_the_parser() {
+        for title in [".end", "ordinary title"] {
+            for terminal in [".end; done", ".END // done", ".end $ done", ".end"] {
+                let deck = format!("{title}\r\nR1 1 0 1k\r\n{terminal}\r\n");
+                let options = rspice_simulation_contract::options::SimulationOptions {
+                    reltol: 0.012345,
+                    ..Default::default()
+                };
+                let configured = apply_simulation_options_to_netlist(&deck, &options);
+                let bound = apply_reference_model_bindings_to_netlist(
+                    &configured,
+                    &[".model sealed D (IS=1e-12)".to_owned()],
+                );
+                let parsed = rspice_core::Netlist::parse(&bound).expect("composed deck parses");
+                assert_eq!(parsed.title, title, "{bound}");
+                assert_eq!(parsed.options.reltol, Some(0.012345), "{bound}");
+                assert!(
+                    parsed
+                        .models
+                        .iter()
+                        .any(|model| model.name.eq_ignore_ascii_case("sealed")),
+                    "{bound}"
+                );
+                assert!(
+                    bound.starts_with(&format!("{title}\r\nR1 1 0 1k\r\n")),
+                    "{bound:?}"
+                );
+                assert!(bound.ends_with(&format!("{terminal}\r\n")), "{bound:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn options_and_reference_models_precede_annotated_terminal_end_cards() {
+        for terminal in [".end ; terminal comment", ".END $ terminal comment"] {
+            let deck = format!("annotated terminal\nR1 1 0 1k\n{terminal}\n");
+            let with_options = apply_simulation_options_to_netlist(
+                &deck,
+                &rspice_simulation_contract::options::SimulationOptions::fast(),
+            );
+            let option = with_options.find(".OPTIONS").expect("options inserted");
+            let end = with_options.find(terminal).expect("terminal retained");
+            assert!(option < end, "{with_options}");
+
+            let with_models = apply_reference_model_bindings_to_netlist(
+                &deck,
+                &[".model sealed D (IS=1e-12)".to_owned()],
+            );
+            let model = with_models.find(".model sealed").expect("model inserted");
+            let end = with_models.find(terminal).expect("terminal retained");
+            assert!(model < end, "{with_models}");
+        }
+    }
+    fn psp_spec() -> AnalysisSpec {
+        AnalysisSpec::Psp {
+            start_freq: 1.0e6,
+            stop_freq: 1.0e9,
+            points_per_unit: 11,
+            sweep: FrequencySweep::Decade,
+            ports: Vec::new(),
+            max_sideband: 3,
+            reltol: 1.0e-3,
+            abstol: 1.0e-12,
+            mixed_mode: false,
+            noise_parameters: false,
+            noise_reference: None,
+        }
+    }
+
+    fn hbsp_spec() -> AnalysisSpec {
+        AnalysisSpec::Hbsp {
+            start_freq: 1.0e3,
+            stop_freq: 1.0e5,
+            points_per_unit: 7,
+            sweep: FrequencySweep::Octave,
+            ports: Vec::new(),
+            max_sideband: 2,
+            reltol: 1.0e-3,
+            abstol: 1.0e-12,
+            mixed_mode: true,
+            noise_parameters: true,
+            noise_reference: None,
+        }
+    }
+
+    /// Every string field arrives with surrounding space, because the card
+    /// trims each one and a fixture that came in clean would not say so.
+    fn hbnoise_spec() -> AnalysisSpec {
+        AnalysisSpec::Hbnoise {
+            input_sideband: 0,
+            output_sideband: 0,
+            noise_reference: None,
+            start_freq: 1.0e1,
+            stop_freq: 1.0e4,
+            points_per_unit: 21,
+            sweep: FrequencySweep::Linear,
+            output_node: " out ".to_owned(),
+            output_ref: " 0 ".to_owned(),
+            input_source: " vin ".to_owned(),
+            max_sideband: 4,
+            integrated_noise: true,
+            noise_figure: false,
+            contributor_ranking: true,
+        }
+    }
+
+    fn transient_noise_spec() -> AnalysisSpec {
+        AnalysisSpec::TransientNoise {
+            stop_time: 1.0e-6,
+            step_time: 1.0e-9,
+            start_time: 2.0e-7,
+            max_timestep: 2.5e-10,
+            seed: Some(97),
+            noise_fmax: 5.0e8,
+            noise_fmin: None,
+            scale: 0.5,
+            uic: true,
+        }
+    }
+
+    /// The card the Studio writes is the card the engine reads, field for
+    /// field.
+    ///
+    /// Not a string assertion. The engine's own parser is the only reader of
+    /// this line, and a keyword it does not know, a positional field in the
+    /// wrong slot, or an exponent it truncates would all pass an expected-text
+    /// comparison while producing a run configured by something the deck never
+    /// said. So the emitted card is read back through `rspice-core` and every
+    /// value is recovered from the `AnalysisCommand::Tran` window and the
+    /// `TransientNoiseConfig` the deck's options carry.
+    #[test]
+    fn a_transient_noise_spec_writes_the_card_the_engine_parses() {
+        use rspice_core::netlist::AnalysisCommand;
+
+        for (scale, uic, noise_fmin) in [
+            (0.5, true, None),
+            (1.0, false, None),
+            (1.0, false, Some(1.0e3)),
+        ] {
+            let AnalysisSpec::TransientNoise {
+                stop_time,
+                step_time,
+                start_time,
+                max_timestep,
+                seed,
+                noise_fmax,
+                ..
+            } = transient_noise_spec()
+            else {
+                unreachable!("the fixture is a transient-noise specification");
+            };
+            let spec = AnalysisSpec::TransientNoise {
+                stop_time,
+                step_time,
+                start_time,
+                max_timestep,
+                seed,
+                noise_fmax,
+                noise_fmin,
+                scale,
+                uic,
+            };
+            let card = build_transient_noise_command(&spec)
+                .expect("a transient-noise specification writes its own card");
+            // Pinned as well as read back: the spelling is what a colleague
+            // handed this deck reads, and a reader of this test should not
+            // have to run a parser to see it.
+            assert_eq!(
+                card,
+                match (uic, noise_fmin) {
+                    (true, None) =>
+                        ".tran 0.000000001 0.000001 0.0000002 0.00000000025 UIC \
+                         NOISEFMAX=500000000 NOISESEED=97 NOISESCALE=0.5",
+                    (false, None) =>
+                        ".tran 0.000000001 0.000001 0.0000002 0.00000000025 \
+                         NOISEFMAX=500000000 NOISESEED=97",
+                    _ =>
+                        ".tran 0.000000001 0.000001 0.0000002 0.00000000025 \
+                         NOISEFMAX=500000000 NOISEFMIN=1000 NOISESEED=97",
+                }
+            );
+
+            // A scale of exactly one is the card's default and is not written;
+            // anything else has to reach the line or the run is quieter than
+            // the form that configured it.
+            assert_eq!(
+                card.contains("NOISESCALE"),
+                scale != 1.0,
+                "{card} states NOISESCALE against a scale of {scale}"
+            );
+            // And an unauthored floor stays unwritten, because writing the
+            // engine's derivation would freeze it.
+            assert_eq!(
+                card.contains("NOISEFMIN"),
+                noise_fmin.is_some(),
+                "{card} states NOISEFMIN against a floor of {noise_fmin:?}"
+            );
+
+            let deck = rspice_core::netlist::Netlist::parse(&format!(
+                "transient noise card\nV1 in 0 SIN(0 1 1k)\nR1 in 0 1k\n{card}\n.end\n"
+            ))
+            .unwrap_or_else(|error| panic!("the engine must read `{card}` back: {error}"));
+
+            let [
+                AnalysisCommand::Tran {
+                    step,
+                    stop,
+                    start,
+                    max_step,
+                    uic: parsed_uic,
+                },
+            ] = deck.analyses.as_slice()
+            else {
+                panic!("the card is one transient window: {:?}", deck.analyses);
+            };
+            assert_eq!(*step, step_time, "{card}");
+            assert_eq!(*stop, stop_time, "{card}");
+            assert_eq!(start.unwrap_or(0.0), start_time, "{card}");
+            assert_eq!(*max_step, Some(max_timestep), "{card}");
+            assert_eq!(*parsed_uic, uic, "{card}");
+
+            let noise = deck
+                .options
+                .transient_noise
+                .unwrap_or_else(|| panic!("the card turns transient noise on: {card}"));
+            assert_eq!(noise.fmax, noise_fmax, "{card}");
+            assert_eq!(noise.fmin, noise_fmin, "{card}");
+            assert_eq!(noise.seed, seed, "{card}");
+            assert_eq!(noise.scale, scale, "{card}");
+        }
+    }
+
+    /// The `.ac DATA=` card and its table are read back by the engine as the
+    /// same axis the specification holds.
+    ///
+    /// Pinned as well as parsed: this is two cards that refer to each other by
+    /// name, so a writer that renamed the table on one line and not the other
+    /// would emit a deck the engine rejects, and a writer that lost a decimal
+    /// digit would emit one it accepts and sweeps somewhere else.
+    #[test]
+    fn the_ac_frequency_table_card_parses_as_the_engine_reads_it() {
+        let frequencies = vec![37.0, 74.0, 148.5];
+        let spec = AnalysisSpec::AcData {
+            table_name: rspice_simulation_contract::config::AC_FREQUENCY_TABLE.to_owned(),
+            frequencies: frequencies.clone(),
+            table_options: Default::default(),
+        };
+        let cards = build_ac_data_command(&spec)
+            .expect("an AC frequency-table specification writes its own cards");
+        assert_eq!(
+            cards,
+            ".ac DATA=rspice_ac_frequency\n\
+             .DATA rspice_ac_frequency\n\
+             + HERTZ\n\
+             + 3.70000000000000000e1\n\
+             + 7.40000000000000000e1\n\
+             + 1.48500000000000000e2\n\
+             .ENDDATA"
+        );
+
+        let deck = rspice_core::netlist::Netlist::parse(&format!(
+            "ac frequency table card\nV1 in 0 AC 1\nR1 in 0 1k\n{cards}\n.end\n"
+        ))
+        .unwrap_or_else(|error| panic!("the engine must read `{cards}` back: {error}"));
+
+        let [rspice_core::netlist::AnalysisCommand::AcData { table_name }] =
+            deck.analyses.as_slice()
+        else {
+            panic!(
+                "the cards are one table-driven AC sweep: {:?}",
+                deck.analyses
+            );
+        };
+        // The parser canonicalizes an identifier to upper case, and the
+        // engine's own table lookup is case-insensitive, so the name is
+        // compared the way the resolver compares it.
+        assert!(
+            table_name.eq_ignore_ascii_case(rspice_simulation_contract::config::AC_FREQUENCY_TABLE),
+            "the card refers to '{table_name}'"
+        );
+
+        // The axis the engine resolves from the table it was handed is the
+        // axis the form authored, value for value.
+        let resolved = deck
+            .frequency_data_table_points(table_name)
+            .expect("the written table resolves to a frequency axis")
+            .into_iter()
+            .map(|point| point.frequency)
+            .collect::<Vec<_>>();
+        assert_eq!(resolved, frequencies);
+    }
+
+    /// An axis the specification cannot execute is refused where the card is
+    /// written, not at the solver.
+    #[test]
+    fn an_ac_frequency_table_card_is_refused_for_an_axis_that_cannot_run() {
+        for frequencies in [vec![], vec![-1.0], vec![f64::NAN]] {
+            let spec = AnalysisSpec::AcData {
+                table_name: rspice_simulation_contract::config::AC_FREQUENCY_TABLE.to_owned(),
+                frequencies: frequencies.clone(),
+                table_options: Default::default(),
+            };
+            assert!(
+                build_ac_data_command(&spec).is_err(),
+                "{frequencies:?} wrote a card"
+            );
+        }
+    }
+
+    fn tf_spec() -> AnalysisSpec {
+        AnalysisSpec::Tf {
+            input_source: " vin ".to_owned(),
+            output_expression: " V(out) ".to_owned(),
+            transfer_gain: true,
+            input_resistance: false,
+            output_resistance: false,
+            normalization: rspice_simulation_contract::analysis_spec::TfNormalization::default(),
+            accuracy: rspice_simulation_contract::analysis_spec::TfAccuracy::default(),
+        }
+    }
+
+    /// The four directives the dispatch match used to format inline.
+    ///
+    /// Pinned rather than derived: these cards have no reader in this crate,
+    /// so a builder that changed its sweep keyword, its exponent width or its
+    /// trimming would emit a deck the runner reads differently and nothing
+    /// else here would notice.
+    #[test]
+    fn every_statement_builder_emits_what_the_inline_arm_did() {
+        assert_eq!(
+            build_psp_command(&psp_spec()),
+            Ok(
+                "* RSPICE PSP DEC 11 1.0000000000000000e6 1.0000000000000000e9 MAXSIDEBAND=3 RELTOL=1.0000000000000000e-3 ABSTOL=9.9999999999999998e-13"
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            build_hbsp_command(&hbsp_spec()),
+            Ok(
+                "* RSPICE HBSP OCT 7 1.0000000000000000e3 1.0000000000000000e5 MAXSIDEBAND=2 RELTOL=1.0000000000000000e-3 ABSTOL=9.9999999999999998e-13"
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            build_hbnoise_command(&hbnoise_spec()),
+            Ok(
+                "* RSPICE HBNOISE LIN 21 1.0000000000000000e1 1.0000000000000000e4 OUT=out REF=0 \
+                IN=vin MAXSIDEBAND=4 INTEGRATED=true CONTRIBUTORS=true"
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            build_tf_command(&tf_spec()),
+            Ok(".tf V(out) vin".to_owned())
+        );
+    }
+
+    /// A builder handed another kind's specification refuses by name.
+    ///
+    /// The destructure's `else` is not decoration: these four are routed by a
+    /// `..` pattern, so a variant added beside them could reach the wrong
+    /// builder, and the answer has to be a refusal naming the builder rather
+    /// than a panic in a running studio.
+    #[test]
+    fn a_statement_builder_handed_another_kind_refuses_by_name() {
+        assert_eq!(
+            build_psp_command(&hbsp_spec()),
+            Err("failed to build PSP command".to_owned())
+        );
+        assert_eq!(
+            build_hbsp_command(&psp_spec()),
+            Err("failed to build HBSP command".to_owned())
+        );
+        assert_eq!(
+            build_hbnoise_command(&tf_spec()),
+            Err("failed to build HBNOISE command".to_owned())
+        );
+        assert_eq!(
+            build_tf_command(&hbnoise_spec()),
+            Err("failed to build TF command".to_owned())
+        );
+        assert_eq!(
+            build_transient_noise_command(&tf_spec()),
+            Err("failed to build transient noise command".to_owned())
+        );
+        assert_eq!(
+            build_dc_mismatch_command(&tf_spec()),
+            Err("failed to build DC mismatch command".to_owned())
+        );
+    }
+
+    /// The card the Studio writes is the card the engine reads, field for
+    /// field.
+    ///
+    /// Not a string assertion alone. `.DCMATCH` is a pure keyword card, so a
+    /// keyword the parser does not define, a switch spelled `true` instead of
+    /// `yes`, or a count the parser reads as an expression would all pass an
+    /// expected-text comparison while configuring a study the form never
+    /// asked for. The emitted line is read back through `rspice-core` and
+    /// every field is recovered from the `DcMatchCard` the parser built.
+    #[test]
+    fn a_dc_mismatch_spec_writes_the_card_the_engine_parses() {
+        for (expression, limit, mismatch, process, sigma, threshold) in [
+            (" V(out,in) ", 3_usize, false, true, 6.0, None),
+            ("V(out)", 10, true, false, 1.0, Some(0.25)),
+            ("I(V1)", 0, true, true, 3.0, None),
+            ("out", 0, true, false, 0.5, Some(1.0)),
+        ] {
+            let spec = AnalysisSpec::DcMismatch {
+                moment_options: Default::default(),
+                output_expression: expression.to_owned(),
+                sigma_multiplier: sigma,
+                contributor_limit: limit,
+                include_process: process,
+                include_mismatch: mismatch,
+                normalized_contributions: true,
+                contribution_threshold: threshold,
+            };
+            let card = build_dc_mismatch_command(&spec)
+                .expect("a DC mismatch specification writes its own card");
+
+            let card = read_back_dc_mismatch_card(&card, expression, |parsed, card| {
+                assert_eq!(parsed.mismatch, mismatch, "{card}");
+                assert_eq!(parsed.process, process, "{card}");
+                assert_eq!(parsed.contributor_limit, limit, "{card}");
+                assert_eq!(parsed.sigma_multiplier, sigma, "{card}");
+                // An unauthored threshold is the card's own default of zero,
+                // and the line does not state it.
+                assert_eq!(parsed.threshold, threshold.unwrap_or(0.0), "{card}");
+                assert_eq!(
+                    card.contains("THRESHOLD"),
+                    threshold.is_some(),
+                    "{card} states THRESHOLD against a share of {threshold:?}"
+                );
+            });
+            // Pinned as well as read back, so a reader of this test sees the
+            // spelling a colleague handed this deck would read.
+            if expression.trim() == "V(out,in)" {
+                assert_eq!(
+                    card,
+                    ".dcmatch OUT=V(out,in) MISMATCH=no PROCESS=yes CONTRIBUTORS=3 SIGMA=6"
+                );
+            }
+            if expression == "V(out)" {
+                assert_eq!(
+                    card,
+                    ".dcmatch OUT=V(out) MISMATCH=yes PROCESS=no CONTRIBUTORS=10 SIGMA=1 \
+                     THRESHOLD=0.25"
+                );
+            }
+        }
+    }
+
+    /// Zero contributors is the card's own spelling of "list every one", and
+    /// the Studio writes it rather than refusing it.
+    #[test]
+    fn a_contributor_limit_of_zero_keeps_every_contributor() {
+        let spec = AnalysisSpec::DcMismatch {
+            moment_options: Default::default(),
+            output_expression: "V(out)".to_owned(),
+            sigma_multiplier: 1.0,
+            contributor_limit: 0,
+            include_process: false,
+            include_mismatch: true,
+            normalized_contributions: true,
+            contribution_threshold: None,
+        };
+        let card =
+            build_dc_mismatch_command(&spec).expect("a limit of zero is a card the engine reads");
+        assert!(card.contains("CONTRIBUTORS=0"), "{card}");
+        read_back_dc_mismatch_card(&card, "V(out)", |parsed, card| {
+            assert_eq!(parsed.contributor_limit, 0, "{card}");
+        });
+    }
+
+    /// Parse one emitted `.dcmatch` line through the engine and check the
+    /// probe it recovered, then hand the card to the caller's own assertions.
+    fn read_back_dc_mismatch_card(
+        card: &str,
+        expression: &str,
+        check: impl FnOnce(&rspice_core::netlist::DcMatchCard, &str),
+    ) -> String {
+        use rspice_core::netlist::AnalysisCommand;
+
+        let deck = rspice_core::netlist::Netlist::parse(&format!(
+            "dc mismatch card\nV1 in 0 1\nR1 in out 1k\nR2 out 0 2k\n{card}\n.end\n"
+        ))
+        .unwrap_or_else(|error| panic!("the engine must read `{card}` back: {error}"));
+        let [AnalysisCommand::DcMatch(parsed)] = deck.analyses.as_slice() else {
+            panic!("the card is one .DCMATCH request: {:?}", deck.analyses);
+        };
+        // The parser canonicalizes the probe to upper case, which is the only
+        // transformation the round trip is allowed to make.
+        let expected = expression.trim().to_ascii_uppercase();
+        let recovered = if parsed.output_is_current {
+            format!("I({})", parsed.output_node)
+        } else {
+            match &parsed.reference_node {
+                Some(reference) => format!("V({},{reference})", parsed.output_node),
+                None if expected.starts_with("V(") => format!("V({})", parsed.output_node),
+                None => parsed.output_node.clone(),
+            }
+        };
+        assert_eq!(recovered, expected, "{card}");
+        check(parsed, card);
+        card.to_owned()
+    }
+}

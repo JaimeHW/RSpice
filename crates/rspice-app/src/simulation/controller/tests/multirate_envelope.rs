@@ -45,9 +45,11 @@ fn spec(draft: &EnvelopeDialogState) -> AnalysisSpec {
         unreachable!()
     };
     assert_eq!(serde_json::to_value(restored_draft).unwrap(), saved);
-    let spec = SimulationController::new()
-        .analysis_draft_spec(&analysis_inputs(&AppState::default()), &restored)
-        .unwrap();
+    let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+        &analysis_inputs(&AppState::default()),
+        &restored,
+    )
+    .unwrap();
     spec.validate().unwrap();
     let worker = WorkerAnalysisSpec::try_from(&spec).unwrap();
     let worker: WorkerAnalysisSpec =

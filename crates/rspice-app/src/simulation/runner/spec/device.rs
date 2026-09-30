@@ -112,7 +112,7 @@ fn run_dc_mismatch(
     else {
         return Err(super::misrouted_spec_error("device", spec));
     };
-    let card_line = crate::simulation::SimulationController::build_dc_mismatch_command(spec)
+    let card_line = rspice_simulation::analysis_preparation::build_dc_mismatch_command(spec)
         .map_err(SimulationError::InvalidConfig)?;
     let data = super::run_abort_aware_service(abort, || {
         svc_runner::run_dc_mismatch_analysis_with_source_path_and_abort(

@@ -1,6 +1,14 @@
 //! Analysis preparation over borrowed domain inputs; this module does not authorize or execute runs.
 
+mod commands;
+mod draft;
 mod helpers;
+pub use commands::{
+    analysis_spec_to_spice_line, apply_reference_model_bindings_to_netlist,
+    apply_simulation_options_to_netlist, build_ac_data_command, build_dc_mismatch_command,
+    build_transient_noise_command,
+};
+pub use draft::analysis_draft_spec;
 mod run_config;
 mod spec;
 

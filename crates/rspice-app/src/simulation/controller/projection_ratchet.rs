@@ -246,12 +246,19 @@ fn projection(draft: &AnalysisDraft) -> String {
         state.sim_setup.clone_from(setup);
         apply_fixture_draft(state, draft);
         let controller = SimulationController::new();
-        let spec = match controller.analysis_draft_spec(&analysis_inputs(state), draft) {
+        let spec = match rspice_simulation::analysis_preparation::analysis_draft_spec(
+            &analysis_inputs(state),
+            draft,
+        ) {
             Ok(spec) => spec,
             Err(error) => return format!("spec-error: {error}"),
         };
 
-        let command = controller.analysis_spec_to_spice_line(&analysis_inputs(state), draft, &spec);
+        let command = rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
+            &analysis_inputs(state),
+            draft,
+            &spec,
+        );
         let options = with_sealed_process_library(|sealed| {
             controller.analysis_spec_execution_options(
                 &analysis_inputs(state),
@@ -1141,10 +1148,11 @@ fn hbnoise_spot_and_zero_sideband_authoring_reach_a_valid_spec() {
         setup.contributor_ranking = false;
         let draft = AnalysisDraft::Hbnoise(setup.clone());
         assert_eq!(draft.manifest_configuration_error(), None);
-        let controller = SimulationController::new();
-        let spec = controller
-            .analysis_draft_spec(&analysis_inputs(&engine_facing_state(&draft)), &draft)
-            .unwrap();
+        let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+            &analysis_inputs(&engine_facing_state(&draft)),
+            &draft,
+        )
+        .unwrap();
         spec.validate().unwrap();
         assert!(matches!(
             spec,

@@ -21,18 +21,18 @@ fn dc_mismatch_moment_controls_survive_authoring_storage_decks_and_workers() {
     let saved = serde_json::to_value(&draft).unwrap();
     let restored: DcMismatchDraft = serde_json::from_value(saved.clone()).unwrap();
     assert_eq!(restored.moment_relative_tolerance, "2m");
-    let spec = SimulationController::new()
-        .analysis_draft_spec(
-            &analysis_inputs(&AppState::default()),
-            &AnalysisDraft::DcMismatch(restored),
-        )
-        .unwrap();
+    let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+        &analysis_inputs(&AppState::default()),
+        &AnalysisDraft::DcMismatch(restored),
+    )
+    .unwrap();
     let AnalysisSpec::DcMismatch { moment_options, .. } = &spec else {
         panic!("DC mismatch specification expected");
     };
     assert_eq!(moment_options.relative_tolerance, 0.002);
     assert_eq!(moment_options.max_points, 131_072);
-    let command = SimulationController::build_dc_mismatch_command(&spec).unwrap();
+    let command =
+        rspice_simulation::analysis_preparation::build_dc_mismatch_command(&spec).unwrap();
     let deck = format!("controls\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n{command}\n.end\n");
     assert_eq!(specs_for(&deck), vec![spec.clone()]);
     let worker = WorkerAnalysisSpec::try_from(&spec).unwrap();
@@ -61,7 +61,7 @@ fn dc_mismatch_moment_controls_survive_authoring_storage_decks_and_workers() {
         .remove("moment_options");
     let legacy: AnalysisSpec = serde_json::from_value(legacy).unwrap();
     assert!(
-        !SimulationController::build_dc_mismatch_command(&legacy)
+        !rspice_simulation::analysis_preparation::build_dc_mismatch_command(&legacy)
             .unwrap()
             .contains("MOMENT_")
     );
@@ -177,9 +177,11 @@ fn a_bare_dcmatch_card_reads_as_the_engine_defaults() {
     let draft = crate::simulation::plan::AnalysisDraft::for_kind(
         crate::simulation::plan::AnalysisKind::DcMismatch,
     );
-    let authored = SimulationController::new()
-        .analysis_draft_spec(&analysis_inputs(&state), &draft)
-        .expect("a default DC mismatch draft builds a specification");
+    let authored = rspice_simulation::analysis_preparation::analysis_draft_spec(
+        &analysis_inputs(&state),
+        &draft,
+    )
+    .expect("a default DC mismatch draft builds a specification");
     let AnalysisSpec::DcMismatch {
         sigma_multiplier: draft_sigma,
         contributor_limit: draft_limit,
@@ -221,8 +223,9 @@ fn the_studio_dcmatch_card_round_trips_through_the_manual_deck_reader() {
                     normalized_contributions: true,
                     contribution_threshold: threshold,
                 };
-                let card = SimulationController::build_dc_mismatch_command(&authored)
-                    .expect("the plan writes its card");
+                let card =
+                    rspice_simulation::analysis_preparation::build_dc_mismatch_command(&authored)
+                        .expect("the plan writes its card");
                 let specs = specs_for(&format!(
                     "round trip\n\
                          V1 in 0 DC 1\n\

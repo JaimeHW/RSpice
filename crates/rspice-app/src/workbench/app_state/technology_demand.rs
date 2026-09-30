@@ -20,7 +20,7 @@
 
 use super::SimSetupState;
 use crate::product::ProcessCorner;
-use crate::simulation::run_set::{RunSetCornerProjection, RunSetDimensionKind};
+use crate::simulation::run_set::RunSetDimensionKind;
 
 /// One authored entity that requires an attached project technology.
 #[derive(Debug, Clone, PartialEq, Eq)]

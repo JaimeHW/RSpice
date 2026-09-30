@@ -122,7 +122,10 @@ impl SimulationController {
             // Resolve the same exact draft and contextual prerequisite closure
             // used by the displayed directive. The queue and preview must
             // agree on the spec that reaches the engine.
-            let spec = match self.analysis_draft_spec(&projected_state, instance.draft()) {
+            let spec = match rspice_simulation::analysis_preparation::analysis_draft_spec(
+                &projected_state,
+                instance.draft(),
+            ) {
                 Ok(spec) => spec,
                 Err(error) => {
                     errors.push(format!("{}: {error}", instance.display_name()));
@@ -130,7 +133,11 @@ impl SimulationController {
                 }
             };
             let analysis_line =
-                match self.analysis_spec_to_spice_line(&projected_state, instance.draft(), &spec) {
+                match rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
+                    &projected_state,
+                    instance.draft(),
+                    &spec,
+                ) {
                     Ok(line) => line,
                     Err(e) => {
                         errors.push(format!("{}: {}", instance.display_name(), e));
@@ -577,7 +584,10 @@ impl SimulationController {
             sim_setup: &producer_state_setup,
             ..*state
         };
-        let producer_spec = self.analysis_draft_spec(&producer_state, producer.draft())?;
+        let producer_spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+            &producer_state,
+            producer.draft(),
+        )?;
         let AnalysisConfig::DcOp(config) =
             rspice_simulation::analysis_preparation::analysis_spec_to_config(&producer_spec)?
         else {
@@ -662,7 +672,8 @@ impl SimulationController {
             sim_setup: &projected_setup,
             ..*state
         };
-        let spec = self.analysis_draft_spec(&projected, base.draft())?;
+        let spec =
+            rspice_simulation::analysis_preparation::analysis_draft_spec(&projected, base.draft())?;
         let periodic_producer = bound_periodic_producer(plan, base)?;
         use crate::simulation::runner::study::StudyPeriodicOptions;
         let periodic_options = match base.draft() {
@@ -754,7 +765,10 @@ impl SimulationController {
                 sim_setup: &producer_state_setup,
                 ..*state
             };
-            let producer_spec = self.analysis_draft_spec(&producer_state, producer.draft())?;
+            let producer_spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+                &producer_state,
+                producer.draft(),
+            )?;
             crate::simulation::execution::validate_prepared_dependency_contract_with_options(
                 &spec,
                 &execution_options,
@@ -778,11 +792,12 @@ impl SimulationController {
                 Some(crate::simulation::runner::study::StudyPostprocess {
                     producer_instance_id: producer.id(),
                     producer_source_revision: plan.revision(),
-                    producer_analysis_line: self.analysis_spec_to_spice_line(
-                        &producer_state,
-                        producer.draft(),
-                        &producer_spec,
-                    )?,
+                    producer_analysis_line:
+                        rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
+                            &producer_state,
+                            producer.draft(),
+                            &producer_spec,
+                        )?,
                     producer_numeric_options: producer
                         .numeric_override()
                         .map(|options| options.to_spice_options())
@@ -813,7 +828,11 @@ impl SimulationController {
             instance_id: id,
             source_revision: plan.revision(),
             analysis,
-            analysis_line: self.analysis_spec_to_spice_line(&projected, base.draft(), &spec)?,
+            analysis_line: rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
+                &projected,
+                base.draft(),
+                &spec,
+            )?,
             numeric_options: base
                 .numeric_override()
                 .map(|options| options.to_spice_options())
@@ -898,12 +917,9 @@ impl SimulationController {
                     // The bound base, not the legacy index, selects the run mode.
                     corner_state.base_analysis_idx = state.sim_setup.corner.base_analysis_idx;
                 }
-                let corner_cfg = crate::simulation::dialog::corner::to_config(
-                    &corner_state,
-                    &state.sim_setup.run_set,
-                    state.sim_setup.reference_pvt,
-                )
-                .map_err(|e| format!("invalid corner settings: {}", e))?;
+                let corner_cfg = corner_state
+                    .to_config(&state.sim_setup.run_set, state.sim_setup.reference_pvt)
+                    .map_err(|e| format!("invalid corner settings: {}", e))?;
                 Ok(SpecExecutionOptions {
                     mc_histogram_bins: None,
                     mc_statistics: None,

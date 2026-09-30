@@ -20,7 +20,6 @@ use crate::simulation::execution::{
     SnapshotParts, TouchstoneExportPolicy, analysis_kind_tag, drc_receipt_digest,
     manual_deck_analysis_instance_id, manual_source_receipt_digest,
 };
-use crate::simulation::run_set::RunSetCornerProjection;
 use rspice_app_types::canonical::content_digest;
 use rspice_simulation::netlist_gen::CrossProbeSnapshot;
 use rspice_simulation::sealed_source::{
@@ -372,7 +371,10 @@ impl SimulationController {
             .content
             .bind_generated_netlist_provenance(generated.netlist);
         let mut source =
-            Self::apply_reference_model_bindings_to_netlist(&generated_source, &model_cards);
+            rspice_simulation::analysis_preparation::apply_reference_model_bindings_to_netlist(
+                &generated_source,
+                &model_cards,
+            );
         let external_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?
             .try_merge(prepared_model_library_veriloga_runtimes(&sealed_models)?)
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
@@ -383,7 +385,10 @@ impl SimulationController {
                 runtime.netlist_alias(),
             );
         }
-        let source = Self::apply_simulation_options_to_netlist(&source, &state.sim_setup.options);
+        let source = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
+            &source,
+            &state.sim_setup.options,
+        );
         let (source, _) = expand_generated_dependencies_with_sealed_sources(
             &source,
             root_schematic.current_file(),
@@ -1034,7 +1039,10 @@ impl SimulationController {
             .content
             .bind_generated_netlist_provenance(generated.netlist);
         let mut netlist =
-            Self::apply_reference_model_bindings_to_netlist(&generated_source, &model_cards);
+            rspice_simulation::analysis_preparation::apply_reference_model_bindings_to_netlist(
+                &generated_source,
+                &model_cards,
+            );
         for runtime in external_veriloga_runtimes.sources() {
             rspice_simulation::netlist_preparation::append_project_veriloga_directive(
                 &mut netlist,
@@ -1042,7 +1050,10 @@ impl SimulationController {
                 runtime.netlist_alias(),
             );
         }
-        netlist = Self::apply_simulation_options_to_netlist(&netlist, &state.sim_setup.options);
+        netlist = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
+            &netlist,
+            &state.sim_setup.options,
+        );
         let (expanded_netlist, sealed_source_dependencies) =
             expand_generated_dependencies_with_sealed_sources(
                 &netlist,
@@ -1238,7 +1249,11 @@ impl SimulationController {
             crate::state::model_library::ModelExecutionPlan::model_cards,
         );
         let composed = manual_deck::compose_manual_deck_source(&owned_materialized);
-        let mut composed = Self::apply_reference_model_bindings_to_netlist(&composed, &model_cards);
+        let mut composed =
+            rspice_simulation::analysis_preparation::apply_reference_model_bindings_to_netlist(
+                &composed,
+                &model_cards,
+            );
         let external_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?
             .try_merge(prepared_model_library_veriloga_runtimes(&sealed_models)?)
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;

@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 mod budgeting;
+mod corner_projection;
 mod model;
 mod participation;
 mod points;

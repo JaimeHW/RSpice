@@ -974,9 +974,11 @@ fn qpss_card_studio_and_manual_deck_resolve_the_same_complete_configuration() {
     });
     let state = engine_facing_state(&draft);
     let controller = SimulationController::new();
-    let spec = controller
-        .analysis_draft_spec(&analysis_inputs(&state), &draft)
-        .unwrap();
+    let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+        &analysis_inputs(&state),
+        &draft,
+    )
+    .unwrap();
     let expected = spec.driven_qpss_config().unwrap();
     let directive = controller.analysis_draft_directive(&state, &draft).unwrap();
     let deck = format!(

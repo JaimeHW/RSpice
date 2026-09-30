@@ -290,7 +290,7 @@ fn the_bypass_voltage_floor_commits_through_the_pages_own_channel() {
 
     assert!(app.state.sim_setup.options.bypass_enabled);
     assert_eq!(app.state.sim_setup.options.bypass_abstol, 4e-9);
-    let deck = crate::simulation::SimulationController::apply_simulation_options_to_netlist(
+    let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
         "bypass options\nV1 1 0 1\nR1 1 0 1k\n.op\n.end\n",
         &app.state.sim_setup.options,
     );

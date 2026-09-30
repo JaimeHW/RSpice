@@ -21,14 +21,19 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
     state.sim_setup.mc.histogram_bins = "99".into();
     state.sim_setup.mc.num_runs = "99".into();
     let draft = AnalysisDraft::MonteCarlo(mc);
-    let spec = controller
-        .analysis_draft_spec(&analysis_inputs(&state), &draft)
-        .unwrap();
+    let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+        &analysis_inputs(&state),
+        &draft,
+    )
+    .unwrap();
     assert!(
-        controller
-            .analysis_spec_to_spice_line(&analysis_inputs(&state), &draft, &spec)
-            .unwrap()
-            .starts_with(".mc 17 ")
+        rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
+            &analysis_inputs(&state),
+            &draft,
+            &spec
+        )
+        .unwrap()
+        .starts_with(".mc 17 ")
     );
     let options = controller
         .analysis_spec_execution_options(&analysis_inputs(&state), &draft, None, &spec, &sealed)
@@ -40,13 +45,18 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
     temp.specific_temps = "11, 22".into();
     state.sim_setup.temp.specific_temps = "not a temperature".into();
     let draft = AnalysisDraft::Temperature(temp);
-    let spec = controller
-        .analysis_draft_spec(&analysis_inputs(&state), &draft)
-        .unwrap();
+    let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+        &analysis_inputs(&state),
+        &draft,
+    )
+    .unwrap();
     assert_eq!(
-        controller
-            .analysis_spec_to_spice_line(&analysis_inputs(&state), &draft, &spec)
-            .unwrap(),
+        rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
+            &analysis_inputs(&state),
+            &draft,
+            &spec
+        )
+        .unwrap(),
         ".step temp list 11 22"
     );
     let options = controller
@@ -59,9 +69,11 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
     corner.base_analysis_idx = 3;
     state.sim_setup.corner.base_analysis_idx = 0;
     let draft = AnalysisDraft::Corner(corner);
-    let spec = controller
-        .analysis_draft_spec(&analysis_inputs(&state), &draft)
-        .unwrap();
+    let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+        &analysis_inputs(&state),
+        &draft,
+    )
+    .unwrap();
     let options = controller
         .analysis_spec_execution_options(&analysis_inputs(&state), &draft, None, &spec, &sealed)
         .unwrap();
@@ -88,15 +100,20 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
         .unwrap();
     assert_eq!(options.pac.unwrap().pac_magnitude, 2.5);
     state.sim_setup.pac.pac_magnitude = "unfinished(".into();
-    let spec = controller
-        .analysis_draft_spec(&analysis_inputs(&state), &draft)
-        .unwrap();
+    let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+        &analysis_inputs(&state),
+        &draft,
+    )
+    .unwrap();
     assert_eq!(spec, AnalysisSpec::Pac);
     assert!(
-        controller
-            .analysis_spec_to_spice_line(&analysis_inputs(&state), &draft, &spec)
-            .unwrap()
-            .contains("pacmag=2.5")
+        rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
+            &analysis_inputs(&state),
+            &draft,
+            &spec
+        )
+        .unwrap()
+        .contains("pacmag=2.5")
     );
 
     let mut pss = state.sim_setup.pss.clone();
@@ -106,17 +123,22 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
     state.sim_setup.pss = pss.clone();
     state.sim_setup.pss.fund_freq = "2k".into();
     let draft = AnalysisDraft::Pss(pss);
-    let spec = controller
-        .analysis_draft_spec(&analysis_inputs(&state), &draft)
-        .unwrap();
+    let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+        &analysis_inputs(&state),
+        &draft,
+    )
+    .unwrap();
     assert!(
         matches!(&spec, AnalysisSpec::Pss { fundamental_freq, .. } if *fundamental_freq == 1e3)
     );
     assert!(
-        controller
-            .analysis_spec_to_spice_line(&analysis_inputs(&state), &draft, &spec)
-            .unwrap()
-            .starts_with(".pss fund=1k ")
+        rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
+            &analysis_inputs(&state),
+            &draft,
+            &spec
+        )
+        .unwrap()
+        .starts_with(".pss fund=1k ")
     );
 
     let mut hb = state.sim_setup.hb.clone();
@@ -125,17 +147,22 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
     state.sim_setup.hb = hb.clone();
     state.sim_setup.hb.fundamental = "2meg".into();
     let draft = AnalysisDraft::HarmonicBalance(hb);
-    let spec = controller
-        .analysis_draft_spec(&analysis_inputs(&state), &draft)
-        .unwrap();
+    let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
+        &analysis_inputs(&state),
+        &draft,
+    )
+    .unwrap();
     assert!(
         matches!(&spec, AnalysisSpec::HarmonicBalance { tones, .. } if tones[0].frequency == 1e6)
     );
     assert!(
-        controller
-            .analysis_spec_to_spice_line(&analysis_inputs(&state), &draft, &spec)
-            .unwrap()
-            .starts_with(".hb 1000000 ")
+        rspice_simulation::analysis_preparation::analysis_spec_to_spice_line(
+            &analysis_inputs(&state),
+            &draft,
+            &spec
+        )
+        .unwrap()
+        .starts_with(".hb 1000000 ")
     );
 }
 

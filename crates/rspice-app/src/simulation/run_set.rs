@@ -11,11 +11,11 @@
 //! would be indistinguishable from one that worked, which is the failure this
 //! module is shaped to prevent.
 
+#[cfg(test)]
 mod corner_projection;
 #[cfg(test)]
 mod tests;
 
-pub use corner_projection::RunSetCornerProjection;
 #[cfg(test)]
 pub use corner_projection::from_corner_config;
 
