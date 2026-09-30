@@ -7,7 +7,6 @@ use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 fn study_options_and_commands_read_the_exact_authored_draft() {
     use rspice_simulation::sweeps::CornerBaseMode;
 
-    let controller = SimulationController::new();
     let mut state = AppState::default();
     let sealed = state
         .model_library_manager
@@ -35,9 +34,14 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
         .unwrap()
         .starts_with(".mc 17 ")
     );
-    let options = controller
-        .analysis_spec_execution_options(&analysis_inputs(&state), &draft, None, &spec, &sealed)
-        .unwrap();
+    let options = rspice_simulation::analysis_preparation::analysis_spec_execution_options(
+        &state.sim_setup,
+        &draft,
+        None,
+        &spec,
+        &sealed,
+    )
+    .unwrap();
     assert_eq!(options.mc_histogram_bins, Some(31));
 
     let mut temp = state.sim_setup.temp.clone();
@@ -59,9 +63,14 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
         .unwrap(),
         ".step temp list 11 22"
     );
-    let options = controller
-        .analysis_spec_execution_options(&analysis_inputs(&state), &draft, None, &spec, &sealed)
-        .unwrap();
+    let options = rspice_simulation::analysis_preparation::analysis_spec_execution_options(
+        &state.sim_setup,
+        &draft,
+        None,
+        &spec,
+        &sealed,
+    )
+    .unwrap();
     assert_eq!(options.temp.unwrap().temperatures_c, vec![11.0, 22.0]);
 
     let mut corner = state.sim_setup.corner.clone();
@@ -74,9 +83,14 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
         &draft,
     )
     .unwrap();
-    let options = controller
-        .analysis_spec_execution_options(&analysis_inputs(&state), &draft, None, &spec, &sealed)
-        .unwrap();
+    let options = rspice_simulation::analysis_preparation::analysis_spec_execution_options(
+        &state.sim_setup,
+        &draft,
+        None,
+        &spec,
+        &sealed,
+    )
+    .unwrap();
     assert!(matches!(
         options.corner.unwrap().base_mode,
         CornerBaseMode::Op
@@ -89,15 +103,14 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
     pac.pac_magnitude = "2.5".into();
     state.sim_setup.pac.pac_magnitude = "9".into();
     let draft = AnalysisDraft::Pac(pac);
-    let options = controller
-        .analysis_spec_execution_options(
-            &analysis_inputs(&state),
-            &draft,
-            None,
-            &AnalysisSpec::Pac,
-            &sealed,
-        )
-        .unwrap();
+    let options = rspice_simulation::analysis_preparation::analysis_spec_execution_options(
+        &state.sim_setup,
+        &draft,
+        None,
+        &AnalysisSpec::Pac,
+        &sealed,
+    )
+    .unwrap();
     assert_eq!(options.pac.unwrap().pac_magnitude, 2.5);
     state.sim_setup.pac.pac_magnitude = "unfinished(".into();
     let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
@@ -386,7 +399,7 @@ fn pvt_selected_bases_persist_clone_and_freeze_exact_settings() {
 fn qp_study_freezes_the_exact_producer_and_complete_consumer_controls() {
     use crate::simulation::dialog::{McDialogState, mc::McConfig};
     use crate::simulation::plan::{QpnoiseOutputDraft, QpssDraft};
-    use crate::simulation::runner::study::StudyAnalysis;
+    use rspice_simulation::study::StudyAnalysis;
     for kind in [
         AnalysisKind::Qpss,
         AnalysisKind::Qpac,
@@ -603,7 +616,8 @@ fn qp_study_freezes_the_exact_producer_and_complete_consumer_controls() {
 #[test]
 fn periodic_rf_study_freezes_all_consumer_options_and_exact_pss_op_chain() {
     use crate::simulation::dialog::{McDialogState, mc::McConfig};
-    use crate::simulation::runner::study::{StudyAnalysis, StudyPeriodicOptions};
+    use rspice_simulation::study::StudyAnalysis;
+    use rspice_simulation::study::StudyPeriodicOptions;
     for kind in [
         AnalysisKind::Pac,
         AnalysisKind::Pxf,
@@ -789,7 +803,7 @@ fn periodic_rf_study_freezes_all_consumer_options_and_exact_pss_op_chain() {
 #[test]
 fn preceding_pac_basis_uses_its_exact_frozen_hb_producer() {
     use crate::simulation::dialog::{McDialogState, mc::McConfig};
-    use crate::simulation::runner::study::StudyPeriodicOptions;
+    use rspice_simulation::study::StudyPeriodicOptions;
 
     let mut state = AppState::default();
     let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
@@ -863,7 +877,7 @@ fn preceding_pac_basis_uses_its_exact_frozen_hb_producer() {
 #[test]
 fn pss_study_freezes_its_exact_op_producer_and_complete_shooting_configuration() {
     use crate::simulation::dialog::{McDialogState, mc::McConfig};
-    use crate::simulation::runner::study::StudyAnalysis;
+    use rspice_simulation::study::StudyAnalysis;
     let mut state = AppState::default();
     let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
     let (first, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
@@ -963,7 +977,7 @@ fn hb_study_freezes_the_selected_instance_and_authenticates_its_native_settings(
         hb::{HbConfig, HbSolverType, HbToneConfig},
         mc::McConfig,
     };
-    use crate::simulation::runner::study::StudyAnalysis;
+    use rspice_simulation::study::StudyAnalysis;
     let mut state = AppState::default();
     let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
     let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
@@ -1061,7 +1075,7 @@ fn hb_study_freezes_the_selected_instance_and_authenticates_its_native_settings(
 #[test]
 fn hb_rf_study_freezes_exact_producer_consumer_and_noise_references() {
     use crate::simulation::dialog::{McDialogState, mc::McConfig};
-    use crate::simulation::runner::study::StudyAnalysis;
+    use rspice_simulation::study::StudyAnalysis;
     for kind in [AnalysisKind::Hbsp, AnalysisKind::Hbnoise] {
         let mut state = AppState::default();
         let plan = state.sim_setup.analysis_plan.as_mut().unwrap();

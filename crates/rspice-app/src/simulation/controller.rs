@@ -22,10 +22,9 @@ use crate::simulation::config::{
     AcAnalysisConfig, AcSweepType, DcSweepConfig, NoiseAnalysisConfig, NoiseSweepType,
     PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
 };
-use crate::simulation::execution::{
-    ExecutionArtifactEnvelope, ExecutionArtifactKind, TouchstoneExportPolicy,
-    canonical_analysis_kind,
-};
+use crate::simulation::execution::ExecutionArtifactEnvelope;
+use crate::simulation::execution::TouchstoneExportPolicy;
+use crate::simulation::execution::canonical_analysis_kind;
 use crate::simulation::multi_run::PssMethod;
 #[cfg(test)]
 use crate::simulation::multi_run::SpPort;
@@ -34,7 +33,6 @@ use crate::simulation::output_contract::{
     PreparedSavedOutput, materialize_live_saved_outputs, retain_plan_saved_outputs,
 };
 use crate::simulation::plan::AnalysisNumericOverride;
-use crate::simulation::runner::SpecExecutionOptions;
 use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
@@ -49,10 +47,12 @@ use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCache
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 use rspice_results::yield_analysis::YieldAnalysisManager;
 use rspice_simulation::error::SimulationError;
+use rspice_simulation::execution_options::SpecExecutionOptions;
 use rspice_simulation::live_transient::{
     TransientDigitalBusSample, TransientDigitalEventSample, TransientRealEventSample,
     TransientSampleDelta,
 };
+use rspice_simulation::prepared_dependency::ExecutionArtifactKind;
 use rspice_simulation_contract::setup_state::SimulationSetup;
 
 mod analysis_commands;
@@ -1840,7 +1840,7 @@ impl SimulationController {
                             .is_some_and(|producer| {
                                 self.pending_analyses.iter().any(|task| {
                                     task.dependencies().contains(&producer)
-                                        && crate::simulation::execution::required_artifact_kinds(
+                                        && rspice_simulation::prepared_dependency::required_artifact_kinds(
                                             task.spec(),
                                             task.spec_options(),
                                         )

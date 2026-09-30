@@ -7,8 +7,9 @@ use rspice_core::abort_signal::AbortSignal;
 
 use crate::services::simulation_runner as svc_runner;
 use crate::simulation::multi_run::AnalysisSpec;
-use crate::simulation::runner::{AnalysisExecutionEnvironment, SpecExecutionOptions};
+use crate::simulation::runner::AnalysisExecutionEnvironment;
 use rspice_simulation::error::SimulationError;
+use rspice_simulation::execution_options::SpecExecutionOptions;
 use rspice_simulation::results::{MonteCarloVariableResult, SimulationResult, WaveformData};
 
 pub(super) fn run_sweep_spec(
@@ -57,7 +58,7 @@ pub(super) fn run_sweep_spec(
 
 fn run_monte_carlo(
     variation_source: crate::simulation::dialog::McVariationSource,
-    base: Option<&crate::simulation::runner::study::StudyRunConfig>,
+    base: Option<&rspice_simulation::study::StudyRunConfig>,
     checkpoint: Option<&rspice_simulation::monte_carlo_checkpoint::MonteCarloCheckpointRequest>,
     histogram_bins: usize,
     checkpoint_observer: Option<&super::CheckpointObserver<'_>>,

@@ -76,7 +76,7 @@ fn run_projected(family: AnalysisType, deck: &str, base: CornerBaseMode) -> Simu
         SavedOutputPrecision, SavedOutputStreaming,
     };
     let corner = family == AnalysisType::Corner;
-    let options = crate::simulation::runner::SpecExecutionOptions {
+    let options = rspice_simulation::execution_options::SpecExecutionOptions {
         corner: corner.then(|| CornerRunConfig {
             temperatures_c: vec![27.0, 85.0],
             voltages: vec![1.8],

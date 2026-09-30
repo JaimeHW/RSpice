@@ -1,155 +1,94 @@
-//! Complete periodic consumer controls and execution on a freshly solved trial.
-use super::super::SpecExecutionOptions;
+//! Periodic consumer execution on a freshly solved trial.
 use super::*;
 use crate::simulation::multi_run::AnalysisSpec;
 use rspice_simulation::results::SimulationResult;
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "analysis", content = "config", deny_unknown_fields)]
-pub enum StudyPeriodicOptions {
-    Pac(rspice_simulation::periodic::PacRunConfig),
-    Pxf(rspice_simulation::periodic::PxfRunConfig),
-    Pnoise(rspice_simulation::periodic::PnoiseRunConfig),
-    Pstb(rspice_simulation::periodic::PstbRunConfig),
-}
-
-impl StudyPeriodicOptions {
-    pub(crate) fn execution_options(&self) -> SpecExecutionOptions {
-        let mut options = SpecExecutionOptions::default();
-        match self {
-            Self::Pac(config) => options.pac = Some(config.clone()),
-            Self::Pxf(config) => options.pxf = Some(config.clone()),
-            Self::Pnoise(config) => options.pnoise = Some(config.clone()),
-            Self::Pstb(config) => options.pstb = Some(config.clone()),
+pub(super) fn run_periodic(
+    request_config: &StudyPostprocess,
+    engine: &rspice_core::Engine,
+    analysis: &StudyAnalysis,
+    circuit: &rspice_core::Netlist,
+    numeric_options: &str,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    request_config.periodic_execution_options()?;
+    let (physical, result) = match analysis {
+        StudyAnalysis::Pss(pss) => super::pss::run_with_circuit(
+            pss,
+            engine,
+            circuit,
+            &request_config.producer_numeric_options,
+            abort,
+        )?,
+        StudyAnalysis::Qpss(qpss) => super::qpss::run_with_circuit(
+            qpss,
+            engine,
+            circuit,
+            &request_config.producer_numeric_options,
+            abort,
+        )?,
+        StudyAnalysis::Hb(hb) => super::hb::run_with_circuit(
+            hb,
+            engine,
+            circuit,
+            &request_config.producer_numeric_options,
+            abort,
+        )?,
+        StudyAnalysis::Native(
+            producer @ (AnalysisSpec::HarmonicBalance { .. } | AnalysisSpec::Qpss { .. }),
+        ) => {
+            let physical = super::pss::circuit_with_options(
+                circuit,
+                &request_config.producer_numeric_options,
+                abort,
+            )?;
+            let result = super::super::spec::run_native_study_on_materialized(
+                producer.clone(),
+                &physical,
+                abort,
+            )?;
+            (physical, result)
         }
-        options
-    }
-}
-
-impl StudyPostprocess {
-    pub(super) fn periodic_execution_options(
-        &self,
-    ) -> Result<SpecExecutionOptions, SimulationError> {
-        let matches = matches!(
-            (&self.request, &self.periodic_options),
-            (AnalysisSpec::Pac, Some(StudyPeriodicOptions::Pac(_)))
-                | (AnalysisSpec::Pxf, Some(StudyPeriodicOptions::Pxf(_)))
-                | (AnalysisSpec::Pnoise, Some(StudyPeriodicOptions::Pnoise(_)))
-                | (AnalysisSpec::Pstb, Some(StudyPeriodicOptions::Pstb(_)))
-                | (
-                    AnalysisSpec::Psp { .. }
-                        | AnalysisSpec::Fourier { .. }
-                        | AnalysisSpec::Fft { .. }
-                        | AnalysisSpec::Hbsp { .. }
-                        | AnalysisSpec::Hbnoise { .. }
-                        | AnalysisSpec::Qpac { .. }
-                        | AnalysisSpec::Qpxf { .. }
-                        | AnalysisSpec::Qpnoise { .. },
-                    None
-                )
-        );
-        if !matches {
+        _ => {
             return Err(SimulationError::InvalidConfig(
-                "Study consumer is missing its matching complete execution configuration".into(),
+                "Periodic study requires its configured PSS, HB or QPSS producer".into(),
             ));
         }
-        Ok(self
-            .periodic_options
-            .as_ref()
-            .map(StudyPeriodicOptions::execution_options)
-            .unwrap_or_default())
-    }
-
-    pub(super) fn is_periodic(&self) -> bool {
-        matches!(
-            self.request,
-            AnalysisSpec::Pac
-                | AnalysisSpec::Pxf
-                | AnalysisSpec::Pnoise
-                | AnalysisSpec::Pstb
-                | AnalysisSpec::Psp { .. }
-                | AnalysisSpec::Qpac { .. }
-                | AnalysisSpec::Qpxf { .. }
-                | AnalysisSpec::Qpnoise { .. }
-        )
-    }
-
-    pub(super) fn run_periodic(
-        &self,
-        engine: &rspice_core::Engine,
-        analysis: &StudyAnalysis,
-        circuit: &rspice_core::Netlist,
-        numeric_options: &str,
-        abort: &dyn AbortSignal,
-    ) -> Result<SimulationResult, SimulationError> {
-        self.periodic_execution_options()?;
-        let (physical, result) = match analysis {
-            StudyAnalysis::Pss(pss) => {
-                pss.run_with_circuit(engine, circuit, &self.producer_numeric_options, abort)?
-            }
-            StudyAnalysis::Qpss(qpss) => {
-                qpss.run_with_circuit(engine, circuit, &self.producer_numeric_options, abort)?
-            }
-            StudyAnalysis::Hb(hb) => {
-                hb.run_with_circuit(engine, circuit, &self.producer_numeric_options, abort)?
-            }
-            StudyAnalysis::Native(
-                producer @ (AnalysisSpec::HarmonicBalance { .. } | AnalysisSpec::Qpss { .. }),
-            ) => {
-                let physical = super::pss::circuit_with_options(
-                    circuit,
-                    &self.producer_numeric_options,
-                    abort,
-                )?;
-                let result = super::super::spec::run_native_study_on_materialized(
-                    producer.clone(),
-                    &physical,
-                    abort,
-                )?;
-                (physical, result)
-            }
-            _ => {
-                return Err(SimulationError::InvalidConfig(
-                    "Periodic study requires its configured PSS, HB or QPSS producer".into(),
-                ));
-            }
-        };
-        let consumer = super::pss::circuit_with_options(&physical, numeric_options, abort)?;
-        if let SimulationResult::Qpss {
-            operating_point, ..
-        } = &result
-        {
-            return super::super::spec::run_qp_study_consumer(
-                self.request.clone(),
-                &consumer,
-                operating_point,
-                abort,
-            );
-        }
-        let carrier = match &result {
-            SimulationResult::Transient {
-                periodic_state: Some(point),
-                ..
-            } => services::PeriodicCarrierState::Shooting(point),
-            SimulationResult::HarmonicBalance {
-                operating_point: point,
-                ..
-            } => services::PeriodicCarrierState::HarmonicBalance(point),
-            _ => {
-                return Err(SimulationError::SolverError(
-                    "Study producer returned no retained periodic state".into(),
-                ));
-            }
-        };
-        super::super::spec::run_periodic_study_consumer(
-            self.request.clone(),
-            self.periodic_options.as_ref(),
+    };
+    let consumer = super::pss::circuit_with_options(&physical, numeric_options, abort)?;
+    if let SimulationResult::Qpss {
+        operating_point, ..
+    } = &result
+    {
+        return super::super::spec::run_qp_study_consumer(
+            request_config.request.clone(),
             &consumer,
-            carrier,
+            operating_point,
             abort,
-        )
+        );
     }
+    let carrier = match &result {
+        SimulationResult::Transient {
+            periodic_state: Some(point),
+            ..
+        } => services::PeriodicCarrierState::Shooting(point),
+        SimulationResult::HarmonicBalance {
+            operating_point: point,
+            ..
+        } => services::PeriodicCarrierState::HarmonicBalance(point),
+        _ => {
+            return Err(SimulationError::SolverError(
+                "Study producer returned no retained periodic state".into(),
+            ));
+        }
+    };
+    super::super::spec::run_periodic_study_consumer(
+        request_config.request.clone(),
+        request_config.periodic_options.as_ref(),
+        &consumer,
+        carrier,
+        abort,
+    )
 }
 
 #[cfg(test)]

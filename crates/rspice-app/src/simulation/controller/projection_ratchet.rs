@@ -245,7 +245,6 @@ fn projection(draft: &AnalysisDraft) -> String {
         let (state, setup) = &mut *fixture;
         state.sim_setup.clone_from(setup);
         apply_fixture_draft(state, draft);
-        let controller = SimulationController::new();
         let spec = match rspice_simulation::analysis_preparation::analysis_draft_spec(
             &analysis_inputs(state),
             draft,
@@ -260,8 +259,8 @@ fn projection(draft: &AnalysisDraft) -> String {
             &spec,
         );
         let options = with_sealed_process_library(|sealed| {
-            controller.analysis_spec_execution_options(
-                &analysis_inputs(state),
+            rspice_simulation::analysis_preparation::analysis_spec_execution_options(
+                &state.sim_setup,
                 draft,
                 None,
                 &spec,

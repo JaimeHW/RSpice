@@ -7,8 +7,8 @@ use rspice_core::abort_signal::AbortSignal;
 use crate::services::simulation_runner as svc_runner;
 use crate::simulation::execution::ResolvedExecutionDependencies;
 use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, SpPort};
-use crate::simulation::runner::SpecExecutionOptions;
 use rspice_simulation::error::SimulationError;
+use rspice_simulation::execution_options::SpecExecutionOptions;
 use rspice_simulation::results::{PstbFloquetMode, SimulationResult, WaveformData};
 
 pub(super) fn run_frequency_spec(
@@ -348,7 +348,7 @@ fn finite_optional(value: Option<f64>, label: &str) -> Result<Option<f64>, Simul
 /// where a mismatch is answered in one sentence naming both.
 fn carrier_is_harmonic_balance(dependencies: &ResolvedExecutionDependencies) -> bool {
     dependencies.artifact_kind()
-        == Some(crate::simulation::execution::ExecutionArtifactKind::HbState)
+        == Some(rspice_simulation::prepared_dependency::ExecutionArtifactKind::HbState)
 }
 
 fn run_pac(
@@ -1449,12 +1449,12 @@ R2 out 0 1k
 }
 
 pub(super) fn run_periodic_study_consumer(
-    options: &crate::simulation::runner::study::StudyPeriodicOptions,
+    options: &rspice_simulation::study::StudyPeriodicOptions,
     circuit: &rspice_core::Netlist,
     carrier: svc_runner::PeriodicCarrierState<'_>,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
-    use crate::simulation::runner::study::StudyPeriodicOptions;
+    use rspice_simulation::study::StudyPeriodicOptions;
     if let svc_runner::PeriodicCarrierState::Shooting(point) = carrier {
         let (name, frequency, harmonics, tolerance, phase) = match options {
             StudyPeriodicOptions::Pac(c) => (

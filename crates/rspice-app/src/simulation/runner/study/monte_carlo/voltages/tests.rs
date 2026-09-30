@@ -2,10 +2,9 @@
 
 use super::*;
 use crate::simulation::multi_run::AnalysisSpec;
-use crate::simulation::runner::{
-    SpecExecutionOptions, worker_contract::WorkerSpecExecutionOptions,
-};
+use crate::simulation::runner::worker_contract::WorkerSpecExecutionOptions;
 use rspice_core::{NoAbort, ResourceLimits};
+use rspice_simulation::execution_options::SpecExecutionOptions;
 use rspice_simulation::monte_carlo_checkpoint::{
     MonteCarloCheckpointInput, MonteCarloCheckpointRequest,
 };

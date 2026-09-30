@@ -1,6 +1,8 @@
 //! Authenticated prerequisite artifacts and bounded worker transfer.
 
 use super::*;
+use rspice_simulation::execution_options::SpecExecutionOptions;
+use rspice_simulation::prepared_dependency::required_artifact_kinds;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(in crate::simulation) struct ResolvedExecutionDependencies {

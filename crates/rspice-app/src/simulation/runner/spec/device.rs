@@ -14,7 +14,7 @@ pub(super) fn run_device_spec(
     spec: AnalysisSpec,
     netlist: &str,
     source_path: Option<&Path>,
-    study_base: Option<&crate::simulation::runner::study::StudyRunConfig>,
+    study_base: Option<&rspice_simulation::study::StudyRunConfig>,
     environment: Option<crate::simulation::runner::AnalysisExecutionEnvironment>,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
@@ -201,7 +201,7 @@ fn run_optimization(
     initial_step: f64,
     min_step: f64,
     source_path: Option<&Path>,
-    study_base: Option<&crate::simulation::runner::study::StudyRunConfig>,
+    study_base: Option<&rspice_simulation::study::StudyRunConfig>,
     environment: Option<crate::simulation::runner::AnalysisExecutionEnvironment>,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {

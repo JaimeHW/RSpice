@@ -23,3 +23,8 @@ pub use spec::{
     build_pss_spec, build_sensitivity_spec, build_soa_spec, build_sp_spec, build_stb_spec,
     build_tf_spec,
 };
+
+mod execution_options;
+mod study;
+pub use execution_options::analysis_spec_execution_options;
+pub use study::{bound_periodic_producer, compile_study_base};

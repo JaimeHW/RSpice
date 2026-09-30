@@ -13,15 +13,27 @@ use rspice_core::netlist::IncludeProcessor;
 use rspice_core::netlist::{parse_include_directive, parse_lib_directive};
 
 use super::*;
-use crate::simulation::execution::{
-    AuthorizedRunDispatch, ExecutionArtifactKind, ExecutionPermit, ExecutionTargetCapabilities,
-    ModelSourceIdentity, PreparationError, PreparationStage, PreparedDependencyBinding,
-    PreparedRunMetadata, PreparedRunSnapshot, PreparedTask, RunSourceReceipt, SavePolicy,
-    SnapshotParts, TouchstoneExportPolicy, analysis_kind_tag, drc_receipt_digest,
-    manual_deck_analysis_instance_id, manual_source_receipt_digest,
-};
+use crate::simulation::execution::AuthorizedRunDispatch;
+use crate::simulation::execution::ExecutionPermit;
+use crate::simulation::execution::ExecutionTargetCapabilities;
+use crate::simulation::execution::ModelSourceIdentity;
+use crate::simulation::execution::PreparationError;
+use crate::simulation::execution::PreparationStage;
+use crate::simulation::execution::PreparedDependencyBinding;
+use crate::simulation::execution::PreparedRunMetadata;
+use crate::simulation::execution::PreparedRunSnapshot;
+use crate::simulation::execution::PreparedTask;
+use crate::simulation::execution::RunSourceReceipt;
+use crate::simulation::execution::SavePolicy;
+use crate::simulation::execution::SnapshotParts;
+use crate::simulation::execution::TouchstoneExportPolicy;
+use crate::simulation::execution::analysis_kind_tag;
+use crate::simulation::execution::drc_receipt_digest;
+use crate::simulation::execution::manual_deck_analysis_instance_id;
+use crate::simulation::execution::manual_source_receipt_digest;
 use rspice_app_types::canonical::content_digest;
 use rspice_simulation::netlist_gen::CrossProbeSnapshot;
+use rspice_simulation::prepared_dependency::ExecutionArtifactKind;
 use rspice_simulation::sealed_source::{
     generated_executable_source_digest, manual_executable_source_digest,
 };
@@ -1528,7 +1540,7 @@ impl SimulationController {
             // solve admits either family, so the deck decides: a deck holding
             // only an `.HB` binds the harmonic-balance state, and one holding
             // a `.PSS` binds the shooting state.
-            let required_kinds = crate::simulation::execution::required_artifact_kinds(
+            let required_kinds = rspice_simulation::prepared_dependency::required_artifact_kinds(
                 &task.queued_analysis().spec,
                 &task.queued_analysis().spec_options,
             );

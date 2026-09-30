@@ -1,11 +1,11 @@
 //! PSS study tests keep operating-point and shooting controls independent.
 
 use super::*;
+use crate::simulation::multi_run::{AnalysisSpec, PssMethod};
 use crate::simulation::multi_run::{OptimizationAlgorithm, OptimizationGoal, OptimizationVariable};
-use crate::simulation::runner::{
-    SpecExecutionOptions, worker_contract::WorkerSpecExecutionOptions,
-};
+use crate::simulation::runner::worker_contract::WorkerSpecExecutionOptions;
 use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
+use rspice_simulation::execution_options::SpecExecutionOptions;
 
 const CIRCUIT: &str = "PSS study\n.param AMP=1 ACTUAL={2*AMP}\nV1 out 0 SIN(-0.25 {ACTUAL} 1k)\nR1 out 0 1k TC1=0.01\nR2 out aux 1k\nC1 aux 0 1n\n.options GMIN=1e-10 RELTOL=.01 TEMP=12 TNOM=27\n";
 

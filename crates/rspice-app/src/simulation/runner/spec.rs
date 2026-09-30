@@ -13,8 +13,9 @@ use crate::services::simulation_runner as svc_runner;
 use super::super::engine_bridge::{EngineBridge, SupplyCornerScale};
 use super::super::execution::ResolvedExecutionDependencies;
 use super::super::multi_run::AnalysisSpec;
-use super::{AnalysisExecutionEnvironment, SpecExecutionOptions};
+use super::AnalysisExecutionEnvironment;
 use rspice_simulation::error::SimulationError;
+use rspice_simulation::execution_options::SpecExecutionOptions;
 use rspice_simulation::results::SimulationResult;
 
 type CheckpointObserver<'a> = dyn Fn(&[u8]) -> Result<(), SimulationError> + Sync + 'a;
@@ -33,7 +34,7 @@ mod sweeps;
 
 pub(super) fn run_periodic_study_consumer(
     spec: AnalysisSpec,
-    options: Option<&super::study::StudyPeriodicOptions>,
+    options: Option<&rspice_simulation::study::StudyPeriodicOptions>,
     circuit: &rspice_core::Netlist,
     carrier: svc_runner::PeriodicCarrierState<'_>,
     abort: &dyn AbortSignal,

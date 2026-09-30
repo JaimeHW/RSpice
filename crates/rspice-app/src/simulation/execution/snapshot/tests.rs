@@ -10,7 +10,7 @@ mod monte_carlo;
 use super::*;
 use crate::simulation::AnalysisConfig;
 use crate::simulation::multi_run::AnalysisSpec;
-use crate::simulation::runner::SpecExecutionOptions;
+use rspice_simulation::execution_options::SpecExecutionOptions;
 
 fn task() -> QueuedAnalysis {
     QueuedAnalysis {

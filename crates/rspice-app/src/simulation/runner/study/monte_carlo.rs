@@ -73,7 +73,7 @@ pub(crate) fn run_monte_carlo_with_continuation(
         abort,
         continuation,
         |engine, trial, abort| {
-            let result = base.run_trial(engine, &analysis, trial, abort)?;
+            let result = super::spectral::run_trial(base, engine, &analysis, trial, abort)?;
             base.measurements
                 .iter()
                 .map(|name| {

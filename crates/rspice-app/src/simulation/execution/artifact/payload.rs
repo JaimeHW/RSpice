@@ -1,6 +1,9 @@
 //! Serializable numerical payloads and exact digests for execution artifacts.
 
 use super::*;
+use rspice_simulation_contract::dependency_contract::{
+    PeriodicStateCapability, validate_periodic_state_contract,
+};
 mod dependencies;
 pub(in crate::simulation) use dependencies::ResolvedExecutionDependencies;
 mod qpss;
@@ -1867,36 +1870,5 @@ fn take_transfer_buffer(
     }
     Ok(slot.take().expect("validated occupied transfer slot"))
 }
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(in crate::simulation) enum ExecutionArtifactError {
-    #[error("missing {kind:?} artifact from bound prerequisite {producer}")]
-    Missing {
-        producer: AnalysisInstanceId,
-        kind: ExecutionArtifactKind,
-    },
-    #[error("dependency artifact belongs to producer {actual}, expected {expected}")]
-    ProducerMismatch {
-        expected: AnalysisInstanceId,
-        actual: AnalysisInstanceId,
-    },
-    #[error("dependency artifact belongs to stale snapshot {actual}, expected {expected}")]
-    StaleSnapshot {
-        expected: ContentDigest,
-        actual: ContentDigest,
-    },
-    #[error("dependency artifact payload digest is {actual}, expected {expected}")]
-    PayloadDigestMismatch {
-        expected: ContentDigest,
-        actual: ContentDigest,
-    },
-    #[error("invalid dependency artifact payload: {0}")]
-    InvalidPayload(String),
-    #[error("invalid typed dependency contract: {0}")]
-    ContractMismatch(String),
-    #[cfg(any(target_arch = "wasm32", test))]
-    #[error("invalid dependency artifact transfer: {0}")]
-    Transport(String),
-}
-
 #[cfg(test)]
 mod tests;

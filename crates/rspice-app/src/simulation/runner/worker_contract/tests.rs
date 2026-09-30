@@ -2161,7 +2161,7 @@ use extended_contract::{assert_analysis_configs_match, round_trip_result};
 
 #[test]
 fn configured_study_worker_transfers_and_authenticates_nested_op_seed() {
-    use crate::simulation::runner::study::StudyRunConfig;
+    use rspice_simulation::study::StudyRunConfig;
     let options = SpecExecutionOptions {
         study_base: Some(StudyRunConfig {
             postprocess: None,

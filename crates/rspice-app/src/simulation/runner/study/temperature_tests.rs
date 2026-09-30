@@ -7,8 +7,8 @@ use crate::simulation::multi_run::{
     AnalysisSpec, HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,
     PssMethod,
 };
-use rspice_simulation::results::SimulationResult;
 use rspice_core::NoAbort;
+use rspice_simulation::results::SimulationResult;
 
 fn base(family: u8, inherited: bool) -> StudyRunConfig {
     let mut config = OpConfig {
@@ -249,7 +249,7 @@ fn study_temperature_precedes_parameter_statistics_and_optimization_replay() {
             initial_step: 0.25,
             min_step: 1e-8,
         },
-        super::super::SpecExecutionOptions {
+        rspice_simulation::execution_options::SpecExecutionOptions {
             study_base: Some(base),
             ..Default::default()
         },

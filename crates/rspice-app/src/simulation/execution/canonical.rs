@@ -36,8 +36,8 @@ use crate::simulation::dialog::{
 };
 use crate::simulation::multi_run::AnalysisSpec;
 use crate::simulation::plan::{AnalysisNumericOverride, NumericOverrideOption, OverrideValue};
-use crate::simulation::runner::SpecExecutionOptions;
 use crate::state::CanonicalAnalysisKind;
+use rspice_simulation::execution_options::SpecExecutionOptions;
 use rspice_simulation::periodic::PnoiseReference;
 use rspice_simulation::sweeps::{CornerBaseMode, CornerFrequencySweep};
 
@@ -223,9 +223,9 @@ pub(in crate::simulation) fn analysis_config_digest(
 /// the core population identity. Keep the complete configured prerequisite and
 /// measurement contract, including saved OP state and its lineage.
 pub(in crate::simulation) fn monte_carlo_evaluator_digest(
-    base: &crate::simulation::runner::study::StudyRunConfig,
+    base: &rspice_simulation::study::StudyRunConfig,
 ) -> ContentDigest {
-    use crate::simulation::runner::study::StudyAnalysis;
+    use rspice_simulation::study::StudyAnalysis;
     let mut base = base.clone();
     base.histogram_bins = 1;
     // Editing checkpoint selection or a reporting control advances the whole
@@ -877,10 +877,10 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.string(&base.instance_id.to_string());
         writer.u64(base.source_revision.get());
         match &base.analysis {
-            crate::simulation::runner::study::StudyAnalysis::Basic(config) => {
+            rspice_simulation::study::StudyAnalysis::Basic(config) => {
                 encode_analysis_config(writer, Some(config));
             }
-            crate::simulation::runner::study::StudyAnalysis::Pss(pss) => {
+            rspice_simulation::study::StudyAnalysis::Pss(pss) => {
                 writer.domain("study-seeded-pss/v1");
                 encode_analysis_spec(writer, &pss.request);
                 writer.uuid(pss.operating_point.instance_id.as_uuid());
@@ -888,7 +888,7 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
                 encode_op_config(writer, &pss.operating_point.config);
                 writer.string(&pss.operating_point.numeric_options);
             }
-            crate::simulation::runner::study::StudyAnalysis::Qpss(qpss) => {
+            rspice_simulation::study::StudyAnalysis::Qpss(qpss) => {
                 writer.domain("study-seeded-qpss/v1");
                 encode_analysis_spec(writer, &qpss.request);
                 writer.uuid(qpss.operating_point.instance_id.as_uuid());
@@ -896,7 +896,7 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
                 encode_op_config(writer, &qpss.operating_point.config);
                 writer.string(&qpss.operating_point.numeric_options);
             }
-            crate::simulation::runner::study::StudyAnalysis::Hb(hb) => {
+            rspice_simulation::study::StudyAnalysis::Hb(hb) => {
                 writer.domain("study-seeded-hb/v1");
                 encode_analysis_spec(writer, &hb.request);
                 writer.uuid(hb.operating_point.instance_id.as_uuid());
@@ -904,7 +904,7 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
                 encode_op_config(writer, &hb.operating_point.config);
                 writer.string(&hb.operating_point.numeric_options);
             }
-            crate::simulation::runner::study::StudyAnalysis::Native(spec) => {
+            rspice_simulation::study::StudyAnalysis::Native(spec) => {
                 writer.domain("study-native-spec/v1");
                 encode_analysis_spec(writer, spec);
             }

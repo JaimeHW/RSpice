@@ -112,9 +112,9 @@ pub(crate) fn run_corner_declaration(
             numeric_override: None,
             spec: AnalysisSpec::Corner,
             config: None,
-            spec_options: super::SpecExecutionOptions {
+            spec_options: rspice_simulation::execution_options::SpecExecutionOptions {
                 corner: Some(contract),
-                ..super::SpecExecutionOptions::default()
+                ..rspice_simulation::execution_options::SpecExecutionOptions::default()
             },
             analysis_line: ".corner".to_owned(),
         },
@@ -138,9 +138,9 @@ pub(crate) fn run_temperature_declaration(
             numeric_override: None,
             spec: AnalysisSpec::Parametric,
             config: None,
-            spec_options: super::SpecExecutionOptions {
+            spec_options: rspice_simulation::execution_options::SpecExecutionOptions {
                 temp: Some(contract),
-                ..super::SpecExecutionOptions::default()
+                ..rspice_simulation::execution_options::SpecExecutionOptions::default()
             },
             analysis_line: ".step temp".to_owned(),
         },

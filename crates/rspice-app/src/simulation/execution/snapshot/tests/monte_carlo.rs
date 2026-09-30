@@ -2,17 +2,15 @@
 
 use super::*;
 use crate::simulation::dialog::McVariationSource;
-use crate::simulation::runner::study::{
-    StudyRunConfig,
-    monte_carlo::{
-        MonteCarloContinuation, run_monte_carlo_with_continuation, source_with_statistics,
-    },
-};
+use crate::simulation::runner::study::monte_carlo::MonteCarloContinuation;
+use crate::simulation::runner::study::monte_carlo::run_monte_carlo_with_continuation;
+use crate::simulation::runner::study::monte_carlo::source_with_statistics;
 use rspice_core::{NoAbort, ResourceLimits};
 use rspice_results::monte_carlo_checkpoint::StudyMonteCarloCheckpoint;
 use rspice_simulation::monte_carlo_checkpoint::{
     MonteCarloCheckpointInput, MonteCarloCheckpointRequest,
 };
+use rspice_simulation::study::StudyRunConfig;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn experiment() -> SnapshotParts {

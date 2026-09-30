@@ -14,6 +14,7 @@ use std::sync::{
 use std::thread::JoinHandle;
 
 use rspice_simulation::error::SimulationError;
+use rspice_simulation::execution_options::SpecExecutionOptions;
 pub(crate) use rspice_simulation_contract::worker_protocol::AnalysisExecutionEnvironment;
 
 use crate::diagnostics::engine_log::{EngineLogLine, EngineLogQueue, RunLogSink};
@@ -47,26 +48,6 @@ mod wasm_worker;
 pub(crate) mod worker_contract;
 
 pub(crate) mod study;
-
-/// Optional execution overrides for spec-driven analyses.
-#[derive(Debug, Clone, Default)]
-pub struct SpecExecutionOptions {
-    pub study_base: Option<study::StudyRunConfig>,
-    pub(crate) mc_checkpoint:
-        Option<rspice_simulation::monte_carlo_checkpoint::MonteCarloCheckpointRequest>,
-    /// Histogram bins for the default all-node OP study. Configured bases carry their own.
-    pub mc_histogram_bins: Option<usize>,
-    pub mc_statistics: Option<crate::simulation::dialog::mc::statistics::McStatisticsConfig>,
-    pub temp: Option<rspice_simulation::sweeps::TempRunConfig>,
-    /// Base analysis paired with a design-parameter `.STEP`. `None` retains
-    /// the classic operating-point behavior for older prepared requests.
-    pub parametric_base: Option<rspice_simulation::sweeps::CornerBaseMode>,
-    pub corner: Option<rspice_simulation::sweeps::CornerRunConfig>,
-    pub pac: Option<rspice_simulation::periodic::PacRunConfig>,
-    pub pxf: Option<rspice_simulation::periodic::PxfRunConfig>,
-    pub pnoise: Option<rspice_simulation::periodic::PnoiseRunConfig>,
-    pub pstb: Option<rspice_simulation::periodic::PstbRunConfig>,
-}
 
 //=============================================================================
 // Simulation Runner
@@ -518,10 +499,10 @@ pub(in crate::simulation::runner) fn request_asked_for_verbose(
                 .study_base
                 .as_ref()
                 .is_some_and(|base| match &base.analysis {
-                    study::StudyAnalysis::Native(AnalysisSpec::HarmonicBalance {
-                        verbose, ..
-                    }) => *verbose,
-                    study::StudyAnalysis::Pss(pss) => {
+                    rspice_simulation::study::StudyAnalysis::Native(
+                        AnalysisSpec::HarmonicBalance { verbose, .. },
+                    ) => *verbose,
+                    rspice_simulation::study::StudyAnalysis::Pss(pss) => {
                         matches!(pss.request, AnalysisSpec::Pss { verbose: true, .. })
                     }
                     _ => false,

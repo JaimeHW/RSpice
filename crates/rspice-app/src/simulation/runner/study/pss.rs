@@ -1,104 +1,38 @@
-//! Fresh configured OP and shooting solves on a single study circuit.
+//! Configured PSS execution on each materialized study circuit.
 use super::*;
 use crate::simulation::dialog::OpConfig;
-use crate::simulation::multi_run::{AnalysisSpec, PssMethod};
 use rspice_simulation::results::SimulationResult;
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StudyOperatingPoint {
-    pub instance_id: AnalysisInstanceId,
-    pub source_revision: ObjectRevision,
-    pub config: OpConfig,
-    pub numeric_options: String,
+pub(super) fn run(
+    request_config: &StudyPssConfig,
+    engine: &rspice_core::Engine,
+    circuit: &rspice_core::Netlist,
+    numeric_options: &str,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    run_with_circuit(request_config, engine, circuit, numeric_options, abort)
+        .map(|(_, result)| result)
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StudyPssConfig {
-    pub request: AnalysisSpec,
-    pub operating_point: StudyOperatingPoint,
-}
-
-impl StudyPssConfig {
-    pub(super) fn validate(&self) -> Result<(), String> {
-        if !matches!(
-            self.request,
-            AnalysisSpec::Pss {
-                method: PssMethod::Shooting,
-                ..
-            }
-        ) {
-            return Err("A PSS study requires a shooting PSS specification".into());
-        }
-        self.request.validate()?;
-        self.operating_point.config.validate()
-    }
-
-    pub(super) fn validate_measurements(&self, measurements: &[String]) -> Result<(), String> {
-        self.validate()?;
-        let AnalysisSpec::Pss { num_harmonics, .. } = self.request else {
-            unreachable!()
-        };
-        for request in measurements {
-            let (mode, key) = request.split_once(':').unwrap_or(("meas", request));
-            if mode.eq_ignore_ascii_case("last") {
-                continue;
-            }
-            if mode.eq_ignore_ascii_case("scalar")
-                && ["pss.frequency", "pss.period", "pss.iterations"]
-                    .iter()
-                    .any(|name| name.eq_ignore_ascii_case(key))
-            {
-                continue;
-            }
-            if mode.eq_ignore_ascii_case("bin") {
-                let (index, _, signal) =
-                    rspice_simulation_contract::study_measurement::parse_study_bin(key)?;
-                if index <= num_harmonics && signal.is_some() {
-                    continue;
-                }
-                return Err(
-                    "PSS bin observations need an explicit signal and a retained harmonic index"
-                        .into(),
-                );
-            }
-            return Err("PSS studies require last:signal, bin:index:quantity:signal or scalar:pss.frequency/period/iterations".into());
-        }
-        Ok(())
-    }
-
-    pub(super) fn run(
-        &self,
-        engine: &rspice_core::Engine,
-        circuit: &rspice_core::Netlist,
-        numeric_options: &str,
-        abort: &dyn AbortSignal,
-    ) -> Result<SimulationResult, SimulationError> {
-        self.run_with_circuit(engine, circuit, numeric_options, abort)
-            .map(|(_, result)| result)
-    }
-
-    pub(super) fn run_with_circuit(
-        &self,
-        engine: &rspice_core::Engine,
-        circuit: &rspice_core::Netlist,
-        numeric_options: &str,
-        abort: &dyn AbortSignal,
-    ) -> Result<(rspice_core::Netlist, SimulationResult), SimulationError> {
-        let (physical, seed) = self.operating_point.run(engine, circuit, abort)?;
-        let temperature_kelvin = self.operating_point.config.temperature_celsius + 273.15;
-        let pss_circuit = circuit_with_options(&physical, numeric_options, abort)?;
-        let result = super::super::spec::run_pss_study_on_materialized(
-            self.request.clone(),
-            &pss_circuit,
-            &seed,
-            temperature_kelvin,
-            abort,
-        )?;
-        Ok((pss_circuit, result))
-    }
+pub(super) fn run_with_circuit(
+    request_config: &StudyPssConfig,
+    engine: &rspice_core::Engine,
+    circuit: &rspice_core::Netlist,
+    numeric_options: &str,
+    abort: &dyn AbortSignal,
+) -> Result<(rspice_core::Netlist, SimulationResult), SimulationError> {
+    let (physical, seed) =
+        super::pss::run_operating_point(&request_config.operating_point, engine, circuit, abort)?;
+    let temperature_kelvin = request_config.operating_point.config.temperature_celsius + 273.15;
+    let pss_circuit = circuit_with_options(&physical, numeric_options, abort)?;
+    let result = super::super::spec::run_pss_study_on_materialized(
+        request_config.request.clone(),
+        &pss_circuit,
+        &seed,
+        temperature_kelvin,
+        abort,
+    )?;
+    Ok((pss_circuit, result))
 }
 
 pub(super) fn circuit_with_options(
@@ -139,69 +73,67 @@ pub(super) fn circuit_with_options(
     Ok(circuit)
 }
 
+pub(super) fn physical_circuit(
+    request_config: &StudyOperatingPoint,
+    circuit: &rspice_core::Netlist,
+    abort: &dyn AbortSignal,
+) -> Result<(rspice_core::Netlist, OpConfig), SimulationError> {
+    super::super::spec::ensure_not_aborted(abort)?;
+    let mut physical = circuit.clone();
+    let mut op = request_config.config.clone();
+    if let (Some(supply), Some(nominal)) = (
+        op.run_point.supply_voltage,
+        op.run_point.nominal_supply_voltage,
+    ) {
+        super::super::spec::run_abort_aware_service(abort, || {
+            rspice_simulation::netlist_preparation::apply_voltage_corner(
+                &mut physical,
+                supply,
+                nominal,
+                &op.run_point.supply_source_names,
+                abort,
+            )
+        })?;
+        op.run_point.supply_voltage = None;
+        op.run_point.nominal_supply_voltage = None;
+    }
+    physical.options.temp = Some(op.temperature_celsius);
+    Ok((physical, op))
+}
+
+pub(super) fn run_operating_point(
+    request_config: &StudyOperatingPoint,
+    engine: &rspice_core::Engine,
+    circuit: &rspice_core::Netlist,
+    abort: &dyn AbortSignal,
+) -> Result<
+    (
+        rspice_core::Netlist,
+        rspice_core::engine::PeriodicDcOperatingPointSeed,
+    ),
+    SimulationError,
+> {
+    let (physical, op) = physical_circuit(request_config, circuit, abort)?;
+    let op_circuit = circuit_with_options(&physical, &request_config.numeric_options, abort)?;
+    let result = EngineBridge::run_materialized_with_abort(
+        engine,
+        &AnalysisConfig::DcOp(op),
+        &op_circuit,
+        abort,
+    )?;
+    let SimulationResult::DcOp(point) = result else {
+        return Err(SimulationError::SolverError(
+            "Periodic study OP producer returned no DC solution".into(),
+        ));
+    };
+    let seed = rspice_core::engine::PeriodicDcOperatingPointSeed::try_new(
+        point.mna_node_names,
+        point.mna_branch_names,
+        point.mna_solution,
+    )
+    .map_err(|error| SimulationError::SolverError(error.to_string()))?;
+    Ok((physical, seed))
+}
+
 #[cfg(test)]
 mod tests;
-
-impl StudyOperatingPoint {
-    pub(super) fn physical_circuit(
-        &self,
-        circuit: &rspice_core::Netlist,
-        abort: &dyn AbortSignal,
-    ) -> Result<(rspice_core::Netlist, OpConfig), SimulationError> {
-        super::super::spec::ensure_not_aborted(abort)?;
-        let mut physical = circuit.clone();
-        let mut op = self.config.clone();
-        if let (Some(supply), Some(nominal)) = (
-            op.run_point.supply_voltage,
-            op.run_point.nominal_supply_voltage,
-        ) {
-            super::super::spec::run_abort_aware_service(abort, || {
-                rspice_simulation::netlist_preparation::apply_voltage_corner(
-                    &mut physical,
-                    supply,
-                    nominal,
-                    &op.run_point.supply_source_names,
-                    abort,
-                )
-            })?;
-            op.run_point.supply_voltage = None;
-            op.run_point.nominal_supply_voltage = None;
-        }
-        physical.options.temp = Some(op.temperature_celsius);
-        Ok((physical, op))
-    }
-
-    pub(super) fn run(
-        &self,
-        engine: &rspice_core::Engine,
-        circuit: &rspice_core::Netlist,
-        abort: &dyn AbortSignal,
-    ) -> Result<
-        (
-            rspice_core::Netlist,
-            rspice_core::engine::PeriodicDcOperatingPointSeed,
-        ),
-        SimulationError,
-    > {
-        let (physical, op) = self.physical_circuit(circuit, abort)?;
-        let op_circuit = circuit_with_options(&physical, &self.numeric_options, abort)?;
-        let result = EngineBridge::run_materialized_with_abort(
-            engine,
-            &AnalysisConfig::DcOp(op),
-            &op_circuit,
-            abort,
-        )?;
-        let SimulationResult::DcOp(point) = result else {
-            return Err(SimulationError::SolverError(
-                "Periodic study OP producer returned no DC solution".into(),
-            ));
-        };
-        let seed = rspice_core::engine::PeriodicDcOperatingPointSeed::try_new(
-            point.mna_node_names,
-            point.mna_branch_names,
-            point.mna_solution,
-        )
-        .map_err(|error| SimulationError::SolverError(error.to_string()))?;
-        Ok((physical, seed))
-    }
-}

@@ -1,61 +1,50 @@
-//! Configured OP initialization on each varied harmonic-balance study circuit.
+//! Configured HB execution on each materialized study circuit.
 use super::*;
-use crate::simulation::multi_run::AnalysisSpec;
 use rspice_simulation::results::SimulationResult;
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StudyHbConfig {
-    pub request: AnalysisSpec,
-    pub operating_point: StudyOperatingPoint,
-}
-
-impl StudyHbConfig {
-    pub(super) fn validate(&self) -> Result<(), String> {
-        if !matches!(self.request, AnalysisSpec::HarmonicBalance { .. }) {
-            return Err("An HB study requires a harmonic-balance specification".into());
-        }
-        self.request.validate()?;
-        self.operating_point.config.validate()
-    }
-
-    pub(super) fn run_with_circuit(
-        &self,
-        engine: &rspice_core::Engine,
-        circuit: &rspice_core::Netlist,
-        numeric_options: &str,
-        abort: &dyn AbortSignal,
-    ) -> Result<(rspice_core::Netlist, SimulationResult), SimulationError> {
-        self.validate().map_err(SimulationError::InvalidConfig)?;
-        // The HB overlay decides startup; it must not leak into the OP solve.
-        let controls = super::pss::circuit_with_options(circuit, numeric_options, abort)?;
-        let (physical, seed) = if controls.options.hb_time_domain_mode
-            == Some(rspice_core::netlist::XyceHbTimeDomainMode::Direct)
-        {
-            let (physical, _) = self.operating_point.physical_circuit(circuit, abort)?;
-            (physical, None)
-        } else {
-            let (physical, seed) = self.operating_point.run(engine, circuit, abort)?;
-            (physical, Some(seed))
-        };
-        let mut physical = super::pss::circuit_with_options(&physical, numeric_options, abort)?;
-        physical.options.temp = Some(self.operating_point.config.temperature_celsius);
-        let result = super::super::spec::run_hb_seeded_study_on_materialized(
-            self.request.clone(),
-            &physical,
-            seed.as_ref(),
+pub(super) fn run_with_circuit(
+    request_config: &StudyHbConfig,
+    engine: &rspice_core::Engine,
+    circuit: &rspice_core::Netlist,
+    numeric_options: &str,
+    abort: &dyn AbortSignal,
+) -> Result<(rspice_core::Netlist, SimulationResult), SimulationError> {
+    request_config
+        .validate()
+        .map_err(SimulationError::InvalidConfig)?;
+    // The HB overlay decides startup; it must not leak into the OP solve.
+    let controls = super::pss::circuit_with_options(circuit, numeric_options, abort)?;
+    let (physical, seed) = if controls.options.hb_time_domain_mode
+        == Some(rspice_core::netlist::XyceHbTimeDomainMode::Direct)
+    {
+        let (physical, _) =
+            super::pss::physical_circuit(&request_config.operating_point, circuit, abort)?;
+        (physical, None)
+    } else {
+        let (physical, seed) = super::pss::run_operating_point(
+            &request_config.operating_point,
+            engine,
+            circuit,
             abort,
         )?;
-        Ok((physical, result))
-    }
+        (physical, Some(seed))
+    };
+    let mut physical = super::pss::circuit_with_options(&physical, numeric_options, abort)?;
+    physical.options.temp = Some(request_config.operating_point.config.temperature_celsius);
+    let result = super::super::spec::run_hb_seeded_study_on_materialized(
+        request_config.request.clone(),
+        &physical,
+        seed.as_ref(),
+        abort,
+    )?;
+    Ok((physical, result))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::simulation::dialog::{OpConfig, OpTemperatureMode};
-    use crate::simulation::multi_run::HbToneSpec;
+    use crate::simulation::multi_run::{AnalysisSpec, HbToneSpec};
     use rspice_core::{Engine, Netlist, NoAbort};
 
     #[test]
@@ -105,7 +94,7 @@ mod tests {
                 );
                 config.operating_point.numeric_options = ".options invalid_option=1".into();
                 let attempt =
-                    config.run_with_circuit(&Engine::default(), &circuit, &options, &NoAbort);
+                    run_with_circuit(&config, &Engine::default(), &circuit, &options, &NoAbort);
                 let (physical, result) = if mode == Some(0) {
                     attempt.expect("zero start must not execute OP-only numerical options")
                 } else {
@@ -114,8 +103,7 @@ mod tests {
                         "seeded startup must execute the selected OP configuration"
                     );
                     config.operating_point.numeric_options = ".options GMIN=1e-7".into();
-                    config
-                        .run_with_circuit(&Engine::default(), &circuit, &options, &NoAbort)
+                    run_with_circuit(&config, &Engine::default(), &circuit, &options, &NoAbort)
                         .unwrap()
                 };
                 assert_eq!(physical.options.temp, Some(37.0));

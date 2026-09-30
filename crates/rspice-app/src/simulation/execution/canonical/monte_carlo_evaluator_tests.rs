@@ -2,9 +2,11 @@
 
 use super::*;
 use crate::product::ObjectRevision;
-use crate::simulation::runner::study::{
-    StudyAnalysis, StudyOperatingPoint, StudyPostprocess, StudyQpssConfig, StudyRunConfig,
-};
+use rspice_simulation::study::StudyAnalysis;
+use rspice_simulation::study::StudyOperatingPoint;
+use rspice_simulation::study::StudyPostprocess;
+use rspice_simulation::study::StudyQpssConfig;
+use rspice_simulation::study::StudyRunConfig;
 
 fn base(analysis: StudyAnalysis) -> StudyRunConfig {
     StudyRunConfig {

@@ -6,6 +6,7 @@
 pub mod analysis_preparation;
 pub mod compilation;
 pub mod error;
+pub mod execution_options;
 pub mod live_transient;
 pub mod measurement_references;
 pub mod model_import;
@@ -17,8 +18,10 @@ pub mod netlist_sources;
 pub mod optimization;
 pub mod pdk;
 pub mod periodic;
+pub mod prepared_dependency;
 pub mod project_veriloga;
 pub mod results;
 pub mod sealed_source;
+pub mod study;
 pub mod sweeps;
 pub mod veriloga;

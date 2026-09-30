@@ -5,10 +5,9 @@ use crate::simulation::multi_run::{
     FrequencySweep, HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,
     SpPort,
 };
-use crate::simulation::runner::{
-    SpecExecutionOptions, worker_contract::WorkerSpecExecutionOptions,
-};
+use crate::simulation::runner::worker_contract::WorkerSpecExecutionOptions;
 use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
+use rspice_simulation::execution_options::SpecExecutionOptions;
 
 const CIRCUIT: &str = "HB RF study\n.param R=100 ACTUAL={2*R}\n.temp 12\nP1 p1 0 PORT=1 Z0=50\nP2 p2 0 PORT=2 Z0=50\nRS p1 p2 {ACTUAL}\nVIN in 0 DC 0 AC 1\nRNOISE in out {ACTUAL}\n";
 

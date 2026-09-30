@@ -8,6 +8,7 @@ use crate::simulation::multi_run::{
 };
 use crate::simulation::runner::worker_contract::WorkerSpecExecutionOptions;
 use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
+use rspice_simulation::execution_options::SpecExecutionOptions;
 
 const CIRCUIT: &str = "Periodic RF study\n.param R=1000 ACTUAL={2*R}\nVIN in 0 SIN(0 0.1 1k) AC 1\nRVAR in out {ACTUAL} TC1=.01\nRL out 0 2k\nC1 out 0 100n\nLPROBE lp 0 .01\nRPROBE lp 0 {ACTUAL/1000}\nP1 p1 0 PORT=1 Z0=50\nP2 p2 0 PORT=2 Z0=50\nRSP p1 p2 {ACTUAL}\n.options TEMP=12 TNOM=27 GMIN=1e-10\n";
 

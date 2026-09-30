@@ -3,10 +3,9 @@
 use super::*;
 use crate::simulation::config::{FftFormatChoice, FftRequest, TransientAnalysisConfig};
 use crate::simulation::multi_run::{OptimizationAlgorithm, OptimizationGoal, OptimizationVariable};
-use crate::simulation::runner::{
-    SpecExecutionOptions, worker_contract::WorkerSpecExecutionOptions,
-};
+use crate::simulation::runner::worker_contract::WorkerSpecExecutionOptions;
 use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
+use rspice_simulation::execution_options::SpecExecutionOptions;
 
 fn study(fft: bool) -> StudyRunConfig {
     let request = if fft {

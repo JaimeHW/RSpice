@@ -128,8 +128,7 @@ pub(crate) fn run_optimization(
             environment.as_ref(),
             &signal,
         )?;
-        let result = base
-            .run_trial(&engine, &analysis, &candidate, &signal)
+        let result = super::spectral::run_trial(base, &engine, &analysis, &candidate, &signal)
             .map_err(|error| match error {
                 SimulationError::SolverError(_)
                 | SimulationError::ConvergenceFailed { .. }
@@ -257,10 +256,10 @@ mod tests {
     use crate::simulation::multi_run::{
         AnalysisSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,
     };
-    use crate::simulation::runner::{
-        SimulationRequest, SpecExecutionOptions, worker_contract::WorkerSimulationRequest,
-    };
+    use crate::simulation::runner::SimulationRequest;
+    use crate::simulation::runner::worker_contract::WorkerSimulationRequest;
     use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
+    use rspice_simulation::execution_options::SpecExecutionOptions;
 
     fn base(analysis: AnalysisConfig, measurement: &str) -> StudyRunConfig {
         StudyRunConfig {

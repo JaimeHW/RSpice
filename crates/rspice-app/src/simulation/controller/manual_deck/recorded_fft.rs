@@ -32,7 +32,7 @@ pub(super) fn manual_fft_tasks(parsed: &Netlist) -> Result<Vec<QueuedAnalysis>, 
         tasks.push(QueuedAnalysis {
             spec: AnalysisSpec::Fft { request },
             config: None,
-            spec_options: crate::simulation::runner::SpecExecutionOptions::default(),
+            spec_options: rspice_simulation::execution_options::SpecExecutionOptions::default(),
             analysis_line,
             numeric_override: None,
         });

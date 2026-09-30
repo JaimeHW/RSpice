@@ -1,14 +1,15 @@
 //! Study dispatch tests execute HB current analyses in Monte Carlo and optimization.
 
 use super::*;
+use crate::simulation::multi_run::AnalysisSpec;
 use crate::simulation::multi_run::{
     HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,
 };
-use rspice_simulation::results::SimulationResult;
-use crate::simulation::runner::{
-    SimulationRequest, SpecExecutionOptions, worker_contract::WorkerSpecExecutionOptions,
-};
+use crate::simulation::runner::SimulationRequest;
+use crate::simulation::runner::worker_contract::WorkerSpecExecutionOptions;
 use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
+use rspice_simulation::execution_options::SpecExecutionOptions;
+use rspice_simulation::results::SimulationResult;
 
 fn base() -> StudyRunConfig {
     StudyRunConfig {
@@ -94,7 +95,7 @@ fn hb_current_study_monte_carlo_runs_each_materialized_circuit_and_run_set_point
         nominal_supply_voltage: Some(1.2),
         supply_source_names: vec!["VDD".into()],
     });
-    let data = super::super::run_monte_carlo(
+    let data = super::run_monte_carlo(
         restored.study_base.as_ref().unwrap(),
         McVariationSource::ParameterTolerance,
         &deck,
@@ -148,7 +149,7 @@ fn hb_current_study_monte_carlo_runs_each_materialized_circuit_and_run_set_point
             .all(|value| (value - 2.4).abs() < 1e-9)
     );
     assert!(matches!(
-        super::super::run_monte_carlo(
+        super::run_monte_carlo(
             &base,
             McVariationSource::ParameterTolerance,
             &deck,
@@ -160,7 +161,7 @@ fn hb_current_study_monte_carlo_runs_each_materialized_circuit_and_run_set_point
     ));
     base.measurements = vec!["scalar:V(out)".into()];
     assert!(
-        super::super::run_monte_carlo(
+        super::run_monte_carlo(
             &base,
             McVariationSource::ParameterTolerance,
             &deck,

@@ -94,7 +94,7 @@ impl From<WorkerSpecExecutionOptions> for SpecExecutionOptions {
             mc_checkpoint: value.mc_checkpoint,
             study_base: value
                 .study_base
-                .map(crate::simulation::runner::study::StudyRunConfig::from),
+                .map(rspice_simulation::study::StudyRunConfig::from),
             temp: value
                 .temp
                 .map(rspice_simulation::sweeps::TempRunConfig::from),
@@ -129,13 +129,13 @@ pub(crate) enum WorkerStudyAnalysis {
         native_spec: AnalysisSpec,
     },
     Pss {
-        pss: Box<crate::simulation::runner::study::StudyPssConfig>,
+        pss: Box<rspice_simulation::study::StudyPssConfig>,
     },
     Qpss {
-        qpss: Box<crate::simulation::runner::study::StudyQpssConfig>,
+        qpss: Box<rspice_simulation::study::StudyQpssConfig>,
     },
     Hb {
-        hb: Box<crate::simulation::runner::study::StudyHbConfig>,
+        hb: Box<rspice_simulation::study::StudyHbConfig>,
     },
 }
 
@@ -160,9 +160,9 @@ impl WorkerStudyAnalysis {
     }
 }
 
-impl From<&crate::simulation::runner::study::StudyAnalysis> for WorkerStudyAnalysis {
-    fn from(value: &crate::simulation::runner::study::StudyAnalysis) -> Self {
-        use crate::simulation::runner::study::StudyAnalysis;
+impl From<&rspice_simulation::study::StudyAnalysis> for WorkerStudyAnalysis {
+    fn from(value: &rspice_simulation::study::StudyAnalysis) -> Self {
+        use rspice_simulation::study::StudyAnalysis;
         match value {
             StudyAnalysis::Basic(config) => Self::Basic(WorkerAnalysisConfig::from(config)),
             StudyAnalysis::Pss(pss) => Self::Pss { pss: pss.clone() },
@@ -175,7 +175,7 @@ impl From<&crate::simulation::runner::study::StudyAnalysis> for WorkerStudyAnaly
     }
 }
 
-impl From<WorkerStudyAnalysis> for crate::simulation::runner::study::StudyAnalysis {
+impl From<WorkerStudyAnalysis> for rspice_simulation::study::StudyAnalysis {
     fn from(value: WorkerStudyAnalysis) -> Self {
         match value {
             WorkerStudyAnalysis::Basic(config) => Self::Basic(AnalysisConfig::from(config)),
@@ -190,7 +190,7 @@ impl From<WorkerStudyAnalysis> for crate::simulation::runner::study::StudyAnalys
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerStudyRunConfig {
     #[serde(default)]
-    postprocess: Option<crate::simulation::runner::study::StudyPostprocess>,
+    postprocess: Option<rspice_simulation::study::StudyPostprocess>,
     instance_id: crate::product::AnalysisInstanceId,
     source_revision: crate::product::ObjectRevision,
     pub(super) analysis: WorkerStudyAnalysis,
@@ -204,9 +204,9 @@ pub(crate) struct WorkerStudyRunConfig {
     constraints: Vec<rspice_results::optimization::OptimizationConstraint>,
 }
 
-impl From<&crate::simulation::runner::study::StudyRunConfig> for WorkerStudyRunConfig {
-    fn from(value: &crate::simulation::runner::study::StudyRunConfig) -> Self {
-        let crate::simulation::runner::study::StudyRunConfig {
+impl From<&rspice_simulation::study::StudyRunConfig> for WorkerStudyRunConfig {
+    fn from(value: &rspice_simulation::study::StudyRunConfig) -> Self {
+        let rspice_simulation::study::StudyRunConfig {
             postprocess,
             instance_id,
             source_revision,
@@ -233,7 +233,7 @@ impl From<&crate::simulation::runner::study::StudyRunConfig> for WorkerStudyRunC
     }
 }
 
-impl From<WorkerStudyRunConfig> for crate::simulation::runner::study::StudyRunConfig {
+impl From<WorkerStudyRunConfig> for rspice_simulation::study::StudyRunConfig {
     fn from(value: WorkerStudyRunConfig) -> Self {
         let WorkerStudyRunConfig {
             postprocess,

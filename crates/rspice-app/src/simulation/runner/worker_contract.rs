@@ -78,7 +78,8 @@ use std::sync::{Arc, Mutex, atomic::AtomicBool};
 
 use serde::{Deserialize, Serialize};
 
-use super::{NetlistInput, SimulationRequest, SpecExecutionOptions};
+use super::NetlistInput;
+use super::SimulationRequest;
 use crate::results::safety::{SoAEvaluation, SoAViolation};
 use crate::simulation::config::AnalysisConfig;
 #[cfg(test)]
@@ -87,6 +88,7 @@ use crate::simulation::multi_run::{AnalysisSpec, TfAccuracy, TfNormalization};
 #[cfg(test)]
 use rspice_results::validation::ResultSchemaMismatch;
 use rspice_simulation::error::SimulationError;
+use rspice_simulation::execution_options::SpecExecutionOptions;
 
 use crate::simulation::status::{SimulationProgress, SimulationStatus};
 use rspice_results::noise::NoiseSummary;

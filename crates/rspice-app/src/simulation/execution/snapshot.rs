@@ -28,14 +28,15 @@ use rspice_simulation::netlist_preparation::splice_before_terminal_end_card;
 #[cfg(test)]
 use crate::state::AnalysisResultSourceDomain;
 
-use super::artifact::{
-    ExecutionArtifactEnvelope, ExecutionArtifactError, ExecutionArtifactKind,
-    PreparedDependencyBinding, ResolvedExecutionDependencies,
-    validate_prepared_dependency_contract_with_options,
-};
+use super::artifact::ExecutionArtifactEnvelope;
+use super::artifact::PreparedDependencyBinding;
+use super::artifact::ResolvedExecutionDependencies;
 use super::canonical::analysis_config_digest;
 use super::permit::ConsumedExecutionPermit;
 use rspice_app_types::canonical::{CanonicalWriter, content_digest};
+use rspice_simulation::prepared_dependency::ExecutionArtifactError;
+use rspice_simulation::prepared_dependency::ExecutionArtifactKind;
+use rspice_simulation::prepared_dependency::validate_prepared_dependency_contract_with_options;
 
 pub(in crate::simulation) mod bound_cards;
 mod declared_points;
@@ -908,7 +909,7 @@ impl AuthorizedTaskDispatch {
 
     pub(in crate::simulation) fn spec_options(
         &self,
-    ) -> &crate::simulation::runner::SpecExecutionOptions {
+    ) -> &rspice_simulation::execution_options::SpecExecutionOptions {
         &self.task.spec_options
     }
 
@@ -1302,10 +1303,11 @@ impl PreparedRunSnapshot {
                 }
             }
 
-            let expected_artifact_kinds = crate::simulation::execution::required_artifact_kinds(
-                &task.task.spec,
-                &task.task.spec_options,
-            );
+            let expected_artifact_kinds =
+                rspice_simulation::prepared_dependency::required_artifact_kinds(
+                    &task.task.spec,
+                    &task.task.spec_options,
+                );
             let expected_binding_count = usize::from(!expected_artifact_kinds.is_empty());
             if task.dependency_bindings.len() != expected_binding_count {
                 return Err(PreparationError::new(

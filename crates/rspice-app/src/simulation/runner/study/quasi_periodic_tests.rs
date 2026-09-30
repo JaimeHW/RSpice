@@ -8,12 +8,11 @@ use crate::simulation::plan::{
     QpnoiseOutputDraft, QpnoiseSourceSelection, QpssDraft, QpxfSidebandSelection,
     QpxfSourceSelection, QuasiPeriodicAcDraft, QuasiPeriodicNoiseDraft, QuasiPeriodicTransferDraft,
 };
-use rspice_simulation::results::SimulationResult;
-use crate::simulation::runner::{
-    SpecExecutionOptions, worker_contract::WorkerSpecExecutionOptions,
-};
+use crate::simulation::runner::worker_contract::WorkerSpecExecutionOptions;
 use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
 use rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod;
+use rspice_simulation::execution_options::SpecExecutionOptions;
+use rspice_simulation::results::SimulationResult;
 
 const CIRCUIT: &str = "Quasi periodic study\n.param R=1000 ACTUAL={2*R}\nV1 in 0 DC 0.2 AC 0.3 30\nI1 0 out DC 0 AC 0.001 -20\nRS in out {ACTUAL} TC1=0.01\nRL out 0 2k\nC1 out 0 100n\n.options TEMP=12 TNOM=27 GMIN=1e-10\n";
 fn producer() -> AnalysisSpec {
@@ -462,9 +461,9 @@ fn qp_study_uses_exact_dc_seed_and_preserves_zero_start_and_supply_environment()
             ".options GMIN=1e-7"
         }
         .into();
-        let (_, result) = qpss
-            .run_with_circuit(&engine, &circuit, &base.numeric_options, &NoAbort)
-            .unwrap();
+        let (_, result) =
+            super::qpss::run_with_circuit(qpss, &engine, &circuit, &base.numeric_options, &NoAbort)
+                .unwrap();
         let actual = result
             .study_measurement("tuple:0,0:real:V(out)")
             .unwrap()

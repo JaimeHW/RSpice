@@ -78,20 +78,6 @@ impl SimulationController {
     }
 }
 
-/// Capture cadence is shared across points; selected trial data is routed after
-/// the Run Set has materialized each point's source and numerical environment.
-pub(super) fn request_from_config(
-    config: Option<&crate::simulation::dialog::mc::checkpoint::McCheckpointConfig>,
-) -> Option<rspice_simulation::monte_carlo_checkpoint::MonteCarloCheckpointRequest> {
-    config.map(
-        |config| rspice_simulation::monte_carlo_checkpoint::MonteCarloCheckpointRequest {
-            publish_every: config.publish_every,
-            trial_range: None,
-            resume: None,
-        },
-    )
-}
-
 /// Resolve selected history into checked populations before freezing a task.
 /// Different populations stay separate; matching trial journals pool exactly.
 pub(super) fn resume_inputs_from_config(

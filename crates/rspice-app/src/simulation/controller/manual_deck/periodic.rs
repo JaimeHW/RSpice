@@ -52,7 +52,7 @@ use super::*;
 // which one each site means.
 use crate::services::simulation_runner::PeriodicCarrier as CarrierSelector;
 use crate::simulation::multi_run::{AnalysisSpec, PssMethod};
-use crate::simulation::runner::SpecExecutionOptions;
+use rspice_simulation::execution_options::SpecExecutionOptions;
 use rspice_simulation::periodic::{
     PacFrequencySweep, PacRunConfig, PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
     PstbRunConfig, PxfFrequencySweep, PxfRunConfig,
