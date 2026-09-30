@@ -97,7 +97,7 @@ impl From<&str> for ServiceRunError {
 }
 
 #[inline]
-pub(crate) fn ensure_not_aborted(abort: &dyn AbortSignal) -> ServiceRunResult<()> {
+pub fn ensure_not_aborted(abort: &dyn AbortSignal) -> ServiceRunResult<()> {
     if abort.is_aborted() {
         Err(ServiceRunError::Aborted)
     } else {
@@ -111,7 +111,7 @@ pub(crate) fn ensure_not_aborted(abort: &dyn AbortSignal) -> ServiceRunResult<()
 /// bounds cancellation latency without paying for a virtual/atomic poll on
 /// every copied or transformed sample.
 #[inline]
-pub(crate) fn poll_periodically(abort: &dyn AbortSignal, index: usize) -> ServiceRunResult<()> {
+pub fn poll_periodically(abort: &dyn AbortSignal, index: usize) -> ServiceRunResult<()> {
     const POLL_STRIDE: usize = 64;
     if index.is_multiple_of(POLL_STRIDE) {
         ensure_not_aborted(abort)?;

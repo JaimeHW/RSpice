@@ -28,7 +28,7 @@ pub(in crate::simulation) struct TransientTrajectoryArtifact {
     /// Defaulted, so an artifact without spectra is byte-identical to one
     /// produced before they existed — including its digest.
     #[serde(default)]
-    spectra: Vec<Arc<crate::simulation::results::RecordedFftSpectrum>>,
+    spectra: Vec<Arc<rspice_simulation::results::RecordedFftSpectrum>>,
 }
 
 mod f64_bits_vec {
@@ -193,7 +193,7 @@ impl TransientTrajectoryArtifact {
         // Two FFT instances with identical requests put the same card in the
         // deck twice, so the engine returns the same spectrum twice. They are
         // equal numbers under one key, and one copy is what the artifact holds.
-        let mut carried: Vec<Arc<crate::simulation::results::RecordedFftSpectrum>> = Vec::new();
+        let mut carried: Vec<Arc<rspice_simulation::results::RecordedFftSpectrum>> = Vec::new();
         if carry_spectra {
             for spectrum in spectra {
                 if !carried
@@ -263,7 +263,7 @@ impl TransientTrajectoryArtifact {
     pub(in crate::simulation) fn spectrum(
         &self,
         key: &str,
-    ) -> Option<&Arc<crate::simulation::results::RecordedFftSpectrum>> {
+    ) -> Option<&Arc<rspice_simulation::results::RecordedFftSpectrum>> {
         self.spectra
             .iter()
             .find(|spectrum| spectrum.request_key == key)

@@ -80,7 +80,8 @@ mod tests {
     use crate::simulation::runner::{
         SpecExecutionOptions, worker_contract::WorkerSpecExecutionOptions,
     };
-    use crate::simulation::{multi_run::AnalysisSpec, results::SimulationResult};
+    use crate::simulation::multi_run::AnalysisSpec;
+    use rspice_simulation::results::SimulationResult;
     use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
 
     fn base(analysis: AnalysisConfig, names: &[&str]) -> StudyRunConfig {
@@ -813,7 +814,7 @@ fn validate_qpss_measurements(
     for request in measurements {
         let (mode, key) = request.split_once(':').unwrap_or(("meas", request));
         if mode.eq_ignore_ascii_case("tuple") {
-            let (tuple, _, _) = crate::simulation::results::parse_study_tuple(key)?;
+            let (tuple, _, _) = rspice_simulation_contract::study_measurement::parse_study_tuple(key)?;
             if grid.index_of(&tuple).is_none() {
                 return Err(format!("QPSS does not retain lattice tuple {tuple:?}"));
             }

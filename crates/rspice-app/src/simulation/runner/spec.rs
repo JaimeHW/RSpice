@@ -13,7 +13,7 @@ use crate::services::simulation_runner as svc_runner;
 use super::super::engine_bridge::{EngineBridge, SupplyCornerScale};
 use super::super::execution::ResolvedExecutionDependencies;
 use super::super::multi_run::AnalysisSpec;
-use super::super::results::SimulationResult;
+use rspice_simulation::results::SimulationResult;
 use super::{AnalysisExecutionEnvironment, SimulationError, SpecExecutionOptions};
 
 type CheckpointObserver<'a> = dyn Fn(&[u8]) -> Result<(), SimulationError> + Sync + 'a;

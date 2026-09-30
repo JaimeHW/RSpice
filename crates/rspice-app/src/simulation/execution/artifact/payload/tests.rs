@@ -6,7 +6,7 @@
 //! belongs to a different frozen configuration.
 
 use super::*;
-use crate::simulation::results::WaveformData;
+use rspice_simulation::results::WaveformData;
 
 fn digest(byte: u8) -> ContentDigest {
     ContentDigest::from_bytes([byte; 32])
@@ -608,7 +608,7 @@ fn dc_operating_point_result() -> SimulationResult {
     configuration.run_point.supply_voltage = Some(1.2);
     configuration.run_point.nominal_supply_voltage = Some(1.0);
     configuration.run_point.supply_source_names = vec!["V1".to_owned()];
-    SimulationResult::DcOp(Box::new(crate::simulation::results::DcOpResult {
+    SimulationResult::DcOp(Box::new(rspice_simulation::results::DcOpResult {
         configuration,
         mna_node_names: vec!["in".to_owned(), "out".to_owned()],
         mna_branch_names: vec!["V1".to_owned()],

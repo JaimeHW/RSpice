@@ -7,7 +7,7 @@
 mod objective;
 pub use objective::validate_optimization_expression;
 
-use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
+use rspice_simulation::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use super::{build_engine_config, is_ground_like, parse_runner_netlist_with_abort};
 use crate::simulation::optimizer::{DesignVar, OptimizerEngine};
 use rspice_core::Value;

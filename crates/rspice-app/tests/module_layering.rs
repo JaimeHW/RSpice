@@ -203,7 +203,6 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("io", "workbench", 15),
     // The persisted model reaching up into orchestration and editors.
     ("state", "simulation", 7),
-    ("state", "services", 9),
     ("state", "io", 5),
     // Editors and orchestration referencing each other sideways; retired by
     // the granularity folds and the `properties`/`panels` merge.
@@ -1339,7 +1338,7 @@ fn source_files_have_no_byte_order_mark() {
 /// `helpers::infer_primary_{source_name,output_node}_with_abort` went too:
 /// both took a first-or-last element off a solved deck, and the offer needs a
 /// *sole* source or it has nothing to offer.
-const MAX_LINT_SUPPRESSIONS: usize = 47;
+const MAX_LINT_SUPPRESSIONS: usize = 46;
 
 /// The crate does not accumulate lint suppressions.
 #[test]

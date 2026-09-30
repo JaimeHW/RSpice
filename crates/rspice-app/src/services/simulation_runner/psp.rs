@@ -15,7 +15,7 @@ use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::s_param;
 
-use super::error::{ensure_not_aborted, poll_periodically};
+use rspice_simulation::error::{ensure_not_aborted, poll_periodically};
 use super::{
     SParameterPort, ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
     parse_runner_netlist_with_abort,

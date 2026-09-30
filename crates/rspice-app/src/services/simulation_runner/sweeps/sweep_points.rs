@@ -8,7 +8,7 @@ use rspice_core::netlist::StepSweep;
 use rspice_core::{ResourceKind, ResourceLimits, Value};
 use std::fmt;
 
-use super::super::error::{ServiceRunError, ServiceRunResult, poll_periodically};
+use rspice_simulation::error::{ServiceRunError, ServiceRunResult, poll_periodically};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum StepSweepExpandError {

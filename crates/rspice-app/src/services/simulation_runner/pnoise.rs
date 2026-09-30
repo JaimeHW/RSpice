@@ -4,7 +4,7 @@
 //! This is the analysis that gives oscillator phase noise and mixer noise
 //! figure, where noise at every sideband folds onto the output.
 
-use super::error::{ensure_not_aborted, poll_periodically};
+use rspice_simulation::error::{ensure_not_aborted, poll_periodically};
 use super::periodic_carrier::{PeriodicCarrier, PeriodicCarrierState};
 use super::{
     ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,

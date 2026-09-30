@@ -153,7 +153,7 @@ fn multirate_envelope_independent_tones_adapt_and_transfer_exact_event_measureme
     let deck = DECK.replace(".end", "Vac second 0 AC .2 90\nRac second out 1k\n.options output outputtimepoints=0,.001,.002\n.end");
     let result = crate::simulation::runner::pvt_point_evidence::run_standalone_spec(&deck, spec);
     let result = round_trip_response_for_test(result);
-    let crate::simulation::results::SimulationResult::Transient {
+    let rspice_simulation::results::SimulationResult::Transient {
         time,
         waveforms,
         measurements,
@@ -209,7 +209,7 @@ fn multirate_envelope_strobe_preserves_incoming_and_outgoing_source_limits() {
     let spec = spec(&draft());
     let deck = DECK.replace(".end", ".options output initial_interval=.65m\n.end");
     let result = crate::simulation::runner::pvt_point_evidence::run_standalone_spec(&deck, spec);
-    let crate::simulation::results::SimulationResult::Transient {
+    let rspice_simulation::results::SimulationResult::Transient {
         time, waveforms, ..
     } = result
     else {

@@ -1,6 +1,6 @@
 //! Small-signal Volterra distortion analysis.
 
-use super::error::{ensure_not_aborted, poll_periodically};
+use rspice_simulation::error::{ensure_not_aborted, poll_periodically};
 use super::{
     ServiceRunError, ServiceRunResult, build_engine_config, generate_freq_points_with_abort,
     parse_runner_netlist_with_abort,

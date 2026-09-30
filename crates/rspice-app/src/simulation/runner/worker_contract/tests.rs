@@ -229,7 +229,7 @@ pub(super) fn authenticated_pstb_result() -> SimulationResult {
     )
     .unwrap();
     let modes = vec![
-        crate::simulation::results::PstbFloquetMode {
+        rspice_simulation::results::PstbFloquetMode {
             multiplier: (first.re, first.im),
             exponent: (first.ln().re / period, first.ln().im / period),
             probe_participation: 0.25,
@@ -237,7 +237,7 @@ pub(super) fn authenticated_pstb_result() -> SimulationResult {
             is_trivial: false,
             subharmonic_order: None,
         },
-        crate::simulation::results::PstbFloquetMode {
+        rspice_simulation::results::PstbFloquetMode {
             multiplier: (second.re, second.im),
             exponent: (second.ln().re / period, second.ln().im / period),
             probe_participation: 0.75,
@@ -399,7 +399,7 @@ use crate::simulation::multi_run::{
     FrequencySweep, HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,
     PssMethod, SpPort,
 };
-use crate::simulation::results::{
+use rspice_simulation::results::{
     DcOpResult, SimulationResult, TransferFunctionQuantity, TransferFunctionScalar, WaveformData,
 };
 use std::collections::HashMap;
@@ -1404,11 +1404,11 @@ fn event_histories_survive_the_worker_edge_in_both_directions() {
         measurements: Vec::new(),
         periodic_state: None,
         convergence: Default::default(),
-        events: crate::simulation::results::TransientEventHistory {
+        events: rspice_simulation::results::TransientEventHistory {
             current_impulses: None,
-            digital: vec![crate::simulation::results::EventNodeHistory {
+            digital: vec![rspice_simulation::results::EventNodeHistory {
                 node_name: "clk".to_owned(),
-                points: vec![crate::simulation::results::DigitalEventPoint {
+                points: vec![rspice_simulation::results::DigitalEventPoint {
                     time_s: 5e-10,
                     value_code: 1,
                 }],

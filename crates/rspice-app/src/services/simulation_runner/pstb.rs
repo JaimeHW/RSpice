@@ -16,10 +16,10 @@
 use super::parse_runner_netlist_with_abort;
 use super::{
     ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
-    error::{ensure_not_aborted, poll_periodically},
 };
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
+use rspice_simulation::error::{ensure_not_aborted, poll_periodically};
 #[cfg(test)]
 use std::path::Path;
 

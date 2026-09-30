@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::simulation::multi_run::AnalysisSpec;
-use crate::simulation::results::SimulationResult;
+use rspice_simulation::results::SimulationResult;
 use crate::simulation::runner::{
     SpecExecutionOptions,
     monte_carlo_checkpoint::{MonteCarloCheckpointInput, MonteCarloCheckpointRequest},

@@ -7,7 +7,7 @@ use rspice_core::abort_signal::AbortSignal;
 
 use super::{EngineBridge, ensure_not_aborted};
 use crate::simulation::config::TransientAnalysisConfig;
-use crate::simulation::results::{SimulationResult, WaveformData};
+use rspice_simulation::results::{SimulationResult, WaveformData};
 use crate::simulation::runner::SimulationError;
 use rspice_core::netlist::AnalysisCommand;
 
@@ -533,8 +533,8 @@ fn collect_event_history(
     tran_result: &rspice_core::engine::TransientResult,
     start_time: f64,
     abort: &dyn AbortSignal,
-) -> Result<crate::simulation::results::TransientEventHistory, SimulationError> {
-    use crate::simulation::results::{
+) -> Result<rspice_simulation::results::TransientEventHistory, SimulationError> {
+    use rspice_simulation::results::{
         DigitalEventPoint, EventNodeHistory, RealEventPoint, TransientEventHistory,
     };
 

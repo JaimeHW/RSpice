@@ -8,7 +8,7 @@ use crate::simulation::plan::{
     QpnoiseOutputDraft, QpnoiseSourceSelection, QpssDraft, QpxfSidebandSelection,
     QpxfSourceSelection, QuasiPeriodicAcDraft, QuasiPeriodicNoiseDraft, QuasiPeriodicTransferDraft,
 };
-use crate::simulation::results::SimulationResult;
+use rspice_simulation::results::SimulationResult;
 use crate::simulation::runner::{
     SpecExecutionOptions, worker_contract::WorkerSpecExecutionOptions,
 };

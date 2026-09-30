@@ -7,7 +7,7 @@ use rspice_core::abort_signal::AbortSignal;
 
 use crate::services::simulation_runner as svc_runner;
 use crate::simulation::multi_run::AnalysisSpec;
-use crate::simulation::results::{MonteCarloVariableResult, SimulationResult, WaveformData};
+use rspice_simulation::results::{MonteCarloVariableResult, SimulationResult, WaveformData};
 use crate::simulation::runner::{
     AnalysisExecutionEnvironment, SimulationError, SpecExecutionOptions,
 };

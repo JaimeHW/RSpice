@@ -2,7 +2,7 @@
 use super::*;
 #[test]
 fn qpnoise_result_transport_uses_one_buffer_and_refuses_corruption() {
-    let SimulationResult::Qpnoise { response, .. } = SimulationResult::qpnoise_test_fixture()
+    let SimulationResult::Qpnoise { response, .. } = crate::simulation::results::qpnoise_test_fixture()
     else {
         unreachable!()
     };

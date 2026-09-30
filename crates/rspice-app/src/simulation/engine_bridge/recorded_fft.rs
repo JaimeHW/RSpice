@@ -12,7 +12,7 @@ use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::TransientFftResult;
 
 use crate::simulation::config::FftRequest;
-use crate::simulation::results::RecordedFftSpectrum;
+use rspice_simulation::results::RecordedFftSpectrum;
 use crate::simulation::runner::SimulationError;
 
 /// Convert the spectra one transient returned, keyed by their own cards.
@@ -66,7 +66,7 @@ pub(super) fn recorded_spectra(
 #[cfg(test)]
 mod tests {
     use crate::simulation::config::FftRequest;
-    use crate::simulation::results::SimulationResult;
+    use rspice_simulation::results::SimulationResult;
 
     fn run(deck: &str, stop: f64) -> SimulationResult {
         let netlist = rspice_core::Netlist::parse(deck).expect("the deck parses");

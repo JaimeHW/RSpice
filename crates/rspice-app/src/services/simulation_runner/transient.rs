@@ -3,7 +3,7 @@
 //! Time-domain integration from an initial condition, returning node
 //! voltage waveforms.
 
-use super::error::{ensure_not_aborted, poll_periodically};
+use rspice_simulation::error::{ensure_not_aborted, poll_periodically};
 use super::{ServiceRunError, ServiceRunResult};
 #[cfg(test)]
 use super::{build_engine_config, parse_runner_netlist_with_abort};

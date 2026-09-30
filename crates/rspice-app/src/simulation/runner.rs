@@ -21,7 +21,7 @@ use crate::diagnostics::engine_log::{EngineLogLine, EngineLogQueue, RunLogSink};
 use super::config::AnalysisConfig;
 use super::execution::{ResolvedExecutionDependencies, ResolvedTaskDispatch};
 use super::multi_run::AnalysisSpec;
-use super::results::SimulationResult;
+use rspice_simulation::results::SimulationResult;
 use super::status::{SimulationProgress, SimulationStatus};
 
 /// Maximum UI-only transient deltas waiting for an application frame.

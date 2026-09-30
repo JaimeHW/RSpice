@@ -19,6 +19,7 @@ wasm-jit = ["rspice-veriloga/wasm-jit"]
 [dependencies]
 base64.workspace = true
 rspice-app-types.workspace = true
+rspice-results = { workspace = true, features = ["engine-evidence"] }
 rspice-design.workspace = true
 rspice-design-model.workspace = true
 rspice-simulation-contract.workspace = true
@@ -30,6 +31,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 toml.workspace = true
+thiserror.workspace = true
 uuid = { workspace = true, features = ["v5"] }
 wasmi.workspace = true
 

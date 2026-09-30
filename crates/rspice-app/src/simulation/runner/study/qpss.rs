@@ -1,7 +1,7 @@
 //! Configured operating-point initialization for each quasiperiodic study trial.
 use super::*;
 use crate::simulation::multi_run::AnalysisSpec;
-use crate::simulation::results::SimulationResult;
+use rspice_simulation::results::SimulationResult;
 use rspice_core::engine::QpssInitialState;
 use serde::{Deserialize, Serialize};
 

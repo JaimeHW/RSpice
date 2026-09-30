@@ -4,7 +4,7 @@
 //! prepared task, so what a declaration needs from this module is the list of
 //! points it will have to answer for.
 
-use super::super::error::{ServiceRunError, ServiceRunResult};
+use rspice_simulation::error::{ServiceRunError, ServiceRunResult};
 use super::types::{CornerPoint, CornerRunConfig};
 
 /// Turn a corner contract into the exact points it declares.

@@ -2487,7 +2487,7 @@ mod contribution;
 
 #[test]
 fn qpnoise_result_noise_figure_export_preserves_signed_output_frequencies() {
-    let result = crate::simulation::SimulationResult::qpnoise_retained_test_fixture();
+    let result = crate::simulation::results::qpnoise_retained_test_fixture();
     let expected = result.waveforms.len();
     let state = quick_view_state(result, ResultViewer::NoiseContrib);
     let resolved = resolve_quick_view(&state).unwrap();

@@ -4,7 +4,7 @@
 //! adaptive, or event-aligned schedules select output projection times;
 //! they do not skip RF cycles during transient integration.
 
-use super::error::{ensure_not_aborted, poll_periodically};
+use rspice_simulation::error::{ensure_not_aborted, poll_periodically};
 #[cfg(test)]
 use super::run_transient_analysis_with_source_path_and_abort;
 use super::{

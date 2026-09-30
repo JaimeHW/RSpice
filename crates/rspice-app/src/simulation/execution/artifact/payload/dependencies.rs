@@ -579,7 +579,7 @@ impl ResolvedExecutionDependencies {
                         let mut spectra = Vec::with_capacity(metadata.spectra.len());
                         for spectrum in metadata.spectra {
                             spectra.push(Arc::new(
-                                crate::simulation::results::RecordedFftSpectrum {
+                                rspice_simulation::results::RecordedFftSpectrum {
                                     request_key: spectrum.request_key,
                                     evidence: spectrum.evidence,
                                     frequency: take_transfer_buffer(

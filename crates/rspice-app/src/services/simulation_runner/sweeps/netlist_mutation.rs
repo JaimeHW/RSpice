@@ -8,7 +8,7 @@ use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::netlist::{ElementKind, SourceSpec};
 
-use super::super::error::{
+use rspice_simulation::error::{
     ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically,
 };
 

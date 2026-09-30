@@ -29,7 +29,7 @@ use crate::services::simulation_runner::{
 };
 use crate::simulation::SimulationResult;
 use crate::simulation::execution::AuthorizedTaskDispatch;
-use crate::simulation::results::WaveformData;
+use rspice_simulation::results::WaveformData;
 use crate::state::{AnalysisResult, AnalysisResultPayload, SimulationRun};
 
 /// Ground, which the sweep mappers require at index 0 and never plot.

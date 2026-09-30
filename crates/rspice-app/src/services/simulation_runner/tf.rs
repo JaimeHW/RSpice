@@ -4,7 +4,7 @@
 //! point. It is not an AC sweep: gain, input resistance, and output
 //! resistance are produced by the engine's zero-hertz linearized solves.
 
-use super::error::ensure_not_aborted;
+use rspice_simulation::error::ensure_not_aborted;
 use super::{
     ServiceRunError, ServiceRunResult, build_engine_config, is_ground_like,
     parse_runner_netlist_with_abort,

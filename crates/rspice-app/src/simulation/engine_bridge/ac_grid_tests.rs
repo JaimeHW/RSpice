@@ -1,7 +1,7 @@
 //! Verify that authored AC grids reach the engine unchanged.
 
 use crate::simulation::config::{AcAnalysisConfig, AcSweepType};
-use crate::simulation::results::SimulationResult;
+use rspice_simulation::results::SimulationResult;
 use crate::simulation::{AnalysisConfig, EngineBridge};
 
 #[test]

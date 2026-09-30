@@ -125,7 +125,7 @@ impl SimulationController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::results::WaveformData;
+    use rspice_simulation::results::WaveformData;
 
     /// An N-port S-parameter result, as the runner assembles one.
     fn matrix_result(num_ports: usize) -> crate::simulation::SimulationResult {

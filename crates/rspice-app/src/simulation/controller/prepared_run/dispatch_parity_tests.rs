@@ -104,7 +104,7 @@ fn independent_ac_data_instances_keep_their_own_parameter_tables() {
                 &rspice_core::NoAbort,
             )
             .unwrap();
-        let crate::simulation::results::SimulationResult::Ac {
+        let rspice_simulation::results::SimulationResult::Ac {
             frequencies,
             waveforms,
             ..

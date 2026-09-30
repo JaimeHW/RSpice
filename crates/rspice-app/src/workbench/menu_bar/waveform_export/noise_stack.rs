@@ -51,7 +51,7 @@ mod tests {
     #[test]
     fn qpnoise_result_noise_sheet_export_preserves_all_displayed_analyses() {
         use crate::state::{AnalysisResult, AnalysisType, WaveformData};
-        let qpnoise = crate::simulation::SimulationResult::qpnoise_retained_test_fixture();
+        let qpnoise = crate::simulation::results::qpnoise_retained_test_fixture();
         let mut state = crate::workbench::AppState::default();
         state.simulation.start_run().add_analysis(qpnoise);
         state.simulation.active_analysis_idx = Some(0);

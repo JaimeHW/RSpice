@@ -6,7 +6,9 @@ pub(super) fn unit(symbol: &str) -> MeasurementUnit {
     MeasurementUnit::known(symbol).unwrap_or(MeasurementUnit::Unknown)
 }
 
-pub(super) fn fft_unit(evidence: &crate::state::FftSpectrumEvidence) -> MeasurementUnit {
+pub(super) fn fft_unit(
+    evidence: &rspice_results::fft::spectrum::FftSpectrumEvidence,
+) -> MeasurementUnit {
     rspice_core::execution::transient_fft_output_unit(
         &evidence.physical_type,
         rspice_results::fft::fft_format_to_core(evidence.format),
@@ -65,7 +67,7 @@ impl SimulationResult {
             } => {
                 if matches!(folded.as_str(), "gain" | "transfer_gain" | "tf.gain") {
                     if *normalization
-                        == crate::simulation::multi_run::TfNormalization::RelativeToNominal
+                        == rspice_simulation_contract::analysis_spec::TfNormalization::RelativeToNominal
                     {
                         unit("1")
                     } else {

@@ -7,7 +7,7 @@ use crate::simulation::multi_run::{
     AnalysisSpec, HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,
     PssMethod,
 };
-use crate::simulation::results::SimulationResult;
+use rspice_simulation::results::SimulationResult;
 use rspice_core::NoAbort;
 
 fn base(family: u8, inherited: bool) -> StudyRunConfig {

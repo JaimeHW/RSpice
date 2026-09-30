@@ -2,7 +2,7 @@
 //!
 //! Steps one design parameter and returns a result set per point.
 
-use super::super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted};
+use rspice_simulation::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted};
 use super::mapping::describe_step_target;
 use super::sweep_points::expand_step_sweep_values_with_abort;
 use super::types::ParametricData;
@@ -213,7 +213,7 @@ fn run_base_analysis(
                     }
                     error => rspice_core::SimulationError::Circuit(error.to_string()),
                 })?;
-            let crate::simulation::results::SimulationResult::DcOp(result) = result else {
+            let rspice_simulation::results::SimulationResult::DcOp(result) = result else {
                 unreachable!("an operating-point request returns operating-point data")
             };
             let mut values = result.node_voltages.into_iter().collect::<Vec<_>>();

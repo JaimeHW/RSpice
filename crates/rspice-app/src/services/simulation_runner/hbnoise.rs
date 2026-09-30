@@ -15,7 +15,7 @@ use rspice_simulation_contract::config::validate_noise_sidebands;
 pub use rspice_simulation_contract::hbnoise_policy::HbNoiseReference;
 use rspice_simulation_contract::hbnoise_policy::validate_hbnoise_frequency_options;
 
-use super::error::{ensure_not_aborted, poll_periodically};
+use rspice_simulation::error::{ensure_not_aborted, poll_periodically};
 #[cfg(test)]
 use super::parse_runner_netlist_with_abort;
 use super::{

@@ -26,6 +26,7 @@ pub use output_contract::{
 pub(crate) mod placed_sources;
 pub(crate) mod plan;
 pub(crate) mod point_family;
+#[cfg(test)]
 pub(crate) mod results;
 pub(crate) mod run_set;
 pub(crate) mod runner;
@@ -39,7 +40,7 @@ pub(crate) mod veriloga;
 // types here duplicated the path without shortening any call site.
 pub use config::AnalysisConfig;
 pub use controller::SimulationController;
-pub use results::{SimulationResult, WaveformData};
+pub use rspice_simulation::results::{SimulationResult, WaveformData};
 // Test-only aliases for private modules: execution reaches the bridge and
 // these helpers through their module paths.
 #[cfg(test)]

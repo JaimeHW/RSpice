@@ -1,6 +1,6 @@
 //! Monte Carlo analysis runner.
 
-use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
+use rspice_simulation::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 #[cfg(test)]
 use super::parse_runner_netlist_with_statistical_sampling_and_abort;
 use super::{DEFAULT_MONTE_CARLO_SEED, build_engine_config, parse_runner_netlist_with_abort};

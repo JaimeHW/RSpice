@@ -63,7 +63,7 @@ fn execute(
     input: NetlistInput,
     abort: Arc<AtomicBool>,
     streams: RunStreams,
-) -> Result<crate::simulation::results::SimulationResult, SimulationError> {
+) -> Result<rspice_simulation::results::SimulationResult, SimulationError> {
     run_simulation_thread_with_progress_observer(
         request,
         input,
@@ -115,7 +115,7 @@ fn captured_request() -> (SimulationRequest, NetlistInput, Vec<u8>) {
 pub(crate) fn completed_checkpoint_fixture() -> (
     SimulationRequest,
     Arc<[u8]>,
-    crate::simulation::results::SimulationResult,
+    rspice_simulation::results::SimulationResult,
 ) {
     let (request, input) = fixture();
     let queue = Arc::new(Mutex::new(None));
@@ -175,7 +175,7 @@ fn monte_carlo_checkpoint_dispatch_transfers_cancelled_population_and_resumes_mi
     )
     .unwrap();
     assert_eq!(retained.completed_indices().collect::<Vec<_>>(), [0, 1, 2]);
-    let crate::simulation::results::SimulationResult::MonteCarlo {
+    let rspice_simulation::results::SimulationResult::MonteCarlo {
         runs_completed,
         member_measurements,
         ..

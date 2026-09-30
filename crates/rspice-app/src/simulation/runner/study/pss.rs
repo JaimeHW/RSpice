@@ -2,7 +2,7 @@
 use super::*;
 use crate::simulation::dialog::OpConfig;
 use crate::simulation::multi_run::{AnalysisSpec, PssMethod};
-use crate::simulation::results::SimulationResult;
+use rspice_simulation::results::SimulationResult;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -54,7 +54,7 @@ impl StudyPssConfig {
                 continue;
             }
             if mode.eq_ignore_ascii_case("bin") {
-                let (index, _, signal) = crate::simulation::results::parse_study_bin(key)?;
+                let (index, _, signal) = rspice_simulation_contract::study_measurement::parse_study_bin(key)?;
                 if index <= num_harmonics && signal.is_some() {
                     continue;
                 }

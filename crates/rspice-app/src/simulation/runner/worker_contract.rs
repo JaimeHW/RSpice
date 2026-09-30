@@ -86,7 +86,7 @@ use crate::simulation::config::AnalysisConfig;
 use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
 use crate::simulation::multi_run::{AnalysisSpec, TfAccuracy, TfNormalization};
 
-use crate::simulation::results::{
+use rspice_simulation::results::{
     DcOpResult, MonteCarloVariableResult, SimulationResult, TransferFunctionQuantity,
     TransferFunctionScalar, TransientEventHistory, WaveformData,
 };
@@ -1981,7 +1981,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 detect_subharmonics,
                 modes: modes
                     .into_iter()
-                    .map(crate::simulation::results::PstbFloquetMode::from)
+                    .map(rspice_simulation::results::PstbFloquetMode::from)
                     .collect(),
                 floquet_evidence,
                 orbit_kind,

@@ -1,7 +1,7 @@
 //! Configured OP initialization on each varied harmonic-balance study circuit.
 use super::*;
 use crate::simulation::multi_run::AnalysisSpec;
-use crate::simulation::results::SimulationResult;
+use rspice_simulation::results::SimulationResult;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

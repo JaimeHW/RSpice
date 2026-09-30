@@ -6,7 +6,7 @@
 
 #![allow(clippy::type_complexity)]
 
-use super::error::ensure_not_aborted;
+use rspice_simulation::error::ensure_not_aborted;
 use super::{
     ServiceRunError, ServiceRunResult, build_multi_tone_hb_layout_with_abort,
     build_resolved_periodic_engine, parse_runner_netlist_with_abort,

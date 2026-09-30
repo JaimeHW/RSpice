@@ -19,7 +19,7 @@ use rspice_core::analysis::sensitivity::{AcSensitivityOutput, SensitivityValue};
 use super::{EngineBridge, ensure_not_aborted};
 use crate::output_spec::{OutputSpec, parse_output_spec, validate_sensitivity_output_spec};
 use crate::simulation::config::SensitivityConfig;
-use crate::simulation::results::SimulationResult;
+use rspice_simulation::results::SimulationResult;
 use crate::simulation::runner::SimulationError;
 use crate::state::{
     ComplexResultValue, SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow,

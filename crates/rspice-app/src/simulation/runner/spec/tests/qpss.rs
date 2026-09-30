@@ -367,7 +367,7 @@ fn qpss_controls_survive_draft_worker_and_real_engine_execution() {
     else {
         panic!("QPSS dispatch returned a different result family")
     };
-    let data = crate::services::simulation_runner::qpss_data_from_operating_point_with_abort(
+    let data = rspice_simulation::results::qpss::qpss_data_from_operating_point_with_abort(
         operating_point,
         &rspice_core::NoAbort,
     )

@@ -1,6 +1,6 @@
 //! Adapter from completed simulation results to portable yield analysis.
-use crate::product::{DatasetId, RunId};
-use crate::simulation::results::SimulationResult;
+use crate::results::SimulationResult;
+use rspice_app_types::product::{DatasetId, RunId};
 use rspice_results::yield_analysis::{MonteCarloSamplingMode, YieldAnalysisProvenance, YieldInput};
 #[cfg(test)]
 use rspice_results::yield_analysis::{YieldAnalysisManager, YieldSpec};
@@ -72,7 +72,7 @@ fn parse_wrapped_target<'a>(target: &'a str, prefix: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::results::MonteCarloVariableResult;
+    use crate::results::MonteCarloVariableResult;
 
     fn monte_carlo_result(name: &str, samples: Vec<f64>) -> SimulationResult {
         let finite = samples

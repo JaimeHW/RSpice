@@ -80,7 +80,7 @@ fn single_frequency_noise_stb_and_disto_execute_and_publish_one_point() {
         let expected_gain = 20.0 * (1000.0_f64 / 2.0_f64.sqrt()).log10();
         assert!((waveforms["Loop Gain (dB)"].y_values[0] - expected_gain).abs() < 1e-6);
         assert_eq!(
-            waveforms[crate::simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM]
+            waveforms[rspice_simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM]
                 .y_values
                 .len(),
             1

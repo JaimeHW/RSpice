@@ -49,7 +49,7 @@ mod browser {
 
     use super::{next_request_id, request_id_from_js_number, stale_result, stale_worker_epoch};
     use crate::diagnostics::engine_log::{EngineLogLine, EngineLogQueue};
-    use crate::simulation::results::SimulationResult;
+    use rspice_simulation::results::SimulationResult;
     use crate::simulation::runner::worker_contract::{
         WORKER_REQUEST_TRANSPORT_PROTOCOL, WorkerProgressSnapshot, WorkerRequest,
         WorkerRequestTransportMetadata, apply_worker_progress_snapshot,

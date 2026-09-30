@@ -7,7 +7,7 @@ use rspice_core::abort_signal::AbortSignal;
 use super::{EngineBridge, ensure_not_aborted};
 use crate::simulation::config::DcSweepConfig;
 use crate::simulation::dialog::{OpConfig, OpInitialGuess, OpNodeInitialization, OpSaveDevice};
-use crate::simulation::results::{DcOpResult, SimulationResult, WaveformData};
+use rspice_simulation::results::{DcOpResult, SimulationResult, WaveformData};
 use crate::simulation::runner::SimulationError;
 use crate::state::{
     DcSweepDirection, DcSweepEvidence, DcSweepFamily, DcSweepQuantity, DcTraceView,
@@ -887,10 +887,11 @@ mod operating_point_contract_tests {
         let result = EngineBridge::new()
             .run(&AnalysisConfig::DcOp(config), DIVIDER)
             .expect("forced OP");
+        let output_voltage = result.measurement("V(out)").unwrap();
         let SimulationResult::DcOp(result) = result else {
             panic!("OP result")
         };
-        assert!((result.voltage("out").unwrap() - 2.0).abs() <= 1.0e-10);
+        assert!((output_voltage - 2.0).abs() <= 1.0e-10);
         assert_eq!(
             result.mna_solution.len(),
             result.mna_node_names.len() + result.mna_branch_names.len()

@@ -16,7 +16,7 @@ use num_complex::Complex64;
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 
-use super::super::error::{ensure_not_aborted, poll_periodically};
+use rspice_simulation::error::{ensure_not_aborted, poll_periodically};
 use super::super::periodic_carrier::{PeriodicCarrier, PeriodicCarrierState};
 use super::super::{
     ServiceRunError, ServiceRunResult, build_resolved_periodic_engine, build_voltage_output_expr,

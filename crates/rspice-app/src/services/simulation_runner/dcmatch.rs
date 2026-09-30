@@ -24,7 +24,7 @@ use rspice_core::analysis::dcmatch::DcMatchResult;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{AnalysisCommand, DcMatchCard};
 
-use super::error::ensure_not_aborted;
+use rspice_simulation::error::ensure_not_aborted;
 use super::{
     ServiceRunError, ServiceRunResult, build_engine_config, parse_runner_netlist_with_abort,
 };

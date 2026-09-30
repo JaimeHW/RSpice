@@ -10,7 +10,7 @@ use rspice_core::abort_signal::AbortSignal;
 
 use crate::simulation::config::FftRequest;
 use crate::simulation::execution::ResolvedExecutionDependencies;
-use crate::simulation::results::SimulationResult;
+use rspice_simulation::results::SimulationResult;
 use crate::simulation::runner::SimulationError;
 
 pub(super) fn run(

@@ -7,7 +7,7 @@ use rspice_core::abort_signal::AbortSignal;
 use crate::services::simulation_runner as svc_runner;
 use crate::simulation::execution::ResolvedExecutionDependencies;
 use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, SpPort};
-use crate::simulation::results::{PstbFloquetMode, SimulationResult, WaveformData};
+use rspice_simulation::results::{PstbFloquetMode, SimulationResult, WaveformData};
 use crate::simulation::runner::{SimulationError, SpecExecutionOptions};
 
 pub(super) fn run_frequency_spec(
@@ -295,34 +295,34 @@ fn run_tf(
 
 fn transfer_quantity(
     quantity: svc_runner::TfQuantity,
-) -> crate::simulation::results::TransferFunctionQuantity {
+) -> rspice_simulation::results::TransferFunctionQuantity {
     match quantity {
         svc_runner::TfQuantity::Voltage => {
-            crate::simulation::results::TransferFunctionQuantity::Voltage
+            rspice_simulation::results::TransferFunctionQuantity::Voltage
         }
         svc_runner::TfQuantity::Current => {
-            crate::simulation::results::TransferFunctionQuantity::Current
+            rspice_simulation::results::TransferFunctionQuantity::Current
         }
     }
 }
 
-fn quantity_unit(quantity: crate::simulation::results::TransferFunctionQuantity) -> &'static str {
+fn quantity_unit(quantity: rspice_simulation::results::TransferFunctionQuantity) -> &'static str {
     match quantity {
-        crate::simulation::results::TransferFunctionQuantity::Voltage => "V",
-        crate::simulation::results::TransferFunctionQuantity::Current => "A",
+        rspice_simulation::results::TransferFunctionQuantity::Voltage => "V",
+        rspice_simulation::results::TransferFunctionQuantity::Current => "A",
     }
 }
 
 fn transfer_scalar(
     value: f64,
     label: &str,
-) -> Result<crate::simulation::results::TransferFunctionScalar, SimulationError> {
+) -> Result<rspice_simulation::results::TransferFunctionScalar, SimulationError> {
     if value.is_nan() {
         return Err(SimulationError::InvalidConfig(format!(
             "TF {label} is not a number"
         )));
     }
-    Ok(crate::simulation::results::TransferFunctionScalar::from_f64(value))
+    Ok(rspice_simulation::results::TransferFunctionScalar::from_f64(value))
 }
 
 fn finite_optional(value: Option<f64>, label: &str) -> Result<Option<f64>, SimulationError> {
@@ -905,9 +905,9 @@ fn run_stb(
     if let Some(contour) = data.nyquist {
         super::ensure_not_aborted(abort)?;
         waveforms.insert(
-            crate::simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM.to_string(),
+            rspice_simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM.to_string(),
             WaveformData::new_complex_in_unit(
-                crate::simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM.to_string(),
+                rspice_simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM.to_string(),
                 contour.frequencies,
                 contour.real,
                 contour.imaginary,
@@ -1337,7 +1337,7 @@ fn insert_scalar_waveform(
 mod transfer_function_tests {
     use super::*;
     use crate::simulation::multi_run::{TfAccuracy, TfNormalization};
-    use crate::simulation::results::{TransferFunctionQuantity, TransferFunctionScalar};
+    use rspice_simulation::results::{TransferFunctionQuantity, TransferFunctionScalar};
     use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
 
     const DIVIDER: &str = "\
@@ -1586,7 +1586,7 @@ fn stability_margin_units_survive_execution_and_retention() {
         Some("dB")
     );
     assert_eq!(
-        waveforms[crate::simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM].y_unit,
+        waveforms[rspice_simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM].y_unit,
         "1"
     );
     let worker = WorkerSimulationResult::try_from(result).unwrap();

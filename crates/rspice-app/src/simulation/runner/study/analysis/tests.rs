@@ -4,7 +4,7 @@ use super::*;
 use crate::simulation::multi_run::{
     HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,
 };
-use crate::simulation::results::SimulationResult;
+use rspice_simulation::results::SimulationResult;
 use crate::simulation::runner::{
     SimulationRequest, SpecExecutionOptions, worker_contract::WorkerSpecExecutionOptions,
 };

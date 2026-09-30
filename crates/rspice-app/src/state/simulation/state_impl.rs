@@ -1492,7 +1492,7 @@ mod tests {
             variables: Vec::new(),
         };
         let provenance =
-            crate::services::yield_result_adapter::yield_provenance_from_monte_carlo_result(
+            rspice_simulation::results::yield_provenance_from_monte_carlo_result(
                 run.run_id,
                 run.dataset_id,
                 &monte_carlo,

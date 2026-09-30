@@ -3,7 +3,7 @@
 //! Compares simulated device stress against the configured limits,
 //! and reports every violation with the instance and the margin.
 
-use super::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
+use rspice_simulation::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use super::{is_ground_like, normalize_voltage_signal_name, parse_runner_netlist_with_abort};
 use crate::results::safety::{
     SoADefinition, SoAEvaluation, SoALimit, SoAManager, SoAParameter, SoAViolation,

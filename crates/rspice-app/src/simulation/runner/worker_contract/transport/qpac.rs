@@ -84,7 +84,7 @@ mod tests {
 
     #[test]
     fn qpac_transport_rejects_short_inline_and_altered_complex_buffers() {
-        let SimulationResult::Qpac { response, .. } = SimulationResult::qpac_test_fixture() else {
+        let SimulationResult::Qpac { response, .. } = crate::simulation::results::qpac_test_fixture() else {
             unreachable!()
         };
         let mut buffers = Vec::new();

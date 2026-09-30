@@ -4,10 +4,12 @@
 //! bounded callbacks before its caller may publish an installation.
 
 pub mod compilation;
+pub mod error;
 pub mod model_import;
 pub mod model_sources;
 pub mod netlist_gen;
 pub mod netlist_sources;
 pub mod pdk;
 pub mod project_veriloga;
+pub mod results;
 pub mod veriloga;

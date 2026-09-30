@@ -2,7 +2,7 @@
 
 #[test]
 fn qpac_csv_preserves_every_signed_tuple_translated_axis_and_complex_unit() {
-    let retained = crate::simulation::SimulationResult::qpac_retained_test_fixture();
+    let retained = crate::simulation::results::qpac_retained_test_fixture();
     let prepared = super::super::prepare_typed_result_csv(&retained).unwrap();
     let mut reader = csv::Reader::from_reader(prepared.contents.as_bytes());
     let headers = reader.headers().unwrap().clone();
@@ -38,7 +38,7 @@ fn qpac_csv_preserves_every_signed_tuple_translated_axis_and_complex_unit() {
 
 #[test]
 fn qpnoise_result_csv_retains_measurements_statuses_covariance_and_primary_evidence() {
-    let result = crate::simulation::SimulationResult::qpnoise_retained_test_fixture();
+    let result = crate::simulation::results::qpnoise_retained_test_fixture();
     let export = super::super::prepare_typed_result_csv(&result).unwrap();
     let mut reader = csv::Reader::from_reader(export.contents.as_bytes());
     let headers = reader.headers().unwrap().clone();
@@ -81,7 +81,7 @@ fn qpnoise_result_csv_retains_measurements_statuses_covariance_and_primary_evide
 
 #[test]
 fn qpxf_csv_preserves_transfer_axes_delay_statuses_and_dual_coordinates() {
-    let retained = crate::simulation::SimulationResult::qpxf_retained_test_fixture();
+    let retained = crate::simulation::results::qpxf_retained_test_fixture();
     let prepared = super::super::prepare_typed_result_csv(&retained).unwrap();
     let mut reader = csv::Reader::from_reader(prepared.contents.as_bytes());
     let headers = reader.headers().unwrap().clone();

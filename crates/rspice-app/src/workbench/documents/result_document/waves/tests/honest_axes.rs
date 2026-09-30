@@ -12,7 +12,7 @@ use crate::state::{ExecutedDeck, ExecutedDeckPoint};
 
 #[test]
 fn qpac_plot_keeps_signed_probe_offsets_on_a_named_linear_axis() {
-    let result = crate::simulation::SimulationResult::qpac_retained_test_fixture();
+    let result = crate::simulation::results::qpac_retained_test_fixture();
     assert!(result.success);
     assert!(crate::state::ac_bode_summary_for_analysis(&result, 0).is_none());
     let mut state = AppState::default();
@@ -38,7 +38,7 @@ fn qpac_plot_keeps_signed_probe_offsets_on_a_named_linear_axis() {
 
 #[test]
 fn qpxf_plot_keeps_signed_output_frequencies_on_a_named_linear_axis() {
-    let result = crate::simulation::SimulationResult::qpxf_retained_test_fixture();
+    let result = crate::simulation::results::qpxf_retained_test_fixture();
     assert!(result.success);
     assert!(crate::state::ac_bode_summary_for_analysis(&result, 0).is_none());
     let mut state = AppState::default();
@@ -328,7 +328,7 @@ fn the_cursor_table_publishes_what_it_paints() {
 
 #[test]
 fn qpnoise_result_plot_preserves_physical_frequencies_and_separate_noise_units() {
-    let result = crate::simulation::SimulationResult::qpnoise_retained_test_fixture();
+    let result = crate::simulation::results::qpnoise_retained_test_fixture();
     assert!(result.success);
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(result);

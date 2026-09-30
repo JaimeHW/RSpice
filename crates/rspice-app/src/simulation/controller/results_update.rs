@@ -391,13 +391,13 @@ impl SimulationController {
                 ] {
                     if let Some(value) = value {
                         let rendered = match value {
-                            crate::simulation::results::TransferFunctionScalar::Finite(value) => {
+                            rspice_simulation::results::TransferFunctionScalar::Finite(value) => {
                                 format!("{value:.6e}")
                             }
-                            crate::simulation::results::TransferFunctionScalar::PositiveInfinity => {
+                            rspice_simulation::results::TransferFunctionScalar::PositiveInfinity => {
                                 "+infinity".to_owned()
                             }
-                            crate::simulation::results::TransferFunctionScalar::NegativeInfinity => {
+                            rspice_simulation::results::TransferFunctionScalar::NegativeInfinity => {
                                 "-infinity".to_owned()
                             }
                         };

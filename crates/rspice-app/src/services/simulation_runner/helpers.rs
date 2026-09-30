@@ -10,7 +10,7 @@ use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::netlist::{ElementKind, FreqVariation, StatisticalParamMode};
 
-use super::error::{ensure_not_aborted, poll_periodically};
+use rspice_simulation::error::{ensure_not_aborted, poll_periodically};
 use super::{ServiceRunError, ServiceRunResult};
 
 /// Locate the first executable `.end` in a title-bearing SPICE deck.

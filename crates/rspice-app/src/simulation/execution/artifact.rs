@@ -17,7 +17,7 @@ use crate::simulation::dependency_contract::{
 };
 use crate::simulation::multi_run::AnalysisSpec;
 use crate::simulation::multi_run::PssMethod;
-use crate::simulation::results::SimulationResult;
+use rspice_simulation::results::SimulationResult;
 use crate::simulation::runner::SpecExecutionOptions;
 use rspice_app_types::canonical::CanonicalWriter;
 

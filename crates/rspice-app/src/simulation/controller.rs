@@ -1990,7 +1990,7 @@ impl SimulationController {
                                     state.simulation.run_by_sequence(run_sequence)
                                 })
                                 .and_then(|run| {
-                                    crate::services::yield_result_adapter::yield_provenance_from_monte_carlo_result(
+                                    rspice_simulation::results::yield_provenance_from_monte_carlo_result(
                                         run.run_id,
                                         run.dataset_id,
                                         &sim_result,

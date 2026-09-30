@@ -7,7 +7,7 @@
 use super::transient_post::{DerivedViewAvailability, LoadedDerivedView};
 use super::*;
 
-use crate::simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM;
+use rspice_simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM;
 
 /// What the locus is, named for the reader rather than for the transport.
 const LOOP_GAIN_LOCUS_LABEL: &str = "L(jω)";

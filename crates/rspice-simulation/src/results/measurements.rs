@@ -7,18 +7,16 @@
 use super::*;
 mod quasi_periodic;
 mod units;
-pub(crate) use rspice_simulation_contract::study_measurement::{
-    parse_study_bin, parse_study_tuple,
-};
+use rspice_simulation_contract::study_measurement::{parse_study_bin, parse_study_tuple};
 use units::unit;
 
 impl SimulationResult {
     /// Resolve a study request without falling back from a failed `.MEAS` to
     /// a same-named signal. Waveform reduction must be explicitly requested.
-    pub(crate) fn study_measurement(
+    pub fn study_measurement(
         &self,
         request: &str,
-    ) -> Option<crate::state::FamilyMeasurementEvidence> {
+    ) -> Option<rspice_results::family_measurements::FamilyMeasurementEvidence> {
         let (mode, key) = request.split_once(':').unwrap_or(("meas", request));
         if mode.eq_ignore_ascii_case("meas") {
             let measurements = match self {
@@ -36,20 +34,22 @@ impl SimulationResult {
             // bias the distribution toward passing trials. Evaluation failures
             // have no raw value, even when an output default is configured.
             measurement.raw_value.filter(|value| value.is_finite())?;
-            return Some(crate::state::FamilyMeasurementEvidence {
-                unit: Some(
-                    measurement
-                        .units
-                        .as_ref()
-                        .map_or(rspice_core::analysis::MeasurementUnit::Unknown, |units| {
-                            units.value.clone()
-                        }),
-                ),
-                name: request.to_owned(),
-                value: Some(measurement.value.filter(|value| value.is_finite())?),
-                passed: measurement.passed,
-                error: measurement.error.clone(),
-            });
+            return Some(
+                rspice_results::family_measurements::FamilyMeasurementEvidence {
+                    unit: Some(
+                        measurement
+                            .units
+                            .as_ref()
+                            .map_or(rspice_core::analysis::MeasurementUnit::Unknown, |units| {
+                                units.value.clone()
+                            }),
+                    ),
+                    name: request.to_owned(),
+                    value: Some(measurement.value.filter(|value| value.is_finite())?),
+                    passed: measurement.passed,
+                    error: measurement.error.clone(),
+                },
+            );
         }
         let mut measured_unit = rspice_core::analysis::MeasurementUnit::Unknown;
         let value = if mode.eq_ignore_ascii_case("tuple") {
@@ -219,7 +219,7 @@ impl SimulationResult {
             None
         };
         value.filter(|value| value.is_finite()).map(|value| {
-            crate::state::FamilyMeasurementEvidence {
+            rspice_results::family_measurements::FamilyMeasurementEvidence {
                 unit: Some(measured_unit),
                 name: request.to_owned(),
                 value: Some(value),
@@ -464,211 +464,13 @@ impl SimulationResult {
             }
         }
     }
-
-    /// Get all measurements associated with this result
-    #[cfg(test)]
-    pub fn measurements(&self) -> HashMap<String, f64> {
-        match self {
-            SimulationResult::DcOp(op) => {
-                let mut out = HashMap::with_capacity(
-                    op.node_voltages.len().saturating_mul(2) + op.branch_currents.len(),
-                );
-                for (node, value) in &op.node_voltages {
-                    out.insert(node.clone(), *value);
-                    out.insert(format!("V({})", node), *value);
-                }
-                for (branch, value) in &op.branch_currents {
-                    out.insert(branch.clone(), *value);
-                    if !branch.starts_with("I(") {
-                        out.insert(format!("I({})", branch), *value);
-                    }
-                }
-                out
-            }
-            SimulationResult::DcSweep { waveforms, .. }
-            | SimulationResult::Transient { waveforms, .. }
-            | SimulationResult::Ac { waveforms, .. }
-            | SimulationResult::Qpac { waveforms, .. }
-            | SimulationResult::Qpxf { waveforms, .. }
-            | SimulationResult::Qpnoise { waveforms, .. }
-            | SimulationResult::HarmonicBalance { waveforms, .. }
-            | SimulationResult::Parametric { waveforms, .. }
-            | SimulationResult::Corner { waveforms, .. }
-            | SimulationResult::Optimization { waveforms, .. }
-            | SimulationResult::Soa { waveforms, .. } => waveforms
-                .iter()
-                .filter_map(|(name, wf)| {
-                    wf.y_values
-                        .last()
-                        .copied()
-                        .map(|value| (name.clone(), value))
-                })
-                .collect(),
-            SimulationResult::Qpss {
-                operating_point, ..
-            } => {
-                let mut values = HashMap::from([
-                    (
-                        "qpss.iterations".into(),
-                        operating_point.iterations() as f64,
-                    ),
-                    (
-                        "qpss.normalized_residual".into(),
-                        operating_point.normalized_residual(),
-                    ),
-                ]);
-                if let Some(frequency) = operating_point.oscillator_frequency_hz() {
-                    values.insert("qpss.oscillator_frequency_hz".into(), frequency);
-                }
-                values
-            }
-            SimulationResult::Pstb {
-                period,
-                fundamental_frequency,
-                stability_threshold,
-                detect_subharmonics,
-                modes,
-                min_stability_margin_db,
-                max_multiplier_magnitude,
-                num_unstable,
-                waveforms,
-                ..
-            } => {
-                let mut values = waveforms
-                    .iter()
-                    .filter_map(|(name, waveform)| {
-                        waveform
-                            .y_values
-                            .last()
-                            .copied()
-                            .map(|value| (name.clone(), value))
-                    })
-                    .collect::<HashMap<_, _>>();
-                values.insert("pstb.period".to_owned(), *period);
-                values.insert(
-                    "pstb.fundamental_frequency".to_owned(),
-                    *fundamental_frequency,
-                );
-                values.insert("pstb.stability_threshold".to_owned(), *stability_threshold);
-                values.insert(
-                    "pstb.detect_subharmonics".to_owned(),
-                    if *detect_subharmonics { 1.0 } else { 0.0 },
-                );
-                values.insert("pstb.mode_count".to_owned(), modes.len() as f64);
-                values.insert("pstb.unstable_mode_count".to_owned(), *num_unstable as f64);
-                values.insert(
-                    "pstb.max_multiplier_magnitude".to_owned(),
-                    *max_multiplier_magnitude,
-                );
-                if let Some(margin) = min_stability_margin_db {
-                    values.insert("pstb.min_stability_margin_db".to_owned(), *margin);
-                }
-                values
-            }
-            SimulationResult::Noise {
-                output_noise,
-                input_noise,
-                contributors,
-                ..
-            } => {
-                let mut out = HashMap::new();
-                if let Some(v) = output_noise.last().copied() {
-                    out.insert("output_noise".to_string(), v);
-                    out.insert("onoise_total".to_string(), v);
-                }
-                if let Some(v) = input_noise.as_ref().and_then(|vals| vals.last().copied()) {
-                    out.insert("input_noise".to_string(), v);
-                    out.insert("inoise_total".to_string(), v);
-                }
-                for (name, vals) in contributors {
-                    if let Some(v) = vals.last().copied() {
-                        out.insert(name.clone(), v);
-                    }
-                }
-                out
-            }
-            SimulationResult::PoleZero {
-                poles, zeros, gain, ..
-            } => {
-                let mut values = HashMap::from([
-                    ("num_poles".to_string(), poles.len() as f64),
-                    ("num_zeros".to_string(), zeros.len() as f64),
-                ]);
-                if let Some(gain) = gain {
-                    values.insert("gain".to_string(), *gain);
-                }
-                values
-            }
-            SimulationResult::SensitivityStudy { evidence } => {
-                if evidence.is_swept() {
-                    return HashMap::new();
-                }
-                evidence
-                    .rows
-                    .iter()
-                    .flat_map(|row| {
-                        let raw = row
-                            .raw
-                            .first()
-                            .copied()
-                            .and_then(|value| value.value())
-                            .map(|value| (row.parameter.clone(), value));
-                        let normalized = row
-                            .normalized
-                            .first()
-                            .copied()
-                            .and_then(|value| value.value())
-                            .map(|value| (format!("normalized:{}", row.parameter), value));
-                        [raw, normalized]
-                    })
-                    .flatten()
-                    .collect()
-            }
-            SimulationResult::DcMismatch { evidence } => dc_mismatch_scalars(evidence)
-                .into_iter()
-                .filter(|(_, value)| value.is_finite())
-                .flat_map(|(name, value)| {
-                    [(name.to_owned(), value), (format!("dcmatch.{name}"), value)]
-                })
-                .collect(),
-            SimulationResult::TransferFunction {
-                gain,
-                input_resistance,
-                output_resistance,
-                ..
-            } => {
-                let mut out = HashMap::new();
-                if let Some(value) = gain.as_ref().and_then(tf_scalar_finite) {
-                    out.insert("gain".to_owned(), value);
-                    out.insert("tf.gain".to_owned(), value);
-                }
-                if let Some(value) = input_resistance.as_ref().and_then(tf_scalar_finite) {
-                    out.insert("input_resistance".to_owned(), value);
-                    out.insert("tf.input_resistance".to_owned(), value);
-                }
-                if let Some(value) = output_resistance.as_ref().and_then(tf_scalar_finite) {
-                    out.insert("output_resistance".to_owned(), value);
-                    out.insert("tf.output_resistance".to_owned(), value);
-                }
-                out
-            }
-            SimulationResult::MonteCarlo { variables, .. } => variables
-                .iter()
-                .map(|var| (var.name.clone(), var.mean))
-                .collect(),
-            SimulationResult::MeasurementsOnly { measurements } => measurements.clone(),
-            SimulationResult::Fft { .. } => HashMap::new(),
-        }
-    }
 }
 
 /// The five DC mismatch scalars, under the names the core result document
 /// gives them.
-///
-/// One list, read by both the single-name lookup and the whole map, so a
-/// specification that resolves by name and a report that lists what is
-/// available cannot offer different sets.
-fn dc_mismatch_scalars(evidence: &crate::state::DcMismatchEvidence) -> [(&'static str, f64); 5] {
+fn dc_mismatch_scalars(
+    evidence: &rspice_results::dc_mismatch::DcMismatchEvidence,
+) -> [(&'static str, f64); 5] {
     [
         ("nominal_value", evidence.nominal_value),
         ("sigma_total", evidence.sigma_total),
@@ -687,9 +489,9 @@ fn dc_mismatch_scalars(evidence: &crate::state::DcMismatchEvidence) -> [(&'stati
 /// vector name matched exactly, so it can never shadow a device called
 /// `GAIN`.
 fn sensitivity_study_row<'a>(
-    evidence: &'a crate::state::SensitivityStudyEvidence,
+    evidence: &'a rspice_results::sensitivity::SensitivityStudyEvidence,
     name: &str,
-) -> Option<&'a crate::state::SensitivityStudyRow> {
+) -> Option<&'a rspice_results::sensitivity::SensitivityStudyRow> {
     evidence
         .rows
         .iter()
@@ -790,7 +592,7 @@ fn last_waveform_by_name<'a>(
 #[cfg(test)]
 mod transfer_function_tests {
     use super::*;
-    use crate::simulation::multi_run::{TfAccuracy, TfNormalization};
+    use rspice_simulation_contract::analysis_spec::{TfAccuracy, TfNormalization};
 
     fn result(
         gain: Option<TransferFunctionScalar>,
@@ -832,14 +634,6 @@ mod transfer_function_tests {
             assert_eq!(tf.measurement(alias), Some(750.0), "alias {alias}");
         }
         assert_eq!(tf.measurement("unknown"), None);
-
-        let measurements = tf.measurements();
-        assert_eq!(measurements["gain"], -0.25);
-        assert_eq!(measurements["tf.gain"], -0.25);
-        assert_eq!(measurements["input_resistance"], 3_000.0);
-        assert_eq!(measurements["tf.input_resistance"], 3_000.0);
-        assert_eq!(measurements["output_resistance"], 750.0);
-        assert_eq!(measurements["tf.output_resistance"], 750.0);
     }
 
     #[test]
@@ -853,14 +647,11 @@ mod transfer_function_tests {
         assert_eq!(tf.measurement("gain"), Some(1.0));
         assert_eq!(tf.measurement("rin"), None);
         assert_eq!(tf.measurement("rout"), None);
-        let measurements = tf.measurements();
-        assert_eq!(measurements["gain"], 1.0);
-        assert!(!measurements.contains_key("input_resistance"));
-        assert!(!measurements.contains_key("output_resistance"));
     }
-    use crate::state::{
-        ComplexResultValue, SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow,
+    use rspice_results::sensitivity::{
+        SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow,
     };
+    use rspice_results::simulation_values::ComplexResultValue;
 
     fn study_row(parameter: &str, raw: Vec<f64>, normalized: Vec<f64>) -> SensitivityStudyRow {
         SensitivityStudyRow {
@@ -902,11 +693,6 @@ mod transfer_function_tests {
         assert_eq!(result.measurement("GAIN"), Some(2.0));
         assert_eq!(result.measurement("normalized:ZERO"), Some(0.0));
         assert_eq!(result.measurement("NULL"), None);
-        let values = result.measurements();
-        assert_eq!(values.len(), 4);
-        for (name, value) in values {
-            assert_eq!(result.measurement(&name), Some(value));
-        }
     }
 
     /// A specification saved when the Studio named its rows `GAIN` still
@@ -926,12 +712,6 @@ mod transfer_function_tests {
         assert_eq!(result.measurement("normalized:GAIN"), Some(0.5));
         assert_eq!(result.measurement("gain"), Some(2.0));
         assert_eq!(result.measurement("SCALE"), None);
-        // The map is keyed by the engine's names, never by the alias: two
-        // keys for one row would double every listing that reads it.
-        let values = result.measurements();
-        assert_eq!(values.len(), 2);
-        assert!(values.contains_key("PARAM:GAIN"));
-        assert!(!values.contains_key("GAIN"));
     }
 
     /// A swept study answers no scalar measurement: there is no "the"
@@ -964,6 +744,5 @@ mod transfer_function_tests {
         };
         assert_eq!(result.measurement("R1"), None);
         assert_eq!(result.measurement("normalized:R1"), None);
-        assert!(result.measurements().is_empty());
     }
 }

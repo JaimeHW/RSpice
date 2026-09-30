@@ -114,10 +114,11 @@ fn pvt_selected_operating_point_controls_reach_each_worker_and_solve() {
                     task.executable_netlist_override.as_ref().unwrap(),
                 )
                 .unwrap();
-            let crate::simulation::results::SimulationResult::DcOp(result) = result else {
+            let output_voltage = result.measurement("V(out)").unwrap();
+            let rspice_simulation::results::SimulationResult::DcOp(result) = result else {
                 panic!("OP result")
             };
-            assert!((result.voltage("out").unwrap() - 0.8).abs() < 1e-10);
+            assert!((output_voltage - 0.8).abs() < 1e-10);
             assert_eq!(result.configuration.initial_guess, base.initial_guess);
             assert_eq!(
                 result.configuration.node_initialization,
@@ -506,10 +507,11 @@ R1 out 0 1k\n\
                 deck,
             )
             .expect("source point solves");
-        let crate::simulation::SimulationResult::DcOp(result) = result else {
+        let output_voltage = result.measurement("V(out)").expect("output node");
+        let crate::simulation::SimulationResult::DcOp(_) = result else {
             panic!("operating point result")
         };
-        assert!((result.voltage("out").expect("output node") - expected_voltage).abs() < 1e-12);
+        assert!((output_voltage - expected_voltage).abs() < 1e-12);
     }
 }
 
@@ -1595,11 +1597,12 @@ fn process_and_voltage_axes_change_the_authorized_op_execution_contract() {
         let result = crate::simulation::EngineBridge::new()
             .run(&AnalysisConfig::DcOp(config.clone()), &source)
             .expect("corner OP solve");
-        let crate::simulation::SimulationResult::DcOp(result) = result else {
+        let supply_voltage = result.measurement("V(in)").expect("supply node");
+        let crate::simulation::SimulationResult::DcOp(_) = result else {
             panic!("OP result")
         };
         assert!(
-            (result.voltage("in").expect("supply node") - config.run_point.supply_voltage.unwrap())
+            (supply_voltage - config.run_point.supply_voltage.unwrap())
                 .abs()
                 <= 1.0e-10
         );

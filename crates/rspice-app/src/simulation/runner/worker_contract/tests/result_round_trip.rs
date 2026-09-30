@@ -313,7 +313,7 @@ fn worker_result_round_trip() {
         runs_completed: 18,
         num_failures: 2,
         all_converged: false,
-        variables: vec![crate::simulation::results::MonteCarloVariableResult {
+        variables: vec![rspice_simulation::results::MonteCarloVariableResult {
             mean_confidence: None,
             name: "V(out)".to_string(),
             samples: vec![0.9, 1.0, 1.1],
@@ -834,7 +834,7 @@ fn a_dc_mismatch_result_survives_the_worker_wire() {
 /// pattern, not by tolerance.
 #[test]
 fn a_recorded_fft_spectrum_survives_the_worker_boundary_bit_for_bit() {
-    use crate::simulation::results::RecordedFftSpectrum;
+    use rspice_simulation::results::RecordedFftSpectrum;
     use crate::state::{FftSpectrumEvidence, FftSpectrumModeEvidence, FftSpectrumStatusEvidence};
 
     let point_count = 8usize;
@@ -968,7 +968,7 @@ fn monte_carlo_mean_confidence_survives_worker_transport_and_rejects_wrong_popul
         num_failures: 1,
         all_converged: false,
         member_measurements: members.clone(),
-        variables: vec![crate::simulation::results::MonteCarloVariableResult {
+        variables: vec![rspice_simulation::results::MonteCarloVariableResult {
             mean_confidence: Some(confidence),
             name: "V(out)".into(),
             samples: vec![0.9, 1.0, 1.1],
@@ -1096,7 +1096,7 @@ fn pss_reporting_schedules_preserve_the_authenticated_orbit() {
         }
         // Exercise the same serialization boundary used by Studio, including
         // reconstruction from the retained orbit and reporting-time buffer.
-        use crate::simulation::results::{SimulationResult, WaveformData};
+        use rspice_simulation::results::{SimulationResult, WaveformData};
         let time = reported.time;
         let waveforms: std::collections::HashMap<_, _> = reported
             .waveforms

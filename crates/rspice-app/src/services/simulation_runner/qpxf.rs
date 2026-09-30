@@ -1,5 +1,5 @@
 //! QPXF consumes the exact QPSS producer configuration and retained orbit.
-use super::error::ensure_not_aborted;
+use rspice_simulation::error::ensure_not_aborted;
 use super::{ServiceRunError, ServiceRunResult, build_resolved_periodic_engine};
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::{QpssOperatingPoint, QpxfAnalysisResult};

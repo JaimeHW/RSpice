@@ -59,7 +59,7 @@ fn qpss() -> (AnalysisResult, AnalysisSpec) {
 }
 #[test]
 fn quasi_periodic_saved_outputs_select_physical_qpss_and_qpac_sources_without_losing_payloads() {
-    let qpac = SimulationResult::qpac_retained_test_fixture();
+    let qpac = crate::simulation::results::qpac_retained_test_fixture();
     let spec = crate::simulation::plan::QuasiPeriodicAcDraft::default()
         .to_spec()
         .unwrap();
@@ -135,7 +135,7 @@ fn quasi_periodic_saved_outputs_select_physical_qpss_and_qpac_sources_without_lo
 }
 #[test]
 fn quasi_periodic_saved_outputs_bind_qpxf_quoted_transfers_and_delay_after_reload() {
-    let original = SimulationResult::qpxf_retained_test_fixture();
+    let original = crate::simulation::results::qpxf_retained_test_fixture();
     let spec = crate::simulation::plan::QuasiPeriodicTransferDraft::default()
         .to_spec()
         .unwrap();
@@ -227,7 +227,7 @@ fn quasi_periodic_saved_outputs_bind_qpxf_quoted_transfers_and_delay_after_reloa
 
 #[test]
 fn qpnoise_result_saved_output_selection_and_deferred_reload_keep_complete_noise_evidence() {
-    let original = SimulationResult::qpnoise_retained_test_fixture();
+    let original = crate::simulation::results::qpnoise_retained_test_fixture();
     let spec = crate::simulation::plan::QuasiPeriodicNoiseDraft::default()
         .to_spec()
         .unwrap();

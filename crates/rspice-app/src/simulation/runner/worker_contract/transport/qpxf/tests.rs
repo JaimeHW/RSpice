@@ -3,7 +3,7 @@ use super::*;
 
 #[test]
 fn qpxf_transport_rejects_short_inline_and_altered_complex_buffers() {
-    let SimulationResult::Qpxf { response, .. } = SimulationResult::qpxf_test_fixture() else {
+    let SimulationResult::Qpxf { response, .. } = crate::simulation::results::qpxf_test_fixture() else {
         unreachable!()
     };
     let mut buffers = Vec::new();

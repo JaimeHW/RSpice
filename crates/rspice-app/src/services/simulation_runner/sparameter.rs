@@ -3,7 +3,7 @@
 //! Sweeps frequency and extracts the scattering matrix between the declared
 //! ports, with the port impedances the run configuration sets.
 
-use super::error::ensure_not_aborted;
+use rspice_simulation::error::ensure_not_aborted;
 use super::{
     ServiceRunError, ServiceRunResult, build_engine_config, generate_freq_points_with_abort,
     parse_runner_netlist_with_abort,

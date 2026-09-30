@@ -22,7 +22,7 @@ use std::sync::Arc;
 /// digest derived from it — is identical for identical runs regardless of the
 /// order the engine happened to register event nodes in.
 fn transient_events_payload(
-    events: crate::simulation::results::TransientEventHistory,
+    events: rspice_simulation::results::TransientEventHistory,
 ) -> Option<AnalysisResultPayload> {
     if events.is_empty() {
         return None;
@@ -690,21 +690,21 @@ impl SimulationController {
                 nominal_output,
             } => {
                 let quantity = |value| match value {
-                    crate::simulation::results::TransferFunctionQuantity::Voltage => {
+                    rspice_simulation::results::TransferFunctionQuantity::Voltage => {
                         TransferFunctionQuantityEvidence::Voltage
                     }
-                    crate::simulation::results::TransferFunctionQuantity::Current => {
+                    rspice_simulation::results::TransferFunctionQuantity::Current => {
                         TransferFunctionQuantityEvidence::Current
                     }
                 };
                 let scalar = |value| match value {
-                    crate::simulation::results::TransferFunctionScalar::Finite(value) => {
+                    rspice_simulation::results::TransferFunctionScalar::Finite(value) => {
                         TransferFunctionScalarEvidence::Finite(value)
                     }
-                    crate::simulation::results::TransferFunctionScalar::PositiveInfinity => {
+                    rspice_simulation::results::TransferFunctionScalar::PositiveInfinity => {
                         TransferFunctionScalarEvidence::PositiveInfinity
                     }
-                    crate::simulation::results::TransferFunctionScalar::NegativeInfinity => {
+                    rspice_simulation::results::TransferFunctionScalar::NegativeInfinity => {
                         TransferFunctionScalarEvidence::NegativeInfinity
                     }
                 };
@@ -1200,7 +1200,7 @@ impl SimulationController {
 
     fn build_monte_carlo_payload_owned(
         &self,
-        variables: Vec<crate::simulation::results::MonteCarloVariableResult>,
+        variables: Vec<rspice_simulation::results::MonteCarloVariableResult>,
     ) -> (
         Vec<crate::state::WaveformData>,
         Vec<MonteCarloVariableMetadata>,
@@ -1208,7 +1208,7 @@ impl SimulationController {
         let mut waveforms = Vec::with_capacity(variables.len());
         let mut metadata = Vec::with_capacity(variables.len());
         for variable in variables {
-            let crate::simulation::results::MonteCarloVariableResult {
+            let rspice_simulation::results::MonteCarloVariableResult {
                 mean_confidence,
                 name,
                 samples,
@@ -1711,7 +1711,7 @@ mod operating_point_conversion_tests {
     #[test]
     fn branch_current_is_wrapped_exactly_once_in_retained_results() {
         let sim_result = crate::simulation::SimulationResult::DcOp(Box::new(
-            crate::simulation::results::DcOpResult {
+            rspice_simulation::results::DcOpResult {
                 configuration: crate::simulation::dialog::OpConfig::default(),
                 branch_currents: HashMap::from([("V1".to_owned(), -1.0e-3)]),
                 ..Default::default()
@@ -1750,7 +1750,7 @@ mod convergence_conversion_tests {
                 time: time.clone(),
                 waveforms: HashMap::from([(
                     "V(out)".to_owned(),
-                    crate::simulation::results::WaveformData::new_time_domain(
+                    rspice_simulation::results::WaveformData::new_time_domain(
                         "V(out)",
                         time,
                         vec![0.0, 0.8],
@@ -1863,7 +1863,7 @@ mod floquet_payload_conversion_tests {
     }
 
     fn pss_result(multipliers: Vec<Complex64>) -> SimulationResult {
-        let display = crate::simulation::results::WaveformData::new_time_domain(
+        let display = rspice_simulation::results::WaveformData::new_time_domain(
             "V(out)",
             vec![0.0, 1.0],
             vec![0.0, 0.0],
@@ -1885,7 +1885,7 @@ mod floquet_payload_conversion_tests {
             .iter()
             .enumerate()
             .map(
-                |(index, multiplier)| crate::simulation::results::PstbFloquetMode {
+                |(index, multiplier)| rspice_simulation::results::PstbFloquetMode {
                     multiplier: (*multiplier, 0.0),
                     exponent: (multiplier.ln() / period, 0.0),
                     probe_participation: (index + 1) as f64 / multipliers.len().max(1) as f64,
@@ -1915,7 +1915,7 @@ mod floquet_payload_conversion_tests {
         let waveforms = if mode_indices.is_empty() {
             HashMap::new()
         } else {
-            let waveform = crate::simulation::results::WaveformData::new_time_domain_in_unit(
+            let waveform = rspice_simulation::results::WaveformData::new_time_domain_in_unit(
                 "Floquet |lambda|",
                 mode_indices.clone(),
                 multipliers[..display_count].to_vec(),
@@ -2096,8 +2096,8 @@ mod waveform_unit_conversion_tests {
         name: &str,
         y_values: Vec<f64>,
         y_unit: &str,
-    ) -> crate::simulation::results::WaveformData {
-        crate::simulation::results::WaveformData {
+    ) -> rspice_simulation::results::WaveformData {
+        rspice_simulation::results::WaveformData {
             name: name.to_owned(),
             x_values: Vec::new(),
             y_values,
@@ -2160,7 +2160,7 @@ mod waveform_unit_conversion_tests {
 
     #[test]
     fn an_ac_magnitude_keeps_the_source_unit_while_phase_states_degrees() {
-        let mut spectrum = crate::simulation::results::WaveformData::new_complex(
+        let mut spectrum = rspice_simulation::results::WaveformData::new_complex(
             "V(out) Spectrum",
             vec![1.0, 10.0],
             vec![1.0, 0.0],
@@ -2194,7 +2194,7 @@ mod waveform_unit_conversion_tests {
 
     #[test]
     fn a_real_frequency_quantity_keeps_its_name_and_unit_without_magnitude_wrapping() {
-        let group_delay = crate::simulation::results::WaveformData::new_time_domain_in_unit(
+        let group_delay = rspice_simulation::results::WaveformData::new_time_domain_in_unit(
             "group_delay",
             vec![1.0, 10.0],
             vec![2.0e-9, 3.0e-9],
@@ -2221,7 +2221,7 @@ mod waveform_unit_conversion_tests {
 
     #[test]
     fn a_frequency_companion_curve_keeps_its_own_exact_abscissa() {
-        let group_delay = crate::simulation::results::WaveformData::new_time_domain_in_unit(
+        let group_delay = rspice_simulation::results::WaveformData::new_time_domain_in_unit(
             "group_delay",
             vec![3.0, 30.0],
             vec![2.0e-9, 3.0e-9],
@@ -2246,7 +2246,7 @@ mod waveform_unit_conversion_tests {
 
     #[test]
     fn a_complex_time_domain_waveform_retains_both_components_and_phase() {
-        let waveform = crate::simulation::results::WaveformData::new_complex_in_unit(
+        let waveform = rspice_simulation::results::WaveformData::new_complex_in_unit(
             "V(env)",
             vec![0.0, 1.0],
             vec![3.0, 0.0],
@@ -2289,7 +2289,7 @@ mod waveform_unit_conversion_tests {
             frequencies: vec![1.0, 10.0],
             waveforms: HashMap::from([(
                 "V(out)".to_owned(),
-                crate::simulation::results::WaveformData::new_complex(
+                rspice_simulation::results::WaveformData::new_complex(
                     "V(out)",
                     vec![1.0, 10.0],
                     vec![1.0, 0.0],

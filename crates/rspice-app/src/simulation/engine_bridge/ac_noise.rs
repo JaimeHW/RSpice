@@ -9,7 +9,7 @@ use super::{EngineBridge, ensure_not_aborted};
 use crate::simulation::config::{
     AcAnalysisConfig, NoiseAnalysisConfig, NoiseContributionDetail, NoiseIntegrationMode,
 };
-use crate::simulation::results::{SimulationResult, WaveformData};
+use rspice_simulation::results::{SimulationResult, WaveformData};
 use crate::simulation::runner::SimulationError;
 
 impl EngineBridge {

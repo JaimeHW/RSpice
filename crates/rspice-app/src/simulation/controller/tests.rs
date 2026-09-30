@@ -17,7 +17,7 @@ use std::path::Path;
 fn studio_ac_data_authored_columns_and_netlist_tables_reach_results() {
     use crate::simulation::config::AcDataTableOptions;
     use crate::simulation::plan::{AcDataDraft, AnalysisDraft};
-    use crate::simulation::results::SimulationResult;
+    use rspice_simulation::results::SimulationResult;
     use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
 
     let controller = SimulationController::new();
@@ -308,7 +308,7 @@ fn transient_noise_seed_inheritance_and_zero_scale_reach_the_solver() {
 fn sensitivity_dc_limit_and_disabled_ac_fields_reach_the_solver_and_results() {
     use crate::simulation::dialog::sens::{SensConfig, SensDialogState};
     use crate::simulation::plan::AnalysisDraft;
-    use crate::simulation::results::SimulationResult;
+    use rspice_simulation::results::SimulationResult;
     use crate::simulation::runner::worker_contract::{WorkerAnalysisSpec, WorkerSimulationResult};
     use crate::state::SensitivityBasisEvidence;
     let source = "DC-limit sensitivity\n.param rt=1k\nV1 in 0 DC 1 AC 1\nR1 in out {rt}\nR2 out 0 1k\n.end\n";
@@ -675,7 +675,7 @@ fn synthetic_sparameter_result() -> crate::simulation::SimulationResult {
     ] {
         waveforms.insert(
             name.to_string(),
-            crate::simulation::results::WaveformData::new_complex(
+            rspice_simulation::results::WaveformData::new_complex(
                 name,
                 frequencies.clone(),
                 real,
@@ -695,7 +695,7 @@ fn synthetic_sparameter_result() -> crate::simulation::SimulationResult {
 }
 
 fn synthetic_dc_op_result() -> crate::simulation::SimulationResult {
-    let mut result = crate::simulation::results::DcOpResult::default();
+    let mut result = rspice_simulation::results::DcOpResult::default();
     result.node_voltages.insert("out".to_string(), 1.25);
     crate::simulation::SimulationResult::DcOp(Box::new(result))
 }
@@ -1350,7 +1350,7 @@ fn completed_transient_result_reuses_owned_waveform_buffers_in_run_history() {
     let mut waveforms = std::collections::HashMap::new();
     waveforms.insert(
         "V(out)".to_string(),
-        crate::simulation::results::WaveformData {
+        rspice_simulation::results::WaveformData {
             name: "V(out)".to_string(),
             x_values: Vec::new(),
             y_values: values,
@@ -1427,7 +1427,7 @@ fn completed_dc_sweep_result_reuses_owned_shared_axis_buffers_in_run_history() {
     let mut waveforms = std::collections::HashMap::new();
     waveforms.insert(
         "V(out)".to_string(),
-        crate::simulation::results::WaveformData {
+        rspice_simulation::results::WaveformData {
             name: "V(out)".to_string(),
             x_values: Vec::new(),
             y_values: values,

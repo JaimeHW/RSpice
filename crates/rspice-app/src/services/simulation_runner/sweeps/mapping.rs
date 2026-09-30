@@ -4,7 +4,7 @@
 //! parameter values that produced them so a plot can be swept by parameter
 //! rather than by run index.
 
-use super::super::error::{
+use rspice_simulation::error::{
     ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically,
 };
 use super::types::{CornerMetricLabel, CornerPoint, SweepPointResult};

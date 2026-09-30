@@ -11,7 +11,7 @@ use crate::services::simulation_runner as svc_runner;
 use crate::simulation::dialog::IntegrationMethod;
 use crate::simulation::execution::{ResolvedExecutionDependencies, TransientTrajectoryArtifact};
 use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, PssMethod};
-use crate::simulation::results::{SimulationResult, WaveformData};
+use rspice_simulation::results::{SimulationResult, WaveformData};
 use crate::simulation::runner::SimulationError;
 
 pub(super) fn run_periodic_spec(

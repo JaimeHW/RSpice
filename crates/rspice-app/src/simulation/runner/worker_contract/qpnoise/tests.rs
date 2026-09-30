@@ -4,7 +4,7 @@ use super::*;
 fn qpnoise_result_worker_saved_evidence_and_typed_plots_roundtrip() {
     let packet = WorkerResponseTransport::from_response(WorkerResponse::from_result_for_transfer(
         73,
-        Ok(SimulationResult::qpnoise_test_fixture()),
+        Ok(crate::simulation::results::qpnoise_test_fixture()),
     ))
     .unwrap();
     let metadata = serde_json::to_string(&packet.response).unwrap();

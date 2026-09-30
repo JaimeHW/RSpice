@@ -423,7 +423,7 @@ mod tests {
                 &NoAbort,
             )
             .unwrap();
-            let crate::simulation::results::SimulationResult::Optimization {
+            let rspice_simulation::results::SimulationResult::Optimization {
                 best_variables,
                 best_cost,
                 converged,
@@ -486,7 +486,7 @@ mod tests {
                 &NoAbort,
             )
             .unwrap();
-            let crate::simulation::results::SimulationResult::Optimization {
+            let rspice_simulation::results::SimulationResult::Optimization {
                 best_variables,
                 best_cost,
                 converged,
@@ -585,14 +585,14 @@ mod tests {
             let restored: WorkerSimulationResult =
                 serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
             assert_eq!(wire, restored);
-            let crate::simulation::results::SimulationResult::Optimization {
+            let rspice_simulation::results::SimulationResult::Optimization {
                 best_variables,
                 best_cost,
                 best_objectives,
                 best_constraints,
                 converged,
                 ..
-            } = crate::simulation::results::SimulationResult::from(restored)
+            } = rspice_simulation::results::SimulationResult::from(restored)
             else {
                 panic!("optimization result")
             };
@@ -805,13 +805,13 @@ mod tests {
             let restored: WorkerSimulationResult =
                 serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
             assert_eq!(wire, restored);
-            let crate::simulation::results::SimulationResult::Optimization {
+            let rspice_simulation::results::SimulationResult::Optimization {
                 best_variables,
                 best_cost,
                 best_constraints,
                 converged,
                 ..
-            } = crate::simulation::results::SimulationResult::from(restored)
+            } = rspice_simulation::results::SimulationResult::from(restored)
             else {
                 unreachable!()
             };

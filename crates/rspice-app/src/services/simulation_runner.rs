@@ -11,7 +11,6 @@ use harmonic_basis::build_multi_tone_hb_layout_with_abort;
 mod dcmatch;
 mod disto;
 mod envelope_fourier;
-mod error;
 mod hb;
 mod hbnoise;
 mod helpers;
@@ -60,7 +59,7 @@ pub use envelope_fourier::{
 pub(crate) use envelope_fourier::{
     fourier_output_is_current, run_fourier_from_observation_with_abort, split_fourier_output,
 };
-pub use error::{ServiceRunError, ServiceRunResult};
+pub use rspice_simulation::error::{ServiceRunError, ServiceRunResult};
 #[cfg(test)]
 pub use hb::run_hb_analysis_with_source_path_and_abort;
 pub(crate) use hb::{
@@ -126,7 +125,6 @@ pub use pss::{
 };
 pub use pstb::PstbRunConfig;
 pub(crate) use pstb::{PstbData, run_pstb_analysis_on_materialized_with_abort};
-pub use qpss::qpss_data_from_operating_point_with_abort;
 #[cfg(test)]
 pub use qpss::run_qpss_analysis_with_source_path_and_abort;
 pub(crate) use rspice_simulation_contract::config::validate_noise_sidebands;

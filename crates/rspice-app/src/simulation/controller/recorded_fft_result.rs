@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use crate::simulation::results::RecordedFftSpectrum;
+use rspice_simulation::results::RecordedFftSpectrum;
 use crate::state::{AnalysisResult, AnalysisResultPayload, AnalysisType};
 
 /// The unit the engine's own rule gives this spectrum's magnitudes.
@@ -41,12 +41,12 @@ fn magnitude_unit(spectrum: &RecordedFftSpectrum) -> String {
 /// Empty for an incomplete record: there is nothing to draw.
 fn spectrum_waveforms(
     spectrum: &RecordedFftSpectrum,
-) -> HashMap<String, crate::simulation::results::WaveformData> {
+) -> HashMap<String, rspice_simulation::results::WaveformData> {
     if !spectrum.evidence.status.is_complete() {
         return HashMap::new();
     }
     let name = spectrum.evidence.output.clone();
-    let mut waveform = crate::simulation::results::WaveformData::new_complex(
+    let mut waveform = rspice_simulation::results::WaveformData::new_complex(
         name.clone(),
         spectrum.frequency.clone(),
         spectrum.real.clone(),
@@ -67,7 +67,7 @@ pub(super) fn analysis_result(
     spectrum: &RecordedFftSpectrum,
     complex_waveforms: impl FnOnce(
         Vec<f64>,
-        HashMap<String, crate::simulation::results::WaveformData>,
+        HashMap<String, rspice_simulation::results::WaveformData>,
     ) -> Vec<crate::state::WaveformData>,
 ) -> AnalysisResult {
     if let Err(error) = spectrum.validate() {

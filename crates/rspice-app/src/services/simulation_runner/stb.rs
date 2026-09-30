@@ -8,7 +8,7 @@
 //! the pair; there is no second method behind a flag, and no configuration
 //! selects one.
 
-use super::error::{ensure_not_aborted, poll_periodically};
+use rspice_simulation::error::{ensure_not_aborted, poll_periodically};
 use super::{
     ServiceRunError, ServiceRunResult, build_engine_config, parse_runner_netlist_with_abort,
 };

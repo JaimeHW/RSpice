@@ -4,7 +4,7 @@
 //! task carries its own deck. This is where that deck gets the process
 //! corner's real model cards in place of the reference ones.
 
-use super::super::error::{
+use rspice_simulation::error::{
     ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically,
 };
 use super::types::{CornerRunConfig, REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END};

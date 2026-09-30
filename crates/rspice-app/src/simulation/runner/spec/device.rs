@@ -7,7 +7,7 @@ use rspice_core::abort_signal::AbortSignal;
 
 use crate::services::simulation_runner as svc_runner;
 use crate::simulation::multi_run::{AnalysisSpec, OptimizationAlgorithm, OptimizationGoal};
-use crate::simulation::results::{SimulationResult, WaveformData};
+use rspice_simulation::results::{SimulationResult, WaveformData};
 use crate::simulation::runner::SimulationError;
 
 pub(super) fn run_device_spec(

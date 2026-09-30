@@ -25,7 +25,7 @@ mod tests {
 
     #[test]
     fn qpac_worker_saved_result_and_display_preserve_complex_response_and_units() {
-        let original = SimulationResult::qpac_test_fixture();
+        let original = crate::simulation::results::qpac_test_fixture();
         let packet = WorkerResponseTransport::from_response(
             WorkerResponse::from_result_for_transfer(72, Ok(original)),
         )

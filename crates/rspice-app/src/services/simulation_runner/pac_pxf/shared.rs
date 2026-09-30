@@ -36,4 +36,4 @@ pub(super) fn resolve_pac_output_node_with_abort(
 use rspice_core::abort_signal::AbortSignal;
 
 use super::super::ServiceRunResult;
-use super::super::error::ensure_not_aborted;
+use rspice_simulation::error::ensure_not_aborted;
