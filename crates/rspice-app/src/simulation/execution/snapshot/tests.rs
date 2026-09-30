@@ -11,6 +11,8 @@ use super::*;
 use crate::simulation::AnalysisConfig;
 use crate::simulation::multi_run::AnalysisSpec;
 use rspice_simulation::execution_options::SpecExecutionOptions;
+use std::ffi::OsString;
+use std::path::PathBuf;
 
 fn task() -> QueuedAnalysis {
     QueuedAnalysis {
@@ -1242,27 +1244,6 @@ fn automatic_export_policy_is_authenticated_by_snapshot_identity() {
             .output_path(12, 3, 4)
             .expect("enabled output path"),
         PathBuf::from("sealed-output").join("amp_run0012_sp03.s4p")
-    );
-}
-
-#[test]
-fn automatic_export_identity_is_derived_from_the_exact_output_prefix() {
-    let first =
-        TouchstoneExportPolicy::enabled(2, PathBuf::from("sealed-output-a"), OsString::from("amp"))
-            .expect("first output policy");
-    let second =
-        TouchstoneExportPolicy::enabled(2, PathBuf::from("sealed-output-b"), OsString::from("amp"))
-            .expect("second output policy");
-    assert_ne!(first, second);
-
-    assert!(
-        TouchstoneExportPolicy::enabled(
-            2,
-            PathBuf::from("sealed-output"),
-            OsString::from("../redirect"),
-        )
-        .is_err(),
-        "a stem must not be able to redirect the captured directory"
     );
 }
 

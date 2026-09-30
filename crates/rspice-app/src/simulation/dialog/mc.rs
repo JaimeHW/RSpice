@@ -1,5 +1,6 @@
 //! App-facing aliases for the portable Monte Carlo draft.
 
+#[cfg(test)]
 pub(crate) mod checkpoint;
 pub(crate) mod statistics;
 

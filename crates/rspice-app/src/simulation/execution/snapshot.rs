@@ -5,8 +5,6 @@
 //! than discovered mid-run.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::ffi::OsString;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::product::ProcessCorner;
@@ -26,13 +24,14 @@ use rspice_simulation::output_contract::policy_tag;
 use rspice_simulation::output_contract::precision_tag;
 use rspice_simulation::output_contract::streaming_tag;
 use rspice_simulation::preparation::QueuedAnalysis;
+pub(in crate::simulation) use rspice_simulation::preparation::touchstone::TouchstoneExportPolicy;
 // The receipt's source domain is named by `snapshot/run_receipt.rs`; the
 // snapshot suite reaches it through this module's glob.
 #[cfg(test)]
 use crate::state::AnalysisResultSourceDomain;
 
 use super::permit::ConsumedExecutionPermit;
-use rspice_app_types::canonical::{CanonicalWriter, content_digest};
+use rspice_app_types::canonical::CanonicalWriter;
 use rspice_simulation::execution_artifact::ExecutionArtifactEnvelope;
 use rspice_simulation::execution_artifact::PreparedDependencyBinding;
 use rspice_simulation::execution_artifact::ResolvedExecutionDependencies;
@@ -46,7 +45,8 @@ mod declared_points;
 mod derived_identity;
 mod hierarchy_map;
 mod monte_carlo;
-pub(in crate::simulation) use monte_carlo::PreparedMonteCarloResume;
+use rspice_simulation::monte_carlo_checkpoint::preparation::PreparedMonteCarloResume;
+use rspice_simulation::monte_carlo_checkpoint::preparation::digest_with_resumes;
 mod participation;
 mod pvt_preparation;
 mod run_receipt;
@@ -172,139 +172,6 @@ impl SavePolicy {
             writer.bool(live_streaming_enabled);
             writer.bool(retain_failure_diagnostics);
         }
-    }
-}
-
-/// Immutable automatic Touchstone-export policy authenticated by preflight.
-///
-/// The output prefix is captured before execution so edits to the live
-/// schematic path or S-parameter dialog cannot redirect a completed run. The
-/// digest uses the platform-exact path identity; display conversion is never
-/// used as persistence authority.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::simulation) enum TouchstoneExportPolicy {
-    Disabled,
-    Enabled {
-        version: u32,
-        output_directory: PathBuf,
-        output_stem: OsString,
-        output_identity: ContentDigest,
-    },
-}
-
-impl TouchstoneExportPolicy {
-    pub(in crate::simulation) const fn disabled() -> Self {
-        Self::Disabled
-    }
-
-    pub(in crate::simulation) fn enabled(
-        version: u32,
-        output_directory: PathBuf,
-        output_stem: OsString,
-    ) -> Result<Self, PreparationError> {
-        if !(1..=2).contains(&version) {
-            return Err(PreparationError::new(
-                PreparationStage::AnalysisPlan,
-                format!("Touchstone export version must be 1 or 2, got {version}"),
-            ));
-        }
-        if output_directory.as_os_str().is_empty() || output_stem.is_empty() {
-            return Err(PreparationError::new(
-                PreparationStage::AnalysisPlan,
-                "Touchstone export requires a non-empty captured output prefix",
-            ));
-        }
-        let stem_path = Path::new(&output_stem);
-        if stem_path.file_name() != Some(output_stem.as_os_str())
-            || stem_path.components().count() != 1
-        {
-            return Err(PreparationError::new(
-                PreparationStage::AnalysisPlan,
-                "Touchstone export stem must be one path component",
-            ));
-        }
-        let output_identity = exact_path_digest(&output_directory.join(&output_stem));
-        Ok(Self::Enabled {
-            version,
-            output_directory,
-            output_stem,
-            output_identity,
-        })
-    }
-
-    pub(in crate::simulation) const fn version(&self) -> Option<u32> {
-        match self {
-            Self::Disabled => None,
-            Self::Enabled { version, .. } => Some(*version),
-        }
-    }
-
-    pub(in crate::simulation) fn output_path(
-        &self,
-        run_id: u64,
-        analysis_idx: usize,
-        num_ports: usize,
-    ) -> Option<PathBuf> {
-        let Self::Enabled {
-            output_directory,
-            output_stem,
-            ..
-        } = self
-        else {
-            return None;
-        };
-        let mut file_name = output_stem.clone();
-        file_name.push(format!(
-            "_run{run_id:04}_sp{:02}.s{}p",
-            analysis_idx.max(1),
-            num_ports.max(2)
-        ));
-        Some(output_directory.join(file_name))
-    }
-
-    fn encode(&self, writer: &mut CanonicalWriter) {
-        writer.domain("touchstone-export-policy");
-        match self {
-            Self::Disabled => writer.u8(0),
-            Self::Enabled {
-                version,
-                output_identity,
-                ..
-            } => {
-                writer.u8(1);
-                writer.u64(u64::from(*version));
-                writer.digest(*output_identity);
-            }
-        }
-    }
-}
-
-fn exact_path_digest(path: &Path) -> ContentDigest {
-    #[cfg(windows)]
-    {
-        use std::os::windows::ffi::OsStrExt as _;
-
-        let mut bytes = Vec::new();
-        for unit in path.as_os_str().encode_wide() {
-            bytes.extend_from_slice(&unit.to_be_bytes());
-        }
-        content_digest("rspice.touchstone-output-prefix/windows-utf16be/v1", &bytes)
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::ffi::OsStrExt as _;
-
-        content_digest(
-            "rspice.touchstone-output-prefix/unix-bytes/v1",
-            path.as_os_str().as_bytes(),
-        )
-    }
-    #[cfg(not(any(windows, unix)))]
-    {
-        content_digest(
-            "rspice.touchstone-output-prefix/utf8/v1",
-            path.as_os_str().to_string_lossy().as_bytes(),
-        )
     }
 }
 
@@ -612,8 +479,7 @@ impl PreparedTask {
             ),
             &self.bound_observation_cards,
         );
-        let analysis_digest =
-            monte_carlo::digest_with_resumes(analysis_digest, &self.monte_carlo_resumes);
+        let analysis_digest = digest_with_resumes(analysis_digest, &self.monte_carlo_resumes);
         let Some(environment) = self.execution_environment.as_ref() else {
             return analysis_digest;
         };

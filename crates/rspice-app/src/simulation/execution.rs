@@ -17,9 +17,9 @@ pub(crate) use rspice_simulation::preparation::{PreparationError, PreparationSta
 pub(in crate::simulation) use snapshot::bound_cards;
 pub(in crate::simulation) use snapshot::{
     AuthorizedRunDispatch, AuthorizedTaskDispatch, ExecutionTargetCapabilities,
-    ModelSourceIdentity, PSS_SPECTRUM_ROLE, PreparedMonteCarloResume, PreparedRunSet,
-    PreparedRunSnapshot, PreparedTask, ResolvedTaskDispatch, RunSourceReceipt, SavePolicy,
-    SnapshotParts, TouchstoneExportPolicy, result_source_domain,
+    ModelSourceIdentity, PSS_SPECTRUM_ROLE, PreparedRunSet, PreparedRunSnapshot, PreparedTask,
+    ResolvedTaskDispatch, RunSourceReceipt, SavePolicy, SnapshotParts, TouchstoneExportPolicy,
+    result_source_domain,
 };
 pub(crate) use snapshot::{PreparedRunMetadata, execution_target_supports_cancellation};
 

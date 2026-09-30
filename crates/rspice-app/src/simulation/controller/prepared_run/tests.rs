@@ -308,61 +308,6 @@ fn governed_manual_deck_dispatches_signed_pdk_veriloga_runtime_without_host_path
     assert!(!contains_external_include_directive(executable));
 }
 
-fn prepared_pss_task(
-    tone_sources: impl IntoIterator<Item = &'static str>,
-    oscillator_mode: bool,
-) -> PreparedTask {
-    PreparedTask::new(
-        crate::product::AnalysisInstanceId::new(),
-        crate::product::ObjectRevision::INITIAL,
-        Vec::new(),
-        "PSS",
-        QueuedAnalysis {
-            numeric_override: None,
-            spec: AnalysisSpec::Pss {
-                method: PssMethod::Shooting,
-                fundamental_freq: 1.0e3,
-                tone_sources: tone_sources.into_iter().map(str::to_owned).collect(),
-                tstab_periods: 20,
-                points_per_period: 512,
-                tolerance: 1.0e-7,
-                oscillator_mode,
-                oscillator_node: oscillator_mode.then(|| "out".to_owned()),
-                num_harmonics: 20,
-                integration_method: None,
-                tstab: 0.0,
-                max_iterations: 100,
-                abstol: 1.0e-12,
-                damping: 1.0,
-                max_period_change: 0.1,
-                verbose: false,
-            },
-            config: None,
-            spec_options: SpecExecutionOptions::default(),
-            analysis_line: ".pss 1k".to_owned(),
-        },
-    )
-}
-
-#[test]
-fn prepared_pss_authenticates_the_complete_executable_source_set() {
-    let deck = "periodic sources\nVLO lo 0 SIN(0 1 1k)\nVCLK clk 0 PULSE(0 1 0 1u 1u 200u 500u)\nR1 lo 0 1k\nR2 clk 0 1k\n.end\n";
-    validate_prepared_periodic_sources(&[prepared_pss_task(["vclk", "VLO"], false)], deck)
-        .expect("the complete commensurate source set is accepted");
-
-    let error = validate_prepared_periodic_sources(&[prepared_pss_task(["VLO"], false)], deck)
-        .expect_err("an omitted periodic source fails preflight");
-    assert_eq!(error.stage(), PreparationStage::AnalysisPlan);
-    assert!(error.message().contains("omitted: VCLK"));
-}
-
-#[test]
-fn prepared_autonomous_pss_accepts_an_exact_empty_driven_source_set() {
-    let deck = "autonomous oscillator\nR1 out 0 1k\nC1 out 0 1n\n.end\n";
-    validate_prepared_periodic_sources(&[prepared_pss_task([], true)], deck)
-        .expect("a source-free autonomous circuit has an exact empty source set");
-}
-
 fn edit_frozen_transient_stop(state: &mut AppState, stop: &str) {
     let plan = state
         .sim_setup

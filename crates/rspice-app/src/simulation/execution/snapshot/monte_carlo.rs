@@ -1,33 +1,12 @@
 //! Route selected trial populations against fully materialized per-point decks.
 use super::*;
-use rspice_simulation::monte_carlo_checkpoint::MonteCarloCheckpointInput;
 
-#[derive(Debug, Clone)]
-pub(in crate::simulation) struct PreparedMonteCarloResume {
-    population: [u8; 32],
-    input: MonteCarloCheckpointInput,
-}
-impl PreparedMonteCarloResume {
-    pub(in crate::simulation) fn from_input(
-        input: MonteCarloCheckpointInput,
-    ) -> Result<Self, String> {
-        let population = input
-            .decode()
-            .map_err(|error| error.to_string())?
-            .population_identity();
-        Ok(Self { population, input })
-    }
-    #[cfg(test)]
-    pub(in crate::simulation) fn input(&self) -> &MonteCarloCheckpointInput {
-        &self.input
-    }
-}
 impl PreparedTask {
     pub(in crate::simulation) fn with_monte_carlo_resumes(
         mut self,
         mut resumes: Vec<PreparedMonteCarloResume>,
     ) -> Self {
-        resumes.sort_by_key(|resume| resume.population);
+        resumes.sort_by_key(PreparedMonteCarloResume::population_identity);
         self.monte_carlo_resumes = resumes.into();
         self.config_digest = self.payload_digest();
         self
@@ -36,23 +15,6 @@ impl PreparedTask {
     pub(in crate::simulation) fn monte_carlo_resumes(&self) -> &[PreparedMonteCarloResume] {
         &self.monte_carlo_resumes
     }
-}
-
-pub(super) fn digest_with_resumes(
-    base: ContentDigest,
-    resumes: &[PreparedMonteCarloResume],
-) -> ContentDigest {
-    if resumes.is_empty() {
-        return base;
-    }
-    let mut writer = CanonicalWriter::new("rspice.monte-carlo-selected-populations/v1");
-    writer.digest(base);
-    writer.sequence(resumes.len());
-    for resume in resumes {
-        writer.digest(ContentDigest::from_bytes(resume.population));
-        writer.digest(resume.input.digest());
-    }
-    writer.finish()
 }
 
 fn invalid(message: impl Into<String>) -> PreparationError {
@@ -80,12 +42,12 @@ pub(super) fn route_resumes(
         }
         let mut bytes = 0usize;
         for resume in task.monte_carlo_resumes.iter() {
-            if !required.insert((task.authored_instance_id, resume.population)) {
+            if !required.insert((task.authored_instance_id, resume.population_identity())) {
                 return Err(invalid(
                     "Monte Carlo checkpoint selections contain an unpooled duplicate population",
                 ));
             }
-            bytes = bytes.saturating_add(resume.input.byte_len());
+            bytes = bytes.saturating_add(resume.input().byte_len());
         }
         if bytes > rspice_core::ResourceLimits::default().max_external_data_bytes {
             return Err(invalid(
@@ -133,7 +95,7 @@ pub(super) fn route_resumes(
         if let Some(candidates) = candidates {
             let selected = candidates
                 .iter()
-                .find(|candidate| candidate.population == population);
+                .find(|candidate| candidate.population_identity() == population);
             if selected.is_some() {
                 used.insert((task.authored_instance_id, population));
             }
@@ -142,7 +104,7 @@ pub(super) fn route_resumes(
                 .mc_checkpoint
                 .as_mut()
                 .expect("checked policy")
-                .resume = selected.map(|selected| selected.input.clone());
+                .resume = selected.map(|selected| selected.input().clone());
             task.monte_carlo_resumes = Arc::from([]);
             task.config_digest = task.payload_digest();
         } else if direct

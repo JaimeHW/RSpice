@@ -11,6 +11,7 @@ use crate::simulation::execution::PreparedTask;
 use crate::simulation::execution::bound_cards;
 use crate::simulation::plan::FrozenSimulationPlan;
 use rspice_simulation::execution_artifact::PreparedDependencyBinding;
+use rspice_simulation::monte_carlo_checkpoint::preparation::resume_inputs_from_config;
 
 impl SimulationController {
     /// Compile a candidate saved output through the same frozen-plan and
@@ -250,8 +251,13 @@ impl SimulationController {
                 if let crate::simulation::plan::AnalysisDraft::MonteCarlo(draft) = instance.draft()
                 {
                     match draft.to_config().and_then(|config| {
-                        monte_carlo_checkpoint::resume_inputs_from_config(
-                            state,
+                        resume_inputs_from_config(
+                            state
+                                .simulation
+                                .runs
+                                .iter()
+                                .flat_map(|run| run.analyses.iter().map(AsRef::as_ref)),
+                            &state.simulation.imported_monte_carlo_checkpoints,
                             config.checkpoint.as_ref(),
                         )
                     }) {

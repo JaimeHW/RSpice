@@ -19,7 +19,8 @@ fn placed_view(port: &PlacedRfPort) -> SpPlacedPort<'_> {
 }
 
 /// Resolve the portable draft against the placed ports visible in the app.
-pub fn to_config(
+#[cfg(test)]
+fn to_config(
     draft: &SpDialogState,
     design: Option<&[PlacedRfPort]>,
 ) -> Result<super::SpConfig, String> {

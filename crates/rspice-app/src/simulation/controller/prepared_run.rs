@@ -5,8 +5,9 @@
 //! begins fully determined or is refused with a reason.
 
 use std::collections::{HashMap, HashSet};
-use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 
 use super::*;
 use crate::simulation::execution::AuthorizedRunDispatch;
@@ -35,17 +36,14 @@ use rspice_simulation::sealed_source::{
 
 #[cfg(test)]
 mod measurement_tests;
-mod periodic_sources;
 
-use periodic_sources::validate_prepared_periodic_sources;
 use rspice_simulation::capture_ledger::{plan_capture_workload, validate_plan_saved_output_budget};
 use rspice_simulation::model_sources::prepared_project_model_sources;
 use rspice_simulation::model_sources::validate_projected_model_binding_authority;
 #[cfg(test)]
 use rspice_simulation::netlist_preparation::dependencies::expand_generated_dependencies;
 use rspice_simulation::netlist_preparation::dependencies::{
-    execution_current_directory, expand_generated_dependencies_with_sealed_sources,
-    expand_manual_dependencies,
+    expand_generated_dependencies_with_sealed_sources, expand_manual_dependencies,
 };
 use rspice_simulation::netlist_preparation::{
     contains_external_include_directive, deferred_external_source_reason, executable_logical_lines,
@@ -55,6 +53,7 @@ use rspice_simulation::netlist_preparation::{measurements, owned_source};
 use rspice_simulation::output_contract::selection::{
     effective_plan_capture, projection_occurrence_nets,
 };
+use rspice_simulation::preparation::validate_prepared_periodic_sources;
 use rspice_simulation::project_veriloga::preparation::{
     prepared_configuration_veriloga_runtimes, prepared_model_library_veriloga_runtimes,
     prepared_signed_pdk_veriloga_runtimes, project_veriloga_runtimes_referenced_by,
@@ -927,7 +926,12 @@ impl SimulationController {
             &project_veriloga_runtimes,
             &measurement_references,
         )?;
-        validate_prepared_periodic_sources(&tasks, &netlist)?;
+        validate_prepared_periodic_sources(
+            tasks
+                .iter()
+                .map(|task| (task.instance_id(), &task.queued_analysis().spec)),
+            &netlist,
+        )?;
         reject_unresolved_device_models(&netlist, has_project_technology)?;
         reject_deferred_corner_model_sources(
             tasks.iter().map(PreparedTask::queued_analysis),
@@ -1636,48 +1640,20 @@ pub(super) fn touchstone_export_policy_for_dialog(
     placed_rf_ports: &[crate::simulation::placed_sources::PlacedRfPort],
     source_path: Option<&Path>,
 ) -> Result<TouchstoneExportPolicy, PreparationError> {
-    let mut dialog = dialog.clone();
-    dialog.ensure_initialized();
-    let config = crate::simulation::dialog::sp::to_config(&dialog, Some(placed_rf_ports)).map_err(
-        |error| {
-            PreparationError::new(
-                PreparationStage::AnalysisPlan,
-                format!("Invalid Touchstone export settings: {error}"),
-            )
-        },
-    )?;
-    if !config.touchstone_export {
-        return Ok(TouchstoneExportPolicy::disabled());
-    }
-
-    let (directory, stem) = touchstone_output_prefix(source_path)?;
-    TouchstoneExportPolicy::enabled(config.touchstone_version, directory, stem)
-}
-
-fn touchstone_output_prefix(
-    source_path: Option<&Path>,
-) -> Result<(PathBuf, OsString), PreparationError> {
-    let current = execution_current_directory()?;
-    let Some(source) = source_path else {
-        return Ok((current, OsString::from("untitled")));
-    };
-
-    let absolute = if source.is_absolute() {
-        source.to_path_buf()
-    } else {
-        current.join(source)
-    };
-    let directory = absolute
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| current.clone());
-    let directory = directory.canonicalize().unwrap_or(directory);
-    let stem = absolute
-        .file_stem()
-        .filter(|stem| !stem.is_empty())
-        .map(OsString::from)
-        .unwrap_or_else(|| OsString::from("untitled"));
-    Ok((directory, stem))
+    let placed = placed_rf_ports
+        .iter()
+        .map(|port| rspice_simulation_contract::sp_draft::SpPlacedPort {
+            reference: &port.reference,
+            port_number: port.port_number,
+            z0: &port.z0,
+            nets: &port.nets,
+        })
+        .collect::<Vec<_>>();
+    rspice_simulation::preparation::touchstone::touchstone_export_policy_for_dialog(
+        dialog,
+        &placed,
+        source_path,
+    )
 }
 
 #[cfg(test)]

@@ -1,5 +1,7 @@
 //! Immutable checkpoint requests and bounded delivery of the latest snapshot.
 
+pub mod preparation;
+
 use crate::error::SimulationError;
 use rspice_app_types::product::ContentDigest;
 use rspice_core::{NoAbort, ResourceLimits};

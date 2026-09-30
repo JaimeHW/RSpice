@@ -70,3 +70,7 @@ impl std::fmt::Display for PreparationError {
         formatter.write_str(&self.message)
     }
 }
+
+mod periodic_sources;
+pub use periodic_sources::validate_prepared_periodic_sources;
+pub mod touchstone;
