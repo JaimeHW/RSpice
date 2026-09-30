@@ -1,127 +1,80 @@
-//! Managing the library search path.
-//!
-//! Order matters: the first path holding a model wins, so adding, removing,
-//! and reordering entries changes which model a design resolves to.
+//! Expand PDK paths against configuration overrides and the host environment.
 
-use super::*;
+use super::PdkConfig;
 
-impl PdkConfig {
-    // =========================================================================
-    // Library Path Management
-    // =========================================================================
+fn get_env_var(config: &PdkConfig, name: &str) -> Option<String> {
+    config
+        .environment_variables
+        .get(name)
+        .cloned()
+        .or_else(|| std::env::var(name).ok())
+}
 
-    /// Add a library search path
-    pub fn add_library_path(&mut self, path: impl Into<String>) {
-        let entry = LibraryPathEntry::new(path);
-        if !self.library_paths.iter().any(|e| e.path == entry.path) {
-            self.library_paths.push(entry);
+pub fn expand_path(config: &PdkConfig, path: &str) -> String {
+    let mut result = path.to_string();
+    let mut iterations = 0;
+    const MAX_ITERATIONS: usize = 10; // Prevent infinite recursion
+
+    // Keep expanding until no more variables or max iterations
+    while iterations < MAX_ITERATIONS {
+        let before = result.clone();
+        result = expand_path_once(config, &result);
+        if result == before {
+            break;
         }
+        iterations += 1;
     }
 
-    /// Remove a library path by index
-    pub fn remove_library_path(&mut self, index: usize) -> Option<LibraryPathEntry> {
-        if index < self.library_paths.len() {
-            Some(self.library_paths.remove(index))
-        } else {
-            None
-        }
-    }
+    result
+}
 
-    // =========================================================================
-    // Environment Variables
-    // =========================================================================
+fn expand_path_once(config: &PdkConfig, path: &str) -> String {
+    let mut result = String::with_capacity(path.len());
+    let mut chars = path.chars().peekable();
 
-    /// Set an environment variable override
-    pub fn set_env_var(&mut self, name: impl Into<String>, value: impl Into<String>) {
-        self.environment_variables.insert(name.into(), value.into());
-    }
-
-    /// Remove an environment variable
-    pub fn remove_env_var(&mut self, name: &str) -> Option<String> {
-        self.environment_variables.remove(name)
-    }
-
-    /// Get an environment variable (checks overrides first, then system)
-    pub fn get_env_var(&self, name: &str) -> Option<String> {
-        self.environment_variables
-            .get(name)
-            .cloned()
-            .or_else(|| std::env::var(name).ok())
-    }
-
-    /// Expand environment variables in a path string
-    ///
-    /// Supports:
-    /// - `$VAR` and `${VAR}` syntax
-    /// - Nested resolution
-    /// - Both config overrides and system environment
-    pub fn expand_path(&self, path: &str) -> String {
-        let mut result = path.to_string();
-        let mut iterations = 0;
-        const MAX_ITERATIONS: usize = 10; // Prevent infinite recursion
-
-        // Keep expanding until no more variables or max iterations
-        while iterations < MAX_ITERATIONS {
-            let before = result.clone();
-            result = self.expand_path_once(&result);
-            if result == before {
-                break;
-            }
-            iterations += 1;
-        }
-
-        result
-    }
-
-    /// Single pass of environment variable expansion
-    fn expand_path_once(&self, path: &str) -> String {
-        let mut result = String::with_capacity(path.len());
-        let mut chars = path.chars().peekable();
-
-        while let Some(c) = chars.next() {
-            if c == '$' {
-                // Check for ${VAR} or $VAR syntax
-                let var_name = if chars.peek() == Some(&'{') {
-                    chars.next(); // consume '{'
-                    let mut name = String::new();
-                    while let Some(&ch) = chars.peek() {
-                        if ch == '}' {
-                            chars.next(); // consume '}'
-                            break;
-                        }
+    while let Some(c) = chars.next() {
+        if c == '$' {
+            // Check for ${VAR} or $VAR syntax
+            let var_name = if chars.peek() == Some(&'{') {
+                chars.next(); // consume '{'
+                let mut name = String::new();
+                while let Some(&ch) = chars.peek() {
+                    if ch == '}' {
+                        chars.next(); // consume '}'
+                        break;
+                    }
+                    name.push(chars.next().unwrap());
+                }
+                name
+            } else {
+                // $VAR - read until non-alphanumeric/underscore
+                let mut name = String::new();
+                while let Some(&ch) = chars.peek() {
+                    if ch.is_alphanumeric() || ch == '_' {
                         name.push(chars.next().unwrap());
-                    }
-                    name
-                } else {
-                    // $VAR - read until non-alphanumeric/underscore
-                    let mut name = String::new();
-                    while let Some(&ch) = chars.peek() {
-                        if ch.is_alphanumeric() || ch == '_' {
-                            name.push(chars.next().unwrap());
-                        } else {
-                            break;
-                        }
-                    }
-                    name
-                };
-
-                // Expand the variable
-                if !var_name.is_empty() {
-                    if let Some(value) = self.get_env_var(&var_name) {
-                        result.push_str(&value);
                     } else {
-                        // Keep original if not found
-                        result.push('$');
-                        result.push_str(&var_name);
+                        break;
                     }
+                }
+                name
+            };
+
+            // Expand the variable
+            if !var_name.is_empty() {
+                if let Some(value) = get_env_var(config, &var_name) {
+                    result.push_str(&value);
                 } else {
+                    // Keep original if not found
                     result.push('$');
+                    result.push_str(&var_name);
                 }
             } else {
-                result.push(c);
+                result.push('$');
             }
+        } else {
+            result.push(c);
         }
-
-        result
     }
+
+    result
 }

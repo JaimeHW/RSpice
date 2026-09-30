@@ -9,6 +9,8 @@ pub mod callback;
 pub mod contracts;
 pub mod diff;
 pub mod display_profile;
+mod library_config;
+pub use library_config::{DiscoveredFile, LibraryPathEntry};
 pub mod manifest;
 pub mod package;
 pub mod technology_draft;

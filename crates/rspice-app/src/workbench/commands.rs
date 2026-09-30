@@ -2115,7 +2115,7 @@ impl Command {
                 activate_workspace(app, Workspace::Design);
             }
             Self::RescanModelLibraries => {
-                app.state.pdk_config.discover_model_files();
+                crate::state::pdk_config::discover_model_files(&mut app.state.pdk_config);
                 app.state.model_library_manager.discover_spice_packs();
                 let (message, has_errors) = model_library_rescan_diagnostic(app);
                 if has_errors {

@@ -5,7 +5,7 @@ use std::sync::{Mutex, OnceLock};
 
 use super::*;
 
-pub(crate) struct NativePackageImport {
+pub struct NativePackageImport {
     base: PdkConfig,
     result: Result<PackageImportCandidate, String>,
 }
@@ -36,7 +36,7 @@ fn prepare_native_package_import(
 }
 
 impl NativePackageImport {
-    pub(crate) fn resolve(self, current: &PdkConfig) -> Result<PackageImportCandidate, String> {
+    pub fn resolve(self, current: &PdkConfig) -> Result<PackageImportCandidate, String> {
         if *current != self.base {
             return Err(
                 "PDK configuration changed while the signed package was being validated; the stale candidate was discarded without mutation."
@@ -47,7 +47,7 @@ impl NativePackageImport {
     }
 }
 
-pub(crate) fn take_native_package_imports() -> Vec<NativePackageImport> {
+pub fn take_native_package_imports() -> Vec<NativePackageImport> {
     native_package_imports()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -55,7 +55,7 @@ pub(crate) fn take_native_package_imports() -> Vec<NativePackageImport> {
         .collect()
 }
 
-pub(crate) fn start_native_package_import(
+pub fn start_native_package_import(
     base: PdkConfig,
     path: std::path::PathBuf,
     authority: PdkAdministrativeAuthority,
@@ -96,9 +96,11 @@ mod tests {
 
     #[test]
     fn background_package_candidate_preserves_base_and_rejects_stale_completion() {
-        let (bytes, trust, authority) = crate::state::pdk_config::signed_technology_test_fixture();
-        let mut base = crate::state::pdk_config::PdkConfig::default();
-        base.publisher_trust_store = trust;
+        let (bytes, trust, authority) = crate::pdk::test_fixtures::fixture_archive();
+        let mut base = PdkConfig {
+            publisher_trust_store: trust,
+            ..PdkConfig::default()
+        };
         let before = base.clone();
 
         let candidate = NativePackageImport {

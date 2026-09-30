@@ -112,6 +112,7 @@ rfd = { version = "0.17", features = ["file-handle-inner"] }
 dirs = "6.0"
 
 [dev-dependencies]
+rspice-simulation = { workspace = true, features = ["pdk-test-fixtures"] }
 rspice-simulation-contract = { workspace = true, features = ["derivation-test-observation"] }
 csv.workspace = true
 rspice-project = { workspace = true, features = ["result-validation-observation", "document-fingerprint-observation", "library-test-fixtures"] }

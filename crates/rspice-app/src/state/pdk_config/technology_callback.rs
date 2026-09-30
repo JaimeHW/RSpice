@@ -4,13 +4,11 @@
 //! registry transactions consume the canonical portable evidence records.
 
 pub use rspice_model_library::pdk::callback::{
-    PdkCallbackError, PdkCallbackExecutionInput, PdkCallbackExecutionReceipt,
-    ProjectPdkCallbackReceipt,
+    PdkCallbackExecutionInput, ProjectPdkCallbackReceipt,
 };
 
 #[cfg(test)]
 mod tests {
-    use super::super::technology_package::PdkTechnologyBinding;
     use super::*;
     use crate::product::ContentDigest;
     use crate::state::pdk_config::{
@@ -18,7 +16,9 @@ mod tests {
     };
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use ed25519_dalek::{Signer as _, SigningKey};
+    use rspice_model_library::pdk::callback::PdkCallbackError;
     use rspice_model_library::pdk::content_digest;
+    use rspice_model_library::pdk::contracts::PdkTechnologyBinding;
     use rspice_model_library::pdk::contracts::{
         PDK_CALLBACK_ABI_VERSION, PdkCallbackCapability, SignedPdkTechnologyArchive,
     };
@@ -28,9 +28,9 @@ mod tests {
         wat_source: &str,
         capabilities: Vec<PdkCallbackCapability>,
     ) -> (Vec<u8>, PdkPublisherTrustStore, PdkAdministrativeAuthority) {
-        let (bytes, trust, authority) = super::super::technology_package::tests::fixture_archive();
+        let (bytes, trust, authority) = rspice_simulation::pdk::test_fixtures::fixture_archive();
         let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
-        let mut manifest: super::super::technology_package::PdkTechnologyManifest =
+        let mut manifest: rspice_model_library::pdk::manifest::PdkTechnologyManifest =
             serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
         let callback_bytes = wat::parse_str(wat_source).unwrap();
         let callback = &mut manifest.callbacks[0];
@@ -230,7 +230,7 @@ mod tests {
         );
         let signing_key = SigningKey::from_bytes(&[0x42; 32]);
         let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
-        let mut manifest: super::super::technology_package::PdkTechnologyManifest =
+        let mut manifest: rspice_model_library::pdk::manifest::PdkTechnologyManifest =
             serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
         manifest.schema_version = 2;
         let manifest_bytes = serde_json::to_vec(&manifest).unwrap();

@@ -1807,7 +1807,7 @@ fn configured_source_replacement_rescans_and_rolls_back_every_file_on_error() {
         .expect("write accepted source");
 
     let mut manager = ModelLibraryManager::new();
-    let mut accepted_config = crate::state::pdk_config::PdkConfig::new();
+    let mut accepted_config = crate::state::pdk_config::PdkConfig::default();
     accepted_config.add_library_path(old_root.to_string_lossy());
     assert_eq!(
         manager
@@ -1828,11 +1828,11 @@ fn configured_source_replacement_rescans_and_rolls_back_every_file_on_error() {
         ".include definitely-missing.inc\n.model broken_n NMOS (LEVEL=1)\n",
     )
     .expect("write broken source");
-    let mut next_config = crate::state::pdk_config::PdkConfig::new();
+    let mut next_config = crate::state::pdk_config::PdkConfig::default();
     next_config.add_library_path(next_root.to_string_lossy());
     next_config
         .discovered_files
-        .push(crate::state::pdk_config::DiscoveredFile::new(
+        .push(crate::state::pdk_config::discovered_file(
             old_file.clone(),
             old_root.clone(),
         ));
@@ -1881,7 +1881,7 @@ fn disabling_configured_sources_unloads_only_retained_pdk_ownership() {
     manager
         .load_library_file(&manual_file, None)
         .expect("load manual external library");
-    let mut enabled = crate::state::pdk_config::PdkConfig::new();
+    let mut enabled = crate::state::pdk_config::PdkConfig::default();
     enabled.add_library_path(configured_root.to_string_lossy());
     manager
         .replace_from_pdk_config(None, &mut enabled)

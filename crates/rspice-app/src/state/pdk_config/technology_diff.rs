@@ -8,12 +8,11 @@ pub(crate) mod tests {
     use ed25519_dalek::{Signer as _, SigningKey};
 
     use super::*;
-    use crate::state::pdk_config::technology_package::{
-        PdkAdministrativeAuthority, PdkExecutionTarget, PdkPublisherTrustStore,
-        PdkTechnologyManifest, SignedPdkTechnologyArchive, ValidatedPdkTechnologyPackage,
-        tests::{fixture_archive, fixture_signed_symbol},
-        validate_archive_bytes,
-    };
+    use rspice_model_library::pdk::contracts::{PdkExecutionTarget, SignedPdkTechnologyArchive};
+    use rspice_model_library::pdk::manifest::PdkTechnologyManifest;
+    use rspice_model_library::pdk::{PdkAdministrativeAuthority, PdkPublisherTrustStore};
+    use rspice_simulation::pdk::test_fixtures::{fixture_archive, fixture_signed_symbol};
+    use rspice_simulation::pdk::{ValidatedPdkTechnologyPackage, validate_archive_bytes};
 
     pub(crate) fn fixture_revision_archives() -> (
         Vec<u8>,
@@ -130,14 +129,11 @@ pub(crate) mod tests {
                 .model_sources
                 .iter_mut()
                 .find(|contract| {
-                    contract.process
-                        == crate::state::pdk_config::technology_package::PdkModelProcess::Tt
+                    contract.process == rspice_model_library::pdk::contracts::PdkModelProcess::Tt
                 })
                 .expect("fixture supplies TT");
-            tt.sources[0].domain =
-                crate::state::pdk_config::technology_package::PdkModelDomain::Mos;
-            tt.required_domains =
-                vec![crate::state::pdk_config::technology_package::PdkModelDomain::Mos];
+            tt.sources[0].domain = rspice_model_library::pdk::contracts::PdkModelDomain::Mos;
+            tt.required_domains = vec![rspice_model_library::pdk::contracts::PdkModelDomain::Mos];
         });
         let diff = PdkTechnologyRevisionDiff::between(baseline.metadata(), candidate.metadata())
             .expect("diff");

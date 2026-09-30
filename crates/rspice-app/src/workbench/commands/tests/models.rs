@@ -449,7 +449,7 @@ fn model_library_rescan_discovers_files_and_reports_path_errors() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.authority.open_session();
-    app.state.pdk_config = crate::state::pdk_config::PdkConfig::new();
+    app.state.pdk_config = crate::state::pdk_config::PdkConfig::default();
     app.state
         .pdk_config
         .add_library_path(root.to_string_lossy().into_owned());

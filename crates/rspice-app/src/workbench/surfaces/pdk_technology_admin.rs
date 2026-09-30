@@ -8,7 +8,6 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use egui::{Align, Color32, Frame, Grid, Layout, RichText, ScrollArea, Sense, Stroke, Ui};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::simulation::pdk_import;
 #[cfg(target_arch = "wasm32")]
 use crate::state::pdk_config::MAX_PDK_ARCHIVE_BYTES;
 use crate::state::pdk_config::{
@@ -25,6 +24,7 @@ use crate::state::pdk_config::{
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
+use rspice_simulation::pdk::import as pdk_import;
 
 const VIEW_STATE_ID: &str = "pdk-technology-admin-view-state";
 const COMPACT_BREAKPOINT: f32 = 760.0;
@@ -4372,7 +4372,7 @@ fn persist_candidate(
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = ctx;
-        candidate.save().map_err(|error| error.to_string())?;
+        crate::state::pdk_config::save(&candidate).map_err(|error| error.to_string())?;
         app.state.pdk_config = candidate;
         apply_admin_commit_effect(view, effect);
         Ok(Some(message))

@@ -545,7 +545,7 @@ fn new_and_closed_projects_restore_configured_sources_without_leaking_project_li
     .expect("write configured PDK source");
 
     let mut state = AppState::default();
-    state.pdk_config = crate::state::pdk_config::PdkConfig::new();
+    state.pdk_config = crate::state::pdk_config::PdkConfig::default();
     state
         .pdk_config
         .add_library_path(root.to_string_lossy().into_owned());

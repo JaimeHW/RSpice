@@ -1,13 +1,13 @@
 //! Browser PDK import transport, private validation-cache restoration, and worker execution.
 
 use super::*;
-use crate::state::pdk_config::ValidatedPdkTechnologyPackage;
+use crate::pdk::ValidatedPdkTechnologyPackage;
 
 const BROWSER_PDK_IMPORT_PROTOCOL_VERSION: u16 = 1;
 
-pub(crate) type BrowserPackageImport = Result<Option<BrowserPackageImportCandidate>, String>;
+pub type BrowserPackageImport = Result<Option<BrowserPackageImportCandidate>, String>;
 
-pub(crate) struct BrowserPackageImportCandidate {
+pub struct BrowserPackageImportCandidate {
     base: PdkConfig,
     payload: BrowserPdkImportPayload,
 }
@@ -39,7 +39,7 @@ thread_local! {
 }
 
 impl BrowserPackageImportCandidate {
-    pub(crate) fn resolve(self, current: &PdkConfig) -> Result<PackageImportCandidate, String> {
+    pub fn resolve(self, current: &PdkConfig) -> Result<PackageImportCandidate, String> {
         if *current != self.base {
             return Err(
                 "PDK configuration changed while the browser worker was validating the signed package; the stale candidate was discarded without mutation."
@@ -73,7 +73,7 @@ impl BrowserPackageImportCandidate {
     }
 }
 
-pub(crate) fn start_browser_package_import(
+pub fn start_browser_package_import(
     base: PdkConfig,
     archive: Vec<u8>,
     authority: PdkAdministrativeAuthority,
@@ -89,15 +89,15 @@ pub(crate) fn start_browser_package_import(
     browser_pdk_import_worker::start(metadata, archive, base, std::rc::Rc::new(wake))
 }
 
-pub(crate) fn cancel_browser_package_import() {
+pub fn cancel_browser_package_import() {
     BROWSER_PACKAGE_IMPORTS.with(|queue| queue.borrow_mut().push_back(Ok(None)));
 }
 
-pub(crate) fn fail_browser_package_import(error: String) {
+pub fn fail_browser_package_import(error: String) {
     BROWSER_PACKAGE_IMPORTS.with(|queue| queue.borrow_mut().push_back(Err(error)));
 }
 
-pub(crate) fn take_browser_package_imports() -> Vec<BrowserPackageImport> {
+pub fn take_browser_package_imports() -> Vec<BrowserPackageImport> {
     let completions =
         BROWSER_PACKAGE_IMPORTS.with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
     if !completions.is_empty() {
@@ -353,7 +353,7 @@ mod browser_pdk_import_worker {
     }
 }
 
-pub(crate) fn run_pdk_import_worker_request_value(
+pub fn run_pdk_import_worker_request_value(
     request: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
     use js_sys::{Object, Reflect, Uint8Array};

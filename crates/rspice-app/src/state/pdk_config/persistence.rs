@@ -116,71 +116,58 @@ struct PreparedBrowserPdkSnapshot {
     archives: Vec<BrowserPdkBlob>,
 }
 
-impl PdkConfig {
-    // =========================================================================
-    // Persistence
-    // =========================================================================
+pub fn default_config_path() -> PathBuf {
+    dirs::config_dir()
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("rspice")
+        .join(CONFIG_FILE_NAME)
+}
 
-    /// Get the default configuration file path
-    pub fn default_config_path() -> PathBuf {
-        dirs::config_dir()
-            .or_else(dirs::home_dir)
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("rspice")
-            .join(CONFIG_FILE_NAME)
+#[cfg(all(not(test), not(target_arch = "wasm32")))]
+pub fn load() -> Result<PdkConfig, ConfigError> {
+    load_from(&default_config_path())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_from(path: &Path) -> Result<PdkConfig, ConfigError> {
+    crate::io::durable_file::reconcile_publication(path)
+        .map_err(|e| ConfigError::Io(e.to_string()))?;
+    if !path.exists() {
+        return Ok(PdkConfig::default());
     }
 
-    /// Load configuration from the default path. Only the native application
-    /// starts this way: tests build a configuration explicitly, and the
-    /// browser restores one through the asynchronous persistence workflow.
-    #[cfg(all(not(test), not(target_arch = "wasm32")))]
-    pub fn load() -> Result<Self, ConfigError> {
-        Self::load_from(&Self::default_config_path())
-    }
+    let content = std::fs::read_to_string(path).map_err(|e| ConfigError::Io(e.to_string()))?;
 
-    /// Load configuration from a specific path
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn load_from(path: &Path) -> Result<Self, ConfigError> {
-        crate::io::durable_file::reconcile_publication(path)
-            .map_err(|e| ConfigError::Io(e.to_string()))?;
-        if !path.exists() {
-            return Ok(Self::default());
-        }
+    serde_json::from_str(&content).map_err(|e| ConfigError::Parse(e.to_string()))
+}
 
-        let content = std::fs::read_to_string(path).map_err(|e| ConfigError::Io(e.to_string()))?;
+pub fn save(config: &PdkConfig) -> Result<(), ConfigError> {
+    save_to(config, &default_config_path())
+}
 
-        serde_json::from_str(&content).map_err(|e| ConfigError::Parse(e.to_string()))
-    }
-
-    /// Save configuration to the default path
-    pub fn save(&self) -> Result<(), ConfigError> {
-        self.save_to(&Self::default_config_path())
-    }
-
-    /// Save configuration to a specific path
-    pub fn save_to(&self, path: &Path) -> Result<(), ConfigError> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _ = (path, self);
-            Err(ConfigError::Io(
+fn save_to(config: &PdkConfig, path: &Path) -> Result<(), ConfigError> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (path, config);
+        Err(ConfigError::Io(
                 "browser PDK configuration publication is asynchronous; use the application persistence workflow"
                     .to_owned(),
             ))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // Ensure parent directory exists
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| ConfigError::Io(e.to_string()))?;
         }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            // Ensure parent directory exists
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| ConfigError::Io(e.to_string()))?;
-            }
 
-            let expected = crate::io::durable_file::observe_expected_content(path)
-                .map_err(|e| ConfigError::Io(e.to_string()))?;
-            let content = serde_json::to_vec_pretty(self)
-                .map_err(|e| ConfigError::Serialize(e.to_string()))?;
+        let expected = crate::io::durable_file::observe_expected_content(path)
+            .map_err(|e| ConfigError::Io(e.to_string()))?;
+        let content =
+            serde_json::to_vec_pretty(config).map_err(|e| ConfigError::Serialize(e.to_string()))?;
 
-            publish_pdk_config(path, expected, &content)
-        }
+        publish_pdk_config(path, expected, &content)
     }
 }
 
@@ -434,11 +421,11 @@ fn validate_browser_pdk_head(
             head.metadata.byte_len, MAX_BROWSER_PDK_METADATA_BYTES
         )));
     }
-    if head.archives.len() > technology_package::MAX_PDK_ARTIFACTS {
+    if head.archives.len() > rspice_model_library::pdk::contracts::MAX_PDK_ARTIFACTS {
         return Err(ConfigError::Parse(format!(
             "browser PDK head declares {} archives, exceeding the {}-archive limit",
             head.archives.len(),
-            technology_package::MAX_PDK_ARTIFACTS
+            rspice_model_library::pdk::contracts::MAX_PDK_ARTIFACTS
         )));
     }
     let mut archive_digests = std::collections::HashSet::with_capacity(head.archives.len());
@@ -543,7 +530,7 @@ mod tests {
     fn browser_snapshot_separates_signed_archives_and_round_trips_exact_state() {
         let path = PathBuf::from("/rspice/browser/pdk_config.json");
         let (archive_bytes, trust, authority) = super::signed_technology_test_fixture();
-        let mut config = PdkConfig::new();
+        let mut config = PdkConfig::default();
         config.publisher_trust_store = trust;
         config
             .technology_registry
@@ -604,7 +591,7 @@ mod tests {
     fn browser_snapshot_rejects_tampered_archive_readback() {
         let path = PathBuf::from("/rspice/browser/tamper.json");
         let (archive_bytes, trust, authority) = super::signed_technology_test_fixture();
-        let mut config = PdkConfig::new();
+        let mut config = PdkConfig::default();
         config.publisher_trust_store = trust;
         config
             .technology_registry
@@ -638,7 +625,7 @@ mod tests {
     #[test]
     fn browser_snapshot_head_is_bound_to_path_and_exact_generation_range() {
         let path = PathBuf::from("/rspice/browser/identity.json");
-        let config = PdkConfig::new();
+        let config = PdkConfig::default();
         let prepared =
             prepare_browser_pdk_snapshot(&path, &config, 1).expect("prepare browser snapshot");
 
@@ -665,14 +652,14 @@ mod tests {
     #[test]
     fn browser_metadata_identity_is_independent_of_hash_map_insertion_order() {
         let path = PathBuf::from("/rspice/browser/canonical.json");
-        let mut first = PdkConfig::new();
+        let mut first = PdkConfig::default();
         first
             .environment_variables
             .insert("PDK_ROOT".to_owned(), "/pdk".to_owned());
         first
             .environment_variables
             .insert("MODEL_ROOT".to_owned(), "/models".to_owned());
-        let mut second = PdkConfig::new();
+        let mut second = PdkConfig::default();
         second
             .environment_variables
             .insert("MODEL_ROOT".to_owned(), "/models".to_owned());
@@ -736,13 +723,13 @@ mod tests {
     fn save_round_trips_through_durable_publication() {
         let root = unique_temp_dir("round-trip");
         let path = root.join(CONFIG_FILE_NAME);
-        let mut config = PdkConfig::new();
+        let mut config = PdkConfig::default();
         config
             .environment_variables
             .insert("PDK_ROOT".to_string(), "/models".to_string());
 
-        config.save_to(&path).expect("save config");
-        let loaded = PdkConfig::load_from(&path).expect("load config");
+        save_to(&config, &path).expect("save config");
+        let loaded = load_from(&path).expect("load config");
 
         assert_eq!(loaded, config);
         std::fs::remove_dir_all(root).expect("remove fixture");
@@ -755,7 +742,7 @@ mod tests {
         std::fs::write(&path, b"authorized predecessor").expect("write predecessor");
         let expected =
             crate::io::durable_file::observe_expected_content(&path).expect("observe destination");
-        let content = serde_json::to_vec_pretty(&PdkConfig::new()).expect("serialize config");
+        let content = serde_json::to_vec_pretty(&PdkConfig::default()).expect("serialize config");
         std::fs::write(&path, b"late external edit").expect("race destination");
 
         let result = publish_pdk_config(&path, expected, &content);
@@ -770,7 +757,7 @@ mod tests {
         let root = unique_temp_dir("display-profile");
         let path = root.join(CONFIG_FILE_NAME);
         let (bytes, trust, authority) = super::signed_technology_test_fixture();
-        let mut config = PdkConfig::new();
+        let mut config = PdkConfig::default();
         config.publisher_trust_store = trust;
         config
             .technology_registry
@@ -796,8 +783,8 @@ mod tests {
             )
             .expect("publish display profile");
 
-        config.save_to(&path).expect("save config");
-        let mut loaded = PdkConfig::load_from(&path).expect("load config");
+        save_to(&config, &path).expect("save config");
+        let mut loaded = load_from(&path).expect("load config");
 
         assert_eq!(
             loaded.display_profile_registry,

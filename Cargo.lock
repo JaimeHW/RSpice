@@ -5713,6 +5713,8 @@ name = "rspice-simulation"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
+ "ed25519-dalek",
+ "js-sys",
  "num-complex",
  "ron",
  "rspice-app-types",
@@ -5730,7 +5732,10 @@ dependencies = [
  "thiserror 2.0.20",
  "toml",
  "uuid",
+ "wasm-bindgen",
  "wasmi",
+ "wat",
+ "web-sys",
 ]
 
 [[package]]

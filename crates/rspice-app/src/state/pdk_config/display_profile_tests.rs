@@ -1,12 +1,12 @@
 //! Display-profile integration with installed packages and persisted audit tampering.
 
 use super::{PdkAdministrativeAuthority, ValidatedPdkTechnologyPackage};
-use crate::state::pdk_config::technology_package::tests::fixture_archive;
 use rspice_model_library::pdk::display_profile::*;
+use rspice_simulation::pdk::test_fixtures::fixture_archive;
 
 fn fixture() -> (ValidatedPdkTechnologyPackage, PdkAdministrativeAuthority) {
     let (bytes, trust, authority) = fixture_archive();
-    let mut registry = super::technology_package::PdkTechnologyRegistry::default();
+    let mut registry = super::PdkTechnologyRegistry::default();
     registry
         .install_archive_bytes(&bytes, &trust, &authority, "install display fixture")
         .expect("install");

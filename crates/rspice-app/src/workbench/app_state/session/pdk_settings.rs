@@ -124,7 +124,7 @@ impl PdkSettingsDialogState {
     /// Trigger a rescan of library paths
     pub fn rescan(&mut self) {
         self.scanning = true;
-        self.config.discover_model_files();
+        crate::state::pdk_config::discover_model_files(&mut self.config);
         self.scanning = false;
     }
 

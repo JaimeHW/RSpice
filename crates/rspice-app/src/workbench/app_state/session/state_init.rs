@@ -31,7 +31,7 @@ pub(crate) fn restore_session_model_library_manager(
 
     #[cfg(all(not(test), not(target_arch = "wasm32")))]
     if next.managed_model_sources != previous_managed {
-        next.save().map_err(|error| {
+        crate::state::pdk_config::save(&next).map_err(|error| {
             vec![format!(
                 "Configured PDK sources were validated but their ownership could not be persisted: {error}"
             )]
@@ -149,7 +149,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         // compilation.
     }
     #[cfg(all(not(test), not(target_arch = "wasm32")))]
-    let (mut pdk_config, pdk_load_error) = match crate::state::pdk_config::PdkConfig::load() {
+    let (mut pdk_config, pdk_load_error) = match crate::state::pdk_config::load() {
         Ok(config) => (config, None),
         Err(error) => (
             crate::state::pdk_config::PdkConfig::default(),

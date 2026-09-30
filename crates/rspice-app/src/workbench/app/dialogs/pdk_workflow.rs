@@ -368,7 +368,7 @@ fn emit_pdk_file_load_success_message(
     library_stats: Option<(usize, usize)>,
 ) {
     state.pdk_config.add_recent_file(path);
-    if let Err(err) = state.pdk_config.save() {
+    if let Err(err) = crate::state::pdk_config::save(&state.pdk_config) {
         emit_pdk_save_warning(state, "was updated", err.to_string());
     }
 
@@ -1188,7 +1188,9 @@ fn poll_native_model_imports(
                     state,
                     previous,
                     (config, candidate, loaded),
-                    |config| config.save().map_err(|error| error.to_string()),
+                    |config| {
+                        crate::state::pdk_config::save(config).map_err(|error| error.to_string())
+                    },
                 );
                 match result {
                     Ok(loaded) => {
@@ -2260,10 +2262,10 @@ mod tests {
         let mut state = AppState::default();
         state.project_lifecycle.authority.open_session();
         state.model_library_manager.clear();
-        state.pdk_config = PdkConfig::new();
+        state.pdk_config = PdkConfig::default();
         let initial_revision = state.workspace.content.project.revision();
         let initial_epoch = state.design_execution_epoch;
-        let mut config = PdkConfig::new();
+        let mut config = PdkConfig::default();
         config.add_library_path(alpha_root.to_string_lossy().into_owned());
         config.add_library_path(beta_root.to_string_lossy().into_owned());
 
@@ -2313,10 +2315,10 @@ mod tests {
         let mut state = AppState::default();
         state.project_lifecycle.authority.open_session();
         state.model_library_manager.clear();
-        state.pdk_config = PdkConfig::new();
+        state.pdk_config = PdkConfig::default();
         let revision = state.workspace.content.project.revision();
         let epoch = state.design_execution_epoch;
-        let mut config = PdkConfig::new();
+        let mut config = PdkConfig::default();
         config.add_library_path(root.to_string_lossy().into_owned());
 
         let errors = apply_pdk_configuration_with_persistence(&mut state, config, |_| {
@@ -2350,7 +2352,7 @@ mod tests {
         state.model_library_manager.clear();
         let revision = state.workspace.content.project.revision();
         let epoch = state.design_execution_epoch;
-        let mut config = PdkConfig::new();
+        let mut config = PdkConfig::default();
         config.add_library_path(root.to_string_lossy().into_owned());
 
         state.pdk_config = config;

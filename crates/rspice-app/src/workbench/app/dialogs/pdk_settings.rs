@@ -200,7 +200,8 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> bool {
                     }
                 } else {
                     let entry = state.config.library_paths()[idx].clone();
-                    let expanded = state.config.expand_path(&entry.path);
+                    let expanded =
+                        crate::state::pdk_config::expand_path(&state.config, &entry.path);
                     let selected = state.selected_source == Some(idx);
                     if let Some(act) = source_row(ui, idx, &entry, selected, &expanded) {
                         action = Some(act);
@@ -239,7 +240,7 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> bool {
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             for (index, (name, value)) in env.iter().enumerate() {
-                let resolved = state.config.expand_path(value);
+                let resolved = crate::state::pdk_config::expand_path(&state.config, value);
                 if let Some(act) = env_row(ui, index, name, value, &resolved) {
                     env_action = Some(act);
                 }
@@ -760,9 +761,12 @@ fn detail_pane(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> Option<PathBu
     let selected_entry: Option<LibraryPathEntry> =
         selected.map(|idx| state.config.library_paths()[idx].clone());
     // Discovery records each file's source as the expanded path.
-    let selected_root: Option<PathBuf> = selected_entry
-        .as_ref()
-        .map(|entry| PathBuf::from(state.config.expand_path(&entry.path)));
+    let selected_root: Option<PathBuf> = selected_entry.as_ref().map(|entry| {
+        PathBuf::from(crate::state::pdk_config::expand_path(
+            &state.config,
+            &entry.path,
+        ))
+    });
     let in_scope = |file: &DiscoveredFile| {
         selected_root
             .as_ref()

@@ -791,7 +791,7 @@ pub fn run_rspice_ui_model_import_request(
 pub fn run_rspice_ui_pdk_import_request(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    simulation::pdk_import::run_pdk_import_worker_request_value(value)
+    rspice_simulation::pdk::import::run_pdk_import_worker_request_value(value)
 }
 
 pub struct ProjectLibraryPublicationCandidate {

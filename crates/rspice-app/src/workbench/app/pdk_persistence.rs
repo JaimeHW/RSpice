@@ -104,15 +104,18 @@ fn start_restore(ctx: &Context) {
         owner.operation_generation
     });
     let repaint = ctx.clone();
-    start_browser_pdk_config_load(PdkConfig::default_config_path(), move |result| {
-        BROWSER_PDK_COMPLETIONS.with(|queue| {
-            queue.borrow_mut().push_back(BrowserPdkCompletion::Restore {
-                operation_generation,
-                result: result.map_err(|error| error.to_string()),
+    start_browser_pdk_config_load(
+        crate::state::pdk_config::default_config_path(),
+        move |result| {
+            BROWSER_PDK_COMPLETIONS.with(|queue| {
+                queue.borrow_mut().push_back(BrowserPdkCompletion::Restore {
+                    operation_generation,
+                    result: result.map_err(|error| error.to_string()),
+                });
             });
-        });
-        repaint.request_repaint();
-    });
+            repaint.request_repaint();
+        },
+    );
 }
 
 impl RSpiceApp {
@@ -532,7 +535,7 @@ fn start_rejected_settings_rollback(
 ) -> Result<(), String> {
     let repaint = ctx.clone();
     start_browser_pdk_config_save(
-        PdkConfig::default_config_path(),
+        crate::state::pdk_config::default_config_path(),
         Some(committed),
         previous,
         move |result| {
@@ -579,7 +582,7 @@ fn start_publication(
     let repaint = ctx.clone();
     let completion_candidate = candidate.clone();
     let result = start_browser_pdk_config_save(
-        PdkConfig::default_config_path(),
+        crate::state::pdk_config::default_config_path(),
         expected,
         candidate,
         move |result| {

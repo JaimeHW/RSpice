@@ -172,3 +172,19 @@ pub fn validate_project_technology_inputs(
     }
     Ok(())
 }
+
+impl super::PdkTechnologyRegistry {
+    pub fn project_signed_technology_package(
+        &self,
+        binding: Option<&ProjectTechnologyBinding>,
+    ) -> Result<Option<&ValidatedPdkTechnologyPackage>, String> {
+        super::project_signed_technology_package(self.validated_packages(), binding)
+    }
+
+    pub fn validate_project_binding(
+        &self,
+        binding: &ProjectTechnologyBinding,
+    ) -> Result<(), TechnologyBindingError> {
+        super::validate_project_binding(self.validated_packages(), binding)
+    }
+}

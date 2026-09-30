@@ -16,7 +16,6 @@ pub(crate) mod multi_run;
 #[cfg(test)]
 pub(crate) mod netlist_gen;
 pub(crate) mod output_contract;
-pub(crate) mod pdk_import;
 pub(crate) mod placed_sources;
 pub(crate) mod plan;
 pub(crate) mod point_family;

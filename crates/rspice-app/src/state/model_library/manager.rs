@@ -922,7 +922,7 @@ impl ModelLibraryManager {
         previous: Option<&crate::state::pdk_config::PdkConfig>,
         next: &mut crate::state::pdk_config::PdkConfig,
     ) -> Result<usize, Vec<String>> {
-        next.discover_model_files();
+        crate::state::pdk_config::discover_model_files(next);
         if !next.scan_errors.is_empty() {
             return Err(next.scan_errors.clone());
         }

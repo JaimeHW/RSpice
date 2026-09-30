@@ -13,10 +13,13 @@ workspace = true
 
 [features]
 default = []
+pdk-test-fixtures = ["dep:ed25519-dalek", "dep:wat"]
 generated-veriloga-catalog = ["rspice-design/generated-veriloga-catalog"]
 wasm-jit = ["rspice-veriloga/wasm-jit"]
 
 [dependencies]
+ed25519-dalek = { workspace = true, features = ["std"], optional = true }
+wat = { version = "1", optional = true }
 num-complex.workspace = true
 base64.workspace = true
 rspice-app-types.workspace = true
@@ -36,6 +39,13 @@ thiserror.workspace = true
 uuid = { workspace = true, features = ["v5"] }
 wasmi.workspace = true
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys.workspace = true
+wasm-bindgen.workspace = true
+web-sys = { workspace = true, features = ["Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent"] }
+
 [dev-dependencies]
+ed25519-dalek = { workspace = true, features = ["std"] }
+wat = "1"
 rspice-design = { workspace = true, features = ["schematic-test-fixtures"] }
 ron = { version = "0.12.2", features = ["integer128"] }
