@@ -19,11 +19,11 @@ use crate::state::{
     SimulationRunIntent,
 };
 
-use super::super::canonical::analysis_kind_tag;
 use super::{
     AuthorizedRunDispatch, PreparationError, PreparationStage, PreparedRunSnapshot,
     RunSourceReceipt,
 };
+use rspice_simulation::execution_identity::analysis_kind_tag;
 
 /// The run-wide facts a prepared-run receipt authenticates.
 struct RunReceiptFacts<'a> {

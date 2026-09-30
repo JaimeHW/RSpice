@@ -338,7 +338,7 @@ pub(in crate::simulation) fn run_declaration(
 }
 
 fn analysis_type_for(spec: &AnalysisSpec) -> AnalysisType {
-    crate::simulation::execution::canonical_analysis_kind(spec).result_analysis_type()
+    rspice_simulation::execution_identity::canonical_analysis_kind(spec).result_analysis_type()
 }
 
 /// Real OP artifact with exact source binding and worker transport validation.

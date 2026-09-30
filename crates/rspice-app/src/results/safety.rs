@@ -9,13 +9,14 @@ pub use rspice_results::safety::SoaCumulativeDurationEvidence;
 pub use rspice_results::safety::{
     SoADefinition, SoAEvaluation, SoALimit, SoAManager, SoAParameter, SoARuleVerdict, SoAViolation,
     SoaCurrentEnvelope, SoaDeratingSamples, SoaDurationMode, SoaEnvelopeSamples, SoaLimitTrace,
-    SoaPulseInterpolation, SoaVoltageBasis, SoaVoltageInterpolation, ViolationSeverity,
-    compare_soa_stress, soa_derating_temperature_waveform_name, soa_envelope_limit_waveform_name,
-    soa_envelope_voltage_waveform_name, soa_power_limit_waveform_name, soa_stress_waveform_name,
+    SoaVoltageBasis, ViolationSeverity, compare_soa_stress, soa_derating_temperature_waveform_name,
+    soa_envelope_limit_waveform_name, soa_envelope_voltage_waveform_name,
+    soa_power_limit_waveform_name, soa_stress_waveform_name,
 };
 #[cfg(test)]
 pub use rspice_results::safety::{
-    SoaDurationEvidence, SoaPowerDerating, SoaPulseCurve, SoaThresholds,
+    SoaDurationEvidence, SoaPowerDerating, SoaPulseCurve, SoaPulseInterpolation, SoaThresholds,
+    SoaVoltageInterpolation,
 };
 mod duration;
 pub use duration::{finalize_soa_durations, qualify_soa_duration_with_mode};

@@ -119,7 +119,7 @@ impl EngineBridge {
                     )
                 })?;
                 let effective_source_digest =
-                    crate::simulation::execution::operating_point_effective_source_digest(
+                    rspice_simulation::execution_identity::operating_point_effective_source_digest(
                         source,
                         config.run_point.clone(),
                     );
@@ -1027,7 +1027,7 @@ mod operating_point_contract_tests {
             panic!("OP result")
         };
         let effective_source_digest =
-            crate::simulation::execution::operating_point_effective_source_digest(
+            rspice_simulation::execution_identity::operating_point_effective_source_digest(
                 DIVIDER,
                 OpRunPointContext::default(),
             );
@@ -1066,7 +1066,7 @@ mod operating_point_contract_tests {
         };
         let mut previous = OpPreviousState {
             source_content_digest:
-                crate::simulation::execution::operating_point_effective_source_digest(
+                rspice_simulation::execution_identity::operating_point_effective_source_digest(
                     source,
                     OpRunPointContext::default(),
                 ),

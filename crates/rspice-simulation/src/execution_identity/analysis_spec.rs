@@ -3,20 +3,27 @@
 //! Split from the encoder it belongs to because this is the part that grows:
 //! every analysis kind contributes an arm, and a kind that learns a parameter
 //! learns a field in the digest. The bytes are the protocol, so nothing here
-//! may be reordered, widened or re-tagged without a version bump — see
-//! `CANONICAL_VERSION` in the parent.
+//! may be reordered, widened or re-tagged without a domain version change.
 
 use super::encode_dc_modes;
 
-use crate::services::simulation_runner::PeriodicCarrier;
-use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
-use crate::simulation::dialog::{IntegrationMethod, OpConfig};
-use crate::simulation::multi_run::{
-    AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
-    FrequencySweep, OptimizationAlgorithm, OptimizationGoal,
-};
+use crate::periodic::PacFrequencySweep;
+use crate::periodic::PnoiseFrequencySweep;
+use crate::periodic::PxfFrequencySweep;
 use rspice_app_types::product::ProcessCorner;
-use rspice_simulation::periodic::{PacFrequencySweep, PnoiseFrequencySweep, PxfFrequencySweep};
+use rspice_simulation_contract::analysis_spec::AnalysisSpec;
+use rspice_simulation_contract::analysis_spec::EnvelopeAdaptiveMode;
+use rspice_simulation_contract::analysis_spec::EnvelopeExtractionPath;
+use rspice_simulation_contract::analysis_spec::EnvelopeInitialPeriodicSolve;
+use rspice_simulation_contract::analysis_spec::OptimizationAlgorithm;
+use rspice_simulation_contract::analysis_spec::OptimizationGoal;
+use rspice_simulation_contract::config::FrequencySweep;
+use rspice_simulation_contract::config::NoiseContributionDetail;
+use rspice_simulation_contract::config::NoiseIntegrationMode;
+use rspice_simulation_contract::config::NoiseSweepType;
+use rspice_simulation_contract::config::OpConfig;
+use rspice_simulation_contract::options::IntegrationMethod;
+use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
 
 use super::{CanonicalWriter, canonical_analysis_kind, encode_op_config, encode_op_fields};
 
@@ -84,10 +91,12 @@ fn hbnoise_reference_changes_identity_and_absence_preserves_legacy_bytes() {
     } = &mut spec
     {
         *noise_figure = true;
-        *noise_reference = Some(crate::services::simulation_runner::HbNoiseReference {
-            source_resistor: "Rs".into(),
-            temperature_kelvin: 290.0,
-        });
+        *noise_reference = Some(
+            rspice_simulation_contract::hbnoise_policy::HbNoiseReference {
+                source_resistor: "Rs".into(),
+                temperature_kelvin: 290.0,
+            },
+        );
     }
     let configured = digest(&spec);
     assert_ne!(configured, baseline);
@@ -110,7 +119,7 @@ fn hbnoise_reference_changes_identity_and_absence_preserves_legacy_bytes() {
 #[cfg(test)]
 #[test]
 fn envelope_initializer_authenticates_every_control_and_preserves_legacy_identity() {
-    use crate::services::simulation_runner::EnvelopeInitializationConfig;
+    use rspice_simulation_contract::envelope_initialization::EnvelopeInitializationConfig;
     let spec = AnalysisSpec::Envelope {
         multirate: None,
         initialization: Default::default(),
@@ -237,8 +246,8 @@ fn optimization_units_and_expression_are_authenticated_without_changing_legacy_i
 #[cfg(test)]
 #[test]
 fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated() {
-    use crate::results::safety::SoAParameter;
-    use crate::services::simulation_runner::SoaRuleConfig;
+    use rspice_results::safety::SoAParameter;
+    use rspice_simulation_contract::soa_rule::SoaRuleConfig;
     let spec = AnalysisSpec::Soa {
         import_model_voltage_ratings: false,
         observation: Default::default(),
@@ -279,7 +288,7 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
         let AnalysisSpec::Soa { observation, .. } = &mut changed else {
             unreachable!()
         };
-        observation.thresholds = crate::results::safety::SoaThresholds {
+        observation.thresholds = rspice_results::safety::SoaThresholds {
             warning_fraction,
             critical_fraction,
         };
@@ -321,7 +330,7 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
             1 => rules[0].max_value = 2e-3,
             2 => rules[0].devices = vec!["M2".into()],
             3 => rules[0].models = vec!["PM".into()],
-            _ => rules[0].voltage_basis = crate::results::safety::SoaVoltageBasis::IntrinsicNodes,
+            _ => rules[0].voltage_basis = rspice_results::safety::SoaVoltageBasis::IntrinsicNodes,
         }
         assert_ne!(digest(&changed), digest(&configured), "rule field {field}");
     }
@@ -342,7 +351,7 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
     let AnalysisSpec::Soa { rules, .. } = &mut cumulative else {
         unreachable!()
     };
-    rules[0].duration_mode = crate::results::safety::SoaDurationMode::Cumulative {
+    rules[0].duration_mode = rspice_results::safety::SoaDurationMode::Cumulative {
         recovery_time_s: None,
     };
     assert_ne!(digest(&timed), digest(&cumulative));
@@ -350,7 +359,7 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
     let AnalysisSpec::Soa { rules, .. } = &mut recovering else {
         unreachable!()
     };
-    rules[0].duration_mode = crate::results::safety::SoaDurationMode::Cumulative {
+    rules[0].duration_mode = rspice_results::safety::SoaDurationMode::Cumulative {
         recovery_time_s: Some(1e-9),
     };
     assert_ne!(digest(&cumulative), digest(&recovering));
@@ -358,7 +367,7 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
     let AnalysisSpec::Soa { rules, .. } = &mut faster else {
         unreachable!()
     };
-    rules[0].duration_mode = crate::results::safety::SoaDurationMode::Cumulative {
+    rules[0].duration_mode = rspice_results::safety::SoaDurationMode::Cumulative {
         recovery_time_s: Some(0.5e-9),
     };
     assert_ne!(digest(&recovering), digest(&faster));
@@ -367,7 +376,7 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
         unreachable!()
     };
     rules[0].parameter = SoAParameter::Pdiss;
-    rules[0].power_derating = Some(crate::results::safety::SoaPowerDerating {
+    rules[0].power_derating = Some(rspice_results::safety::SoaPowerDerating {
         reference_temperature_kelvin: 300.0,
         watts_per_kelvin: 0.001,
     });
@@ -389,7 +398,25 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
         unreachable!()
     };
     rules[0].parameter = SoAParameter::Id;
-    rules[0].current_envelope = Some(crate::results::safety::soa_current_envelope_test_fixture());
+    rules[0].current_envelope = Some(rspice_results::safety::SoaCurrentEnvelope {
+        source: "Synthetic SOA fixture".into(),
+        conditions: "Synthetic fixed case temperature; single window".into(),
+        voltages_v: vec![0.0, 1.0, 10.0],
+        dc_currents_a: Some(vec![0.0, 0.01, 0.001]),
+        pulses: vec![
+            rspice_results::safety::SoaPulseCurve {
+                duration_s: 1e-9,
+                currents_a: vec![0.0, 0.04, 0.004],
+            },
+            rspice_results::safety::SoaPulseCurve {
+                duration_s: 100e-9,
+                currents_a: vec![0.0, 0.02, 0.002],
+            },
+        ],
+        pulse_width_s: Some(10e-9),
+        voltage_interpolation: rspice_results::safety::SoaVoltageInterpolation::Logarithmic,
+        pulse_interpolation: rspice_results::safety::SoaPulseInterpolation::Logarithmic,
+    });
     assert_ne!(digest(&curves), digest(&configured));
     for field in 0..10 {
         let mut changed = curves.clone();
@@ -403,8 +430,8 @@ fn soa_legacy_identity_is_preserved_and_every_scoped_rule_field_is_authenticated
             2 => c.voltages_v[1] *= 1.1,
             3 => c.dc_currents_a.as_mut().unwrap()[1] *= 0.9,
             4 => c.pulse_width_s = None,
-            5 => c.voltage_interpolation = crate::results::safety::SoaVoltageInterpolation::Linear,
-            6 => c.pulse_interpolation = crate::results::safety::SoaPulseInterpolation::LongerPulse,
+            5 => c.voltage_interpolation = rspice_results::safety::SoaVoltageInterpolation::Linear,
+            6 => c.pulse_interpolation = rspice_results::safety::SoaPulseInterpolation::LongerPulse,
             7 => c.pulses[0].duration_s *= 0.9,
             8 => c.pulses[0].currents_a[1] *= 1.1,
             _ => c.pulses.pop().map(|_| ()).unwrap(),
@@ -484,15 +511,15 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             writer.bool(*input_resistance);
             writer.bool(*output_resistance);
             writer.u8(match normalization {
-                crate::simulation::multi_run::TfNormalization::None => 0,
-                crate::simulation::multi_run::TfNormalization::RelativeToNominal => 1,
-                crate::simulation::multi_run::TfNormalization::PerSourceUnit => 2,
+                rspice_simulation_contract::analysis_spec::TfNormalization::None => 0,
+                rspice_simulation_contract::analysis_spec::TfNormalization::RelativeToNominal => 1,
+                rspice_simulation_contract::analysis_spec::TfNormalization::PerSourceUnit => 2,
             });
             writer.u8(match accuracy {
-                crate::simulation::multi_run::TfAccuracy::Fast => 0,
-                crate::simulation::multi_run::TfAccuracy::Balanced => 1,
-                crate::simulation::multi_run::TfAccuracy::Accurate => 2,
-                crate::simulation::multi_run::TfAccuracy::Robust => 3,
+                rspice_simulation_contract::analysis_spec::TfAccuracy::Fast => 0,
+                rspice_simulation_contract::analysis_spec::TfAccuracy::Balanced => 1,
+                rspice_simulation_contract::analysis_spec::TfAccuracy::Accurate => 2,
+                rspice_simulation_contract::analysis_spec::TfAccuracy::Robust => 3,
             });
         }
         AnalysisSpec::DcSweep {
@@ -540,7 +567,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
         } => {
             writer.string(table_name);
             encode_f64_slice(writer, frequencies);
-            if *table_options != crate::simulation::config::AcDataTableOptions::default() {
+            if *table_options != rspice_simulation_contract::config::AcDataTableOptions::default() {
                 writer.domain("ac-data-table-options");
                 writer.bool(table_options.from_netlist);
                 writer.usize(table_options.parameter_columns.len());
@@ -630,8 +657,8 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             verbose,
         } => {
             writer.u8(match method {
-                crate::simulation::multi_run::PssMethod::Shooting => 0,
-                crate::simulation::multi_run::PssMethod::HarmonicBalance => 1,
+                rspice_simulation_contract::analysis_spec::PssMethod::Shooting => 0,
+                rspice_simulation_contract::analysis_spec::PssMethod::HarmonicBalance => 1,
             });
             writer.f64(*fundamental_freq);
             writer.sequence(tone_sources.len());
@@ -716,7 +743,9 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             // keeps its identity because it keeps its computation, and an
             // emptied filter is a different run that must digest differently.
             // Never `writer.option`: an absent tail is the old encoding.
-            if filter != crate::simulation::config::DESIGN_PARAMETERS_FILTER || sweep.is_some() {
+            if filter != rspice_simulation_contract::config::DESIGN_PARAMETERS_FILTER
+                || sweep.is_some()
+            {
                 writer.string(filter);
                 writer.option(sweep.as_ref(), |writer, sweep| {
                     writer.f64(sweep.stop_frequency);
@@ -864,7 +893,9 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             if *import_model_voltage_ratings {
                 writer.string("soa-model-voltage-ratings-v1");
             }
-            if *observation != crate::services::simulation_runner::SoaObservationConfig::default() {
+            if *observation
+                != rspice_simulation_contract::soa_observation::SoaObservationConfig::default()
+            {
                 writer.string("soa-observation-v1");
                 writer.f64(observation.start_time);
                 writer.option(observation.max_step.as_ref(), |writer, value| {
@@ -905,7 +936,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                 for rule in rules {
                     writer.bool(
                         rule.voltage_basis
-                            == crate::results::safety::SoaVoltageBasis::IntrinsicNodes,
+                            == rspice_results::safety::SoaVoltageBasis::IntrinsicNodes,
                     );
                 }
             }
@@ -934,8 +965,8 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                 writer.sequence(rules.len());
                 for rule in rules {
                     match rule.duration_mode {
-                        crate::results::safety::SoaDurationMode::PerExcursion => writer.bool(false),
-                        crate::results::safety::SoaDurationMode::Cumulative { recovery_time_s } => {
+                        rspice_results::safety::SoaDurationMode::PerExcursion => writer.bool(false),
+                        rspice_results::safety::SoaDurationMode::Cumulative { recovery_time_s } => {
                             writer.bool(true);
                             writer.option(recovery_time_s.as_ref(), |writer, value| {
                                 writer.f64(*value)
@@ -970,11 +1001,11 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
                         });
                         writer.bool(
                             curve.voltage_interpolation
-                                == crate::results::safety::SoaVoltageInterpolation::Logarithmic,
+                                == rspice_results::safety::SoaVoltageInterpolation::Logarithmic,
                         );
                         writer.bool(
                             curve.pulse_interpolation
-                                == crate::results::safety::SoaPulseInterpolation::Logarithmic,
+                                == rspice_results::safety::SoaPulseInterpolation::Logarithmic,
                         );
                         writer.sequence(curve.pulses.len());
                         for pulse in &curve.pulses {
@@ -1031,7 +1062,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             }
             encode_envelope_initial_periodic_solve(writer, *initial_periodic_solve);
             if initialization
-                != &crate::services::simulation_runner::EnvelopeInitializationConfig::default()
+                != &rspice_simulation_contract::envelope_initialization::EnvelopeInitializationConfig::default()
             {
                 writer.string("envelope-initialization-v1");
                 writer.usize(initialization.max_iterations);
@@ -1126,7 +1157,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
             writer.option(oscillator_node.as_ref(), |w, value| w.string(value));
             // Preserve identities of old default requests; authored controls
             // append a versioned tail rather than changing their prefix.
-            if controls != &crate::simulation::multi_run::QpssControls::default() {
+            if controls != &rspice_simulation_contract::analysis_spec::QpssControls::default() {
                 writer.string("qpss-controls-v1");
                 writer.f64(controls.current_absolute_tolerance);
                 writer.f64(controls.voltage_absolute_tolerance);
@@ -1212,7 +1243,7 @@ pub(super) fn encode_analysis_spec(writer: &mut CanonicalWriter, spec: &Analysis
         }
         AnalysisSpec::Qpac { controls, .. } => {
             encode_quasi_periodic_transfer(writer, spec);
-            if controls != &crate::simulation::multi_run::QpacControls::default() {
+            if controls != &rspice_simulation_contract::analysis_spec::QpacControls::default() {
                 writer.string("qpac-controls-v1");
                 writer.f64(controls.magnitude);
                 writer.f64(controls.phase_degrees);
@@ -1653,7 +1684,7 @@ fn encode_envelope_extraction_path(writer: &mut CanonicalWriter, value: Envelope
     });
 }
 
-pub(in crate::simulation) const fn analysis_kind_tag(spec: &AnalysisSpec) -> u8 {
+pub const fn analysis_kind_tag(spec: &AnalysisSpec) -> u8 {
     canonical_analysis_kind(spec).tag()
 }
 
@@ -1715,11 +1746,11 @@ pub(super) fn encode_periodic_carrier_tail(writer: &mut CanonicalWriter, carrier
 /// single-sideband voltage request while authenticating every new option.
 fn encode_qpxf_controls(
     writer: &mut CanonicalWriter,
-    controls: &crate::simulation::multi_run::QpxfControls,
+    controls: &rspice_simulation_contract::analysis_spec::QpxfControls,
 ) {
     use rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod;
     use rspice_core::engine::{QpxfFrequencyAxis, QpxfInputLattices, QpxfSources};
-    if controls == &crate::simulation::multi_run::QpxfControls::default() {
+    if controls == &rspice_simulation_contract::analysis_spec::QpxfControls::default() {
         return;
     }
     writer.string("qpxf-controls-v1");
@@ -1775,7 +1806,7 @@ fn encode_qpxf_controls(
 /// Authenticate every selected measurement, source window and numerical setting.
 fn encode_qpnoise_controls(
     w: &mut CanonicalWriter,
-    c: &crate::simulation::multi_run::QpnoiseControls,
+    c: &rspice_simulation_contract::analysis_spec::QpnoiseControls,
     integrated_noise: bool,
 ) {
     use rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod;
@@ -1798,7 +1829,7 @@ fn encode_qpnoise_controls(
         normalized.input_lattice.clear();
     }
     let c = &normalized;
-    if c == &crate::simulation::multi_run::QpnoiseControls::default() {
+    if c == &rspice_simulation_contract::analysis_spec::QpnoiseControls::default() {
         return;
     }
     w.string("qpnoise-controls-v1");

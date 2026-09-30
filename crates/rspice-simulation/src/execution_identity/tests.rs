@@ -1,13 +1,18 @@
 //! Canonical execution identity and numerical control regressions.
 
 use super::*;
-use crate::services::drc::{DrcLocation, DrcViolation};
-use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
-use crate::simulation::multi_run::{
-    EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve, FrequencySweep,
-    TfAccuracy, TfNormalization,
-};
 use rspice_app_types::canonical::content_digest;
+use rspice_design::drc::DrcLocation;
+use rspice_design::drc::DrcViolation;
+use rspice_simulation_contract::analysis_spec::EnvelopeAdaptiveMode;
+use rspice_simulation_contract::analysis_spec::EnvelopeExtractionPath;
+use rspice_simulation_contract::analysis_spec::EnvelopeInitialPeriodicSolve;
+use rspice_simulation_contract::analysis_spec::TfAccuracy;
+use rspice_simulation_contract::analysis_spec::TfNormalization;
+use rspice_simulation_contract::config::FrequencySweep;
+use rspice_simulation_contract::config::NoiseContributionDetail;
+use rspice_simulation_contract::config::NoiseIntegrationMode;
+use rspice_simulation_contract::config::NoiseSweepType;
 
 #[test]
 fn analysis_kind_tags_are_append_only() {
@@ -24,12 +29,9 @@ fn analysis_kind_tags_are_append_only() {
 
 #[test]
 fn ac_data_table_options_preserve_old_requests_and_separate_new_identities() {
-    use crate::simulation::config::AcDataParameterColumn;
-    use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
+    use rspice_simulation_contract::config::AcDataParameterColumn;
     let json = serde_json::json!({"AcData": {"table_name": "pts", "frequencies": [1.0, 0.0]}});
-    let old: AnalysisSpec = serde_json::from_value(json.clone()).unwrap();
-    let worker: WorkerAnalysisSpec = serde_json::from_value(json).unwrap();
-    assert_eq!(AnalysisSpec::from(worker), old);
+    let old: AnalysisSpec = serde_json::from_value(json).unwrap();
     let digest = |spec: &AnalysisSpec| {
         let mut writer = CanonicalWriter::new("test");
         encode_analysis_spec(&mut writer, spec);
@@ -69,12 +71,6 @@ fn ac_data_table_options_preserve_old_requests_and_separate_new_identities() {
     table_options.from_netlist = true;
     reference.validate().unwrap();
     assert_ne!(digest(&reference), digest(&old));
-    for spec in [columns, reference] {
-        let worker = WorkerAnalysisSpec::try_from(&spec).unwrap();
-        let restored: WorkerAnalysisSpec =
-            serde_json::from_value(serde_json::to_value(worker).unwrap()).unwrap();
-        assert_eq!(AnalysisSpec::from(restored), spec);
-    }
 }
 
 /// A transient-noise plan with no authored floor digests to exactly the
@@ -167,7 +163,7 @@ fn a_design_parameter_filter_at_one_frequency_leaves_the_plan_digest_unchanged()
         filter: filter.to_owned(),
         sweep: None,
     };
-    let spec = sensitivity(crate::simulation::config::DESIGN_PARAMETERS_FILTER);
+    let spec = sensitivity(rspice_simulation_contract::config::DESIGN_PARAMETERS_FILTER);
     let mut encoded = CanonicalWriter::new("test");
     encode_analysis_spec(&mut encoded, &spec);
 
@@ -205,7 +201,7 @@ fn an_emptied_filter_is_a_different_plan_from_one_saved_before_filters() {
         encode_analysis_spec(&mut writer, &sensitivity(filter));
         writer.finish()
     };
-    let legacy = digest(crate::simulation::config::DESIGN_PARAMETERS_FILTER);
+    let legacy = digest(rspice_simulation_contract::config::DESIGN_PARAMETERS_FILTER);
     assert_ne!(legacy, digest(""));
     assert_ne!(legacy, digest("R* PARAM:*"));
     assert_ne!(digest(""), digest("R*"));
@@ -286,7 +282,8 @@ fn dc_mismatch_moment_controls_preserve_defaults_and_distinguish_policies() {
 #[test]
 fn an_unauthored_vary_only_leaves_the_plan_digest_unchanged() {
     let monte_carlo = |params: Vec<String>| AnalysisSpec::MonteCarlo {
-        variation_source: crate::simulation::dialog::McVariationSource::ParameterTolerance,
+        variation_source:
+            rspice_simulation_contract::mc_draft::McVariationSource::ParameterTolerance,
         params,
     };
     let spec = monte_carlo(Vec::new());
@@ -338,7 +335,7 @@ fn a_pss_spectrum_digest_follows_its_harmonic_count() {
 
 fn exact_pss_spec() -> AnalysisSpec {
     AnalysisSpec::Pss {
-        method: crate::simulation::multi_run::PssMethod::Shooting,
+        method: rspice_simulation_contract::analysis_spec::PssMethod::Shooting,
         fundamental_freq: 1.0e6,
         tone_sources: vec!["VIN".to_owned()],
         tstab_periods: 20,
@@ -385,7 +382,9 @@ fn exact_noise_spec() -> AnalysisSpec {
 #[test]
 fn a_harmonic_balance_request_that_asks_for_a_solver_trace_is_a_different_request() {
     let base = AnalysisSpec::HarmonicBalance {
-        tones: vec![crate::simulation::multi_run::HbToneSpec::new(1.0e9, 9)],
+        tones: vec![rspice_simulation_contract::analysis_spec::HbToneSpec::new(
+            1.0e9, 9,
+        )],
         reltol: 1.0e-6,
         abstol: 1.0e-12,
         max_iterations: 100,
@@ -476,7 +475,7 @@ fn noise_digest_changes_for_every_exact_execution_field() {
         assert_ne!(baseline, digest(&variant, None), "variant: {variant:?}");
     }
 
-    let base_config = crate::simulation::config::NoiseAnalysisConfig::default();
+    let base_config = rspice_simulation_contract::config::NoiseAnalysisConfig::default();
     let mut changed_config = base_config.clone();
     changed_config.contribution_detail = NoiseContributionDetail::SummaryOnly;
     assert_ne!(
@@ -491,8 +490,9 @@ fn noise_digest_changes_for_every_exact_execution_field() {
 /// one identity and either's results could be attributed to the other.
 #[test]
 fn corner_digest_changes_when_points_are_excluded_from_the_same_axes() {
+    use crate::sweeps::CornerPoint;
+    use crate::sweeps::CornerRunConfig;
     use rspice_app_types::product::ProcessCorner;
-    use rspice_simulation::sweeps::{CornerPoint, CornerRunConfig};
 
     let axes = CornerRunConfig {
         process_corners: vec![ProcessCorner::TT],
@@ -554,8 +554,8 @@ fn corner_digest_changes_when_points_are_excluded_from_the_same_axes() {
 /// along with the defect.
 #[test]
 fn an_unauthored_carrier_leaves_the_plan_digest_unchanged() {
-    use crate::services::simulation_runner::PeriodicCarrier;
-    use rspice_simulation::periodic::PacRunConfig;
+    use crate::periodic::PacRunConfig;
+    use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
 
     let digest = |carrier: PeriodicCarrier| {
         analysis_config_digest(
@@ -645,8 +645,8 @@ fn an_unauthored_carrier_leaves_the_plan_digest_unchanged() {
 /// three positions.
 #[test]
 fn a_pss_carried_request_keeps_its_digest() {
-    use crate::services::simulation_runner::PeriodicCarrier;
-    use rspice_simulation::periodic::PacRunConfig;
+    use crate::periodic::PacRunConfig;
+    use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
 
     let config = PacRunConfig {
         carrier: PeriodicCarrier::Pss,
@@ -715,7 +715,7 @@ fn a_pss_carried_request_keeps_its_digest() {
 /// runs a new digest would detach each from its own results.
 #[test]
 fn a_symmetric_sideband_range_leaves_the_plan_digest_unchanged() {
-    use rspice_simulation::periodic::PacRunConfig;
+    use crate::periodic::PacRunConfig;
 
     let digest = |sideband_min: i32, sideband_max: i32| {
         analysis_config_digest(
@@ -751,7 +751,7 @@ fn a_symmetric_sideband_range_leaves_the_plan_digest_unchanged() {
 #[test]
 fn pss_digest_changes_for_every_exact_contract_value() {
     let base = AnalysisSpec::Pss {
-        method: crate::simulation::multi_run::PssMethod::Shooting,
+        method: rspice_simulation_contract::analysis_spec::PssMethod::Shooting,
         fundamental_freq: 1.0e6,
         tone_sources: vec!["VCLK".to_owned()],
         tstab_periods: 20,
@@ -785,7 +785,7 @@ fn pss_digest_changes_for_every_exact_contract_value() {
     }
     changed!(
         method,
-        crate::simulation::multi_run::PssMethod::HarmonicBalance
+        rspice_simulation_contract::analysis_spec::PssMethod::HarmonicBalance
     );
     changed!(fundamental_freq, 2.0e6);
     changed!(tone_sources, vec!["VLO".to_owned(), "VRF".to_owned()]);
@@ -797,7 +797,7 @@ fn pss_digest_changes_for_every_exact_contract_value() {
     changed!(num_harmonics, 21);
     changed!(
         integration_method,
-        Some(crate::simulation::dialog::IntegrationMethod::Euler)
+        Some(rspice_simulation_contract::options::IntegrationMethod::Euler)
     );
     changed!(tstab, 3.0e-9);
     changed!(max_iterations, 250);
@@ -1227,7 +1227,7 @@ fn periodic_port_noise_options_have_distinct_execution_identities() {
                 start_freq: 1e4,
                 stop_freq: 1e4,
                 points_per_unit: 1,
-                sweep: crate::simulation::multi_run::FrequencySweep::Linear,
+                sweep: rspice_simulation_contract::config::FrequencySweep::Linear,
                 ports: Vec::new(),
                 max_sideband: 1,
                 reltol: 1.0e-3,
@@ -1241,7 +1241,7 @@ fn periodic_port_noise_options_have_distinct_execution_identities() {
                 start_freq: 1e4,
                 stop_freq: 1e4,
                 points_per_unit: 1,
-                sweep: crate::simulation::multi_run::FrequencySweep::Linear,
+                sweep: rspice_simulation_contract::config::FrequencySweep::Linear,
                 ports: Vec::new(),
                 max_sideband: 1,
                 reltol: 1.0e-3,

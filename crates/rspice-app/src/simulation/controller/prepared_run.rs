@@ -27,11 +27,11 @@ use crate::simulation::execution::RunSourceReceipt;
 use crate::simulation::execution::SavePolicy;
 use crate::simulation::execution::SnapshotParts;
 use crate::simulation::execution::TouchstoneExportPolicy;
-use crate::simulation::execution::analysis_kind_tag;
-use crate::simulation::execution::drc_receipt_digest;
-use crate::simulation::execution::manual_deck_analysis_instance_id;
-use crate::simulation::execution::manual_source_receipt_digest;
 use rspice_app_types::canonical::content_digest;
+use rspice_simulation::execution_identity::analysis_kind_tag;
+use rspice_simulation::execution_identity::drc_receipt_digest;
+use rspice_simulation::execution_identity::manual_deck_analysis_instance_id;
+use rspice_simulation::execution_identity::manual_source_receipt_digest;
 use rspice_simulation::netlist_gen::CrossProbeSnapshot;
 use rspice_simulation::prepared_dependency::ExecutionArtifactKind;
 use rspice_simulation::sealed_source::{
@@ -1341,7 +1341,7 @@ impl SimulationController {
             .map(PreparedTask::config_digest)
             .collect::<Vec<_>>();
         let dependency_closure_digest =
-            crate::simulation::execution::sealed_dependency_closure_digest(
+            rspice_simulation::execution_identity::sealed_dependency_closure_digest(
                 &sealed_source_dependencies,
             );
         let receipt_digest = manual_source_receipt_digest(

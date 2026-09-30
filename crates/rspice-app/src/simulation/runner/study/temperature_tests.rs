@@ -156,7 +156,7 @@ fn bind_compatible_previous(base: &mut StudyRunConfig, source: &str) {
     op.node_initialization = OpNodeInitialization::IgnoreIcAndNodeset;
     op.previous_state = Some(OpPreviousState {
         source_content_digest:
-            crate::simulation::execution::operating_point_effective_source_digest(
+            rspice_simulation::execution_identity::operating_point_effective_source_digest(
                 &previous_source,
                 Default::default(),
             ),

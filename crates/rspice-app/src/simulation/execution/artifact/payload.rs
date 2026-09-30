@@ -1237,7 +1237,8 @@ impl HbStateArtifact {
     }
 
     fn digest(&self) -> ContentDigest {
-        let state = super::super::hb_operating_point_digest(&self.operating_point);
+        let state =
+            rspice_simulation::execution_identity::hb_operating_point_digest(&self.operating_point);
         let Some(environment) = &self.environment else {
             return state;
         };

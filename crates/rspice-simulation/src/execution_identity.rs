@@ -16,35 +16,49 @@ mod qpss_controls_tests;
 #[cfg(test)]
 mod qpxf_controls_tests;
 
-pub(in crate::simulation) use analysis_spec::analysis_kind_tag;
+pub use analysis_spec::analysis_kind_tag;
 use analysis_spec::{
     corner_process_tag, encode_analysis_spec, encode_f64_slice, encode_noise_contribution_detail,
     encode_noise_integration_mode, encode_periodic_carrier_tail, pac_sweep_tag, pnoise_sweep_tag,
     pxf_sweep_tag,
 };
 
-use crate::product::{
-    AnalysisInstanceId, ContentDigest, manual_deck_analysis_instance_id_from_tag,
-};
-use crate::services::drc::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
-use crate::simulation::AnalysisConfig;
-use crate::simulation::config::{AcSweepType, PzAnalysisType};
-use crate::simulation::dialog::{
-    IntegrationMethod, OpAccuracy, OpAnnotation, OpConfig, OpDeviceDetail, OpHomotopy,
-    OpInitialGuess, OpNodeInitialization, OpPreviousState, OpRunPointContext, OpSaveDevice,
-    OpTemperatureMode,
-};
-use crate::simulation::multi_run::AnalysisSpec;
-use crate::simulation::plan::{AnalysisNumericOverride, NumericOverrideOption, OverrideValue};
-use crate::state::CanonicalAnalysisKind;
-use rspice_simulation::execution_options::SpecExecutionOptions;
-use rspice_simulation::periodic::PnoiseReference;
-use rspice_simulation::sweeps::{CornerBaseMode, CornerFrequencySweep};
+use crate::execution_options::SpecExecutionOptions;
+use crate::periodic::PnoiseReference;
+use crate::sweeps::CornerBaseMode;
+use crate::sweeps::CornerFrequencySweep;
+use rspice_app_types::product::AnalysisInstanceId;
+use rspice_app_types::product::ContentDigest;
+use rspice_app_types::product::manual_deck_analysis_instance_id_from_tag;
+use rspice_design::drc::DrcLocation;
+use rspice_design::drc::DrcResult;
+use rspice_design::drc::DrcSeverity;
+use rspice_design::drc::DrcViolation;
+use rspice_design::drc::DrcViolationType;
+use rspice_results::analysis_tag::CanonicalAnalysisKind;
+use rspice_simulation_contract::analysis_spec::AnalysisSpec;
+use rspice_simulation_contract::config::AcSweepType;
+use rspice_simulation_contract::config::AnalysisConfig;
+use rspice_simulation_contract::config::OpAccuracy;
+use rspice_simulation_contract::config::OpAnnotation;
+use rspice_simulation_contract::config::OpConfig;
+use rspice_simulation_contract::config::OpDeviceDetail;
+use rspice_simulation_contract::config::OpHomotopy;
+use rspice_simulation_contract::config::OpInitialGuess;
+use rspice_simulation_contract::config::OpNodeInitialization;
+use rspice_simulation_contract::config::OpPreviousState;
+use rspice_simulation_contract::config::OpRunPointContext;
+use rspice_simulation_contract::config::OpSaveDevice;
+use rspice_simulation_contract::config::OpTemperatureMode;
+use rspice_simulation_contract::config::PzAnalysisType;
+use rspice_simulation_contract::numeric_override::AnalysisNumericOverride;
+use rspice_simulation_contract::numeric_override::NumericOverrideOption;
+use rspice_simulation_contract::numeric_override::OverrideValue;
+use rspice_simulation_contract::options::IntegrationMethod;
 
 use rspice_app_types::canonical::CanonicalWriter;
 
-#[cfg(any(target_arch = "wasm32", test))]
-pub(in crate::simulation) fn f64_sequence_digest(domain: &str, values: &[f64]) -> ContentDigest {
+pub fn f64_sequence_digest(domain: &str, values: &[f64]) -> ContentDigest {
     let mut writer = CanonicalWriter::new(domain);
     writer.sequence(values.len());
     for value in values {
@@ -59,9 +73,7 @@ pub(in crate::simulation) fn f64_sequence_digest(domain: &str, values: &[f64]) -
 /// encoding for backward-compatible parsing, but the core engine refuses them
 /// for dependent numerical reuse. Integral-bearing states use the v3 domain
 /// and authenticate their own typed spectra independently of branch currents.
-pub(in crate::simulation) fn hb_operating_point_digest(
-    point: &rspice_core::engine::HbOperatingPoint,
-) -> ContentDigest {
+pub fn hb_operating_point_digest(point: &rspice_core::engine::HbOperatingPoint) -> ContentDigest {
     let config = point.config();
     let has_integrals = !point.integral_spectra().is_empty();
     let mut writer = CanonicalWriter::new(if has_integrals {
@@ -152,12 +164,12 @@ pub(in crate::simulation) fn hb_operating_point_digest(
 /// one OP. Process-corner materialization is already represented in
 /// `source`; supply scaling is authenticated separately because it is applied
 /// to the parsed netlist immediately before circuit construction.
-pub(in crate::simulation) fn operating_point_effective_source_digest(
+pub fn operating_point_effective_source_digest(
     source: &str,
     run_point: OpRunPointContext,
 ) -> ContentDigest {
     let mut writer = CanonicalWriter::new("rspice.op-effective-source/v1");
-    writer.digest(crate::state::content_digest(source));
+    writer.digest(rspice_design::netlist_document::content_digest(source));
     writer.option(run_point.supply_voltage.as_ref(), |writer, value| {
         writer.f64(*value);
     });
@@ -170,12 +182,12 @@ pub(in crate::simulation) fn operating_point_effective_source_digest(
 
 /// Stable manual-deck task identity derived from the exact expanded source.
 ///
-/// Manual decks do not own durable [`SimulationPlan`](crate::simulation::plan::SimulationPlan)
+/// Manual decks do not own durable [`SimulationPlan`](rspice_simulation_contract::plan_model::SimulationPlan)
 /// instances. Their task identities therefore live in a dedicated UUID-v5
 /// namespace and are reproducible only for an identical expanded source,
 /// analysis kind, and same-kind occurrence. Simulation-plan runs must use the
 /// instance IDs carried by their frozen plan and must never call this helper.
-pub(in crate::simulation) fn manual_deck_analysis_instance_id(
+pub fn manual_deck_analysis_instance_id(
     expanded_source_identity: ContentDigest,
     spec: &AnalysisSpec,
     kind_occurrence: usize,
@@ -201,7 +213,7 @@ pub(in crate::simulation) fn manual_deck_analysis_instance_id(
 /// nine encodes differently under `/v3` than it did under `/v2`, so the domain
 /// moves rather than letting two encodings collide inside one name.
 /// `/v4` includes the SP noise request in the typed analysis encoding.
-pub(in crate::simulation) fn analysis_config_digest(
+pub fn analysis_config_digest(
     analysis_line: &str,
     spec: &AnalysisSpec,
     config: Option<&AnalysisConfig>,
@@ -222,17 +234,15 @@ pub(in crate::simulation) fn analysis_config_digest(
 /// The source, sampler, physical point and engine law are bound separately by
 /// the core population identity. Keep the complete configured prerequisite and
 /// measurement contract, including saved OP state and its lineage.
-pub(in crate::simulation) fn monte_carlo_evaluator_digest(
-    base: &rspice_simulation::study::StudyRunConfig,
-) -> ContentDigest {
-    use rspice_simulation::study::StudyAnalysis;
+pub fn monte_carlo_evaluator_digest(base: &crate::study::StudyRunConfig) -> ContentDigest {
+    use crate::study::StudyAnalysis;
     let mut base = base.clone();
     base.histogram_bins = 1;
     // Editing checkpoint selection or a reporting control advances the whole
     // plan revision, including unchanged prerequisites. Compatibility follows
     // their full frozen configurations instead. Keep instance identities and
     // every saved OP source/snapshot/result digest and numerical value intact.
-    base.source_revision = crate::product::ObjectRevision::INITIAL;
+    base.source_revision = rspice_app_types::product::ObjectRevision::INITIAL;
     let operating_point = match &mut base.analysis {
         StudyAnalysis::Pss(config) => Some(&mut config.operating_point),
         StudyAnalysis::Qpss(config) => Some(&mut config.operating_point),
@@ -240,10 +250,10 @@ pub(in crate::simulation) fn monte_carlo_evaluator_digest(
         StudyAnalysis::Basic(_) | StudyAnalysis::Native(_) => None,
     };
     if let Some(operating_point) = operating_point {
-        operating_point.source_revision = crate::product::ObjectRevision::INITIAL;
+        operating_point.source_revision = rspice_app_types::product::ObjectRevision::INITIAL;
     }
     if let Some(postprocess) = &mut base.postprocess {
-        postprocess.producer_source_revision = crate::product::ObjectRevision::INITIAL;
+        postprocess.producer_source_revision = rspice_app_types::product::ObjectRevision::INITIAL;
     }
     // Unit-aware observations change how limits interpret a population. Old
     // journals remain readable, but cannot supply trials to this evaluator.
@@ -416,6 +426,7 @@ fn encode_op_config(writer: &mut CanonicalWriter, config: &OpConfig) {
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn encode_op_fields(
     writer: &mut CanonicalWriter,
     temperature_mode: OpTemperatureMode,
@@ -514,11 +525,11 @@ fn encode_op_fields(
     writer.usize(run_point.index);
     writer.usize(run_point.count);
     writer.u8(match run_point.process {
-        crate::product::ProcessCorner::TT => 0,
-        crate::product::ProcessCorner::SS => 1,
-        crate::product::ProcessCorner::FF => 2,
-        crate::product::ProcessCorner::SF => 3,
-        crate::product::ProcessCorner::FS => 4,
+        rspice_app_types::product::ProcessCorner::TT => 0,
+        rspice_app_types::product::ProcessCorner::SS => 1,
+        rspice_app_types::product::ProcessCorner::FF => 2,
+        rspice_app_types::product::ProcessCorner::SF => 3,
+        rspice_app_types::product::ProcessCorner::FS => 4,
     });
     writer.option(run_point.supply_voltage.as_ref(), |writer, voltage| {
         writer.f64(*voltage);
@@ -533,7 +544,7 @@ fn encode_op_fields(
     }
 }
 
-pub(in crate::simulation) fn manual_source_receipt_digest(
+pub fn manual_source_receipt_digest(
     source: &str,
     executable_netlist: &str,
     origin: Option<&str>,
@@ -561,7 +572,7 @@ pub(in crate::simulation) fn manual_source_receipt_digest(
 /// observed by the core include processor. Full file bytes are included so a
 /// change confined to an unselected library section still invalidates the
 /// retained export bundle evidence rather than silently changing later output.
-pub(in crate::simulation) fn sealed_dependency_closure_digest(
+pub fn sealed_dependency_closure_digest(
     dependencies: &[rspice_core::netlist::ResolvedIncludeDependency],
 ) -> ContentDigest {
     let mut writer = CanonicalWriter::new("rspice.sealed-manual-dependency-closure/v1");
@@ -584,10 +595,7 @@ pub(in crate::simulation) fn sealed_dependency_closure_digest(
     writer.finish()
 }
 
-pub(in crate::simulation) fn drc_receipt_digest(
-    topology_revision: u64,
-    result: &DrcResult,
-) -> ContentDigest {
+pub fn drc_receipt_digest(topology_revision: u64, result: &DrcResult) -> ContentDigest {
     let mut violation_digests = result
         .violations()
         .iter()
@@ -831,7 +839,8 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.domain("monte-carlo-custom-statistics/v1");
         writer.sequence(statistics.variations.len());
         for row in &statistics.variations {
-            use crate::simulation::dialog::mc::statistics::{McScope, McShape};
+            use rspice_simulation_contract::mc_statistics::McScope;
+            use rspice_simulation_contract::mc_statistics::McShape;
             writer.string(&row.parameter);
             writer.u8(match row.scope {
                 McScope::Process => 0,
@@ -862,7 +871,7 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.sequence(statistics.correlations.len());
         for row in &statistics.correlations {
             writer.u8(match row.scope {
-                crate::simulation::dialog::mc::statistics::McScope::Process => 0,
+                rspice_simulation_contract::mc_statistics::McScope::Process => 0,
                 _ => 1,
             });
             writer.sequence(row.parameters.len());
@@ -877,10 +886,10 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
         writer.string(&base.instance_id.to_string());
         writer.u64(base.source_revision.get());
         match &base.analysis {
-            rspice_simulation::study::StudyAnalysis::Basic(config) => {
+            crate::study::StudyAnalysis::Basic(config) => {
                 encode_analysis_config(writer, Some(config));
             }
-            rspice_simulation::study::StudyAnalysis::Pss(pss) => {
+            crate::study::StudyAnalysis::Pss(pss) => {
                 writer.domain("study-seeded-pss/v1");
                 encode_analysis_spec(writer, &pss.request);
                 writer.uuid(pss.operating_point.instance_id.as_uuid());
@@ -888,7 +897,7 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
                 encode_op_config(writer, &pss.operating_point.config);
                 writer.string(&pss.operating_point.numeric_options);
             }
-            rspice_simulation::study::StudyAnalysis::Qpss(qpss) => {
+            crate::study::StudyAnalysis::Qpss(qpss) => {
                 writer.domain("study-seeded-qpss/v1");
                 encode_analysis_spec(writer, &qpss.request);
                 writer.uuid(qpss.operating_point.instance_id.as_uuid());
@@ -896,7 +905,7 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
                 encode_op_config(writer, &qpss.operating_point.config);
                 writer.string(&qpss.operating_point.numeric_options);
             }
-            rspice_simulation::study::StudyAnalysis::Hb(hb) => {
+            crate::study::StudyAnalysis::Hb(hb) => {
                 writer.domain("study-seeded-hb/v1");
                 encode_analysis_spec(writer, &hb.request);
                 writer.uuid(hb.operating_point.instance_id.as_uuid());
@@ -904,7 +913,7 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
                 encode_op_config(writer, &hb.operating_point.config);
                 writer.string(&hb.operating_point.numeric_options);
             }
-            rspice_simulation::study::StudyAnalysis::Native(spec) => {
+            crate::study::StudyAnalysis::Native(spec) => {
                 writer.domain("study-native-spec/v1");
                 encode_analysis_spec(writer, spec);
             }
@@ -986,8 +995,12 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
     }
 }
 
-fn encode_dc_modes(writer: &mut CanonicalWriter, modes: &crate::simulation::config::DcSweepModes) {
-    use crate::simulation::config::{DcAxisMode, DcSweepModes};
+fn encode_dc_modes(
+    writer: &mut CanonicalWriter,
+    modes: &rspice_simulation_contract::config::DcSweepModes,
+) {
+    use rspice_simulation_contract::config::DcAxisMode;
+    use rspice_simulation_contract::config::DcSweepModes;
     if modes == &DcSweepModes::default() {
         return;
     }
@@ -1102,9 +1115,7 @@ fn encode_corner_base_mode(writer: &mut CanonicalWriter, mode: &CornerBaseMode) 
 /// the receipt layer's accepted set, and the result family the task produces
 /// all live together on [`CanonicalAnalysisKind`], so widening the protocol
 /// cannot teach dispatch a tag the receipt layer will refuse.
-pub(in crate::simulation) const fn canonical_analysis_kind(
-    spec: &AnalysisSpec,
-) -> CanonicalAnalysisKind {
+pub const fn canonical_analysis_kind(spec: &AnalysisSpec) -> CanonicalAnalysisKind {
     match spec {
         AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. } => CanonicalAnalysisKind::DcOp,
         AnalysisSpec::DcSweep { .. } => CanonicalAnalysisKind::DcSweep,

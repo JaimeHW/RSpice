@@ -65,6 +65,7 @@ pub use ac_bode::{
 };
 pub use analysis_result::AnalysisResult;
 pub use rspice_results::analysis_payload::AnalysisResultPayload;
+#[cfg(test)]
 pub use rspice_results::analysis_tag::CanonicalAnalysisKind;
 pub use rspice_results::analysis_type::AnalysisType;
 pub use rspice_results::convergence_attribution::ConvergenceAttribution;

@@ -223,7 +223,9 @@ fn drive_pss_from_the_fixture_supply(state: &mut AppState) {
 fn queued_tags(state: &AppState) -> Result<Vec<u8>, Vec<String>> {
     Ok(compiled_queue(state)?
         .iter()
-        .map(|task| crate::simulation::execution::analysis_kind_tag(&task.queued_analysis().spec))
+        .map(|task| {
+            rspice_simulation::execution_identity::analysis_kind_tag(&task.queued_analysis().spec)
+        })
         .collect())
 }
 
@@ -246,7 +248,9 @@ fn task_receipts(state: &AppState) -> Vec<PreparedRunTaskReceipt> {
         .unwrap_or_else(|errors| panic!("the fixture plan compiles: {}", errors.join("; ")))
         .iter()
         .map(|task| {
-            let tag = crate::simulation::execution::analysis_kind_tag(&task.queued_analysis().spec);
+            let tag = rspice_simulation::execution_identity::analysis_kind_tag(
+                &task.queued_analysis().spec,
+            );
             PreparedRunTaskReceipt::new(
                 task.instance_id(),
                 task.source_revision(),

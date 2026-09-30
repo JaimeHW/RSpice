@@ -5,20 +5,12 @@
 //! snapshot's generation-bound permit immediately before dispatch.
 
 mod artifact;
-mod canonical;
 mod permit;
 mod snapshot;
 
 pub(in crate::simulation) use artifact::{
     ExecutionArtifactEnvelope, PeriodicOperatingEnvironment, PeriodicStateArtifact,
     PreparedDependencyBinding, ResolvedExecutionDependencies, TransientTrajectoryArtifact,
-};
-#[cfg(any(target_arch = "wasm32", test))]
-pub(in crate::simulation) use canonical::f64_sequence_digest;
-pub(in crate::simulation) use canonical::{
-    analysis_kind_tag, canonical_analysis_kind, drc_receipt_digest, hb_operating_point_digest,
-    manual_deck_analysis_instance_id, manual_source_receipt_digest, monte_carlo_evaluator_digest,
-    operating_point_effective_source_digest, sealed_dependency_closure_digest,
 };
 pub(in crate::simulation) use permit::{ExecutionPermit, ExecutionPermitIssuer};
 pub(in crate::simulation) use snapshot::bound_cards;

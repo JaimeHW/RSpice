@@ -64,7 +64,7 @@ pub(crate) fn run_monte_carlo_with_continuation(
         abort,
     )?;
     let evaluation_identity =
-        *crate::simulation::execution::monte_carlo_evaluator_digest(base).as_bytes();
+        *rspice_simulation::execution_identity::monte_carlo_evaluator_digest(base).as_bytes();
     run_prepared(
         circuit,
         study,
@@ -417,7 +417,8 @@ pub(crate) fn prepared_population_identity(
         environment,
         &rspice_core::NoAbort,
     )?;
-    let evaluation = *crate::simulation::execution::monte_carlo_evaluator_digest(base).as_bytes();
+    let evaluation =
+        *rspice_simulation::execution_identity::monte_carlo_evaluator_digest(base).as_bytes();
     prepared
         .engine
         .new_monte_carlo_checkpoint(

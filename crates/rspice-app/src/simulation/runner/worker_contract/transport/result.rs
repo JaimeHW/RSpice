@@ -21,7 +21,7 @@ impl WorkerSimulationResultTransport {
                 validated_startup_directives,
                 mna_node_names,
                 mna_branch_names,
-                mna_solution_digest: crate::simulation::execution::f64_sequence_digest(
+                mna_solution_digest: rspice_simulation::execution_identity::f64_sequence_digest(
                     "rspice.worker-dc-op-mna/v1",
                     &mna_solution,
                 ),
@@ -342,7 +342,7 @@ impl WorkerSimulationResultTransport {
             } => {
                 let configuration = configuration.into_config(buffers)?;
                 let mna_solution = mna_solution.into_vec(buffers)?;
-                let actual_digest = crate::simulation::execution::f64_sequence_digest(
+                let actual_digest = rspice_simulation::execution_identity::f64_sequence_digest(
                     "rspice.worker-dc-op-mna/v1",
                     &mna_solution,
                 );

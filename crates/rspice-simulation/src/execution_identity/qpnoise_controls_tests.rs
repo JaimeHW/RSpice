@@ -1,10 +1,11 @@
 //! QPNOISE identity compatibility and effective measurement configuration.
 use super::*;
-use crate::simulation::multi_run::{FrequencySweep, QpnoiseControls};
 use rspice_core::engine::{
     QpnoiseFrequencyAxis, QpnoiseIntegrationMethod, QpnoiseLattices, QpnoiseNoiseFigure,
     QpnoiseObservation, QpnoiseOutput, QpnoiseSources,
 };
+use rspice_simulation_contract::analysis_spec::QpnoiseControls;
+use rspice_simulation_contract::config::FrequencySweep;
 fn digest(spec: &AnalysisSpec) -> ContentDigest {
     let mut writer = CanonicalWriter::new("test");
     analysis_spec::encode_analysis_spec(&mut writer, spec);

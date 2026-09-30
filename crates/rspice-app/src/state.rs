@@ -130,7 +130,7 @@ pub use schematic::*;
 // Test-only aliases: the submodule is private, so this path is the only way
 // the tests can name an attribution's vocabulary directly.
 #[cfg(test)]
-pub use simulation::ConvergenceFailureClass;
+pub use simulation::{CanonicalAnalysisKind, ConvergenceFailureClass};
 
 pub use rspice_model_library::sealed_model_sources;
 pub use simulation::CurrentImpulseHistoryEvidence;
@@ -140,35 +140,35 @@ pub(crate) use simulation::RunHistoryRevision;
 pub(crate) use simulation::current_impulse_history_fixture;
 pub use simulation::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
-    AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType, CanonicalAnalysisKind,
-    ComplexResultValue, ConvergenceAttribution, CrossProbeIndex,
-    DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult, DigitalBusEvidence,
-    DigitalBusSourceEvidence, DigitalEventPointEvidence, DigitalEventTraceEvidence, EvidenceDomain,
-    ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, ExecutionTarget,
-    FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements, FloquetOrbitKindEvidence,
-    FloquetSpectrumCertificateEvidence, FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence,
-    HierarchyMapRow, MonteCarloVariableMetadata, NoiseContributorRow, NoiseFigureEvidence,
-    NoiseSummary, OccurrenceProbeSpelling, OperatingPointAccuracyEvidence,
-    OperatingPointAnnotationEvidence, OperatingPointDeviceDetailEvidence,
-    OperatingPointHomotopyEvidence, OperatingPointInitialGuessEvidence,
-    OperatingPointNodeInitializationEvidence, OperatingPointPreviousStateEvidence,
-    OperatingPointProcessEvidence, OperatingPointSaveDeviceEvidence,
-    OperatingPointTemperatureEvidence, OperatingPointValue, PeriodicNoiseConversionEvidence,
-    PeriodicNoiseOutputQuantity, PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate,
-    PreparedModelQualification, PreparedModelSourceIdentity, PreparedRunReceipt,
-    PreparedRunReceiptInput, PreparedRunTaskReceipt, PreparedSourceCheckReceipt,
-    PreparedSpecification, PreparedSpecificationPolicy, PssFloquetMultiplierEvidence,
-    PstbFloquetModeEvidence, PstbStabilityClassificationEvidence, RealEventPointEvidence,
-    RealEventTraceEvidence, ResultImportFormat, ResultImportSource, RunHistory, RunRetention,
-    SavedOutputDcMember, SavedOutputMaterializationStatus, SavedOutputReceipt,
-    SensitivityResultMode, SensitivityResultRow, SharedWaveformValues, SignOffStanding,
-    SimulationCampaignMembership, SimulationRun, SimulationRunIntent, SimulationRunLifecycle,
-    SimulationRunProvenance, SimulationState, SoaEvaluationEvidence, SoaParameterEvidence,
-    SoaRuleVerdictEvidence, SoaSourceHistory, SoaSourceWaveform, SoaViolationEvidence,
-    SoaViolationSeverityEvidence, SpecificationVerdictStatus, TransferFunctionAccuracyEvidence,
-    TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
-    TransferFunctionScalarEvidence, WaveformData, absent_deck_reason, ac_bode_shape_for_analysis,
-    ac_bode_shape_for_selection, ac_bode_summary_for_analysis, ac_bode_summary_for_selection,
+    AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType, ComplexResultValue,
+    ConvergenceAttribution, CrossProbeIndex, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult,
+    DigitalBusEvidence, DigitalBusSourceEvidence, DigitalEventPointEvidence,
+    DigitalEventTraceEvidence, EvidenceDomain, ExecutedDeck, ExecutedDeckArchive,
+    ExecutedDeckPoint, ExecutionTarget, FamilyMeasurementEvidence, FamilyMemberId,
+    FamilyMemberMeasurements, FloquetOrbitKindEvidence, FloquetSpectrumCertificateEvidence,
+    FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence, HierarchyMapRow,
+    MonteCarloVariableMetadata, NoiseContributorRow, NoiseFigureEvidence, NoiseSummary,
+    OccurrenceProbeSpelling, OperatingPointAccuracyEvidence, OperatingPointAnnotationEvidence,
+    OperatingPointDeviceDetailEvidence, OperatingPointHomotopyEvidence,
+    OperatingPointInitialGuessEvidence, OperatingPointNodeInitializationEvidence,
+    OperatingPointPreviousStateEvidence, OperatingPointProcessEvidence,
+    OperatingPointSaveDeviceEvidence, OperatingPointTemperatureEvidence, OperatingPointValue,
+    PeriodicNoiseConversionEvidence, PeriodicNoiseOutputQuantity, PoleZeroRootSetEvidence,
+    PoleZeroSpectrumCertificate, PreparedModelQualification, PreparedModelSourceIdentity,
+    PreparedRunReceipt, PreparedRunReceiptInput, PreparedRunTaskReceipt,
+    PreparedSourceCheckReceipt, PreparedSpecification, PreparedSpecificationPolicy,
+    PssFloquetMultiplierEvidence, PstbFloquetModeEvidence, PstbStabilityClassificationEvidence,
+    RealEventPointEvidence, RealEventTraceEvidence, ResultImportFormat, ResultImportSource,
+    RunHistory, RunRetention, SavedOutputDcMember, SavedOutputMaterializationStatus,
+    SavedOutputReceipt, SensitivityResultMode, SensitivityResultRow, SharedWaveformValues,
+    SignOffStanding, SimulationCampaignMembership, SimulationRun, SimulationRunIntent,
+    SimulationRunLifecycle, SimulationRunProvenance, SimulationState, SoaEvaluationEvidence,
+    SoaParameterEvidence, SoaRuleVerdictEvidence, SoaSourceHistory, SoaSourceWaveform,
+    SoaViolationEvidence, SoaViolationSeverityEvidence, SpecificationVerdictStatus,
+    TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
+    TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence, WaveformData,
+    absent_deck_reason, ac_bode_shape_for_analysis, ac_bode_shape_for_selection,
+    ac_bode_summary_for_analysis, ac_bode_summary_for_selection,
 };
 pub use simulation::{
     ConvergenceReport, PeriodicConvergenceEvidence, PeriodicInitializationMethod,

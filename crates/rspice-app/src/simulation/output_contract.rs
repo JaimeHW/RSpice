@@ -10,7 +10,6 @@ use std::sync::Arc;
 use crate::analysis::calculator::{self, CalcValue};
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SavedOutputId};
 use crate::simulation::config::NoiseSweepType;
-use crate::simulation::execution::analysis_kind_tag;
 use crate::simulation::multi_run::{AnalysisRunType, AnalysisSpec, FrequencySweep};
 use crate::state::{
     AnalysisResult, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, SavedOutput, SavedOutputCompatibility,
@@ -18,6 +17,7 @@ use crate::state::{
     SavedOutputReceipt, SavedOutputStreaming, WaveformData,
 };
 use rspice_app_types::canonical::content_digest;
+use rspice_simulation::execution_identity::analysis_kind_tag;
 
 const MAX_SELECTED_POINT_COUNT: usize = 10_000_000;
 

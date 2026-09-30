@@ -496,6 +496,38 @@ fn analysis_spec_round_trips_supported_variants() {
 
         assert_eq!(reconstructed, spec);
     }
+    {
+        use rspice_simulation_contract::config::AcDataParameterColumn;
+        let json = serde_json::json!({"AcData": {"table_name": "pts", "frequencies": [1.0, 0.0]}});
+        let old: AnalysisSpec = serde_json::from_value(json.clone()).unwrap();
+        let worker: WorkerAnalysisSpec = serde_json::from_value(json).unwrap();
+        assert_eq!(AnalysisSpec::from(worker), old);
+        let mut columns = old.clone();
+        let AnalysisSpec::AcData { table_options, .. } = &mut columns else {
+            unreachable!()
+        };
+        table_options.parameter_columns.push(AcDataParameterColumn {
+            name: "load".into(),
+            values: vec![1000.0, 2000.0],
+        });
+        let mut reference = old.clone();
+        let AnalysisSpec::AcData {
+            frequencies,
+            table_options,
+            ..
+        } = &mut reference
+        else {
+            unreachable!()
+        };
+        frequencies.clear();
+        table_options.from_netlist = true;
+        for spec in [columns, reference] {
+            let worker = WorkerAnalysisSpec::try_from(&spec).unwrap();
+            let restored: WorkerAnalysisSpec =
+                serde_json::from_value(serde_json::to_value(worker).unwrap()).unwrap();
+            assert_eq!(AnalysisSpec::from(restored), spec);
+        }
+    }
 }
 
 #[test]

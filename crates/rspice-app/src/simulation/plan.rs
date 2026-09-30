@@ -17,9 +17,11 @@ pub use config::{
     QpssDraft, QpxfSidebandSelection, QpxfSourceSelection, QuasiPeriodicAcDraft,
     QuasiPeriodicNoiseDraft, QuasiPeriodicTransferDraft, TransientNoiseDraft,
 };
+#[cfg(test)]
+pub use numeric_override::OverrideValue;
 pub use numeric_override::{
-    AnalysisNumericOverride, NumericOverrideOption, OverrideSection, OverrideValue,
-    OverrideValueKind, SolverOwnership,
+    AnalysisNumericOverride, NumericOverrideOption, OverrideSection, OverrideValueKind,
+    SolverOwnership,
 };
 pub use rspice_simulation_contract::analysis_kind::{AnalysisAvailability, AnalysisKind};
 pub use rspice_simulation_contract::plan_model::{

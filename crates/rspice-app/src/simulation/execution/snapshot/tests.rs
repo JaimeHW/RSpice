@@ -1113,10 +1113,11 @@ fn retained_op_state_must_match_the_prepared_executable_source() {
 
     let mut matching = parts();
     let previous = OpPreviousState {
-        source_content_digest: super::super::canonical::operating_point_effective_source_digest(
-            &matching.executable_netlist,
-            crate::simulation::dialog::OpRunPointContext::default(),
-        ),
+        source_content_digest:
+            rspice_simulation::execution_identity::operating_point_effective_source_digest(
+                &matching.executable_netlist,
+                crate::simulation::dialog::OpRunPointContext::default(),
+            ),
         producer_snapshot_digest: ContentDigest::from_bytes([2; 32]),
         producer_result_digest: ContentDigest::from_bytes([3; 32]),
         node_names: vec!["out".to_owned()],

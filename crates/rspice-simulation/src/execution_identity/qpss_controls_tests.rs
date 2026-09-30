@@ -1,8 +1,8 @@
 //! Every authored QPSS control participates in prepared request identity.
 use super::*;
-use crate::simulation::plan::QpssDraft;
 use rspice_core::analysis::quasi_periodic::QuasiPeriodicSampling;
 use rspice_core::engine::QpssInitialState;
+use rspice_simulation_contract::quasi_periodic_draft::QpssDraft;
 
 fn authored() -> QpssDraft {
     QpssDraft {
@@ -28,7 +28,7 @@ fn qpss_controls_change_request_identity() {
         super::analysis_config_digest(".qpss", value, None, &SpecExecutionOptions::default(), None)
     };
     let original = digest(&spec);
-    let changes: &[fn(&mut crate::simulation::multi_run::QpssControls)] = &[
+    let changes: &[fn(&mut rspice_simulation_contract::analysis_spec::QpssControls)] = &[
         |c| c.current_absolute_tolerance *= 2.0,
         |c| c.voltage_absolute_tolerance *= 2.0,
         |c| c.max_backtracks += 1,

@@ -1,12 +1,12 @@
 //! Canonical Monte Carlo tests preserve saved base-analysis and postprocessor identity.
 
 use super::*;
-use crate::product::ObjectRevision;
-use rspice_simulation::study::StudyAnalysis;
-use rspice_simulation::study::StudyOperatingPoint;
-use rspice_simulation::study::StudyPostprocess;
-use rspice_simulation::study::StudyQpssConfig;
-use rspice_simulation::study::StudyRunConfig;
+use crate::study::StudyAnalysis;
+use crate::study::StudyOperatingPoint;
+use crate::study::StudyPostprocess;
+use crate::study::StudyQpssConfig;
+use crate::study::StudyRunConfig;
+use rspice_app_types::product::ObjectRevision;
 
 fn base(analysis: StudyAnalysis) -> StudyRunConfig {
     StudyRunConfig {
@@ -37,7 +37,7 @@ fn monte_carlo_evaluator_compatibility_preserves_saved_op_and_solver_identity() 
         solution: vec![0.5],
     });
     op.validate_for_execution().unwrap();
-    let spec = crate::simulation::plan::QpssDraft {
+    let spec = rspice_simulation_contract::quasi_periodic_draft::QpssDraft {
         tones: "1k, 1414.213562373095".into(),
         harmonics: "1, 1".into(),
         ..Default::default()
@@ -59,7 +59,8 @@ fn monte_carlo_evaluator_compatibility_preserves_saved_op_and_solver_identity() 
         analysis_config_digest(
             ".mc 2",
             &AnalysisSpec::MonteCarlo {
-                variation_source: crate::simulation::dialog::McVariationSource::ParameterTolerance,
+                variation_source:
+                    rspice_simulation_contract::mc_draft::McVariationSource::ParameterTolerance,
                 params: vec![],
             },
             None,
@@ -135,11 +136,13 @@ fn monte_carlo_evaluator_compatibility_preserves_saved_op_and_solver_identity() 
 #[test]
 fn monte_carlo_evaluator_compatibility_keeps_postprocessor_configuration() {
     let mut base = base(
-        AnalysisConfig::Transient(crate::simulation::config::TransientAnalysisConfig {
-            step_time: 1e-6,
-            stop_time: 10e-3,
-            ..Default::default()
-        })
+        AnalysisConfig::Transient(
+            rspice_simulation_contract::config::TransientAnalysisConfig {
+                step_time: 1e-6,
+                stop_time: 10e-3,
+                ..Default::default()
+            },
+        )
         .into(),
     );
     base.analysis_line = ".four 1k V(out)".into();

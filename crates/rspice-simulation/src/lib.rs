@@ -6,6 +6,7 @@
 pub mod analysis_preparation;
 pub mod compilation;
 pub mod error;
+pub mod execution_identity;
 pub mod execution_options;
 pub mod live_transient;
 pub mod measurement_references;

@@ -1,8 +1,8 @@
 //! QPXF identities preserve legacy bytes and bind every active selection/control.
 use super::*;
-use crate::simulation::multi_run::QpxfControls;
-use crate::simulation::plan::QuasiPeriodicTransferDraft;
 use rspice_core::engine::{QpxfFrequencyAxis, QpxfInputLattices, QpxfSources};
+use rspice_simulation_contract::analysis_spec::QpxfControls;
+use rspice_simulation_contract::quasi_periodic_draft::QuasiPeriodicTransferDraft;
 fn digest(spec: &AnalysisSpec) -> ContentDigest {
     let mut writer = CanonicalWriter::new("test");
     analysis_spec::encode_analysis_spec(&mut writer, spec);

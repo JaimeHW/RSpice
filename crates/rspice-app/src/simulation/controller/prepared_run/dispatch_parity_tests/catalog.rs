@@ -50,7 +50,9 @@ fn every_configured_analysis_survives_save_prepare_and_dispatch() {
                 .find(|task| task.instance_id() == own_id)
                 .ok_or("configured analysis has no queued task")?;
             assert_eq!(
-                crate::simulation::execution::analysis_kind_tag(&own_task.queued_analysis().spec),
+                rspice_simulation::execution_identity::analysis_kind_tag(
+                    &own_task.queued_analysis().spec
+                ),
                 kind.canonical_kind().tag(),
                 "{kind:?} task carries the wrong tag"
             );

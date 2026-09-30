@@ -11,7 +11,7 @@ fn monte_carlo_checkpoint_retention_project_round_trip_integrity_and_legacy_abse
     let checkpoint = MonteCarloCheckpointEvidence::from_bytes(bytes.clone()).unwrap();
     let provenance = AnalysisResultProvenance::new_with_source_domain(
         AnalysisResultSourceDomain::ManualDeck,
-        crate::product::manual_deck_analysis_instance_id_from_tag(
+        rspice_app_types::product::manual_deck_analysis_instance_id_from_tag(
             ContentDigest::from_bytes([82; 32]),
             crate::state::CanonicalAnalysisKind::MonteCarlo.tag(),
             0,

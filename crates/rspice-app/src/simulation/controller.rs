@@ -24,7 +24,6 @@ use crate::simulation::config::{
 };
 use crate::simulation::execution::ExecutionArtifactEnvelope;
 use crate::simulation::execution::TouchstoneExportPolicy;
-use crate::simulation::execution::canonical_analysis_kind;
 use crate::simulation::multi_run::PssMethod;
 #[cfg(test)]
 use crate::simulation::multi_run::SpPort;
@@ -47,6 +46,7 @@ use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCache
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 use rspice_results::yield_analysis::YieldAnalysisManager;
 use rspice_simulation::error::SimulationError;
+use rspice_simulation::execution_identity::canonical_analysis_kind;
 use rspice_simulation::execution_options::SpecExecutionOptions;
 use rspice_simulation::live_transient::{
     TransientDigitalBusSample, TransientDigitalEventSample, TransientRealEventSample,
@@ -825,7 +825,7 @@ impl SimulationController {
                 return None;
             };
             Some(
-                crate::simulation::execution::operating_point_effective_source_digest(
+                rspice_simulation::execution_identity::operating_point_effective_source_digest(
                     next_analysis.executable_netlist(),
                     config.run_point.clone(),
                 ),

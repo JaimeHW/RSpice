@@ -484,7 +484,7 @@ impl WorkerOpPreviousStateTransport {
             branch_names,
             solution,
         } = previous_state;
-        let solution_digest = crate::simulation::execution::f64_sequence_digest(
+        let solution_digest = rspice_simulation::execution_identity::f64_sequence_digest(
             "rspice.worker-op-previous-state/v1",
             &solution,
         );
@@ -510,7 +510,7 @@ impl WorkerOpPreviousStateTransport {
             );
         }
         let solution = self.solution.into_vec(buffers)?;
-        let actual_digest = crate::simulation::execution::f64_sequence_digest(
+        let actual_digest = rspice_simulation::execution_identity::f64_sequence_digest(
             "rspice.worker-op-previous-state/v1",
             &solution,
         );
@@ -859,11 +859,11 @@ impl WorkerHbOperatingPointTransport {
                     .unzip();
                 WorkerHbSpectrumTransport {
                     node_name,
-                    real_digest: crate::simulation::execution::f64_sequence_digest(
+                    real_digest: rspice_simulation::execution_identity::f64_sequence_digest(
                         "rspice.worker-hb-spectrum-real/v1",
                         &real,
                     ),
-                    imaginary_digest: crate::simulation::execution::f64_sequence_digest(
+                    imaginary_digest: rspice_simulation::execution_identity::f64_sequence_digest(
                         "rspice.worker-hb-spectrum-imaginary/v1",
                         &imaginary,
                     ),
@@ -884,11 +884,11 @@ impl WorkerHbOperatingPointTransport {
                     .unzip();
                 WorkerHbBranchSpectrumTransport {
                     branch_name,
-                    real_digest: crate::simulation::execution::f64_sequence_digest(
+                    real_digest: rspice_simulation::execution_identity::f64_sequence_digest(
                         "rspice.worker-hb-branch-spectrum-real/v1",
                         &real,
                     ),
-                    imaginary_digest: crate::simulation::execution::f64_sequence_digest(
+                    imaginary_digest: rspice_simulation::execution_identity::f64_sequence_digest(
                         "rspice.worker-hb-branch-spectrum-imaginary/v1",
                         &imaginary,
                     ),
@@ -908,11 +908,11 @@ impl WorkerHbOperatingPointTransport {
                     .unzip();
                 WorkerHbIntegralSpectrumTransport {
                     name: spectrum.name.clone(),
-                    real_digest: crate::simulation::execution::f64_sequence_digest(
+                    real_digest: rspice_simulation::execution_identity::f64_sequence_digest(
                         "rspice.worker-hb-integral-spectrum-real/v1",
                         &real,
                     ),
-                    imaginary_digest: crate::simulation::execution::f64_sequence_digest(
+                    imaginary_digest: rspice_simulation::execution_identity::f64_sequence_digest(
                         "rspice.worker-hb-integral-spectrum-imaginary/v1",
                         &imaginary,
                     ),
@@ -929,7 +929,9 @@ impl WorkerHbOperatingPointTransport {
             integral_spectra,
             iterations: operating_point.iterations(),
             residual_norm: operating_point.residual_norm(),
-            state_digest: crate::simulation::execution::hb_operating_point_digest(&operating_point),
+            state_digest: rspice_simulation::execution_identity::hb_operating_point_digest(
+                &operating_point,
+            ),
         }
     }
 
@@ -952,14 +954,15 @@ impl WorkerHbOperatingPointTransport {
             node_names.push(spectrum.node_name);
             let real = spectrum.real.into_vec(buffers)?;
             let imaginary = spectrum.imaginary.into_vec(buffers)?;
-            let actual_real_digest = crate::simulation::execution::f64_sequence_digest(
+            let actual_real_digest = rspice_simulation::execution_identity::f64_sequence_digest(
                 "rspice.worker-hb-spectrum-real/v1",
                 &real,
             );
-            let actual_imaginary_digest = crate::simulation::execution::f64_sequence_digest(
-                "rspice.worker-hb-spectrum-imaginary/v1",
-                &imaginary,
-            );
+            let actual_imaginary_digest =
+                rspice_simulation::execution_identity::f64_sequence_digest(
+                    "rspice.worker-hb-spectrum-imaginary/v1",
+                    &imaginary,
+                );
             if actual_real_digest != spectrum.real_digest
                 || actual_imaginary_digest != spectrum.imaginary_digest
             {
@@ -973,14 +976,15 @@ impl WorkerHbOperatingPointTransport {
             mna_branch_names.push(spectrum.branch_name);
             let real = spectrum.real.into_vec(buffers)?;
             let imaginary = spectrum.imaginary.into_vec(buffers)?;
-            let actual_real_digest = crate::simulation::execution::f64_sequence_digest(
+            let actual_real_digest = rspice_simulation::execution_identity::f64_sequence_digest(
                 "rspice.worker-hb-branch-spectrum-real/v1",
                 &real,
             );
-            let actual_imaginary_digest = crate::simulation::execution::f64_sequence_digest(
-                "rspice.worker-hb-branch-spectrum-imaginary/v1",
-                &imaginary,
-            );
+            let actual_imaginary_digest =
+                rspice_simulation::execution_identity::f64_sequence_digest(
+                    "rspice.worker-hb-branch-spectrum-imaginary/v1",
+                    &imaginary,
+                );
             if actual_real_digest != spectrum.real_digest
                 || actual_imaginary_digest != spectrum.imaginary_digest
             {
@@ -998,11 +1002,11 @@ impl WorkerHbOperatingPointTransport {
         for spectrum in self.integral_spectra {
             let real = spectrum.real.into_vec(buffers)?;
             let imaginary = spectrum.imaginary.into_vec(buffers)?;
-            let real_digest = crate::simulation::execution::f64_sequence_digest(
+            let real_digest = rspice_simulation::execution_identity::f64_sequence_digest(
                 "rspice.worker-hb-integral-spectrum-real/v1",
                 &real,
             );
-            let imaginary_digest = crate::simulation::execution::f64_sequence_digest(
+            let imaginary_digest = rspice_simulation::execution_identity::f64_sequence_digest(
                 "rspice.worker-hb-integral-spectrum-imaginary/v1",
                 &imaginary,
             );
@@ -1030,7 +1034,7 @@ impl WorkerHbOperatingPointTransport {
         )
         .map_err(|error| format!("invalid retained HB worker payload: {error}"))?;
         let actual_state_digest =
-            crate::simulation::execution::hb_operating_point_digest(&operating_point);
+            rspice_simulation::execution_identity::hb_operating_point_digest(&operating_point);
         if actual_state_digest != self.state_digest {
             return Err(
                 "retained HB worker state identity or configuration digest mismatch".to_owned(),

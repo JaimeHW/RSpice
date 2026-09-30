@@ -15,7 +15,8 @@ mod spec;
 
 pub use run_type::{AnalysisRunType, FrequencySweep};
 pub use spec::{
-    AnalysisSpec, EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
-    HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable, PssMethod,
-    QpacControls, QpnoiseControls, QpssControls, QpxfControls, SpPort, TfAccuracy, TfNormalization,
+    AnalysisSpec, HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,
+    PssMethod, SpPort, TfAccuracy, TfNormalization,
 };
+#[cfg(test)]
+pub use spec::{EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve};

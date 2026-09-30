@@ -1,7 +1,7 @@
 //! QPAC request identity covers authored controls without invalidating legacy defaults.
 use super::*;
-use crate::simulation::multi_run::QpacControls;
-use crate::simulation::plan::QuasiPeriodicAcDraft;
+use rspice_simulation_contract::analysis_spec::QpacControls;
+use rspice_simulation_contract::quasi_periodic_draft::QuasiPeriodicAcDraft;
 
 fn digest(spec: &AnalysisSpec) -> ContentDigest {
     let mut writer = CanonicalWriter::new("test");

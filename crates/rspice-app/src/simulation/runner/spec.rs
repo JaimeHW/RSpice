@@ -141,7 +141,7 @@ pub(super) fn run_spec_request_with_environment_and_checkpoint_observer(
     ensure_not_aborted(abort_flag)?;
     validation.map_err(SimulationError::InvalidConfig)?;
     if let Some(reason) =
-        crate::simulation::execution::canonical_analysis_kind(&spec).execution_blocker()
+        rspice_simulation::execution_identity::canonical_analysis_kind(&spec).execution_blocker()
     {
         return Err(SimulationError::InvalidConfig(format!(
             "{} execution is unavailable; the request was rejected before dispatch: {reason}",
@@ -870,7 +870,8 @@ R2 out 0 1k\n\
             extraction_path: EnvelopeExtractionPath::Projection,
         };
         assert_eq!(
-            crate::simulation::execution::canonical_analysis_kind(&spec).execution_blocker(),
+            rspice_simulation::execution_identity::canonical_analysis_kind(&spec)
+                .execution_blocker(),
             None
         );
 
@@ -934,7 +935,8 @@ R2 out 0 1k\n\
             noise_reference: None,
         };
         assert_eq!(
-            crate::simulation::execution::canonical_analysis_kind(&hbsp).execution_blocker(),
+            rspice_simulation::execution_identity::canonical_analysis_kind(&hbsp)
+                .execution_blocker(),
             None
         );
         let hbsp_result = run_spec_request(
@@ -981,7 +983,8 @@ R2 out 0 1k\n\
             contributor_ranking: true,
         };
         assert_eq!(
-            crate::simulation::execution::canonical_analysis_kind(&hbnoise).execution_blocker(),
+            rspice_simulation::execution_identity::canonical_analysis_kind(&hbnoise)
+                .execution_blocker(),
             None
         );
         let hbnoise_result = run_spec_request(
@@ -1327,7 +1330,8 @@ R2 out 0 1k\n\
             noise_reference: None,
         };
         assert_eq!(
-            crate::simulation::execution::canonical_analysis_kind(&psp).execution_blocker(),
+            rspice_simulation::execution_identity::canonical_analysis_kind(&psp)
+                .execution_blocker(),
             None
         );
 
@@ -1473,7 +1477,8 @@ R2 out 0 1k\n\
             uic: false,
         };
         assert_eq!(
-            crate::simulation::execution::canonical_analysis_kind(&spec).execution_blocker(),
+            rspice_simulation::execution_identity::canonical_analysis_kind(&spec)
+                .execution_blocker(),
             None,
             "the transient-noise solver is in this build"
         );
