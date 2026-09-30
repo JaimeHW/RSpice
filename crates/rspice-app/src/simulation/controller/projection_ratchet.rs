@@ -37,7 +37,7 @@ use serde_json::{Map, Value};
 
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::model_library::ModelLibraryManager;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, SimSetupState};
 
 use super::SimulationController;
 
@@ -105,6 +105,9 @@ const ENUM_CANDIDATES: &[&str] = &[
     "octave",
     "linear",
     "explicit_frequency_list",
+    "auto",
+    "direct",
+    "krylov",
     "Decade",
     "Octave",
     "Linear",
@@ -192,11 +195,15 @@ const OBJECT_SEEDS: &[(AnalysisKind, &str, &str)] = &[
 pub(super) fn engine_facing_state(draft: &AnalysisDraft) -> AppState {
     let mut state = AppState::default();
     state.sim_setup.pss.ensure_initialized();
+    apply_fixture_draft(&mut state, draft);
+    state
+}
+
+fn apply_fixture_draft(state: &mut AppState, draft: &AnalysisDraft) {
     if state.sim_setup.pss.tone_sources.trim().is_empty() {
         state.sim_setup.pss.tone_sources = "VSRC".to_owned();
     }
     state.sim_setup.apply_analysis_draft_projection(draft);
-    state
 }
 
 /// The default draft body for `kind`, with the fixture context an empty
@@ -219,20 +226,38 @@ pub(super) fn fixture_draft(kind: AnalysisKind) -> AnalysisDraft {
 }
 
 fn projection(draft: &AnalysisDraft) -> String {
-    let controller = SimulationController::new();
-    let state = engine_facing_state(draft);
+    use std::cell::RefCell;
 
-    let spec = match controller.analysis_draft_spec(&state, draft) {
-        Ok(spec) => spec,
-        Err(error) => return format!("spec-error: {error}"),
-    };
+    thread_local! {
+        // The project and catalogs are read-only inputs to projection. Keep
+        // their identities stable and restore the complete setup for each
+        // trial instead of recompiling the bootstrapped workspaces each time.
+        static FIXTURE: RefCell<(AppState, SimSetupState)> = {
+            let mut state = AppState::default();
+            state.sim_setup.pss.ensure_initialized();
+            let setup = state.sim_setup.clone();
+            RefCell::new((state, setup))
+        };
+    }
 
-    let command = controller.analysis_spec_to_spice_line(&state, draft, &spec);
-    let options = with_sealed_process_library(|sealed| {
-        controller.analysis_spec_execution_options(&state, draft, None, &spec, sealed)
-    });
+    FIXTURE.with(|fixture| {
+        let mut fixture = fixture.borrow_mut();
+        let (state, setup) = &mut *fixture;
+        state.sim_setup.clone_from(setup);
+        apply_fixture_draft(state, draft);
+        let controller = SimulationController::new();
+        let spec = match controller.analysis_draft_spec(state, draft) {
+            Ok(spec) => spec,
+            Err(error) => return format!("spec-error: {error}"),
+        };
 
-    format!("{spec:?}\u{1f}{command:?}\u{1f}{options:?}")
+        let command = controller.analysis_spec_to_spice_line(state, draft, &spec);
+        let options = with_sealed_process_library(|sealed| {
+            controller.analysis_spec_execution_options(state, draft, None, &spec, sealed)
+        });
+
+        format!("{spec:?}\u{1f}{command:?}\u{1f}{options:?}")
+    })
 }
 
 /// A sealed model library that defines every process section the corner run
