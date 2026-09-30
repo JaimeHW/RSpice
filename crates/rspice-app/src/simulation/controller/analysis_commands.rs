@@ -286,8 +286,9 @@ impl SimulationController {
         // because this is the one path every surface takes to a directive, so
         // the plan refuses by name instead of writing a deck the engine will
         // reject for a reason that no longer mentions the schematic.
-        if let Some(error) = stb_cfg.deleted_probe_error(&state.schematic.placed_loop_probe_names())
-        {
+        if let Some(error) = stb_cfg.deleted_probe_error(
+            &rspice_design::schematic::component_edit::placed_loop_probe_names(state.schematic),
+        ) {
             return Err(error);
         }
         Ok(stb_cfg.to_spice())
@@ -416,9 +417,9 @@ impl SimulationController {
         // for the same reason: this is the one path every surface takes to a
         // directive, so a plan pointing at a probe the drawing no longer holds
         // is refused by name here rather than in the solver.
-        if let Some(error) =
-            pstb_cfg.deleted_probe_error(&state.schematic.placed_loop_probe_names())
-        {
+        if let Some(error) = pstb_cfg.deleted_probe_error(
+            &rspice_design::schematic::component_edit::placed_loop_probe_names(state.schematic),
+        ) {
             return Err(error);
         }
         Ok(pstb_cfg.to_spice())

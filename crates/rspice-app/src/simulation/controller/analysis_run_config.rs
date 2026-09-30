@@ -29,7 +29,7 @@ struct PeriodicCarrierBasis {
 
 impl PeriodicCarrierBasis {
     fn read(
-        state: &SimSetupState,
+        state: &SimulationSetup,
         producer: Option<&AnalysisDraft>,
         carrier: crate::services::simulation_runner::PeriodicCarrier,
         consumer: &str,
@@ -95,7 +95,7 @@ impl PeriodicCarrierBasis {
 
 impl SimulationController {
     pub(super) fn pac_run_config_from_dialog(
-        state: &SimSetupState,
+        state: &SimulationSetup,
         draft: &crate::simulation::dialog::pac::PacDialogState,
         producer: Option<&AnalysisDraft>,
     ) -> Result<rspice_simulation::periodic::PacRunConfig, String> {
@@ -143,7 +143,7 @@ impl SimulationController {
     }
 
     pub(super) fn pnoise_run_config_from_dialog(
-        state: &SimSetupState,
+        state: &SimulationSetup,
         draft: &crate::simulation::dialog::pnoise::PnoiseDialogState,
         producer: Option<&AnalysisDraft>,
     ) -> Result<rspice_simulation::periodic::PnoiseRunConfig, String> {
@@ -206,7 +206,7 @@ impl SimulationController {
     }
 
     pub(super) fn pxf_run_config_from_dialog(
-        state: &SimSetupState,
+        state: &SimulationSetup,
         draft: &crate::simulation::dialog::pxf::PxfDialogState,
         producer: Option<&AnalysisDraft>,
     ) -> Result<rspice_simulation::periodic::PxfRunConfig, String> {
@@ -252,7 +252,7 @@ impl SimulationController {
     }
 
     pub(super) fn pstb_run_config_from_dialog(
-        state: &SimSetupState,
+        state: &SimulationSetup,
         draft: &crate::simulation::dialog::pstb::PstbDialogState,
         producer: Option<&AnalysisDraft>,
     ) -> Result<rspice_simulation::periodic::PstbRunConfig, String> {
@@ -285,7 +285,7 @@ impl SimulationController {
     }
 
     pub(super) fn temp_run_config_from_dialog(
-        state: &SimSetupState,
+        state: &SimulationSetup,
         temp_cfg: &crate::simulation::dialog::temp::TempConfig,
     ) -> Result<rspice_simulation::sweeps::TempRunConfig, String> {
         use crate::simulation::dialog::temp::TempBaseAnalysis;
@@ -330,7 +330,7 @@ impl SimulationController {
     }
 
     pub(super) fn corner_run_config_from_dialog(
-        state: &SimSetupState,
+        state: &SimulationSetup,
         corner_cfg: &crate::simulation::dialog::corner::CornerConfig,
         sealed_model_sources: &crate::state::model_library::SealedModelExecutionSources,
     ) -> Result<rspice_simulation::sweeps::CornerRunConfig, String> {
@@ -393,7 +393,7 @@ impl SimulationController {
     }
 
     fn transient_study_base_mode(
-        state: &SimSetupState,
+        state: &SimulationSetup,
     ) -> Result<rspice_simulation::sweeps::CornerBaseMode, String> {
         use rspice_simulation::sweeps::CornerBaseMode;
         let draft = &state.tran;
@@ -429,7 +429,7 @@ impl SimulationController {
         )
     }
 
-    pub(super) fn periodic_solver_tolerances(state: &SimSetupState) -> (f64, f64) {
+    pub(super) fn periodic_solver_tolerances(state: &SimulationSetup) -> (f64, f64) {
         let opts = &state.options;
         (opts.reltol, opts.abstol)
     }
@@ -450,7 +450,7 @@ impl SimulationController {
     /// them would be a number no deck could carry and no round trip could
     /// preserve.
     pub(super) fn authored_or_plan_tolerances(
-        state: &SimSetupState,
+        state: &SimulationSetup,
         reltol: Option<f64>,
         abstol: Option<f64>,
     ) -> (f64, f64) {

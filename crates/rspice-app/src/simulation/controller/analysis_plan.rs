@@ -77,7 +77,7 @@ impl SimulationController {
 
     pub(super) fn build_analysis_plan(
         &self,
-        state: &SimSetupState,
+        state: &SimulationSetup,
     ) -> Result<FrozenSimulationPlan, Vec<String>> {
         let plan = state.analysis_plan.as_ref().ok_or_else(|| {
             vec![

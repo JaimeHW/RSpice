@@ -10,8 +10,9 @@ use super::*;
 /// A projected instance replaces only `sim_setup`; circuit and evidence stay borrowed.
 #[derive(Clone, Copy)]
 pub(super) struct AnalysisInputs<'a> {
-    pub(super) sim_setup: &'a SimSetupState,
-    pub(super) schematic: &'a crate::state::SchematicState,
+    pub(super) sim_setup: &'a SimulationSetup,
+    pub(super) schematic: &'a rspice_design::schematic::document::SchematicDocument,
+    pub(super) selected_components: &'a std::collections::HashSet<u64>,
     pub(super) runs: &'a [crate::state::SimulationRun],
     pub(super) active_run:
         Option<&'a rspice_results::run::SimulationRun<crate::state::AnalysisResult>>,
@@ -24,7 +25,8 @@ impl<'a> AnalysisInputs<'a> {
     pub(super) fn new(state: &'a AppState) -> Self {
         Self {
             sim_setup: &state.sim_setup,
-            schematic: &state.schematic,
+            schematic: state.schematic.document(),
+            selected_components: &state.schematic.session.selection.components,
             runs: &state.simulation.runs,
             active_run: state.simulation.active_run().map(|run| &run.data),
             project_revision: state.workspace.content.project.revision(),
@@ -312,16 +314,9 @@ impl SimulationController {
         let mut config = op.to_config()?;
         config.selected_devices = state
             .schematic
-            .document()
             .components
             .iter()
-            .filter(|component| {
-                state
-                    .schematic
-                    .session
-                    .selection
-                    .has_component(component.id)
-            })
+            .filter(|component| state.selected_components.contains(&component.id))
             .map(|component| component.name.clone())
             .collect();
         config.selected_devices.sort();

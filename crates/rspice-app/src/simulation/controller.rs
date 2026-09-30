@@ -49,12 +49,11 @@ use crate::state::{
     SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
     SoaViolationSeverityEvidence, WaveformData,
 };
-use crate::workbench::app_state::{
-    ActiveViewer, AppState, SimSetupState, SpecializedViewerCacheProvenance,
-};
+use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCacheProvenance};
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 use rspice_results::yield_analysis::YieldAnalysisManager;
 use rspice_simulation::error::SimulationError;
+use rspice_simulation_contract::setup_state::SimulationSetup;
 
 mod analysis_commands;
 mod analysis_helpers;

@@ -233,7 +233,7 @@ fn a_noise_instance_and_its_ac_sibling_each_state_their_own_frequency_axis() {
             .find(|instance| instance.id() == id)
             .expect("the instance is in the frozen plan");
         let mut projected = app.state.clone();
-        projected.sim_setup = setup
+        projected.sim_setup.setup = setup
             .frozen_instance_projection(&frozen, instance)
             .expect("the instance projects");
         app.simulation_controller
