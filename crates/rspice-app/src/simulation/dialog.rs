@@ -83,7 +83,7 @@ pub use sp::{SpDialogState, SpPortSource, TOUCHSTONE_VERSION_LABELS};
 
 // Re-exports - Transfer Function
 pub use pz::PzDialogState;
-pub use xf::{XfDialogState, XfNormalization};
+pub use xf::XfDialogState;
 
 // Re-exports - Stability/Sensitivity
 pub use sens::SensDialogState;

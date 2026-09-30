@@ -39,7 +39,7 @@ use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::model_library::ModelLibraryManager;
 use crate::workbench::app_state::{AppState, SimSetupState};
 
-use super::{AnalysisInputs, SimulationController};
+use super::{SimulationController, analysis_inputs};
 
 /// Fields that cannot move the engine-facing projection, and why.
 ///
@@ -246,16 +246,15 @@ fn projection(draft: &AnalysisDraft) -> String {
         state.sim_setup.clone_from(setup);
         apply_fixture_draft(state, draft);
         let controller = SimulationController::new();
-        let spec = match controller.analysis_draft_spec(&AnalysisInputs::new(state), draft) {
+        let spec = match controller.analysis_draft_spec(&analysis_inputs(state), draft) {
             Ok(spec) => spec,
             Err(error) => return format!("spec-error: {error}"),
         };
 
-        let command =
-            controller.analysis_spec_to_spice_line(&AnalysisInputs::new(state), draft, &spec);
+        let command = controller.analysis_spec_to_spice_line(&analysis_inputs(state), draft, &spec);
         let options = with_sealed_process_library(|sealed| {
             controller.analysis_spec_execution_options(
-                &AnalysisInputs::new(state),
+                &analysis_inputs(state),
                 draft,
                 None,
                 &spec,
@@ -1144,7 +1143,7 @@ fn hbnoise_spot_and_zero_sideband_authoring_reach_a_valid_spec() {
         assert_eq!(draft.manifest_configuration_error(), None);
         let controller = SimulationController::new();
         let spec = controller
-            .analysis_draft_spec(&AnalysisInputs::new(&engine_facing_state(&draft)), &draft)
+            .analysis_draft_spec(&analysis_inputs(&engine_facing_state(&draft)), &draft)
             .unwrap();
         spec.validate().unwrap();
         assert!(matches!(

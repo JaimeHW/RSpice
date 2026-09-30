@@ -3,6 +3,7 @@
 //! PDK runtime validation compiles exact signed source closures and executes
 //! bounded callbacks before its caller may publish an installation.
 
+pub mod analysis_preparation;
 pub mod compilation;
 pub mod error;
 pub mod measurement_references;

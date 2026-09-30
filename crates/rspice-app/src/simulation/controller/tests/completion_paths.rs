@@ -660,15 +660,13 @@ fn incomplete_soa_results_fail_closed_without_retained_payloads() {
 
 #[test]
 fn sensitivity_spec_projects_frequency_only_in_ac_mode() {
-    let controller = SimulationController::new();
     let mut state = AppState::default();
     state.sim_setup.sens = crate::simulation::dialog::SensDialogState::from_config(
         &crate::simulation::dialog::sens::SensConfig::default(),
     );
     state.sim_setup.sens.ac_freq = "invalid".to_owned();
     assert!(matches!(
-        controller
-            .build_sensitivity_spec(&state.sim_setup.sens)
+        rspice_simulation::analysis_preparation::build_sensitivity_spec(&state.sim_setup.sens)
             .unwrap(),
         crate::simulation::multi_run::AnalysisSpec::Sensitivity {
             ac_mode: false,
@@ -678,16 +676,14 @@ fn sensitivity_spec_projects_frequency_only_in_ac_mode() {
     ));
     state.sim_setup.sens.sens_type_idx = 1;
     assert!(
-        controller
-            .build_sensitivity_spec(&state.sim_setup.sens)
+        rspice_simulation::analysis_preparation::build_sensitivity_spec(&state.sim_setup.sens)
             .is_err()
     );
     for (text, expected) in [("2k", 2_000.0), ("3Meg", 3_000_000.0)] {
         state.sim_setup.sens.ac_freq = text.to_owned();
         let crate::simulation::multi_run::AnalysisSpec::Sensitivity {
             ac_mode, frequency, ..
-        } = controller
-            .build_sensitivity_spec(&state.sim_setup.sens)
+        } = rspice_simulation::analysis_preparation::build_sensitivity_spec(&state.sim_setup.sens)
             .unwrap()
         else {
             panic!("sensitivity spec")

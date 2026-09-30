@@ -2,4 +2,4 @@
 
 #[cfg(test)]
 pub use rspice_simulation_contract::stb_draft::StbConfig;
-pub use rspice_simulation_contract::stb_draft::{StbDialogState, StbProbeReference, StbSweepType};
+pub use rspice_simulation_contract::stb_draft::{StbDialogState, StbProbeReference};

@@ -2,4 +2,4 @@
 
 #[cfg(test)]
 pub use rspice_simulation_contract::sens_draft::SensConfig;
-pub use rspice_simulation_contract::sens_draft::{SensDialogState, SensType};
+pub use rspice_simulation_contract::sens_draft::SensDialogState;

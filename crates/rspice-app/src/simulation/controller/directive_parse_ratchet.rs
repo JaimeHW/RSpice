@@ -27,7 +27,7 @@ use crate::simulation::multi_run::AnalysisSpec;
 use crate::simulation::plan::AnalysisKind;
 
 use super::projection_ratchet::{engine_facing_state, fixture_draft};
-use super::{AnalysisInputs, SimulationController};
+use super::{SimulationController, analysis_inputs};
 
 /// A deck with the nodes and sources the fixture drafts name.
 ///
@@ -975,7 +975,7 @@ fn qpss_card_studio_and_manual_deck_resolve_the_same_complete_configuration() {
     let state = engine_facing_state(&draft);
     let controller = SimulationController::new();
     let spec = controller
-        .analysis_draft_spec(&AnalysisInputs::new(&state), &draft)
+        .analysis_draft_spec(&analysis_inputs(&state), &draft)
         .unwrap();
     let expected = spec.driven_qpss_config().unwrap();
     let directive = controller.analysis_draft_directive(&state, &draft).unwrap();

@@ -6,32 +6,21 @@
 
 use super::*;
 
-/// Borrowed inputs shared by draft lowering and frozen study preparation.
-/// A projected instance replaces only `sim_setup`; circuit and evidence stay borrowed.
-#[derive(Clone, Copy)]
-pub(super) struct AnalysisInputs<'a> {
-    pub(super) sim_setup: &'a SimulationSetup,
-    pub(super) schematic: &'a rspice_design::schematic::document::SchematicDocument,
-    pub(super) selected_components: &'a std::collections::HashSet<u64>,
-    pub(super) runs: &'a [crate::state::SimulationRun],
-    pub(super) active_run:
-        Option<&'a rspice_results::run::SimulationRun<crate::state::AnalysisResult>>,
-    pub(super) project_revision: crate::product::ObjectRevision,
-    pub(super) plan_payloads:
-        &'a [rspice_simulation_contract::plan_payload::SimulationPlanPayloadRecord],
-}
+pub(super) type AnalysisInputs<'a> = rspice_simulation::analysis_preparation::AnalysisInputs<
+    'a,
+    crate::state::SimulationRun,
+    crate::state::AnalysisResult,
+>;
 
-impl<'a> AnalysisInputs<'a> {
-    pub(super) fn new(state: &'a AppState) -> Self {
-        Self {
-            sim_setup: &state.sim_setup,
-            schematic: state.schematic.document(),
-            selected_components: &state.schematic.session.selection.components,
-            runs: &state.simulation.runs,
-            active_run: state.simulation.active_run().map(|run| &run.data),
-            project_revision: state.workspace.content.project.revision(),
-            plan_payloads: &state.workspace.content.simulation_plan_payloads,
-        }
+pub(super) fn analysis_inputs(state: &AppState) -> AnalysisInputs<'_> {
+    AnalysisInputs {
+        sim_setup: &state.sim_setup,
+        schematic: state.schematic.document(),
+        selected_components: &state.schematic.session.selection.components,
+        runs: &state.simulation.runs,
+        active_run: state.simulation.active_run().map(|run| &run.data),
+        project_revision: state.workspace.content.project.revision(),
+        plan_payloads: &state.workspace.content.simulation_plan_payloads,
     }
 }
 
@@ -47,7 +36,9 @@ impl SimulationController {
             return Err(error);
         }
         let spec = match draft {
-            AnalysisDraft::OperatingPoint(draft) => self.build_op_spec(state, draft)?,
+            AnalysisDraft::OperatingPoint(draft) => {
+                rspice_simulation::analysis_preparation::build_op_spec(state, draft)?
+            }
             AnalysisDraft::Transient(draft) => AnalysisSpec::Transient {
                 stop_time: parse_spice_value_checked(&draft.stop)
                     .map_err(|e| format!("invalid stop time: {}", e))?,
@@ -55,8 +46,10 @@ impl SimulationController {
                     .map_err(|e| format!("invalid step time: {}", e))?,
                 start_time: parse_spice_value_checked(&draft.start)
                     .map_err(|e| format!("invalid start time: {}", e))?,
-                max_timestep: Self::parse_optional_spice_value(&draft.max_step)
-                    .map_err(|e| format!("invalid max step: {}", e))?,
+                max_timestep: rspice_simulation::analysis_preparation::parse_optional_spice_value(
+                    &draft.max_step,
+                )
+                .map_err(|e| format!("invalid max step: {}", e))?,
                 uic: draft.uic,
             },
             AnalysisDraft::Ac(draft) => AnalysisSpec::Ac {
@@ -64,8 +57,11 @@ impl SimulationController {
                     .map_err(|e| format!("invalid start frequency: {}", e))?,
                 stop_freq: parse_spice_value_checked(&draft.fstop)
                     .map_err(|e| format!("invalid stop frequency: {}", e))?,
-                points_per_unit: Self::parse_positive_points(&draft.points, "ac_points")?,
-                sweep: Self::map_frequency_sweep(draft.sweep),
+                points_per_unit: rspice_simulation::analysis_preparation::parse_positive_points(
+                    &draft.points,
+                    "ac_points",
+                )?,
+                sweep: rspice_simulation::analysis_preparation::map_frequency_sweep(draft.sweep),
             },
             AnalysisDraft::DcSweep(draft) => {
                 let config = draft.to_config()?;
@@ -93,17 +89,43 @@ impl SimulationController {
                     params: config.params,
                 }
             }
-            AnalysisDraft::Pss(draft) => self.build_pss_spec(draft)?,
-            AnalysisDraft::HarmonicBalance(draft) => self.build_harmonic_balance_spec(draft)?,
-            AnalysisDraft::Stb(draft) => self.build_stb_spec(draft)?,
-            AnalysisDraft::SParameter(draft) => self.build_sp_spec(state, draft)?,
-            AnalysisDraft::Envelope(draft) => self.build_envelope_spec(draft)?,
-            AnalysisDraft::Fourier(draft) => self.build_fourier_spec(draft)?,
-            AnalysisDraft::Optimization(draft) => self.build_optimization_spec(state, draft)?,
-            AnalysisDraft::Soa(draft) => self.build_soa_spec(draft)?,
-            AnalysisDraft::PoleZero(draft) => self.build_pole_zero_spec(draft)?,
-            AnalysisDraft::Sensitivity(draft) => self.build_sensitivity_spec(draft)?,
-            AnalysisDraft::TransferFunction(draft) => self.build_tf_spec(draft)?,
+            AnalysisDraft::Pss(draft) => {
+                rspice_simulation::analysis_preparation::build_pss_spec(draft)?
+            }
+            AnalysisDraft::HarmonicBalance(draft) => {
+                rspice_simulation::analysis_preparation::build_harmonic_balance_spec(draft)?
+            }
+            AnalysisDraft::Stb(draft) => {
+                rspice_simulation::analysis_preparation::build_stb_spec(draft)?
+            }
+            AnalysisDraft::SParameter(draft) => {
+                rspice_simulation::analysis_preparation::build_sp_spec(state.schematic, draft)?
+            }
+            AnalysisDraft::Envelope(draft) => {
+                rspice_simulation::analysis_preparation::build_envelope_spec(draft)?
+            }
+            AnalysisDraft::Fourier(draft) => {
+                rspice_simulation::analysis_preparation::build_fourier_spec(draft)?
+            }
+            AnalysisDraft::Optimization(draft) => {
+                rspice_simulation::analysis_preparation::build_optimization_spec(
+                    state.sim_setup,
+                    state.plan_payloads,
+                    draft,
+                )?
+            }
+            AnalysisDraft::Soa(draft) => {
+                rspice_simulation::analysis_preparation::build_soa_spec(draft)?
+            }
+            AnalysisDraft::PoleZero(draft) => {
+                rspice_simulation::analysis_preparation::build_pole_zero_spec(draft)?
+            }
+            AnalysisDraft::Sensitivity(draft) => {
+                rspice_simulation::analysis_preparation::build_sensitivity_spec(draft)?
+            }
+            AnalysisDraft::TransferFunction(draft) => {
+                rspice_simulation::analysis_preparation::build_tf_spec(draft)?
+            }
             AnalysisDraft::Pac(draft) => {
                 let mut draft = draft.clone();
                 draft.ensure_initialized();
@@ -160,10 +182,17 @@ impl SimulationController {
                     .map_err(|e| format!("invalid DISTO start frequency: {e}"))?,
                 stop_freq: parse_spice_value_checked(&draft.sweep.fstop)
                     .map_err(|e| format!("invalid DISTO stop frequency: {e}"))?,
-                points_per_unit: Self::parse_positive_points(&draft.sweep.points, "disto_points")?,
-                sweep: Self::map_frequency_sweep(draft.sweep.sweep),
-                f2_over_f1: Self::parse_optional_spice_value(&draft.f2_over_f1)
-                    .map_err(|e| format!("invalid DISTO f2/f1 ratio: {e}"))?,
+                points_per_unit: rspice_simulation::analysis_preparation::parse_positive_points(
+                    &draft.sweep.points,
+                    "disto_points",
+                )?,
+                sweep: rspice_simulation::analysis_preparation::map_frequency_sweep(
+                    draft.sweep.sweep,
+                ),
+                f2_over_f1: rspice_simulation::analysis_preparation::parse_optional_spice_value(
+                    &draft.f2_over_f1,
+                )
+                .map_err(|e| format!("invalid DISTO f2/f1 ratio: {e}"))?,
             },
             AnalysisDraft::Noise(draft) => {
                 let mut config = draft.to_config()?;
@@ -297,689 +326,6 @@ impl SimulationController {
         spec.validate()?;
         Ok(spec)
     }
-
-    pub(super) fn build_op_spec(
-        &self,
-        state: &AnalysisInputs<'_>,
-        draft: &crate::simulation::dialog::op::OpDialogState,
-    ) -> Result<AnalysisSpec, String> {
-        let mut op = draft.clone();
-        if matches!(op.temperature_mode_idx, 0 | 3) {
-            op.temperature = state
-                .sim_setup
-                .reference_pvt
-                .temperature_celsius
-                .to_string();
-        }
-        let mut config = op.to_config()?;
-        config.selected_devices = state
-            .schematic
-            .components
-            .iter()
-            .filter(|component| state.selected_components.contains(&component.id))
-            .map(|component| component.name.clone())
-            .collect();
-        config.selected_devices.sort();
-        config.selected_devices.dedup();
-        if config.initial_guess.uses_previous_state() {
-            config.previous_state = rspice_results::run_history::newest_retained_op_state(
-                state.runs.iter().map(|run| &run.data),
-                state.project_revision,
-                config.initial_guess
-                    == crate::simulation::dialog::OpInitialGuess::PreviousCompatible,
-            );
-        }
-        if matches!(
-            config.device_detail,
-            crate::simulation::dialog::OpDeviceDetail::SelectedAndViolations
-                | crate::simulation::dialog::OpDeviceDetail::ViolationsOnly
-        ) && let Some((source_digest, devices)) = state
-            .active_run
-            .and_then(|run| run.soa_violation_context(state.project_revision))
-        {
-            config.violation_devices = devices;
-            config.violation_source_content_digest = Some(source_digest);
-        }
-        config.validate_for_execution()?;
-        Ok(AnalysisSpec::DcOp {
-            temperature_mode: config.temperature_mode,
-            temperature_celsius: config.temperature_celsius,
-            initial_guess: config.initial_guess,
-            node_initialization: config.node_initialization,
-            homotopy: config.homotopy,
-            annotation: config.annotation,
-            device_detail: config.device_detail,
-            save_device_op: config.save_device_op,
-            accuracy: config.accuracy,
-            selected_devices: config.selected_devices,
-            previous_state: config.previous_state,
-            violation_devices: config.violation_devices,
-            violation_source_content_digest: config.violation_source_content_digest,
-            run_point: config.run_point,
-        })
-    }
-
-    pub(super) fn analysis_spec_to_config(
-        &self,
-        spec: &AnalysisSpec,
-    ) -> Result<AnalysisConfig, String> {
-        match spec {
-            AnalysisSpec::LegacyDcOp => Ok(AnalysisConfig::dc_op()),
-            AnalysisSpec::DcOp {
-                temperature_mode,
-                temperature_celsius,
-                initial_guess,
-                node_initialization,
-                homotopy,
-                annotation,
-                device_detail,
-                save_device_op,
-                accuracy,
-                selected_devices,
-                previous_state,
-                violation_devices,
-                violation_source_content_digest,
-                run_point,
-            } => Ok(AnalysisConfig::DcOp(crate::simulation::dialog::OpConfig {
-                temperature_mode: *temperature_mode,
-                temperature_celsius: *temperature_celsius,
-                initial_guess: *initial_guess,
-                node_initialization: *node_initialization,
-                homotopy: *homotopy,
-                annotation: *annotation,
-                device_detail: *device_detail,
-                save_device_op: *save_device_op,
-                accuracy: *accuracy,
-                selected_devices: selected_devices.clone(),
-                previous_state: previous_state.clone(),
-                violation_devices: violation_devices.clone(),
-                violation_source_content_digest: *violation_source_content_digest,
-                run_point: run_point.clone(),
-            })),
-            AnalysisSpec::DcSweep {
-                source_name,
-                start,
-                stop,
-                step,
-                source2,
-                start2,
-                stop2,
-                step2,
-                hysteresis,
-                modes,
-            } => Ok(AnalysisConfig::DcSweep(DcSweepConfig {
-                source: source_name.clone(),
-                start: *start,
-                stop: *stop,
-                step: *step,
-                source2: source2.clone(),
-                start2: *start2,
-                stop2: *stop2,
-                step2: *step2,
-                hysteresis: *hysteresis,
-                modes: modes.clone(),
-            })),
-            AnalysisSpec::Ac {
-                start_freq,
-                stop_freq,
-                points_per_unit,
-                sweep,
-            } => Ok(AnalysisConfig::Ac(AcAnalysisConfig {
-                start_freq: *start_freq,
-                stop_freq: *stop_freq,
-                num_points: *points_per_unit,
-                sweep_type: Self::map_ac_sweep(*sweep),
-            })),
-            AnalysisSpec::Transient {
-                stop_time,
-                step_time,
-                start_time,
-                max_timestep,
-                uic,
-            } => Ok(AnalysisConfig::Transient(TransientAnalysisConfig {
-                stop_time: *stop_time,
-                step_time: *step_time,
-                start_time: *start_time,
-                max_timestep: *max_timestep,
-                uic: *uic,
-            })),
-            AnalysisSpec::Noise {
-                output_node,
-                reference_node,
-                input_source,
-                start_freq,
-                stop_freq,
-                points_per_decade,
-                sweep,
-                explicit_frequencies,
-                data_table_name,
-                contribution_detail,
-                integration_mode,
-                temperature,
-            } => Ok(AnalysisConfig::Noise(NoiseAnalysisConfig {
-                output_node: output_node.clone(),
-                reference_node: reference_node.clone(),
-                input_source: input_source.clone(),
-                sweep_type: match sweep {
-                    NoiseSweepType::Decade | NoiseSweepType::ExplicitFrequencyList => {
-                        AcSweepType::Decade
-                    }
-                    NoiseSweepType::Octave => AcSweepType::Octave,
-                    NoiseSweepType::Linear => AcSweepType::Linear,
-                    NoiseSweepType::Unsupported(index) => {
-                        return Err(format!(
-                            "noise sweep mode {index} is outside the supported schema"
-                        ));
-                    }
-                },
-                num_points: *points_per_decade,
-                start_freq: *start_freq,
-                stop_freq: *stop_freq,
-                explicit_frequencies: explicit_frequencies.clone(),
-                data_table_name: data_table_name.clone(),
-                contribution_detail: *contribution_detail,
-                integration_mode: *integration_mode,
-                temperature_kelvin: *temperature,
-            })),
-            AnalysisSpec::PoleZero {
-                input_node,
-                input_ref,
-                output_node,
-                output_ref,
-                transfer_type,
-                analysis_type,
-            } => {
-                let analysis_type = match analysis_type.trim().to_ascii_uppercase().as_str() {
-                    "PZ" => PzAnalysisType::PoleZero,
-                    "POL" => PzAnalysisType::PolesOnly,
-                    "ZER" => PzAnalysisType::ZerosOnly,
-                    other => {
-                        return Err(format!(
-                            "invalid pole-zero analysis type '{}': expected PZ, POL, or ZER",
-                            other
-                        ));
-                    }
-                };
-                let transfer_type = transfer_type.trim().to_ascii_uppercase();
-                if transfer_type != "VOL" && transfer_type != "CUR" {
-                    return Err(format!(
-                        "invalid pole-zero transfer type '{}': expected VOL or CUR",
-                        transfer_type
-                    ));
-                }
-                Ok(AnalysisConfig::PoleZero(PoleZeroConfig {
-                    input_node: input_node.clone(),
-                    input_ref: input_ref.clone(),
-                    output_node: output_node.clone(),
-                    output_ref: output_ref.clone(),
-                    transfer_type,
-                    analysis_type,
-                }))
-            }
-            AnalysisSpec::Sensitivity {
-                output_var,
-                ac_mode,
-                frequency,
-                filter,
-                sweep,
-            } => Ok(AnalysisConfig::Sensitivity(SensitivityConfig {
-                output_var: output_var.clone(),
-                ac_mode: *ac_mode,
-                frequency: *frequency,
-                filter: filter.clone(),
-                sweep: sweep.map(crate::simulation::config::SensitivitySweep::from_spec),
-            })),
-            _ => Err(format!(
-                "{} runs through the spec-driven simulation path and cannot be converted to a legacy analysis config",
-                spec.run_type().display_name()
-            )),
-        }
-    }
-
-    pub(super) fn build_pss_spec(
-        &self,
-        draft: &crate::simulation::dialog::pss::PssDialogState,
-    ) -> Result<AnalysisSpec, String> {
-        let mut pss_state = draft.clone();
-        pss_state.ensure_initialized();
-        let pss_cfg = pss_state
-            .to_config()
-            .map_err(|e| format!("invalid PSS settings: {}", e))?;
-        Ok(AnalysisSpec::Pss {
-            // The editor builds shooting requests and nothing else. The
-            // legacy harmonic-balance formulation is still a variant so a
-            // sealed manifest that named it opens and refuses by name; no
-            // control reaches it.
-            method: PssMethod::Shooting,
-            fundamental_freq: pss_cfg.fund_freq,
-            tone_sources: pss_cfg.tone_sources,
-            tstab_periods: pss_cfg.tstab_periods,
-            points_per_period: pss_cfg.points_per_period,
-            tolerance: pss_cfg.tolerance,
-            oscillator_mode: pss_cfg.osc_mode,
-            oscillator_node: pss_cfg.osc_mode.then(|| pss_cfg.osc_node.trim().to_owned()),
-            num_harmonics: pss_cfg.num_harmonics,
-            integration_method: pss_cfg.integration_method,
-            tstab: pss_cfg.tstab,
-            max_iterations: pss_cfg.max_iterations,
-            abstol: pss_cfg.abstol,
-            damping: pss_cfg.damping,
-            max_period_change: pss_cfg.max_period_change,
-            verbose: pss_cfg.verbose,
-        })
-    }
-
-    pub(super) fn build_stb_spec(
-        &self,
-        draft: &crate::simulation::dialog::stb::StbDialogState,
-    ) -> Result<AnalysisSpec, String> {
-        let mut stb_state = draft.clone();
-        stb_state.ensure_initialized();
-        let stb_cfg = stb_state
-            .to_config()
-            .map_err(|e| format!("invalid STB settings: {}", e))?;
-        Ok(AnalysisSpec::Stb {
-            probe_node: stb_cfg.probe_source,
-            start_freq: stb_cfg.start_freq,
-            stop_freq: stb_cfg.stop_freq,
-            sweep: match stb_cfg.sweep_type {
-                crate::simulation::dialog::stb::StbSweepType::Decade => FrequencySweep::Decade,
-                crate::simulation::dialog::stb::StbSweepType::Octave => FrequencySweep::Octave,
-                crate::simulation::dialog::stb::StbSweepType::Linear => FrequencySweep::Linear,
-            },
-            points_per_decade: stb_cfg.num_points as usize,
-            compute_nyquist: stb_cfg.compute_nyquist,
-        })
-    }
-
-    pub(super) fn build_harmonic_balance_spec(
-        &self,
-        draft: &crate::simulation::dialog::hb::HbDialogState,
-    ) -> Result<AnalysisSpec, String> {
-        let mut hb_state = draft.clone();
-        hb_state.ensure_initialized();
-        let hb_cfg = hb_state
-            .to_config()
-            .map_err(|e| format!("invalid harmonic balance settings: {}", e))?;
-        let mut tones = Vec::with_capacity(1 + hb_cfg.additional_tones.len());
-        // The primary tone's label. Fixed, because nothing authors one: the
-        // form has no name row and the additional tones number themselves
-        // from this.
-        let mut primary_tone =
-            HbToneSpec::new(hb_cfg.fundamental_freq, hb_cfg.num_harmonics as usize)
-                .with_name("tone1".to_string());
-        if let Some(source) = hb_cfg
-            .fundamental_source
-            .as_deref()
-            .map(str::trim)
-            .filter(|source| !source.is_empty())
-        {
-            primary_tone = primary_tone.with_source(source.to_string());
-        }
-        tones.push(primary_tone);
-        for (idx, tone) in hb_cfg.additional_tones.iter().enumerate() {
-            let label = if tone.name.trim().is_empty() {
-                format!("tone{}", idx + 2)
-            } else {
-                tone.name.clone()
-            };
-            let mut tone_spec =
-                HbToneSpec::new(tone.frequency, tone.harmonics as usize).with_name(label);
-            if let Some(source) = tone
-                .source
-                .as_deref()
-                .map(str::trim)
-                .filter(|source| !source.is_empty())
-            {
-                tone_spec = tone_spec.with_source(source.to_string());
-            }
-            tones.push(tone_spec);
-        }
-        Ok(AnalysisSpec::HarmonicBalance {
-            tones,
-            reltol: hb_cfg.reltol,
-            abstol: hb_cfg.abstol,
-            max_iterations: hb_cfg.maxiter as usize,
-            damping: hb_cfg.damping,
-            min_damping: hb_cfg.min_damping,
-            oversample: hb_cfg.oversample as usize,
-            collocation_points: hb_cfg.collocation_points.map(|points| points as usize),
-            max_mixing_order: hb_cfg.max_mixing_order as usize,
-            use_krylov: matches!(
-                hb_cfg.solver,
-                crate::simulation::dialog::hb::HbSolverType::Krylov
-            ),
-            gmres_restart: hb_cfg.gmres_restart as usize,
-            source_stepping: hb_cfg.source_stepping,
-            use_exact_jacobian: hb_cfg.use_exact_jacobian,
-            verbose: hb_cfg.verbose,
-        })
-    }
-
-    /// Validate the form's port source and prepare its configured fallback.
-    /// Circuit elaboration resolves authored ports, including hierarchy, and
-    /// the resulting scattering data carries the references used by the solver.
-    pub(super) fn build_sp_spec(
-        &self,
-        state: &AnalysisInputs<'_>,
-        draft: &crate::simulation::dialog::sp::SpDialogState,
-    ) -> Result<AnalysisSpec, String> {
-        let mut sp_state = draft.clone();
-        sp_state.ensure_initialized();
-        let placed = crate::simulation::placed_sources::placed_rf_ports(state.schematic, None);
-        let sp_cfg = crate::simulation::dialog::sp::to_config(&sp_state, Some(&placed))
-            .map_err(|e| format!("invalid S-parameter settings: {}", e))?;
-        let ports = sp_cfg
-            .ports
-            .iter()
-            .map(|port| SpPort {
-                node_pos: port.node_pos.clone(),
-                node_neg: port.node_neg.clone(),
-                z0: port.z0,
-            })
-            .collect();
-        Ok(AnalysisSpec::SParameter {
-            start_freq: sp_cfg.start_freq,
-            stop_freq: sp_cfg.stop_freq,
-            points_per_unit: sp_cfg.num_points as usize,
-            sweep: match sp_cfg.sweep_type {
-                crate::simulation::dialog::sp::SpSweepType::Decade => FrequencySweep::Decade,
-                crate::simulation::dialog::sp::SpSweepType::Octave => FrequencySweep::Octave,
-                crate::simulation::dialog::sp::SpSweepType::Linear => FrequencySweep::Linear,
-            },
-            z0: sp_cfg.z0,
-            ports,
-            do_noise: sp_cfg.do_noise,
-        })
-    }
-
-    pub(super) fn build_envelope_spec(
-        &self,
-        draft: &crate::simulation::dialog::envelope::EnvelopeDialogState,
-    ) -> Result<AnalysisSpec, String> {
-        let mut envelope_state = draft.clone();
-        envelope_state.ensure_initialized();
-        let envelope_cfg = envelope_state
-            .to_config()
-            .map_err(|e| format!("invalid envelope settings: {}", e))?;
-        let (fundamental_freq, additional_carrier_tones) = envelope_cfg
-            .carrier_tones
-            .split_first()
-            .map(|(first, additional)| (*first, additional.to_vec()))
-            .ok_or_else(|| "invalid envelope settings: carrier tone list is empty".to_owned())?;
-        Ok(AnalysisSpec::Envelope {
-            multirate: envelope_cfg.multirate,
-            initialization: envelope_cfg.initialization,
-            fundamental_freq,
-            additional_carrier_tones,
-            stop_time: envelope_cfg.stop_time,
-            num_harmonics: envelope_cfg.harmonic_order as usize,
-            envelope_step: Some(envelope_cfg.envelope_step),
-            modulation_sources: envelope_cfg.modulation_sources,
-            initial_periodic_solve: envelope_cfg.initial_periodic_solve,
-            adaptive_mode: envelope_cfg.adaptive_mode,
-            extraction_path: envelope_cfg.extraction_path,
-        })
-    }
-
-    pub(super) fn build_fourier_spec(
-        &self,
-        draft: &crate::simulation::dialog::fourier::FourierDialogState,
-    ) -> Result<AnalysisSpec, String> {
-        let mut fourier_state = draft.clone();
-        fourier_state.ensure_initialized();
-        let fourier_cfg = fourier_state
-            .to_config()
-            .map_err(|e| format!("invalid Fourier settings: {}", e))?;
-        Ok(AnalysisSpec::Fourier {
-            fundamental_freq: fourier_cfg.fundamental_freq,
-            num_harmonics: fourier_cfg.num_harmonics as usize,
-            num_periods: fourier_cfg.num_periods as usize,
-            output_node: fourier_cfg.output_node.clone(),
-            output_ref: fourier_cfg.output_ref.clone(),
-            additional_outputs: fourier_cfg.additional_outputs.clone(),
-            start_time: fourier_cfg.start_time,
-            stop_time: fourier_cfg.stop_time,
-            compute_thd: fourier_cfg.compute_thd,
-            normalize: fourier_cfg.normalize,
-        })
-    }
-
-    pub(super) fn build_optimization_spec(
-        &self,
-        state: &AnalysisInputs<'_>,
-        draft: &crate::simulation::dialog::optimization::OptimizationDialogState,
-    ) -> Result<AnalysisSpec, String> {
-        let mut optimization_state = draft.clone();
-        optimization_state.ensure_initialized();
-        let cfg = optimization_state
-            .to_config()
-            .map_err(|e| format!("invalid optimization settings: {}", e))?;
-
-        Self::reject_optimization_of_fixed_design_variables(state, &cfg.variables)?;
-
-        Ok(AnalysisSpec::Optimization {
-            search: cfg.search,
-            variables: cfg
-                .variables
-                .into_iter()
-                .map(|var| OptimizationVariable {
-                    name: var.name,
-                    min: var.min,
-                    max: var.max,
-                    initial: var.initial,
-                })
-                .collect(),
-            objective_unit: cfg.objective_unit,
-            objective_expression: cfg.objective_expression,
-            objective_node: cfg.objective_node,
-            objective_ref: cfg.objective_ref,
-            goal: match cfg.goal_mode {
-                crate::simulation::dialog::optimization::OptimizationGoalMode::Minimize => {
-                    OptimizationGoal::Minimize
-                }
-                crate::simulation::dialog::optimization::OptimizationGoalMode::Maximize => {
-                    OptimizationGoal::Maximize
-                }
-                crate::simulation::dialog::optimization::OptimizationGoalMode::Target => {
-                    OptimizationGoal::Target
-                }
-            },
-            target: cfg.target_value,
-            algorithm: match cfg.algorithm {
-                crate::simulation::dialog::optimization::OptimizationAlgorithmMode::GradientDescent => {
-                    OptimizationAlgorithm::GradientDescent
-                }
-                crate::simulation::dialog::optimization::OptimizationAlgorithmMode::PatternSearch => {
-                    OptimizationAlgorithm::PatternSearch
-                }
-                crate::simulation::dialog::optimization::OptimizationAlgorithmMode::SimulatedAnnealing => {
-                    OptimizationAlgorithm::SimulatedAnnealing
-                }
-            },
-            max_iterations: cfg.max_iterations,
-            cost_tolerance: cfg.cost_tolerance,
-            fd_step: cfg.fd_step,
-            initial_step: cfg.initial_step,
-            min_step: cfg.min_step,
-        })
-    }
-
-    /// Refuse to optimize a variable its owner declared fixed.
-    ///
-    /// The sweep role on the Variables page is the designer's statement about
-    /// what may move. An optimizer that quietly drove a variable marked
-    /// "Fixed parameter" would make that statement decorative, and would hand
-    /// back a design nobody agreed to. Names are matched case-insensitively,
-    /// the way every other design-variable reference is resolved.
-    fn reject_optimization_of_fixed_design_variables(
-        state: &AnalysisInputs<'_>,
-        variables: &[crate::simulation::dialog::optimization::OptimizationVariableConfig],
-    ) -> Result<(), String> {
-        let Some(payload) = state
-            .sim_setup
-            .stable_analysis_plan()
-            .ok()
-            .map(|plan| plan.id())
-            .and_then(|plan_id| {
-                state
-                    .plan_payloads
-                    .iter()
-                    .find(|record| record.plan_id == plan_id)
-                    .map(|record| &record.payload)
-            })
-        else {
-            return Ok(());
-        };
-
-        let mut fixed: Vec<&str> = Vec::new();
-        for variable in variables {
-            if let Some(declared) = payload
-                .design_variables
-                .iter()
-                .find(|candidate| candidate.name.eq_ignore_ascii_case(&variable.name))
-                && declared.sweep_eligibility
-                    == crate::state::DesignVariableSweepEligibility::FixedParameter
-            {
-                fixed.push(declared.name.as_str());
-            }
-        }
-
-        if fixed.is_empty() {
-            return Ok(());
-        }
-        Err(format!(
-            "optimization cannot vary {}: {} declared a fixed parameter on the Variables page. \
-             Change the sweep role, or optimize a different variable.",
-            if fixed.len() == 1 {
-                "this design variable"
-            } else {
-                "these design variables"
-            },
-            fixed.join(", ")
-        ))
-    }
-
-    pub(super) fn build_soa_spec(
-        &self,
-        draft: &crate::simulation::dialog::soa::SoaDialogState,
-    ) -> Result<AnalysisSpec, String> {
-        let mut soa_state = draft.clone();
-        soa_state.ensure_initialized();
-        let cfg = soa_state
-            .to_config()
-            .map_err(|e| format!("invalid SOA settings: {}", e))?;
-        Ok(AnalysisSpec::Soa {
-            import_model_voltage_ratings: cfg.import_model_voltage_ratings,
-            observation: cfg.observation,
-            rules: cfg.rules,
-            stop_time: cfg.stop_time,
-            step_time: cfg.step_time,
-            check_vgs_max: cfg.check_vgs_max,
-            max_vgs: cfg.max_vgs,
-            check_vds_max: cfg.check_vds_max,
-            max_vds: cfg.max_vds,
-            check_vbe_max: cfg.check_vbe_max,
-            max_vbe: cfg.max_vbe,
-            check_vce_max: cfg.check_vce_max,
-            max_vce: cfg.max_vce,
-        })
-    }
-
-    pub(super) fn build_tf_spec(
-        &self,
-        draft: &crate::simulation::dialog::xf::XfDialogState,
-    ) -> Result<AnalysisSpec, String> {
-        let mut xf_state = draft.clone();
-        xf_state.ensure_initialized();
-        let config = xf_state
-            .to_config()
-            .map_err(|e| format!("invalid transfer-function settings: {}", e))?;
-        Ok(AnalysisSpec::Tf {
-            input_source: config.input_source,
-            output_expression: config.output_expression,
-            transfer_gain: config.transfer_gain,
-            input_resistance: config.input_resistance,
-            output_resistance: config.output_resistance,
-            normalization: match config.normalization {
-                crate::simulation::dialog::XfNormalization::None => {
-                    crate::simulation::multi_run::TfNormalization::None
-                }
-                crate::simulation::dialog::XfNormalization::RelativeToNominal => {
-                    crate::simulation::multi_run::TfNormalization::RelativeToNominal
-                }
-                crate::simulation::dialog::XfNormalization::PerSourceUnit => {
-                    crate::simulation::multi_run::TfNormalization::PerSourceUnit
-                }
-            },
-            // The form's tier and the spec's tier are the one shared type, so
-            // there is no translation left to get wrong.
-            accuracy: config.accuracy,
-        })
-    }
-
-    pub(super) fn build_pole_zero_spec(
-        &self,
-        draft: &crate::simulation::dialog::pz::PzDialogState,
-    ) -> Result<AnalysisSpec, String> {
-        let mut pz_state = draft.clone();
-        pz_state.ensure_initialized();
-        let pz_cfg = pz_state
-            .to_config()
-            .map_err(|e| format!("invalid pole-zero settings: {}", e))?;
-
-        let analysis_type = match pz_cfg.analysis_type {
-            crate::simulation::dialog::pz::PzAnalysisType::PolesAndZeros => {
-                PzAnalysisType::PoleZero
-            }
-            crate::simulation::dialog::pz::PzAnalysisType::PolesOnly => PzAnalysisType::PolesOnly,
-            crate::simulation::dialog::pz::PzAnalysisType::ZerosOnly => PzAnalysisType::ZerosOnly,
-        };
-
-        let transfer_type = match pz_cfg.transfer_type {
-            crate::simulation::dialog::pz::PzTransferType::Voltage => "VOL",
-            crate::simulation::dialog::pz::PzTransferType::Current => "CUR",
-        };
-
-        Ok(AnalysisSpec::PoleZero {
-            input_node: pz_cfg.input_pos,
-            input_ref: pz_cfg.input_neg,
-            output_node: pz_cfg.output_pos,
-            output_ref: pz_cfg.output_neg,
-            transfer_type: transfer_type.to_string(),
-            analysis_type: match analysis_type {
-                PzAnalysisType::PoleZero => "PZ".to_string(),
-                PzAnalysisType::PolesOnly => "POL".to_string(),
-                PzAnalysisType::ZerosOnly => "ZER".to_string(),
-            },
-        })
-    }
-
-    pub(super) fn build_sensitivity_spec(
-        &self,
-        draft: &crate::simulation::dialog::sens::SensDialogState,
-    ) -> Result<AnalysisSpec, String> {
-        let mut sens_state = draft.clone();
-        sens_state.ensure_initialized();
-        let sens_cfg = sens_state
-            .to_config()
-            .map_err(|e| format!("invalid sensitivity settings: {}", e))?;
-
-        let ac_mode = matches!(
-            sens_cfg.sens_type,
-            crate::simulation::dialog::sens::SensType::Ac
-        );
-
-        Ok(AnalysisSpec::Sensitivity {
-            output_var: sens_cfg.output_expr,
-            ac_mode,
-            frequency: ac_mode.then_some(sens_cfg.ac_freq),
-            filter: sens_cfg.filter,
-            sweep: sens_cfg
-                .sweep
-                .map(crate::simulation::config::SensitivitySweep::to_spec),
-        })
-    }
 }
 
 fn parse_si(text: &str, field: &str) -> Result<f64, String> {
@@ -1079,12 +425,13 @@ mod manifest_tests {
 
             let specs = [
                 controller
-                    .analysis_draft_spec(&AnalysisInputs::new(&state), &AnalysisDraft::Noise(noise))
+                    .analysis_draft_spec(&analysis_inputs(&state), &AnalysisDraft::Noise(noise))
                     .unwrap(),
                 controller
-                    .analysis_draft_spec(&AnalysisInputs::new(&state), &AnalysisDraft::Disto(disto))
+                    .analysis_draft_spec(&analysis_inputs(&state), &AnalysisDraft::Disto(disto))
                     .unwrap(),
-                controller.build_stb_spec(&state.sim_setup.stb).unwrap(),
+                rspice_simulation::analysis_preparation::build_stb_spec(&state.sim_setup.stb)
+                    .unwrap(),
             ];
             for spec in specs {
                 spec.validate().unwrap();
@@ -1130,7 +477,7 @@ mod manifest_tests {
         draft.integration_mode = crate::simulation::config::NoiseIntegrationMode::OutputNoiseOnly;
 
         let spec = controller
-            .analysis_draft_spec(&AnalysisInputs::new(&state), &AnalysisDraft::Noise(draft))
+            .analysis_draft_spec(&analysis_inputs(&state), &AnalysisDraft::Noise(draft))
             .expect("exact noise draft parses");
         assert!(matches!(
             spec,
@@ -1171,7 +518,7 @@ mod manifest_tests {
         draft.f2_over_f1 = "0.8".to_owned();
 
         let spec = controller
-            .analysis_draft_spec(&AnalysisInputs::new(&state), &AnalysisDraft::Disto(draft))
+            .analysis_draft_spec(&analysis_inputs(&state), &AnalysisDraft::Disto(draft))
             .expect("exact DISTO draft parses");
         assert!(matches!(
             spec,
@@ -1214,10 +561,7 @@ mod manifest_tests {
             state.sim_setup.tran.stop = "stale singleton".to_owned();
 
             let spec = controller
-                .analysis_draft_spec(
-                    &AnalysisInputs::new(&state),
-                    &AnalysisDraft::Transient(draft),
-                )
+                .analysis_draft_spec(&analysis_inputs(&state), &AnalysisDraft::Transient(draft))
                 .unwrap_or_else(|error| panic!("a stop time of {typed} must be accepted: {error}"));
             let AnalysisSpec::Transient { stop_time, .. } = spec else {
                 panic!("the authored transient draft builds a transient analysis");
@@ -1236,10 +580,7 @@ mod manifest_tests {
             draft.stop = typed.to_owned();
             assert!(
                 controller
-                    .analysis_draft_spec(
-                        &AnalysisInputs::new(&state),
-                        &AnalysisDraft::Transient(draft)
-                    )
+                    .analysis_draft_spec(&analysis_inputs(&state), &AnalysisDraft::Transient(draft))
                     .is_err(),
                 "a stop time of {typed} must not reach a run"
             );
@@ -1257,7 +598,7 @@ mod manifest_tests {
         ac.sweep = 2;
         state.sim_setup.ac.fstart = "stale singleton".to_owned();
         let spec = controller
-            .analysis_draft_spec(&AnalysisInputs::new(&state), &AnalysisDraft::Ac(ac))
+            .analysis_draft_spec(&analysis_inputs(&state), &AnalysisDraft::Ac(ac))
             .expect("the authored AC draft builds its spec");
         assert!(matches!(
             spec,
@@ -1274,7 +615,7 @@ mod manifest_tests {
         dc.stop = "3".to_owned();
         state.sim_setup.dc.source = "stale singleton".to_owned();
         let spec = controller
-            .analysis_draft_spec(&AnalysisInputs::new(&state), &AnalysisDraft::DcSweep(dc))
+            .analysis_draft_spec(&analysis_inputs(&state), &AnalysisDraft::DcSweep(dc))
             .expect("the authored DC draft builds its spec");
         assert!(matches!(
             spec,
@@ -1315,10 +656,10 @@ mod manifest_tests {
         state.sim_setup.optimization.fd_step = "not a number".to_owned();
 
         let spec = controller
-            .analysis_draft_spec(&AnalysisInputs::new(&state), &draft)
+            .analysis_draft_spec(&analysis_inputs(&state), &draft)
             .expect("an authored optimization draft builds its spec");
         let line = controller
-            .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &draft, &spec)
+            .analysis_spec_to_spice_line(&analysis_inputs(&state), &draft, &spec)
             .expect("the authored optimization draft builds its card");
         assert!(line.contains("fd=2.500000e-3"), "{line}");
         let AnalysisSpec::Optimization {
@@ -1350,7 +691,7 @@ mod manifest_tests {
         };
         invalid.min_step = "0.5".to_owned();
         let error = controller
-            .analysis_draft_spec(&AnalysisInputs::new(&state), &invalid_draft)
+            .analysis_draft_spec(&analysis_inputs(&state), &invalid_draft)
             .expect_err("a smallest step above the first step is not a search");
         assert!(
             error.contains("min_step"),
@@ -1369,13 +710,13 @@ mod manifest_tests {
             state.sim_setup.sp.do_noise = !requested;
             let draft = AnalysisDraft::SParameter(draft);
             let spec = controller
-                .analysis_draft_spec(&AnalysisInputs::new(&state), &draft)
+                .analysis_draft_spec(&analysis_inputs(&state), &draft)
                 .unwrap();
             assert!(
                 matches!(&spec, AnalysisSpec::SParameter { do_noise, .. } if *do_noise == requested)
             );
             let line = controller
-                .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &draft, &spec)
+                .analysis_spec_to_spice_line(&analysis_inputs(&state), &draft, &spec)
                 .unwrap();
             assert_eq!(line.split_whitespace().nth(5) == Some("1"), requested);
         }
@@ -1398,7 +739,7 @@ mod manifest_tests {
         ] {
             let draft = AnalysisDraft::for_kind(kind);
             let spec = controller
-                .analysis_draft_spec(&AnalysisInputs::new(&AppState::default()), &draft)
+                .analysis_draft_spec(&analysis_inputs(&AppState::default()), &draft)
                 .expect("default draft parses");
             assert!(matches!(
                 (kind, &spec),
@@ -1431,7 +772,7 @@ mod manifest_tests {
             network.reltol = "2.5e-6".into();
             network.abstol = "7e-13".into();
             let spec = controller
-                .analysis_draft_spec(&AnalysisInputs::new(&AppState::default()), &draft)
+                .analysis_draft_spec(&analysis_inputs(&AppState::default()), &draft)
                 .expect("periodic network draft parses");
             match spec {
                 AnalysisSpec::Hbsp { reltol, abstol, .. }
@@ -1446,7 +787,6 @@ mod manifest_tests {
 
     #[test]
     fn pss_draft_projects_every_owned_execution_field() {
-        let controller = SimulationController::new();
         let mut state = AppState::default();
         state.sim_setup.pss.ensure_initialized();
         state.sim_setup.pss.fund_freq = "2.5Meg".to_owned();
@@ -1463,8 +803,7 @@ mod manifest_tests {
         state.sim_setup.pss.osc_mode = false;
         state.sim_setup.pss.osc_node = "osc_out".to_owned();
 
-        let spec = controller
-            .build_pss_spec(&state.sim_setup.pss)
+        let spec = rspice_simulation::analysis_preparation::build_pss_spec(&state.sim_setup.pss)
             .expect("PSS spec builds");
         assert_eq!(
             spec,
@@ -1493,7 +832,6 @@ mod manifest_tests {
     /// tone, and the oscillator node it does name reaches the spec.
     #[test]
     fn an_autonomous_pss_draft_projects_its_oscillator_node_and_no_tones() {
-        let controller = SimulationController::new();
         let mut state = AppState::default();
         state.sim_setup.pss.ensure_initialized();
         state.sim_setup.pss.integration_method_idx = 0;
@@ -1501,8 +839,7 @@ mod manifest_tests {
         state.sim_setup.pss.osc_mode = true;
         state.sim_setup.pss.osc_node = "osc_out".to_owned();
 
-        let spec = controller
-            .build_pss_spec(&state.sim_setup.pss)
+        let spec = rspice_simulation::analysis_preparation::build_pss_spec(&state.sim_setup.pss)
             .expect("PSS spec builds");
         assert!(
             matches!(
@@ -1531,7 +868,7 @@ mod manifest_tests {
         state.sim_setup.fourier.fundamental = "3k".into();
 
         let spec = controller
-            .analysis_draft_spec(&AnalysisInputs::new(&state), &draft)
+            .analysis_draft_spec(&analysis_inputs(&state), &draft)
             .expect("Fourier spec builds");
         assert!(matches!(
             &spec,
@@ -1543,7 +880,7 @@ mod manifest_tests {
         ));
         assert!(
             controller
-                .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &draft, &spec)
+                .analysis_spec_to_spice_line(&analysis_inputs(&state), &draft, &spec)
                 .unwrap()
                 .starts_with(".four 2000 ")
         );
@@ -1565,7 +902,7 @@ mod manifest_tests {
         state.sim_setup.envelope.carrier_tones = "not a frequency".into();
 
         let spec = controller
-            .analysis_draft_spec(&AnalysisInputs::new(&state), &draft)
+            .analysis_draft_spec(&analysis_inputs(&state), &draft)
             .expect("Envelope spec builds");
         assert_eq!(
             spec,
@@ -1585,7 +922,7 @@ mod manifest_tests {
         );
         assert!(
             controller
-                .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &draft, &spec)
+                .analysis_spec_to_spice_line(&analysis_inputs(&state), &draft, &spec)
                 .unwrap()
                 .starts_with(".envlp carriers=[1Meg,2.5Meg] ")
         );
@@ -1602,7 +939,7 @@ mod manifest_tests {
         state.sim_setup.soa.stop_time = "not a time".into();
 
         let spec = controller
-            .analysis_draft_spec(&AnalysisInputs::new(&state), &draft)
+            .analysis_draft_spec(&analysis_inputs(&state), &draft)
             .unwrap();
         assert!(matches!(
             &spec,
@@ -1614,7 +951,7 @@ mod manifest_tests {
         ));
         assert!(
             controller
-                .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &draft, &spec)
+                .analysis_spec_to_spice_line(&analysis_inputs(&state), &draft, &spec)
                 .unwrap()
                 .starts_with(".soa stop=0.002 step=0.000002 ")
         );
@@ -1630,7 +967,7 @@ mod manifest_tests {
         let pz_draft = AnalysisDraft::PoleZero(state.sim_setup.pz.clone());
         state.sim_setup.pz.input_pos.clear();
         let pz_spec = controller
-            .analysis_draft_spec(&AnalysisInputs::new(&state), &pz_draft)
+            .analysis_draft_spec(&analysis_inputs(&state), &pz_draft)
             .unwrap();
         assert!(matches!(
             &pz_spec,
@@ -1638,7 +975,7 @@ mod manifest_tests {
         ));
         assert!(
             controller
-                .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &pz_draft, &pz_spec)
+                .analysis_spec_to_spice_line(&analysis_inputs(&state), &pz_draft, &pz_spec)
                 .unwrap()
                 .contains("PZ_IN")
         );
@@ -1648,7 +985,7 @@ mod manifest_tests {
         let sens_draft = AnalysisDraft::Sensitivity(state.sim_setup.sens.clone());
         state.sim_setup.sens.output_expr.clear();
         let sens_spec = controller
-            .analysis_draft_spec(&AnalysisInputs::new(&state), &sens_draft)
+            .analysis_draft_spec(&analysis_inputs(&state), &sens_draft)
             .unwrap();
         assert!(matches!(
             &sens_spec,
@@ -1656,7 +993,7 @@ mod manifest_tests {
         ));
         assert!(
             controller
-                .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &sens_draft, &sens_spec)
+                .analysis_spec_to_spice_line(&analysis_inputs(&state), &sens_draft, &sens_spec)
                 .unwrap()
                 .contains("V(SENS_OUT)")
         );
@@ -1667,7 +1004,7 @@ mod manifest_tests {
         let tf_draft = AnalysisDraft::TransferFunction(state.sim_setup.xf.clone());
         state.sim_setup.xf.input_source.clear();
         let tf_spec = controller
-            .analysis_draft_spec(&AnalysisInputs::new(&state), &tf_draft)
+            .analysis_draft_spec(&analysis_inputs(&state), &tf_draft)
             .unwrap();
         assert!(matches!(
             &tf_spec,
@@ -1675,7 +1012,7 @@ mod manifest_tests {
         ));
         assert!(
             controller
-                .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &tf_draft, &tf_spec)
+                .analysis_spec_to_spice_line(&analysis_inputs(&state), &tf_draft, &tf_spec)
                 .unwrap()
                 .contains("VTF")
         );
@@ -1692,7 +1029,7 @@ mod manifest_tests {
         state.sim_setup.op.temperature_mode_idx = usize::MAX;
         let draft = AnalysisDraft::OperatingPoint(authored.clone());
         let spec = controller
-            .analysis_draft_spec(&AnalysisInputs::new(&state), &draft)
+            .analysis_draft_spec(&analysis_inputs(&state), &draft)
             .unwrap();
         assert!(matches!(
             spec,
@@ -1706,7 +1043,7 @@ mod manifest_tests {
         authored.temperature = "-15".into();
         let spec = controller
             .analysis_draft_spec(
-                &AnalysisInputs::new(&state),
+                &analysis_inputs(&state),
                 &AnalysisDraft::OperatingPoint(authored),
             )
             .unwrap();

@@ -966,13 +966,17 @@ impl SimulationController {
                 )
             })?;
         let run_set_contract =
-            Self::corner_run_config_from_dialog(&state.sim_setup, &run_set_config, &sealed_models)
-                .map_err(|error| {
-                    PreparationError::new(
-                        PreparationStage::ModelBindings,
-                        format!("Run Set model binding failed: {error}"),
-                    )
-                })?;
+            rspice_simulation::analysis_preparation::corner_run_config_from_dialog(
+                &state.sim_setup,
+                &run_set_config,
+                &sealed_models,
+            )
+            .map_err(|error| {
+                PreparationError::new(
+                    PreparationStage::ModelBindings,
+                    format!("Run Set model binding failed: {error}"),
+                )
+            })?;
         let prepared_run_set = crate::simulation::execution::PreparedRunSet::new(
             state.sim_setup.run_set.clone(),
             run_set_contract,

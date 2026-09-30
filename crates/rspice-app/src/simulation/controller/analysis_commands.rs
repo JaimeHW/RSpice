@@ -17,7 +17,7 @@ impl SimulationController {
         state: &AppState,
         draft: &crate::simulation::plan::AnalysisDraft,
     ) -> Result<String, String> {
-        let state = &AnalysisInputs::new(state);
+        let state = &analysis_inputs(state);
         let spec = self.analysis_draft_spec(state, draft)?;
         self.analysis_spec_to_spice_line(state, draft, &spec)
     }
@@ -137,7 +137,8 @@ impl SimulationController {
             AnalysisSpec::Qpac { .. } => Ok(spec.qpac_card()?.to_spice()),
             AnalysisSpec::Qpxf { .. } => Ok(spec.qpxf_card()?.to_spice()),
             AnalysisSpec::Qpnoise { .. } => Ok(spec.qpnoise_card()?.to_spice()),
-            _ => self.analysis_spec_to_config(spec).map(|cfg| cfg.to_spice()),
+            _ => rspice_simulation::analysis_preparation::analysis_spec_to_config(spec)
+                .map(|cfg| cfg.to_spice()),
         }
     }
 
@@ -952,7 +953,7 @@ mod tests {
         );
 
         let error = SimulationController::new()
-            .build_stb_command(&AnalysisInputs::new(&state), &state.sim_setup.stb)
+            .build_stb_command(&analysis_inputs(&state), &state.sim_setup.stb)
             .expect_err("a probe that is not on the schematic is refused");
 
         assert!(error.contains("VLOOP1"), "{error}");
@@ -975,7 +976,7 @@ mod tests {
         );
 
         let directive = SimulationController::new()
-            .build_stb_command(&AnalysisInputs::new(&state), &state.sim_setup.stb)
+            .build_stb_command(&analysis_inputs(&state), &state.sim_setup.stb)
             .expect("a placed probe reaches the deck");
 
         assert!(directive.contains("probe=VLOOP1"), "{directive}");
@@ -1004,21 +1005,21 @@ mod tests {
         );
 
         let error = SimulationController::new()
-            .build_pstb_command(&AnalysisInputs::new(&state), &state.sim_setup.pstb)
+            .build_pstb_command(&analysis_inputs(&state), &state.sim_setup.pstb)
             .expect_err("a probe that is not on the schematic is refused");
         assert!(error.contains("VLOOP1"), "{error}");
         assert!(error.contains("VLOOP2"), "{error}");
 
         state.sim_setup.pstb.probe_reference = StbProbeReference::Entered;
         let directive = SimulationController::new()
-            .build_pstb_command(&AnalysisInputs::new(&state), &state.sim_setup.pstb)
+            .build_pstb_command(&analysis_inputs(&state), &state.sim_setup.pstb)
             .expect("a name entered by hand is the deck's claim, not this design's");
         assert!(directive.contains("probe=VLOOP1"), "{directive}");
 
         state.sim_setup.pstb.probe = "VLOOP2".to_owned();
         state.sim_setup.pstb.probe_reference = StbProbeReference::Placed;
         let directive = SimulationController::new()
-            .build_pstb_command(&AnalysisInputs::new(&state), &state.sim_setup.pstb)
+            .build_pstb_command(&analysis_inputs(&state), &state.sim_setup.pstb)
             .expect("a placed probe reaches the deck");
         assert!(directive.contains("probe=VLOOP2"), "{directive}");
     }

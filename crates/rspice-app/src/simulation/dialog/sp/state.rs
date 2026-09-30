@@ -34,7 +34,9 @@ pub fn port_roster_error(draft: &SpDialogState, placed: &[PlacedRfPort]) -> Opti
 }
 
 #[cfg(test)]
-use super::{SpConfig, SpPortConfig, SpSweepType};
+use super::{SpConfig, SpPortConfig};
+#[cfg(test)]
+use rspice_simulation_contract::sp_config::SpSweepType;
 
 #[cfg(test)]
 mod tests {

@@ -23,7 +23,7 @@ fn dc_mismatch_moment_controls_survive_authoring_storage_decks_and_workers() {
     assert_eq!(restored.moment_relative_tolerance, "2m");
     let spec = SimulationController::new()
         .analysis_draft_spec(
-            &AnalysisInputs::new(&AppState::default()),
+            &analysis_inputs(&AppState::default()),
             &AnalysisDraft::DcMismatch(restored),
         )
         .unwrap();
@@ -178,7 +178,7 @@ fn a_bare_dcmatch_card_reads_as_the_engine_defaults() {
         crate::simulation::plan::AnalysisKind::DcMismatch,
     );
     let authored = SimulationController::new()
-        .analysis_draft_spec(&AnalysisInputs::new(&state), &draft)
+        .analysis_draft_spec(&analysis_inputs(&state), &draft)
         .expect("a default DC mismatch draft builds a specification");
     let AnalysisSpec::DcMismatch {
         sigma_multiplier: draft_sigma,

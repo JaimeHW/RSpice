@@ -1,9 +1,6 @@
 //! App-facing aliases for the portable optimization draft.
 
-pub use rspice_simulation_contract::optimization_draft::{
-    OptimizationAlgorithmMode, OptimizationDialogState, OptimizationGoalMode,
-    OptimizationVariableConfig,
-};
+pub use rspice_simulation_contract::optimization_draft::OptimizationDialogState;
 
 #[cfg(test)]
 pub use rspice_simulation_contract::optimization_draft::OptimizationConfig;

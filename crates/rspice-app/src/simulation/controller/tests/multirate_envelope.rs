@@ -46,7 +46,7 @@ fn spec(draft: &EnvelopeDialogState) -> AnalysisSpec {
     };
     assert_eq!(serde_json::to_value(restored_draft).unwrap(), saved);
     let spec = SimulationController::new()
-        .analysis_draft_spec(&AnalysisInputs::new(&AppState::default()), &restored)
+        .analysis_draft_spec(&analysis_inputs(&AppState::default()), &restored)
         .unwrap();
     spec.validate().unwrap();
     let worker = WorkerAnalysisSpec::try_from(&spec).unwrap();

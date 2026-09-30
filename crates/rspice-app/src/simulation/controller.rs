@@ -26,10 +26,8 @@ use crate::simulation::execution::{
     ExecutionArtifactEnvelope, ExecutionArtifactKind, TouchstoneExportPolicy,
     canonical_analysis_kind,
 };
-use crate::simulation::multi_run::{
-    AnalysisSpec, FrequencySweep, HbToneSpec, OptimizationAlgorithm, OptimizationGoal,
-    OptimizationVariable, PssMethod, SpPort,
-};
+use crate::simulation::multi_run::PssMethod;
+use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, HbToneSpec, SpPort};
 use crate::simulation::output_contract::{
     PreparedSavedOutput, materialize_live_saved_outputs, retain_plan_saved_outputs,
 };
@@ -56,11 +54,11 @@ use rspice_simulation::error::SimulationError;
 use rspice_simulation_contract::setup_state::SimulationSetup;
 
 mod analysis_commands;
-mod analysis_helpers;
 mod analysis_plan;
+#[cfg(test)]
 mod analysis_run_config;
 mod analysis_spec_build;
-use analysis_spec_build::AnalysisInputs;
+use analysis_spec_build::{AnalysisInputs, analysis_inputs};
 #[cfg(test)]
 mod directive_parse_ratchet;
 mod live_transient;

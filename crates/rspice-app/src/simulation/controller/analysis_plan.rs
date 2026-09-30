@@ -95,7 +95,7 @@ impl SimulationController {
     ) -> Result<Vec<PreparedTask>, Vec<String>> {
         let mut queue = Vec::with_capacity(plan.instances().len());
         let mut errors = Vec::new();
-        let inputs = AnalysisInputs::new(state);
+        let inputs = analysis_inputs(state);
 
         for instance in plan.instances() {
             if let Some(reason) = instance.kind().execution_blocker() {
@@ -186,14 +186,19 @@ impl SimulationController {
                         })
                         .and_then(|base| match base.draft() {
                             crate::simulation::plan::AnalysisDraft::OperatingPoint(draft) => {
-                                self.build_op_spec(&projected_state, draft)
+                                rspice_simulation::analysis_preparation::build_op_spec(
+                                    &projected_state,
+                                    draft,
+                                )
                             }
                             _ => Err(format!(
                                 "{} has a non-operating-point base while OP mode is selected",
                                 instance.display_name()
                             )),
                         })
-                        .and_then(|spec| self.analysis_spec_to_config(&spec));
+                        .and_then(|spec| {
+                            rspice_simulation::analysis_preparation::analysis_spec_to_config(&spec)
+                        });
                     match config {
                         Ok(AnalysisConfig::DcOp(config)) => {
                             *mode = rspice_simulation::sweeps::CornerBaseMode::ConfiguredOp(
@@ -296,7 +301,7 @@ impl SimulationController {
                     numeric_override: numeric_override.clone(),
                 }
             } else {
-                match self.analysis_spec_to_config(&spec) {
+                match rspice_simulation::analysis_preparation::analysis_spec_to_config(&spec) {
                     Ok(config) => {
                         if let Err(errs) = config.validate() {
                             errors.push(format!(
@@ -573,7 +578,9 @@ impl SimulationController {
             ..*state
         };
         let producer_spec = self.analysis_draft_spec(&producer_state, producer.draft())?;
-        let AnalysisConfig::DcOp(config) = self.analysis_spec_to_config(&producer_spec)? else {
+        let AnalysisConfig::DcOp(config) =
+            rspice_simulation::analysis_preparation::analysis_spec_to_config(&producer_spec)?
+        else {
             return Err("Periodic study dependency is not an operating-point configuration".into());
         };
         use crate::simulation::runner::study::{
@@ -659,29 +666,29 @@ impl SimulationController {
         let periodic_producer = bound_periodic_producer(plan, base)?;
         use crate::simulation::runner::study::StudyPeriodicOptions;
         let periodic_options = match base.draft() {
-            AnalysisDraft::Pac(draft) => {
-                Some(StudyPeriodicOptions::Pac(Self::pac_run_config_from_dialog(
+            AnalysisDraft::Pac(draft) => Some(StudyPeriodicOptions::Pac(
+                rspice_simulation::analysis_preparation::pac_run_config_from_dialog(
                     projected.sim_setup,
                     draft,
                     periodic_producer.map(|producer| producer.draft()),
-                )?))
-            }
-            AnalysisDraft::Pxf(draft) => {
-                Some(StudyPeriodicOptions::Pxf(Self::pxf_run_config_from_dialog(
+                )?,
+            )),
+            AnalysisDraft::Pxf(draft) => Some(StudyPeriodicOptions::Pxf(
+                rspice_simulation::analysis_preparation::pxf_run_config_from_dialog(
                     projected.sim_setup,
                     draft,
                     periodic_producer.map(|producer| producer.draft()),
-                )?))
-            }
+                )?,
+            )),
             AnalysisDraft::Pnoise(draft) => Some(StudyPeriodicOptions::Pnoise(
-                Self::pnoise_run_config_from_dialog(
+                rspice_simulation::analysis_preparation::pnoise_run_config_from_dialog(
                     projected.sim_setup,
                     draft,
                     periodic_producer.map(|producer| producer.draft()),
                 )?,
             )),
             AnalysisDraft::Pstb(draft) => Some(StudyPeriodicOptions::Pstb(
-                Self::pstb_run_config_from_dialog(
+                rspice_simulation::analysis_preparation::pstb_run_config_from_dialog(
                     projected.sim_setup,
                     draft,
                     periodic_producer.map(|producer| producer.draft()),
@@ -763,7 +770,10 @@ impl SimulationController {
                 ) {
                     self.compile_study_seeded_periodic(state, plan, producer, &producer_spec)?
                 } else {
-                    self.analysis_spec_to_config(&producer_spec)?.into()
+                    rspice_simulation::analysis_preparation::analysis_spec_to_config(
+                        &producer_spec,
+                    )?
+                    .into()
                 },
                 Some(crate::simulation::runner::study::StudyPostprocess {
                     producer_instance_id: producer.id(),
@@ -792,7 +802,10 @@ impl SimulationController {
                 None,
             )
         } else {
-            (self.analysis_spec_to_config(&spec)?.into(), None)
+            (
+                rspice_simulation::analysis_preparation::analysis_spec_to_config(&spec)?.into(),
+                None,
+            )
         };
         analysis.validate().map_err(|errors| errors.join("; "))?;
         Ok(Some(crate::simulation::runner::study::StudyRunConfig {
@@ -861,10 +874,12 @@ impl SimulationController {
                     mc_statistics: None,
                     mc_checkpoint: None,
                     study_base: None,
-                    temp: Some(Self::temp_run_config_from_dialog(
-                        state.sim_setup,
-                        &temp_cfg,
-                    )?),
+                    temp: Some(
+                        rspice_simulation::analysis_preparation::temp_run_config_from_dialog(
+                            state.sim_setup,
+                            &temp_cfg,
+                        )?,
+                    ),
                     parametric_base: None,
                     corner: None,
                     pac: None,
@@ -896,11 +911,13 @@ impl SimulationController {
                     study_base: None,
                     temp: None,
                     parametric_base: None,
-                    corner: Some(Self::corner_run_config_from_dialog(
-                        state.sim_setup,
-                        &corner_cfg,
-                        sealed_model_sources,
-                    )?),
+                    corner: Some(
+                        rspice_simulation::analysis_preparation::corner_run_config_from_dialog(
+                            state.sim_setup,
+                            &corner_cfg,
+                            sealed_model_sources,
+                        )?,
+                    ),
                     pac: None,
                     pxf: None,
                     pnoise: None,
@@ -912,11 +929,13 @@ impl SimulationController {
                     return Err("PAC specification requires its authored draft".into());
                 };
                 Ok(SpecExecutionOptions {
-                    pac: Some(Self::pac_run_config_from_dialog(
-                        state.sim_setup,
-                        draft,
-                        periodic_producer,
-                    )?),
+                    pac: Some(
+                        rspice_simulation::analysis_preparation::pac_run_config_from_dialog(
+                            state.sim_setup,
+                            draft,
+                            periodic_producer,
+                        )?,
+                    ),
                     ..Default::default()
                 })
             }
@@ -925,11 +944,13 @@ impl SimulationController {
                     return Err("PXF specification requires its authored draft".into());
                 };
                 Ok(SpecExecutionOptions {
-                    pxf: Some(Self::pxf_run_config_from_dialog(
-                        state.sim_setup,
-                        draft,
-                        periodic_producer,
-                    )?),
+                    pxf: Some(
+                        rspice_simulation::analysis_preparation::pxf_run_config_from_dialog(
+                            state.sim_setup,
+                            draft,
+                            periodic_producer,
+                        )?,
+                    ),
                     ..Default::default()
                 })
             }
@@ -939,11 +960,13 @@ impl SimulationController {
                     return Err("PNOISE specification requires its authored draft".into());
                 };
                 Ok(SpecExecutionOptions {
-                    pnoise: Some(Self::pnoise_run_config_from_dialog(
-                        state.sim_setup,
-                        draft,
-                        periodic_producer,
-                    )?),
+                    pnoise: Some(
+                        rspice_simulation::analysis_preparation::pnoise_run_config_from_dialog(
+                            state.sim_setup,
+                            draft,
+                            periodic_producer,
+                        )?,
+                    ),
                     ..Default::default()
                 })
             }
@@ -952,11 +975,13 @@ impl SimulationController {
                     return Err("PSTB specification requires its authored draft".into());
                 };
                 Ok(SpecExecutionOptions {
-                    pstb: Some(Self::pstb_run_config_from_dialog(
-                        state.sim_setup,
-                        draft,
-                        periodic_producer,
-                    )?),
+                    pstb: Some(
+                        rspice_simulation::analysis_preparation::pstb_run_config_from_dialog(
+                            state.sim_setup,
+                            draft,
+                            periodic_producer,
+                        )?,
+                    ),
                     ..Default::default()
                 })
             }
