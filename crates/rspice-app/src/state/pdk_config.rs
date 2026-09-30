@@ -34,7 +34,8 @@ use std::path::PathBuf;
 mod accessors;
 mod discovered_file;
 mod discovery;
-mod display_profile;
+#[cfg(test)]
+mod display_profile_tests;
 mod errors;
 mod library_path;
 mod paths;
@@ -43,15 +44,11 @@ mod project_binding;
 mod recent;
 mod technology_callback;
 mod technology_diff;
-mod technology_draft;
+#[cfg(test)]
+mod technology_draft_tests;
 mod technology_package;
 
 pub use discovered_file::DiscoveredFile;
-pub use display_profile::{
-    PdkDisplayFillStyle, PdkDisplayLayerStyle, PdkDisplayProfileAuditAction,
-    PdkDisplayProfileAuditReceipt, PdkDisplayProfileBinding, PdkDisplayProfileDraft,
-    PdkDisplayProfileRegistry, PdkDisplayProfileRevision, PdkDisplayProfileScope,
-};
 pub use errors::ConfigError;
 pub use library_path::LibraryPathEntry;
 #[cfg(target_arch = "wasm32")]
@@ -59,16 +56,21 @@ pub(crate) use persistence::{
     BrowserPdkConfigReceipt, BrowserPdkConfigRestore, BrowserPdkStorageDurability,
     BrowserPdkStorageStatus, start_browser_pdk_config_load, start_browser_pdk_config_save,
 };
+pub use rspice_model_library::pdk::display_profile::{
+    PdkDisplayFillStyle, PdkDisplayLayerStyle, PdkDisplayProfileAuditAction,
+    PdkDisplayProfileAuditReceipt, PdkDisplayProfileBinding, PdkDisplayProfileDraft,
+    PdkDisplayProfileRegistry, PdkDisplayProfileRevision, PdkDisplayProfileScope,
+};
+#[allow(unused_imports)]
+pub use rspice_model_library::pdk::technology_draft::{
+    PdkTechnologyDraft, PdkTechnologyDraftBaseline, UnsignedPdkTechnologyAuthoringBundle,
+};
 pub use technology_callback::{PdkCallbackExecutionInput, ProjectPdkCallbackReceipt};
 #[cfg(test)]
 pub(crate) use technology_diff::tests::fixture_revision_archives as signed_technology_diff_test_fixture;
 pub use technology_diff::{
     PdkTechnologyDiffArea, PdkTechnologyDiffEntry, PdkTechnologyDiffError, PdkTechnologyDiffImpact,
     PdkTechnologyDiffKind, PdkTechnologyMigrationEvidence, PdkTechnologyRevisionDiff,
-};
-#[allow(unused_imports)]
-pub use technology_draft::{
-    PdkTechnologyDraft, PdkTechnologyDraftBaseline, UnsignedPdkTechnologyAuthoringBundle,
 };
 #[cfg(test)]
 pub(crate) use technology_package::tests::fixture_archive as signed_technology_test_fixture;

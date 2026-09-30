@@ -19,7 +19,9 @@ use std::collections::BTreeSet;
 #[cfg(test)]
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 #[cfg(test)]
-use rspice_model_library::pdk::manifest::{signed_model_virtual_root, validate_package_path};
+use rspice_model_library::pdk::manifest::{
+    signed_model_virtual_root, validate_manifest, validate_package_path,
+};
 #[cfg(test)]
 use rspice_model_library::pdk::package::authenticate_archive;
 use serde::{Deserialize, Serialize};
@@ -32,7 +34,6 @@ pub use rspice_simulation::pdk::{
 use crate::product::ContentDigest;
 pub use rspice_model_library::pdk::contracts::*;
 pub use rspice_model_library::pdk::manifest::PdkTechnologyManifest;
-pub(super) use rspice_model_library::pdk::manifest::validate_manifest;
 use rspice_model_library::pdk::manifest::validate_version;
 use rspice_model_library::pdk::package::decode_bounded;
 pub use rspice_model_library::pdk::{

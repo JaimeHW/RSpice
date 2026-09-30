@@ -216,11 +216,11 @@ fn resolve_display_contract(
         .state
         .pdk_config
         .display_profile_registry
-        .active_for_package(package);
+        .active_for_package(package.metadata());
     let (profile_label, selection_rgba, entries) = active.map_or_else(
         || {
             let defaults = crate::state::pdk_config::PdkDisplayProfileDraft::signed_defaults(
-                package,
+                package.metadata(),
                 "signed-default",
                 "Signed package defaults",
             );

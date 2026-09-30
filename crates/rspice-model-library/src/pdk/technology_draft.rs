@@ -8,10 +8,14 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::technology_package::{
-    PDK_TECHNOLOGY_MANIFEST_SCHEMA_VERSION, PdkTechnologyArchiveFile, PdkTechnologyBinding,
-    PdkTechnologyError, PdkTechnologyManifest, SignedPdkTechnologyArchive,
-    ValidatedPdkTechnologyPackage, validate_manifest,
+use super::{
+    PdkTechnologyError,
+    contracts::{
+        PDK_TECHNOLOGY_MANIFEST_SCHEMA_VERSION, PdkTechnologyArchiveFile, PdkTechnologyBinding,
+        SignedPdkTechnologyArchive,
+    },
+    manifest::{PdkTechnologyManifest, validate_manifest},
+    package::PdkTechnologyPackageMetadata,
 };
 
 pub const PDK_TECHNOLOGY_DRAFT_SCHEMA_VERSION: u32 = 1;
@@ -21,7 +25,7 @@ pub const PDK_TECHNOLOGY_AUTHORING_BUNDLE_SCHEMA_VERSION: u32 = 1;
 #[serde(deny_unknown_fields)]
 pub struct PdkTechnologyDraftBaseline {
     pub binding: PdkTechnologyBinding,
-    pub archive_digest: crate::product::ContentDigest,
+    pub archive_digest: rspice_app_types::product::ContentDigest,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -47,7 +51,7 @@ pub struct UnsignedPdkTechnologyAuthoringBundle {
 
 impl PdkTechnologyDraft {
     #[must_use]
-    pub fn from_package(package: &ValidatedPdkTechnologyPackage) -> Self {
+    pub fn from_package(package: &PdkTechnologyPackageMetadata) -> Self {
         let mut manifest = package.manifest().clone();
         manifest.schema_version = PDK_TECHNOLOGY_MANIFEST_SCHEMA_VERSION;
         Self {
@@ -66,7 +70,7 @@ impl PdkTechnologyDraft {
     pub fn set_revision(&mut self, revision: String) {
         self.manifest.revision.clone_from(&revision);
         for definition in &mut self.manifest.symbol_definitions {
-            let crate::state::SymbolSourceContract::Model { model, .. } = &mut definition.source
+            let crate::symbol::SymbolSourceContract::Model { model, .. } = &mut definition.source
             else {
                 continue;
             };
@@ -79,7 +83,7 @@ impl PdkTechnologyDraft {
 
     pub fn validate_candidate(
         &self,
-        baseline: &ValidatedPdkTechnologyPackage,
+        baseline: &PdkTechnologyPackageMetadata,
     ) -> Result<(), PdkTechnologyError> {
         if self.schema_version != PDK_TECHNOLOGY_DRAFT_SCHEMA_VERSION {
             return Err(PdkTechnologyError::UnsupportedSchema {
@@ -137,7 +141,7 @@ impl PdkTechnologyDraft {
 
     pub fn authoring_bundle(
         &self,
-        baseline: &ValidatedPdkTechnologyPackage,
+        baseline: &PdkTechnologyPackageMetadata,
         source_archive: &SignedPdkTechnologyArchive,
     ) -> Result<UnsignedPdkTechnologyAuthoringBundle, PdkTechnologyError> {
         self.validate_candidate(baseline)?;
@@ -148,65 +152,5 @@ impl PdkTechnologyDraft {
             candidate_manifest: self.manifest.clone(),
             source_files: source_archive.files.clone(),
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn draft_requires_a_new_revision_and_preserves_exact_artifact_authority() {
-        let (bytes, trust, _) = super::super::technology_package::tests::fixture_archive();
-        let (_, package) = super::super::technology_package::validate_archive_bytes(&bytes, &trust)
-            .expect("fixture validates");
-        let mut draft = PdkTechnologyDraft::from_package(&package);
-        assert!(matches!(
-            draft.validate_candidate(&package),
-            Err(PdkTechnologyError::ImmutableRevision(_))
-        ));
-
-        draft.set_revision("2.4.0".to_owned());
-        draft
-            .validate_candidate(&package)
-            .expect("candidate validates");
-        draft.manifest.artifacts.clear();
-        assert!(matches!(
-            draft.validate_candidate(&package),
-            Err(PdkTechnologyError::InvalidReference(_))
-        ));
-    }
-
-    #[test]
-    fn authoring_bundle_carries_source_files_without_private_signing_material() {
-        let (bytes, trust, _) = super::super::technology_package::tests::fixture_archive();
-        let (archive, package) =
-            super::super::technology_package::validate_archive_bytes(&bytes, &trust)
-                .expect("fixture validates");
-        let mut draft = PdkTechnologyDraft::from_package(&package);
-        draft.set_revision("2.4.0".to_owned());
-        let bundle = draft
-            .authoring_bundle(&package, &archive)
-            .expect("bundle builds");
-        assert_eq!(bundle.source_files, archive.files);
-        let json = serde_json::to_value(bundle).expect("bundle serializes");
-        assert!(json.get("signature_base64").is_none());
-    }
-
-    #[test]
-    fn persisted_pdk_config_round_trips_an_invalid_in_progress_draft_without_authority() {
-        let (bytes, trust, _) = super::super::technology_package::tests::fixture_archive();
-        let (_, package) = super::super::technology_package::validate_archive_bytes(&bytes, &trust)
-            .expect("fixture validates");
-        let draft = PdkTechnologyDraft::from_package(&package);
-        assert!(draft.validate_candidate(&package).is_err());
-
-        let mut config = super::super::PdkConfig::default();
-        config.technology_draft = Some(draft.clone());
-        let json = serde_json::to_string(&config).expect("PDK config serializes");
-        let restored: super::super::PdkConfig =
-            serde_json::from_str(&json).expect("PDK config restores");
-        assert_eq!(restored.technology_draft, Some(draft));
-        assert!(restored.technology_registry.validated_packages().is_empty());
     }
 }

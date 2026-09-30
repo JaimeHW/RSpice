@@ -555,7 +555,7 @@ mod tests {
             )
             .expect("install package");
         let package = config.technology_registry.validated_packages()[0].clone();
-        let mut draft = PdkTechnologyDraft::from_package(&package);
+        let mut draft = PdkTechnologyDraft::from_package(package.metadata());
         draft.set_revision("2.4.0".to_owned());
         config.technology_draft = Some(draft.clone());
 
@@ -785,8 +785,12 @@ mod tests {
         config
             .display_profile_registry
             .publish_and_activate(
-                &package,
-                PdkDisplayProfileDraft::signed_defaults(&package, "layout-dark", "Layout dark"),
+                package.metadata(),
+                PdkDisplayProfileDraft::signed_defaults(
+                    package.metadata(),
+                    "layout-dark",
+                    "Layout dark",
+                ),
                 &authority,
                 "publish persistent profile",
             )
@@ -813,7 +817,7 @@ mod tests {
         assert!(
             loaded
                 .display_profile_registry
-                .active_for_package(rebound)
+                .active_for_package(rebound.metadata())
                 .is_some()
         );
         std::fs::remove_dir_all(root).expect("remove fixture");

@@ -430,7 +430,7 @@ fn registry_snapshot(app: &RSpiceApp) -> RegistrySnapshot {
     let runtime_display_profile_valid = display_registry.active_binding().is_none()
         || registry
             .active_package()
-            .and_then(|package| display_registry.active_for_package(package))
+            .and_then(|package| display_registry.active_for_package(package.metadata()))
             .is_some();
     let project_signed_package = project
         .project
@@ -882,7 +882,7 @@ fn technology_draft_controls(
             .show(ui)
             .clicked()
         {
-            view.technology_draft = Some(PdkTechnologyDraft::from_package(package));
+            view.technology_draft = Some(PdkTechnologyDraft::from_package(package.metadata()));
             view.technology_draft_dirty = true;
             view.discard_technology_draft_armed = false;
         }
@@ -923,7 +923,7 @@ fn technology_draft_controls(
             view.discard_technology_draft_armed = false;
         }
     });
-    let validation = draft.validate_candidate(package);
+    let validation = draft.validate_candidate(package.metadata());
     match &validation {
         Ok(()) => {
             ui.colored_label(
@@ -1448,7 +1448,7 @@ fn display_section(
                         .unwrap_or(0)
                         .saturating_add(1);
                     view.display_draft = Some(PdkDisplayProfileDraft::signed_defaults(
-                        package,
+                        package.metadata(),
                         format!("layout-profile-{next:02}"),
                         format!("Layout profile {next:02}"),
                     ));
@@ -1470,7 +1470,8 @@ fn display_section(
                         },
                         |draft| (draft.profile_id.clone(), draft.label.clone(), draft.scope),
                     );
-                    let mut reset = PdkDisplayProfileDraft::signed_defaults(package, id, label);
+                    let mut reset =
+                        PdkDisplayProfileDraft::signed_defaults(package.metadata(), id, label);
                     reset.scope = scope;
                     view.display_draft = Some(reset);
                     view.display_draft_dirty = true;
@@ -1756,7 +1757,7 @@ fn reconcile_display_draft(
     } else {
         view.selected_display_profile = None;
         view.display_draft = Some(PdkDisplayProfileDraft::signed_defaults(
-            package,
+            package.metadata(),
             "layout-profile-01",
             "Layout profile 01",
         ));
@@ -4157,7 +4158,7 @@ fn apply_action(
                     "The exact source archive for this draft is unavailable.".to_owned()
                 })?;
                 let bundle = draft
-                    .authoring_bundle(package, archive)
+                    .authoring_bundle(package.metadata(), archive)
                     .map_err(|error| error.to_string())?;
                 let bytes = serde_json::to_vec_pretty(&bundle)
                     .map_err(|error| format!("Could not serialize authoring bundle: {error}"))?;
@@ -4310,7 +4311,7 @@ fn apply_action(
             package.and_then(|package| {
                 let receipt = candidate
                     .display_profile_registry
-                    .publish_and_activate(&package, draft, &authority(view), view.reason.trim())
+                    .publish_and_activate(package.metadata(), draft, &authority(view), view.reason.trim())
                     .map_err(|error| error.to_string())?;
                 #[cfg(not(target_arch = "wasm32"))]
                 {
@@ -4349,7 +4350,7 @@ fn apply_action(
             package.and_then(|package| {
                 let receipt = if rollback {
                     candidate.display_profile_registry.rollback_to(
-                        &package,
+                        package.metadata(),
                         &binding.profile_id,
                         binding.revision,
                         &authority(view),
@@ -4357,7 +4358,7 @@ fn apply_action(
                     )
                 } else {
                     candidate.display_profile_registry.activate(
-                        &package,
+                        package.metadata(),
                         &binding.profile_id,
                         binding.revision,
                         &authority(view),
