@@ -7,13 +7,13 @@
 //! the operator budgets against. The snapshot is the authority: if these ever
 //! diverge, the page is what changes.
 
-use crate::services::drc::DrcResult;
 use crate::simulation::plan::{AnalysisDraft, AnalysisInstance, AnalysisKind};
 use crate::simulation::run_set::{
     AnalysisRunAt, NETLIST_SUPPLY_SOURCE_PREFIX, RunSetDimensionKind,
 };
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use rspice_design::drc::DrcResult;
 
 use super::page_runset::{exact_plan_task_count, worst_point_task_cost};
 

@@ -545,7 +545,7 @@ const RAW_BUFFER_CONSTRUCTORS: &[&str] = &[
 /// design that does not exist yet — so there is no projection to read. Both
 /// its baseline and its candidate are maps it assembled itself.
 ///
-/// `services/drc/extraction.rs`, the app netlisting integration fixtures,
+/// `services/drc_tests.rs`, the app netlisting integration fixtures,
 /// and `workbench/commands.rs` also
 /// call these constructors, but only from their own test modules, so they are
 /// not sites. The definition sites need no exemption either: they declare

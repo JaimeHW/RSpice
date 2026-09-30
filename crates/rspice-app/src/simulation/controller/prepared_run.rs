@@ -654,32 +654,8 @@ impl SimulationController {
             &execution_projection,
         );
         let source_data = project_netlist_source_data(state);
-        let drc = crate::services::drc::run_drc_check_with_hierarchy_and_config(
-            root_schematic,
-            &hierarchy,
-            crate::services::drc::DrcConfig {
-                check_missing_ground: true,
-                ..crate::services::drc::DrcConfig::default()
-            },
-        );
-        if !drc.completed {
-            return Err(PreparationError::new(
-                PreparationStage::DesignChecks,
-                "Schematic source checks did not complete",
-            ));
-        }
-        if drc.has_errors() {
-            let summary = drc.summary();
-            return Err(PreparationError::new(
-                PreparationStage::DesignChecks,
-                format!(
-                    "Fix schematic source-check errors before simulation ({} critical, {} error{})",
-                    summary.critical,
-                    summary.errors,
-                    if summary.errors == 1 { "" } else { "s" }
-                ),
-            ));
-        }
+        let drc =
+            rspice_simulation::preparation::check_generated_design(root_schematic, &hierarchy)?;
         validate_projected_model_binding_authority(
             state.model_library_manager.catalog(),
             state.model_library_manager.resolution_records(),

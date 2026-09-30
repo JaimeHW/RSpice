@@ -880,7 +880,7 @@ fn top_deck_lifecycle_is_atomic_and_preserves_inactive_decks() {
 #[test]
 fn first_top_deck_is_authored_without_a_synthetic_generated_baseline() {
     let mut state = AppState::default();
-    state.dialogs.drc_results = Some(crate::services::drc::DrcResult::new());
+    state.dialogs.drc_results = Some(rspice_design::drc::DrcResult::new());
     state.dialogs.drc_checked_version = state.schematic.topology_version();
     assert!(state.workspace.content.netlist_descriptor.is_none());
     assert!(state.workspace.content.netlist_document.is_none());

@@ -1001,7 +1001,7 @@ mod tests {
         app.state.workbench.activate(Workspace::Netlist);
         app.state.ui.code_workspace.page =
             crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
-        app.state.dialogs.drc_results = Some(crate::services::drc::DrcResult::new());
+        app.state.dialogs.drc_results = Some(rspice_design::drc::DrcResult::new());
         let diagnostics = vec![
             crate::workbench::documents::netlist_document::Diagnostic::error("bad card"),
             crate::workbench::documents::netlist_document::Diagnostic::current(
@@ -1051,7 +1051,7 @@ mod tests {
             .with_provenance(provenance),
         );
         app.state.workbench.activate(Workspace::Results);
-        app.state.dialogs.drc_results = Some(crate::services::drc::DrcResult::new());
+        app.state.dialogs.drc_results = Some(rspice_design::drc::DrcResult::new());
 
         assert!(!app.state.is_netlist_first_without_schematic());
         assert!(app.state.active_result_uses_manual_deck());

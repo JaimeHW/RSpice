@@ -23,7 +23,6 @@ use crate::schematic::view::{
     },
     sheet_visibility::{self, SheetScope},
 };
-use crate::services::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use crate::state::{
     AnalysisResultPayload, CellViewRef, Component, ComponentType, DisplayMode,
     DrawingSheetBorderTemplate, DrawingSheetInheritance, DrawingSheetTitleBlockAnchor,
@@ -45,6 +44,7 @@ use crate::workbench::state::{InlineEditField, ModelsPage, VerificationPage, Wor
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_design::connectivity::extract_with_hierarchy as extract;
 use rspice_design::connectivity::summary::{DesignNet, NetClass};
+use rspice_design::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use rspice_design::hierarchy::HierarchySource;
 
 use super::{
@@ -747,11 +747,11 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
         .count();
     let open_pins = current_violation_count(
         &app.state,
-        crate::services::drc::DrcViolationType::UnconnectedPin,
+        rspice_design::drc::DrcViolationType::UnconnectedPin,
     );
     let floating_nets = current_violation_count(
         &app.state,
-        crate::services::drc::DrcViolationType::FloatingNode,
+        rspice_design::drc::DrcViolationType::FloatingNode,
     );
 
     hero(
@@ -1256,7 +1256,7 @@ fn schematic_grid_label(pitch: crate::state::SchematicGridPitch) -> &'static str
 
 fn current_violation_count(
     state: &AppState,
-    violation_type: crate::services::drc::DrcViolationType,
+    violation_type: rspice_design::drc::DrcViolationType,
 ) -> usize {
     if !checks_current(state) {
         return 0;

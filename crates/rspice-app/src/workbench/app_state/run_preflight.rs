@@ -11,10 +11,10 @@
 //! list of what can change the answer.
 
 use super::technology_demand::technology_demand;
-use crate::services::drc::DrcResult;
 use crate::state::model_library::ModelLibraryManager;
 use crate::state::{ProjectWorkspace, SchematicState};
 use crate::workbench::app_state::SimSetupState;
+use rspice_design::drc::DrcResult;
 
 /// The user-facing reason a new run cannot start, excluding the transient
 /// "already running" state so a queued re-run can share the same rule.

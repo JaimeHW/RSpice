@@ -1454,14 +1454,12 @@ mod gesture_tests;
 mod tests {
     use super::*;
     use crate::product::ProcessCorner;
-    use crate::services::drc::{
-        DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
-    };
     use crate::state::{
         CellViewRef, ComponentType, ConfigurationBlackBoxPolicy, ConfigurationModelProfile,
         ConfigurationSetCatalog, ConfigurationSetDefinition, Point, SchematicState,
         UnresolvedBindingPolicy,
     };
+    use rspice_design::drc::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 
     #[test]
     fn window_rendering_preserves_primary_drawers_and_console_expansion() {

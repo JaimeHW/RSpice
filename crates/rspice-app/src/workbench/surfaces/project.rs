@@ -1067,7 +1067,7 @@ mod tests {
         app.commit_project_library_publication(candidate)
             .expect("publication commits");
         {
-            use crate::services::drc::{
+            use rspice_design::drc::{
                 DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
             };
             app.state.workspace.content.active_view = crate::state::CellViewRef::new(

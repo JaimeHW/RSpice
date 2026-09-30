@@ -1895,13 +1895,13 @@ fn log_tone(severity: LogSeverity) -> SemanticTone {
     }
 }
 
-fn drc_tone(severity: crate::services::drc::DrcSeverity) -> SemanticTone {
+fn drc_tone(severity: rspice_design::drc::DrcSeverity) -> SemanticTone {
     match severity {
-        crate::services::drc::DrcSeverity::Critical | crate::services::drc::DrcSeverity::Error => {
+        rspice_design::drc::DrcSeverity::Critical | rspice_design::drc::DrcSeverity::Error => {
             SemanticTone::Error
         }
-        crate::services::drc::DrcSeverity::Warning => SemanticTone::Warning,
-        crate::services::drc::DrcSeverity::Info => SemanticTone::Info,
+        rspice_design::drc::DrcSeverity::Warning => SemanticTone::Warning,
+        rspice_design::drc::DrcSeverity::Info => SemanticTone::Info,
     }
 }
 

@@ -4,7 +4,7 @@
 //! extraction: a component with a named terminal on a node stands for whatever
 //! drawing produced it. That the extraction really does produce these inputs —
 //! that the checker and the deck agree on every terminal of every fixture — is
-//! proved in `services::drc::extraction::tests`, which is where the geometry
+//! proved in `services::drc_tests`, which is where the geometry
 //! lives.
 
 use super::*;

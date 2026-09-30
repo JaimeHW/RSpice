@@ -1314,7 +1314,7 @@ pub(super) fn active_run_matches_design(state: &AppState) -> bool {
 }
 
 pub(super) fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -> bool {
-    use crate::services::drc::DrcViolationType;
+    use rspice_design::drc::DrcViolationType;
 
     if !matches!(
         violation.violation_type,

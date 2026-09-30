@@ -5,15 +5,18 @@
 //! design check equals its node in the emitted deck. A disagreement is fixed in
 //! the shared extraction, never patched into one consumer.
 
-use super::*;
-use crate::services::drc::{DrcLocation, DrcSeverity, DrcViolation, DrcViolationType};
 use crate::simulation::table_route::SourceFiles;
+use crate::state::ComponentType;
 use crate::state::{
     Bus, BusDeclaration, BusSlice, BusTapOrientation, Cell, CellViewRef, Component, Library,
     LibraryCellInstance, LibraryManager, NetLabel, Point, PortDirection, PortSpec, SchematicState,
     SymbolDocument, SymbolPin, View, ViewType, Wire,
 };
 use rspice_design::drc::ParameterRangeIssue;
+use rspice_design::drc::{DrcConfig, DrcResult, extract_checked_design, run_check_with_hierarchy};
+use rspice_design::drc::{DrcLocation, DrcSeverity, DrcViolation, DrcViolationType};
+use rspice_design::hierarchy::HierarchySource;
+use rspice_design::schematic::document::SchematicDocument;
 use rspice_simulation::netlist_gen::{NetlistSourceData, generate_netlist_hierarchical};
 use std::collections::HashMap;
 
@@ -47,7 +50,7 @@ fn reference_of(schematic: &SchematicState, id: u64) -> String {
 }
 
 fn run(schematic: &SchematicState, config: DrcConfig) -> DrcResult {
-    run_drc_check_with_hierarchy_and_config(
+    run_check_with_hierarchy(
         schematic,
         &HierarchySource::from_buffers(
             &std::collections::HashMap::<String, SchematicDocument>::new(),
@@ -175,7 +178,7 @@ fn hierarchy_resolved_unconnected_pin_check_uses_authored_terminal_geometry() {
         Point::new(60, 40),
     ));
 
-    let result = run_drc_check_with_hierarchy_and_config(
+    let result = run_check_with_hierarchy(
         &schematic,
         &hierarchy,
         DrcConfig {
@@ -350,7 +353,7 @@ fn duplicate_authored_cell_outputs_on_bus_member_are_reported_with_policy_severi
         DrcViolationType::DuplicateBusMemberDriver,
         DrcSeverity::Critical,
     );
-    let result = run_drc_check_with_hierarchy_and_config(&schematic, &hierarchy, config);
+    let result = run_check_with_hierarchy(&schematic, &hierarchy, config);
     let violation = result
         .violations()
         .iter()
@@ -688,10 +691,6 @@ fn erc_and_netlist_agree_on_nets() {
 fn the_second_extraction_has_no_survivors() {
     for (path, source) in [
         (
-            "services/drc/extraction.rs",
-            include_str!("../extraction.rs"),
-        ),
-        (
             "rspice-design/src/drc/extraction.rs",
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -736,27 +735,27 @@ fn the_canvas_keeps_no_connectivity_owner_of_its_own() {
     for (path, source) in [
         (
             "state/schematic/net_highlight.rs",
-            include_str!("../../../state/schematic/net_highlight.rs"),
+            include_str!("../state/schematic/net_highlight.rs"),
         ),
         (
             "schematic/view/scene.rs",
-            include_str!("../../../schematic/view/scene.rs"),
+            include_str!("../schematic/view/scene.rs"),
         ),
         (
             "schematic/view/interaction.rs",
-            include_str!("../../../schematic/view/interaction.rs"),
+            include_str!("../schematic/view/interaction.rs"),
         ),
         (
             "workbench/app/schematic/named_net.rs",
-            include_str!("../../../workbench/app/schematic/named_net.rs"),
+            include_str!("../workbench/app/schematic/named_net.rs"),
         ),
         (
             "workbench/docks/inspector/design.rs",
-            include_str!("../../../workbench/docks/inspector/design.rs"),
+            include_str!("../workbench/docks/inspector/design.rs"),
         ),
         (
             "workbench/docks/inspector/design/inline_instance.rs",
-            include_str!("../../../workbench/docks/inspector/design/inline_instance.rs"),
+            include_str!("../workbench/docks/inspector/design/inline_instance.rs"),
         ),
     ] {
         let shipped = crate::source_guard::production_source(source);

@@ -9,11 +9,11 @@
 use egui::{Painter, Pos2, Shape, Stroke, pos2, vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::services::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use crate::state::Point;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::active_palette;
 use crate::workbench::app_state::AppState;
+use rspice_design::drc::{DrcLocation, DrcSeverity, DrcViolation};
 
 use super::sheet_visibility::object_is_on_active_sheet;
 use super::viewport::Viewport;
@@ -333,10 +333,10 @@ fn truncate(text: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::drc::DrcViolationType;
     use crate::state::{
         Component, ComponentType, SheetDefinition, SheetPortPolicy, SheetTemplate, Wire,
     };
+    use rspice_design::drc::DrcViolationType;
 
     fn state_with_hidden_object(hidden_id: u64) -> AppState {
         let mut state = AppState::default();

@@ -2,8 +2,8 @@
 //! `crate::workbench::chrome::title_bar`.
 
 use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
-use crate::services::drc::DrcSeverity;
 use crate::workbench::app_state::AppState;
+use rspice_design::drc::DrcSeverity;
 
 /// Per-run cap on per-finding console rows; the rest stay reachable via
 /// the canvas badges and typed finding-navigation commands.

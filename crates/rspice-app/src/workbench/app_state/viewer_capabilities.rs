@@ -423,8 +423,8 @@ mod tests {
     use super::*;
     use crate::analysis::{BodeData, EyeData, EyeTrace, FftData, NyquistData, WindowFunction};
     use crate::diagnostics::{LogSeverity, LogSource};
-    use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
     use crate::workbench::app_state::SpecializedViewerCacheAuthority;
+    use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
     fn retained_analysis(
         id: u64,

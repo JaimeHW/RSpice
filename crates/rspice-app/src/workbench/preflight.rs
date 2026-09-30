@@ -359,12 +359,12 @@ fn collect_report(state: &AppState) -> PreflightReport {
             state.library_manager.catalog(),
             execution_projection,
         );
-        let result = crate::services::drc::run_drc_check_with_hierarchy_and_config(
+        let result = rspice_design::drc::run_check_with_hierarchy(
             root_schematic,
             &hierarchy_source,
-            crate::services::drc::DrcConfig {
+            rspice_design::drc::DrcConfig {
                 check_missing_ground: true,
-                ..crate::services::drc::DrcConfig::default()
+                ..rspice_design::drc::DrcConfig::default()
             },
         );
         if result.completed {

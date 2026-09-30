@@ -11,10 +11,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use egui::{Context, Grid, RichText, ScrollArea, Ui, Vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::services::drc::{
-    DrcConfig, DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
-    run_drc_check_with_hierarchy_and_config,
-};
 use crate::state::workspace::DesignProjection;
 use crate::state::{
     BundleWidthMismatchPolicy, BusDeclaration, BusDirection, BusTargetKind, CellViewRef,
@@ -28,6 +24,10 @@ use crate::ui::widgets::{
 };
 use crate::workbench::design_system::section_header;
 use rspice_design::connectivity::summary::{DesignNet, NetClass, projection_nets};
+use rspice_design::drc::{
+    DrcConfig, DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
+    run_check_with_hierarchy,
+};
 use rspice_design::hierarchy::HierarchySource;
 
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
@@ -341,11 +341,7 @@ fn build_report(
         &projection,
         &state.workspace.content.active_view.key(),
     );
-    let drc = run_drc_check_with_hierarchy_and_config(
-        subject,
-        &hierarchy,
-        connectivity_drc_config(state),
-    );
+    let drc = run_check_with_hierarchy(subject, &hierarchy, connectivity_drc_config(state));
     // Typed-bus geometry, the bus rows, and every reveal anchor below stay on
     // the document the canvas paints: a materialized page carries namespaced
     // coordinates that would scroll the editor off the design.
@@ -1417,11 +1413,8 @@ fn validate_repair_candidate(
         .map_err(|error| error.to_string())?;
     let hierarchy =
         HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
-    let candidate_drc = run_drc_check_with_hierarchy_and_config(
-        candidate,
-        &hierarchy,
-        connectivity_drc_config(state),
-    );
+    let candidate_drc =
+        run_check_with_hierarchy(candidate, &hierarchy, connectivity_drc_config(state));
     let before = severe_drc_counts(baseline_drc);
     let after = severe_drc_counts(&candidate_drc);
     for (kind, count) in after {

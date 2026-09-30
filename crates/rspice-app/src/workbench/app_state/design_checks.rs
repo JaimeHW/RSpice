@@ -10,10 +10,10 @@ use std::collections::BTreeMap;
 use sha2::{Digest, Sha256};
 
 use crate::product::{ContentDigest, ObjectRevision, ProjectId};
-use crate::services::drc::{DrcConfig, DrcResult};
 use crate::state::{
     CanonicalCellViewOwnerKey, CellViewRef, ViewType, canonical_cell_view_owner_key,
 };
+use rspice_design::drc::{DrcConfig, DrcResult};
 
 use super::AppState;
 
@@ -113,11 +113,8 @@ impl AppState {
             self.library_manager.catalog(),
             &projection,
         );
-        let result = crate::services::drc::run_drc_check_with_hierarchy_and_config(
-            checked,
-            &hierarchy,
-            config.clone(),
-        );
+        let result =
+            rspice_design::drc::run_check_with_hierarchy(checked, &hierarchy, config.clone());
         self.publish_design_check_result(subject, config, result.clone())?;
         Ok(result)
     }

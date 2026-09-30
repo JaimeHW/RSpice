@@ -9,7 +9,6 @@ use std::collections::BTreeSet;
 
 use egui::{Align, Align2, Color32, Layout, Rect, Sense, Stroke, Ui, pos2, vec2};
 
-use crate::services::drc::DrcSeverity;
 use crate::state::netlist_document::{DiagnosticSeverity, DocumentOwnership};
 use crate::state::{CellViewRef, SimulationRunLifecycle, ViewType};
 use crate::ui::icons::Icon;
@@ -23,6 +22,7 @@ use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{property_row, property_row_toned};
 use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
 use crate::workbench::state::{ModelsCatalogScope, ModelsPage, ProjectPage, Workspace};
+use rspice_design::drc::DrcSeverity;
 
 use super::page::{
     self, BODY_TOP, CARD_GAP, HEADER_TOP, STACK_BREAKPOINT, elide_text, paint_elided,

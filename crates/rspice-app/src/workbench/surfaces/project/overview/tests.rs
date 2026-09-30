@@ -323,7 +323,7 @@ fn current_checks_without_a_retained_result_are_never_green() {
 
 #[test]
 fn project_problem_selects_the_highest_severity_finding() {
-    use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
+    use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
     let mut app = RSpiceApp::test_instance();
     app.state.workspace.content.active_view = CellViewRef::new(

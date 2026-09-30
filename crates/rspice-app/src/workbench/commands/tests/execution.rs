@@ -125,7 +125,7 @@ fn run_controls_follow_stable_execution_ownership_through_cancellation() {
 
 #[test]
 fn repeated_violation_navigation_keeps_advancing_after_jump_to_design() {
-    use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
+    use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
     let mut app = RSpiceApp::test_instance();
     let mut result = DrcResult::new();

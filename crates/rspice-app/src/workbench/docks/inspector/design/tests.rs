@@ -462,7 +462,7 @@ fn checks_are_stale_until_they_run_against_the_current_topology() {
     assert!(!checks_current(&state));
     assert_eq!(checks_status(&state), "stale");
 
-    state.dialogs.drc_results = Some(crate::services::drc::DrcResult::new());
+    state.dialogs.drc_results = Some(rspice_design::drc::DrcResult::new());
     state.dialogs.drc_checked_version = state.schematic.topology_version();
     assert!(checks_current(&state));
     assert_eq!(checks_status(&state), "0 errors");
@@ -471,34 +471,31 @@ fn checks_are_stale_until_they_run_against_the_current_topology() {
 #[test]
 fn sheet_check_rows_report_real_unconnected_and_floating_counts() {
     let mut state = AppState::default();
-    let mut result = crate::services::drc::DrcResult::new();
-    result.add_violation(crate::services::drc::DrcViolation::new(
+    let mut result = rspice_design::drc::DrcResult::new();
+    result.add_violation(rspice_design::drc::DrcViolation::new(
         1,
-        crate::services::drc::DrcViolationType::UnconnectedPin,
+        rspice_design::drc::DrcViolationType::UnconnectedPin,
         "R1.+ is open",
-        crate::services::drc::DrcLocation::Component {
+        rspice_design::drc::DrcLocation::Component {
             id: 1,
             name: "R1".to_owned(),
         },
     ));
-    result.add_violation(crate::services::drc::DrcViolation::new(
+    result.add_violation(rspice_design::drc::DrcViolation::new(
         2,
-        crate::services::drc::DrcViolationType::FloatingNode,
+        rspice_design::drc::DrcViolationType::FloatingNode,
         "net OUT is floating",
-        crate::services::drc::DrcLocation::Point { x: 0.0, y: 0.0 },
+        rspice_design::drc::DrcLocation::Point { x: 0.0, y: 0.0 },
     ));
     state.dialogs.drc_results = Some(result);
     state.dialogs.drc_checked_version = state.schematic.topology_version();
 
     assert_eq!(
-        current_violation_count(
-            &state,
-            crate::services::drc::DrcViolationType::UnconnectedPin
-        ),
+        current_violation_count(&state, rspice_design::drc::DrcViolationType::UnconnectedPin),
         1
     );
     assert_eq!(
-        current_violation_count(&state, crate::services::drc::DrcViolationType::FloatingNode),
+        current_violation_count(&state, rspice_design::drc::DrcViolationType::FloatingNode),
         1
     );
 }

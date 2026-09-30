@@ -9,7 +9,6 @@ mod sheet_membership;
 mod show_in_netlist;
 
 use crate::diagnostics::{LogAnchor, LogSource};
-use crate::services::drc::{DrcLocation, DrcViolationType};
 use crate::state::{
     Cell, CellViewRef, Component, ComponentType, LayoutEdit, LayoutInstance, LayoutObjectId,
     LayoutOrientation, LayoutPoint, LayoutTransform, Library, LibraryCellInstance, Point,
@@ -20,6 +19,7 @@ use crate::state::{
 use crate::workbench::ChoicePreference;
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::Workspace;
+use rspice_design::drc::{DrcLocation, DrcViolationType};
 
 #[test]
 fn generated_symbol_sync_advances_the_catalog_only_for_real_changes() {

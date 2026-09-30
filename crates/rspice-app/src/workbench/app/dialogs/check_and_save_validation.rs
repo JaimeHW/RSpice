@@ -12,15 +12,13 @@ use sha2::{Digest as _, Sha256};
 
 use crate::diagnostics::LogAnchor;
 use crate::product::ContentDigest;
-use crate::services::drc::{
-    DrcConfig, DrcLocation, DrcSeverity, run_drc_check_with_hierarchy_and_config,
-};
 use crate::state::{
     CellViewRef, SymbolResolver, ValidatedRevisionDependency, ValidationFindingCounts,
 };
 use crate::workbench::lifecycle::project_lifecycle::{
     SaveScope, accepted_generation, effective_save_scope, snapshot,
 };
+use rspice_design::drc::{DrcConfig, DrcLocation, DrcSeverity, run_check_with_hierarchy};
 use rspice_design::hierarchy::HierarchySource;
 use rspice_simulation::netlist_gen::generate_netlist_hierarchical;
 
@@ -321,7 +319,7 @@ impl CheckAndSaveValidationReport {
                 let configured_hierarchy = configured_hierarchy
                     .as_ref()
                     .expect("a resolved projection binds a hierarchy source");
-                let drc = run_drc_check_with_hierarchy_and_config(
+                let drc = run_check_with_hierarchy(
                     root,
                     configured_hierarchy,
                     DrcConfig {
@@ -457,11 +455,7 @@ impl CheckAndSaveValidationReport {
             let projected = projected_document(execution_projection.as_ref().ok(), key)
                 .filter(|_| key != &root_schematic_key);
             if let (Some(hierarchy), Some(schematic)) = (configured_hierarchy.as_ref(), projected) {
-                let drc = run_drc_check_with_hierarchy_and_config(
-                    schematic,
-                    hierarchy,
-                    DrcConfig::default(),
-                );
+                let drc = run_check_with_hierarchy(schematic, hierarchy, DrcConfig::default());
                 if !drc.completed {
                     insert_finding(
                         &mut findings,

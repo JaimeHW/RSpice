@@ -71,6 +71,40 @@ impl std::fmt::Display for PreparationError {
     }
 }
 
+/// Run the generated design's source checks before snapshot preparation.
+pub fn check_generated_design(
+    schematic: &impl AsRef<rspice_design::schematic::document::SchematicDocument>,
+    hierarchy: &rspice_design::hierarchy::HierarchySource<'_>,
+) -> Result<rspice_design::drc::DrcResult, PreparationError> {
+    let drc = rspice_design::drc::run_check_with_hierarchy(
+        schematic,
+        hierarchy,
+        rspice_design::drc::DrcConfig {
+            check_missing_ground: true,
+            ..rspice_design::drc::DrcConfig::default()
+        },
+    );
+    if !drc.completed {
+        return Err(PreparationError::new(
+            PreparationStage::DesignChecks,
+            "Schematic source checks did not complete",
+        ));
+    }
+    if drc.has_errors() {
+        let summary = drc.summary();
+        return Err(PreparationError::new(
+            PreparationStage::DesignChecks,
+            format!(
+                "Fix schematic source-check errors before simulation ({} critical, {} error{})",
+                summary.critical,
+                summary.errors,
+                if summary.errors == 1 { "" } else { "s" }
+            ),
+        ));
+    }
+    Ok(drc)
+}
+
 mod periodic_sources;
 pub use periodic_sources::validate_prepared_periodic_sources;
 pub mod touchstone;

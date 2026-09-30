@@ -11,13 +11,57 @@ use super::checker::{
 use super::input::{ComponentInfo, ParameterRangeIssue, PinInfo};
 use super::types::{DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 use crate::connectivity::{ConnectivityDiagnosticKind, ExtractedConnectivity, ExtractedTerminal};
+use crate::hierarchy::HierarchySource;
 use crate::properties::PropertyCatalog;
 use crate::properties::PropertyDefinition;
 use crate::properties::PropertyValue;
 use crate::schematic::component::Component;
 use crate::schematic::component_type::ComponentType;
+use crate::schematic::document::SchematicDocument;
 
-pub fn extract_components(
+/// Resolve the design once, and bind every placed component to it.
+pub fn extract_checked_design(
+    schematic: &impl AsRef<SchematicDocument>,
+    hierarchy: &HierarchySource<'_>,
+) -> (Vec<ComponentInfo>, ExtractedConnectivity) {
+    let connectivity = crate::connectivity::extract_with_hierarchy(schematic, Some(hierarchy));
+    let components = extract_components(schematic.as_ref(), &connectivity, |comp| {
+        if comp.kind != ComponentType::CellInstance {
+            return Some(true);
+        }
+        let Some(binding) = comp.library_cell.as_ref() else {
+            return Some(false);
+        };
+        if binding.source_path.is_some()
+            || binding.netlist_template.is_some()
+            || binding.is_executable_builtin()
+        {
+            return Some(true);
+        }
+        if hierarchy.has_execution_plan() {
+            // Top-level DRC extraction has no instance path with which to
+            // query an execution-plan rebind. Do not judge the placed
+            // binding when the executable authority may select another
+            // master.
+            return None;
+        }
+        Some(hierarchy.schematic_master_for_binding(binding).is_some())
+    });
+    (components, connectivity)
+}
+
+/// Run DRC using the active hierarchy's symbol and binding authority.
+pub fn run_check_with_hierarchy(
+    schematic: &impl AsRef<SchematicDocument>,
+    hierarchy: &HierarchySource<'_>,
+    config: DrcConfig,
+) -> DrcResult {
+    run_check(schematic.as_ref(), config, || {
+        extract_checked_design(schematic, hierarchy)
+    })
+}
+
+fn extract_components(
     schematic: &crate::schematic::document::SchematicDocument,
     connectivity: &ExtractedConnectivity,
     mut component_known_for: impl FnMut(&Component) -> Option<bool>,
@@ -315,7 +359,7 @@ const fn is_current_source(kind: ComponentType) -> bool {
 /// Check one design with its authoritative connectivity and component facts.
 /// The extractor runs once inside the measured operation; both returned inputs
 /// must describe the same document and connectivity pass.
-pub fn run_check(
+fn run_check(
     schematic: &crate::schematic::document::SchematicDocument,
     config: DrcConfig,
     extract: impl FnOnce() -> (Vec<ComponentInfo>, ExtractedConnectivity),

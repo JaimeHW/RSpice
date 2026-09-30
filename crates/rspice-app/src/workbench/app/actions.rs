@@ -1441,8 +1441,8 @@ mod shortcut_ownership_tests {
 
     #[test]
     fn next_marker_resolves_again_after_first_jump_activates_design() {
-        use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
         use crate::workbench::commands::vocabulary::CommandPlatform;
+        use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
         let mut app = RSpiceApp::test_instance();
         let mut result = DrcResult::new();

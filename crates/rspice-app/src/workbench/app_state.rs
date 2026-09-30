@@ -1116,7 +1116,7 @@ impl AppState {
     /// Only an exact, current receipt for the active cell/view can block. The
     /// legacy dialog projection is presentation state and is never execution
     /// authority. Manual deck runs use `manual_deck_run_block_reason` instead.
-    pub fn current_blocking_drc_result(&self) -> Option<&crate::services::drc::DrcResult> {
+    pub fn current_blocking_drc_result(&self) -> Option<&rspice_design::drc::DrcResult> {
         match self.active_design_check_status() {
             DesignCheckStatus::Current(receipt) if receipt.result.has_errors() => {
                 Some(&receipt.result)

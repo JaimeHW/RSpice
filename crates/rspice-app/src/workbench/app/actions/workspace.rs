@@ -9,7 +9,6 @@ mod symbol_document;
 
 use crate::diagnostics::{ConsoleMessage, LogAnchor, LogSeverity};
 use crate::schematic::view::SchematicSymbolContext;
-use crate::services::drc::DrcSeverity;
 use crate::state::{
     CellViewRef, ComponentType, OpenCellView, Point, PortDirection, PortSpec, SchematicState,
     SymbolDocument, View, ViewType,
@@ -17,6 +16,7 @@ use crate::state::{
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
 use crate::workbench::state::WorkspaceDocumentId;
+use rspice_design::drc::DrcSeverity;
 use std::collections::BTreeMap;
 
 pub(super) const MAX_FINDING_ROWS: usize = 50;

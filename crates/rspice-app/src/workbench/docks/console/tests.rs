@@ -2,10 +2,10 @@
 
 use super::*;
 use crate::diagnostics::LogSource;
-use crate::services::drc::{DrcResult, DrcSeverity};
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
 use crate::workbench::AppState;
 use crate::workbench::state::WorkbenchState;
+use rspice_design::drc::{DrcResult, DrcSeverity};
 
 #[test]
 fn console_empty_hints_match_mockup_spacing_and_type_scale() {

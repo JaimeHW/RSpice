@@ -6,7 +6,8 @@
 pub(crate) mod cloud_account;
 #[cfg(windows)]
 pub(crate) mod dpapi;
-pub(crate) mod drc;
+#[cfg(test)]
+mod drc_tests;
 pub(crate) mod license;
 pub(crate) mod live_protocol;
 pub(crate) mod model_hub;

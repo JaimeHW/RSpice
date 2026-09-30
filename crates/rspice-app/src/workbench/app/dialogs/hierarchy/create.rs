@@ -10,7 +10,6 @@ use egui::{Align, Context, Frame, Label, Layout, Margin, Sense, Stroke, Ui, UiBu
 
 use crate::diagnostics::ConsoleMessage;
 use crate::schematic::view::SchematicSymbolContext;
-use crate::services::drc::{DrcConfig, DrcViolation, run_drc_check_with_hierarchy_and_config};
 use crate::state::{
     Cell, CellViewRef, HierarchyExtractionPlan, HierarchyExtractionTerminal,
     HierarchyNetConnectivity, NetLabel, PortDirection, PortDiscipline, PortSpec,
@@ -23,6 +22,7 @@ use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
     select_mono_with_response,
 };
+use rspice_design::drc::{DrcConfig, DrcViolation, run_check_with_hierarchy};
 use rspice_design::hierarchy::HierarchySource;
 use rspice_simulation::netlist_gen::generate_netlist_hierarchical;
 
@@ -913,11 +913,9 @@ fn validate_candidate_drc(
         HierarchySource::from_workspace(baseline_libraries.catalog(), baseline_buffers);
     let candidate_hierarchy =
         HierarchySource::from_workspace(candidate_libraries.catalog(), candidate_buffers);
-    let baseline_result =
-        run_drc_check_with_hierarchy_and_config(baseline, &baseline_hierarchy, config.clone());
-    let parent_result =
-        run_drc_check_with_hierarchy_and_config(parent, &candidate_hierarchy, config.clone());
-    let child_result = run_drc_check_with_hierarchy_and_config(child, &candidate_hierarchy, config);
+    let baseline_result = run_check_with_hierarchy(baseline, &baseline_hierarchy, config.clone());
+    let parent_result = run_check_with_hierarchy(parent, &candidate_hierarchy, config.clone());
+    let child_result = run_check_with_hierarchy(child, &candidate_hierarchy, config);
     let baseline = baseline_result
         .violations()
         .iter()
