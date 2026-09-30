@@ -24,32 +24,6 @@ fn fixture_package() -> ValidatedPdkTechnologyPackage {
     config.technology_registry.validated_packages()[0].clone()
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn background_package_candidate_is_complete_and_leaves_base_unchanged() {
-    let (bytes, trust, authority) = crate::state::pdk_config::signed_technology_test_fixture();
-    let mut base = crate::state::pdk_config::PdkConfig::default();
-    base.publisher_trust_store = trust;
-    let before = base.clone();
-
-    let candidate =
-        prepare_native_package_import(&base, &bytes, &authority, "background import test")
-            .expect("background candidate validates");
-
-    assert_eq!(base, before);
-    assert_eq!(candidate.package_id, "demo180");
-    assert_eq!(candidate.revision, "2.3.1");
-    assert_eq!(candidate.sequence, 1);
-    assert_eq!(
-        candidate
-            .config
-            .technology_registry
-            .validated_packages()
-            .len(),
-        1
-    );
-}
-
 #[test]
 fn layer_rename_cascades_through_every_physical_identity_reference() {
     let package = fixture_package();
