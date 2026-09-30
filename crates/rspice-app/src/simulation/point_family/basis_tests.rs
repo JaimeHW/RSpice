@@ -1,8 +1,8 @@
 //! A family's signal basis must describe every retained point without invention.
 
 use super::*;
-use crate::services::simulation_runner::{CornerFrequencySweep, CornerRunConfig, TempRunConfig};
 use crate::state::{AnalysisType, SimulationState};
+use rspice_simulation::sweeps::{CornerFrequencySweep, CornerRunConfig, TempRunConfig};
 
 const CONDITIONAL: &str = "Conditional family\n\
     VDD vdd 0 DC 1.8 AC 1\n\

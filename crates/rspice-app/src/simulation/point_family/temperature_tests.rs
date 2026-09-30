@@ -1,8 +1,8 @@
 //! What a temperature step's family says about the points it declared.
 
 use super::*;
-use crate::services::simulation_runner::{CornerBaseMode, CornerFrequencySweep, TempRunConfig};
 use crate::state::{AnalysisResultFamilyMetadata, AnalysisType};
+use rspice_simulation::sweeps::{CornerBaseMode, CornerFrequencySweep, TempRunConfig};
 
 /// A divider whose upper leg carries a linear temperature coefficient, so the
 /// axis is the only thing that moves the answer and the answer can be written

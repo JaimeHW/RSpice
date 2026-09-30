@@ -13,8 +13,8 @@
 
 use super::*;
 
-use crate::services::simulation_runner::{CornerBaseMode, CornerRunConfig, TempRunConfig};
 use crate::simulation::point_family::{DeclaredAxisPoint, DeclaredRunPoint};
+use rspice_simulation::sweeps::{CornerBaseMode, CornerRunConfig, TempRunConfig};
 
 /// One prepared task per point of a corner run's declared space.
 ///
@@ -50,14 +50,13 @@ pub(super) fn expand_corner_run_point_tasks(
             format!("Corner PVT contract is invalid: {error}"),
         )
     })?;
-    let expanded = crate::services::simulation_runner::expand_corner_pvt_points(contract).map_err(
-        |error| {
+    let expanded =
+        rspice_simulation::sweeps::expand_corner_pvt_points(contract).map_err(|error| {
             PreparationError::new(
                 PreparationStage::AnalysisPlan,
                 format!("Corner PVT expansion failed: {error}"),
             )
-        },
-    )?;
+        })?;
     if expanded.is_empty() {
         return Err(PreparationError::new(
             PreparationStage::AnalysisPlan,
@@ -100,14 +99,14 @@ pub(super) fn expand_corner_run_point_tasks(
             deck,
             contract: NarrowedContract::Corner(CornerRunConfig {
                 nominal_voltage: nominal_supply_voltage,
-                points: vec![crate::services::simulation_runner::CornerPoint {
+                points: vec![rspice_simulation::sweeps::CornerPoint {
                     process,
                     voltage,
                     temperature_c: temperature_celsius,
                 }],
                 ..contract.clone()
             }),
-            origin: DeclaredAxisPoint::Corner(crate::services::simulation_runner::CornerPoint {
+            origin: DeclaredAxisPoint::Corner(rspice_simulation::sweeps::CornerPoint {
                 process,
                 voltage,
                 temperature_c: temperature_celsius,
@@ -357,9 +356,9 @@ fn point_base_analysis_request(
     Option<crate::simulation::AnalysisConfig>,
     String,
 ) {
-    use crate::services::simulation_runner::CornerFrequencySweep;
     use crate::simulation::dialog::{OpConfig, OpRunPointContext, OpTemperatureMode};
     use crate::simulation::multi_run::FrequencySweep;
+    use rspice_simulation::sweeps::CornerFrequencySweep;
 
     match base_mode {
         CornerBaseMode::Op | CornerBaseMode::ConfiguredOp(_) => {

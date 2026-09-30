@@ -695,7 +695,7 @@ struct PreparedPvtPoint {
     source_overrides: Vec<(String, String)>,
     /// Exact corner contract that owns process-model and nominal-voltage
     /// semantics for this point. Temperature-only axes do not carry one.
-    corner_contract: Option<crate::services::simulation_runner::CornerRunConfig>,
+    corner_contract: Option<rspice_simulation::sweeps::CornerRunConfig>,
     /// This point's identity in the Studio's global Run Set, as the point table
     /// and a per-analysis point selection both name it. Only the global
     /// expansion mints one; a corner or temperature declaration owns its own
@@ -984,13 +984,13 @@ pub(in crate::simulation) struct SnapshotParts {
 #[derive(Debug, Clone)]
 pub(in crate::simulation) struct PreparedRunSet {
     state: RunSetState,
-    corner_contract: crate::services::simulation_runner::CornerRunConfig,
+    corner_contract: rspice_simulation::sweeps::CornerRunConfig,
 }
 
 impl PreparedRunSet {
     pub(in crate::simulation) fn new(
         state: RunSetState,
-        corner_contract: crate::services::simulation_runner::CornerRunConfig,
+        corner_contract: rspice_simulation::sweeps::CornerRunConfig,
     ) -> Self {
         Self {
             state,
@@ -1949,8 +1949,7 @@ fn derive_pvt_points(
                 let corner = match task.spec_options.corner.as_ref() {
                     Some(corner) => corner,
                     None => {
-                        default_corner =
-                            crate::services::simulation_runner::CornerRunConfig::default();
+                        default_corner = rspice_simulation::sweeps::CornerRunConfig::default();
                         &default_corner
                     }
                 };
@@ -1960,8 +1959,7 @@ fn derive_pvt_points(
                         format!("Corner PVT contract is invalid: {error}"),
                     )
                 })?;
-                let expanded_corner =
-                    crate::services::simulation_runner::expand_corner_pvt_points(corner);
+                let expanded_corner = rspice_simulation::sweeps::expand_corner_pvt_points(corner);
                 let points = expanded_corner.map_err(|error| {
                     PreparationError::new(
                         PreparationStage::AnalysisPlan,
@@ -2080,9 +2078,7 @@ fn reference_pvt_point(process: ProcessCorner, temperature_celsius: f64) -> Prep
     }
 }
 
-fn corner_contract_digest(
-    contract: &crate::services::simulation_runner::CornerRunConfig,
-) -> ContentDigest {
+fn corner_contract_digest(contract: &rspice_simulation::sweeps::CornerRunConfig) -> ContentDigest {
     let mut writer = CanonicalWriter::new("rspice.op-pvt-corner-contract/v1");
     writer.option(contract.nominal_voltage.as_ref(), |writer, voltage| {
         writer.f64(*voltage);

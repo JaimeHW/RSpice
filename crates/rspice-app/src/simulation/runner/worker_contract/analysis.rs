@@ -97,13 +97,13 @@ impl From<WorkerSpecExecutionOptions> for SpecExecutionOptions {
                 .map(crate::simulation::runner::study::StudyRunConfig::from),
             temp: value
                 .temp
-                .map(crate::services::simulation_runner::TempRunConfig::from),
+                .map(rspice_simulation::sweeps::TempRunConfig::from),
             parametric_base: value
                 .parametric_base
-                .map(crate::services::simulation_runner::CornerBaseMode::from),
+                .map(rspice_simulation::sweeps::CornerBaseMode::from),
             corner: value
                 .corner
-                .map(crate::services::simulation_runner::CornerRunConfig::from),
+                .map(rspice_simulation::sweeps::CornerRunConfig::from),
             pac: value
                 .pac
                 .map(crate::services::simulation_runner::PacRunConfig::from),
@@ -258,239 +258,6 @@ impl From<WorkerStudyRunConfig> for crate::simulation::runner::study::StudyRunCo
             histogram_bins,
             objective_terms,
             constraints,
-        }
-    }
-}
-
-impl From<&crate::services::simulation_runner::TempRunConfig> for WorkerTempRunConfig {
-    fn from(value: &crate::services::simulation_runner::TempRunConfig) -> Self {
-        Self {
-            temperatures_c: value.temperatures_c.clone(),
-            base_mode: WorkerCornerBaseMode::from(&value.base_mode),
-        }
-    }
-}
-
-impl From<WorkerTempRunConfig> for crate::services::simulation_runner::TempRunConfig {
-    fn from(value: WorkerTempRunConfig) -> Self {
-        Self {
-            temperatures_c: value.temperatures_c,
-            base_mode: crate::services::simulation_runner::CornerBaseMode::from(value.base_mode),
-        }
-    }
-}
-
-impl From<&crate::services::simulation_runner::CornerRunConfig> for WorkerCornerRunConfig {
-    fn from(value: &crate::services::simulation_runner::CornerRunConfig) -> Self {
-        Self {
-            process_corners: value
-                .process_corners
-                .iter()
-                .copied()
-                .map(WorkerCornerProcess::from)
-                .collect(),
-            voltages: value.voltages.clone(),
-            supply_source_names: value.supply_source_names.clone(),
-            temperatures_c: value.temperatures_c.clone(),
-            full_matrix: value.full_matrix,
-            nominal_voltage: value.nominal_voltage,
-            base_mode: WorkerCornerBaseMode::from(&value.base_mode),
-            model_bindings: value
-                .model_bindings
-                .iter()
-                .map(WorkerCornerModelBinding::from)
-                .collect(),
-            points: value
-                .points
-                .iter()
-                .map(|point| WorkerCornerPoint {
-                    process: WorkerCornerProcess::from(point.process),
-                    voltage: point.voltage,
-                    temperature_c: point.temperature_c,
-                })
-                .collect(),
-        }
-    }
-}
-
-impl From<WorkerCornerRunConfig> for crate::services::simulation_runner::CornerRunConfig {
-    fn from(value: WorkerCornerRunConfig) -> Self {
-        Self {
-            process_corners: value
-                .process_corners
-                .into_iter()
-                .map(rspice_app_types::product::ProcessCorner::from)
-                .collect(),
-            voltages: value.voltages,
-            supply_source_names: value.supply_source_names,
-            temperatures_c: value.temperatures_c,
-            full_matrix: value.full_matrix,
-            nominal_voltage: value.nominal_voltage,
-            base_mode: crate::services::simulation_runner::CornerBaseMode::from(value.base_mode),
-            model_bindings: value
-                .model_bindings
-                .into_iter()
-                .map(rspice_model_library::CornerModelBinding::from)
-                .collect(),
-            points: value
-                .points
-                .into_iter()
-                .map(|point| crate::services::simulation_runner::CornerPoint {
-                    process: rspice_app_types::product::ProcessCorner::from(point.process),
-                    voltage: point.voltage,
-                    temperature_c: point.temperature_c,
-                })
-                .collect(),
-        }
-    }
-}
-
-impl From<&crate::services::simulation_runner::CornerBaseMode> for WorkerCornerBaseMode {
-    fn from(value: &crate::services::simulation_runner::CornerBaseMode) -> Self {
-        match value {
-            crate::services::simulation_runner::CornerBaseMode::Op => Self::Op,
-            crate::services::simulation_runner::CornerBaseMode::ConfiguredOp(config) => {
-                Self::ConfiguredOp(config.clone())
-            }
-            crate::services::simulation_runner::CornerBaseMode::DcSweep {
-                modes,
-                source_name,
-                start,
-                stop,
-                step,
-            } => Self::DcSweep {
-                modes: modes.clone(),
-                source_name: source_name.clone(),
-                start: *start,
-                stop: *stop,
-                step: *step,
-            },
-            crate::services::simulation_runner::CornerBaseMode::DcSweepNested {
-                modes,
-                source_name,
-                start,
-                stop,
-                step,
-                source2,
-                start2,
-                stop2,
-                step2,
-            } => Self::DcSweepNested {
-                modes: modes.clone(),
-                source_name: source_name.clone(),
-                start: *start,
-                stop: *stop,
-                step: *step,
-                source2: source2.clone(),
-                start2: *start2,
-                stop2: *stop2,
-                step2: *step2,
-            },
-            crate::services::simulation_runner::CornerBaseMode::Transient {
-                stop_time,
-                step_time,
-            } => Self::Transient {
-                stop_time: *stop_time,
-                step_time: *step_time,
-            },
-            crate::services::simulation_runner::CornerBaseMode::TransientWindow {
-                stop_time,
-                step_time,
-                start_time,
-                max_timestep,
-                uic,
-            } => Self::TransientWindow {
-                stop_time: *stop_time,
-                step_time: *step_time,
-                start_time: *start_time,
-                max_timestep: *max_timestep,
-                uic: *uic,
-            },
-            crate::services::simulation_runner::CornerBaseMode::Ac {
-                start_freq,
-                stop_freq,
-                points_per_unit,
-                sweep,
-            } => Self::Ac {
-                start_freq: *start_freq,
-                stop_freq: *stop_freq,
-                points_per_unit: *points_per_unit,
-                sweep: WorkerSweepType::from(*sweep),
-            },
-        }
-    }
-}
-
-impl From<WorkerCornerBaseMode> for crate::services::simulation_runner::CornerBaseMode {
-    fn from(value: WorkerCornerBaseMode) -> Self {
-        match value {
-            WorkerCornerBaseMode::Op => Self::Op,
-            WorkerCornerBaseMode::ConfiguredOp(config) => Self::ConfiguredOp(config),
-            WorkerCornerBaseMode::DcSweep {
-                modes,
-                source_name,
-                start,
-                stop,
-                step,
-            } => Self::DcSweep {
-                modes,
-                source_name,
-                start,
-                stop,
-                step,
-            },
-            WorkerCornerBaseMode::DcSweepNested {
-                modes,
-                source_name,
-                start,
-                stop,
-                step,
-                source2,
-                start2,
-                stop2,
-                step2,
-            } => Self::DcSweepNested {
-                modes,
-                source_name,
-                start,
-                stop,
-                step,
-                source2,
-                start2,
-                stop2,
-                step2,
-            },
-            WorkerCornerBaseMode::Transient {
-                stop_time,
-                step_time,
-            } => Self::Transient {
-                stop_time,
-                step_time,
-            },
-            WorkerCornerBaseMode::TransientWindow {
-                stop_time,
-                step_time,
-                start_time,
-                max_timestep,
-                uic,
-            } => Self::TransientWindow {
-                stop_time,
-                step_time,
-                start_time,
-                max_timestep,
-                uic,
-            },
-            WorkerCornerBaseMode::Ac {
-                start_freq,
-                stop_freq,
-                points_per_unit,
-                sweep,
-            } => Self::Ac {
-                start_freq,
-                stop_freq,
-                points_per_unit,
-                sweep: crate::services::simulation_runner::CornerFrequencySweep::from(sweep),
-            },
         }
     }
 }
@@ -707,16 +474,6 @@ impl From<crate::services::simulation_runner::PnoiseFrequencySweep> for WorkerSw
     }
 }
 
-impl From<crate::services::simulation_runner::CornerFrequencySweep> for WorkerSweepType {
-    fn from(value: crate::services::simulation_runner::CornerFrequencySweep) -> Self {
-        match value {
-            crate::services::simulation_runner::CornerFrequencySweep::Decade => Self::Decade,
-            crate::services::simulation_runner::CornerFrequencySweep::Octave => Self::Octave,
-            crate::services::simulation_runner::CornerFrequencySweep::Linear => Self::Linear,
-        }
-    }
-}
-
 impl From<WorkerSweepType> for crate::services::simulation_runner::PacFrequencySweep {
     fn from(value: WorkerSweepType) -> Self {
         match value {
@@ -738,16 +495,6 @@ impl From<WorkerSweepType> for crate::services::simulation_runner::PxfFrequencyS
 }
 
 impl From<WorkerSweepType> for crate::services::simulation_runner::PnoiseFrequencySweep {
-    fn from(value: WorkerSweepType) -> Self {
-        match value {
-            WorkerSweepType::Decade => Self::Decade,
-            WorkerSweepType::Octave => Self::Octave,
-            WorkerSweepType::Linear => Self::Linear,
-        }
-    }
-}
-
-impl From<WorkerSweepType> for crate::services::simulation_runner::CornerFrequencySweep {
     fn from(value: WorkerSweepType) -> Self {
         match value {
             WorkerSweepType::Decade => Self::Decade,

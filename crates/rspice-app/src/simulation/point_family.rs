@@ -25,12 +25,13 @@ use rspice_core::{NoAbort, Value};
 
 use crate::product::AnalysisInstanceId;
 use crate::services::simulation_runner::{
-    CornerBaseMode, CornerPoint, SweepPointResult, map_corner_results, map_temperature_results,
+    SweepPointResult, map_corner_results, map_temperature_results,
 };
 use crate::simulation::SimulationResult;
 use crate::simulation::execution::AuthorizedTaskDispatch;
-use rspice_simulation::results::WaveformData;
 use crate::state::{AnalysisResult, AnalysisResultPayload, SimulationRun};
+use rspice_simulation::results::WaveformData;
+use rspice_simulation::sweeps::{CornerBaseMode, CornerPoint};
 
 /// Ground, which the sweep mappers require at index 0 and never plot.
 const GROUND_NODE: &str = "0";

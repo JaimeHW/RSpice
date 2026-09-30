@@ -62,11 +62,11 @@ pub struct SpecExecutionOptions {
     /// Histogram bins for the default all-node OP study. Configured bases carry their own.
     pub mc_histogram_bins: Option<usize>,
     pub mc_statistics: Option<crate::simulation::dialog::mc::statistics::McStatisticsConfig>,
-    pub temp: Option<crate::services::simulation_runner::TempRunConfig>,
+    pub temp: Option<rspice_simulation::sweeps::TempRunConfig>,
     /// Base analysis paired with a design-parameter `.STEP`. `None` retains
     /// the classic operating-point behavior for older prepared requests.
-    pub parametric_base: Option<crate::services::simulation_runner::CornerBaseMode>,
-    pub corner: Option<crate::services::simulation_runner::CornerRunConfig>,
+    pub parametric_base: Option<rspice_simulation::sweeps::CornerBaseMode>,
+    pub corner: Option<rspice_simulation::sweeps::CornerRunConfig>,
     pub pac: Option<crate::services::simulation_runner::PacRunConfig>,
     pub pxf: Option<crate::services::simulation_runner::PxfRunConfig>,
     pub pnoise: Option<crate::services::simulation_runner::PnoiseRunConfig>,

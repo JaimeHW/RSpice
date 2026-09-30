@@ -102,7 +102,7 @@ pub(in crate::simulation) fn run_hb_spec_with_op(
 /// expansion produced.
 pub(crate) fn run_corner_declaration(
     deck: &str,
-    contract: crate::services::simulation_runner::CornerRunConfig,
+    contract: rspice_simulation::sweeps::CornerRunConfig,
     reference_temperature_celsius: f64,
 ) -> Result<SimulationRun, String> {
     run_declaration(
@@ -128,7 +128,7 @@ pub(crate) fn run_corner_declaration(
 /// expansion produced.
 pub(crate) fn run_temperature_declaration(
     deck: &str,
-    contract: crate::services::simulation_runner::TempRunConfig,
+    contract: rspice_simulation::sweeps::TempRunConfig,
     reference_temperature_celsius: f64,
 ) -> Result<SimulationRun, String> {
     run_declaration(

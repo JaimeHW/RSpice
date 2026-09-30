@@ -59,9 +59,9 @@ pub(crate) use rspice_simulation_contract::worker_result_values::{
     WorkerTransferFunctionScalar,
 };
 pub(crate) use rspice_simulation_contract::worker_run_config::{
-    WorkerCornerBaseMode, WorkerCornerModelBinding, WorkerCornerPoint, WorkerCornerProcess,
-    WorkerCornerRunConfig, WorkerPacRunConfig, WorkerPeriodicCarrier, WorkerPnoiseReference,
-    WorkerPnoiseRunConfig, WorkerPstbRunConfig, WorkerPxfRunConfig, WorkerTempRunConfig,
+    WorkerCornerBaseMode, WorkerCornerRunConfig, WorkerPacRunConfig, WorkerPeriodicCarrier,
+    WorkerPnoiseReference, WorkerPnoiseRunConfig, WorkerPstbRunConfig, WorkerPxfRunConfig,
+    WorkerTempRunConfig,
 };
 #[cfg(test)]
 pub(crate) use rspice_simulation_contract::worker_soa::WorkerSoAParameter;

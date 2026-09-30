@@ -1488,12 +1488,12 @@ fn ui_progress_fraction_uses_runner_fraction_or_running_floor() {
 #[test]
 fn a_corner_declarations_turn_assembles_its_family_without_reaching_the_runner() {
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
-    use crate::services::simulation_runner::{CornerBaseMode, CornerRunConfig};
     use crate::simulation::execution::{
         ExecutionPermitIssuer, ExecutionTargetCapabilities, PreparedRunSnapshot, PreparedTask,
         RunSourceReceipt, SavePolicy, SnapshotParts,
     };
     use rspice_app_types::product::ProcessCorner;
+    use rspice_simulation::sweeps::{CornerBaseMode, CornerRunConfig};
 
     let corner = QueuedAnalysis {
         numeric_override: None,

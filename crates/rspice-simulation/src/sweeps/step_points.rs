@@ -8,10 +8,10 @@ use rspice_core::netlist::StepSweep;
 use rspice_core::{ResourceKind, ResourceLimits, Value};
 use std::fmt;
 
-use rspice_simulation::error::{ServiceRunError, ServiceRunResult, poll_periodically};
+use crate::error::{ServiceRunError, ServiceRunResult, poll_periodically};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum StepSweepExpandError {
+pub enum StepSweepExpandError {
     NonFiniteLinearSweep,
     ZeroLinearStep,
     LinearDirectionMismatch,
@@ -98,9 +98,7 @@ fn point_buffer(capacity: usize) -> Result<Vec<Value>, StepSweepExpandError> {
     Ok(values)
 }
 
-pub(crate) fn expand_step_sweep_values(
-    sweep: &StepSweep,
-) -> Result<Vec<Value>, StepSweepExpandError> {
+pub fn expand_step_sweep_values(sweep: &StepSweep) -> Result<Vec<Value>, StepSweepExpandError> {
     match expand_step_sweep_values_impl(sweep, ResourceLimits::default().max_batch_runs, None) {
         Ok(values) => Ok(values),
         Err(StepSweepExpansionFailure::Invalid(error)) => Err(error),
@@ -110,7 +108,7 @@ pub(crate) fn expand_step_sweep_values(
     }
 }
 
-pub(super) fn expand_step_sweep_values_with_abort(
+pub fn expand_step_sweep_values_with_abort(
     sweep: &StepSweep,
     max_batch_runs: usize,
     abort: &dyn AbortSignal,

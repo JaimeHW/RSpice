@@ -4,13 +4,14 @@
 //! parameter values that produced them so a plot can be swept by parameter
 //! rather than by run index.
 
-use rspice_simulation::error::{
-    ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically,
-};
-use super::types::{CornerMetricLabel, CornerPoint, SweepPointResult};
+use super::types::SweepPointResult;
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::netlist::{StepCommand, StepSweep, StepTarget};
+use rspice_simulation::error::{
+    ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically,
+};
+use rspice_simulation::sweeps::{CornerMetricLabel, CornerPoint};
 
 pub(super) fn describe_step_target(step_cmd: &StepCommand) -> String {
     if let StepSweep::Data { table_name } = &step_cmd.sweep {

@@ -59,7 +59,6 @@ pub use envelope_fourier::{
 pub(crate) use envelope_fourier::{
     fourier_output_is_current, run_fourier_from_observation_with_abort, split_fourier_output,
 };
-pub use rspice_simulation::error::{ServiceRunError, ServiceRunResult};
 #[cfg(test)]
 pub use hb::run_hb_analysis_with_source_path_and_abort;
 pub(crate) use hb::{
@@ -127,6 +126,7 @@ pub use pstb::PstbRunConfig;
 pub(crate) use pstb::{PstbData, run_pstb_analysis_on_materialized_with_abort};
 #[cfg(test)]
 pub use qpss::run_qpss_analysis_with_source_path_and_abort;
+pub use rspice_simulation::error::{ServiceRunError, ServiceRunResult};
 pub(crate) use rspice_simulation_contract::config::validate_noise_sidebands;
 // DC sweep, noise, pole-zero, and sensitivity have no entry here, and that is
 // the module boundary rather than an omission. The seven fundamental analyses
@@ -143,16 +143,14 @@ pub use sparameter::{
     run_sparameter_analysis_with_source_path_and_abort,
 };
 pub use stb::run_stb_analysis_with_sweep_and_source_path_and_abort;
-pub use sweeps::{
-    CornerBaseMode, CornerFrequencySweep, CornerPoint, CornerRunConfig, TempRunConfig,
-    run_parametric_analysis_with_base_and_source_path_and_abort,
-    run_parametric_analysis_with_source_path_and_abort,
-};
 pub(crate) use sweeps::{
     REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END, SweepPointResult,
-    apply_voltage_corner, expand_corner_pvt_points, expand_step_sweep_values,
-    infer_nominal_supply_voltage, map_corner_results, map_temperature_results,
-    materialize_corner_process_source,
+    apply_voltage_corner, infer_nominal_supply_voltage, map_corner_results,
+    map_temperature_results, materialize_corner_process_source,
+};
+pub use sweeps::{
+    run_parametric_analysis_with_base_and_source_path_and_abort,
+    run_parametric_analysis_with_source_path_and_abort,
 };
 pub use tf::{
     TfAccuracy, TfNormalization, TfQuantity, TfRunConfig, infer_tf_run_config,

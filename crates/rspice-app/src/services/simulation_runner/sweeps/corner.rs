@@ -4,13 +4,14 @@
 //! task carries its own deck. This is where that deck gets the process
 //! corner's real model cards in place of the reference ones.
 
-use rspice_simulation::error::{
-    ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically,
-};
-use super::types::{CornerRunConfig, REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END};
+use super::types::{REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END};
 use rspice_core::abort_signal::AbortSignal;
 #[cfg(test)]
 use rspice_core::abort_signal::NoAbort;
+use rspice_simulation::error::{
+    ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically,
+};
+use rspice_simulation::sweeps::CornerRunConfig;
 
 /// Freeze the exact executable source for one process corner. This is what
 /// keeps a process axis from being retained as metadata while the solver
@@ -155,11 +156,10 @@ fn inject_model_cards_with_abort(
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use super::super::execution::expand_corner_points;
-    use super::super::types::CornerBaseMode;
     use super::*;
     use rspice_app_types::product::ProcessCorner;
     use rspice_model_library::CornerModelBinding;
+    use rspice_simulation::sweeps::CornerBaseMode;
 
     struct AbortOnPoll {
         abort_on: usize,
@@ -295,36 +295,6 @@ mod tests {
                 .to_string()
                 .contains("not an enabled point")
         );
-    }
-
-    #[test]
-    fn a_diagonal_sweep_refuses_unequal_axes_rather_than_cycling_the_shorter_one() {
-        let unequal = CornerRunConfig {
-            process_corners: vec![ProcessCorner::TT],
-            voltages: vec![0.9, 1.0],
-            supply_source_names: vec!["VDD".to_owned()],
-            temperatures_c: vec![-40.0, 27.0, 125.0],
-            full_matrix: false,
-            ..CornerRunConfig::default()
-        };
-
-        let error = unequal
-            .validate()
-            .expect_err("2 and 3 have no index-by-index pairing");
-        assert!(error.contains("equal non-scalar axis lengths"), "{error}");
-
-        // A single-valued axis is shared by every point, which is a pairing.
-        let shared = CornerRunConfig {
-            voltages: vec![1.0],
-            ..unequal
-        };
-        shared
-            .validate()
-            .expect("a scalar axis pairs with any length");
-        let points = expand_corner_points(&shared, 64).expect("diagonal expansion");
-        assert_eq!(points.len(), 3);
-        assert!(points.iter().all(|point| point.voltage == 1.0));
-        assert_eq!(points[2].temperature_c, 125.0);
     }
 
     #[test]

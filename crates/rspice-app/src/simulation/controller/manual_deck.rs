@@ -10,7 +10,7 @@ use rspice_core::netlist::{
     PoleZeroTransferType, StepCommand, StepTarget,
 };
 
-use crate::services::simulation_runner::{
+use rspice_simulation::sweeps::{
     CornerBaseMode, CornerFrequencySweep, TempRunConfig, expand_step_sweep_values,
 };
 

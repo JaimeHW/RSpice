@@ -863,8 +863,8 @@ fn a_filtered_space_reaches_the_executor_as_the_points_it_resolved() {
 
     // The expansion the executor and operating-point preparation share must
     // return exactly that list, not the matrix the axes would rebuild.
-    let expanded = crate::services::simulation_runner::expand_corner_pvt_points(
-        &crate::services::simulation_runner::CornerRunConfig {
+    let expanded = rspice_simulation::sweeps::expand_corner_pvt_points(
+        &rspice_simulation::sweeps::CornerRunConfig {
             process_corners: vec![
                 rspice_app_types::product::ProcessCorner::TT,
                 rspice_app_types::product::ProcessCorner::SS,
@@ -875,7 +875,7 @@ fn a_filtered_space_reaches_the_executor_as_the_points_it_resolved() {
             points: config
                 .points
                 .iter()
-                .map(|point| crate::services::simulation_runner::CornerPoint {
+                .map(|point| rspice_simulation::sweeps::CornerPoint {
                     process: point.process,
                     voltage: point.voltage,
                     temperature_c: point.temperature_celsius,

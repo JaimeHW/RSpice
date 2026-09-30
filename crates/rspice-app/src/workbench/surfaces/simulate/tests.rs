@@ -2137,9 +2137,9 @@ fn a_render_path_refusal_restated_every_frame_does_not_spin_the_sequence() {
 /// measures the divider output. The supply axis is what makes the corners
 /// disagree: `V(out)` is half the supply the point was solved at.
 fn corner_evidence_run() -> SimulationRun {
-    use crate::services::simulation_runner::{CornerBaseMode, CornerRunConfig};
     use rspice_app_types::product::ProcessCorner;
     use rspice_model_library::CornerModelBinding;
+    use rspice_simulation::sweeps::{CornerBaseMode, CornerRunConfig};
 
     let deck = "corner evidence\n\
          VDD vdd 0 DC 1.8\n\
@@ -2265,9 +2265,9 @@ fn a_corner_run_answers_a_specification_at_each_of_its_own_points() {
 /// it was never given evidence for.
 #[test]
 fn a_corner_point_that_cannot_be_solved_is_retained_as_a_failure() {
-    use crate::services::simulation_runner::{CornerBaseMode, CornerRunConfig};
     use rspice_app_types::product::ProcessCorner;
     use rspice_model_library::CornerModelBinding;
+    use rspice_simulation::sweeps::{CornerBaseMode, CornerRunConfig};
 
     // The base analysis names a sweep source the deck does not define, so
     // every point fails in the engine rather than in preparation.
@@ -2337,7 +2337,7 @@ fn a_corner_point_that_cannot_be_solved_is_retained_as_a_failure() {
 /// output. The upper leg carries a linear temperature coefficient, so the
 /// temperatures disagree by construction: `V(out)` falls as the deck heats up.
 fn temperature_evidence_run() -> SimulationRun {
-    use crate::services::simulation_runner::{CornerBaseMode, TempRunConfig};
+    use rspice_simulation::sweeps::{CornerBaseMode, TempRunConfig};
 
     let deck = "temperature evidence\n\
          VDD vdd 0 DC 1.8\n\

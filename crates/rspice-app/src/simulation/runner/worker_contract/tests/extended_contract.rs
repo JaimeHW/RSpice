@@ -809,13 +809,13 @@ fn sampled_pnoise_studio_worker_preserves_sampling_controls() {
 
 #[test]
 fn worker_spec_request_preserves_parametric_temp_execution_options() {
-    let temp = crate::services::simulation_runner::TempRunConfig {
+    let temp = rspice_simulation::sweeps::TempRunConfig {
         temperatures_c: vec![-40.0, 25.0, 125.0],
-        base_mode: crate::services::simulation_runner::CornerBaseMode::Ac {
+        base_mode: rspice_simulation::sweeps::CornerBaseMode::Ac {
             start_freq: 10.0,
             stop_freq: 1.0e6,
             points_per_unit: 21,
-            sweep: crate::services::simulation_runner::CornerFrequencySweep::Octave,
+            sweep: rspice_simulation::sweeps::CornerFrequencySweep::Octave,
         },
     };
     let request = SimulationRequest::Spec {
@@ -855,7 +855,7 @@ fn worker_spec_request_preserves_parametric_temp_execution_options() {
 
 #[test]
 fn worker_spec_request_preserves_corner_execution_options() {
-    let corner = crate::services::simulation_runner::CornerRunConfig {
+    let corner = rspice_simulation::sweeps::CornerRunConfig {
         process_corners: vec![
             rspice_app_types::product::ProcessCorner::SS,
             rspice_app_types::product::ProcessCorner::FF,
@@ -865,7 +865,7 @@ fn worker_spec_request_preserves_corner_execution_options() {
         temperatures_c: vec![-40.0, 25.0, 125.0],
         full_matrix: false,
         nominal_voltage: Some(1.0),
-        base_mode: crate::services::simulation_runner::CornerBaseMode::Transient {
+        base_mode: rspice_simulation::sweeps::CornerBaseMode::Transient {
             stop_time: 5.0e-6,
             step_time: 10.0e-9,
         },
@@ -887,12 +887,12 @@ fn worker_spec_request_preserves_corner_execution_options() {
         // handed only the axes would rebuild the cross product and solve the
         // combinations the declaration removed.
         points: vec![
-            crate::services::simulation_runner::CornerPoint {
+            rspice_simulation::sweeps::CornerPoint {
                 process: rspice_app_types::product::ProcessCorner::SS,
                 voltage: 0.9,
                 temperature_c: 125.0,
             },
-            crate::services::simulation_runner::CornerPoint {
+            rspice_simulation::sweeps::CornerPoint {
                 process: rspice_app_types::product::ProcessCorner::FF,
                 voltage: 1.1,
                 temperature_c: -40.0,
@@ -1253,16 +1253,16 @@ fn assert_pstb_config_matches(
 }
 
 fn assert_temp_config_matches(
-    actual: &crate::services::simulation_runner::TempRunConfig,
-    expected: &crate::services::simulation_runner::TempRunConfig,
+    actual: &rspice_simulation::sweeps::TempRunConfig,
+    expected: &rspice_simulation::sweeps::TempRunConfig,
 ) {
     assert_eq!(actual.temperatures_c, expected.temperatures_c);
     assert_corner_base_mode_matches(&actual.base_mode, &expected.base_mode);
 }
 
 fn assert_corner_config_matches(
-    actual: &crate::services::simulation_runner::CornerRunConfig,
-    expected: &crate::services::simulation_runner::CornerRunConfig,
+    actual: &rspice_simulation::sweeps::CornerRunConfig,
+    expected: &rspice_simulation::sweeps::CornerRunConfig,
 ) {
     assert_eq!(actual.process_corners, expected.process_corners);
     assert_eq!(actual.voltages, expected.voltages);
@@ -1275,10 +1275,10 @@ fn assert_corner_config_matches(
 }
 
 fn assert_corner_base_mode_matches(
-    actual: &crate::services::simulation_runner::CornerBaseMode,
-    expected: &crate::services::simulation_runner::CornerBaseMode,
+    actual: &rspice_simulation::sweeps::CornerBaseMode,
+    expected: &rspice_simulation::sweeps::CornerBaseMode,
 ) {
-    use crate::services::simulation_runner::CornerBaseMode;
+    use rspice_simulation::sweeps::CornerBaseMode;
 
     match (actual, expected) {
         (CornerBaseMode::Op, CornerBaseMode::Op) => {}

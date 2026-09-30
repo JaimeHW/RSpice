@@ -289,11 +289,9 @@ impl SimulationController {
     pub(super) fn temp_run_config_from_dialog(
         state: &AppState,
         temp_cfg: &crate::simulation::dialog::temp::TempConfig,
-    ) -> Result<crate::services::simulation_runner::TempRunConfig, String> {
-        use crate::services::simulation_runner::{
-            CornerBaseMode, CornerFrequencySweep, TempRunConfig,
-        };
+    ) -> Result<rspice_simulation::sweeps::TempRunConfig, String> {
         use crate::simulation::dialog::temp::TempBaseAnalysis;
+        use rspice_simulation::sweeps::{CornerBaseMode, CornerFrequencySweep, TempRunConfig};
 
         let temperatures_c = if !temp_cfg.specific_temps.is_empty() {
             temp_cfg.specific_temps.clone()
@@ -342,11 +340,11 @@ impl SimulationController {
         state: &AppState,
         corner_cfg: &crate::simulation::dialog::corner::CornerConfig,
         sealed_model_sources: &crate::state::model_library::SealedModelExecutionSources,
-    ) -> Result<crate::services::simulation_runner::CornerRunConfig, String> {
-        use crate::services::simulation_runner::{
+    ) -> Result<rspice_simulation::sweeps::CornerRunConfig, String> {
+        use crate::simulation::dialog::corner::CornerBaseAnalysis;
+        use rspice_simulation::sweeps::{
             CornerBaseMode, CornerFrequencySweep, CornerPoint, CornerRunConfig,
         };
-        use crate::simulation::dialog::corner::CornerBaseAnalysis;
 
         let process_corners = corner_cfg.process_corners.clone();
         let points: Vec<CornerPoint> = corner_cfg
@@ -408,8 +406,8 @@ impl SimulationController {
 
     fn transient_study_base_mode(
         state: &AppState,
-    ) -> Result<crate::services::simulation_runner::CornerBaseMode, String> {
-        use crate::services::simulation_runner::CornerBaseMode;
+    ) -> Result<rspice_simulation::sweeps::CornerBaseMode, String> {
+        use rspice_simulation::sweeps::CornerBaseMode;
         let draft = &state.sim_setup.tran;
         let config = crate::simulation::config::TransientAnalysisConfig {
             stop_time: parse_spice_value_checked(&draft.stop)
@@ -476,8 +474,8 @@ impl SimulationController {
 #[cfg(test)]
 mod pvt_base_tests {
     use super::*;
-    use crate::services::simulation_runner::CornerBaseMode;
     use crate::simulation::runner::worker_contract::WorkerCornerBaseMode;
+    use rspice_simulation::sweeps::CornerBaseMode;
 
     #[test]
     fn pvt_base_transient_window_survives_configuration_and_worker_transport() {

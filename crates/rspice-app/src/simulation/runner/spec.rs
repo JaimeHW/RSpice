@@ -800,9 +800,9 @@ R2 out 0 1k\n\
             &EngineBridge::new(),
             AnalysisSpec::Parametric,
             SpecExecutionOptions {
-                temp: Some(crate::services::simulation_runner::TempRunConfig {
+                temp: Some(rspice_simulation::sweeps::TempRunConfig {
                     temperatures_c: vec![-40.0, 27.0],
-                    base_mode: crate::services::simulation_runner::CornerBaseMode::Op,
+                    base_mode: rspice_simulation::sweeps::CornerBaseMode::Op,
                 }),
                 ..SpecExecutionOptions::default()
             },

@@ -14,4 +14,5 @@ pub mod pdk;
 pub mod project_veriloga;
 pub mod results;
 pub mod sealed_source;
+pub mod sweeps;
 pub mod veriloga;

@@ -4,8 +4,8 @@
 //! prepared task, so what a declaration needs from this module is the list of
 //! points it will have to answer for.
 
-use rspice_simulation::error::{ServiceRunError, ServiceRunResult};
-use super::types::{CornerPoint, CornerRunConfig};
+use super::config::{CornerPoint, CornerRunConfig};
+use crate::error::{ServiceRunError, ServiceRunResult};
 
 /// Turn a corner contract into the exact points it declares.
 ///
@@ -204,6 +204,36 @@ mod tests {
 
         assert_eq!(points.len(), 3);
         assert_eq!(points[2].voltage, 0.9);
+        assert_eq!(points[2].temperature_c, 125.0);
+    }
+
+    #[test]
+    fn a_diagonal_sweep_refuses_unequal_axes_rather_than_cycling_the_shorter_one() {
+        let unequal = CornerRunConfig {
+            process_corners: vec![ProcessCorner::TT],
+            voltages: vec![0.9, 1.0],
+            supply_source_names: vec!["VDD".to_owned()],
+            temperatures_c: vec![-40.0, 27.0, 125.0],
+            full_matrix: false,
+            ..CornerRunConfig::default()
+        };
+
+        let error = unequal
+            .validate()
+            .expect_err("2 and 3 have no index-by-index pairing");
+        assert!(error.contains("equal non-scalar axis lengths"), "{error}");
+
+        // A single-valued axis is shared by every point, which is a pairing.
+        let shared = CornerRunConfig {
+            voltages: vec![1.0],
+            ..unequal
+        };
+        shared
+            .validate()
+            .expect("a scalar axis pairs with any length");
+        let points = expand_corner_points(&shared, 64).expect("diagonal expansion");
+        assert_eq!(points.len(), 3);
+        assert!(points.iter().all(|point| point.voltage == 1.0));
         assert_eq!(points[2].temperature_c, 125.0);
     }
 }

@@ -3,15 +3,15 @@
 //! Steps one design parameter and returns a result set per point.
 
 use super::mapping::describe_step_target;
-use super::sweep_points::expand_step_sweep_values_with_abort;
 use super::types::ParametricData;
-use super::types::{CornerBaseMode, CornerFrequencySweep};
 use rspice_core::abort_signal::AbortSignal;
 #[cfg(test)]
 use rspice_core::abort_signal::NoAbort;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{AnalysisCommand, StepSweep, StepTarget};
 use rspice_simulation::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted};
+use rspice_simulation::sweeps::expand_step_sweep_values_with_abort;
+use rspice_simulation::sweeps::{CornerBaseMode, CornerFrequencySweep};
 use std::path::Path;
 
 /// Run parametric analysis, reporting failures as strings. Test-only; see
@@ -63,7 +63,8 @@ pub fn run_parametric_analysis_with_base_and_source_path_and_abort(
     base_mode: &CornerBaseMode,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<ParametricData> {
-    super::types::validate_base_mode("Parametric", base_mode).map_err(ServiceRunError::Failure)?;
+    rspice_simulation::sweeps::validate_base_mode("Parametric", base_mode)
+        .map_err(ServiceRunError::Failure)?;
     let netlist = super::super::parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
     ensure_not_aborted(abort)?;
 

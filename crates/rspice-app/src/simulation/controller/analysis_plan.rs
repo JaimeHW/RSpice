@@ -170,7 +170,7 @@ impl SimulationController {
                             .as_mut()
                             .map(|config| &mut config.base_mode)
                     });
-                if let Some(mode @ crate::services::simulation_runner::CornerBaseMode::Op) = mode {
+                if let Some(mode @ rspice_simulation::sweeps::CornerBaseMode::Op) = mode {
                     let config = instance
                         .draft()
                         .pvt_base_analysis()
@@ -197,10 +197,9 @@ impl SimulationController {
                         .and_then(|spec| self.analysis_spec_to_config(&projected_state, &spec));
                     match config {
                         Ok(AnalysisConfig::DcOp(config)) => {
-                            *mode =
-                                crate::services::simulation_runner::CornerBaseMode::ConfiguredOp(
-                                    Box::new(config),
-                                );
+                            *mode = rspice_simulation::sweeps::CornerBaseMode::ConfiguredOp(
+                                Box::new(config),
+                            );
                         }
                         Ok(_) => {
                             unreachable!("the operating-point builder returns an OP configuration")

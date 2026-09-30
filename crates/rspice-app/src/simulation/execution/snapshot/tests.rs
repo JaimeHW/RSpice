@@ -34,9 +34,9 @@ fn configured_op_task(config: crate::simulation::dialog::OpConfig) -> QueuedAnal
 
 #[test]
 fn pvt_selected_operating_point_controls_reach_each_worker_and_solve() {
-    use crate::services::simulation_runner::CornerBaseMode;
     use crate::simulation::dialog::{OpConfig, OpInitialGuess, OpNodeInitialization};
     use crate::simulation::runner::worker_contract::{WorkerAnalysisConfig, WorkerCornerBaseMode};
+    use rspice_simulation::sweeps::CornerBaseMode;
     let base = OpConfig {
         initial_guess: OpInitialGuess::UserNodeVoltages,
         node_initialization: OpNodeInitialization::ForceIcValues,
@@ -163,9 +163,9 @@ fn temperature_task(temperatures_c: Vec<f64>) -> QueuedAnalysis {
         spec: AnalysisSpec::Parametric,
         config: None,
         spec_options: SpecExecutionOptions {
-            temp: Some(crate::services::simulation_runner::TempRunConfig {
+            temp: Some(rspice_simulation::sweeps::TempRunConfig {
                 temperatures_c,
-                base_mode: crate::services::simulation_runner::CornerBaseMode::Op,
+                base_mode: rspice_simulation::sweeps::CornerBaseMode::Op,
             }),
             ..SpecExecutionOptions::default()
         },
@@ -197,14 +197,14 @@ fn corner_task(
         spec: AnalysisSpec::Corner,
         config: None,
         spec_options: SpecExecutionOptions {
-            corner: Some(crate::services::simulation_runner::CornerRunConfig {
+            corner: Some(rspice_simulation::sweeps::CornerRunConfig {
                 process_corners,
                 voltages,
                 supply_source_names: vec!["VDD".to_owned()],
                 temperatures_c,
                 full_matrix,
                 nominal_voltage: Some(1.0),
-                base_mode: crate::services::simulation_runner::CornerBaseMode::Op,
+                base_mode: rspice_simulation::sweeps::CornerBaseMode::Op,
                 model_bindings: Vec::new(),
                 points: Vec::new(),
             }),
@@ -312,7 +312,7 @@ fn global_temperature_run_set(temperatures: &[&str]) -> PreparedRunSet {
             }
         }
     }
-    let mut contract = crate::services::simulation_runner::CornerRunConfig::default();
+    let mut contract = rspice_simulation::sweeps::CornerRunConfig::default();
     contract.temperatures_c = temperatures
         .iter()
         .map(|temperature| temperature.parse::<f64>().unwrap())
@@ -338,7 +338,7 @@ fn global_supply_temperature_run_set(supply: &str, temperature: &str) -> Prepare
             _ => {}
         }
     }
-    let mut contract = crate::services::simulation_runner::CornerRunConfig::default();
+    let mut contract = rspice_simulation::sweeps::CornerRunConfig::default();
     contract.voltages = vec![supply.parse().unwrap()];
     contract.temperatures_c = vec![temperature.parse().unwrap()];
     contract.nominal_voltage = Some(1.0);
@@ -348,10 +348,7 @@ fn global_supply_temperature_run_set(supply: &str, temperature: &str) -> Prepare
 
 fn reference_only_run_set() -> PreparedRunSet {
     let state = crate::simulation::run_set::RunSetState::reference_only();
-    PreparedRunSet::new(
-        state,
-        crate::services::simulation_runner::CornerRunConfig::default(),
-    )
+    PreparedRunSet::new(state, rspice_simulation::sweeps::CornerRunConfig::default())
 }
 
 fn global_parameter_run_set(name: &str, values: &[&str]) -> PreparedRunSet {
@@ -366,10 +363,7 @@ fn global_parameter_run_set(name: &str, values: &[&str]) -> PreparedRunSet {
     dimension.source = format!("design-variable:{name}");
     dimension.set_values_from_lines(&values.join("\n"), 2);
     dimension.enabled = true;
-    PreparedRunSet::new(
-        state,
-        crate::services::simulation_runner::CornerRunConfig::default(),
-    )
+    PreparedRunSet::new(state, rspice_simulation::sweeps::CornerRunConfig::default())
 }
 
 fn global_source_run_set(name: &str, values: &[&str]) -> PreparedRunSet {
@@ -384,10 +378,7 @@ fn global_source_run_set(name: &str, values: &[&str]) -> PreparedRunSet {
     );
     dimension.source = format!("netlist-source:{name}");
     state.dimensions.push(dimension);
-    PreparedRunSet::new(
-        state,
-        crate::services::simulation_runner::CornerRunConfig::default(),
-    )
+    PreparedRunSet::new(state, rspice_simulation::sweeps::CornerRunConfig::default())
 }
 
 #[test]
@@ -1601,11 +1592,7 @@ fn process_and_voltage_axes_change_the_authorized_op_execution_contract() {
         let crate::simulation::SimulationResult::DcOp(_) = result else {
             panic!("OP result")
         };
-        assert!(
-            (supply_voltage - config.run_point.supply_voltage.unwrap())
-                .abs()
-                <= 1.0e-10
-        );
+        assert!((supply_voltage - config.run_point.supply_voltage.unwrap()).abs() <= 1.0e-10);
     }
     assert_eq!(seen_contracts.len(), 4);
     assert_eq!(seen_supplies.len(), 2);
@@ -2242,8 +2229,8 @@ const CORNER_EVIDENCE_DECK: &str = "corner evidence\n\
 /// axis, paired diagonally so the nominal point and one derated point are the
 /// whole space.
 fn transient_corner_task() -> QueuedAnalysis {
-    use crate::services::simulation_runner::{CornerBaseMode, CornerRunConfig};
     use rspice_app_types::product::ProcessCorner;
+    use rspice_simulation::sweeps::{CornerBaseMode, CornerRunConfig};
 
     QueuedAnalysis {
         numeric_override: None,
@@ -2282,7 +2269,7 @@ fn transient_corner_parts() -> SnapshotParts {
 
 #[test]
 fn pvt_base_transient_window_reaches_each_point_and_its_displayed_card() {
-    use crate::services::simulation_runner::CornerBaseMode;
+    use rspice_simulation::sweeps::CornerBaseMode;
     let mode = CornerBaseMode::TransientWindow {
         stop_time: 100e-9,
         step_time: 1e-9,

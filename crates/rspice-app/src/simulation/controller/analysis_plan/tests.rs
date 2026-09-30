@@ -5,7 +5,7 @@ use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 
 #[test]
 fn study_options_and_commands_read_the_exact_authored_draft() {
-    use crate::services::simulation_runner::CornerBaseMode;
+    use rspice_simulation::sweeps::CornerBaseMode;
 
     let controller = SimulationController::new();
     let mut state = AppState::default();
@@ -123,11 +123,11 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
 
 #[test]
 fn pvt_selected_bases_persist_clone_and_freeze_exact_settings() {
-    use crate::services::simulation_runner::CornerBaseMode;
     use crate::simulation::plan::{
         AnalysisNumericOverride, NumericOverrideOption as O, SimulationPlan,
     };
     use crate::simulation::runner::worker_contract::WorkerCornerBaseMode;
+    use rspice_simulation::sweeps::CornerBaseMode;
     for wrapper in [AnalysisKind::Temperature, AnalysisKind::Corner] {
         for kind in [
             AnalysisKind::OperatingPoint,
@@ -300,7 +300,7 @@ fn pvt_selected_bases_persist_clone_and_freeze_exact_settings() {
                     );
                     assert_eq!(
                         *sweep,
-                        crate::services::simulation_runner::CornerFrequencySweep::Octave
+                        rspice_simulation::sweeps::CornerFrequencySweep::Octave
                     );
                 }
                 CornerBaseMode::DcSweepNested {

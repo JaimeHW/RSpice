@@ -2,47 +2,20 @@
 
 #![allow(clippy::needless_range_loop, clippy::type_complexity)]
 
-use super::ServiceRunError;
-use rspice_app_types::product::ProcessCorner;
-
 mod corner;
-mod execution;
 mod mapping;
 mod netlist_mutation;
 mod parametric;
-mod sweep_points;
 mod types;
 
 pub(crate) use corner::materialize_corner_process_source;
 pub(crate) use mapping::{map_corner_results, map_temperature_results};
 pub(crate) use netlist_mutation::{apply_voltage_corner, infer_nominal_supply_voltage};
-pub(crate) use sweep_points::expand_step_sweep_values;
 pub(crate) use types::{
     REFERENCE_MODEL_BINDING_BEGIN, REFERENCE_MODEL_BINDING_END, SweepPointResult,
 };
 
-/// Expand exactly the PVT tuples consumed by the corner runner without
-/// exposing its internal result type. Preflight uses this same expansion so
-/// its point count cannot drift from execution semantics.
-pub(crate) fn expand_corner_pvt_points(
-    config: &CornerRunConfig,
-) -> Result<Vec<(ProcessCorner, rspice_core::Value, rspice_core::Value)>, ServiceRunError> {
-    execution::expand_corner_points(
-        config,
-        rspice_core::ResourceLimits::default().max_batch_runs,
-    )
-    .map(|points| {
-        points
-            .into_iter()
-            .map(|point| (point.process, point.voltage, point.temperature_c))
-            .collect()
-    })
-}
-
 pub use parametric::{
     run_parametric_analysis_with_base_and_source_path_and_abort,
     run_parametric_analysis_with_source_path_and_abort,
-};
-pub use types::{
-    CornerBaseMode, CornerFrequencySweep, CornerPoint, CornerRunConfig, TempRunConfig,
 };

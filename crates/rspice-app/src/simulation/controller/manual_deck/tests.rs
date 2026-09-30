@@ -17,8 +17,8 @@ fn manual_deck_planning_has_no_panic_shortcuts() {
         }
     }
 }
-use crate::services::simulation_runner::CornerBaseMode;
 use crate::simulation::multi_run::FrequencySweep;
+use rspice_simulation::sweeps::CornerBaseMode;
 
 #[test]
 fn studio_hb_card_retains_solver_controls_and_automatic_grid() {
