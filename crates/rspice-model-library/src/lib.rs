@@ -22,6 +22,7 @@ mod resolution;
 pub mod source_bundle;
 pub mod source_paths;
 pub mod symbol;
+mod technology_binding;
 mod types;
 mod validation;
 
@@ -36,6 +37,7 @@ pub use catalog::{
 pub use corner::*;
 pub use definition_metadata::*;
 pub use model::*;
+pub use technology_binding::*;
 pub use types::*;
 
 pub use corner_expansion::RetainedClosure;

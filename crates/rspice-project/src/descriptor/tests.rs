@@ -2,22 +2,23 @@ use super::*;
 
 fn technology_binding_fixture() -> ProjectTechnologyBinding {
     let root = PathBuf::from(r"C:\qualified-pdk\models.lib");
-    ProjectTechnologyBinding {
-        schema_version: PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION,
-        package_name: "Qualified analog models".to_owned(),
-        package_version: Some("2026.07".to_owned()),
-        technology_node: Some("180 nm".to_owned()),
-        model_library: "qualified_analog".to_owned(),
-        root_source: root.clone(),
-        source_closure: vec![rspice_model_library::ModelSourcePin {
-            path: root,
+    serde_json::from_value(serde_json::json!({
+        "schema_version": PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION,
+        "package_name": "Qualified analog models",
+        "package_version": "2026.07",
+        "technology_node": "180 nm",
+        "model_library": "qualified_analog",
+        "root_source": root,
+        "source_closure": [rspice_model_library::ModelSourcePin {
+            path: root.clone(),
             digest: rspice_app_types::product::ContentDigest::from_bytes([0x4a; 32]),
         }],
-        source_edges: Vec::new(),
-        model_count: 14,
-        process_sections: vec!["ff".to_owned(), "ss".to_owned(), "tt".to_owned()],
-        signed_package: None,
-    }
+        "source_edges": [],
+        "model_count": 14,
+        "process_sections": ["ff", "ss", "tt"],
+        "signed_package": null,
+    }))
+    .expect("technology binding fixture deserializes")
 }
 
 #[test]
@@ -255,8 +256,10 @@ fn technology_attachment_is_atomic_revisioned_and_idempotent() {
         committed
     );
 
-    let mut rejected = technology_binding_fixture();
-    rejected.model_count = 0;
+    let mut rejected =
+        serde_json::to_value(technology_binding_fixture()).expect("binding serializes");
+    rejected["model_count"] = serde_json::json!(0);
+    let rejected = serde_json::from_value(rejected).expect("invalid binding shape deserializes");
     let before = project.clone();
     assert!(matches!(
         project.attach_technology(rejected),
@@ -351,8 +354,10 @@ fn technology_change_receipts_are_checkpoint_bound_atomic_and_tamper_evident() {
     assert_eq!(project.technology_change_audit().len(), 1);
     project.validate().expect("audited project validates");
 
-    let mut bypass = binding.clone();
-    bypass.package_version = Some("2026.08".to_owned());
+    let mut bypass = serde_json::to_value(&binding).expect("binding serializes");
+    bypass["package_version"] = serde_json::json!("2026.08");
+    let bypass: ProjectTechnologyBinding =
+        serde_json::from_value(bypass).expect("changed binding shape deserializes");
     assert_eq!(
         project.attach_technology(bypass.clone()),
         Err(ProjectDescriptorError::TechnologyAuditRequired)
