@@ -4,7 +4,7 @@
 //! includes, the sealed model set, and the export policy — so the run either
 //! begins fully determined or is refused with a reason.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::Path;
 #[cfg(test)]
 use std::path::PathBuf;
@@ -22,14 +22,11 @@ use crate::simulation::execution::RunSourceReceipt;
 use crate::simulation::execution::SavePolicy;
 use crate::simulation::execution::SnapshotParts;
 use crate::simulation::execution::TouchstoneExportPolicy;
+use crate::simulation::execution::{attach_saved_output_contracts, prepare_manual_tasks};
 use rspice_app_types::canonical::content_digest;
-use rspice_simulation::execution_artifact::PreparedDependencyBinding;
-use rspice_simulation::execution_identity::analysis_kind_tag;
 use rspice_simulation::execution_identity::drc_receipt_digest;
-use rspice_simulation::execution_identity::manual_deck_analysis_instance_id;
 use rspice_simulation::execution_identity::manual_source_receipt_digest;
 use rspice_simulation::netlist_gen::CrossProbeSnapshot;
-use rspice_simulation::prepared_dependency::ExecutionArtifactKind;
 use rspice_simulation::sealed_source::{
     generated_executable_source_digest, manual_executable_source_digest,
 };
@@ -1190,7 +1187,7 @@ impl SimulationController {
             PreparationError::new(PreparationStage::SourceChecks, errors.join("; "))
         })?;
         let source_digest = manual_executable_source_digest(&expanded);
-        let tasks = Self::prepare_manual_tasks(
+        let tasks = prepare_manual_tasks(
             source_digest,
             state.workspace.content.project.revision(),
             queued_tasks,
@@ -1264,234 +1261,6 @@ impl SimulationController {
             touchstone_export,
             sealed_source_dependencies,
         })
-    }
-
-    fn prepare_manual_tasks(
-        expanded_source_identity: crate::product::ContentDigest,
-        source_revision: crate::product::ObjectRevision,
-        tasks: Vec<QueuedAnalysis>,
-    ) -> Result<Vec<PreparedTask>, PreparationError> {
-        let mut kind_occurrences = std::collections::HashMap::<u8, usize>::new();
-        let mut prepared = tasks
-            .into_iter()
-            .map(|task| {
-                let occurrence = kind_occurrences
-                    .entry(analysis_kind_tag(&task.spec))
-                    .or_default();
-                let current_occurrence = *occurrence;
-                *occurrence += 1;
-                let instance_id = manual_deck_analysis_instance_id(
-                    expanded_source_identity,
-                    &task.spec,
-                    current_occurrence,
-                );
-                let label = Self::analysis_name_for_spec(&task.spec);
-                PreparedTask::new(instance_id, source_revision, Vec::new(), label, task)
-            })
-            .collect::<Vec<_>>();
-
-        let transient_producers = prepared
-            .iter()
-            .filter(|task| matches!(&task.queued_analysis().spec, AnalysisSpec::Transient { .. }))
-            .map(|task| {
-                (
-                    task.instance_id(),
-                    task.source_revision(),
-                    task.config_digest(),
-                )
-            })
-            .collect::<Vec<_>>();
-        let periodic_producers = prepared
-            .iter()
-            .filter(|task| matches!(&task.queued_analysis().spec, AnalysisSpec::Pss { .. }))
-            .map(|task| {
-                (
-                    task.instance_id(),
-                    task.source_revision(),
-                    task.config_digest(),
-                )
-            })
-            .collect::<Vec<_>>();
-        let qpss_producers = prepared
-            .iter()
-            .filter(|task| {
-                matches!(
-                    &task.queued_analysis().spec,
-                    AnalysisSpec::Qpss {
-                        autonomous: false,
-                        ..
-                    }
-                )
-            })
-            .map(|task| {
-                (
-                    task.instance_id(),
-                    task.source_revision(),
-                    task.config_digest(),
-                )
-            })
-            .collect::<Vec<_>>();
-        let harmonic_balance_producers = prepared
-            .iter()
-            .filter(|task| {
-                matches!(
-                    &task.queued_analysis().spec,
-                    AnalysisSpec::HarmonicBalance { .. }
-                )
-            })
-            .map(|task| {
-                (
-                    task.instance_id(),
-                    task.source_revision(),
-                    task.config_digest(),
-                )
-            })
-            .collect::<Vec<_>>();
-        let operating_point_producers = prepared
-            .iter()
-            .filter(|task| {
-                matches!(
-                    &task.queued_analysis().spec,
-                    AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. }
-                )
-            })
-            .map(|task| {
-                (
-                    task.instance_id(),
-                    task.source_revision(),
-                    task.config_digest(),
-                )
-            })
-            .collect::<Vec<_>>();
-        for task in &mut prepared {
-            if matches!(task.queued_analysis().spec, AnalysisSpec::Fft { .. }) {
-                // The engine binds every `.FFT` card in a deck to that deck's
-                // *first* transient, so the Studio binds the same one — not
-                // Fourier's stricter "exactly one transient".
-                let Some((producer_id, producer_revision, producer_config_digest)) =
-                    transient_producers.first()
-                else {
-                    return Err(PreparationError::new(
-                        PreparationStage::AnalysisPlan,
-                        ".FFT requires a completed authored .TRAN to post-process in the same deck",
-                    ));
-                };
-                task.set_dependencies(vec![*producer_id]);
-                task.set_dependency_bindings(vec![
-                    PreparedDependencyBinding::transient_trajectory(
-                        *producer_id,
-                        *producer_revision,
-                        *producer_config_digest,
-                    ),
-                ]);
-                continue;
-            }
-            type ProducerIdentity = (
-                crate::product::AnalysisInstanceId,
-                crate::product::ObjectRevision,
-                crate::product::ContentDigest,
-            );
-            type BindingConstructor = fn(
-                crate::product::AnalysisInstanceId,
-                crate::product::ObjectRevision,
-                crate::product::ContentDigest,
-            ) -> PreparedDependencyBinding;
-            // The artifact kinds this request admits, in the order it prefers
-            // them, and the producer list each one names. A periodic
-            // small-signal request whose carrier is the preceding periodic
-            // solve admits either family, so the deck decides: a deck holding
-            // only an `.HB` binds the harmonic-balance state, and one holding
-            // a `.PSS` binds the shooting state.
-            let required_kinds = rspice_simulation::prepared_dependency::required_artifact_kinds(
-                &task.queued_analysis().spec,
-                &task.queued_analysis().spec_options,
-            );
-            if required_kinds.is_empty() {
-                continue;
-            }
-            let candidates = required_kinds
-                .iter()
-                .map(|kind| {
-                    let (producers, binding): (&[ProducerIdentity], BindingConstructor) = match kind
-                    {
-                        ExecutionArtifactKind::TransientTrajectory => (
-                            &transient_producers,
-                            PreparedDependencyBinding::transient_trajectory,
-                        ),
-                        ExecutionArtifactKind::PeriodicState => (
-                            &periodic_producers,
-                            PreparedDependencyBinding::periodic_state,
-                        ),
-                        ExecutionArtifactKind::QpssState => {
-                            (&qpss_producers, PreparedDependencyBinding::qpss_state)
-                        }
-                        ExecutionArtifactKind::HbState => (
-                            &harmonic_balance_producers,
-                            PreparedDependencyBinding::hb_state,
-                        ),
-                        ExecutionArtifactKind::DcOperatingPointSeed => (
-                            &operating_point_producers,
-                            PreparedDependencyBinding::dc_operating_point_seed,
-                        ),
-                    };
-                    (*kind, producers, binding)
-                })
-                .collect::<Vec<_>>();
-            let Some((_, producers, binding)) = candidates
-                .iter()
-                .copied()
-                .find(|(_, producers, _)| producers.len() == 1)
-            else {
-                return Err(PreparationError::new(
-                    PreparationStage::AnalysisPlan,
-                    format!(
-                        "Manual-deck {} requires exactly one prepared {} producer; found {}",
-                        task.queued_analysis().spec.run_type().display_name(),
-                        required_kinds
-                            .iter()
-                            .map(|kind| kind.producer_label())
-                            .collect::<Vec<_>>()
-                            .join(" or "),
-                        candidates
-                            .iter()
-                            .map(|(_, producers, _)| producers.len())
-                            .max()
-                            .unwrap_or_default()
-                    ),
-                ));
-            };
-            let [(producer_id, producer_revision, producer_config_digest)] = producers else {
-                unreachable!("the selected producer list holds exactly one identity");
-            };
-            task.set_dependencies(vec![*producer_id]);
-            task.set_dependency_bindings(vec![binding(
-                *producer_id,
-                *producer_revision,
-                *producer_config_digest,
-            )]);
-        }
-
-        // Analysis directives are declarative, so source order cannot make a
-        // .FOUR consumer precede its .TRAN producer. Preserve authored order
-        // among every currently-ready task while applying the exact graph.
-        let mut ordered = Vec::with_capacity(prepared.len());
-        let mut completed = HashSet::with_capacity(prepared.len());
-        while !prepared.is_empty() {
-            let Some(ready_index) = prepared.iter().position(|task| {
-                task.dependencies()
-                    .iter()
-                    .all(|dependency| completed.contains(dependency))
-            }) else {
-                return Err(PreparationError::new(
-                    PreparationStage::AnalysisPlan,
-                    "Manual-deck analysis dependencies contain a cycle",
-                ));
-            };
-            let task = prepared.remove(ready_index);
-            completed.insert(task.instance_id());
-            ordered.push(task);
-        }
-        Ok(ordered)
     }
 }
 
@@ -1585,40 +1354,6 @@ fn reject_unresolved_device_models(
     ))
 }
 
-fn attach_saved_output_contracts(
-    tasks: Vec<PreparedTask>,
-    outputs: &[crate::state::SavedOutput],
-) -> Result<Vec<PreparedTask>, PreparationError> {
-    if outputs.is_empty() {
-        return Ok(tasks);
-    }
-    let analyses = tasks
-        .iter()
-        .map(|task| (task.instance_id(), &task.queued_analysis().spec))
-        .collect::<Vec<_>>();
-    let mut by_analysis = HashMap::with_capacity(tasks.len());
-    for output in outputs {
-        let contracts = rspice_simulation::output_contract::compile_saved_output_contracts(
-            output,
-            analyses.iter().copied(),
-        )
-        .map_err(|error| PreparationError::new(PreparationStage::AnalysisPlan, error))?;
-        for contract in contracts {
-            by_analysis
-                .entry(contract.analysis_id())
-                .or_insert_with(Vec::new)
-                .push(contract);
-        }
-    }
-    Ok(tasks
-        .into_iter()
-        .map(|task| {
-            let contracts = by_analysis.remove(&task.instance_id()).unwrap_or_default();
-            task.with_saved_output_contracts(contracts)
-        })
-        .collect())
-}
-
 fn touchstone_export_policy<'a>(
     state: &AppState,
     tasks: impl IntoIterator<Item = &'a QueuedAnalysis>,
@@ -1631,27 +1366,9 @@ fn touchstone_export_policy<'a>(
         return Ok(TouchstoneExportPolicy::disabled());
     }
 
-    let placed = crate::simulation::placed_sources::placed_rf_ports(&state.schematic, None);
-    touchstone_export_policy_for_dialog(&state.sim_setup.sp, &placed, source_path)
-}
-
-pub(super) fn touchstone_export_policy_for_dialog(
-    dialog: &crate::simulation::dialog::SpDialogState,
-    placed_rf_ports: &[crate::simulation::placed_sources::PlacedRfPort],
-    source_path: Option<&Path>,
-) -> Result<TouchstoneExportPolicy, PreparationError> {
-    let placed = placed_rf_ports
-        .iter()
-        .map(|port| rspice_simulation_contract::sp_draft::SpPlacedPort {
-            reference: &port.reference,
-            port_number: port.port_number,
-            z0: &port.z0,
-            nets: &port.nets,
-        })
-        .collect::<Vec<_>>();
     rspice_simulation::preparation::touchstone::touchstone_export_policy_for_dialog(
-        dialog,
-        &placed,
+        &state.sim_setup.sp,
+        state.schematic.document(),
         source_path,
     )
 }

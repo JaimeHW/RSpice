@@ -9,12 +9,12 @@ mod permit;
 #[cfg(test)]
 mod qpss_artifact_tests;
 mod snapshot;
+mod task_preparation;
 
 pub(in crate::simulation) use authorization::PreparedRunAuthorization;
 #[cfg(test)]
 pub(in crate::simulation) use permit::ExecutionPermitIssuer;
 pub(crate) use rspice_simulation::preparation::{PreparationError, PreparationStage};
-pub(in crate::simulation) use snapshot::bound_cards;
 pub(in crate::simulation) use snapshot::{
     AuthorizedRunDispatch, AuthorizedTaskDispatch, ExecutionTargetCapabilities,
     ModelSourceIdentity, PSS_SPECTRUM_ROLE, PreparedRunSet, PreparedRunSnapshot, PreparedTask,
@@ -22,6 +22,9 @@ pub(in crate::simulation) use snapshot::{
     result_source_domain,
 };
 pub(crate) use snapshot::{PreparedRunMetadata, execution_target_supports_cancellation};
+pub(in crate::simulation) use task_preparation::{
+    attach_saved_output_contracts, prepare_manual_tasks, prepare_plan_tasks,
+};
 
 /// What the execution target will do with a multi-point run: the target's own
 /// name, and how many of its tasks run at once.

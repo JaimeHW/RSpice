@@ -80,9 +80,9 @@ fn the_exported_file_is_the_version_that_was_chosen() {
         assert_eq!(dialog.touchstone_version, version);
 
         let policy =
-            crate::simulation::controller::prepared_run::touchstone_export_policy_for_dialog(
+            rspice_simulation::preparation::touchstone::touchstone_export_policy_for_dialog(
                 &dialog,
-                &[],
+                &rspice_design::schematic::document::SchematicDocument::default(),
                 Some(&PathBuf::from("designs").join("amp.sch")),
             )
             .expect("an enabled export prepares a policy");

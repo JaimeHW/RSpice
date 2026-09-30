@@ -61,7 +61,7 @@ mod analysis_plan;
 #[cfg(test)]
 mod analysis_run_config;
 mod analysis_spec_build;
-use analysis_spec_build::{AnalysisInputs, analysis_inputs};
+use analysis_spec_build::analysis_inputs;
 #[cfg(test)]
 mod directive_parse_ratchet;
 mod live_transient;

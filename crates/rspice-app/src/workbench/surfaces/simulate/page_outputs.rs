@@ -634,7 +634,7 @@ pub(super) fn empty_registry_text(
 /// Separate from the row that prints it because the answer is a property of the
 /// plan rather than of the sentence: `Automatic` synthesizes a bounded top-level
 /// voltage set (`rspice_simulation::output_contract::selection::effective_plan_saved_outputs`),
-/// those become saved-output contracts (`prepared_run::attach_saved_output_contracts`)
+/// those become saved-output contracts (`execution::attach_saved_output_contracts`)
 /// and the contracts prune the retained waveforms
 /// (`simulation::output_contract`) — so "full dataset retained" is the one thing
 /// that run does not do. Only `Explicit only`, which returns an empty set rather

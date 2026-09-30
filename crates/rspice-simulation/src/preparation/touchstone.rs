@@ -152,12 +152,22 @@ fn exact_path_digest(path: &Path) -> ContentDigest {
 
 pub fn touchstone_export_policy_for_dialog(
     dialog: &SpDialogState,
-    placed_rf_ports: &[SpPlacedPort<'_>],
+    schematic: &impl AsRef<rspice_design::schematic::document::SchematicDocument>,
     source_path: Option<&Path>,
 ) -> Result<TouchstoneExportPolicy, PreparationError> {
+    let ports = rspice_design::rf_ports::rf_ports(schematic);
+    let placed = ports
+        .iter()
+        .map(|port| SpPlacedPort {
+            reference: &port.reference,
+            port_number: port.port_number,
+            z0: &port.z0,
+            nets: &port.nets,
+        })
+        .collect::<Vec<_>>();
     let mut dialog = dialog.clone();
     dialog.ensure_initialized();
-    let config = dialog.to_config(Some(placed_rf_ports)).map_err(|error| {
+    let config = dialog.to_config(Some(&placed)).map_err(|error| {
         PreparationError::new(
             PreparationStage::AnalysisPlan,
             format!("Invalid Touchstone export settings: {error}"),
