@@ -1,81 +1,22 @@
-//! Resolve persisted project pins against the currently trusted runtime registry.
-use super::PdkTechnologyRegistry;
-use rspice_project::{
-    ProjectSignedTechnologyPin, ProjectTechnologyBinding, TechnologyBindingError,
-};
+//! Bind project pin validation to the registry's current runtime package cache.
+use super::{PdkTechnologyRegistry, ValidatedPdkTechnologyPackage};
+use rspice_project::{ProjectTechnologyBinding, TechnologyBindingError};
 
 impl PdkTechnologyRegistry {
     pub(crate) fn project_signed_technology_package(
         &self,
         binding: Option<&ProjectTechnologyBinding>,
-    ) -> Result<Option<&crate::state::pdk_config::ValidatedPdkTechnologyPackage>, String> {
-        let Some(binding) = binding else {
-            return Ok(None);
-        };
-        let Some(pin) = binding.signed_package() else {
-            return Err("Project technology binding has no signed package pin.".to_owned());
-        };
-        self.validate_project_binding(binding)
-            .map_err(|error| format!("Signed PDK project binding is unavailable: {error}"))?;
-        self
-            .validated_packages()
-            .iter()
-            .find(|package| {
-                package
-                    .manifest()
-                    .package_id
-                    .eq_ignore_ascii_case(pin.package_id())
-                    && package.manifest().revision == pin.revision()
-                    && package.manifest_digest() == pin.manifest_digest()
-                    && package.archive_digest() == pin.archive_digest()
-            })
-            .map(Some)
-            .ok_or_else(|| {
-                "The project's exact signed PDK package is not present in the current trusted runtime catalog."
-                    .to_owned()
-            })
+    ) -> Result<Option<&ValidatedPdkTechnologyPackage>, String> {
+        rspice_simulation::pdk::project_signed_technology_package(
+            self.validated_packages(),
+            binding,
+        )
     }
 
     pub(crate) fn validate_project_binding(
         &self,
         binding: &ProjectTechnologyBinding,
     ) -> Result<(), TechnologyBindingError> {
-        let pin = binding
-            .signed_package()
-            .ok_or(TechnologyBindingError::MissingSignedPackage)?;
-        self.validate_project_pin(pin)
-    }
-
-    pub(crate) fn validate_project_pin(
-        &self,
-        pin: &ProjectSignedTechnologyPin,
-    ) -> Result<(), TechnologyBindingError> {
-        pin.validate()?;
-        let package = self
-            .validated_packages()
-            .iter()
-            .find(|package| {
-                package
-                    .manifest()
-                    .package_id
-                    .eq_ignore_ascii_case(pin.package_id())
-                    && package.manifest().revision == pin.revision()
-                    && package.manifest_digest() == pin.manifest_digest()
-                    && package.archive_digest() == pin.archive_digest()
-            })
-            .ok_or_else(|| TechnologyBindingError::SignedPackageUnavailable {
-                package_id: pin.package_id().to_owned(),
-                revision: pin.revision().to_owned(),
-            })?;
-        let observed = ProjectSignedTechnologyPin::from_package_metadata(package.metadata())?;
-        if &observed != pin {
-            return Err(TechnologyBindingError::SignedPackageMetadataDrift {
-                package_id: pin.package_id().to_owned(),
-                revision: pin.revision().to_owned(),
-            });
-        }
-        package
-            .runtime_compatibility()
-            .map_err(TechnologyBindingError::SignedPackageRuntime)
+        rspice_simulation::pdk::validate_project_binding(self.validated_packages(), binding)
     }
 }

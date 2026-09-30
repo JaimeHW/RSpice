@@ -2,6 +2,11 @@
 
 mod callback;
 mod package;
+mod project_binding;
+
+pub use project_binding::{
+    project_signed_technology_package, validate_project_binding, validate_project_pin,
+};
 
 pub use package::{
     PdkModelSourceParts, SealedPdkModelProcessBinding, SealedPdkModelSources,

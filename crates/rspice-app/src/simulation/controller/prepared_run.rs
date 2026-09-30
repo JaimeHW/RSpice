@@ -35,14 +35,13 @@ use rspice_simulation::sealed_source::{
 
 #[cfg(test)]
 mod measurement_tests;
-mod model_sources;
 pub(crate) mod occurrence_outputs;
 mod periodic_sources;
 
-use model_sources::validate_projected_model_binding_authority;
 use occurrence_outputs::{effective_plan_capture, projection_occurrence_nets};
 use periodic_sources::validate_prepared_periodic_sources;
 use rspice_simulation::model_sources::prepared_project_model_sources;
+use rspice_simulation::model_sources::validate_projected_model_binding_authority;
 #[cfg(test)]
 use rspice_simulation::netlist_preparation::dependencies::expand_generated_dependencies;
 use rspice_simulation::netlist_preparation::dependencies::{
@@ -326,7 +325,7 @@ impl SimulationController {
             state.model_library_manager.resolution_records(),
             state.library_manager.catalog(),
             state.workspace.content.project.technology_binding(),
-            &state.pdk_config.technology_registry,
+            state.pdk_config.technology_registry.validated_packages(),
             &projection,
         )?;
         let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
@@ -801,7 +800,7 @@ impl SimulationController {
             state.model_library_manager.resolution_records(),
             state.library_manager.catalog(),
             state.workspace.content.project.technology_binding(),
-            &state.pdk_config.technology_registry,
+            state.pdk_config.technology_registry.validated_packages(),
             &execution_projection,
         )?;
 

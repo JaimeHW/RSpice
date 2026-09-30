@@ -1,5 +1,8 @@
 //! Authentication and materialization of immutable model-source snapshots.
 
+mod binding_authority;
+pub use binding_authority::validate_projected_model_binding_authority;
+
 mod catalog_sealing;
 pub use catalog_sealing::{seal_catalog_execution_sources, seal_plan_execution_sources};
 

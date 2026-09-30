@@ -5,29 +5,29 @@
 
 use std::path::Path;
 
-use crate::simulation::execution::{PreparationError, PreparationStage};
-use crate::state::pdk_config::PdkTechnologyRegistry;
+use crate::pdk::{ValidatedPdkTechnologyPackage, project_signed_technology_package};
+use crate::preparation::{PreparationError, PreparationStage};
 use rspice_design::library::LibraryCatalog;
+use rspice_model_library::ProjectTechnologyBinding;
 use rspice_model_library::{ModelCatalog, ModelResolutionRecords};
-use rspice_project::ProjectTechnologyBinding;
 
 /// Revalidate every model-bearing instance in the frozen hierarchy against
 /// the project-global provider decision. Editor properties are not an
 /// execution authority: restored projects and older symbol revisions must
 /// pass this boundary immediately before their sources are sealed.
-pub(super) fn validate_projected_model_binding_authority(
+pub fn validate_projected_model_binding_authority(
     models: &ModelCatalog,
     resolutions: &ModelResolutionRecords,
     libraries: &LibraryCatalog,
     technology_binding: Option<&ProjectTechnologyBinding>,
-    technologies: &PdkTechnologyRegistry,
-    projection: &crate::state::workspace::ConfigurationExecutionProjection,
+    packages: &[ValidatedPdkTechnologyPackage],
+    projection: &rspice_design::projection::ConfigurationExecutionProjection,
 ) -> Result<(), PreparationError> {
-    use crate::state::model_library::ModelConsumerScope;
+    use rspice_model_library::ModelConsumerScope;
 
     for (view, schematic) in projection.schematic_buffers() {
         for component in &schematic.document().components {
-            let params = crate::state::parse_params_string(&component.params);
+            let params = rspice_design::parameters::parse_params_string(&component.params);
             let model_bound_cell = component.library_cell.as_ref().filter(|binding| {
                 binding.netlist_template.is_some() && !binding.is_executable_builtin()
             });
@@ -98,7 +98,7 @@ pub(super) fn validate_projected_model_binding_authority(
                     && selected_library.starts_with("signed-pdk:")
                     && signed_pdk_symbol_binding_matches(
                         technology_binding,
-                        technologies,
+                        packages,
                         selected_library,
                         &definition,
                         binding.source_path.as_deref(),
@@ -193,7 +193,7 @@ pub(super) fn validate_projected_model_binding_authority(
 
 fn signed_pdk_symbol_binding_matches(
     technology_binding: Option<&ProjectTechnologyBinding>,
-    technologies: &PdkTechnologyRegistry,
+    packages: &[ValidatedPdkTechnologyPackage],
     provider_library: &str,
     definition: &str,
     source_path: Option<&Path>,
@@ -201,8 +201,7 @@ fn signed_pdk_symbol_binding_matches(
     let Some(source_path) = source_path else {
         return Ok(false);
     };
-    let package = technologies
-        .project_signed_technology_package(technology_binding)
+    let package = project_signed_technology_package(packages, technology_binding)
         .map_err(|error| {
             PreparationError::new(
                 PreparationStage::ModelBindings,
@@ -228,7 +227,7 @@ fn signed_pdk_symbol_binding_matches(
 
 fn bound_symbol_provider_library(
     libraries: &LibraryCatalog,
-    binding: &crate::state::LibraryCellInstance,
+    binding: &rspice_design::schematic::component::LibraryCellInstance,
     view: &str,
     instance: &str,
 ) -> Result<Option<String>, PreparationError> {
@@ -244,7 +243,7 @@ fn bound_symbol_provider_library(
         .into_iter()
         .filter(|candidate| !candidate.name.eq_ignore_ascii_case(&binding.view));
     for candidate in preferred.chain(remaining) {
-        let definition = crate::state::load_model_bound_symbol(candidate).map_err(|error| {
+        let definition = rspice_design::model_bound_symbol::load_model_bound_symbol(candidate).map_err(|error| {
             PreparationError::new(
                 PreparationStage::ModelBindings,
                 format!(
@@ -273,8 +272,10 @@ fn model_source_paths_match(left: &Path, right: &Path) -> bool {
     }
 }
 
-fn component_value_is_model_name(kind: crate::state::ComponentType) -> bool {
-    use crate::state::ComponentType;
+fn component_value_is_model_name(
+    kind: rspice_design::schematic::component_type::ComponentType,
+) -> bool {
+    use rspice_design::schematic::component_type::ComponentType;
 
     matches!(
         kind,

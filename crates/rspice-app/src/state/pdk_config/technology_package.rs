@@ -1682,8 +1682,7 @@ endmodule
             package.metadata(),
         )
         .expect("project pin");
-        registry
-            .validate_project_pin(&pin)
+        rspice_simulation::pdk::validate_project_pin(registry.validated_packages(), &pin)
             .expect("exact trusted archive resolves");
 
         let json = serde_json::to_string(&pin).expect("pin serializes");
@@ -1697,7 +1696,7 @@ endmodule
             .revalidate_installed(&revoked)
             .expect_err("revocation invalidates runtime packages");
         assert!(matches!(
-            registry.validate_project_pin(&pin),
+            rspice_simulation::pdk::validate_project_pin(registry.validated_packages(), &pin),
             Err(crate::state::workspace::TechnologyBindingError::SignedPackageUnavailable { .. })
         ));
     }

@@ -509,7 +509,7 @@ fn frozen_hierarchy_rejects_stale_instance_model_library_metadata() {
         state.model_library_manager.resolution_records(),
         state.library_manager.catalog(),
         state.workspace.content.project.technology_binding(),
-        &state.pdk_config.technology_registry,
+        state.pdk_config.technology_registry.validated_packages(),
         &projection,
     )
     .expect_err("stale per-instance provider metadata must fail preflight");
@@ -540,7 +540,7 @@ fn frozen_hierarchy_rejects_stale_instance_model_library_metadata() {
         state.model_library_manager.resolution_records(),
         state.library_manager.catalog(),
         state.workspace.content.project.technology_binding(),
-        &state.pdk_config.technology_registry,
+        state.pdk_config.technology_registry.validated_packages(),
         &projection,
     )
     .expect("matching provider metadata is executable");
