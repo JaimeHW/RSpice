@@ -53,7 +53,6 @@ mod browser {
         WORKER_REQUEST_TRANSPORT_PROTOCOL, WorkerProgressSnapshot, WorkerRequest,
         WorkerRequestTransportMetadata, apply_worker_progress_snapshot,
         take_worker_request_checkpoint, take_worker_request_op_previous_state,
-        validate_worker_request_checkpoint_lengths,
         validate_worker_request_transfer_buffer_lengths, validate_worker_response_id,
         worker_response_from_value,
     };
@@ -65,8 +64,9 @@ mod browser {
     use rspice_simulation::error::SimulationError;
     use rspice_simulation::results::SimulationResult;
 
-    use crate::simulation::runner::monte_carlo_checkpoint::{
+    use rspice_simulation::monte_carlo_checkpoint::{
         CheckpointQueue, replace_checkpoint, validate_checkpoint_bytes_size,
+        validate_worker_request_checkpoint_lengths,
     };
 
     #[derive(Default)]

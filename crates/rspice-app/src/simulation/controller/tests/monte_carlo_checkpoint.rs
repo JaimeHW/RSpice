@@ -3,7 +3,7 @@
 use super::*;
 use crate::product::{ContentDigest, ObjectRevision, SimulationPlanId};
 use crate::simulation::runner::{
-    SimulationRequest, monte_carlo_checkpoint::tests::completed_checkpoint_fixture,
+    SimulationRequest, monte_carlo_checkpoint_tests::completed_checkpoint_fixture,
 };
 use crate::state::{CanonicalAnalysisKind, PreparedRunReceipt, PreparedRunTaskReceipt};
 
@@ -160,7 +160,7 @@ fn monte_carlo_checkpoint_retention_obeys_budget_and_rejects_unrequested_capture
         .as_mut()
         .unwrap()
         .mc_checkpoint = Some(
-        crate::simulation::runner::monte_carlo_checkpoint::MonteCarloCheckpointRequest {
+        rspice_simulation::monte_carlo_checkpoint::MonteCarloCheckpointRequest {
             publish_every: 1.try_into().unwrap(),
             trial_range: None,
             resume: None,

@@ -6,6 +6,8 @@
 //! sides run in different threads natively and different contexts in the
 //! browser, so this is a serialized contract rather than a shared type.
 
+use rspice_simulation::monte_carlo_checkpoint::validate_worker_request_checkpoint_lengths;
+
 mod analysis;
 mod monte_carlo_checkpoint;
 pub(crate) use monte_carlo_checkpoint::*;

@@ -2,9 +2,6 @@
 
 use super::*;
 use crate::simulation::dialog::McVariationSource;
-use crate::simulation::runner::monte_carlo_checkpoint::{
-    MonteCarloCheckpointInput, MonteCarloCheckpointRequest,
-};
 use crate::simulation::runner::study::{
     StudyRunConfig,
     monte_carlo::{
@@ -13,6 +10,9 @@ use crate::simulation::runner::study::{
 };
 use rspice_core::{NoAbort, ResourceLimits};
 use rspice_results::monte_carlo_checkpoint::StudyMonteCarloCheckpoint;
+use rspice_simulation::monte_carlo_checkpoint::{
+    MonteCarloCheckpointInput, MonteCarloCheckpointRequest,
+};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn experiment() -> SnapshotParts {

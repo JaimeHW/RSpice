@@ -1,6 +1,6 @@
 //! Route selected trial populations against fully materialized per-point decks.
 use super::*;
-use crate::simulation::runner::monte_carlo_checkpoint::MonteCarloCheckpointInput;
+use rspice_simulation::monte_carlo_checkpoint::MonteCarloCheckpointInput;
 
 #[derive(Debug, Clone)]
 pub(in crate::simulation) struct PreparedMonteCarloResume {

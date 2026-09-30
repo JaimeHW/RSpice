@@ -58,9 +58,7 @@ pub(super) fn run_sweep_spec(
 fn run_monte_carlo(
     variation_source: crate::simulation::dialog::McVariationSource,
     base: Option<&crate::simulation::runner::study::StudyRunConfig>,
-    checkpoint: Option<
-        &crate::simulation::runner::monte_carlo_checkpoint::MonteCarloCheckpointRequest,
-    >,
+    checkpoint: Option<&rspice_simulation::monte_carlo_checkpoint::MonteCarloCheckpointRequest>,
     histogram_bins: usize,
     checkpoint_observer: Option<&super::CheckpointObserver<'_>>,
     netlist: &str,

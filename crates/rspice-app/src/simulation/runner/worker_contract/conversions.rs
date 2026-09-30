@@ -368,7 +368,7 @@ fn emit_worker_monte_carlo_checkpoint(bytes: &[u8]) -> Result<(), SimulationErro
             "Could not deliver Monte Carlo checkpoint: {message}"
         ))
     };
-    super::super::monte_carlo_checkpoint::validate_checkpoint_bytes_size(bytes.len())
+    rspice_simulation::monte_carlo_checkpoint::validate_checkpoint_bytes_size(bytes.len())
         .map_err(&fail)?;
     let id = ACTIVE_WORKER_PROGRESS_ID
         .with(|active| active.get())
@@ -557,9 +557,9 @@ pub(crate) fn prepare_wasm_jit_request_value(
     };
     for runtime in request.project_veriloga_runtimes.device_runtimes() {
         match runtime.compile_wasm_jit_artifact() {
-            Ok(artifact) => preparation.artifacts.push(
-                crate::simulation::veriloga::WasmJitWorkerArtifact::from_compiled(&artifact),
-            ),
+            Ok(artifact) => preparation
+                .artifacts
+                .push(crate::simulation::veriloga::WasmJitWorkerArtifact::from_compiled(&artifact)),
             Err(error) => preparation.errors.push(format!(
                 "Verilog-A runtime '{}' could not qualify for the browser JIT: {error}",
                 runtime.netlist_alias()

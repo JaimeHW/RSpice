@@ -82,14 +82,14 @@ impl SimulationController {
 /// the Run Set has materialized each point's source and numerical environment.
 pub(super) fn request_from_config(
     config: Option<&crate::simulation::dialog::mc::checkpoint::McCheckpointConfig>,
-) -> Option<crate::simulation::runner::monte_carlo_checkpoint::MonteCarloCheckpointRequest> {
-    config.map(|config| {
-        crate::simulation::runner::monte_carlo_checkpoint::MonteCarloCheckpointRequest {
+) -> Option<rspice_simulation::monte_carlo_checkpoint::MonteCarloCheckpointRequest> {
+    config.map(
+        |config| rspice_simulation::monte_carlo_checkpoint::MonteCarloCheckpointRequest {
             publish_every: config.publish_every,
             trial_range: None,
             resume: None,
-        }
-    })
+        },
+    )
 }
 
 /// Resolve selected history into checked populations before freezing a task.
@@ -98,8 +98,8 @@ pub(super) fn resume_inputs_from_config(
     state: &AppState,
     config: Option<&crate::simulation::dialog::mc::checkpoint::McCheckpointConfig>,
 ) -> Result<Vec<crate::simulation::execution::PreparedMonteCarloResume>, String> {
-    use crate::simulation::runner::monte_carlo_checkpoint::MonteCarloCheckpointInput;
     use rspice_results::monte_carlo_checkpoint::StudyMonteCarloCheckpoint;
+    use rspice_simulation::monte_carlo_checkpoint::MonteCarloCheckpointInput;
     let Some(config) = config else {
         return Ok(Vec::new());
     };

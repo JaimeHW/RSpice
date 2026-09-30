@@ -33,8 +33,11 @@ use rspice_simulation::results::SimulationResult;
 /// remains lossless and atomically replaces the live document.
 const MAX_PENDING_LIVE_TRANSIENT_SAMPLES: usize = 8_192;
 
-pub(crate) mod monte_carlo_checkpoint;
-use monte_carlo_checkpoint::{CheckpointObserver, CheckpointQueue, replace_checkpoint};
+#[cfg(test)]
+pub(crate) mod monte_carlo_checkpoint_tests;
+use rspice_simulation::monte_carlo_checkpoint::{
+    CheckpointObserver, CheckpointQueue, replace_checkpoint,
+};
 mod live_impulses;
 pub(in crate::simulation) use live_impulses::{CurrentImpulseBuffer, CurrentImpulseDelta};
 use live_impulses::{LiveTransientQueue, PublishedCurrentImpulses};
@@ -58,7 +61,8 @@ pub(crate) mod study;
 #[derive(Debug, Clone, Default)]
 pub struct SpecExecutionOptions {
     pub study_base: Option<study::StudyRunConfig>,
-    pub(crate) mc_checkpoint: Option<monte_carlo_checkpoint::MonteCarloCheckpointRequest>,
+    pub(crate) mc_checkpoint:
+        Option<rspice_simulation::monte_carlo_checkpoint::MonteCarloCheckpointRequest>,
     /// Histogram bins for the default all-node OP study. Configured bases carry their own.
     pub mc_histogram_bins: Option<usize>,
     pub mc_statistics: Option<crate::simulation::dialog::mc::statistics::McStatisticsConfig>,
@@ -325,7 +329,7 @@ impl SimulationRunner {
 
     #[cfg(test)]
     pub(in crate::simulation) fn store_checkpoint_for_test(&self, bytes: Arc<[u8]>) {
-        monte_carlo_checkpoint::replace_checkpoint(&self.monte_carlo_checkpoint, bytes);
+        replace_checkpoint(&self.monte_carlo_checkpoint, bytes);
     }
 
     /// Abort and discard all runner-local completion/progress state.

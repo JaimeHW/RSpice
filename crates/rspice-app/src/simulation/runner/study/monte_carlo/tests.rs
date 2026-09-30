@@ -295,8 +295,8 @@ fn studio_monte_carlo_checkpoint_reuses_trials_after_report_card_edits() {
 
 #[test]
 fn studio_monte_carlo_legacy_unitless_checkpoints_remain_readable_but_cannot_resume() {
-    use crate::simulation::runner::monte_carlo_checkpoint::MonteCarloCheckpointInput;
     use crate::state::MonteCarloCheckpointEvidence;
+    use rspice_simulation::monte_carlo_checkpoint::MonteCarloCheckpointInput;
     let base = base();
     let limits = ResourceLimits::default();
     let mut typed = None;

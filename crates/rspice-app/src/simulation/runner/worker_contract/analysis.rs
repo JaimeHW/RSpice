@@ -51,7 +51,7 @@ pub(crate) struct WorkerSpecExecutionOptions {
     pub study_base: Option<WorkerStudyRunConfig>,
     #[serde(default)]
     pub mc_checkpoint:
-        Option<crate::simulation::runner::monte_carlo_checkpoint::MonteCarloCheckpointRequest>,
+        Option<rspice_simulation::monte_carlo_checkpoint::MonteCarloCheckpointRequest>,
     #[serde(default)]
     pub mc_histogram_bins: Option<usize>,
     #[serde(default)]

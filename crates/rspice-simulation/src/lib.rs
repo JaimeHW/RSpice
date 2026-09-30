@@ -8,6 +8,7 @@ pub mod error;
 pub mod measurement_references;
 pub mod model_import;
 pub mod model_sources;
+pub mod monte_carlo_checkpoint;
 pub mod netlist_gen;
 pub mod netlist_preparation;
 pub mod netlist_sources;

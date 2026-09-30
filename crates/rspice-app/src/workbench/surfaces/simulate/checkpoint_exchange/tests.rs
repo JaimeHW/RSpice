@@ -6,7 +6,7 @@ use super::*;
 #[cfg(not(target_arch = "wasm32"))]
 fn monte_carlo_checkpoint_file_actions_preserve_owner_and_project_storage() {
     let (_, bytes, _) =
-        crate::simulation::runner::monte_carlo_checkpoint::tests::completed_checkpoint_fixture();
+        crate::simulation::runner::monte_carlo_checkpoint_tests::completed_checkpoint_fixture();
     let checkpoint = MonteCarloCheckpointEvidence::from_bytes(bytes).unwrap();
     let ctx = egui::Context::default();
     let mut app = RSpiceApp::test_instance();

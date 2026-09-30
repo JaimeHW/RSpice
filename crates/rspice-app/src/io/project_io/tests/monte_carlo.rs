@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn monte_carlo_checkpoint_retention_project_round_trip_integrity_and_legacy_absence() {
-    use crate::simulation::runner::monte_carlo_checkpoint::tests::completed_checkpoint_fixture;
+    use crate::simulation::runner::monte_carlo_checkpoint_tests::completed_checkpoint_fixture;
     use crate::state::MonteCarloCheckpointEvidence;
 
     let (_, bytes, _) = completed_checkpoint_fixture();

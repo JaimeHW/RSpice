@@ -2,13 +2,14 @@
 
 use super::*;
 use crate::simulation::multi_run::AnalysisSpec;
-use rspice_simulation::results::SimulationResult;
 use crate::simulation::runner::{
-    SpecExecutionOptions,
-    monte_carlo_checkpoint::{MonteCarloCheckpointInput, MonteCarloCheckpointRequest},
-    worker_contract::WorkerSpecExecutionOptions,
+    SpecExecutionOptions, worker_contract::WorkerSpecExecutionOptions,
 };
 use rspice_core::{NoAbort, ResourceLimits};
+use rspice_simulation::monte_carlo_checkpoint::{
+    MonteCarloCheckpointInput, MonteCarloCheckpointRequest,
+};
+use rspice_simulation::results::SimulationResult;
 
 fn execute(
     source: &str,
