@@ -7,8 +7,9 @@ use rspice_core::abort_signal::AbortSignal;
 use crate::services::simulation_runner as svc_runner;
 use crate::simulation::execution::ResolvedExecutionDependencies;
 use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, SpPort};
+use crate::simulation::runner::SpecExecutionOptions;
+use rspice_simulation::error::SimulationError;
 use rspice_simulation::results::{PstbFloquetMode, SimulationResult, WaveformData};
-use crate::simulation::runner::{SimulationError, SpecExecutionOptions};
 
 pub(super) fn run_frequency_spec(
     spec: AnalysisSpec,
@@ -1337,8 +1338,8 @@ fn insert_scalar_waveform(
 mod transfer_function_tests {
     use super::*;
     use crate::simulation::multi_run::{TfAccuracy, TfNormalization};
-    use rspice_simulation::results::{TransferFunctionQuantity, TransferFunctionScalar};
     use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
+    use rspice_simulation::results::{TransferFunctionQuantity, TransferFunctionScalar};
 
     const DIVIDER: &str = "\
 structured TF runner

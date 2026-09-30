@@ -49,7 +49,6 @@ mod browser {
 
     use super::{next_request_id, request_id_from_js_number, stale_result, stale_worker_epoch};
     use crate::diagnostics::engine_log::{EngineLogLine, EngineLogQueue};
-    use rspice_simulation::results::SimulationResult;
     use crate::simulation::runner::worker_contract::{
         WORKER_REQUEST_TRANSPORT_PROTOCOL, WorkerProgressSnapshot, WorkerRequest,
         WorkerRequestTransportMetadata, apply_worker_progress_snapshot,
@@ -59,10 +58,12 @@ mod browser {
         worker_response_from_value,
     };
     use crate::simulation::runner::{
-        LiveTransientQueue, NetlistInput, SimulationError, SimulationRequest, TransientSampleDelta,
+        LiveTransientQueue, NetlistInput, SimulationRequest, TransientSampleDelta,
         push_live_transient_sample,
     };
     use crate::simulation::status::{EngineAvailability, SimulationProgress, SimulationStatus};
+    use rspice_simulation::error::SimulationError;
+    use rspice_simulation::results::SimulationResult;
 
     use crate::simulation::runner::monte_carlo_checkpoint::{
         CheckpointQueue, replace_checkpoint, validate_checkpoint_bytes_size,

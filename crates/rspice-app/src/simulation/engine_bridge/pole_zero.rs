@@ -4,9 +4,9 @@ use rspice_core::abort_signal::AbortSignal;
 
 use super::{EngineBridge, ensure_not_aborted};
 use crate::simulation::config::{PoleZeroConfig, PzAnalysisType};
-use rspice_simulation::results::SimulationResult;
-use crate::simulation::runner::SimulationError;
 use crate::state::{PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate};
+use rspice_simulation::error::SimulationError;
+use rspice_simulation::results::SimulationResult;
 
 impl EngineBridge {
     /// Run pole-zero analysis.

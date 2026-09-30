@@ -5,7 +5,7 @@ use std::path::Path;
 use rspice_core::abort_signal::AbortSignal;
 
 use super::{EngineBridge, ensure_not_aborted};
-use crate::simulation::runner::SimulationError;
+use rspice_simulation::error::SimulationError;
 
 impl EngineBridge {
     pub(crate) fn parse_netlist_with_abort_and_source_path(

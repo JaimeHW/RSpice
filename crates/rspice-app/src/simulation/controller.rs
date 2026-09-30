@@ -36,8 +36,8 @@ use crate::simulation::output_contract::{
 use crate::simulation::plan::AnalysisNumericOverride;
 use crate::simulation::runner::SpecExecutionOptions;
 use crate::simulation::runner::{
-    SimulationError, TransientDigitalBusSample, TransientDigitalEventSample,
-    TransientRealEventSample, TransientSampleDelta,
+    TransientDigitalBusSample, TransientDigitalEventSample, TransientRealEventSample,
+    TransientSampleDelta,
 };
 use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
 use crate::state::{
@@ -52,6 +52,7 @@ use crate::state::{
 use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCacheProvenance};
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 use rspice_results::yield_analysis::YieldAnalysisManager;
+use rspice_simulation::error::SimulationError;
 
 mod analysis_commands;
 mod analysis_helpers;

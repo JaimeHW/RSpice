@@ -1,11 +1,9 @@
 //! Immutable checkpoint requests and bounded delivery of the latest snapshot.
 
-use super::SimulationError;
 use crate::product::ContentDigest;
 use rspice_core::{NoAbort, ResourceLimits};
-use rspice_results::monte_carlo_checkpoint::{
-    CheckpointError, StudyMonteCarloCheckpoint, checkpoint_digest,
-};
+use rspice_results::monte_carlo_checkpoint::{StudyMonteCarloCheckpoint, checkpoint_digest};
+use rspice_simulation::error::SimulationError;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
@@ -79,27 +77,6 @@ impl MonteCarloCheckpointInput {
         candidate.decode()?;
         *self = candidate;
         Ok(())
-    }
-}
-
-impl From<CheckpointError> for SimulationError {
-    fn from(error: CheckpointError) -> Self {
-        match error {
-            CheckpointError::InvalidConfig(message) => Self::InvalidConfig(message),
-            CheckpointError::ResourceLimit {
-                resource,
-                requested,
-                limit,
-            } => Self::ResourceLimit {
-                resource: resource.as_str().into(),
-                requested,
-                limit,
-            },
-            CheckpointError::Aborted => Self::Aborted,
-            CheckpointError::Numerical(error) => {
-                crate::simulation::engine_bridge::EngineBridge::new().translate_error(*error)
-            }
-        }
     }
 }
 

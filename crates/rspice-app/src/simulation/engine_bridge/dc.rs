@@ -7,11 +7,11 @@ use rspice_core::abort_signal::AbortSignal;
 use super::{EngineBridge, ensure_not_aborted};
 use crate::simulation::config::DcSweepConfig;
 use crate::simulation::dialog::{OpConfig, OpInitialGuess, OpNodeInitialization, OpSaveDevice};
-use rspice_simulation::results::{DcOpResult, SimulationResult, WaveformData};
-use crate::simulation::runner::SimulationError;
 use crate::state::{
     DcSweepDirection, DcSweepEvidence, DcSweepFamily, DcSweepQuantity, DcTraceView,
 };
+use rspice_simulation::error::SimulationError;
+use rspice_simulation::results::{DcOpResult, SimulationResult, WaveformData};
 
 /// What the two branches of a retracing sweep are called.
 ///

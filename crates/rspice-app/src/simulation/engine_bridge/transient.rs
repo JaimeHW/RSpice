@@ -7,9 +7,9 @@ use rspice_core::abort_signal::AbortSignal;
 
 use super::{EngineBridge, ensure_not_aborted};
 use crate::simulation::config::TransientAnalysisConfig;
-use rspice_simulation::results::{SimulationResult, WaveformData};
-use crate::simulation::runner::SimulationError;
 use rspice_core::netlist::AnalysisCommand;
+use rspice_simulation::error::SimulationError;
+use rspice_simulation::results::{SimulationResult, WaveformData};
 
 impl EngineBridge {
     /// Run transient analysis.

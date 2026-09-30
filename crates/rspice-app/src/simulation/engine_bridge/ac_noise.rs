@@ -9,8 +9,8 @@ use super::{EngineBridge, ensure_not_aborted};
 use crate::simulation::config::{
     AcAnalysisConfig, NoiseAnalysisConfig, NoiseContributionDetail, NoiseIntegrationMode,
 };
+use rspice_simulation::error::SimulationError;
 use rspice_simulation::results::{SimulationResult, WaveformData};
-use crate::simulation::runner::SimulationError;
 
 impl EngineBridge {
     /// Run AC small-signal analysis.

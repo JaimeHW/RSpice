@@ -18,7 +18,7 @@ mod spectral;
 pub(crate) use optimization::run_optimization;
 pub use spectral::StudyPostprocess;
 
-use super::{AnalysisExecutionEnvironment, SimulationError};
+use super::AnalysisExecutionEnvironment;
 use crate::product::{AnalysisInstanceId, ObjectRevision};
 use crate::services::simulation_runner as services;
 use crate::simulation::dialog::McVariationSource;
@@ -29,6 +29,7 @@ use rspice_core::analysis::monte_carlo::Distribution;
 use rspice_core::engine::MonteCarloEnvironment;
 #[cfg(test)]
 use rspice_core::engine::MonteCarloStudyConfig;
+use rspice_simulation::error::SimulationError;
 use std::path::Path;
 use std::sync::{
     Mutex,
@@ -77,12 +78,12 @@ impl AbortSignal for StudyAbort<'_> {
 mod tests {
     use super::*;
     use crate::simulation::config::{AcAnalysisConfig, AcSweepType, TransientAnalysisConfig};
+    use crate::simulation::multi_run::AnalysisSpec;
     use crate::simulation::runner::{
         SpecExecutionOptions, worker_contract::WorkerSpecExecutionOptions,
     };
-    use crate::simulation::multi_run::AnalysisSpec;
-    use rspice_simulation::results::SimulationResult;
     use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
+    use rspice_simulation::results::SimulationResult;
 
     fn base(analysis: AnalysisConfig, names: &[&str]) -> StudyRunConfig {
         StudyRunConfig {
@@ -814,7 +815,8 @@ fn validate_qpss_measurements(
     for request in measurements {
         let (mode, key) = request.split_once(':').unwrap_or(("meas", request));
         if mode.eq_ignore_ascii_case("tuple") {
-            let (tuple, _, _) = rspice_simulation_contract::study_measurement::parse_study_tuple(key)?;
+            let (tuple, _, _) =
+                rspice_simulation_contract::study_measurement::parse_study_tuple(key)?;
             if grid.index_of(&tuple).is_none() {
                 return Err(format!("QPSS does not retain lattice tuple {tuple:?}"));
             }

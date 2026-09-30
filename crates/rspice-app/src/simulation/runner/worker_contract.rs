@@ -77,14 +77,15 @@ use std::sync::{Arc, Mutex, atomic::AtomicBool};
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(test)]
-use super::ResultSchemaMismatch;
-use super::{NetlistInput, SimulationError, SimulationRequest, SpecExecutionOptions};
+use super::{NetlistInput, SimulationRequest, SpecExecutionOptions};
 use crate::results::safety::{SoAEvaluation, SoAViolation};
 use crate::simulation::config::AnalysisConfig;
 #[cfg(test)]
 use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
 use crate::simulation::multi_run::{AnalysisSpec, TfAccuracy, TfNormalization};
+#[cfg(test)]
+use rspice_results::validation::ResultSchemaMismatch;
+use rspice_simulation::error::SimulationError;
 
 use crate::simulation::status::{SimulationProgress, SimulationStatus};
 use rspice_results::noise::NoiseSummary;
@@ -497,156 +498,6 @@ fn worker_payload_limit_error(payload_bytes: usize, limit_bytes: usize) -> Worke
         crate::simulation::run_set::format_bytes(payload_bytes as u64),
         crate::simulation::run_set::format_bytes(limit_bytes as u64)
     ))
-}
-
-impl From<SimulationError> for WorkerSimulationError {
-    fn from(value: SimulationError) -> Self {
-        match value {
-            SimulationError::ParseError(message) => Self::ParseError(message),
-            SimulationError::BehavioralReference {
-                owner_name,
-                canonical_owner_name,
-                dependency_name,
-                canonical_dependency_name,
-                reason,
-            } => Self::BehavioralReference {
-                owner_name,
-                canonical_owner_name,
-                dependency_name,
-                canonical_dependency_name,
-                reason,
-            },
-            SimulationError::CircuitError(message) => Self::CircuitError(message),
-            SimulationError::Elaboration {
-                instance,
-                module,
-                kind,
-                location,
-                message,
-            } => Self::Elaboration {
-                instance,
-                module,
-                kind,
-                location,
-                message,
-            },
-            SimulationError::SolverError(message) => Self::SolverError(message),
-            SimulationError::RequestedSignalUnavailable {
-                signal,
-                analysis,
-                coordinate,
-            } => Self::RequestedSignalUnavailable {
-                signal,
-                analysis,
-                coordinate,
-            },
-            SimulationError::ResultSchemaMismatch(mismatch) => Self::ResultSchemaMismatch(mismatch),
-            SimulationError::ConvergenceFailed {
-                iterations,
-                message,
-            } => Self::ConvergenceFailed {
-                iterations,
-                message,
-            },
-            SimulationError::Attributed {
-                message,
-                attribution,
-            } => Self::Attributed {
-                message,
-                attribution,
-            },
-            SimulationError::Aborted => Self::Aborted,
-            SimulationError::AlreadyRunning => Self::AlreadyRunning,
-            SimulationError::ThreadPanic => Self::ThreadPanic,
-            SimulationError::InvalidConfig(message) => Self::InvalidConfig(message),
-            SimulationError::UnsupportedOutcome(message) => Self::UnsupportedOutcome(message),
-            SimulationError::ResourceLimit {
-                resource,
-                requested,
-                limit,
-            } => Self::ResourceLimit {
-                resource,
-                requested,
-                limit,
-            },
-        }
-    }
-}
-
-impl From<WorkerSimulationError> for SimulationError {
-    fn from(value: WorkerSimulationError) -> Self {
-        match value {
-            WorkerSimulationError::ParseError(message) => Self::ParseError(message),
-            WorkerSimulationError::BehavioralReference {
-                owner_name,
-                canonical_owner_name,
-                dependency_name,
-                canonical_dependency_name,
-                reason,
-            } => Self::BehavioralReference {
-                owner_name,
-                canonical_owner_name,
-                dependency_name,
-                canonical_dependency_name,
-                reason,
-            },
-            WorkerSimulationError::CircuitError(message) => Self::CircuitError(message),
-            WorkerSimulationError::Elaboration {
-                instance,
-                module,
-                kind,
-                location,
-                message,
-            } => Self::Elaboration {
-                instance,
-                module,
-                kind,
-                location,
-                message,
-            },
-            WorkerSimulationError::SolverError(message) => Self::SolverError(message),
-            WorkerSimulationError::RequestedSignalUnavailable {
-                signal,
-                analysis,
-                coordinate,
-            } => Self::RequestedSignalUnavailable {
-                signal,
-                analysis,
-                coordinate,
-            },
-            WorkerSimulationError::ResultSchemaMismatch(mismatch) => {
-                Self::ResultSchemaMismatch(mismatch)
-            }
-            WorkerSimulationError::ConvergenceFailed {
-                iterations,
-                message,
-            } => Self::ConvergenceFailed {
-                iterations,
-                message,
-            },
-            WorkerSimulationError::Attributed {
-                message,
-                attribution,
-            } => Self::Attributed {
-                message,
-                attribution,
-            },
-            WorkerSimulationError::Aborted => Self::Aborted,
-            WorkerSimulationError::AlreadyRunning => Self::AlreadyRunning,
-            WorkerSimulationError::ThreadPanic => Self::ThreadPanic,
-            WorkerSimulationError::InvalidConfig(message) => Self::InvalidConfig(message),
-            WorkerSimulationError::UnsupportedOutcome(message) => Self::UnsupportedOutcome(message),
-            WorkerSimulationError::ResourceLimit {
-                resource,
-                requested,
-                limit,
-            } => Self::ResourceLimit {
-                resource,
-                requested,
-                limit,
-            },
-        }
-    }
 }
 
 pub(crate) use rspice_simulation_contract::progress::WorkerProgressSnapshot;

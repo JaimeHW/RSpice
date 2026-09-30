@@ -12,8 +12,8 @@ use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::TransientFftResult;
 
 use crate::simulation::config::FftRequest;
+use rspice_simulation::error::SimulationError;
 use rspice_simulation::results::RecordedFftSpectrum;
-use crate::simulation::runner::SimulationError;
 
 /// Convert the spectra one transient returned, keyed by their own cards.
 ///

@@ -2,7 +2,6 @@
 //!
 //! Steps one design parameter and returns a result set per point.
 
-use rspice_simulation::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted};
 use super::mapping::describe_step_target;
 use super::sweep_points::expand_step_sweep_values_with_abort;
 use super::types::ParametricData;
@@ -12,6 +11,7 @@ use rspice_core::abort_signal::AbortSignal;
 use rspice_core::abort_signal::NoAbort;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{AnalysisCommand, StepSweep, StepTarget};
+use rspice_simulation::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted};
 use std::path::Path;
 
 /// Run parametric analysis, reporting failures as strings. Test-only; see
@@ -208,7 +208,7 @@ fn run_base_analysis(
                     abort,
                 )
                 .map_err(|error| match error {
-                    crate::simulation::runner::SimulationError::Aborted => {
+                    rspice_simulation::error::SimulationError::Aborted => {
                         rspice_core::SimulationError::Aborted
                     }
                     error => rspice_core::SimulationError::Circuit(error.to_string()),

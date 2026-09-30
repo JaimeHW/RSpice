@@ -17,8 +17,8 @@ use std::path::Path;
 fn studio_ac_data_authored_columns_and_netlist_tables_reach_results() {
     use crate::simulation::config::AcDataTableOptions;
     use crate::simulation::plan::{AcDataDraft, AnalysisDraft};
-    use rspice_simulation::results::SimulationResult;
     use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
+    use rspice_simulation::results::SimulationResult;
 
     let controller = SimulationController::new();
     let state = AppState::default();
@@ -308,9 +308,9 @@ fn transient_noise_seed_inheritance_and_zero_scale_reach_the_solver() {
 fn sensitivity_dc_limit_and_disabled_ac_fields_reach_the_solver_and_results() {
     use crate::simulation::dialog::sens::{SensConfig, SensDialogState};
     use crate::simulation::plan::AnalysisDraft;
-    use rspice_simulation::results::SimulationResult;
     use crate::simulation::runner::worker_contract::{WorkerAnalysisSpec, WorkerSimulationResult};
     use crate::state::SensitivityBasisEvidence;
+    use rspice_simulation::results::SimulationResult;
     let source = "DC-limit sensitivity\n.param rt=1k\nV1 in 0 DC 1 AC 1\nR1 in out {rt}\nR2 out 0 1k\n.end\n";
     let controller = SimulationController::new();
     for (ac_mode, stop, expected_frequencies) in [
@@ -1220,7 +1220,7 @@ fn abort_trigger_discards_worker_aborted_result_without_failed_analysis() {
     controller.total_analyses = 1;
     controller
         .runner
-        .store_pending_result(Err(crate::simulation::runner::SimulationError::Aborted))
+        .store_pending_result(Err(rspice_simulation::error::SimulationError::Aborted))
         .expect("seed worker abort result");
     bind_and_request_test_abort(&mut state, &mut controller);
 

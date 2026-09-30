@@ -24,7 +24,7 @@ use crate::state::{
     SimulationRun, SimulationRunIntent, SimulationRunProvenance,
 };
 
-use super::SimulationError;
+use rspice_simulation::error::SimulationError;
 
 const TEST_NAMESPACE: uuid::Uuid = uuid::Uuid::from_u128(0x0f22_9f3a_51b8_4cd7_9e21_7c60_5d18_a4b3);
 

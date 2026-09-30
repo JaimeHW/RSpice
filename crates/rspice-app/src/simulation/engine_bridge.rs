@@ -24,7 +24,7 @@ use rspice_core::abort_signal::AbortSignal;
 use rspice_core::abort_signal::NoAbort;
 
 use super::config::AnalysisConfig;
-use super::runner::SimulationError;
+use rspice_simulation::error::SimulationError;
 use rspice_simulation::results::SimulationResult;
 
 #[cfg(test)]
