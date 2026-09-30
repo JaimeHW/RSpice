@@ -17,13 +17,14 @@ impl SimulationController {
         state: &AppState,
         draft: &crate::simulation::plan::AnalysisDraft,
     ) -> Result<String, String> {
+        let state = &AnalysisInputs::new(state);
         let spec = self.analysis_draft_spec(state, draft)?;
         self.analysis_spec_to_spice_line(state, draft, &spec)
     }
 
     pub(super) fn analysis_spec_to_spice_line(
         &self,
-        state: &AppState,
+        state: &AnalysisInputs<'_>,
         draft: &AnalysisDraft,
         spec: &AnalysisSpec,
     ) -> Result<String, String> {
@@ -136,9 +137,7 @@ impl SimulationController {
             AnalysisSpec::Qpac { .. } => Ok(spec.qpac_card()?.to_spice()),
             AnalysisSpec::Qpxf { .. } => Ok(spec.qpxf_card()?.to_spice()),
             AnalysisSpec::Qpnoise { .. } => Ok(spec.qpnoise_card()?.to_spice()),
-            _ => self
-                .analysis_spec_to_config(state, spec)
-                .map(|cfg| cfg.to_spice()),
+            _ => self.analysis_spec_to_config(spec).map(|cfg| cfg.to_spice()),
         }
     }
 
@@ -202,7 +201,7 @@ impl SimulationController {
 
     pub(super) fn build_temperature_step_command(
         &self,
-        state: &AppState,
+        state: &AnalysisInputs<'_>,
         draft: &crate::simulation::dialog::temp::TempDialogState,
     ) -> Result<String, String> {
         let mut temp_state = draft.clone();
@@ -234,7 +233,7 @@ impl SimulationController {
 
     pub(super) fn build_corner_temp_command(
         &self,
-        state: &AppState,
+        state: &AnalysisInputs<'_>,
         draft: &crate::simulation::dialog::corner::CornerDialogState,
     ) -> Result<String, String> {
         let mut corner_state = draft.clone();
@@ -275,7 +274,7 @@ impl SimulationController {
 
     pub(super) fn build_stb_command(
         &self,
-        state: &AppState,
+        state: &AnalysisInputs<'_>,
         draft: &crate::simulation::dialog::stb::StbDialogState,
     ) -> Result<String, String> {
         let mut stb_state = draft.clone();
@@ -308,12 +307,12 @@ impl SimulationController {
 
     pub(super) fn build_sp_command(
         &self,
-        state: &AppState,
+        state: &AnalysisInputs<'_>,
         draft: &crate::simulation::dialog::sp::SpDialogState,
     ) -> Result<String, String> {
         let mut sp_state = draft.clone();
         sp_state.ensure_initialized();
-        let placed = crate::simulation::placed_sources::placed_rf_ports(&state.schematic, None);
+        let placed = crate::simulation::placed_sources::placed_rf_ports(state.schematic, None);
         let sp_cfg = crate::simulation::dialog::sp::to_config(&sp_state, Some(&placed))
             .map_err(|e| format!("invalid S-parameter settings: {}", e))?;
         Ok(sp_cfg.to_spice())
@@ -405,7 +404,7 @@ impl SimulationController {
 
     pub(super) fn build_pstb_command(
         &self,
-        state: &AppState,
+        state: &AnalysisInputs<'_>,
         draft: &crate::simulation::dialog::pstb::PstbDialogState,
     ) -> Result<String, String> {
         let mut pstb_state = draft.clone();
@@ -952,7 +951,7 @@ mod tests {
         );
 
         let error = SimulationController::new()
-            .build_stb_command(&state, &state.sim_setup.stb)
+            .build_stb_command(&AnalysisInputs::new(&state), &state.sim_setup.stb)
             .expect_err("a probe that is not on the schematic is refused");
 
         assert!(error.contains("VLOOP1"), "{error}");
@@ -975,7 +974,7 @@ mod tests {
         );
 
         let directive = SimulationController::new()
-            .build_stb_command(&state, &state.sim_setup.stb)
+            .build_stb_command(&AnalysisInputs::new(&state), &state.sim_setup.stb)
             .expect("a placed probe reaches the deck");
 
         assert!(directive.contains("probe=VLOOP1"), "{directive}");
@@ -1004,21 +1003,21 @@ mod tests {
         );
 
         let error = SimulationController::new()
-            .build_pstb_command(&state, &state.sim_setup.pstb)
+            .build_pstb_command(&AnalysisInputs::new(&state), &state.sim_setup.pstb)
             .expect_err("a probe that is not on the schematic is refused");
         assert!(error.contains("VLOOP1"), "{error}");
         assert!(error.contains("VLOOP2"), "{error}");
 
         state.sim_setup.pstb.probe_reference = StbProbeReference::Entered;
         let directive = SimulationController::new()
-            .build_pstb_command(&state, &state.sim_setup.pstb)
+            .build_pstb_command(&AnalysisInputs::new(&state), &state.sim_setup.pstb)
             .expect("a name entered by hand is the deck's claim, not this design's");
         assert!(directive.contains("probe=VLOOP1"), "{directive}");
 
         state.sim_setup.pstb.probe = "VLOOP2".to_owned();
         state.sim_setup.pstb.probe_reference = StbProbeReference::Placed;
         let directive = SimulationController::new()
-            .build_pstb_command(&state, &state.sim_setup.pstb)
+            .build_pstb_command(&AnalysisInputs::new(&state), &state.sim_setup.pstb)
             .expect("a placed probe reaches the deck");
         assert!(directive.contains("probe=VLOOP2"), "{directive}");
     }

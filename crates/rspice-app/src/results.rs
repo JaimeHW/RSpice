@@ -2,6 +2,5 @@
 
 pub(crate) mod safety;
 pub(crate) use rspice_results::{
-    operating_point, report_document, stability, viewer_catalog, visualization_document,
-    visualization_raster,
+    report_document, stability, viewer_catalog, visualization_document, visualization_raster,
 };

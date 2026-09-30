@@ -121,20 +121,6 @@ pub struct SimulationState {
 }
 
 impl SimulationState {
-    /// Newest complete accepted OP. Compatible-circuit startup explicitly
-    /// permits older revisions; execution still checks every MNA identity.
-    pub(crate) fn newest_retained_op_state(
-        &self,
-        project_revision: crate::product::ObjectRevision,
-        allow_changed_revision: bool,
-    ) -> Option<crate::results::operating_point::OpPreviousState> {
-        rspice_results::run_history::newest_retained_op_state(
-            self.runs.iter().map(|run| &run.data),
-            project_revision,
-            allow_changed_revision,
-        )
-    }
-
     pub(crate) fn has_retained_op_state(
         &self,
         project_revision: crate::product::ObjectRevision,

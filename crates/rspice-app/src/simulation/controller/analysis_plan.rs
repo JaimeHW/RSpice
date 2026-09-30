@@ -35,7 +35,7 @@ impl SimulationController {
         if outputs.is_empty() {
             return Vec::new();
         }
-        let plan = match self.build_analysis_plan(state) {
+        let plan = match self.build_analysis_plan(&state.sim_setup) {
             Ok(plan) => plan,
             Err(errors) => {
                 return invalid_saved_output_reports(outputs.len(), errors.join("; "));
@@ -77,9 +77,9 @@ impl SimulationController {
 
     pub(super) fn build_analysis_plan(
         &self,
-        state: &AppState,
+        state: &SimSetupState,
     ) -> Result<FrozenSimulationPlan, Vec<String>> {
-        let plan = state.sim_setup.analysis_plan.as_ref().ok_or_else(|| {
+        let plan = state.analysis_plan.as_ref().ok_or_else(|| {
             vec![
                 "The simulation plan has not been migrated to stable analysis instances".to_owned(),
             ]
@@ -95,25 +95,24 @@ impl SimulationController {
     ) -> Result<Vec<PreparedTask>, Vec<String>> {
         let mut queue = Vec::with_capacity(plan.instances().len());
         let mut errors = Vec::new();
-        // Remaining legacy engine builders still read the retired singleton
-        // setup view. Clone once, then project each frozen instance (and its
-        // exact bound prerequisites) into that short-lived view.
-        // The live state and frozen plan remain untouched.
-        let mut projected_state = state.clone();
+        let inputs = AnalysisInputs::new(state);
 
         for instance in plan.instances() {
             if let Some(reason) = instance.kind().execution_blocker() {
                 errors.push(format!("{}: {reason}", instance.display_name()));
                 continue;
             }
-            projected_state.sim_setup =
-                match state.sim_setup.frozen_instance_projection(plan, instance) {
-                    Ok(projection) => projection,
-                    Err(error) => {
-                        errors.push(format!("{}: {error}", instance.display_name()));
-                        continue;
-                    }
-                };
+            let projected_setup = match state.sim_setup.frozen_instance_projection(plan, instance) {
+                Ok(projection) => projection,
+                Err(error) => {
+                    errors.push(format!("{}: {error}", instance.display_name()));
+                    continue;
+                }
+            };
+            let projected_state = AnalysisInputs {
+                sim_setup: &projected_setup,
+                ..inputs
+            };
             let dependency_ids = instance
                 .dependencies()
                 .iter()
@@ -194,7 +193,7 @@ impl SimulationController {
                                 instance.display_name()
                             )),
                         })
-                        .and_then(|spec| self.analysis_spec_to_config(&projected_state, &spec));
+                        .and_then(|spec| self.analysis_spec_to_config(&spec));
                     match config {
                         Ok(AnalysisConfig::DcOp(config)) => {
                             *mode = rspice_simulation::sweeps::CornerBaseMode::ConfiguredOp(
@@ -217,7 +216,7 @@ impl SimulationController {
                 crate::simulation::plan::AnalysisDraft::MonteCarlo(_)
                     | crate::simulation::plan::AnalysisDraft::Optimization(_)
             ) {
-                match self.compile_study_base(state, plan, instance.draft()) {
+                match self.compile_study_base(&inputs, plan, instance.draft()) {
                     Ok(base) => spec_options.study_base = base,
                     Err(error) => {
                         errors.push(format!("{}: {error}", instance.display_name()));
@@ -297,7 +296,7 @@ impl SimulationController {
                     numeric_override: numeric_override.clone(),
                 }
             } else {
-                match self.analysis_spec_to_config(&projected_state, &spec) {
+                match self.analysis_spec_to_config(&spec) {
                     Ok(config) => {
                         if let Err(errs) = config.validate() {
                             errors.push(format!(
@@ -547,7 +546,7 @@ impl SimulationController {
 
     fn compile_study_seeded_periodic(
         &self,
-        state: &AppState,
+        state: &AnalysisInputs<'_>,
         plan: &FrozenSimulationPlan,
         base: &crate::simulation::plan::FrozenAnalysisInstance,
         spec: &AnalysisSpec,
@@ -565,15 +564,16 @@ impl SimulationController {
         let [producer] = producers.as_slice() else {
             return Err("A periodic study requires exactly one explicitly bound, enabled operating-point producer".into());
         };
-        let mut producer_state = state.clone();
-        producer_state.sim_setup = state
+        let producer_state_setup = state
             .sim_setup
             .frozen_instance_projection(plan, producer)
             .map_err(|error| error.to_string())?;
+        let producer_state = AnalysisInputs {
+            sim_setup: &producer_state_setup,
+            ..*state
+        };
         let producer_spec = self.analysis_draft_spec(&producer_state, producer.draft())?;
-        let AnalysisConfig::DcOp(config) =
-            self.analysis_spec_to_config(&producer_state, &producer_spec)?
-        else {
+        let AnalysisConfig::DcOp(config) = self.analysis_spec_to_config(&producer_spec)? else {
             return Err("Periodic study dependency is not an operating-point configuration".into());
         };
         use crate::simulation::runner::study::{
@@ -608,7 +608,7 @@ impl SimulationController {
 
     fn compile_study_base(
         &self,
-        state: &AppState,
+        state: &AnalysisInputs<'_>,
         plan: &FrozenSimulationPlan,
         draft: &crate::simulation::plan::AnalysisDraft,
     ) -> Result<Option<crate::simulation::runner::study::StudyRunConfig>, String> {
@@ -647,39 +647,42 @@ impl SimulationController {
                 base.display_name()
             ));
         }
-        let mut projected = state.clone();
-        projected.sim_setup = state
+        let projected_setup = state
             .sim_setup
             .frozen_instance_projection(plan, base)
             .map_err(|error| error.to_string())?;
+        let projected = AnalysisInputs {
+            sim_setup: &projected_setup,
+            ..*state
+        };
         let spec = self.analysis_draft_spec(&projected, base.draft())?;
         let periodic_producer = bound_periodic_producer(plan, base)?;
         use crate::simulation::runner::study::StudyPeriodicOptions;
         let periodic_options = match base.draft() {
             AnalysisDraft::Pac(draft) => {
                 Some(StudyPeriodicOptions::Pac(Self::pac_run_config_from_dialog(
-                    &projected,
+                    projected.sim_setup,
                     draft,
                     periodic_producer.map(|producer| producer.draft()),
                 )?))
             }
             AnalysisDraft::Pxf(draft) => {
                 Some(StudyPeriodicOptions::Pxf(Self::pxf_run_config_from_dialog(
-                    &projected,
+                    projected.sim_setup,
                     draft,
                     periodic_producer.map(|producer| producer.draft()),
                 )?))
             }
             AnalysisDraft::Pnoise(draft) => Some(StudyPeriodicOptions::Pnoise(
                 Self::pnoise_run_config_from_dialog(
-                    &projected,
+                    projected.sim_setup,
                     draft,
                     periodic_producer.map(|producer| producer.draft()),
                 )?,
             )),
             AnalysisDraft::Pstb(draft) => Some(StudyPeriodicOptions::Pstb(
                 Self::pstb_run_config_from_dialog(
-                    &projected,
+                    projected.sim_setup,
                     draft,
                     periodic_producer.map(|producer| producer.draft()),
                 )?,
@@ -736,11 +739,14 @@ impl SimulationController {
             let [producer] = producers.as_slice() else {
                 return Err("A spectral study requires exactly one explicitly bound, enabled producer of the required analysis kind".into());
             };
-            let mut producer_state = state.clone();
-            producer_state.sim_setup = state
+            let producer_state_setup = state
                 .sim_setup
                 .frozen_instance_projection(plan, producer)
                 .map_err(|error| error.to_string())?;
+            let producer_state = AnalysisInputs {
+                sim_setup: &producer_state_setup,
+                ..*state
+            };
             let producer_spec = self.analysis_draft_spec(&producer_state, producer.draft())?;
             crate::simulation::execution::validate_prepared_dependency_contract_with_options(
                 &spec,
@@ -757,8 +763,7 @@ impl SimulationController {
                 ) {
                     self.compile_study_seeded_periodic(state, plan, producer, &producer_spec)?
                 } else {
-                    self.analysis_spec_to_config(&producer_state, &producer_spec)?
-                        .into()
+                    self.analysis_spec_to_config(&producer_spec)?.into()
                 },
                 Some(crate::simulation::runner::study::StudyPostprocess {
                     producer_instance_id: producer.id(),
@@ -787,10 +792,7 @@ impl SimulationController {
                 None,
             )
         } else {
-            (
-                self.analysis_spec_to_config(&projected, &spec)?.into(),
-                None,
-            )
+            (self.analysis_spec_to_config(&spec)?.into(), None)
         };
         analysis.validate().map_err(|errors| errors.join("; "))?;
         Ok(Some(crate::simulation::runner::study::StudyRunConfig {
@@ -812,7 +814,7 @@ impl SimulationController {
 
     pub(super) fn analysis_spec_execution_options(
         &self,
-        state: &AppState,
+        state: &AnalysisInputs<'_>,
         draft: &crate::simulation::plan::AnalysisDraft,
         periodic_producer: Option<&crate::simulation::plan::AnalysisDraft>,
         spec: &AnalysisSpec,
@@ -859,7 +861,10 @@ impl SimulationController {
                     mc_statistics: None,
                     mc_checkpoint: None,
                     study_base: None,
-                    temp: Some(Self::temp_run_config_from_dialog(state, &temp_cfg)?),
+                    temp: Some(Self::temp_run_config_from_dialog(
+                        state.sim_setup,
+                        &temp_cfg,
+                    )?),
                     parametric_base: None,
                     corner: None,
                     pac: None,
@@ -892,7 +897,7 @@ impl SimulationController {
                     temp: None,
                     parametric_base: None,
                     corner: Some(Self::corner_run_config_from_dialog(
-                        state,
+                        state.sim_setup,
                         &corner_cfg,
                         sealed_model_sources,
                     )?),
@@ -908,7 +913,7 @@ impl SimulationController {
                 };
                 Ok(SpecExecutionOptions {
                     pac: Some(Self::pac_run_config_from_dialog(
-                        state,
+                        state.sim_setup,
                         draft,
                         periodic_producer,
                     )?),
@@ -921,7 +926,7 @@ impl SimulationController {
                 };
                 Ok(SpecExecutionOptions {
                     pxf: Some(Self::pxf_run_config_from_dialog(
-                        state,
+                        state.sim_setup,
                         draft,
                         periodic_producer,
                     )?),
@@ -935,7 +940,7 @@ impl SimulationController {
                 };
                 Ok(SpecExecutionOptions {
                     pnoise: Some(Self::pnoise_run_config_from_dialog(
-                        state,
+                        state.sim_setup,
                         draft,
                         periodic_producer,
                     )?),
@@ -948,7 +953,7 @@ impl SimulationController {
                 };
                 Ok(SpecExecutionOptions {
                     pstb: Some(Self::pstb_run_config_from_dialog(
-                        state,
+                        state.sim_setup,
                         draft,
                         periodic_producer,
                     )?),

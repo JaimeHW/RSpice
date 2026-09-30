@@ -21,15 +21,17 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
     state.sim_setup.mc.histogram_bins = "99".into();
     state.sim_setup.mc.num_runs = "99".into();
     let draft = AnalysisDraft::MonteCarlo(mc);
-    let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
+    let spec = controller
+        .analysis_draft_spec(&AnalysisInputs::new(&state), &draft)
+        .unwrap();
     assert!(
         controller
-            .analysis_spec_to_spice_line(&state, &draft, &spec)
+            .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &draft, &spec)
             .unwrap()
             .starts_with(".mc 17 ")
     );
     let options = controller
-        .analysis_spec_execution_options(&state, &draft, None, &spec, &sealed)
+        .analysis_spec_execution_options(&AnalysisInputs::new(&state), &draft, None, &spec, &sealed)
         .unwrap();
     assert_eq!(options.mc_histogram_bins, Some(31));
 
@@ -38,15 +40,17 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
     temp.specific_temps = "11, 22".into();
     state.sim_setup.temp.specific_temps = "not a temperature".into();
     let draft = AnalysisDraft::Temperature(temp);
-    let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
+    let spec = controller
+        .analysis_draft_spec(&AnalysisInputs::new(&state), &draft)
+        .unwrap();
     assert_eq!(
         controller
-            .analysis_spec_to_spice_line(&state, &draft, &spec)
+            .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &draft, &spec)
             .unwrap(),
         ".step temp list 11 22"
     );
     let options = controller
-        .analysis_spec_execution_options(&state, &draft, None, &spec, &sealed)
+        .analysis_spec_execution_options(&AnalysisInputs::new(&state), &draft, None, &spec, &sealed)
         .unwrap();
     assert_eq!(options.temp.unwrap().temperatures_c, vec![11.0, 22.0]);
 
@@ -55,9 +59,11 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
     corner.base_analysis_idx = 3;
     state.sim_setup.corner.base_analysis_idx = 0;
     let draft = AnalysisDraft::Corner(corner);
-    let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
+    let spec = controller
+        .analysis_draft_spec(&AnalysisInputs::new(&state), &draft)
+        .unwrap();
     let options = controller
-        .analysis_spec_execution_options(&state, &draft, None, &spec, &sealed)
+        .analysis_spec_execution_options(&AnalysisInputs::new(&state), &draft, None, &spec, &sealed)
         .unwrap();
     assert!(matches!(
         options.corner.unwrap().base_mode,
@@ -72,15 +78,23 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
     state.sim_setup.pac.pac_magnitude = "9".into();
     let draft = AnalysisDraft::Pac(pac);
     let options = controller
-        .analysis_spec_execution_options(&state, &draft, None, &AnalysisSpec::Pac, &sealed)
+        .analysis_spec_execution_options(
+            &AnalysisInputs::new(&state),
+            &draft,
+            None,
+            &AnalysisSpec::Pac,
+            &sealed,
+        )
         .unwrap();
     assert_eq!(options.pac.unwrap().pac_magnitude, 2.5);
     state.sim_setup.pac.pac_magnitude = "unfinished(".into();
-    let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
+    let spec = controller
+        .analysis_draft_spec(&AnalysisInputs::new(&state), &draft)
+        .unwrap();
     assert_eq!(spec, AnalysisSpec::Pac);
     assert!(
         controller
-            .analysis_spec_to_spice_line(&state, &draft, &spec)
+            .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &draft, &spec)
             .unwrap()
             .contains("pacmag=2.5")
     );
@@ -92,13 +106,15 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
     state.sim_setup.pss = pss.clone();
     state.sim_setup.pss.fund_freq = "2k".into();
     let draft = AnalysisDraft::Pss(pss);
-    let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
+    let spec = controller
+        .analysis_draft_spec(&AnalysisInputs::new(&state), &draft)
+        .unwrap();
     assert!(
         matches!(&spec, AnalysisSpec::Pss { fundamental_freq, .. } if *fundamental_freq == 1e3)
     );
     assert!(
         controller
-            .analysis_spec_to_spice_line(&state, &draft, &spec)
+            .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &draft, &spec)
             .unwrap()
             .starts_with(".pss fund=1k ")
     );
@@ -109,13 +125,15 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
     state.sim_setup.hb = hb.clone();
     state.sim_setup.hb.fundamental = "2meg".into();
     let draft = AnalysisDraft::HarmonicBalance(hb);
-    let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
+    let spec = controller
+        .analysis_draft_spec(&AnalysisInputs::new(&state), &draft)
+        .unwrap();
     assert!(
         matches!(&spec, AnalysisSpec::HarmonicBalance { tones, .. } if tones[0].frequency == 1e6)
     );
     assert!(
         controller
-            .analysis_spec_to_spice_line(&state, &draft, &spec)
+            .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &draft, &spec)
             .unwrap()
             .starts_with(".hb 1000000 ")
     );
@@ -1671,7 +1689,7 @@ fn frozen_noise_task_keeps_exact_draft_and_reference_pvt() {
 
     let controller = SimulationController::new();
     let frozen = controller
-        .build_analysis_plan(&state)
+        .build_analysis_plan(&state.sim_setup)
         .expect("plan freezes");
     let sealed = state
         .model_library_manager
@@ -1751,7 +1769,7 @@ fn frozen_plan_ids_revisions_and_exact_dependency_bindings_reach_prepared_tasks(
 
     let controller = SimulationController::new();
     let frozen = controller
-        .build_analysis_plan(&state)
+        .build_analysis_plan(&state.sim_setup)
         .expect("plan freezes");
     let sealed = state
         .model_library_manager
@@ -1818,7 +1836,7 @@ fn same_kind_sparameter_instances_freeze_independent_export_policies() {
 
     let controller = SimulationController::new();
     let frozen = controller
-        .build_analysis_plan(&state)
+        .build_analysis_plan(&state.sim_setup)
         .expect("plan freezes");
     let sealed = state
         .model_library_manager

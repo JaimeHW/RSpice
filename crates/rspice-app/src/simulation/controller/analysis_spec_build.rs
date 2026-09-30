@@ -6,10 +6,37 @@
 
 use super::*;
 
+/// Borrowed inputs shared by draft lowering and frozen study preparation.
+/// A projected instance replaces only `sim_setup`; circuit and evidence stay borrowed.
+#[derive(Clone, Copy)]
+pub(super) struct AnalysisInputs<'a> {
+    pub(super) sim_setup: &'a SimSetupState,
+    pub(super) schematic: &'a crate::state::SchematicState,
+    pub(super) runs: &'a [crate::state::SimulationRun],
+    pub(super) active_run:
+        Option<&'a rspice_results::run::SimulationRun<crate::state::AnalysisResult>>,
+    pub(super) project_revision: crate::product::ObjectRevision,
+    pub(super) plan_payloads:
+        &'a [rspice_simulation_contract::plan_payload::SimulationPlanPayloadRecord],
+}
+
+impl<'a> AnalysisInputs<'a> {
+    pub(super) fn new(state: &'a AppState) -> Self {
+        Self {
+            sim_setup: &state.sim_setup,
+            schematic: &state.schematic,
+            runs: &state.simulation.runs,
+            active_run: state.simulation.active_run().map(|run| &run.data),
+            project_revision: state.workspace.content.project.revision(),
+            plan_payloads: &state.workspace.content.simulation_plan_payloads,
+        }
+    }
+}
+
 impl SimulationController {
     pub(super) fn analysis_draft_spec(
         &self,
-        state: &AppState,
+        state: &AnalysisInputs<'_>,
         draft: &crate::simulation::plan::AnalysisDraft,
     ) -> Result<AnalysisSpec, String> {
         use crate::simulation::plan::AnalysisDraft;
@@ -271,7 +298,7 @@ impl SimulationController {
 
     pub(super) fn build_op_spec(
         &self,
-        state: &AppState,
+        state: &AnalysisInputs<'_>,
         draft: &crate::simulation::dialog::op::OpDialogState,
     ) -> Result<AnalysisSpec, String> {
         let mut op = draft.clone();
@@ -300,8 +327,9 @@ impl SimulationController {
         config.selected_devices.sort();
         config.selected_devices.dedup();
         if config.initial_guess.uses_previous_state() {
-            config.previous_state = state.simulation.newest_retained_op_state(
-                state.workspace.content.project.revision(),
+            config.previous_state = rspice_results::run_history::newest_retained_op_state(
+                state.runs.iter().map(|run| &run.data),
+                state.project_revision,
                 config.initial_guess
                     == crate::simulation::dialog::OpInitialGuess::PreviousCompatible,
             );
@@ -311,8 +339,8 @@ impl SimulationController {
             crate::simulation::dialog::OpDeviceDetail::SelectedAndViolations
                 | crate::simulation::dialog::OpDeviceDetail::ViolationsOnly
         ) && let Some((source_digest, devices)) = state
-            .simulation
-            .active_soa_violation_context(state.workspace.content.project.revision())
+            .active_run
+            .and_then(|run| run.soa_violation_context(state.project_revision))
         {
             config.violation_devices = devices;
             config.violation_source_content_digest = Some(source_digest);
@@ -338,7 +366,6 @@ impl SimulationController {
 
     pub(super) fn analysis_spec_to_config(
         &self,
-        _state: &AppState,
         spec: &AnalysisSpec,
     ) -> Result<AnalysisConfig, String> {
         match spec {
@@ -639,12 +666,12 @@ impl SimulationController {
     /// the resulting scattering data carries the references used by the solver.
     pub(super) fn build_sp_spec(
         &self,
-        state: &AppState,
+        state: &AnalysisInputs<'_>,
         draft: &crate::simulation::dialog::sp::SpDialogState,
     ) -> Result<AnalysisSpec, String> {
         let mut sp_state = draft.clone();
         sp_state.ensure_initialized();
-        let placed = crate::simulation::placed_sources::placed_rf_ports(&state.schematic, None);
+        let placed = crate::simulation::placed_sources::placed_rf_ports(state.schematic, None);
         let sp_cfg = crate::simulation::dialog::sp::to_config(&sp_state, Some(&placed))
             .map_err(|e| format!("invalid S-parameter settings: {}", e))?;
         let ports = sp_cfg
@@ -725,7 +752,7 @@ impl SimulationController {
 
     pub(super) fn build_optimization_spec(
         &self,
-        state: &AppState,
+        state: &AnalysisInputs<'_>,
         draft: &crate::simulation::dialog::optimization::OptimizationDialogState,
     ) -> Result<AnalysisSpec, String> {
         let mut optimization_state = draft.clone();
@@ -791,7 +818,7 @@ impl SimulationController {
     /// back a design nobody agreed to. Names are matched case-insensitively,
     /// the way every other design-variable reference is resolved.
     fn reject_optimization_of_fixed_design_variables(
-        state: &AppState,
+        state: &AnalysisInputs<'_>,
         variables: &[crate::simulation::dialog::optimization::OptimizationVariableConfig],
     ) -> Result<(), String> {
         let Some(payload) = state
@@ -799,7 +826,13 @@ impl SimulationController {
             .stable_analysis_plan()
             .ok()
             .map(|plan| plan.id())
-            .and_then(|plan_id| state.workspace.content.plan_data(plan_id))
+            .and_then(|plan_id| {
+                state
+                    .plan_payloads
+                    .iter()
+                    .find(|record| record.plan_id == plan_id)
+                    .map(|record| &record.payload)
+            })
         else {
             return Ok(());
         };
@@ -1051,10 +1084,10 @@ mod manifest_tests {
 
             let specs = [
                 controller
-                    .analysis_draft_spec(&state, &AnalysisDraft::Noise(noise))
+                    .analysis_draft_spec(&AnalysisInputs::new(&state), &AnalysisDraft::Noise(noise))
                     .unwrap(),
                 controller
-                    .analysis_draft_spec(&state, &AnalysisDraft::Disto(disto))
+                    .analysis_draft_spec(&AnalysisInputs::new(&state), &AnalysisDraft::Disto(disto))
                     .unwrap(),
                 controller.build_stb_spec(&state.sim_setup.stb).unwrap(),
             ];
@@ -1102,7 +1135,7 @@ mod manifest_tests {
         draft.integration_mode = crate::simulation::config::NoiseIntegrationMode::OutputNoiseOnly;
 
         let spec = controller
-            .analysis_draft_spec(&state, &AnalysisDraft::Noise(draft))
+            .analysis_draft_spec(&AnalysisInputs::new(&state), &AnalysisDraft::Noise(draft))
             .expect("exact noise draft parses");
         assert!(matches!(
             spec,
@@ -1143,7 +1176,7 @@ mod manifest_tests {
         draft.f2_over_f1 = "0.8".to_owned();
 
         let spec = controller
-            .analysis_draft_spec(&state, &AnalysisDraft::Disto(draft))
+            .analysis_draft_spec(&AnalysisInputs::new(&state), &AnalysisDraft::Disto(draft))
             .expect("exact DISTO draft parses");
         assert!(matches!(
             spec,
@@ -1186,7 +1219,10 @@ mod manifest_tests {
             state.sim_setup.tran.stop = "stale singleton".to_owned();
 
             let spec = controller
-                .analysis_draft_spec(&state, &AnalysisDraft::Transient(draft))
+                .analysis_draft_spec(
+                    &AnalysisInputs::new(&state),
+                    &AnalysisDraft::Transient(draft),
+                )
                 .unwrap_or_else(|error| panic!("a stop time of {typed} must be accepted: {error}"));
             let AnalysisSpec::Transient { stop_time, .. } = spec else {
                 panic!("the authored transient draft builds a transient analysis");
@@ -1205,7 +1241,10 @@ mod manifest_tests {
             draft.stop = typed.to_owned();
             assert!(
                 controller
-                    .analysis_draft_spec(&state, &AnalysisDraft::Transient(draft))
+                    .analysis_draft_spec(
+                        &AnalysisInputs::new(&state),
+                        &AnalysisDraft::Transient(draft)
+                    )
                     .is_err(),
                 "a stop time of {typed} must not reach a run"
             );
@@ -1223,7 +1262,7 @@ mod manifest_tests {
         ac.sweep = 2;
         state.sim_setup.ac.fstart = "stale singleton".to_owned();
         let spec = controller
-            .analysis_draft_spec(&state, &AnalysisDraft::Ac(ac))
+            .analysis_draft_spec(&AnalysisInputs::new(&state), &AnalysisDraft::Ac(ac))
             .expect("the authored AC draft builds its spec");
         assert!(matches!(
             spec,
@@ -1240,7 +1279,7 @@ mod manifest_tests {
         dc.stop = "3".to_owned();
         state.sim_setup.dc.source = "stale singleton".to_owned();
         let spec = controller
-            .analysis_draft_spec(&state, &AnalysisDraft::DcSweep(dc))
+            .analysis_draft_spec(&AnalysisInputs::new(&state), &AnalysisDraft::DcSweep(dc))
             .expect("the authored DC draft builds its spec");
         assert!(matches!(
             spec,
@@ -1281,10 +1320,10 @@ mod manifest_tests {
         state.sim_setup.optimization.fd_step = "not a number".to_owned();
 
         let spec = controller
-            .analysis_draft_spec(&state, &draft)
+            .analysis_draft_spec(&AnalysisInputs::new(&state), &draft)
             .expect("an authored optimization draft builds its spec");
         let line = controller
-            .analysis_spec_to_spice_line(&state, &draft, &spec)
+            .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &draft, &spec)
             .expect("the authored optimization draft builds its card");
         assert!(line.contains("fd=2.500000e-3"), "{line}");
         let AnalysisSpec::Optimization {
@@ -1316,7 +1355,7 @@ mod manifest_tests {
         };
         invalid.min_step = "0.5".to_owned();
         let error = controller
-            .analysis_draft_spec(&state, &invalid_draft)
+            .analysis_draft_spec(&AnalysisInputs::new(&state), &invalid_draft)
             .expect_err("a smallest step above the first step is not a search");
         assert!(
             error.contains("min_step"),
@@ -1334,12 +1373,14 @@ mod manifest_tests {
             draft.do_noise = requested;
             state.sim_setup.sp.do_noise = !requested;
             let draft = AnalysisDraft::SParameter(draft);
-            let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
+            let spec = controller
+                .analysis_draft_spec(&AnalysisInputs::new(&state), &draft)
+                .unwrap();
             assert!(
                 matches!(&spec, AnalysisSpec::SParameter { do_noise, .. } if *do_noise == requested)
             );
             let line = controller
-                .analysis_spec_to_spice_line(&state, &draft, &spec)
+                .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &draft, &spec)
                 .unwrap();
             assert_eq!(line.split_whitespace().nth(5) == Some("1"), requested);
         }
@@ -1362,7 +1403,7 @@ mod manifest_tests {
         ] {
             let draft = AnalysisDraft::for_kind(kind);
             let spec = controller
-                .analysis_draft_spec(&AppState::default(), &draft)
+                .analysis_draft_spec(&AnalysisInputs::new(&AppState::default()), &draft)
                 .expect("default draft parses");
             assert!(matches!(
                 (kind, &spec),
@@ -1395,7 +1436,7 @@ mod manifest_tests {
             network.reltol = "2.5e-6".into();
             network.abstol = "7e-13".into();
             let spec = controller
-                .analysis_draft_spec(&AppState::default(), &draft)
+                .analysis_draft_spec(&AnalysisInputs::new(&AppState::default()), &draft)
                 .expect("periodic network draft parses");
             match spec {
                 AnalysisSpec::Hbsp { reltol, abstol, .. }
@@ -1495,7 +1536,7 @@ mod manifest_tests {
         state.sim_setup.fourier.fundamental = "3k".into();
 
         let spec = controller
-            .analysis_draft_spec(&state, &draft)
+            .analysis_draft_spec(&AnalysisInputs::new(&state), &draft)
             .expect("Fourier spec builds");
         assert!(matches!(
             &spec,
@@ -1507,7 +1548,7 @@ mod manifest_tests {
         ));
         assert!(
             controller
-                .analysis_spec_to_spice_line(&state, &draft, &spec)
+                .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &draft, &spec)
                 .unwrap()
                 .starts_with(".four 2000 ")
         );
@@ -1529,7 +1570,7 @@ mod manifest_tests {
         state.sim_setup.envelope.carrier_tones = "not a frequency".into();
 
         let spec = controller
-            .analysis_draft_spec(&state, &draft)
+            .analysis_draft_spec(&AnalysisInputs::new(&state), &draft)
             .expect("Envelope spec builds");
         assert_eq!(
             spec,
@@ -1549,7 +1590,7 @@ mod manifest_tests {
         );
         assert!(
             controller
-                .analysis_spec_to_spice_line(&state, &draft, &spec)
+                .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &draft, &spec)
                 .unwrap()
                 .starts_with(".envlp carriers=[1Meg,2.5Meg] ")
         );
@@ -1565,7 +1606,9 @@ mod manifest_tests {
         let draft = AnalysisDraft::Soa(state.sim_setup.soa.clone());
         state.sim_setup.soa.stop_time = "not a time".into();
 
-        let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
+        let spec = controller
+            .analysis_draft_spec(&AnalysisInputs::new(&state), &draft)
+            .unwrap();
         assert!(matches!(
             &spec,
             AnalysisSpec::Soa {
@@ -1576,7 +1619,7 @@ mod manifest_tests {
         ));
         assert!(
             controller
-                .analysis_spec_to_spice_line(&state, &draft, &spec)
+                .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &draft, &spec)
                 .unwrap()
                 .starts_with(".soa stop=0.002 step=0.000002 ")
         );
@@ -1591,14 +1634,16 @@ mod manifest_tests {
         state.sim_setup.pz.input_pos = "PZ_IN".into();
         let pz_draft = AnalysisDraft::PoleZero(state.sim_setup.pz.clone());
         state.sim_setup.pz.input_pos.clear();
-        let pz_spec = controller.analysis_draft_spec(&state, &pz_draft).unwrap();
+        let pz_spec = controller
+            .analysis_draft_spec(&AnalysisInputs::new(&state), &pz_draft)
+            .unwrap();
         assert!(matches!(
             &pz_spec,
             AnalysisSpec::PoleZero { input_node, .. } if input_node == "PZ_IN"
         ));
         assert!(
             controller
-                .analysis_spec_to_spice_line(&state, &pz_draft, &pz_spec)
+                .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &pz_draft, &pz_spec)
                 .unwrap()
                 .contains("PZ_IN")
         );
@@ -1607,14 +1652,16 @@ mod manifest_tests {
         state.sim_setup.sens.output_expr = "V(SENS_OUT)".into();
         let sens_draft = AnalysisDraft::Sensitivity(state.sim_setup.sens.clone());
         state.sim_setup.sens.output_expr.clear();
-        let sens_spec = controller.analysis_draft_spec(&state, &sens_draft).unwrap();
+        let sens_spec = controller
+            .analysis_draft_spec(&AnalysisInputs::new(&state), &sens_draft)
+            .unwrap();
         assert!(matches!(
             &sens_spec,
             AnalysisSpec::Sensitivity { output_var, .. } if output_var == "V(SENS_OUT)"
         ));
         assert!(
             controller
-                .analysis_spec_to_spice_line(&state, &sens_draft, &sens_spec)
+                .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &sens_draft, &sens_spec)
                 .unwrap()
                 .contains("V(SENS_OUT)")
         );
@@ -1624,14 +1671,16 @@ mod manifest_tests {
         state.sim_setup.xf.output_expression = "V(TF_OUT)".into();
         let tf_draft = AnalysisDraft::TransferFunction(state.sim_setup.xf.clone());
         state.sim_setup.xf.input_source.clear();
-        let tf_spec = controller.analysis_draft_spec(&state, &tf_draft).unwrap();
+        let tf_spec = controller
+            .analysis_draft_spec(&AnalysisInputs::new(&state), &tf_draft)
+            .unwrap();
         assert!(matches!(
             &tf_spec,
             AnalysisSpec::Tf { input_source, .. } if input_source == "VTF"
         ));
         assert!(
             controller
-                .analysis_spec_to_spice_line(&state, &tf_draft, &tf_spec)
+                .analysis_spec_to_spice_line(&AnalysisInputs::new(&state), &tf_draft, &tf_spec)
                 .unwrap()
                 .contains("VTF")
         );
@@ -1647,7 +1696,9 @@ mod manifest_tests {
         authored.temperature = "unfinished edit".into();
         state.sim_setup.op.temperature_mode_idx = usize::MAX;
         let draft = AnalysisDraft::OperatingPoint(authored.clone());
-        let spec = controller.analysis_draft_spec(&state, &draft).unwrap();
+        let spec = controller
+            .analysis_draft_spec(&AnalysisInputs::new(&state), &draft)
+            .unwrap();
         assert!(matches!(
             spec,
             AnalysisSpec::DcOp {
@@ -1659,7 +1710,10 @@ mod manifest_tests {
         authored.temperature_mode_idx = 2;
         authored.temperature = "-15".into();
         let spec = controller
-            .analysis_draft_spec(&state, &AnalysisDraft::OperatingPoint(authored))
+            .analysis_draft_spec(
+                &AnalysisInputs::new(&state),
+                &AnalysisDraft::OperatingPoint(authored),
+            )
             .unwrap();
         assert!(matches!(
             spec,

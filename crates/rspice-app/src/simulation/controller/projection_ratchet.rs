@@ -39,7 +39,7 @@ use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::model_library::ModelLibraryManager;
 use crate::workbench::app_state::{AppState, SimSetupState};
 
-use super::SimulationController;
+use super::{AnalysisInputs, SimulationController};
 
 /// Fields that cannot move the engine-facing projection, and why.
 ///
@@ -246,14 +246,21 @@ fn projection(draft: &AnalysisDraft) -> String {
         state.sim_setup.clone_from(setup);
         apply_fixture_draft(state, draft);
         let controller = SimulationController::new();
-        let spec = match controller.analysis_draft_spec(state, draft) {
+        let spec = match controller.analysis_draft_spec(&AnalysisInputs::new(state), draft) {
             Ok(spec) => spec,
             Err(error) => return format!("spec-error: {error}"),
         };
 
-        let command = controller.analysis_spec_to_spice_line(state, draft, &spec);
+        let command =
+            controller.analysis_spec_to_spice_line(&AnalysisInputs::new(state), draft, &spec);
         let options = with_sealed_process_library(|sealed| {
-            controller.analysis_spec_execution_options(state, draft, None, &spec, sealed)
+            controller.analysis_spec_execution_options(
+                &AnalysisInputs::new(state),
+                draft,
+                None,
+                &spec,
+                sealed,
+            )
         });
 
         format!("{spec:?}\u{1f}{command:?}\u{1f}{options:?}")
@@ -700,7 +707,7 @@ fn every_authored_advanced_option_moves_the_prepared_task_identity() {
     let digest_of = |state: &AppState| -> Vec<u8> {
         let controller = SimulationController::new();
         let plan = controller
-            .build_analysis_plan(state)
+            .build_analysis_plan(&state.sim_setup)
             .unwrap_or_else(|errors| panic!("the fixture plan compiles: {}", errors.join("; ")));
         let sealed = state
             .model_library_manager
@@ -835,7 +842,7 @@ fn the_step_ceiling_a_transient_cannot_carry_is_judged_through_a_kind_that_can()
     let digest_of = |state: &AppState| -> Vec<u8> {
         let controller = SimulationController::new();
         let plan = controller
-            .build_analysis_plan(state)
+            .build_analysis_plan(&state.sim_setup)
             .unwrap_or_else(|errors| panic!("the fixture plan compiles: {}", errors.join("; ")));
         let sealed = state
             .model_library_manager
@@ -933,7 +940,7 @@ fn the_harmonic_balance_initial_state_a_transient_cannot_carry_is_judged_through
     let digest_of = |state: &AppState| -> Vec<u8> {
         let controller = SimulationController::new();
         let plan = controller
-            .build_analysis_plan(state)
+            .build_analysis_plan(&state.sim_setup)
             .unwrap_or_else(|errors| panic!("the fixture plan compiles: {}", errors.join("; ")));
         let sealed = state
             .model_library_manager
@@ -1137,7 +1144,7 @@ fn hbnoise_spot_and_zero_sideband_authoring_reach_a_valid_spec() {
         assert_eq!(draft.manifest_configuration_error(), None);
         let controller = SimulationController::new();
         let spec = controller
-            .analysis_draft_spec(&engine_facing_state(&draft), &draft)
+            .analysis_draft_spec(&AnalysisInputs::new(&engine_facing_state(&draft)), &draft)
             .unwrap();
         spec.validate().unwrap();
         assert!(matches!(

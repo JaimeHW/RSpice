@@ -42,7 +42,7 @@ fn every_configured_analysis_survives_save_prepare_and_dispatch() {
 
             let mut controller = SimulationController::new();
             let frozen = controller
-                .build_analysis_plan(&state)
+                .build_analysis_plan(&state.sim_setup)
                 .map_err(|e| e.join("; "))?;
             let queue = compiled_queue(&state).map_err(|e| e.join("; "))?;
             let own_task = queue

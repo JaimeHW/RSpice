@@ -29,7 +29,7 @@ struct PeriodicCarrierBasis {
 
 impl PeriodicCarrierBasis {
     fn read(
-        state: &AppState,
+        state: &SimSetupState,
         producer: Option<&AnalysisDraft>,
         carrier: crate::services::simulation_runner::PeriodicCarrier,
         consumer: &str,
@@ -55,9 +55,9 @@ impl PeriodicCarrierBasis {
         // Standalone draft previews have no frozen plan. Executable queue and
         // nested study paths always supply their exact bound producer above.
         if matches!(carrier, PeriodicCarrier::Hb) {
-            return Self::from_hb(&state.sim_setup.hb, consumer);
+            return Self::from_hb(&state.hb, consumer);
         }
-        Self::from_pss(&state.sim_setup.pss, consumer)
+        Self::from_pss(&state.pss, consumer)
     }
 
     fn from_hb(
@@ -95,7 +95,7 @@ impl PeriodicCarrierBasis {
 
 impl SimulationController {
     pub(super) fn pac_run_config_from_dialog(
-        state: &AppState,
+        state: &SimSetupState,
         draft: &crate::simulation::dialog::pac::PacDialogState,
         producer: Option<&AnalysisDraft>,
     ) -> Result<rspice_simulation::periodic::PacRunConfig, String> {
@@ -143,7 +143,7 @@ impl SimulationController {
     }
 
     pub(super) fn pnoise_run_config_from_dialog(
-        state: &AppState,
+        state: &SimSetupState,
         draft: &crate::simulation::dialog::pnoise::PnoiseDialogState,
         producer: Option<&AnalysisDraft>,
     ) -> Result<rspice_simulation::periodic::PnoiseRunConfig, String> {
@@ -206,7 +206,7 @@ impl SimulationController {
     }
 
     pub(super) fn pxf_run_config_from_dialog(
-        state: &AppState,
+        state: &SimSetupState,
         draft: &crate::simulation::dialog::pxf::PxfDialogState,
         producer: Option<&AnalysisDraft>,
     ) -> Result<rspice_simulation::periodic::PxfRunConfig, String> {
@@ -252,7 +252,7 @@ impl SimulationController {
     }
 
     pub(super) fn pstb_run_config_from_dialog(
-        state: &AppState,
+        state: &SimSetupState,
         draft: &crate::simulation::dialog::pstb::PstbDialogState,
         producer: Option<&AnalysisDraft>,
     ) -> Result<rspice_simulation::periodic::PstbRunConfig, String> {
@@ -285,7 +285,7 @@ impl SimulationController {
     }
 
     pub(super) fn temp_run_config_from_dialog(
-        state: &AppState,
+        state: &SimSetupState,
         temp_cfg: &crate::simulation::dialog::temp::TempConfig,
     ) -> Result<rspice_simulation::sweeps::TempRunConfig, String> {
         use crate::simulation::dialog::temp::TempBaseAnalysis;
@@ -303,26 +303,21 @@ impl SimulationController {
 
         let base_mode = match temp_cfg.base_analysis {
             TempBaseAnalysis::Op => CornerBaseMode::Op,
-            TempBaseAnalysis::Dc => {
-                CornerBaseMode::from_dc_config(&state.sim_setup.dc.to_config()?)
-            }
+            TempBaseAnalysis::Dc => CornerBaseMode::from_dc_config(&state.dc.to_config()?),
             TempBaseAnalysis::Transient => Self::transient_study_base_mode(state)?,
             TempBaseAnalysis::Ac => {
-                let sweep = match Self::map_frequency_sweep(state.sim_setup.ac.sweep) {
+                let sweep = match Self::map_frequency_sweep(state.ac.sweep) {
                     FrequencySweep::Decade => CornerFrequencySweep::Decade,
                     FrequencySweep::Octave => CornerFrequencySweep::Octave,
                     FrequencySweep::Linear => CornerFrequencySweep::Linear,
                 };
                 CornerBaseMode::Ac {
-                    start_freq: parse_spice_value_checked(&state.sim_setup.ac.fstart)
+                    start_freq: parse_spice_value_checked(&state.ac.fstart)
                         .map_err(|e| format!("invalid temperature AC start frequency: {}", e))?,
-                    stop_freq: parse_spice_value_checked(&state.sim_setup.ac.fstop)
+                    stop_freq: parse_spice_value_checked(&state.ac.fstop)
                         .map_err(|e| format!("invalid temperature AC stop frequency: {}", e))?,
-                    points_per_unit: Self::parse_positive_points(
-                        &state.sim_setup.ac.points,
-                        "ac_points",
-                    )
-                    .map_err(|e| format!("invalid temperature AC points: {}", e))?,
+                    points_per_unit: Self::parse_positive_points(&state.ac.points, "ac_points")
+                        .map_err(|e| format!("invalid temperature AC points: {}", e))?,
                     sweep,
                 }
             }
@@ -335,7 +330,7 @@ impl SimulationController {
     }
 
     pub(super) fn corner_run_config_from_dialog(
-        state: &AppState,
+        state: &SimSetupState,
         corner_cfg: &crate::simulation::dialog::corner::CornerConfig,
         sealed_model_sources: &crate::state::model_library::SealedModelExecutionSources,
     ) -> Result<rspice_simulation::sweeps::CornerRunConfig, String> {
@@ -364,26 +359,21 @@ impl SimulationController {
 
         let base_mode = match corner_cfg.base_analysis {
             CornerBaseAnalysis::Op => CornerBaseMode::Op,
-            CornerBaseAnalysis::Dc => {
-                CornerBaseMode::from_dc_config(&state.sim_setup.dc.to_config()?)
-            }
+            CornerBaseAnalysis::Dc => CornerBaseMode::from_dc_config(&state.dc.to_config()?),
             CornerBaseAnalysis::Transient => Self::transient_study_base_mode(state)?,
             CornerBaseAnalysis::Ac => {
-                let sweep = match Self::map_frequency_sweep(state.sim_setup.ac.sweep) {
+                let sweep = match Self::map_frequency_sweep(state.ac.sweep) {
                     FrequencySweep::Decade => CornerFrequencySweep::Decade,
                     FrequencySweep::Octave => CornerFrequencySweep::Octave,
                     FrequencySweep::Linear => CornerFrequencySweep::Linear,
                 };
                 CornerBaseMode::Ac {
-                    start_freq: parse_spice_value_checked(&state.sim_setup.ac.fstart)
+                    start_freq: parse_spice_value_checked(&state.ac.fstart)
                         .map_err(|e| format!("invalid corner AC start frequency: {}", e))?,
-                    stop_freq: parse_spice_value_checked(&state.sim_setup.ac.fstop)
+                    stop_freq: parse_spice_value_checked(&state.ac.fstop)
                         .map_err(|e| format!("invalid corner AC stop frequency: {}", e))?,
-                    points_per_unit: Self::parse_positive_points(
-                        &state.sim_setup.ac.points,
-                        "ac_points",
-                    )
-                    .map_err(|e| format!("invalid corner AC points: {}", e))?,
+                    points_per_unit: Self::parse_positive_points(&state.ac.points, "ac_points")
+                        .map_err(|e| format!("invalid corner AC points: {}", e))?,
                     sweep,
                 }
             }
@@ -403,10 +393,10 @@ impl SimulationController {
     }
 
     fn transient_study_base_mode(
-        state: &AppState,
+        state: &SimSetupState,
     ) -> Result<rspice_simulation::sweeps::CornerBaseMode, String> {
         use rspice_simulation::sweeps::CornerBaseMode;
-        let draft = &state.sim_setup.tran;
+        let draft = &state.tran;
         let config = crate::simulation::config::TransientAnalysisConfig {
             stop_time: parse_spice_value_checked(&draft.stop)
                 .map_err(|e| format!("invalid study transient stop time: {e}"))?,
@@ -439,8 +429,8 @@ impl SimulationController {
         )
     }
 
-    pub(super) fn periodic_solver_tolerances(state: &AppState) -> (f64, f64) {
-        let opts = &state.sim_setup.options;
+    pub(super) fn periodic_solver_tolerances(state: &SimSetupState) -> (f64, f64) {
+        let opts = &state.options;
         (opts.reltol, opts.abstol)
     }
 
@@ -460,7 +450,7 @@ impl SimulationController {
     /// them would be a number no deck could carry and no round trip could
     /// preserve.
     pub(super) fn authored_or_plan_tolerances(
-        state: &AppState,
+        state: &SimSetupState,
         reltol: Option<f64>,
         abstol: Option<f64>,
     ) -> (f64, f64) {
@@ -490,7 +480,7 @@ mod pvt_base_tests {
             .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
             .unwrap();
         assert!(matches!(
-            SimulationController::temp_run_config_from_dialog(&state, &temperature)
+            SimulationController::temp_run_config_from_dialog(&state.sim_setup, &temperature)
                 .unwrap()
                 .base_mode,
             CornerBaseMode::Transient { .. }
@@ -500,10 +490,10 @@ mod pvt_base_tests {
         state.sim_setup.tran.max_step = "2u".into();
         state.sim_setup.tran.uic = true;
         for mode in [
-            SimulationController::temp_run_config_from_dialog(&state, &temperature)
+            SimulationController::temp_run_config_from_dialog(&state.sim_setup, &temperature)
                 .unwrap()
                 .base_mode,
-            SimulationController::corner_run_config_from_dialog(&state, &corner, &sealed)
+            SimulationController::corner_run_config_from_dialog(&state.sim_setup, &corner, &sealed)
                 .unwrap()
                 .base_mode,
         ] {
@@ -530,9 +520,13 @@ mod pvt_base_tests {
 
         // Invalid inherited fields must fail on the study form as they do on Transient.
         state.sim_setup.tran.max_step = "-2u".into();
-        assert!(SimulationController::temp_run_config_from_dialog(&state, &temperature).is_err());
         assert!(
-            SimulationController::corner_run_config_from_dialog(&state, &corner, &sealed).is_err()
+            SimulationController::temp_run_config_from_dialog(&state.sim_setup, &temperature)
+                .is_err()
+        );
+        assert!(
+            SimulationController::corner_run_config_from_dialog(&state.sim_setup, &corner, &sealed)
+                .is_err()
         );
     }
 }

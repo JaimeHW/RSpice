@@ -231,7 +231,7 @@ fn compiled_queue(
     state: &AppState,
 ) -> Result<Vec<crate::simulation::execution::PreparedTask>, Vec<String>> {
     let controller = SimulationController::new();
-    let plan = controller.build_analysis_plan(state)?;
+    let plan = controller.build_analysis_plan(&state.sim_setup)?;
     let sealed = state
         .model_library_manager
         .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)

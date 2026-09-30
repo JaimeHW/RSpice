@@ -850,9 +850,11 @@ impl SimulationController {
         }
         validate_projected_model_binding_authority(state, &execution_projection)?;
 
-        let plan = self.build_analysis_plan(state).map_err(|errors| {
-            PreparationError::new(PreparationStage::AnalysisPlan, errors.join("; "))
-        })?;
+        let plan = self
+            .build_analysis_plan(&state.sim_setup)
+            .map_err(|errors| {
+                PreparationError::new(PreparationStage::AnalysisPlan, errors.join("; "))
+            })?;
         let plan_payload = state.workspace.content.plan_data(plan.plan_id()).ok_or_else(|| {
             PreparationError::new(
                 PreparationStage::AnalysisPlan,
@@ -964,14 +966,13 @@ impl SimulationController {
                 )
             })?;
         let run_set_contract =
-            Self::corner_run_config_from_dialog(state, &run_set_config, &sealed_models).map_err(
-                |error| {
+            Self::corner_run_config_from_dialog(&state.sim_setup, &run_set_config, &sealed_models)
+                .map_err(|error| {
                     PreparationError::new(
                         PreparationStage::ModelBindings,
                         format!("Run Set model binding failed: {error}"),
                     )
-                },
-            )?;
+                })?;
         let prepared_run_set = crate::simulation::execution::PreparedRunSet::new(
             state.sim_setup.run_set.clone(),
             run_set_contract,

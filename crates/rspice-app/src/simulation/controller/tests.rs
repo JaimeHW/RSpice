@@ -38,7 +38,10 @@ fn studio_ac_data_authored_columns_and_netlist_tables_reach_results() {
         let restored: AcDataDraft = serde_json::from_value(json.clone()).unwrap();
         assert_eq!(serde_json::to_value(&restored).unwrap(), json);
         let spec = controller
-            .analysis_draft_spec(&state, &AnalysisDraft::AcData(restored))
+            .analysis_draft_spec(
+                &AnalysisInputs::new(&state),
+                &AnalysisDraft::AcData(restored),
+            )
             .unwrap();
         spec.validate().unwrap();
         let worker = WorkerAnalysisSpec::try_from(&spec).unwrap();
@@ -199,7 +202,9 @@ fn transient_noise_seed_inheritance_and_zero_scale_reach_the_solver() {
             unreachable!()
         };
         assert_eq!(serde_json::to_value(settings).unwrap(), json);
-        let spec = controller.analysis_draft_spec(&state, &restored).unwrap();
+        let spec = controller
+            .analysis_draft_spec(&AnalysisInputs::new(&state), &restored)
+            .unwrap();
         spec.validate().unwrap();
         let wire = WorkerAnalysisSpec::try_from(&spec).unwrap();
         let wire: WorkerAnalysisSpec =
@@ -282,14 +287,20 @@ fn transient_noise_seed_inheritance_and_zero_scale_reach_the_solver() {
     for seed in ["", "0", "18446744073709551615"] {
         assert!(
             controller
-                .analysis_draft_spec(&state, &AnalysisDraft::TransientNoise(draft(seed, "0")))
+                .analysis_draft_spec(
+                    &AnalysisInputs::new(&state),
+                    &AnalysisDraft::TransientNoise(draft(seed, "0"))
+                )
                 .is_ok()
         );
     }
     for seed in ["-1", "1.5", "18446744073709551616", "unfinished"] {
         assert!(
             controller
-                .analysis_draft_spec(&state, &AnalysisDraft::TransientNoise(draft(seed, "1")))
+                .analysis_draft_spec(
+                    &AnalysisInputs::new(&state),
+                    &AnalysisDraft::TransientNoise(draft(seed, "1"))
+                )
                 .is_err(),
             "{seed}"
         );
@@ -297,7 +308,10 @@ fn transient_noise_seed_inheritance_and_zero_scale_reach_the_solver() {
     for scale in ["-1", "NaN", "inf"] {
         assert!(
             controller
-                .analysis_draft_spec(&state, &AnalysisDraft::TransientNoise(draft("0", scale)))
+                .analysis_draft_spec(
+                    &AnalysisInputs::new(&state),
+                    &AnalysisDraft::TransientNoise(draft("0", scale))
+                )
                 .is_err(),
             "{scale}"
         );
@@ -343,7 +357,9 @@ fn sensitivity_dc_limit_and_disabled_ac_fields_reach_the_solver_and_results() {
         restored.prepare_after_restore();
         let mut state = AppState::default();
         state.sim_setup.apply_analysis_draft_projection(&restored);
-        let spec = controller.analysis_draft_spec(&state, &restored).unwrap();
+        let spec = controller
+            .analysis_draft_spec(&AnalysisInputs::new(&state), &restored)
+            .unwrap();
         spec.validate().unwrap();
         assert_eq!(serde_json::to_value(&state.sim_setup.sens).unwrap(), json);
         let wire = WorkerAnalysisSpec::try_from(&spec).unwrap();
@@ -351,7 +367,7 @@ fn sensitivity_dc_limit_and_disabled_ac_fields_reach_the_solver_and_results() {
             serde_json::from_value(serde_json::to_value(&wire).unwrap()).unwrap();
         let spec = AnalysisSpec::from(restored);
         spec.validate().unwrap();
-        let config = controller.analysis_spec_to_config(&state, &spec).unwrap();
+        let config = controller.analysis_spec_to_config(&spec).unwrap();
         let AnalysisConfig::Sensitivity(sensitivity) = &config else {
             panic!("SENS config")
         };

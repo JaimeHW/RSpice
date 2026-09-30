@@ -273,9 +273,12 @@ fn saved_op_selection_requires_explicit_compatible_revision_policy() {
     let json = serde_json::to_string(&persisted).unwrap();
     let restored: ProjectSimulationResults = serde_json::from_str(&json).unwrap();
     let simulation = crate::io::simulation_state_from_results(restored).unwrap();
-    let same = simulation
-        .newest_retained_op_state(ObjectRevision::INITIAL, false)
-        .unwrap();
+    let same = rspice_results::run_history::newest_retained_op_state(
+        simulation.runs.iter().map(|run| &run.data),
+        ObjectRevision::INITIAL,
+        false,
+    )
+    .unwrap();
     assert_eq!(same.producer_snapshot_digest, snapshot);
     assert_eq!(
         same.producer_result_digest,
@@ -284,13 +287,20 @@ fn saved_op_selection_requires_explicit_compatible_revision_policy() {
     let revision = ObjectRevision::INITIAL.next().unwrap();
     assert!(!simulation.has_retained_op_state(revision, false));
     assert!(
-        simulation
-            .newest_retained_op_state(revision, false)
-            .is_none()
+        rspice_results::run_history::newest_retained_op_state(
+            simulation.runs.iter().map(|run| &run.data),
+            revision,
+            false
+        )
+        .is_none()
     );
     assert!(simulation.has_retained_op_state(revision, true));
     assert_eq!(
-        simulation.newest_retained_op_state(revision, true),
+        rspice_results::run_history::newest_retained_op_state(
+            simulation.runs.iter().map(|run| &run.data),
+            revision,
+            true
+        ),
         Some(same)
     );
 }

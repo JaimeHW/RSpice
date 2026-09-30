@@ -67,7 +67,9 @@ fn plan_with_bound_fft(with_fft: Option<Option<&str>>) -> AppState {
 
 fn compile(state: &AppState) -> Vec<crate::simulation::execution::PreparedTask> {
     let controller = SimulationController::new();
-    let frozen = controller.build_analysis_plan(state).expect("plan freezes");
+    let frozen = controller
+        .build_analysis_plan(&state.sim_setup)
+        .expect("plan freezes");
     let sealed = state
         .model_library_manager
         .seal_execution_sources()
@@ -272,7 +274,7 @@ fn an_fft_analysis_without_an_earlier_transient_is_refused_before_the_run() {
     // arrives before a queue is ever compiled.
     let controller = SimulationController::new();
     let errors = controller
-        .build_analysis_plan(&state)
+        .build_analysis_plan(&state.sim_setup)
         .expect_err("an unbound FFT cannot freeze");
     assert!(
         errors
