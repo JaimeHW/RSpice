@@ -614,10 +614,14 @@ mod tests {
     fn qp_transfer_counts_use_explicit_signed_and_logarithmic_native_grids() {
         use rspice_simulation_contract::quasi_periodic_draft::QuasiPeriodicAcDraft;
         use rspice_simulation_contract::quasi_periodic_draft::QuasiPeriodicTransferDraft;
-        let mut ac = QuasiPeriodicAcDraft::default();
-        ac.explicit_offsets = "-1, 0, 1, 2".into();
-        let mut xf = QuasiPeriodicTransferDraft::default();
-        xf.explicit_frequencies = "-1, 0, 1".into();
+        let ac = QuasiPeriodicAcDraft {
+            explicit_offsets: "-1, 0, 1, 2".into(),
+            ..Default::default()
+        };
+        let mut xf = QuasiPeriodicTransferDraft {
+            explicit_frequencies: "-1, 0, 1".into(),
+            ..Default::default()
+        };
         assert_eq!(quasi_periodic_sample_count(&ac.to_spec().unwrap()), Some(4));
         assert_eq!(quasi_periodic_sample_count(&xf.to_spec().unwrap()), Some(3));
         xf.explicit_frequencies.clear();

@@ -25,17 +25,19 @@ fn base(analysis: StudyAnalysis) -> StudyRunConfig {
 
 #[test]
 fn monte_carlo_evaluator_compatibility_preserves_saved_op_and_solver_identity() {
-    let mut op = OpConfig::default();
-    op.initial_guess = OpInitialGuess::PreviousCompatible;
-    op.node_initialization = OpNodeInitialization::IgnoreIcAndNodeset;
-    op.previous_state = Some(OpPreviousState {
-        source_content_digest: ContentDigest::from_bytes([1; 32]),
-        producer_snapshot_digest: ContentDigest::from_bytes([2; 32]),
-        producer_result_digest: ContentDigest::from_bytes([3; 32]),
-        node_names: vec!["out".into()],
-        branch_names: vec![],
-        solution: vec![0.5],
-    });
+    let op = OpConfig {
+        initial_guess: OpInitialGuess::PreviousCompatible,
+        node_initialization: OpNodeInitialization::IgnoreIcAndNodeset,
+        previous_state: Some(OpPreviousState {
+            source_content_digest: ContentDigest::from_bytes([1; 32]),
+            producer_snapshot_digest: ContentDigest::from_bytes([2; 32]),
+            producer_result_digest: ContentDigest::from_bytes([3; 32]),
+            node_names: vec!["out".into()],
+            branch_names: vec![],
+            solution: vec![0.5],
+        }),
+        ..Default::default()
+    };
     op.validate_for_execution().unwrap();
     let spec = rspice_simulation_contract::quasi_periodic_draft::QpssDraft {
         tones: "1k, 1414.213562373095".into(),
