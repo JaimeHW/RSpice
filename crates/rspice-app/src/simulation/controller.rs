@@ -50,8 +50,10 @@ use rspice_simulation::live_transient::{
     TransientDigitalBusSample, TransientDigitalEventSample, TransientRealEventSample,
     TransientSampleDelta,
 };
+#[cfg(test)]
 use rspice_simulation::manual_deck;
 use rspice_simulation::output_contract::PreparedSavedOutput;
+#[cfg(test)]
 use rspice_simulation::preparation::QueuedAnalysis;
 use rspice_simulation::prepared_dependency::ExecutionArtifactKind;
 use rspice_simulation_contract::setup_state::SimulationSetup;

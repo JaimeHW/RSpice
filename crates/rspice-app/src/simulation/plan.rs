@@ -24,8 +24,10 @@ pub use numeric_override::{
     SolverOwnership,
 };
 pub use rspice_simulation_contract::analysis_kind::{AnalysisAvailability, AnalysisKind};
+#[cfg(test)]
+pub use rspice_simulation_contract::plan_model::FrozenAnalysisInstance;
 pub use rspice_simulation_contract::plan_model::{
     AnalysisDependency, AnalysisInstance, AnalysisLifecycleCommand, AnalysisLifecycleReceipt,
-    AnalysisLifecycleState, AnalysisPlanError, AnalysisPlanIssue, FrozenAnalysisInstance,
-    FrozenSimulationPlan, SimulationPlan,
+    AnalysisLifecycleState, AnalysisPlanError, AnalysisPlanIssue, FrozenSimulationPlan,
+    SimulationPlan,
 };

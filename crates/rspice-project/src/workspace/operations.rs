@@ -23,23 +23,8 @@ impl ProjectWorkspace {
     /// The SPICE comment is part of the executable bytes and therefore flows
     /// into source, snapshot, and retained-run digests without relying on
     /// mutable UI state or a side-channel receipt.
-    pub fn bind_generated_netlist_provenance(&self, mut source: String) -> String {
-        let insertion = source.find('\n').map_or(0, |index| index + 1);
-        let mut provenance = self
-            .design_management
-            .semantic_digest()
-            .map(|digest| format!("* RSpice design-management digest {digest}\n"))
-            .unwrap_or_else(|error| format!("* RSpice design-management INVALID ({error})\n"));
-        if let Some(configuration) = self.configuration_sets.active() {
-            provenance.push_str(&format!(
-                "* RSpice configuration-set {} revision {} digest {}\n",
-                configuration.id(),
-                configuration.revision(),
-                configuration.semantic_digest()
-            ));
-        }
-        source.insert_str(insertion, &provenance);
-        source
+    pub fn bind_generated_netlist_provenance(&self, source: String) -> String {
+        bind_generated_netlist_provenance(&self.design_management, &self.configuration_sets, source)
     }
 
     /// Publish an independently mutated catalog and the owning project
@@ -777,4 +762,27 @@ fn design_management_at_revision(
             message: source.to_string(),
         }
     })
+}
+
+/// Bind canonical design-management and configuration provenance into generated source.
+pub fn bind_generated_netlist_provenance(
+    design_management: &rspice_design_model::design_management::DesignManagementCatalog,
+    configuration_sets: &rspice_design::configuration_set::ConfigurationSetCatalog,
+    mut source: String,
+) -> String {
+    let insertion = source.find('\n').map_or(0, |index| index + 1);
+    let mut provenance = design_management
+        .semantic_digest()
+        .map(|digest| format!("* RSpice design-management digest {digest}\n"))
+        .unwrap_or_else(|error| format!("* RSpice design-management INVALID ({error})\n"));
+    if let Some(configuration) = configuration_sets.active() {
+        provenance.push_str(&format!(
+            "* RSpice configuration-set {} revision {} digest {}\n",
+            configuration.id(),
+            configuration.revision(),
+            configuration.semantic_digest()
+        ));
+    }
+    source.insert_str(insertion, &provenance);
+    source
 }

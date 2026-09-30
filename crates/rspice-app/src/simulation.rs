@@ -19,6 +19,7 @@ pub(crate) mod output_contract;
 pub(crate) mod placed_sources;
 pub(crate) mod plan;
 pub(crate) mod point_family;
+pub(crate) mod project_technology;
 #[cfg(test)]
 pub(crate) mod results;
 pub(crate) mod run_set;

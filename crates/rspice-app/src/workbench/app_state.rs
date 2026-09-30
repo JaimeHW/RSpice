@@ -331,21 +331,25 @@ impl AppState {
         self.clear_project_design_history();
     }
 
+    pub(crate) fn technology_inputs(
+        &self,
+    ) -> crate::simulation::project_technology::ProjectTechnologyInputs<'_> {
+        crate::simulation::project_technology::ProjectTechnologyInputs {
+            project: &self.workspace.content.project,
+            sim_setup: &self.sim_setup,
+            models: self.model_library_manager.catalog(),
+            resolutions: self.model_library_manager.resolution_records(),
+            registry: &self.pdk_config.technology_registry,
+            layouts: self.workspace.content.physical_layout_documents(),
+        }
+    }
+
     /// Resolve the project-owned technology contract against both mutable
     /// execution catalogs. No simulation or governed save may infer authority
     /// from a display label, an active registry package, or model paths alone.
     pub(crate) fn validate_project_technology_contract(&self) -> Result<(), String> {
-        let binding = self
-            .workspace
-            .content
-            .project
-            .validated_technology_binding()?;
-        rspice_simulation::pdk::validate_project_technology_inputs(
-            binding,
-            self.model_library_manager.catalog(),
-            self.pdk_config.technology_registry.validated_packages(),
-            self.workspace.content.physical_layout_documents(),
-        )
+        self.technology_inputs()
+            .validate_project_technology_contract()
     }
 
     /// Resolve the exact currently trusted signed package pinned by this
@@ -363,19 +367,13 @@ impl AppState {
     /// prefer project-sealed model sources over the plain model library key
     /// off this, not off the binding alone.
     pub(crate) fn project_technology_in_effect(&self) -> bool {
-        self.workspace
-            .content
-            .project
-            .has_audited_technology_binding()
+        self.technology_inputs().project_technology_in_effect()
     }
 
     /// What the authored plan needs a project technology for, computed before
     /// any netlist exists.
     pub(crate) fn technology_demand(&self) -> rspice_simulation::preparation::TechnologyDemand {
-        rspice_simulation::preparation::technology_demand(
-            &self.sim_setup,
-            self.workspace.content.physical_layout_documents(),
-        )
+        self.technology_inputs().technology_demand()
     }
 
     /// The single technology gate: a project need not have a technology; if it
@@ -385,16 +383,7 @@ impl AppState {
     /// yields the exact reattach message for a binding without receipts. An
     /// absent binding blocks only what the plan actually demands.
     pub(crate) fn technology_gate_block_reason(&self) -> Result<(), String> {
-        if self
-            .workspace
-            .content
-            .project
-            .technology_binding()
-            .is_some()
-        {
-            return self.validate_project_technology_contract();
-        }
-        self.technology_demand().block_reason().map_or(Ok(()), Err)
+        self.technology_inputs().technology_gate_block_reason()
     }
 
     /// Resolve the exact signed project pin into the physical-layout unit and
@@ -650,31 +639,8 @@ impl AppState {
     pub(crate) fn seal_project_execution_model_sources(
         &self,
     ) -> Result<crate::state::model_library::SealedModelExecutionSources, String> {
-        self.validate_project_technology_contract()?;
-        let project_binding = self
-            .workspace
-            .content
-            .project
-            .technology_binding()
-            .expect("validated project technology has an exact binding");
-        let signed_pin = project_binding
-            .signed_package()
-            .expect("validated project technology has an exact signed package");
-        let package_binding = crate::state::pdk_config::PdkTechnologyBinding {
-            package_id: signed_pin.package_id().to_owned(),
-            revision: signed_pin.revision().to_owned(),
-            manifest_digest: signed_pin.manifest_digest(),
-        };
-        let sealed_pdk = self
-            .pdk_config
-            .technology_registry
-            .seal_model_sources_for_binding(&package_binding, signed_pin.archive_digest())
-            .map_err(|error| {
-                format!("Signed PDK model sources cannot be sealed for project execution: {error}")
-            })?;
-        self.model_library_manager
-            .seal_execution_sources_for_plan(&self.sim_setup.model_bindings)?
-            .with_pdk_model_sources(sealed_pdk)
+        self.technology_inputs()
+            .seal_project_execution_model_sources()
     }
 
     /// Execute one signed PDK callback for the exact package pinned by the

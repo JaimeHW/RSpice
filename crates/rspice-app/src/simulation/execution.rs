@@ -6,6 +6,7 @@
 
 mod authorization;
 mod permit;
+pub(in crate::simulation) mod preparation;
 #[cfg(test)]
 mod qpss_artifact_tests;
 mod snapshot;

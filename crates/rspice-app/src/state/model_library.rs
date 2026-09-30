@@ -78,7 +78,7 @@ pub use rspice_model_library::qualification::{
 };
 pub use rspice_model_library::{ClosureFacts, closure_facts, envelope_is_invalid};
 pub use rspice_model_library::{
-    ModelConsumerScope, ModelExecutionPlan, ModelResolutionRecord, ModelValidationFinding,
+    ModelConsumerScope, ModelResolutionRecord, ModelValidationFinding,
     ModelValidationFindingSeverity, SimulationPlanModelBinding,
 };
 pub use rspice_model_library::{ModelLevel, ModelType};

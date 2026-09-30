@@ -78,12 +78,7 @@ impl SimulationController {
     pub(super) fn build_analysis_plan(
         state: &SimulationSetup,
     ) -> Result<FrozenSimulationPlan, Vec<String>> {
-        let plan = state.analysis_plan.as_ref().ok_or_else(|| {
-            vec![
-                "The simulation plan has not been migrated to stable analysis instances".to_owned(),
-            ]
-        })?;
-        plan.freeze().map_err(|error| vec![error.to_string()])
+        crate::simulation::execution::preparation::build_analysis_plan(state)
     }
 
     pub(super) fn build_queue_from_plan(
