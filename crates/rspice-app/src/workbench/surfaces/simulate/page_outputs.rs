@@ -633,7 +633,7 @@ pub(super) fn empty_registry_text(
 ///
 /// Separate from the row that prints it because the answer is a property of the
 /// plan rather than of the sentence: `Automatic` synthesizes a bounded top-level
-/// voltage set (`prepared_run::occurrence_outputs::effective_plan_saved_outputs`),
+/// voltage set (`rspice_simulation::output_contract::selection::effective_plan_saved_outputs`),
 /// those become saved-output contracts (`prepared_run::attach_saved_output_contracts`)
 /// and the contracts prune the retained waveforms
 /// (`simulation::output_contract`) — so "full dataset retained" is the one thing
@@ -644,7 +644,7 @@ pub(super) fn empty_registry_text(
 ///
 /// `schematic_probes` is how many outputs the sheet's enabled probes alone would
 /// mint — see
-/// [`crate::simulation::controller::prepared_run::occurrence_outputs::enabled_probe_output_count`].
+/// [`rspice_simulation::output_contract::selection::enabled_probe_output_count`].
 /// It is not decoration. Once the probes mint an output the effective set is
 /// non-empty, and a non-empty set is what the preparation returns in *every*
 /// selection mode: a plan with no authored output and one enabled probe saves
@@ -675,9 +675,12 @@ pub(super) fn empty_registry_outcome(
 fn enabled_schematic_probe_outputs(app: &RSpiceApp) -> usize {
     app.state
         .workspace
-        .simulation_root_schematic(&app.state.workspace.content.active_view, &app.state.schematic)
+        .simulation_root_schematic(
+            &app.state.workspace.content.active_view,
+            &app.state.schematic,
+        )
         .map_or(0, |schematic| {
-            crate::simulation::controller::prepared_run::occurrence_outputs::enabled_probe_output_count(
+            rspice_simulation::output_contract::selection::enabled_probe_output_count(
                 &schematic.document().probes,
             )
         })

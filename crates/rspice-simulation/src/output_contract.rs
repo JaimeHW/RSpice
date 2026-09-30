@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 mod bindings;
 mod preflight;
+pub mod selection;
 pub use bindings::SourceCandidate;
 pub use preflight::{
     SavedOutputPreflightReport, SavedOutputSemanticStatus, SavedOutputStorageEstimate,

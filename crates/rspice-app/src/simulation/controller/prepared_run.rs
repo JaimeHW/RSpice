@@ -35,11 +35,10 @@ use rspice_simulation::sealed_source::{
 
 #[cfg(test)]
 mod measurement_tests;
-pub(crate) mod occurrence_outputs;
 mod periodic_sources;
 
-use occurrence_outputs::{effective_plan_capture, projection_occurrence_nets};
 use periodic_sources::validate_prepared_periodic_sources;
+use rspice_simulation::capture_ledger::{plan_capture_workload, validate_plan_saved_output_budget};
 use rspice_simulation::model_sources::prepared_project_model_sources;
 use rspice_simulation::model_sources::validate_projected_model_binding_authority;
 #[cfg(test)]
@@ -53,6 +52,9 @@ use rspice_simulation::netlist_preparation::{
     reject_deferred_external_sources_with_project_runtimes, validated_executable_hierarchy,
 };
 use rspice_simulation::netlist_preparation::{measurements, owned_source};
+use rspice_simulation::output_contract::selection::{
+    effective_plan_capture, projection_occurrence_nets,
+};
 use rspice_simulation::project_veriloga::preparation::{
     prepared_configuration_veriloga_runtimes, prepared_model_library_veriloga_runtimes,
     prepared_signed_pdk_veriloga_runtimes, project_veriloga_runtimes_referenced_by,
@@ -117,120 +119,6 @@ fn activate_campaign_plan(
     Ok(plan_name)
 }
 
-/// How many Run Set points each queued task is executed at.
-///
-/// The queue this gate is handed is the plan's, before PVT expansion, and each
-/// task carries the participation its analysis declared. Resolving it here
-/// through [`crate::simulation::run_set::participating_point_keys`] — the same
-/// resolver `snapshot::resolve_run_set_participation` mints the expanded tasks
-/// from — is what stops the gate charging a nominal-only analysis for every
-/// corner of the matrix.
-///
-/// Fails closed twice: a space that does not expand exactly, and a
-/// participation that does not resolve against it, are both priced at the
-/// whole declared space. The expansion refuses the second case by name a few
-/// steps later, so over-pricing here never becomes the reason a valid run is
-/// refused.
-fn plan_capture_workload(
-    run_set: &crate::simulation::run_set::RunSetState,
-    reference: crate::simulation::run_set::ReferencePoint,
-    tasks: &[PreparedTask],
-) -> rspice_simulation::capture_ledger::CaptureWorkload {
-    use crate::simulation::run_set;
-    use rspice_simulation::capture_ledger::CaptureWorkload;
-
-    let matrix = u64::try_from(run_set.point_count())
-        .unwrap_or(u64::MAX)
-        .max(1);
-    let points = match run_set::resolve(run_set) {
-        Some(points) if run_set.enabled_dimensions().next().is_some() && !points.is_empty() => {
-            points
-        }
-        _ => return CaptureWorkload::uniform(matrix, tasks.len()),
-    };
-
-    let mut points_by_analysis: std::collections::HashMap<crate::product::AnalysisInstanceId, u64> =
-        std::collections::HashMap::new();
-    let mut engine_task_points = 0u64;
-    for task in tasks {
-        let count = run_set::participating_point_keys(task.run_at(), &points, reference)
-            .map_or(matrix, |keys| {
-                u64::try_from(keys.len()).unwrap_or(u64::MAX).max(1)
-            });
-        // Several tasks can carry one instance identity — a PSS keeps its
-        // spectrum companion under the same analysis — so the analysis is
-        // priced at the widest participation any of them declared.
-        points_by_analysis
-            .entry(task.instance_id())
-            .and_modify(|held| *held = (*held).max(count))
-            .or_insert(count);
-        engine_task_points = engine_task_points.saturating_add(count);
-    }
-    CaptureWorkload::narrowed(points_by_analysis, matrix, engine_task_points)
-}
-
-/// Refuse a plan whose retained evidence would not fit its declared ceiling.
-///
-/// The forecast is [`CaptureLedger::total_bytes`] — the same number the Save
-/// page's ledger prints, from the same fold over the same groups, priced over
-/// the same per-analysis workload. This used to be its own accumulation, which
-/// meant a page could show a forecast under the ceiling while preparation
-/// refused the run for exceeding it, and nothing in either place would have
-/// said which was wrong.
-fn validate_plan_saved_output_budget(
-    groups: &[crate::state::CaptureGroup],
-    outputs: &[crate::state::SavedOutput],
-    membership: &crate::state::CaptureGroupMembership,
-    tasks: &[PreparedTask],
-    workload: &rspice_simulation::capture_ledger::CaptureWorkload,
-    maximum_storage_bytes: u64,
-    selection_mode: crate::state::OutputSelectionMode,
-) -> Result<(), PreparationError> {
-    let reports = outputs
-        .iter()
-        .map(|output| {
-            rspice_simulation::output_contract::preflight_saved_output(
-                output,
-                tasks
-                    .iter()
-                    .map(|task| (task.instance_id(), &task.queued_analysis().spec)),
-                crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
-            )
-        })
-        .collect::<Vec<_>>();
-    let ledger = rspice_simulation::capture_ledger::CaptureLedger::resolve(
-        groups,
-        outputs,
-        &reports,
-        membership,
-        selection_mode,
-        workload,
-    );
-    // An unbounded output is refused before the ceiling is compared: a total
-    // that silently omitted it would be a forecast of a different plan.
-    if let Some(unprovable) = ledger.indeterminate().first() {
-        return Err(PreparationError::new(
-            PreparationStage::AnalysisPlan,
-            format!(
-                "Saved-output storage budget cannot be proven for '{}': {}",
-                unprovable.name, unprovable.reason
-            ),
-        ));
-    }
-    let forecast = ledger.total_bytes();
-    if forecast > maximum_storage_bytes {
-        return Err(PreparationError::new(
-            PreparationStage::AnalysisPlan,
-            format!(
-                "Saved-output forecast {} exceeds this plan's {} storage budget",
-                crate::simulation::run_set::format_bytes(forecast),
-                crate::simulation::run_set::format_bytes(maximum_storage_bytes)
-            ),
-        ));
-    }
-    Ok(())
-}
-
 impl SimulationController {
     /// Resolve the output set shown by Simulation Studio through the same
     /// configured-root and hierarchy projection used by run preparation.
@@ -278,7 +166,8 @@ impl SimulationController {
             &projection,
             &projection.root().key(),
         );
-        let occurrences = projection_occurrence_nets(&state.library_manager, &projection, nets);
+        let occurrences =
+            projection_occurrence_nets(state.library_manager.catalog(), &projection, nets);
         let (outputs, automatic_fallback, membership) = effective_plan_capture(
             selection_mode,
             explicit,
@@ -871,8 +760,11 @@ impl SimulationController {
                 &hierarchy,
             ),
         );
-        let occurrences =
-            projection_occurrence_nets(&state.library_manager, &execution_projection, design_nets);
+        let occurrences = projection_occurrence_nets(
+            state.library_manager.catalog(),
+            &execution_projection,
+            design_nets,
+        );
         let (effective_saved_outputs, used_automatic_outputs, capture_membership) =
             effective_plan_capture(
                 state.sim_setup.save_policy.output_selection_mode,
@@ -886,14 +778,16 @@ impl SimulationController {
             &plan_payload.capture_groups,
             &effective_saved_outputs,
             &capture_membership,
-            &tasks,
+            tasks
+                .iter()
+                .map(|task| (task.instance_id(), &task.queued_analysis().spec)),
             &plan_capture_workload(
                 &state.sim_setup.run_set,
                 state.sim_setup.reference_pvt,
-                &tasks,
+                tasks.iter().map(|task| (task.instance_id(), task.run_at())),
             ),
-            state.sim_setup.save_policy.maximum_storage_bytes,
-            state.sim_setup.save_policy.output_selection_mode,
+            &state.sim_setup.save_policy,
+            crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
         )?;
         let tasks = attach_saved_output_contracts(tasks, &effective_saved_outputs)?;
         if tasks.is_empty() {

@@ -15,17 +15,31 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::simulation::execution::{PreparationError, PreparationStage};
-use crate::state::{InstancePath, OccurrenceProbeSpelling};
+use crate::preparation::{PreparationError, PreparationStage};
+use rspice_app_types::hierarchy_path::{InstancePath, OccurrenceProbeSpelling};
+use rspice_app_types::product::{SavedOutputId, SimulationPlanId};
 use rspice_design::connectivity::summary::{DesignNet, projection_nets};
+use rspice_design::library::{LibraryCatalog, ViewType};
+use rspice_design::projection::DesignProjection;
+use rspice_design::schematic::probe::SchematicProbe;
+use rspice_design_model::port::PortDirection;
+use rspice_results::saved_output::{
+    SavedOutputDisplayIntent, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision,
+    SavedOutputStreaming,
+};
+use rspice_simulation_contract::capture_group::{CaptureGroup, CaptureGroupMembership};
+use rspice_simulation_contract::output_policy::OutputSelectionMode;
+use rspice_simulation_contract::saved_output::{
+    SavedOutput, SavedOutputCompatibility, SavedOutputOrigin,
+};
 
 const AUTOMATIC_OUTPUT_SMALL_DESIGN_LIMIT: usize = 16;
 const AUTOMATIC_OUTPUT_HARD_LIMIT: usize = 32;
 
 /// One occurrence of the executed design and the nets its master owns.
-pub(super) struct OccurrenceNets {
-    pub occurrence: InstancePath,
-    pub nets: Arc<Vec<DesignNet>>,
+pub struct OccurrenceNets {
+    occurrence: InstancePath,
+    nets: Arc<Vec<DesignNet>>,
 }
 
 /// Every occurrence the configured design emits, paired with its master's nets.
@@ -36,9 +50,9 @@ pub(super) struct OccurrenceNets {
 /// instances of one master share a drawing and not one node. An occurrence the
 /// engine grammar cannot spell is left out, for the same reason a probe on it
 /// cannot be requested — there is no name to ask for.
-pub(super) fn projection_occurrence_nets(
-    libraries: &crate::state::LibraryManager,
-    projection: &crate::state::workspace::DesignProjection,
+pub fn projection_occurrence_nets(
+    libraries: &LibraryCatalog,
+    projection: &DesignProjection,
     root_nets: Arc<Vec<DesignNet>>,
 ) -> Vec<OccurrenceNets> {
     let mut occurrences = vec![OccurrenceNets {
@@ -52,16 +66,12 @@ pub(super) fn projection_occurrence_nets(
         .filter(|binding| {
             matches!(
                 binding.resolved_view_type(),
-                crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+                ViewType::Schematic | ViewType::Testbench
             ) && binding.instance_path().to_engine_name().is_ok()
         })
         .map(|binding| OccurrenceNets {
             occurrence: binding.instance_path().clone(),
-            nets: projection_nets(
-                libraries.catalog(),
-                projection,
-                &binding.resolved_reference().key(),
-            ),
+            nets: projection_nets(libraries, projection, &binding.resolved_reference().key()),
         })
         .collect::<Vec<_>>();
     below.sort_by_key(|entry| (entry.occurrence.depth(), entry.occurrence.fold_key()));
@@ -97,24 +107,17 @@ struct AutomaticCandidate {
 /// the same projected records. [`effective_plan_saved_outputs`] resolves *which*
 /// outputs there are and is deliberately left un-projected so the selection
 /// rules can be tested without a group set; production callers want this.
-pub(super) fn effective_plan_capture(
-    selection_mode: crate::state::OutputSelectionMode,
-    explicit: &[crate::state::SavedOutput],
-    groups: &[crate::state::CaptureGroup],
-    probes: &[crate::state::SchematicProbe],
+pub fn effective_plan_capture(
+    selection_mode: OutputSelectionMode,
+    explicit: &[SavedOutput],
+    groups: &[CaptureGroup],
+    probes: &[SchematicProbe],
     occurrences: &[OccurrenceNets],
-    plan_id: crate::product::SimulationPlanId,
-) -> Result<
-    (
-        Vec<crate::state::SavedOutput>,
-        bool,
-        crate::state::CaptureGroupMembership,
-    ),
-    PreparationError,
-> {
+    plan_id: SimulationPlanId,
+) -> Result<(Vec<SavedOutput>, bool, CaptureGroupMembership), PreparationError> {
     let (mut outputs, automatic_fallback) =
         effective_plan_saved_outputs(selection_mode, explicit, probes, occurrences, plan_id)?;
-    let membership = rspice_simulation::capture_ledger::project_onto_groups(groups, &mut outputs);
+    let membership = crate::capture_ledger::project_onto_groups(groups, &mut outputs);
     Ok((outputs, automatic_fallback, membership))
 }
 
@@ -128,7 +131,7 @@ pub(super) fn effective_plan_capture(
 /// [`enabled_probe_output_count`], which is how the studio's Outputs surfaces
 /// learn that a plan with an empty registry still saves something.
 fn enabled_probe_expressions(
-    probes: &[crate::state::SchematicProbe],
+    probes: &[SchematicProbe],
 ) -> std::collections::BTreeMap<String, (String, bool)> {
     let mut expressions = std::collections::BTreeMap::new();
     for probe in probes.iter().filter(|probe| probe.enabled) {
@@ -156,22 +159,22 @@ fn enabled_probe_expressions(
 /// or the whole dataset. The studio's Outputs row and its preflight cell both
 /// stated one of those two instead, on a plan that would do neither.
 #[must_use]
-pub(crate) fn enabled_probe_output_count(probes: &[crate::state::SchematicProbe]) -> usize {
+pub fn enabled_probe_output_count(probes: &[SchematicProbe]) -> usize {
     enabled_probe_expressions(probes).len()
 }
 
 /// Resolve the plan's effective saved-output set without mutating project
 /// data. Automatic outputs belong to the prepared snapshot, use stable IDs,
 /// and therefore remain deterministic for an unchanged plan and topology.
-pub(super) fn effective_plan_saved_outputs(
-    selection_mode: crate::state::OutputSelectionMode,
-    explicit: &[crate::state::SavedOutput],
-    probes: &[crate::state::SchematicProbe],
+fn effective_plan_saved_outputs(
+    selection_mode: OutputSelectionMode,
+    explicit: &[SavedOutput],
+    probes: &[SchematicProbe],
     occurrences: &[OccurrenceNets],
-    plan_id: crate::product::SimulationPlanId,
-) -> Result<(Vec<crate::state::SavedOutput>, bool), PreparationError> {
+    plan_id: SimulationPlanId,
+) -> Result<(Vec<SavedOutput>, bool), PreparationError> {
     let mut enabled_probe_outputs =
-        std::collections::HashMap::<crate::product::SavedOutputId, HashSet<String>>::new();
+        std::collections::HashMap::<SavedOutputId, HashSet<String>>::new();
     let enabled_probe_expressions = enabled_probe_expressions(probes);
     for probe in probes.iter().filter(|probe| probe.enabled) {
         let Some(expression) = probe.source_expression.as_deref().map(str::trim) else {
@@ -193,7 +196,7 @@ pub(super) fn effective_plan_saved_outputs(
     let mut explicit = explicit
         .iter()
         .filter(|output| {
-            output.origin != crate::state::SavedOutputOrigin::SchematicProbe
+            output.origin != SavedOutputOrigin::SchematicProbe
                 || enabled_probe_outputs
                     .get(&output.id)
                     .is_some_and(|expressions| {
@@ -208,9 +211,9 @@ pub(super) fn effective_plan_saved_outputs(
                 .map(|(_, plot)| *plot);
             if let Some(plot) = expression_plot {
                 output.display_intent = if plot {
-                    crate::state::SavedOutputDisplayIntent::Plot
+                    SavedOutputDisplayIntent::Plot
                 } else {
-                    crate::state::SavedOutputDisplayIntent::DataBrowserOnly
+                    SavedOutputDisplayIntent::DataBrowserOnly
                 };
             }
             output
@@ -242,14 +245,14 @@ pub(super) fn effective_plan_saved_outputs(
                 ordinal = ordinal.saturating_add(1);
             }
         }
-        let mut output = crate::state::SavedOutput::new(
-            crate::state::SavedOutputKind::RawVoltageOrCurrent,
+        let mut output = SavedOutput::new(
+            SavedOutputKind::RawVoltageOrCurrent,
             output_name,
             expression,
-            crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
-            crate::state::SavedOutputPolicy::SelectedAndFinalPoints,
-            crate::state::SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
-            crate::state::SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
+            SavedOutputCompatibility::AllCompatibleAnalyses,
+            SavedOutputPolicy::SelectedAndFinalPoints,
+            SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
+            SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
         )
         .map_err(|error| {
             PreparationError::new(
@@ -257,24 +260,23 @@ pub(super) fn effective_plan_saved_outputs(
                 format!("Schematic probe output is invalid: {error}"),
             )
         })?
-        .with_origin(crate::state::SavedOutputOrigin::SchematicProbe)
+        .with_origin(SavedOutputOrigin::SchematicProbe)
         .with_display_intent(if plot {
-            crate::state::SavedOutputDisplayIntent::Plot
+            SavedOutputDisplayIntent::Plot
         } else {
-            crate::state::SavedOutputDisplayIntent::DataBrowserOnly
+            SavedOutputDisplayIntent::DataBrowserOnly
         });
         let identity = format!("rspice.schematic-probe/v1/{expression_key}");
-        output.id =
-            crate::product::SavedOutputId::from_namespace(plan_id.as_uuid(), identity.as_bytes());
+        output.id = SavedOutputId::from_namespace(plan_id.as_uuid(), identity.as_bytes());
         explicit.push(output);
     }
-    if selection_mode == crate::state::OutputSelectionMode::SaveAll {
+    if selection_mode == OutputSelectionMode::SaveAll {
         return Ok((explicit, false));
     }
     if !explicit.is_empty() {
         return Ok((explicit, false));
     }
-    if selection_mode == crate::state::OutputSelectionMode::ExplicitOnly {
+    if selection_mode == OutputSelectionMode::ExplicitOnly {
         return Ok((Vec::new(), false));
     }
 
@@ -289,8 +291,8 @@ pub(super) fn effective_plan_saved_outputs(
 /// ask for by name.
 fn automatic_outputs(
     occurrences: &[OccurrenceNets],
-    plan_id: crate::product::SimulationPlanId,
-) -> Result<Vec<crate::state::SavedOutput>, PreparationError> {
+    plan_id: SimulationPlanId,
+) -> Result<Vec<SavedOutput>, PreparationError> {
     fn carries_signal(net: &&DesignNet) -> bool {
         net.class != rspice_design::connectivity::summary::NetClass::Ground
     }
@@ -309,8 +311,8 @@ fn automatic_outputs(
                 .filter(carries_signal)
                 .filter_map(move |net| {
                     let priority = match net.port {
-                        Some(crate::state::PortDirection::Out) => 0,
-                        Some(crate::state::PortDirection::InOut) => 1,
+                        Some(PortDirection::Out) => 0,
+                        Some(PortDirection::InOut) => 1,
                         _ if net.authored_name => 2,
                         _ if include_unnamed => 3,
                         _ => return None,
@@ -354,14 +356,14 @@ fn automatic_outputs(
 
     let mut outputs = Vec::with_capacity(candidates.len().min(AUTOMATIC_OUTPUT_HARD_LIMIT));
     for candidate in candidates.into_iter().take(AUTOMATIC_OUTPUT_HARD_LIMIT) {
-        let mut output = crate::state::SavedOutput::new(
-            crate::state::SavedOutputKind::RawVoltageOrCurrent,
+        let mut output = SavedOutput::new(
+            SavedOutputKind::RawVoltageOrCurrent,
             candidate.spelling.display().to_owned(),
             candidate.spelling.engine().to_owned(),
-            crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
-            crate::state::SavedOutputPolicy::SelectedAndFinalPoints,
-            crate::state::SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
-            crate::state::SavedOutputStreaming::StoreOnly,
+            SavedOutputCompatibility::AllCompatibleAnalyses,
+            SavedOutputPolicy::SelectedAndFinalPoints,
+            SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
+            SavedOutputStreaming::StoreOnly,
         )
         .map_err(|error| {
             PreparationError::new(
@@ -372,16 +374,18 @@ fn automatic_outputs(
                 ),
             )
         })?
-        .with_origin(crate::state::SavedOutputOrigin::Automatic)
+        .with_origin(SavedOutputOrigin::Automatic)
         .with_display_intent(if candidate.priority <= 1 {
-            crate::state::SavedOutputDisplayIntent::Plot
+            SavedOutputDisplayIntent::Plot
         } else {
-            crate::state::SavedOutputDisplayIntent::DataBrowserOnly
+            SavedOutputDisplayIntent::DataBrowserOnly
         });
         let identity = format!("rspice.automatic-node-voltage/v1/{}", candidate.canonical);
-        output.id =
-            crate::product::SavedOutputId::from_namespace(plan_id.as_uuid(), identity.as_bytes());
+        output.id = SavedOutputId::from_namespace(plan_id.as_uuid(), identity.as_bytes());
         outputs.push(output);
     }
     Ok(outputs)
 }
+
+#[cfg(test)]
+mod tests;

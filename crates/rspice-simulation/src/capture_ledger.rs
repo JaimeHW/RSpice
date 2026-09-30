@@ -33,6 +33,9 @@
 //! nominal-only analysis as if it crossed every corner, and the fail-closed
 //! preparation gate refused runs that fit by exactly that factor.
 
+mod preparation;
+pub use preparation::{plan_capture_workload, validate_plan_saved_output_budget};
+
 use crate::output_contract::SavedOutputPreflightReport;
 use crate::output_contract::SavedOutputStorageEstimate;
 use crate::output_contract::retained_engine_source_upper_bound_bytes;
