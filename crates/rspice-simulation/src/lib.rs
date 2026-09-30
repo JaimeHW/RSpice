@@ -4,6 +4,7 @@
 //! bounded callbacks before its caller may publish an installation.
 
 pub mod analysis_preparation;
+pub mod capture_ledger;
 pub mod compilation;
 pub mod error;
 pub mod execution_identity;
@@ -17,6 +18,7 @@ pub mod netlist_gen;
 pub mod netlist_preparation;
 pub mod netlist_sources;
 pub mod optimization;
+pub mod output_contract;
 pub mod pdk;
 pub mod periodic;
 pub mod prepared_dependency;

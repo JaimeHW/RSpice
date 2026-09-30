@@ -90,19 +90,19 @@ impl<'a> Sources<'a> {
                 waveforms: &[],
                 family: Some((self, member)),
                 axis: self.axes.get(&member).copied(),
-                complex_policy: contract.complex_policy,
+                complex_policy: contract.complex_policy(),
             };
-            let result = match contract.kind {
+            let result = match contract.kind() {
                 SavedOutputKind::RawVoltageOrCurrent => probe::resolve_bound_raw_probe(
-                    &contract.source_expression,
-                    &contract.name,
+                    contract.source_expression(),
+                    contract.name(),
                     self.axes.get(&member).copied(),
                     false,
                     |name| context.resolve(name),
                 ),
                 SavedOutputKind::DerivedExpression => resolve_derived_with(
-                    &contract.source_expression,
-                    &contract.name,
+                    contract.source_expression(),
+                    contract.name(),
                     &context,
                     self.axes.get(&member).copied(),
                 ),
@@ -110,7 +110,7 @@ impl<'a> Sources<'a> {
             };
             let mut output =
                 result.map_err(|reason| format!("DC member {}: {reason}", member + 1))?;
-            output.name = self.evidence.member_trace_name(&contract.name, member);
+            output.name = self.evidence.member_trace_name(contract.name(), member);
             outputs.push(output);
         }
         Ok(outputs)

@@ -171,7 +171,7 @@ pub(in crate::simulation) fn run_declaration(
     let mut contracts = Vec::new();
     for output in outputs {
         contracts.extend(
-            crate::simulation::output_contract::compile_saved_output_contracts(
+            rspice_simulation::output_contract::compile_saved_output_contracts(
                 output,
                 [(instance, &declaration.spec)],
             )?,

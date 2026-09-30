@@ -7,9 +7,6 @@
 
 use egui::Ui;
 
-use crate::simulation::SavedOutputSemanticStatus;
-use crate::simulation::capture_ledger;
-use crate::simulation::output_contract::SavedOutputPreflightReport;
 use crate::simulation::run_set::format_bytes;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
@@ -21,6 +18,9 @@ use crate::ui::widgets::{Button, mono_input, select};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
 use crate::workbench::commands::vocabulary::Command;
+use rspice_simulation::capture_ledger;
+use rspice_simulation::output_contract::SavedOutputPreflightReport;
+use rspice_simulation::output_contract::SavedOutputSemanticStatus;
 
 use super::page_kit::{
     RowPress, Tone, card, card_body, card_head_row, card_note, card_row, card_with_head,
@@ -133,7 +133,7 @@ fn unresolved_plan(ui: &mut Ui, reason: &str) {
 pub(super) fn projected_output_bytes_for(
     app: &RSpiceApp,
     payload: &SimulationPlanPayload,
-    workload: &crate::simulation::capture_ledger::CaptureWorkload,
+    workload: &rspice_simulation::capture_ledger::CaptureWorkload,
 ) -> std::collections::HashMap<crate::product::SavedOutputId, Option<u64>> {
     app.simulation_controller
         .effective_saved_outputs_preflight(
@@ -160,7 +160,7 @@ fn registry(
     ui: &mut Ui,
     app: &mut RSpiceApp,
     payload: &SimulationPlanPayload,
-    workload: &crate::simulation::capture_ledger::CaptureWorkload,
+    workload: &rspice_simulation::capture_ledger::CaptureWorkload,
 ) {
     let outputs = &payload.saved_outputs;
     let reports = app
@@ -693,8 +693,12 @@ fn empty_registry_row(ui: &mut Ui, statement: &str, tone: Tone) {
     ledger_row(ui, &[1.0], &[(statement, tone)], false, RowPress::Ignored);
 }
 
-fn status_cell(report: Option<&crate::simulation::SavedOutputPreflightReport>) -> (String, Tone) {
-    match report.map(crate::simulation::SavedOutputPreflightReport::semantic_status) {
+fn status_cell(
+    report: Option<&rspice_simulation::output_contract::SavedOutputPreflightReport>,
+) -> (String, Tone) {
+    match report
+        .map(rspice_simulation::output_contract::SavedOutputPreflightReport::semantic_status)
+    {
         Some(SavedOutputSemanticStatus::Valid { .. }) => ("resolves".to_owned(), Tone::Ok),
         Some(SavedOutputSemanticStatus::RuntimeBound { .. }) => {
             ("bound at run time".to_owned(), Tone::Warn)
@@ -1498,7 +1502,7 @@ fn storage_read(
     ui: &mut Ui,
     app: &RSpiceApp,
     payload: &SimulationPlanPayload,
-    workload: &crate::simulation::capture_ledger::CaptureWorkload,
+    workload: &rspice_simulation::capture_ledger::CaptureWorkload,
 ) {
     let selection = app.simulation_controller.effective_saved_outputs_preflight(
         &app.state,
@@ -1570,10 +1574,10 @@ fn storage_read(
 #[cfg(test)]
 mod tests {
     use super::{Tone, compatibility_options, output_registry_summary};
-    use crate::simulation::SavedOutputSemanticStatus;
     use crate::simulation::plan::AnalysisKind;
     use crate::state::SavedOutputCompatibility;
     use crate::workbench::RSpiceApp;
+    use rspice_simulation::output_contract::SavedOutputSemanticStatus;
 
     /// The scope picker offers each analysis under the name the rest of the
     /// product shows it by, and positions only what naming leaves ambiguous.

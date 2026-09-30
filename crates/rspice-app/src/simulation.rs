@@ -5,7 +5,6 @@
 
 pub(crate) use rspice_simulation_contract::accuracy;
 pub(crate) mod automation;
-pub(crate) mod capture_ledger;
 pub(crate) use rspice_simulation_contract::config;
 pub(crate) mod controller;
 #[cfg(test)]
@@ -17,9 +16,6 @@ pub(crate) mod multi_run;
 #[cfg(test)]
 pub(crate) mod netlist_gen;
 pub(crate) mod output_contract;
-pub use output_contract::{
-    SavedOutputPreflightReport, SavedOutputSemanticStatus, SavedOutputStorageEstimate,
-};
 pub(crate) mod placed_sources;
 pub(crate) mod plan;
 pub(crate) mod point_family;

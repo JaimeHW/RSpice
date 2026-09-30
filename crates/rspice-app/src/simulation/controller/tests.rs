@@ -566,7 +566,7 @@ fn save_all_retains_engine_results_while_explicit_empty_retains_none() {
     )
     .expect("selected display output");
     all.current_saved_output_contracts =
-        crate::simulation::output_contract::compile_saved_output_contracts(
+        rspice_simulation::output_contract::compile_saved_output_contracts(
             &selected,
             [(
                 crate::product::AnalysisInstanceId::new(),

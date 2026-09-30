@@ -10,13 +10,14 @@ mod groups;
 use egui::Ui;
 
 use crate::product::RunId;
-use crate::simulation::capture_ledger::{CaptureLedger, CaptureWorkload};
 pub(super) use crate::simulation::run_set::format_bytes;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
     CaptureGroupMembership, RunRetention, SavedOutputPrecision, SavedOutputStreaming,
 };
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_simulation::capture_ledger::CaptureLedger;
+use rspice_simulation::capture_ledger::CaptureWorkload;
 
 use crate::ui::widgets::select;
 
@@ -270,7 +271,7 @@ fn streaming_contract(ui: &mut Ui, state: &mut AppState, payload: &SimulationPla
     // reported a policy no task would run under. Projected through the ledger's
     // own owner, on a copy, so reading the card never rewrites the plan.
     let mut effective = payload.saved_outputs.clone();
-    crate::simulation::capture_ledger::project_onto_groups(&payload.capture_groups, &mut effective);
+    rspice_simulation::capture_ledger::project_onto_groups(&payload.capture_groups, &mut effective);
     let streamed = effective
         .iter()
         .filter(|output| {

@@ -1754,7 +1754,7 @@ fn ensure_plan_probe_output(
     .with_origin(crate::state::SavedOutputOrigin::SchematicProbe);
     let preflight =
         crate::simulation::SimulationController::new().saved_output_preflight(state, &output);
-    if let crate::simulation::SavedOutputSemanticStatus::Invalid { reason } =
+    if let rspice_simulation::output_contract::SavedOutputSemanticStatus::Invalid { reason } =
         preflight.semantic_status()
     {
         return Err(format!(

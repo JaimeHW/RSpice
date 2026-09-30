@@ -263,7 +263,11 @@ fn dc_output_forecasts_count_authored_modes_and_both_retrace_members() {
                 },
             };
             let output = output(SavedOutputKind::RawVoltageOrCurrent, "V(pos)", "V(pos)");
-            let report = preflight_saved_output(&output, [(AnalysisInstanceId::new(), &spec)]);
+            let report = preflight_saved_output(
+                &output,
+                [(AnalysisInstanceId::new(), &spec)],
+                crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
+            );
             assert_eq!(
                 report.storage_estimate(),
                 &SavedOutputStorageEstimate::ExactBytes(count * multiplier * 16),

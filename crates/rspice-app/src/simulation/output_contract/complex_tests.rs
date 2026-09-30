@@ -76,7 +76,11 @@ fn complex_derived_storage_estimate_waits_for_the_evaluated_shape() {
         "Complex output",
         "complex(V(a),V(b))",
     );
-    let report = preflight_saved_output(&output, [(AnalysisInstanceId::new(), &ac())]);
+    let report = preflight_saved_output(
+        &output,
+        [(AnalysisInstanceId::new(), &ac())],
+        crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
+    );
     assert!(
         matches!(report.storage_estimate(), SavedOutputStorageEstimate::Indeterminate { reason } if reason.contains("real or complex"))
     );

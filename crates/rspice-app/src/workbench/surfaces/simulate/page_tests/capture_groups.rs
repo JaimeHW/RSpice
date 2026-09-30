@@ -159,7 +159,7 @@ fn the_group_editor_edits_every_rule_of_a_disjunction() {
 }
 
 /// The Save page's own ledger, built exactly the way the page builds it.
-fn page_capture_ledger(app: &RSpiceApp) -> crate::simulation::capture_ledger::CaptureLedger {
+fn page_capture_ledger(app: &RSpiceApp) -> rspice_simulation::capture_ledger::CaptureLedger {
     let payload = app
         .state
         .workspace
@@ -175,7 +175,7 @@ fn page_capture_ledger(app: &RSpiceApp) -> crate::simulation::capture_ledger::Ca
             &payload.capture_groups,
         )
         .expect("the test design resolves an output set");
-    crate::simulation::capture_ledger::CaptureLedger::resolve(
+    rspice_simulation::capture_ledger::CaptureLedger::resolve(
         &payload.capture_groups,
         &outputs,
         &reports,
@@ -635,10 +635,12 @@ fn the_registry_size_and_the_ledger_row_price_one_output_once() {
         .saved_outputs_preflight(&app.state, &payload.saved_outputs)
         .iter()
         .filter_map(|report| match report.storage_estimate() {
-            crate::simulation::SavedOutputStorageEstimate::ExactBytes(bytes) => {
+            rspice_simulation::output_contract::SavedOutputStorageEstimate::ExactBytes(bytes) => {
                 Some(bytes.saturating_mul(matrix))
             }
-            crate::simulation::SavedOutputStorageEstimate::Indeterminate { .. } => None,
+            rspice_simulation::output_contract::SavedOutputStorageEstimate::Indeterminate {
+                ..
+            } => None,
         })
         .collect();
     let projected: Vec<u64> = payload

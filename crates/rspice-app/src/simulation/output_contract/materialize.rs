@@ -91,8 +91,8 @@ fn prepare_output(
 ) -> Result<ResolvedOutput, String> {
     let mut output = resolve_output(contract, analysis, source, family, bindings)?;
     for waveform in output.waveforms_mut() {
-        if contract.policy == SavedOutputPolicy::SelectedAndFinalPoints
-            && let Some(grid) = contract.selection_grid
+        if contract.policy() == SavedOutputPolicy::SelectedAndFinalPoints
+            && let Some(grid) = contract.selection_grid()
         {
             *waveform = resample_selected_and_final(waveform, grid)?;
         }
@@ -102,9 +102,9 @@ fn prepare_output(
             && !same_samples(existing, waveform)
         {
             if preserve_engine
-                && contract.kind == SavedOutputKind::RawVoltageOrCurrent
+                && contract.kind() == SavedOutputKind::RawVoltageOrCurrent
                 && existing.unit == waveform.unit
-                && waveform_matches_requested(existing, &contract.source_expression)
+                && waveform_matches_requested(existing, contract.source_expression())
             {
                 // Save-all retains the exact engine superset of a sampled raw probe.
                 *waveform = existing.clone();
@@ -115,9 +115,10 @@ fn prepare_output(
                 ));
             }
         }
-        waveform.visible = contract.display_intent == crate::state::SavedOutputDisplayIntent::Plot;
-        if contract.precision == SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
-            || contract.streaming == SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
+        waveform.visible =
+            contract.display_intent() == crate::state::SavedOutputDisplayIntent::Plot;
+        if contract.precision() == SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
+            || contract.streaming() == SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
         {
             waveform.rebuild_display_cache(DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
         }
@@ -209,8 +210,7 @@ fn materialize_with_engine_policy(
         Ok(source) => source,
         Err(reason) => {
             for contract in contracts {
-                analysis.saved_output_receipts.push(receipt(
-                    contract,
+                analysis.saved_output_receipts.push(contract.receipt(
                     SavedOutputMaterializationStatus::Unavailable {
                         reason: reason.clone(),
                     },
@@ -228,9 +228,10 @@ fn materialize_with_engine_policy(
             SavedOutputMaterializationStatus::Unavailable {
                 reason: reason.clone(),
             }
-        } else if contract.policy == SavedOutputPolicy::OnDemandFromRetainedState {
+        } else if contract.policy() == SavedOutputPolicy::OnDemandFromRetainedState {
             SavedOutputMaterializationStatus::Deferred
-        } else if contract.policy == SavedOutputPolicy::FailureDiagnosticsOnly && analysis.success {
+        } else if contract.policy() == SavedOutputPolicy::FailureDiagnosticsOnly && analysis.success
+        {
             SavedOutputMaterializationStatus::SuppressedOnSuccess
         } else {
             match prepare_output(
@@ -248,7 +249,7 @@ fn materialize_with_engine_policy(
         };
         analysis
             .saved_output_receipts
-            .push(receipt(contract, status, captured.ok().flatten()));
+            .push(contract.receipt(status, captured.ok().flatten()));
     }
 }
 
@@ -302,7 +303,7 @@ pub(in crate::simulation) fn retain_plan_saved_outputs(
         )
     ) && contracts
         .iter()
-        .any(|contract| contract.policy == SavedOutputPolicy::OnDemandFromRetainedState)
+        .any(|contract| contract.policy() == SavedOutputPolicy::OnDemandFromRetainedState)
     {
         // Source curves remain available for deferred evaluation, but are not
         // authored plot outputs in an explicit-only plan.
@@ -331,7 +332,7 @@ pub(in crate::simulation) fn materialize_live_saved_outputs(
         .iter()
         .filter(|contract| {
             contract.streaming() == SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
-                && contract.display_intent == crate::state::SavedOutputDisplayIntent::Plot
+                && contract.display_intent() == crate::state::SavedOutputDisplayIntent::Plot
         })
         .peekable();
     if live.peek().is_none() {
@@ -376,33 +377,14 @@ pub(crate) fn materialize_deferred_saved_output(
     let receipt = analysis
         .saved_output_receipts
         .get(receipt_index)
-        .cloned()
         .ok_or_else(|| "saved-output receipt no longer exists".to_owned())?;
-    if receipt.status != SavedOutputMaterializationStatus::Deferred {
-        return Err("saved-output receipt is not deferred".to_owned());
-    }
-    let contract = PreparedSavedOutput {
-        output_id: receipt.output_id,
-        output_revision: receipt.output_revision,
-        analysis_id: receipt.analysis_id,
-        kind: receipt.output_kind,
-        name: receipt.name,
-        source_expression: receipt.source_expression,
-        complex_policy: receipt.complex_policy,
-        policy: receipt.save_policy,
-        precision: receipt.stored_precision,
-        streaming: receipt.streaming,
-        display_intent: receipt.display_intent,
-        selection_grid: None,
-        candidates: None,
-        digest: receipt.contract_digest,
-    };
+    let contract = PreparedSavedOutput::from_deferred_receipt(receipt)?;
     let source = source_waveforms(analysis)?;
     let family = Sources::new(analysis, &source);
     let bindings = if receipt.source_bindings.is_some() {
-        receipt.source_bindings
+        receipt.source_bindings.clone()
     } else if matches!(
-        contract.kind,
+        contract.kind(),
         SavedOutputKind::RawVoltageOrCurrent | SavedOutputKind::DerivedExpression
     ) {
         if analysis.dc_op.is_none() && family.is_none() {

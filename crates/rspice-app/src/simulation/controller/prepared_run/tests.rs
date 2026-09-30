@@ -1111,7 +1111,7 @@ fn deferred_outputs_share_one_sealed_engine_source_budget_per_analysis() {
             .expect("plan owns deferred output");
     }
     let one_source =
-        crate::simulation::output_contract::retained_engine_source_upper_bound_bytes(1);
+        rspice_simulation::output_contract::retained_engine_source_upper_bound_bytes(1);
     state.sim_setup.save_policy.maximum_storage_bytes = one_source;
     let controller = SimulationController::new();
 

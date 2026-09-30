@@ -33,12 +33,14 @@
 //! nominal-only analysis as if it crossed every corner, and the fail-closed
 //! preparation gate refused runs that fit by exactly that factor.
 
-use crate::product::CaptureGroupId;
-use crate::simulation::SavedOutputStorageEstimate;
-use crate::simulation::output_contract::{
-    SavedOutputPreflightReport, retained_engine_source_upper_bound_bytes,
-};
-use crate::state::{CaptureGroup, CaptureGroupMembership, OutputSelectionMode, SavedOutput};
+use crate::output_contract::SavedOutputPreflightReport;
+use crate::output_contract::SavedOutputStorageEstimate;
+use crate::output_contract::retained_engine_source_upper_bound_bytes;
+use rspice_app_types::product::CaptureGroupId;
+use rspice_simulation_contract::capture_group::CaptureGroup;
+use rspice_simulation_contract::capture_group::CaptureGroupMembership;
+use rspice_simulation_contract::output_policy::OutputSelectionMode;
+use rspice_simulation_contract::saved_output::SavedOutput;
 
 /// One group's line in the ledger.
 pub struct CaptureLedgerRow {
@@ -73,12 +75,13 @@ pub struct IndeterminateOutput {
 /// PVT set.
 ///
 /// Both callers resolve it through
-/// [`crate::simulation::run_set::participating_point_keys`], the one resolver
+/// [`rspice_simulation_contract::run_set::participating_point_keys`], the one resolver
 /// the prepared expansion mints its tasks from, so the number the Save page
 /// forecasts against and the number preparation refuses against are the same
 /// projection of the same queue.
 pub struct CaptureWorkload {
-    points_by_analysis: std::collections::HashMap<crate::product::AnalysisInstanceId, u64>,
+    points_by_analysis:
+        std::collections::HashMap<rspice_app_types::product::AnalysisInstanceId, u64>,
     /// Points for an analysis this projection does not name. A caller whose
     /// declared space does not expand exactly states the whole space here,
     /// which is the same fail-closed rule the workload table applies to an
@@ -109,7 +112,10 @@ impl CaptureWorkload {
     /// A projection that prices each named analysis at its own participation.
     #[must_use]
     pub fn narrowed(
-        points_by_analysis: std::collections::HashMap<crate::product::AnalysisInstanceId, u64>,
+        points_by_analysis: std::collections::HashMap<
+            rspice_app_types::product::AnalysisInstanceId,
+            u64,
+        >,
         default_points: u64,
         engine_task_points: u64,
     ) -> Self {
@@ -122,7 +128,7 @@ impl CaptureWorkload {
 
     /// Points one analysis is executed at.
     #[must_use]
-    pub fn points_for(&self, analysis: crate::product::AnalysisInstanceId) -> u64 {
+    pub fn points_for(&self, analysis: rspice_app_types::product::AnalysisInstanceId) -> u64 {
         self.points_by_analysis
             .get(&analysis)
             .copied()
@@ -199,7 +205,7 @@ impl CaptureLedger {
     ///
     /// `workload` says how many run-set points each analysis is executed at
     /// and how many engine analyses the queue holds. Both callers build it
-    /// through [`crate::simulation::run_set::participating_point_keys`], the
+    /// through [`rspice_simulation_contract::run_set::participating_point_keys`], the
     /// resolver the prepared expansion mints tasks from, so neither can price
     /// a nominal-only analysis at the whole PVT matrix — which is how a
     /// fail-closed budget came to refuse a run that fits.
@@ -345,7 +351,7 @@ impl CaptureLedger {
 /// while execution ran the authored ones would be a forecast of a run that
 /// never happens.
 ///
-/// Called by [`crate::simulation::controller`] on both routes into the
+/// Called by the application controller on both routes into the
 /// effective output set — the page's preflight and the prepared run's — so the
 /// number shown and the contract dispatched are the same projection.
 pub fn project_onto_groups(
@@ -365,10 +371,13 @@ pub fn project_onto_groups(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{
-        CaptureGroupRule, InstancePath, SavedOutputCompatibility, SavedOutputKind,
-        SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
-    };
+    use rspice_app_types::hierarchy_path::InstancePath;
+    use rspice_results::saved_output::SavedOutputKind;
+    use rspice_results::saved_output::SavedOutputPolicy;
+    use rspice_results::saved_output::SavedOutputPrecision;
+    use rspice_results::saved_output::SavedOutputStreaming;
+    use rspice_simulation_contract::capture_group::CaptureGroupRule;
+    use rspice_simulation_contract::saved_output::SavedOutputCompatibility;
 
     fn output(name: &str, expression: &str) -> SavedOutput {
         SavedOutput::new(
@@ -388,7 +397,7 @@ mod tests {
     }
 
     fn exact_for(
-        analysis: crate::product::AnalysisInstanceId,
+        analysis: rspice_app_types::product::AnalysisInstanceId,
         bytes: u64,
     ) -> SavedOutputPreflightReport {
         SavedOutputPreflightReport::exact_for_analysis_test(analysis, bytes)
@@ -411,7 +420,7 @@ mod tests {
     /// number, refused runs that fit.
     #[test]
     fn each_analysis_is_priced_at_its_own_participation() {
-        use crate::product::AnalysisInstanceId;
+        use rspice_app_types::product::AnalysisInstanceId;
 
         let nominal = AnalysisInstanceId::new();
         let everywhere = AnalysisInstanceId::new();
@@ -453,8 +462,8 @@ mod tests {
 
     #[test]
     fn automatic_native_results_are_budgeted_once_at_their_run_set_points() {
-        let selected = crate::product::AnalysisInstanceId::new();
-        let native = crate::product::AnalysisInstanceId::new();
+        let selected = rspice_app_types::product::AnalysisInstanceId::new();
+        let native = rspice_app_types::product::AnalysisInstanceId::new();
         let outputs = vec![output("a", "V(n)"), output("b", "V(m)")];
         let reports = vec![exact_for(selected, 100), exact_for(selected, 200)];
         let membership = CaptureGroupMembership::resolve(&[], &outputs);
@@ -719,7 +728,10 @@ mod tests {
 
         assert_eq!(outputs, authored, "no group means no override");
         assert_eq!(ledger.rows().len(), 1);
-        assert_eq!(ledger.rows()[0].name, crate::state::UNGROUPED_NAME);
+        assert_eq!(
+            ledger.rows()[0].name,
+            rspice_simulation_contract::capture_group::UNGROUPED_NAME
+        );
         assert_eq!(ledger.total_bytes(), (100 + 250) * 4);
     }
 

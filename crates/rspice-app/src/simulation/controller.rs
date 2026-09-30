@@ -28,9 +28,8 @@ use crate::simulation::multi_run::PssMethod;
 #[cfg(test)]
 use crate::simulation::multi_run::SpPort;
 use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, HbToneSpec};
-use crate::simulation::output_contract::{
-    PreparedSavedOutput, materialize_live_saved_outputs, retain_plan_saved_outputs,
-};
+use crate::simulation::output_contract::materialize_live_saved_outputs;
+use crate::simulation::output_contract::retain_plan_saved_outputs;
 use crate::simulation::plan::AnalysisNumericOverride;
 use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
 use crate::state::{
@@ -52,6 +51,7 @@ use rspice_simulation::live_transient::{
     TransientDigitalBusSample, TransientDigitalEventSample, TransientRealEventSample,
     TransientSampleDelta,
 };
+use rspice_simulation::output_contract::PreparedSavedOutput;
 use rspice_simulation::prepared_dependency::ExecutionArtifactKind;
 use rspice_simulation_contract::setup_state::SimulationSetup;
 

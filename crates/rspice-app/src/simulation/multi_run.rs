@@ -10,10 +10,9 @@
 //! - Result aggregation across runs
 //! - Corner sweep automation
 
-mod run_type;
 mod spec;
 
-pub use run_type::{AnalysisRunType, FrequencySweep};
+pub use rspice_simulation_contract::config::FrequencySweep;
 pub use spec::{
     AnalysisSpec, HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable,
     PssMethod, SpPort, TfAccuracy, TfNormalization,

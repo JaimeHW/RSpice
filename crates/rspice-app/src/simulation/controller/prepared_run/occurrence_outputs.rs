@@ -114,7 +114,7 @@ pub(super) fn effective_plan_capture(
 > {
     let (mut outputs, automatic_fallback) =
         effective_plan_saved_outputs(selection_mode, explicit, probes, occurrences, plan_id)?;
-    let membership = crate::simulation::capture_ledger::project_onto_groups(groups, &mut outputs);
+    let membership = rspice_simulation::capture_ledger::project_onto_groups(groups, &mut outputs);
     Ok((outputs, automatic_fallback, membership))
 }
 

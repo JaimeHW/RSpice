@@ -34,13 +34,11 @@ use egui::{Align, Align2, Color32, Layout, Rect, ScrollArea, Sense, Stroke, Ui, 
 
 use crate::product::{AnalysisInstanceId, ContentDigest, SimulationPlanId};
 use crate::services::simulation_runner::{TfRunConfig, infer_tf_run_config};
+use crate::simulation::SimulationController;
 use crate::simulation::dialog::{NoiseReferenceType, PssDialogState};
 use crate::simulation::plan::{
     AnalysisDependency, AnalysisDependencyRepairContext, AnalysisDraft, AnalysisKind,
     AnalysisLifecycleCommand, AnalysisLifecycleReceipt, AnalysisLifecycleState, AnalysisPlanIssue,
-};
-use crate::simulation::{
-    SavedOutputSemanticStatus, SavedOutputStorageEstimate, SimulationController,
 };
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
@@ -55,6 +53,8 @@ use crate::workbench::state::{
     SimulationWorkflowDialog, Workspace,
 };
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_simulation::output_contract::SavedOutputSemanticStatus;
+use rspice_simulation::output_contract::SavedOutputStorageEstimate;
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{

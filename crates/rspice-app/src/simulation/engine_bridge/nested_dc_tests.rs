@@ -320,11 +320,12 @@ fn schema_21_dc_history_authenticates_without_inventing_traversal() {
 #[test]
 fn filtered_dc_curves_and_derived_aliases_keep_exact_projection_evidence() {
     use crate::simulation::multi_run::AnalysisSpec;
-    use crate::simulation::output_contract::{PreparedSavedOutput, retain_plan_saved_outputs};
+    use crate::simulation::output_contract::retain_plan_saved_outputs;
     use crate::state::{
         SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
         SavedOutputPrecision, SavedOutputStreaming,
     };
+    use rspice_simulation::output_contract::PreparedSavedOutput;
     let result = solve(DcSweepConfig {
         source: "V1".to_owned(),
         start: 0.0,

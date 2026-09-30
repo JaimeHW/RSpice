@@ -1,114 +1,10 @@
-//! Bind authored references once against the engine basis of their owning task.
-//! Deferred evaluation uses exact retained columns, never authored output labels
-//! or whichever deck happens to be open later.
-
-use std::collections::BTreeMap;
+//! Bind retained source columns and resolve deferred output expressions.
 
 use super::*;
 use crate::state::{
     SavedOutputAxis, SavedOutputBoundSource, SavedOutputSourceBindings, saved_output_references,
 };
-use rspice_core::netlist::GroundPolicy;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum Candidate {
-    Probe(String),
-    Trace(String),
-    Ground,
-}
-
-pub(super) type Candidates = BTreeMap<String, Vec<Candidate>>;
-
-impl PreparedSavedOutput {
-    pub(in crate::simulation) fn bind_deck(
-        contracts: &mut [Self],
-        netlist: &rspice_core::Netlist,
-    ) -> Result<(), String> {
-        let mut references = std::collections::BTreeSet::new();
-        for contract in contracts.iter() {
-            references.extend(
-                saved_output_references(contract.kind, &contract.source_expression)?
-                    .into_iter()
-                    .flatten(),
-            );
-        }
-        let requested = references
-            .iter()
-            .filter_map(|signal| {
-                let (current, node) = probe_identity(signal);
-                if current {
-                    None
-                } else {
-                    Some(
-                        crate::state::ProbeTarget::engine_alias(node)
-                            .unwrap_or_else(|| node.to_owned()),
-                    )
-                }
-            })
-            .collect();
-        let aliases = rspice_core::netlist::collect_requested_interface_node_aliases_with_abort(
-            netlist,
-            &requested,
-            &rspice_core::abort_signal::NoAbort,
-        )
-        .map_err(|error| format!("saved-output interface binding failed: {error}"))?;
-        let candidates = Arc::new(
-            references
-                .into_iter()
-                .map(|signal| {
-                    let list = candidates(&signal, netlist.ground_policy(), Some(&aliases));
-                    (signal, list)
-                })
-                .collect(),
-        );
-        for contract in contracts {
-            contract.candidates = Some(Arc::clone(&candidates));
-        }
-        Ok(())
-    }
-}
-
-fn candidates(
-    signal: &str,
-    ground: GroundPolicy,
-    aliases: Option<&rspice_core::netlist::InterfaceNodeAliases>,
-) -> Vec<Candidate> {
-    if let Some((device, quantity)) = crate::state::device_current_probe(signal) {
-        let mut result = vec![Candidate::Trace(signal.to_owned())];
-        if let Some(engine) = crate::state::ProbeTarget::engine_alias(device) {
-            let candidate = Candidate::Trace(format!("@{engine}[{quantity}]"));
-            if !result.contains(&candidate) {
-                result.push(candidate);
-            }
-        }
-        return result;
-    }
-    let (current, node) = probe_identity(signal);
-    let mut result = vec![Candidate::Trace(signal.to_owned())];
-    let mut add = |node: &str| {
-        let candidate = if !current && ground.is_ground(node) {
-            Candidate::Ground
-        } else {
-            Candidate::Probe(format!("{}({node})", if current { "I" } else { "V" }))
-        };
-        if !result.contains(&candidate) {
-            result.push(candidate);
-        }
-    };
-    // Literal slash/dotted nodes win before hierarchy and formal-port aliases.
-    add(node);
-    let engine = crate::state::ProbeTarget::engine_alias(node);
-    if let Some(engine) = &engine {
-        add(engine);
-    }
-    if !current
-        && let Some(target) =
-            aliases.and_then(|aliases| aliases.resolve(engine.as_deref().unwrap_or(node)))
-    {
-        add(target);
-    }
-    result
-}
+use rspice_simulation::output_contract::SourceCandidate as Candidate;
 
 pub(super) fn capture(
     contract: &PreparedSavedOutput,
@@ -116,7 +12,7 @@ pub(super) fn capture(
     source: &[WaveformData],
     family: Option<&Result<dc_family::Sources<'_>, String>>,
 ) -> Result<Option<SavedOutputSourceBindings>, String> {
-    let Some(references) = saved_output_references(contract.kind, &contract.source_expression)?
+    let Some(references) = saved_output_references(contract.kind(), contract.source_expression())?
     else {
         return Ok(None);
     };
@@ -137,18 +33,7 @@ pub(super) fn capture(
     let references = references
         .into_iter()
         .map(|signal| {
-            let fallback;
-            let candidates = if let Some(prepared) = contract
-                .candidates
-                .as_ref()
-                .and_then(|map| map.get(&signal))
-            {
-                prepared
-            } else {
-                // Old OP/DC evidence and low-level callers know only canonical zero.
-                fallback = candidates(&signal, GroundPolicy::OnlyZero, None);
-                &fallback
-            };
+            let candidates = contract.source_candidates(&signal);
             let bound = candidates
                 .iter()
                 .find_map(|candidate| match candidate {
@@ -289,23 +174,27 @@ pub(super) fn resolve(
         waveforms: source,
         family: None,
         axis,
-        complex_policy: contract.complex_policy,
+        complex_policy: contract.complex_policy(),
     };
-    match contract.kind {
+    match contract.kind() {
         SavedOutputKind::RawVoltageOrCurrent => probe::resolve_bound_raw_probe(
-            &contract.source_expression,
-            &contract.name,
+            contract.source_expression(),
+            contract.name(),
             axis,
             analysis.analysis_type.uses_complex_bode_projection(),
             |signal| context.resolve(signal),
         ),
         SavedOutputKind::DerivedExpression => {
-            let mut waveform =
-                resolve_derived_with(&contract.source_expression, &contract.name, &context, axis)?;
+            let mut waveform = resolve_derived_with(
+                contract.source_expression(),
+                contract.name(),
+                &context,
+                axis,
+            )?;
             // A direct quoted trace keeps the producer's units. Composite
             // calculator expressions retain their existing unstated-unit contract.
             if let Ok(calculator::ast::CalculatorExpr::WaveformRef { signal, .. }) =
-                calculator::parser::Parser::new(&contract.source_expression).try_parse()
+                calculator::parser::Parser::new(contract.source_expression()).try_parse()
                 && let Ok(probe::Source::Waveform(source)) = context.resolve(&signal)
             {
                 waveform.unit = source.unit.clone();

@@ -1,10 +1,10 @@
 //! The capture-group card: what each group holds, and what it costs.
 //!
 //! Every number on this card comes from one
-//! [`CaptureLedger`](crate::simulation::capture_ledger::CaptureLedger), which is
+//! [`CaptureLedger`](rspice_simulation::capture_ledger::CaptureLedger), which is
 //! the same fold preparation prices the run with. The card therefore has no
 //! arithmetic of its own — it draws rows and reads
-//! [`total_bytes`](crate::simulation::capture_ledger::CaptureLedger::total_bytes)
+//! [`total_bytes`](rspice_simulation::capture_ledger::CaptureLedger::total_bytes)
 //! for the status line, so the forecast an engineer approves here and the
 //! forecast that refuses their run cannot be two numbers.
 //!
@@ -16,7 +16,6 @@
 use egui::Ui;
 
 use crate::product::CaptureGroupId;
-use crate::simulation::capture_ledger::CaptureLedger;
 use crate::state::{
     CaptureGroup, CaptureGroupMembership, OutputSelectionMode, SavedOutput, UNGROUPED_NAME,
 };
@@ -25,6 +24,7 @@ use crate::ui::widgets::{Button, select};
 use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
 use crate::workbench::state::{CaptureGroupDraft, SimulationWorkflowDialog};
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_simulation::capture_ledger::CaptureLedger;
 
 use super::super::page_kit::{
     RowPress, Tone, card_body, card_head_row, card_note, card_with_head, field_pair, ledger_head,

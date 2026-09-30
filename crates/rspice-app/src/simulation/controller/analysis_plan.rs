@@ -18,7 +18,7 @@ impl SimulationController {
         &self,
         state: &AppState,
         output: &crate::state::SavedOutput,
-    ) -> crate::simulation::SavedOutputPreflightReport {
+    ) -> rspice_simulation::output_contract::SavedOutputPreflightReport {
         self.saved_outputs_preflight(state, std::slice::from_ref(output))
             .pop()
             .expect("single-output preflight always returns one report")
@@ -31,7 +31,7 @@ impl SimulationController {
         &self,
         state: &AppState,
         outputs: &[crate::state::SavedOutput],
-    ) -> Vec<crate::simulation::SavedOutputPreflightReport> {
+    ) -> Vec<rspice_simulation::output_contract::SavedOutputPreflightReport> {
         if outputs.is_empty() {
             return Vec::new();
         }
@@ -65,11 +65,12 @@ impl SimulationController {
         outputs
             .iter()
             .map(|output| {
-                crate::simulation::output_contract::preflight_saved_output(
+                rspice_simulation::output_contract::preflight_saved_output(
                     output,
                     tasks
                         .iter()
                         .map(|task| (task.instance_id(), &task.queued_analysis().spec)),
+                    crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
                 )
             })
             .collect()
@@ -569,8 +570,8 @@ impl SimulationController {
 fn invalid_saved_output_reports(
     count: usize,
     reason: impl Into<String>,
-) -> Vec<crate::simulation::SavedOutputPreflightReport> {
-    let report = crate::simulation::SavedOutputPreflightReport::invalid(reason);
+) -> Vec<rspice_simulation::output_contract::SavedOutputPreflightReport> {
+    let report = rspice_simulation::output_contract::SavedOutputPreflightReport::invalid(reason);
     vec![report; count]
 }
 

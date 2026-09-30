@@ -133,9 +133,9 @@ fn plan_capture_workload(
     run_set: &crate::simulation::run_set::RunSetState,
     reference: crate::simulation::run_set::ReferencePoint,
     tasks: &[PreparedTask],
-) -> crate::simulation::capture_ledger::CaptureWorkload {
-    use crate::simulation::capture_ledger::CaptureWorkload;
+) -> rspice_simulation::capture_ledger::CaptureWorkload {
     use crate::simulation::run_set;
+    use rspice_simulation::capture_ledger::CaptureWorkload;
 
     let matrix = u64::try_from(run_set.point_count())
         .unwrap_or(u64::MAX)
@@ -180,22 +180,23 @@ fn validate_plan_saved_output_budget(
     outputs: &[crate::state::SavedOutput],
     membership: &crate::state::CaptureGroupMembership,
     tasks: &[PreparedTask],
-    workload: &crate::simulation::capture_ledger::CaptureWorkload,
+    workload: &rspice_simulation::capture_ledger::CaptureWorkload,
     maximum_storage_bytes: u64,
     selection_mode: crate::state::OutputSelectionMode,
 ) -> Result<(), PreparationError> {
     let reports = outputs
         .iter()
         .map(|output| {
-            crate::simulation::output_contract::preflight_saved_output(
+            rspice_simulation::output_contract::preflight_saved_output(
                 output,
                 tasks
                     .iter()
                     .map(|task| (task.instance_id(), &task.queued_analysis().spec)),
+                crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
             )
         })
         .collect::<Vec<_>>();
-    let ledger = crate::simulation::capture_ledger::CaptureLedger::resolve(
+    let ledger = rspice_simulation::capture_ledger::CaptureLedger::resolve(
         groups,
         outputs,
         &reports,
@@ -241,7 +242,7 @@ impl SimulationController {
     ) -> Result<
         (
             Vec<crate::state::SavedOutput>,
-            Vec<crate::simulation::SavedOutputPreflightReport>,
+            Vec<rspice_simulation::output_contract::SavedOutputPreflightReport>,
             bool,
             crate::state::CaptureGroupMembership,
         ),
@@ -2036,7 +2037,7 @@ fn attach_saved_output_contracts(
         .collect::<Vec<_>>();
     let mut by_analysis = HashMap::with_capacity(tasks.len());
     for output in outputs {
-        let contracts = crate::simulation::output_contract::compile_saved_output_contracts(
+        let contracts = rspice_simulation::output_contract::compile_saved_output_contracts(
             output,
             analyses.iter().copied(),
         )

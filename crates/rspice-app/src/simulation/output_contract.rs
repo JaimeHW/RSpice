@@ -1,25 +1,34 @@
-//! Immutable saved-output preparation and result materialization.
+//! Saved-output materialization and application result adoption.
 //!
-//! Project rows are compiled against the exact prepared analysis identity.
-//! Dispatch therefore carries no reference to mutable workspace state, and
-//! result receipts authenticate the contract that actually produced data.
+//! Consumes immutable contracts prepared by the simulation runtime.
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::analysis::calculator::{self, CalcValue};
-use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SavedOutputId};
+#[cfg(test)]
+use crate::product::{AnalysisInstanceId, ContentDigest};
+#[cfg(test)]
 use crate::simulation::config::NoiseSweepType;
-use crate::simulation::multi_run::{AnalysisRunType, AnalysisSpec, FrequencySweep};
+#[cfg(test)]
+use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep};
 use crate::state::{
-    AnalysisResult, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, SavedOutput, SavedOutputCompatibility,
-    SavedOutputKind, SavedOutputMaterializationStatus, SavedOutputPolicy, SavedOutputPrecision,
-    SavedOutputReceipt, SavedOutputStreaming, WaveformData,
+    AnalysisResult, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, SavedOutputKind,
+    SavedOutputMaterializationStatus, SavedOutputPolicy, SavedOutputPrecision,
+    SavedOutputStreaming, WaveformData,
 };
-use rspice_app_types::canonical::content_digest;
-use rspice_simulation::execution_identity::analysis_kind_tag;
+#[cfg(test)]
+use crate::state::{SavedOutput, SavedOutputCompatibility};
 
-const MAX_SELECTED_POINT_COUNT: usize = 10_000_000;
+use rspice_simulation::output_contract::{
+    PreparedSavedOutput, TransientSelectionGrid, parse_probe, parse_rf_port, probe_identity,
+    validate_selection_grid,
+};
+#[cfg(test)]
+use rspice_simulation::output_contract::{
+    SavedOutputSemanticStatus, SavedOutputStorageEstimate, compile_saved_output_contracts,
+    preflight_saved_output, retained_engine_source_upper_bound_bytes,
+};
 
 mod bindings;
 mod dc_family;
@@ -48,863 +57,26 @@ mod probe_tests;
 #[cfg(test)]
 mod quasi_periodic_tests;
 
-/// Static validation result for a candidate output contract. `RuntimeBound`
-/// is not a placeholder: it records the precise evidence that cannot exist
-/// until the solver has produced the retained source dataset.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SavedOutputSemanticStatus {
-    Valid { detail: String },
-    RuntimeBound { reason: String },
-    Invalid { reason: String },
-}
-
-/// Additional retained waveform/cache bytes attributable to one candidate
-/// output across all enabled compatible prepared tasks.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SavedOutputStorageEstimate {
-    ExactBytes(u64),
-    Indeterminate { reason: String },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SavedOutputPreflightReport {
-    semantic_status: SavedOutputSemanticStatus,
-    storage_estimate: SavedOutputStorageEstimate,
-    /// The same bound, divided between the analyses that produce it.
-    ///
-    /// A caller pricing this output over a run set needs the parts: two
-    /// analyses producing one output do not have to run at the same number of
-    /// points, and multiplying the sum by the whole matrix prices a
-    /// nominal-only analysis as if it crossed every corner.
-    bytes_by_analysis: Vec<(AnalysisInstanceId, u64)>,
-    compatible_analysis_count: usize,
-    retained_engine_source_analysis_ids: Vec<AnalysisInstanceId>,
-}
-
-impl SavedOutputPreflightReport {
-    pub(crate) fn invalid(reason: impl Into<String>) -> Self {
-        let reason = reason.into();
-        Self {
-            semantic_status: SavedOutputSemanticStatus::Invalid {
-                reason: reason.clone(),
-            },
-            storage_estimate: SavedOutputStorageEstimate::Indeterminate { reason },
-            bytes_by_analysis: Vec::new(),
-            compatible_analysis_count: 0,
-            retained_engine_source_analysis_ids: Vec::new(),
-        }
-    }
-
-    /// A report that bounds one output at exactly `bytes`, for tests that
-    /// exercise arithmetic over reports rather than the preflight that
-    /// produces them.
-    #[cfg(test)]
-    pub(crate) fn exact_for_test(bytes: u64) -> Self {
-        Self {
-            semantic_status: SavedOutputSemanticStatus::Valid {
-                detail: "test".to_owned(),
-            },
-            storage_estimate: SavedOutputStorageEstimate::ExactBytes(bytes),
-            // No analysis to attribute it to, so a ledger prices it at the
-            // caller's default participation. That is what these fixtures
-            // mean: one output, one bound, over the whole declared space.
-            bytes_by_analysis: Vec::new(),
-            compatible_analysis_count: 1,
-            retained_engine_source_analysis_ids: Vec::new(),
-        }
-    }
-
-    /// [`Self::exact_for_test`] with the bound attributed to one analysis, for
-    /// a test that prices the same report over different participations.
-    #[cfg(test)]
-    pub(crate) fn exact_for_analysis_test(analysis: AnalysisInstanceId, bytes: u64) -> Self {
-        Self {
-            bytes_by_analysis: vec![(analysis, bytes)],
-            ..Self::exact_for_test(bytes)
-        }
-    }
-
-    pub const fn semantic_status(&self) -> &SavedOutputSemanticStatus {
-        &self.semantic_status
-    }
-
-    pub const fn storage_estimate(&self) -> &SavedOutputStorageEstimate {
-        &self.storage_estimate
-    }
-
-    /// [`Self::storage_estimate`], divided between the analyses producing it.
-    ///
-    /// Empty when the estimate is indeterminate, and empty for a fixture
-    /// report that names no analysis. The entries always sum to the scalar.
-    pub fn bytes_by_analysis(&self) -> &[(AnalysisInstanceId, u64)] {
-        &self.bytes_by_analysis
-    }
-
-    pub const fn compatible_analysis_count(&self) -> usize {
-        self.compatible_analysis_count
-    }
-
-    /// Prepared analyses whose complete engine waveform state must survive so
-    /// this deferred output can be evaluated exactly after the run.
-    pub fn retained_engine_source_analysis_ids(&self) -> &[AnalysisInstanceId] {
-        &self.retained_engine_source_analysis_ids
-    }
-}
-
-/// Conservative logical-byte ceiling for complete engine waveform source
-/// state retained by deferred outputs.
-///
-/// The core resource contract bounds scalar result values for one analysis.
-/// Counting every permitted value as f64 is the stable cross-platform upper
-/// bound consumed by preflight. Several deferred outputs attached to the same
-/// prepared analysis share this state and must count it exactly once.
-pub(crate) fn retained_engine_source_upper_bound_bytes(analysis_count: usize) -> u64 {
-    let values =
-        u64::try_from(rspice_core::ResourceLimits::default().max_result_values).unwrap_or(u64::MAX);
-    let per_analysis = values.saturating_mul(std::mem::size_of::<f64>() as u64);
-    per_analysis.saturating_mul(u64::try_from(analysis_count).unwrap_or(u64::MAX))
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(in crate::simulation) struct TransientSelectionGrid {
-    pub start: f64,
-    pub step: f64,
-    pub stop: f64,
-}
-
-/// One output contract resolved for exactly one prepared analysis task.
-#[derive(Debug, Clone, PartialEq)]
-pub(in crate::simulation) struct PreparedSavedOutput {
-    output_id: SavedOutputId,
-    output_revision: ObjectRevision,
-    analysis_id: AnalysisInstanceId,
-    kind: SavedOutputKind,
-    name: String,
-    source_expression: String,
-    complex_policy: crate::state::ComplexExpressionPolicy,
-    policy: SavedOutputPolicy,
-    precision: SavedOutputPrecision,
-    streaming: SavedOutputStreaming,
-    display_intent: crate::state::SavedOutputDisplayIntent,
-    selection_grid: Option<TransientSelectionGrid>,
-    candidates: Option<Arc<bindings::Candidates>>,
-    digest: ContentDigest,
-}
-
-impl PreparedSavedOutput {
-    pub(in crate::simulation) fn prepare(
-        output: &SavedOutput,
-        analysis_id: AnalysisInstanceId,
-        spec: &AnalysisSpec,
-    ) -> Result<Option<Self>, String> {
-        output.validate()?;
-        // Automatic node probes belong to ordinary circuit waveforms. Other
-        // families retain their native spectra, study statistics or reports.
-        // Explicit output requests still use the full compatibility contract.
-        if output.origin == crate::state::SavedOutputOrigin::Automatic
-            && (!matches!(
-                spec.run_type(),
-                AnalysisRunType::DcOp
-                    | AnalysisRunType::DcSweep
-                    | AnalysisRunType::Transient
-                    | AnalysisRunType::Ac
-                    | AnalysisRunType::TransientNoise
-            ) || matches!(spec, AnalysisSpec::AcData { frequencies, table_options, .. }
-                if table_options.from_netlist && frequencies.is_empty()))
-        {
-            return Ok(None);
-        }
-        let selected = match &output.compatible_analyses {
-            SavedOutputCompatibility::OpTranAc => {
-                matches!(
-                    spec.run_type(),
-                    AnalysisRunType::DcOp | AnalysisRunType::Transient | AnalysisRunType::Ac
-                ) && output_kind_supports_run_type(output.kind, spec.run_type())
-            }
-            SavedOutputCompatibility::AllCompatibleAnalyses => {
-                output_kind_supports_run_type(output.kind, spec.run_type())
-            }
-            SavedOutputCompatibility::SelectedAnalysis {
-                analysis_id: selected,
-            } => {
-                if *selected != analysis_id {
-                    false
-                } else if !output_kind_supports_run_type(output.kind, spec.run_type()) {
-                    return Err(format!(
-                        "saved output '{}' selects analysis {analysis_id}, but {} outputs are incompatible with {}",
-                        output.name,
-                        output.kind.label(),
-                        spec.run_type().display_name()
-                    ));
-                } else {
-                    true
-                }
-            }
-        };
-        if !selected {
-            return Ok(None);
-        }
-        if !output_kind_supports_run_type(output.kind, spec.run_type()) {
-            return Err(format!(
-                "saved output '{}' cannot be materialized by {}",
-                output.name,
-                spec.run_type().display_name()
-            ));
-        }
-        validate_static_contract_semantics(output, spec)?;
-
-        let selection_grid = match (output.save_policy, spec) {
-            (
-                SavedOutputPolicy::SelectedAndFinalPoints,
-                AnalysisSpec::Transient {
-                    stop_time,
-                    step_time,
-                    start_time,
-                    ..
-                }
-                | AnalysisSpec::TransientNoise {
-                    stop_time,
-                    step_time,
-                    start_time,
-                    ..
-                },
-            ) => Some(TransientSelectionGrid {
-                start: *start_time,
-                step: *step_time,
-                stop: *stop_time,
-            }),
-            _ => None,
-        };
-        if let Some(grid) = selection_grid {
-            validate_selection_grid(grid)?;
-        }
-        let digest = output_contract_digest(output, analysis_id, spec, selection_grid);
-        Ok(Some(Self {
-            output_id: output.id,
-            output_revision: output.revision,
-            analysis_id,
-            kind: output.kind,
-            name: output.name.clone(),
-            source_expression: output.source_expression.clone(),
-            complex_policy: output.complex_policy,
-            policy: output.save_policy,
-            precision: output.stored_precision,
-            streaming: output.streaming,
-            display_intent: output.display_intent,
-            selection_grid,
-            candidates: None,
-            digest,
-        }))
-    }
-
-    /// Recompile this immutable contract for a deterministically derived
-    /// analysis identity. PVT expansion happens after plan outputs have been
-    /// prepared, so copying the old digest or identity would make the
-    /// expanded task fail authentication (or, worse, retain data under the
-    /// wrong analysis). The reconstructed authored contract deliberately uses
-    /// `AllCompatibleAnalyses`: selection was already proven when the original
-    /// prepared contract was created, and every derived task has the same OP
-    /// run type.
-    pub(in crate::simulation) fn rebind_analysis(
-        &self,
-        analysis_id: AnalysisInstanceId,
-        spec: &AnalysisSpec,
-    ) -> Result<Self, String> {
-        let output = SavedOutput {
-            id: self.output_id,
-            revision: self.output_revision,
-            origin: crate::state::SavedOutputOrigin::Plan,
-            display_intent: self.display_intent,
-            kind: self.kind,
-            name: self.name.clone(),
-            source_expression: self.source_expression.clone(),
-            complex_policy: self.complex_policy,
-            compatible_analyses: SavedOutputCompatibility::AllCompatibleAnalyses,
-            save_policy: self.policy,
-            stored_precision: self.precision,
-            streaming: self.streaming,
-        };
-        Self::prepare(&output, analysis_id, spec)?.ok_or_else(|| {
-            format!(
-                "saved output '{}' is incompatible with derived analysis {analysis_id}",
-                self.name
-            )
-        })
-    }
-
-    pub(in crate::simulation) const fn output_id(&self) -> SavedOutputId {
-        self.output_id
-    }
-
-    pub(in crate::simulation) const fn output_revision(&self) -> ObjectRevision {
-        self.output_revision
-    }
-
-    pub(in crate::simulation) const fn analysis_id(&self) -> AnalysisInstanceId {
-        self.analysis_id
-    }
-
-    pub(in crate::simulation) const fn kind(&self) -> SavedOutputKind {
-        self.kind
-    }
-
-    pub(in crate::simulation) fn name(&self) -> &str {
-        &self.name
-    }
-
-    pub(in crate::simulation) fn source_expression(&self) -> &str {
-        &self.source_expression
-    }
-
-    pub(in crate::simulation) const fn policy(&self) -> SavedOutputPolicy {
-        self.policy
-    }
-
-    pub(in crate::simulation) const fn precision(&self) -> SavedOutputPrecision {
-        self.precision
-    }
-
-    pub(in crate::simulation) const fn streaming(&self) -> SavedOutputStreaming {
-        self.streaming
-    }
-
-    pub(in crate::simulation) const fn selection_grid(&self) -> Option<TransientSelectionGrid> {
-        self.selection_grid
-    }
-
-    pub(in crate::simulation) const fn digest(&self) -> ContentDigest {
-        self.digest
-    }
-}
-
-pub(in crate::simulation) fn compile_saved_output_contracts<'a>(
-    output: &SavedOutput,
-    analyses: impl IntoIterator<Item = (AnalysisInstanceId, &'a AnalysisSpec)>,
-) -> Result<Vec<PreparedSavedOutput>, String> {
-    let mut contracts = Vec::new();
-    for (analysis_id, spec) in analyses {
-        if let Some(contract) = PreparedSavedOutput::prepare(output, analysis_id, spec)? {
-            contracts.push(contract);
-        }
-    }
-    if contracts.is_empty() && output.origin != crate::state::SavedOutputOrigin::Automatic {
-        return Err(format!(
-            "saved output '{}' has no compatible enabled analysis",
-            output.name
-        ));
-    }
-    Ok(contracts)
-}
-
-pub(in crate::simulation) fn preflight_saved_output<'a>(
-    output: &SavedOutput,
-    analyses: impl IntoIterator<Item = (AnalysisInstanceId, &'a AnalysisSpec)>,
-) -> SavedOutputPreflightReport {
-    let analyses = analyses.into_iter().collect::<Vec<_>>();
-    let contracts = match compile_saved_output_contracts(output, analyses.iter().copied()) {
-        Ok(contracts) => contracts,
-        Err(reason) => return SavedOutputPreflightReport::invalid(reason),
-    };
-
-    let semantic_status = semantic_status(output, &contracts, &analyses);
-    if let SavedOutputSemanticStatus::Invalid { reason } = &semantic_status {
-        return SavedOutputPreflightReport::invalid(reason.clone());
-    }
-    let (storage_estimate, bytes_by_analysis) = storage_estimate(&contracts, &analyses);
-    let retained_engine_source_analysis_ids =
-        if output.save_policy == SavedOutputPolicy::OnDemandFromRetainedState {
-            contracts
-                .iter()
-                .map(PreparedSavedOutput::analysis_id)
-                .collect()
-        } else {
-            Vec::new()
-        };
-    SavedOutputPreflightReport {
-        semantic_status,
-        storage_estimate,
-        bytes_by_analysis,
-        compatible_analysis_count: contracts.len(),
-        retained_engine_source_analysis_ids,
-    }
-}
-
-pub(in crate::simulation) fn output_kind_supports_run_type(
-    kind: SavedOutputKind,
-    run_type: AnalysisRunType,
-) -> bool {
-    match kind {
-        SavedOutputKind::DerivedExpression
-            if matches!(run_type, AnalysisRunType::Qpxf | AnalysisRunType::Qpnoise) =>
-        {
-            true
-        }
-        SavedOutputKind::RawVoltageOrCurrent | SavedOutputKind::DerivedExpression => matches!(
-            run_type,
-            AnalysisRunType::DcOp
-                | AnalysisRunType::DcSweep
-                | AnalysisRunType::Ac
-                | AnalysisRunType::Transient
-                | AnalysisRunType::Noise
-                | AnalysisRunType::MonteCarlo
-                | AnalysisRunType::Parametric
-                | AnalysisRunType::Corner
-                | AnalysisRunType::Optimization
-                | AnalysisRunType::Soa
-                | AnalysisRunType::SParameter
-                | AnalysisRunType::Pac
-                | AnalysisRunType::Pnoise
-                | AnalysisRunType::Pxf
-                | AnalysisRunType::Pss
-                | AnalysisRunType::Qpss
-                | AnalysisRunType::Qpac
-                | AnalysisRunType::HarmonicBalance
-                | AnalysisRunType::Envelope
-                | AnalysisRunType::Fourier
-                | AnalysisRunType::TransientNoise
-        ),
-        SavedOutputKind::DeviceOperatingPointQuantity => matches!(run_type, AnalysisRunType::DcOp),
-        SavedOutputKind::NoiseContributor => matches!(
-            run_type,
-            AnalysisRunType::Noise
-                | AnalysisRunType::Pnoise
-                | AnalysisRunType::Qpnoise
-                | AnalysisRunType::Hbnoise
-                | AnalysisRunType::TransientNoise
-        ),
-        SavedOutputKind::RfPortQuantity => matches!(
-            run_type,
-            AnalysisRunType::SParameter | AnalysisRunType::Hbsp | AnalysisRunType::Psp
-        ),
-    }
-}
-
-fn validate_static_contract_semantics(
-    output: &SavedOutput,
-    spec: &AnalysisSpec,
-) -> Result<(), String> {
-    if output.kind != SavedOutputKind::RfPortQuantity {
-        return Ok(());
-    }
-    let (output_port, input_port) = parse_rf_port(&output.source_expression)?;
-    let port_count = match spec {
-        // SP's configured ports are a fallback. Authored hierarchical ports
-        // may replace them, so only the solved circuit can establish this bound.
-        AnalysisSpec::SParameter { .. } => return Ok(()),
-        AnalysisSpec::Hbsp { ports, .. } | AnalysisSpec::Psp { ports, .. } => ports.len(),
-        _ => {
-            return Err(format!(
-                "saved output '{}' requires an RF-port analysis",
-                output.name
-            ));
-        }
-    };
-    if output_port > port_count || input_port > port_count {
-        return Err(format!(
-            "saved output '{}' references S({output_port},{input_port}), but {} has {port_count} configured port{}",
-            output.name,
-            spec.run_type().display_name(),
-            if port_count == 1 { "" } else { "s" }
-        ));
-    }
-    Ok(())
-}
-
-fn semantic_status(
-    output: &SavedOutput,
-    contracts: &[PreparedSavedOutput],
-    analyses: &[(AnalysisInstanceId, &AnalysisSpec)],
-) -> SavedOutputSemanticStatus {
-    if output.kind == SavedOutputKind::RfPortQuantity {
-        let mut requires_elaboration = false;
-        for contract in contracts {
-            let Some((_, spec)) = analyses
-                .iter()
-                .find(|(analysis_id, _)| *analysis_id == contract.analysis_id)
-            else {
-                return SavedOutputSemanticStatus::Invalid {
-                    reason: format!(
-                        "prepared analysis {} is absent from the preflight input",
-                        contract.analysis_id
-                    ),
-                };
-            };
-            if let Err(reason) = validate_static_contract_semantics(output, spec) {
-                return SavedOutputSemanticStatus::Invalid { reason };
-            }
-            requires_elaboration |= matches!(spec, AnalysisSpec::SParameter { .. });
-        }
-        if requires_elaboration {
-            return SavedOutputSemanticStatus::RuntimeBound {
-                reason: "RF port indices are bound to the elaborated circuit and its retained scattering traces".to_owned(),
-            };
-        }
-        return SavedOutputSemanticStatus::Valid {
-            detail: "RF port indices resolve to configured ports in every compatible analysis"
-                .to_owned(),
-        };
-    }
-
-    let reason = match output.kind {
-        SavedOutputKind::RawVoltageOrCurrent => {
-            "probe grammar and analysis ownership are valid; node/branch existence is bound to the sealed executable netlist"
-        }
-        SavedOutputKind::DerivedExpression => {
-            "expression grammar and analysis ownership are valid; referenced traces are bound to each retained solver result"
-        }
-        SavedOutputKind::DeviceOperatingPointQuantity => {
-            "device-quantity grammar and DC operating-point ownership are valid; device existence is bound to the sealed executable netlist"
-        }
-        SavedOutputKind::NoiseContributor => {
-            "noise contributor grammar and analysis ownership are valid; contributor existence is bound to the retained noise report"
-        }
-        SavedOutputKind::RfPortQuantity => unreachable!("handled above"),
-    };
-    SavedOutputSemanticStatus::RuntimeBound {
-        reason: reason.to_owned(),
-    }
-}
-
-/// One output's bounded cost, and how it divides between the analyses that
-/// produce it.
-///
-/// The scalar is the sum of the parts, so a reader can keep using it — but a
-/// caller that prices the output over a run set needs the parts, because the
-/// analyses producing it do not all run at the same number of points.
-fn storage_estimate(
-    contracts: &[PreparedSavedOutput],
-    analyses: &[(AnalysisInstanceId, &AnalysisSpec)],
-) -> (SavedOutputStorageEstimate, Vec<(AnalysisInstanceId, u64)>) {
-    let mut by_analysis: Vec<(AnalysisInstanceId, u64)> = Vec::new();
-    let mut total = 0_u64;
-    for contract in contracts {
-        if contract.policy == SavedOutputPolicy::OnDemandFromRetainedState {
-            continue;
-        }
-        if contract.kind == SavedOutputKind::DerivedExpression {
-            return (
-                indeterminate(format!(
-                    "'{}' storage depends on the evaluated sample domain and real or complex result",
-                    contract.name
-                )),
-                Vec::new(),
-            );
-        }
-        if contract.policy == SavedOutputPolicy::FailureDiagnosticsOnly {
-            return (
-                indeterminate(format!(
-                    "'{}' is retained only on failure, so its storage depends on the partial dataset available at the failure boundary",
-                    contract.name
-                )),
-                Vec::new(),
-            );
-        }
-        let Some((_, spec)) = analyses
-            .iter()
-            .find(|(analysis_id, _)| *analysis_id == contract.analysis_id)
-        else {
-            return (
-                indeterminate(format!(
-                    "prepared analysis {} is absent from the preflight input",
-                    contract.analysis_id
-                )),
-                Vec::new(),
-            );
-        };
-        let sample_count = match deterministic_sample_count(contract, spec) {
-            Ok(sample_count) => sample_count,
-            Err(reason) => return (indeterminate(reason), Vec::new()),
-        };
-        let source_values = if stores_complex_components(contract.kind, spec.run_type()) {
-            4_u64
-        } else {
-            2_u64
-        };
-        let source_bytes = sample_count
-            .checked_mul(source_values)
-            .and_then(|values| values.checked_mul(std::mem::size_of::<f64>() as u64));
-        let cache_bytes = if contract.precision
-            == SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
-            || contract.streaming == SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
-        {
-            sample_count
-                .min(DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES as u64)
-                .checked_mul(2)
-                .and_then(|values| values.checked_mul(std::mem::size_of::<f32>() as u64))
-        } else {
-            Some(0)
-        };
-        let Some(output_bytes) =
-            source_bytes.and_then(|source| cache_bytes.and_then(|cache| source.checked_add(cache)))
-        else {
-            return (
-                indeterminate(
-                    "saved-output storage estimate exceeds the supported 64-bit byte range",
-                ),
-                Vec::new(),
-            );
-        };
-        let Some(next_total) = total.checked_add(output_bytes) else {
-            return (
-                indeterminate(
-                    "aggregate saved-output storage estimate exceeds the supported 64-bit byte range",
-                ),
-                Vec::new(),
-            );
-        };
-        total = next_total;
-        match by_analysis
-            .iter_mut()
-            .find(|(analysis_id, _)| *analysis_id == contract.analysis_id)
-        {
-            // One analysis can produce several contracts for one output, and
-            // it runs all of them at the same points, so they fold into one
-            // line rather than becoming two entries priced separately.
-            Some((_, bytes)) => *bytes = bytes.saturating_add(output_bytes),
-            None => by_analysis.push((contract.analysis_id, output_bytes)),
-        }
-    }
-    (SavedOutputStorageEstimate::ExactBytes(total), by_analysis)
-}
-
-fn indeterminate(reason: impl Into<String>) -> SavedOutputStorageEstimate {
-    SavedOutputStorageEstimate::Indeterminate {
-        reason: reason.into(),
-    }
-}
-
-fn deterministic_sample_count(
-    contract: &PreparedSavedOutput,
-    spec: &AnalysisSpec,
-) -> Result<u64, String> {
-    if contract.kind == SavedOutputKind::DeviceOperatingPointQuantity {
-        return Ok(1);
-    }
-    if let Some(grid) = contract.selection_grid {
-        let intervals = ((grid.stop - grid.start) / grid.step).ceil();
-        if !intervals.is_finite() || intervals < 0.0 || intervals >= u64::MAX as f64 {
-            return Err(format!(
-                "'{}' selected-point grid exceeds the supported estimate range",
-                contract.name
-            ));
-        }
-        return Ok(intervals as u64 + 1);
-    }
-    let count = match spec {
-        AnalysisSpec::DcOp { .. } => Some(1_usize),
-        AnalysisSpec::DcSweep {
-            start,
-            stop,
-            step,
-            source2,
-            start2,
-            stop2,
-            step2,
-            hysteresis,
-            modes,
-            ..
-        } => {
-            let primary = modes.primary.spec(*start, *stop, *step).points().len();
-            if source2.is_some() {
-                match (start2, stop2, step2) {
-                    (Some(start), Some(stop), Some(step)) => {
-                        Some(primary.saturating_mul(
-                            modes.secondary.spec(*start, *stop, *step).points().len(),
-                        ))
-                    }
-                    _ => None,
-                }
-            } else if *hysteresis {
-                // Retained forward/reverse curves both include the turnaround.
-                Some(primary.saturating_mul(2))
-            } else {
-                Some(primary)
-            }
-        }
-        AnalysisSpec::Ac {
-            start_freq,
-            stop_freq,
-            points_per_unit,
-            sweep,
-        }
-        | AnalysisSpec::Disto {
-            start_freq,
-            stop_freq,
-            points_per_unit,
-            sweep,
-            ..
-        }
-        | AnalysisSpec::SParameter {
-            start_freq,
-            stop_freq,
-            points_per_unit,
-            sweep,
-            ..
-        }
-        | AnalysisSpec::Hbsp {
-            start_freq,
-            stop_freq,
-            points_per_unit,
-            sweep,
-            ..
-        }
-        | AnalysisSpec::Hbnoise {
-            start_freq,
-            stop_freq,
-            points_per_unit,
-            sweep,
-            ..
-        }
-        | AnalysisSpec::Psp {
-            start_freq,
-            stop_freq,
-            points_per_unit,
-            sweep,
-            ..
-        } => frequency_point_count(*start_freq, *stop_freq, *points_per_unit, *sweep),
-        AnalysisSpec::Qpac { .. } | AnalysisSpec::Qpxf { .. } | AnalysisSpec::Qpnoise { .. } => {
-            quasi_periodic_sample_count(spec)
-        }
-        AnalysisSpec::AcData {
-            frequencies,
-            table_options,
-            ..
-        } => (!table_options.from_netlist || !frequencies.is_empty()).then_some(frequencies.len()),
-        AnalysisSpec::Noise {
-            start_freq,
-            stop_freq,
-            points_per_decade,
-            sweep,
-            explicit_frequencies,
-            ..
-        } => explicit_frequencies.as_ref().map(Vec::len).or_else(|| {
-            let sweep = match sweep {
-                NoiseSweepType::Decade => FrequencySweep::Decade,
-                NoiseSweepType::Octave => FrequencySweep::Octave,
-                NoiseSweepType::Linear => FrequencySweep::Linear,
-                NoiseSweepType::ExplicitFrequencyList | NoiseSweepType::Unsupported(_) => {
-                    return None;
-                }
-            };
-            frequency_point_count(*start_freq, *stop_freq, *points_per_decade, sweep)
-        }),
-        // One-sided, DC through Nyquist: the transform length decides it, so
-        // a recorded FFT's point count is bounded by its own request.
-        AnalysisSpec::Fft { request } => Some(request.points / 2 + 1),
-        _ => None,
-    };
-    count
-        .and_then(|count| u64::try_from(count).ok())
-        .ok_or_else(|| {
-            format!(
-                "'{}' uses {}, whose prepared point count is data-dependent or not bounded by its analysis specification",
-                contract.name,
-                spec.run_type().display_name()
-            )
-        })
-}
-
-/// Count the native effective axis independently of output compatibility. The
-/// request owns signed/explicit grids and logarithmic endpoint conventions.
-fn quasi_periodic_sample_count(spec: &AnalysisSpec) -> Option<usize> {
-    let limits = rspice_core::ResourceLimits::default();
-    match spec {
-        AnalysisSpec::Qpac { .. } => spec.qpac_card().ok().and_then(|card| {
-            rspice_core::engine::QpacRequest::validate_qpac_card(&card, &limits).ok()
-        }),
-        AnalysisSpec::Qpnoise { .. } => spec.qpnoise_card().ok().and_then(|card| {
-            rspice_core::engine::QpnoiseRequest::validate_qpnoise_card(&card, &limits).ok()
-        }),
-        AnalysisSpec::Qpxf { .. } => spec.qpxf_card().ok().and_then(|card| {
-            rspice_core::engine::QpxfRequest::validate_qpxf_card(&card, &limits).ok()
-        }),
-        _ => None,
-    }
-}
-
-fn frequency_point_count(
-    start: f64,
-    stop: f64,
-    points_per_unit: usize,
-    sweep: FrequencySweep,
-) -> Option<usize> {
-    let variation = match sweep {
-        FrequencySweep::Linear => rspice_core::netlist::FreqVariation::Lin,
-        FrequencySweep::Decade => rspice_core::netlist::FreqVariation::Dec,
-        FrequencySweep::Octave => rspice_core::netlist::FreqVariation::Oct,
-    };
-    rspice_core::analysis::ac::try_ac_sweep_point_count_bounded_with_abort(
-        variation,
-        points_per_unit,
-        start,
-        stop,
-        rspice_core::ResourceLimits::default().max_analysis_points,
-        &rspice_core::NoAbort,
-    )
-    .ok()
-}
-
-fn stores_complex_components(kind: SavedOutputKind, run_type: AnalysisRunType) -> bool {
-    kind == SavedOutputKind::RfPortQuantity
-        || kind == SavedOutputKind::RawVoltageOrCurrent
-            && matches!(
-                run_type,
-                AnalysisRunType::Ac
-                    | AnalysisRunType::Pac
-                    | AnalysisRunType::Pxf
-                    | AnalysisRunType::Pstb
-                    | AnalysisRunType::Stb
-                    | AnalysisRunType::SParameter
-                    | AnalysisRunType::Hbsp
-                    | AnalysisRunType::Psp
-                    | AnalysisRunType::Qpac
-                    | AnalysisRunType::Qpxf
-            )
-}
-
-fn receipt(
-    contract: &PreparedSavedOutput,
-    status: SavedOutputMaterializationStatus,
-    source_bindings: Option<crate::state::SavedOutputSourceBindings>,
-) -> SavedOutputReceipt {
-    SavedOutputReceipt {
-        output_id: contract.output_id,
-        output_revision: contract.output_revision,
-        analysis_id: contract.analysis_id,
-        contract_digest: contract.digest,
-        name: contract.name.clone(),
-        source_expression: contract.source_expression.clone(),
-        complex_policy: contract.complex_policy,
-        output_kind: contract.kind,
-        save_policy: contract.policy,
-        stored_precision: contract.precision,
-        streaming: contract.streaming,
-        display_intent: contract.display_intent,
-        source_bindings,
-        status,
-    }
-}
-
 fn resolve_contract_waveform(
     contract: &PreparedSavedOutput,
     analysis: &AnalysisResult,
     waveforms: &[WaveformData],
 ) -> Result<WaveformData, String> {
-    match contract.kind {
+    match contract.kind() {
         SavedOutputKind::RawVoltageOrCurrent => resolve_raw_probe(
-            &contract.source_expression,
+            contract.source_expression(),
             waveforms,
-            &contract.name,
+            contract.name(),
             analysis.analysis_type.uses_complex_bode_projection(),
         ),
         SavedOutputKind::DerivedExpression => resolve_derived_expression(
-            &contract.source_expression,
+            contract.source_expression(),
             waveforms,
-            &contract.name,
-            contract.complex_policy,
+            contract.name(),
+            contract.complex_policy(),
         ),
         SavedOutputKind::DeviceOperatingPointQuantity => {
-            resolve_device_quantity(&contract.source_expression, analysis, &contract.name)
+            resolve_device_quantity(contract.source_expression(), analysis, contract.name())
         }
         SavedOutputKind::NoiseContributor => {
             // Typed noise names include output tuples and mechanism labels. A
@@ -912,33 +84,33 @@ fn resolve_contract_waveform(
             if let Ok(calculator::ast::CalculatorExpr::WaveformRef {
                 signal,
                 dataset: None,
-            }) = calculator::parser::try_parse(&contract.source_expression)
-                && contract.source_expression.trim_start().starts_with('"')
+            }) = calculator::parser::try_parse(contract.source_expression())
+                && contract.source_expression().trim_start().starts_with('"')
             {
-                return clone_named_waveform(waveforms, &signal, &contract.name);
+                return clone_named_waveform(waveforms, &signal, contract.name());
             }
-            let source = format!("noise({})", contract.source_expression.trim());
-            clone_named_waveform(waveforms, &source, &contract.name).or_else(|_| {
-                clone_named_waveform(waveforms, &contract.source_expression, &contract.name)
+            let source = format!("noise({})", contract.source_expression().trim());
+            clone_named_waveform(waveforms, &source, contract.name()).or_else(|_| {
+                clone_named_waveform(waveforms, contract.source_expression(), contract.name())
             })
         }
         SavedOutputKind::RfPortQuantity => {
-            let (output, input) = parse_rf_port(&contract.source_expression)?;
+            let (output, input) = parse_rf_port(contract.source_expression())?;
             let separated = format!("S{output}_{input}");
-            clone_named_waveform(waveforms, &separated, &contract.name)
+            clone_named_waveform(waveforms, &separated, contract.name())
                 .or_else(|error| {
                     if output <= 9 && input <= 9 {
                         clone_named_waveform(
                             waveforms,
                             &format!("S{output}{input}"),
-                            &contract.name,
+                            contract.name(),
                         )
                     } else {
                         Err(error)
                     }
                 })
                 .or_else(|_| {
-                    clone_named_waveform(waveforms, &contract.source_expression, &contract.name)
+                    clone_named_waveform(waveforms, contract.source_expression(), contract.name())
                 })
         }
     }
@@ -1014,40 +186,6 @@ fn resolve_device_quantity(
     ))
 }
 
-fn parse_probe(expression: &str) -> Result<(String, Vec<String>), String> {
-    let expression = expression.trim();
-    let open = expression
-        .find('(')
-        .ok_or_else(|| "probe is missing '('".to_owned())?;
-    let inner = expression[open + 1..]
-        .strip_suffix(')')
-        .ok_or_else(|| "probe is missing ')'".to_owned())?;
-    Ok((
-        expression[..open].trim().to_owned(),
-        inner
-            .split(',')
-            .map(|value| value.trim().to_owned())
-            .collect(),
-    ))
-}
-
-fn parse_rf_port(expression: &str) -> Result<(usize, usize), String> {
-    let (function, arguments) = parse_probe(expression)?;
-    if !function.eq_ignore_ascii_case("S") || arguments.len() != 2 {
-        return Err("RF quantity must use S(output, input)".to_owned());
-    }
-    let output = arguments[0]
-        .parse::<usize>()
-        .map_err(|_| "RF output port must be a positive integer".to_owned())?;
-    let input = arguments[1]
-        .parse::<usize>()
-        .map_err(|_| "RF input port must be a positive integer".to_owned())?;
-    if output == 0 || input == 0 {
-        return Err("RF ports are one-based".to_owned());
-    }
-    Ok((output, input))
-}
-
 fn clone_named_waveform(
     waveforms: &[WaveformData],
     source: &str,
@@ -1098,28 +236,6 @@ fn find_literal_waveform<'a>(
         })
 }
 
-fn probe_identity(name: &str) -> (bool, &str) {
-    let name = name.trim_matches('|');
-    if crate::state::device_current_probe(name).is_some() {
-        return (true, name);
-    }
-    if let Some(inner) = name.get(2..).and_then(|inner| inner.strip_suffix(')')) {
-        if name
-            .get(..2)
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("I("))
-        {
-            return (true, inner);
-        }
-        if name
-            .get(..2)
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("V("))
-        {
-            return (false, inner);
-        }
-    }
-    (false, name)
-}
-
 fn waveform_matches_requested(waveform: &WaveformData, requested: &str) -> bool {
     find_waveform(std::slice::from_ref(waveform), requested).is_some()
 }
@@ -1129,25 +245,6 @@ fn clone_with_name(source: &WaveformData, name: &str) -> WaveformData {
     waveform.name = name.to_owned();
     waveform.display_cache = None;
     waveform
-}
-
-fn validate_selection_grid(grid: TransientSelectionGrid) -> Result<(), String> {
-    if !grid.start.is_finite()
-        || !grid.step.is_finite()
-        || !grid.stop.is_finite()
-        || grid.start < 0.0
-        || grid.step <= 0.0
-        || grid.stop < grid.start
-    {
-        return Err("selected-point transient grid is invalid".to_owned());
-    }
-    let count = ((grid.stop - grid.start) / grid.step).floor() + 2.0;
-    if !count.is_finite() || count > MAX_SELECTED_POINT_COUNT as f64 {
-        return Err(format!(
-            "selected-point grid exceeds the {MAX_SELECTED_POINT_COUNT}-sample safety limit"
-        ));
-    }
-    Ok(())
 }
 
 fn resample_selected_and_final(
@@ -1204,83 +301,6 @@ fn resample_selected_and_final(
         result = result.with_complex_components(&complex.source_name, real, imag);
     }
     Ok(result)
-}
-
-fn output_contract_digest(
-    output: &SavedOutput,
-    analysis_id: AnalysisInstanceId,
-    spec: &AnalysisSpec,
-    grid: Option<TransientSelectionGrid>,
-) -> ContentDigest {
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(output.id.as_uuid().as_bytes());
-    bytes.extend_from_slice(&output.revision.get().to_be_bytes());
-    bytes.extend_from_slice(analysis_id.as_uuid().as_bytes());
-    bytes.push(analysis_kind_tag(spec));
-    bytes.push(output_kind_tag(output.kind));
-    append_string(&mut bytes, &output.name);
-    append_string(&mut bytes, &output.source_expression);
-    bytes.push(policy_tag(output.save_policy));
-    bytes.push(precision_tag(output.stored_precision));
-    bytes.push(streaming_tag(output.streaming));
-    bytes.push(match output.display_intent {
-        crate::state::SavedOutputDisplayIntent::Plot => 0,
-        crate::state::SavedOutputDisplayIntent::DataBrowserOnly => 1,
-    });
-    if let Some(grid) = grid {
-        bytes.push(1);
-        bytes.extend_from_slice(&grid.start.to_bits().to_be_bytes());
-        bytes.extend_from_slice(&grid.step.to_bits().to_be_bytes());
-        bytes.extend_from_slice(&grid.stop.to_bits().to_be_bytes());
-    } else {
-        bytes.push(0);
-    }
-    // Historical contracts retain their exact digest. The new domain binds
-    // rectangular evaluation without reinterpreting an old receipt.
-    let domain = if output.complex_policy.is_legacy() {
-        "rspice.prepared-saved-output/v1"
-    } else {
-        "rspice.prepared-saved-output/rectangular-v2"
-    };
-    content_digest(domain, &bytes)
-}
-
-fn append_string(bytes: &mut Vec<u8>, value: &str) {
-    bytes.extend_from_slice(&(value.len() as u64).to_be_bytes());
-    bytes.extend_from_slice(value.as_bytes());
-}
-
-pub(in crate::simulation) const fn output_kind_tag(kind: SavedOutputKind) -> u8 {
-    match kind {
-        SavedOutputKind::RawVoltageOrCurrent => 0,
-        SavedOutputKind::DerivedExpression => 1,
-        SavedOutputKind::DeviceOperatingPointQuantity => 2,
-        SavedOutputKind::NoiseContributor => 3,
-        SavedOutputKind::RfPortQuantity => 4,
-    }
-}
-
-pub(in crate::simulation) const fn policy_tag(policy: SavedOutputPolicy) -> u8 {
-    match policy {
-        SavedOutputPolicy::EveryAcceptedPoint => 0,
-        SavedOutputPolicy::SelectedAndFinalPoints => 1,
-        SavedOutputPolicy::OnDemandFromRetainedState => 2,
-        SavedOutputPolicy::FailureDiagnosticsOnly => 3,
-    }
-}
-
-pub(in crate::simulation) const fn precision_tag(precision: SavedOutputPrecision) -> u8 {
-    match precision {
-        SavedOutputPrecision::FullSourcePrecision => 0,
-        SavedOutputPrecision::DisplayCacheWithFullSourcePrecision => 1,
-    }
-}
-
-pub(in crate::simulation) const fn streaming_tag(streaming: SavedOutputStreaming) -> u8 {
-    match streaming {
-        SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation => 0,
-        SavedOutputStreaming::StoreOnly => 1,
-    }
 }
 
 #[cfg(test)]
@@ -1544,72 +564,6 @@ mod tests {
     }
 
     #[test]
-    fn preflight_estimates_frequency_storage_from_runtime_grids() {
-        let output = output(
-            SavedOutputPolicy::EveryAcceptedPoint,
-            SavedOutputPrecision::FullSourcePrecision,
-        );
-        let analysis_id = AnalysisInstanceId::new();
-        for (start_freq, stop_freq, points_per_unit, sweep, expected_count) in [
-            (1.0, 1000.0, 10, FrequencySweep::Decade, 31),
-            (10.0, 80.0, 2, FrequencySweep::Octave, 7),
-            (0.0, 100.0, 3, FrequencySweep::Linear, 3),
-            (0.0, 100.0, 2, FrequencySweep::Linear, 1),
-            (100.0, 100.0, 10, FrequencySweep::Decade, 1),
-        ] {
-            let spec = AnalysisSpec::Ac {
-                start_freq,
-                stop_freq,
-                points_per_unit,
-                sweep,
-            };
-            let report = preflight_saved_output(&output, [(analysis_id, &spec)]);
-            assert_eq!(report.compatible_analysis_count(), 1);
-            assert_eq!(
-                report.storage_estimate(),
-                &SavedOutputStorageEstimate::ExactBytes(expected_count * 4 * 8)
-            );
-            assert!(matches!(
-                report.semantic_status(),
-                SavedOutputSemanticStatus::RuntimeBound { .. }
-            ));
-        }
-    }
-
-    #[test]
-    fn preflight_marks_adaptive_transient_capture_indeterminate() {
-        let output = output(
-            SavedOutputPolicy::EveryAcceptedPoint,
-            SavedOutputPrecision::FullSourcePrecision,
-        );
-        let spec = transient_spec();
-        let report = preflight_saved_output(&output, [(AnalysisInstanceId::new(), &spec)]);
-        assert!(matches!(
-            report.storage_estimate(),
-            SavedOutputStorageEstimate::Indeterminate { reason }
-                if reason.contains("data-dependent")
-        ));
-    }
-
-    #[test]
-    fn preflight_exactly_bounds_default_schematic_probe_grid() {
-        let output = output(
-            SavedOutputPolicy::SelectedAndFinalPoints,
-            SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
-        );
-        let spec = transient_spec();
-        let report = preflight_saved_output(&output, [(AnalysisInstanceId::new(), &spec)]);
-
-        // 0 through 1 at 0.25 is five retained samples.  A real voltage
-        // waveform stores an f64 x/y pair and the requested display cache
-        // stores an f32 x/y pair for each sample.
-        assert_eq!(
-            report.storage_estimate(),
-            &SavedOutputStorageEstimate::ExactBytes(5 * ((2 * 8) + (2 * 4)))
-        );
-    }
-
-    #[test]
     fn plan_retention_discards_unselected_engine_waveforms() {
         let contract = PreparedSavedOutput::prepare(
             &output(
@@ -1692,7 +646,11 @@ mod tests {
             ]);
 
         retain_plan_saved_outputs(&mut analysis, &[contract]);
-        let report = preflight_saved_output(&deferred, [(analysis_id, &transient_spec())]);
+        let report = preflight_saved_output(
+            &deferred,
+            [(analysis_id, &transient_spec())],
+            crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
+        );
 
         assert_eq!(analysis.waveforms.len(), 1);
         assert_eq!(
@@ -1742,7 +700,11 @@ mod tests {
                 },
             ],
         };
-        let report = preflight_saved_output(&output, [(AnalysisInstanceId::new(), &spec)]);
+        let report = preflight_saved_output(
+            &output,
+            [(AnalysisInstanceId::new(), &spec)],
+            crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
+        );
         assert!(matches!(
             report.semantic_status(),
             SavedOutputSemanticStatus::RuntimeBound { reason } if reason.contains("elaborated circuit")
@@ -1778,30 +740,5 @@ mod tests {
             missing.saved_output_receipts[0].status,
             SavedOutputMaterializationStatus::Unavailable { .. }
         ));
-    }
-    #[test]
-    fn qp_transfer_counts_use_explicit_signed_and_logarithmic_native_grids() {
-        use crate::simulation::plan::{QuasiPeriodicAcDraft, QuasiPeriodicTransferDraft};
-        let mut ac = QuasiPeriodicAcDraft::default();
-        ac.explicit_offsets = "-1, 0, 1, 2".into();
-        let mut xf = QuasiPeriodicTransferDraft::default();
-        xf.explicit_frequencies = "-1, 0, 1".into();
-        assert_eq!(quasi_periodic_sample_count(&ac.to_spec().unwrap()), Some(4));
-        assert_eq!(quasi_periodic_sample_count(&xf.to_spec().unwrap()), Some(3));
-        xf.explicit_frequencies.clear();
-        xf.sweep.start = "-10".into();
-        xf.sweep.stop = "10".into();
-        xf.sweep.sweep = 2;
-        xf.sweep.points = "5".into();
-        assert_eq!(quasi_periodic_sample_count(&xf.to_spec().unwrap()), Some(5));
-        xf.sweep.start = "1".into();
-        xf.sweep.stop = "12".into();
-        xf.sweep.sweep = 0;
-        xf.sweep.points = "3".into();
-        assert_eq!(
-            quasi_periodic_sample_count(&xf.to_spec().unwrap()),
-            Some(4),
-            "native logarithmic grids use ceil(density*span)"
-        );
     }
 }
