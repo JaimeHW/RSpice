@@ -84,7 +84,6 @@ pub(crate) use monte_carlo::{
 pub use optimization::{
     OptimizationAlgorithmMode, OptimizationGoalMode, OptimizationRunConfig, OptimizationVariable,
     run_optimization_analysis_with_config_and_source_path_and_abort,
-    validate_optimization_expression,
 };
 pub(crate) use optimization::{
     OptimizationData, OptimizationEvaluation, materialize_optimization_candidate,

@@ -13,6 +13,7 @@ pub mod monte_carlo_checkpoint;
 pub mod netlist_gen;
 pub mod netlist_preparation;
 pub mod netlist_sources;
+pub mod optimization;
 pub mod pdk;
 pub mod periodic;
 pub mod project_veriloga;

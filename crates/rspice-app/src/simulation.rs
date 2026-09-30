@@ -17,7 +17,6 @@ pub(crate) mod execution;
 pub(crate) mod multi_run;
 #[cfg(test)]
 pub(crate) mod netlist_gen;
-pub(crate) mod optimizer;
 pub(crate) mod output_contract;
 pub use output_contract::{
     SavedOutputPreflightReport, SavedOutputSemanticStatus, SavedOutputStorageEstimate,
@@ -35,7 +34,7 @@ pub(crate) mod table_route;
 #[cfg(test)]
 pub(crate) mod veriloga_tests;
 
-// The optimizer, netlist generator, options translator, and
+// The netlist generator, options translator, and
 // engine bridge are all reached through their own modules; flattening their
 // types here duplicated the path without shortening any call site.
 pub use config::AnalysisConfig;

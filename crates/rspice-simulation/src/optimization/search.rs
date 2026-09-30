@@ -18,8 +18,8 @@ mod design_var;
 mod engine_core;
 mod lifecycle;
 pub use design_var::DesignVar;
-pub use rspice_results::optimization::OptimizationScore;
-pub use rspice_simulation_contract::optimization_search::{OptimizerAlgo, OptimizerConfig};
+use rspice_results::optimization::OptimizationScore;
+use rspice_simulation_contract::optimization_search::{OptimizerAlgo, OptimizerConfig};
 
 /// Core engine for executing optimization runs
 ///

@@ -8,7 +8,7 @@ use rspice_core::execution::{
 };
 use rspice_core::netlist::Netlist;
 
-pub use rspice_simulation_contract::optimization_expression::validate_optimization_expression;
+use rspice_simulation_contract::optimization_expression::validate_optimization_expression;
 
 pub(super) fn evaluate(
     expression: &str,

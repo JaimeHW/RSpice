@@ -835,25 +835,6 @@ mod tests {
             )
             .unwrap();
         }
-        // A feasibility gradient at the old point cannot prove convergence
-        // after a coordinate fallback moves into the feasible region.
-        use crate::simulation::optimizer::{
-            DesignVar, OptimizationScore, OptimizerAlgo, OptimizerConfig, OptimizerEngine,
-        };
-        let mut optimizer = OptimizerEngine::with_config(OptimizerConfig {
-            algorithm: OptimizerAlgo::GradientDescent,
-            ..Default::default()
-        });
-        optimizer.add_var(DesignVar::new("X", 0.5, 0.0, 1.0));
-        let mut score = |vars: &std::collections::HashMap<String, f64>| OptimizationScore {
-            cost: (vars["X"] - 0.9).powi(2),
-            violation: if vars["X"] < 0.6 { 1.0 } else { 0.0 },
-        };
-        let initial = optimizer.current_vars();
-        optimizer.observe_candidate(&initial, score(&initial));
-        optimizer.step(&mut score);
-        assert_eq!(optimizer.best_score().violation, 0.0);
-        assert!(!optimizer.is_converged(None));
         let tiny = Constraint {
             measurement: "tiny".into(),
             unit: String::new(),
