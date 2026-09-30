@@ -498,6 +498,63 @@ impl fmt::Display for ProbeTarget {
     }
 }
 
+/// One probed quantity, spelled for the reader and for the engine.
+///
+/// The two spellings are not interchangeable, and the boundary between them is
+/// the probe request itself: the reader is shown the design's own address,
+/// `V(/X1/n1)`, while the engine is asked for the flattened node it actually
+/// solves, `V(x1.n1)`. At the design root the two coincide character for
+/// character, because the root owns no scope and lowercasing a leaf there
+/// would rename a signal its author spelled.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OccurrenceProbeSpelling {
+    display: String,
+    engine: String,
+}
+
+impl OccurrenceProbeSpelling {
+    /// `quantity` of `leaf`, read at `occurrence`.
+    ///
+    /// `quantity` is the `V` or `I` the raw-output grammar wraps a name in.
+    /// `None` when the occurrence has no engine spelling at all, which a
+    /// non-ASCII instance name produces: the engine cannot be asked for that
+    /// node under any name, so there is no probe to place.
+    pub fn for_leaf(occurrence: &InstancePath, quantity: char, leaf: &str) -> Option<Self> {
+        if occurrence.is_root() {
+            return Some(Self::verbatim(format!("{quantity}({leaf})")));
+        }
+        let target = ProbeTarget {
+            scope: occurrence.clone(),
+            leaf: leaf.to_owned(),
+        };
+        let engine = target.engine_name().ok()?;
+        Some(Self {
+            display: format!("{quantity}({target})"),
+            engine: format!("{quantity}({engine})"),
+        })
+    }
+
+    /// An expression that already names exactly the quantity it means, so both
+    /// spellings are that expression.
+    pub fn verbatim(expression: impl Into<String>) -> Self {
+        let expression = expression.into();
+        Self {
+            display: expression.clone(),
+            engine: expression,
+        }
+    }
+
+    /// What the reader is shown.
+    pub fn display(&self) -> &str {
+        &self.display
+    }
+
+    /// What the engine is asked for.
+    pub fn engine(&self) -> &str {
+        &self.engine
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum HierarchyPathError {
     #[error("a hierarchical path is required")]
@@ -1155,5 +1212,27 @@ mod tests {
             pattern
         );
         assert!(serde_json::from_str::<InstancePathPattern>("\"/top/**\"").is_err());
+    }
+
+    #[test]
+    fn probe_placed_while_descended_names_the_occurrence() {
+        let occurrence = InstancePath::parse("/X1").expect("one descent");
+        let spelling = OccurrenceProbeSpelling::for_leaf(&occurrence, 'V', "n1")
+            .expect("an ASCII instance has an engine name");
+
+        assert_eq!(spelling.display(), "V(/X1/n1)");
+        assert_eq!(spelling.engine(), "V(x1.n1)");
+
+        let current = OccurrenceProbeSpelling::for_leaf(&occurrence, 'I', "R2")
+            .expect("a device leaf spells the same way");
+        assert_eq!(current.display(), "I(/X1/R2)");
+        assert_eq!(current.engine(), "I(x1.r2)");
+    }
+
+    #[test]
+    fn an_instance_the_engine_cannot_name_has_no_probe_spelling() {
+        let occurrence = InstancePath::parse("/Xé").expect("a Unicode instance name is legal");
+
+        assert!(OccurrenceProbeSpelling::for_leaf(&occurrence, 'V', "n1").is_none());
     }
 }
