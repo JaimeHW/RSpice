@@ -299,7 +299,7 @@ pub(in crate::simulation) fn validate_prepared_dependency_contract_with_options(
     ) {
         let require_autonomous = matches!(consumer, AnalysisSpec::Pnoise)
             && consumer_options.pnoise.as_ref().is_some_and(|config| {
-                config.noise_ref == crate::services::simulation_runner::PnoiseReference::Phase
+                config.noise_ref == rspice_simulation::periodic::PnoiseReference::Phase
             });
         // The carrier family this request named. A harmonic-balance producer
         // is admitted only where the request's `FROM=` admits it, so a sealed

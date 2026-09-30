@@ -571,7 +571,7 @@ fn run_pnoise(
                 pnoise_cfg.pss_fundamental_freq,
                 pnoise_cfg.pss_num_harmonics,
                 pnoise_cfg.pss_tolerance,
-                pnoise_cfg.noise_ref == svc_runner::PnoiseReference::Phase,
+                pnoise_cfg.noise_ref == rspice_simulation::periodic::PnoiseReference::Phase,
             )
             .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
         super::run_abort_aware_service(abort, || {
@@ -610,7 +610,7 @@ pub(super) fn frequency_measurement(
 
 fn pnoise_result(
     data: svc_runner::PnoiseData,
-    reference: svc_runner::PnoiseReference,
+    reference: rspice_simulation::periodic::PnoiseReference,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
     let timing = data
@@ -677,7 +677,7 @@ fn pnoise_result(
     }
     Ok(SimulationResult::Noise {
         output_unit: Some(rspice_core::analysis::MeasurementUnit::Known(
-            if reference == svc_runner::PnoiseReference::Phase {
+            if reference == rspice_simulation::periodic::PnoiseReference::Phase {
                 "dBc/Hz"
             } else if timing {
                 "s²/Hz"
@@ -699,9 +699,8 @@ fn pnoise_result(
 #[test]
 fn sampled_pnoise_studio_runs_retained_hb_and_reports_timing_and_input_units() {
     use rspice_core::analysis::pnoise::{PeriodicNoiseEdge, PeriodicNoiseSampling};
-    use svc_runner::{
-        HbRunConfig, HbToneRunConfig, PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
-    };
+    use rspice_simulation::periodic::{PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig};
+    use svc_runner::{HbRunConfig, HbToneRunConfig};
     let deck = "sampled studio\nI1 0 out SIN(0 1m 1k) AC 1\nR1 out 0 1k\n.end\n";
     let hb = svc_runner::run_hb_analysis_with_source_path_and_abort(
         deck,
@@ -815,7 +814,7 @@ fn pnoise_phase_contributor_shares_are_measurements_not_density_curves() {
         ..
     } = pnoise_result(
         data,
-        svc_runner::PnoiseReference::Phase,
+        rspice_simulation::periodic::PnoiseReference::Phase,
         &rspice_core::abort_signal::NoAbort,
     )
     .unwrap()
@@ -1477,7 +1476,7 @@ pub(super) fn run_periodic_study_consumer(
                 c.pss_fundamental_freq,
                 c.pss_num_harmonics,
                 c.pss_tolerance,
-                c.noise_ref == svc_runner::PnoiseReference::Phase,
+                c.noise_ref == rspice_simulation::periodic::PnoiseReference::Phase,
             ),
             StudyPeriodicOptions::Pstb(c) => (
                 "PSTB",

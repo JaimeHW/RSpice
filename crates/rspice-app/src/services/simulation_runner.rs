@@ -96,7 +96,6 @@ pub(crate) use pac_pxf::{
     PacData, PxfData, run_pac_analysis_on_materialized_with_abort,
     run_pxf_analysis_on_materialized_with_abort,
 };
-pub use pac_pxf::{PacFrequencySweep, PacRunConfig, PxfFrequencySweep, PxfRunConfig};
 #[cfg(test)]
 pub use pac_pxf::{
     run_pac_analysis_from_hb_with_source_path_and_abort,
@@ -108,7 +107,6 @@ pub(crate) use pnoise::PnoiseData;
 #[cfg(test)]
 pub use pnoise::run_pnoise_analysis_from_hb_with_source_path_and_abort;
 pub(crate) use pnoise::run_pnoise_analysis_on_materialized_with_abort;
-pub use pnoise::{PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig};
 pub(crate) use psp::run_psp_analysis_from_pss_on_materialized_with_abort;
 pub(crate) use psp::{PspData, run_hbsp_analysis_from_hb_on_materialized_with_abort};
 pub use psp::{PspRunConfig, PspSweep};
@@ -119,12 +117,10 @@ pub use pss::{
     PssRunConfig, run_pss_analysis_with_dc_seed_and_source_path_and_abort,
     run_pss_analysis_with_source_path_and_abort,
 };
-pub use pstb::PstbRunConfig;
 pub(crate) use pstb::{PstbData, run_pstb_analysis_on_materialized_with_abort};
 #[cfg(test)]
 pub use qpss::run_qpss_analysis_with_source_path_and_abort;
 pub use rspice_simulation::error::{ServiceRunError, ServiceRunResult};
-pub(crate) use rspice_simulation_contract::config::validate_noise_sidebands;
 // DC sweep, noise, pole-zero, and sensitivity have no entry here, and that is
 // the module boundary rather than an omission. The seven fundamental analyses
 // -- DC op, DC sweep, transient, AC, noise, pole-zero, sensitivity -- ship

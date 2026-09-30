@@ -595,14 +595,14 @@ fn worker_spec_request_preserves_structured_tf_contract() {
 
 #[test]
 fn worker_spec_request_preserves_pac_pxf_execution_options() {
-    let pac = crate::services::simulation_runner::PacRunConfig {
+    let pac = rspice_simulation::periodic::PacRunConfig {
         pss_fundamental_freq: 2.0e6,
         pss_num_harmonics: 7,
         pss_tolerance: 2.5e-6,
         start_freq: 100.0,
         stop_freq: 10.0e6,
         points_per_unit: 13,
-        sweep: crate::services::simulation_runner::PacFrequencySweep::Octave,
+        sweep: rspice_simulation::periodic::PacFrequencySweep::Octave,
         input_source: "VRF".to_string(),
         output_node: "mix_out".to_string(),
         output_ref: Some("vref".to_string()),
@@ -619,14 +619,14 @@ fn worker_spec_request_preserves_pac_pxf_execution_options() {
         sideband_min: -2,
         sideband_max: 4,
     };
-    let pxf = crate::services::simulation_runner::PxfRunConfig {
+    let pxf = rspice_simulation::periodic::PxfRunConfig {
         pss_fundamental_freq: 1.5e6,
         pss_num_harmonics: 9,
         pss_tolerance: 7.0e-7,
         start_freq: 50.0,
         stop_freq: 20.0e6,
         points_per_unit: 11,
-        sweep: crate::services::simulation_runner::PxfFrequencySweep::Linear,
+        sweep: rspice_simulation::periodic::PxfFrequencySweep::Linear,
         input_source: "VIN".to_string(),
         input_sideband: -1,
         output_node: "if_out".to_string(),
@@ -693,7 +693,7 @@ fn worker_spec_request_preserves_pac_pxf_execution_options() {
 
 #[test]
 fn worker_spec_request_preserves_pnoise_pstb_execution_options() {
-    let pnoise = crate::services::simulation_runner::PnoiseRunConfig {
+    let pnoise = rspice_simulation::periodic::PnoiseRunConfig {
         sampling: None,
         input_sideband: -2,
         output_sideband: 1,
@@ -703,19 +703,19 @@ fn worker_spec_request_preserves_pnoise_pstb_execution_options() {
         start_freq: 10.0,
         stop_freq: 5.0e6,
         points_per_unit: 19,
-        sweep: crate::services::simulation_runner::PnoiseFrequencySweep::Linear,
+        sweep: rspice_simulation::periodic::PnoiseFrequencySweep::Linear,
         max_sideband: 6,
         output_node: "vout".to_string(),
         output_ref: Some("vref".to_string()),
         input_source: "VIN".to_string(),
-        noise_ref: crate::services::simulation_runner::PnoiseReference::Input,
+        noise_ref: rspice_simulation::periodic::PnoiseReference::Input,
         integrated_noise: true,
         noise_summary: false,
         reltol: 3.0e-5,
         abstol: 4.0e-18,
         carrier: crate::services::simulation_runner::PeriodicCarrier::Pss,
     };
-    let pstb = crate::services::simulation_runner::PstbRunConfig {
+    let pstb = rspice_simulation::periodic::PstbRunConfig {
         pss_fundamental_freq: 4.0e6,
         pss_num_harmonics: 11,
         pss_tolerance: 9.0e-7,
@@ -782,29 +782,6 @@ fn worker_spec_request_preserves_pnoise_pstb_execution_options() {
         }
         other => panic!("expected PSTB spec request, got {other:?}"),
     }
-}
-
-#[test]
-fn sampled_pnoise_studio_worker_preserves_sampling_controls() {
-    use rspice_core::analysis::pnoise::{PeriodicNoiseEdge, PeriodicNoiseSampling};
-    let config = crate::services::simulation_runner::PnoiseRunConfig {
-        sampling: Some(PeriodicNoiseSampling::Delay {
-            edge: PeriodicNoiseEdge::default(),
-            reference_node: "clk".into(),
-            reference_ref: Some("vss".into()),
-            reference_edge: PeriodicNoiseEdge {
-                threshold_volts: 0.7,
-                ..Default::default()
-            },
-            periods: 3,
-        }),
-        ..Default::default()
-    };
-    let worker = super::super::WorkerPnoiseRunConfig::from(&config);
-    let decoded: super::super::WorkerPnoiseRunConfig =
-        serde_json::from_str(&serde_json::to_string(&worker).unwrap()).unwrap();
-    let restored = crate::services::simulation_runner::PnoiseRunConfig::from(decoded);
-    assert_eq!(restored, config);
 }
 
 #[test]
@@ -1170,8 +1147,8 @@ pub(super) fn assert_analysis_configs_match(actual: &AnalysisConfig, expected: &
 }
 
 fn assert_pac_config_matches(
-    actual: &crate::services::simulation_runner::PacRunConfig,
-    expected: &crate::services::simulation_runner::PacRunConfig,
+    actual: &rspice_simulation::periodic::PacRunConfig,
+    expected: &rspice_simulation::periodic::PacRunConfig,
 ) {
     assert_eq!(actual.pss_fundamental_freq, expected.pss_fundamental_freq);
     assert_eq!(actual.pss_num_harmonics, expected.pss_num_harmonics);
@@ -1193,8 +1170,8 @@ fn assert_pac_config_matches(
 }
 
 fn assert_pxf_config_matches(
-    actual: &crate::services::simulation_runner::PxfRunConfig,
-    expected: &crate::services::simulation_runner::PxfRunConfig,
+    actual: &rspice_simulation::periodic::PxfRunConfig,
+    expected: &rspice_simulation::periodic::PxfRunConfig,
 ) {
     assert_eq!(actual.pss_fundamental_freq, expected.pss_fundamental_freq);
     assert_eq!(actual.pss_num_harmonics, expected.pss_num_harmonics);
@@ -1214,8 +1191,8 @@ fn assert_pxf_config_matches(
 }
 
 fn assert_pnoise_config_matches(
-    actual: &crate::services::simulation_runner::PnoiseRunConfig,
-    expected: &crate::services::simulation_runner::PnoiseRunConfig,
+    actual: &rspice_simulation::periodic::PnoiseRunConfig,
+    expected: &rspice_simulation::periodic::PnoiseRunConfig,
 ) {
     assert_eq!(actual.input_sideband, expected.input_sideband);
     assert_eq!(actual.output_sideband, expected.output_sideband);
@@ -1238,8 +1215,8 @@ fn assert_pnoise_config_matches(
 }
 
 fn assert_pstb_config_matches(
-    actual: &crate::services::simulation_runner::PstbRunConfig,
-    expected: &crate::services::simulation_runner::PstbRunConfig,
+    actual: &rspice_simulation::periodic::PstbRunConfig,
+    expected: &rspice_simulation::periodic::PstbRunConfig,
 ) {
     assert_eq!(actual.pss_fundamental_freq, expected.pss_fundamental_freq);
     assert_eq!(actual.pss_num_harmonics, expected.pss_num_harmonics);

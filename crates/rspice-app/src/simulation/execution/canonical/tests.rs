@@ -554,7 +554,8 @@ fn corner_digest_changes_when_points_are_excluded_from_the_same_axes() {
 /// along with the defect.
 #[test]
 fn an_unauthored_carrier_leaves_the_plan_digest_unchanged() {
-    use crate::services::simulation_runner::{PacRunConfig, PeriodicCarrier};
+    use crate::services::simulation_runner::PeriodicCarrier;
+    use rspice_simulation::periodic::PacRunConfig;
 
     let digest = |carrier: PeriodicCarrier| {
         analysis_config_digest(
@@ -644,7 +645,8 @@ fn an_unauthored_carrier_leaves_the_plan_digest_unchanged() {
 /// three positions.
 #[test]
 fn a_pss_carried_request_keeps_its_digest() {
-    use crate::services::simulation_runner::{PacRunConfig, PeriodicCarrier};
+    use crate::services::simulation_runner::PeriodicCarrier;
+    use rspice_simulation::periodic::PacRunConfig;
 
     let config = PacRunConfig {
         carrier: PeriodicCarrier::Pss,
@@ -713,7 +715,7 @@ fn a_pss_carried_request_keeps_its_digest() {
 /// runs a new digest would detach each from its own results.
 #[test]
 fn a_symmetric_sideband_range_leaves_the_plan_digest_unchanged() {
-    use crate::services::simulation_runner::PacRunConfig;
+    use rspice_simulation::periodic::PacRunConfig;
 
     let digest = |sideband_min: i32, sideband_max: i32| {
         analysis_config_digest(

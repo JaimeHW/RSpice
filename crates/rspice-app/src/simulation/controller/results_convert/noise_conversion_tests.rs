@@ -144,10 +144,10 @@ fn descending_axis_with_misaligned_worker_series_fails_closed_without_panicking(
 }
 
 fn periodic_noise_result(
-    reference: crate::services::simulation_runner::PnoiseReference,
+    reference: rspice_simulation::periodic::PnoiseReference,
 ) -> AnalysisResult {
     let mut controller = SimulationController::new();
-    let mut config = crate::services::simulation_runner::PnoiseRunConfig::default();
+    let mut config = rspice_simulation::periodic::PnoiseRunConfig::default();
     config.noise_ref = reference;
     config.pss_fundamental_freq = 2.4e9;
     controller.current_spec_options = Some(SpecExecutionOptions {
@@ -178,7 +178,7 @@ fn periodic_noise_result(
 
 #[test]
 fn phase_reference_retains_exact_dbc_per_hz_quantity_and_carrier() {
-    let result = periodic_noise_result(crate::services::simulation_runner::PnoiseReference::Phase);
+    let result = periodic_noise_result(rspice_simulation::periodic::PnoiseReference::Phase);
     assert!(result.validate_retained_evidence().is_ok());
     assert_eq!(result.waveforms[0].name, "phase_noise");
     assert_eq!(
@@ -192,7 +192,7 @@ fn phase_reference_retains_exact_dbc_per_hz_quantity_and_carrier() {
 
 #[test]
 fn output_reference_remains_psd_and_is_never_relabelled_as_phase_noise() {
-    let result = periodic_noise_result(crate::services::simulation_runner::PnoiseReference::Output);
+    let result = periodic_noise_result(rspice_simulation::periodic::PnoiseReference::Output);
     assert!(result.validate_retained_evidence().is_ok());
     assert_eq!(result.waveforms[0].name, "onoise");
     assert_eq!(
@@ -372,8 +372,8 @@ fn an_oscillator_publishes_the_carrier_it_converged_at_not_the_authored_guess() 
     );
 
     let mut controller = SimulationController::new();
-    let mut config = crate::services::simulation_runner::PnoiseRunConfig::default();
-    config.noise_ref = crate::services::simulation_runner::PnoiseReference::Phase;
+    let mut config = rspice_simulation::periodic::PnoiseRunConfig::default();
+    config.noise_ref = rspice_simulation::periodic::PnoiseReference::Phase;
     // What the Studio authors for an autonomous producer, and what
     // `PeriodicStateArtifact::validate_consumer_basis` matches bit for bit:
     // the reciprocal of the period guess, never the converged frequency.
@@ -428,8 +428,8 @@ fn an_oscillator_publishes_the_carrier_it_converged_at_not_the_authored_guess() 
 #[test]
 fn phase_noise_with_no_captured_carrier_is_refused_rather_than_labelled_with_a_guess() {
     let mut controller = SimulationController::new();
-    let mut config = crate::services::simulation_runner::PnoiseRunConfig::default();
-    config.noise_ref = crate::services::simulation_runner::PnoiseReference::Phase;
+    let mut config = rspice_simulation::periodic::PnoiseRunConfig::default();
+    config.noise_ref = rspice_simulation::periodic::PnoiseReference::Phase;
     config.pss_fundamental_freq = 2.4e9;
     controller.current_spec_options = Some(SpecExecutionOptions {
         pnoise: Some(config),

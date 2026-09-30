@@ -1102,14 +1102,14 @@ R2 out 0 1k\n\
             contributor_ranking: true,
         };
         let pnoise_options = SpecExecutionOptions {
-            pnoise: Some(svc_runner::PnoiseRunConfig {
+            pnoise: Some(rspice_simulation::periodic::PnoiseRunConfig {
                 output_node: "out".into(),
                 input_source: "Iref".into(),
-                noise_ref: svc_runner::PnoiseReference::Input,
+                noise_ref: rspice_simulation::periodic::PnoiseReference::Input,
                 start_freq: 1e3,
                 stop_freq: 1e4,
                 points_per_unit: 3,
-                sweep: svc_runner::PnoiseFrequencySweep::Linear,
+                sweep: rspice_simulation::periodic::PnoiseFrequencySweep::Linear,
                 pss_num_harmonics: 8,
                 max_sideband: 0,
                 integrated_noise: true,
@@ -1200,13 +1200,13 @@ R2 out 0 1k\n\
     fn pnoise_reported_contributors_keep_their_physical_spectra_and_band_powers() {
         let netlist = "PNOISE contributor spectrum\nV1 in 0 0\nR1 in out 1k\nR2 out 0 1k\nC1 out 0 1n\n.end\n";
         let dependencies = transferred_hb_dependencies(netlist);
-        let mut config = svc_runner::PnoiseRunConfig {
+        let mut config = rspice_simulation::periodic::PnoiseRunConfig {
             pss_num_harmonics: 8,
             max_sideband: 1,
             start_freq: 1e3,
             stop_freq: 1e6,
             points_per_unit: 3,
-            sweep: svc_runner::PnoiseFrequencySweep::Linear,
+            sweep: rspice_simulation::periodic::PnoiseFrequencySweep::Linear,
             output_node: "out".into(),
             integrated_noise: true,
             noise_summary: true,

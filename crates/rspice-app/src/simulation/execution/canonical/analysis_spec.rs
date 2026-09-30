@@ -8,9 +8,7 @@
 
 use super::encode_dc_modes;
 
-use crate::services::simulation_runner::{
-    PacFrequencySweep, PeriodicCarrier, PnoiseFrequencySweep, PxfFrequencySweep,
-};
+use crate::services::simulation_runner::PeriodicCarrier;
 use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, NoiseSweepType};
 use crate::simulation::dialog::{IntegrationMethod, OpConfig};
 use crate::simulation::multi_run::{
@@ -18,6 +16,7 @@ use crate::simulation::multi_run::{
     FrequencySweep, OptimizationAlgorithm, OptimizationGoal,
 };
 use rspice_app_types::product::ProcessCorner;
+use rspice_simulation::periodic::{PacFrequencySweep, PnoiseFrequencySweep, PxfFrequencySweep};
 
 use super::{CanonicalWriter, canonical_analysis_kind, encode_op_config, encode_op_fields};
 

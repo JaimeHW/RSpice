@@ -930,8 +930,8 @@ fn pss_consumers_require_a_shooting_periodic_state_contract() {
 
 #[test]
 fn prepared_phase_pnoise_requires_an_autonomous_pss_artifact() {
-    let mut pnoise = crate::services::simulation_runner::PnoiseRunConfig::default();
-    pnoise.noise_ref = crate::services::simulation_runner::PnoiseReference::Phase;
+    let mut pnoise = rspice_simulation::periodic::PnoiseRunConfig::default();
+    pnoise.noise_ref = rspice_simulation::periodic::PnoiseReference::Phase;
     let options = SpecExecutionOptions {
         pnoise: Some(pnoise),
         ..SpecExecutionOptions::default()

@@ -3,19 +3,7 @@
 //! Both name their output node the same way, and both must resolve it
 //! against the flattened deck rather than the schematic.
 
-pub(super) fn normalize_pac_node_name(raw: &str) -> String {
-    let trimmed = raw.trim();
-    if trimmed.len() >= 3
-        && trimmed
-            .get(0..2)
-            .map(|prefix| prefix.eq_ignore_ascii_case("V("))
-            .unwrap_or(false)
-        && trimmed.ends_with(')')
-    {
-        return trimmed[2..trimmed.len() - 1].trim().to_string();
-    }
-    trimmed.to_string()
-}
+use rspice_simulation::periodic::normalize_pac_node_name;
 
 pub(super) fn resolve_pac_output_node_with_abort(
     result: &rspice_core::analysis::pac::PacResult,

@@ -12,6 +12,7 @@ pub mod netlist_gen;
 pub mod netlist_preparation;
 pub mod netlist_sources;
 pub mod pdk;
+pub mod periodic;
 pub mod project_veriloga;
 pub mod results;
 pub mod sealed_source;

@@ -386,7 +386,7 @@ fn the_periodic_small_signal_options_round_trip_through_the_deck_reader() {
     assert!(!pnoise.noise_summary);
     assert_eq!(
         pnoise.noise_ref,
-        crate::services::simulation_runner::PnoiseReference::Output
+        rspice_simulation::periodic::PnoiseReference::Output
     );
 }
 

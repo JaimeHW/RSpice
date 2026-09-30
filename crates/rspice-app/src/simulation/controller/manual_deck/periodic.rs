@@ -51,12 +51,12 @@ use super::*;
 // different facts about one carrier, and a reader of this file needs to see
 // which one each site means.
 use crate::services::simulation_runner::PeriodicCarrier as CarrierSelector;
-use crate::services::simulation_runner::{
+use crate::simulation::multi_run::{AnalysisSpec, PssMethod};
+use crate::simulation::runner::SpecExecutionOptions;
+use rspice_simulation::periodic::{
     PacFrequencySweep, PacRunConfig, PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
     PstbRunConfig, PxfFrequencySweep, PxfRunConfig,
 };
-use crate::simulation::multi_run::{AnalysisSpec, PssMethod};
-use crate::simulation::runner::SpecExecutionOptions;
 
 #[derive(Debug)]
 struct ParsedCard {

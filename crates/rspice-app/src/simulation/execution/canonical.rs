@@ -27,7 +27,6 @@ use crate::product::{
     AnalysisInstanceId, ContentDigest, manual_deck_analysis_instance_id_from_tag,
 };
 use crate::services::drc::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
-use crate::services::simulation_runner::PnoiseReference;
 use crate::simulation::AnalysisConfig;
 use crate::simulation::config::{AcSweepType, PzAnalysisType};
 use crate::simulation::dialog::{
@@ -39,6 +38,7 @@ use crate::simulation::multi_run::AnalysisSpec;
 use crate::simulation::plan::{AnalysisNumericOverride, NumericOverrideOption, OverrideValue};
 use crate::simulation::runner::SpecExecutionOptions;
 use crate::state::CanonicalAnalysisKind;
+use rspice_simulation::periodic::PnoiseReference;
 use rspice_simulation::sweeps::{CornerBaseMode, CornerFrequencySweep};
 
 use rspice_app_types::canonical::CanonicalWriter;

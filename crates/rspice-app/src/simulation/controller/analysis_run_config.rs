@@ -98,8 +98,8 @@ impl SimulationController {
         state: &AppState,
         draft: &crate::simulation::dialog::pac::PacDialogState,
         producer: Option<&AnalysisDraft>,
-    ) -> Result<crate::services::simulation_runner::PacRunConfig, String> {
-        use crate::services::simulation_runner::{PacFrequencySweep, PacRunConfig};
+    ) -> Result<rspice_simulation::periodic::PacRunConfig, String> {
+        use rspice_simulation::periodic::{PacFrequencySweep, PacRunConfig};
 
         let mut pac_state = draft.clone();
         pac_state.ensure_initialized();
@@ -146,10 +146,8 @@ impl SimulationController {
         state: &AppState,
         draft: &crate::simulation::dialog::pnoise::PnoiseDialogState,
         producer: Option<&AnalysisDraft>,
-    ) -> Result<crate::services::simulation_runner::PnoiseRunConfig, String> {
-        use crate::services::simulation_runner::{
-            PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
-        };
+    ) -> Result<rspice_simulation::periodic::PnoiseRunConfig, String> {
+        use rspice_simulation::periodic::{PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig};
 
         let mut pnoise_state = draft.clone();
         pnoise_state.ensure_initialized();
@@ -211,8 +209,8 @@ impl SimulationController {
         state: &AppState,
         draft: &crate::simulation::dialog::pxf::PxfDialogState,
         producer: Option<&AnalysisDraft>,
-    ) -> Result<crate::services::simulation_runner::PxfRunConfig, String> {
-        use crate::services::simulation_runner::{PxfFrequencySweep, PxfRunConfig};
+    ) -> Result<rspice_simulation::periodic::PxfRunConfig, String> {
+        use rspice_simulation::periodic::{PxfFrequencySweep, PxfRunConfig};
 
         let mut pxf_state = draft.clone();
         pxf_state.ensure_initialized();
@@ -257,8 +255,8 @@ impl SimulationController {
         state: &AppState,
         draft: &crate::simulation::dialog::pstb::PstbDialogState,
         producer: Option<&AnalysisDraft>,
-    ) -> Result<crate::services::simulation_runner::PstbRunConfig, String> {
-        use crate::services::simulation_runner::PstbRunConfig;
+    ) -> Result<rspice_simulation::periodic::PstbRunConfig, String> {
+        use rspice_simulation::periodic::PstbRunConfig;
 
         let mut pstb_state = draft.clone();
         pstb_state.ensure_initialized();

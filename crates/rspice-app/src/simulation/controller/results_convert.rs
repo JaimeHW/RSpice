@@ -219,11 +219,11 @@ impl SimulationController {
             return;
         };
         let output_quantity = match config.noise_ref {
-            crate::services::simulation_runner::PnoiseReference::Phase => {
+            rspice_simulation::periodic::PnoiseReference::Phase => {
                 PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz
             }
-            crate::services::simulation_runner::PnoiseReference::Output
-            | crate::services::simulation_runner::PnoiseReference::Input => {
+            rspice_simulation::periodic::PnoiseReference::Output
+            | rspice_simulation::periodic::PnoiseReference::Input => {
                 if config
                     .sampling
                     .as_ref()

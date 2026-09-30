@@ -67,10 +67,10 @@ pub struct SpecExecutionOptions {
     /// the classic operating-point behavior for older prepared requests.
     pub parametric_base: Option<rspice_simulation::sweeps::CornerBaseMode>,
     pub corner: Option<rspice_simulation::sweeps::CornerRunConfig>,
-    pub pac: Option<crate::services::simulation_runner::PacRunConfig>,
-    pub pxf: Option<crate::services::simulation_runner::PxfRunConfig>,
-    pub pnoise: Option<crate::services::simulation_runner::PnoiseRunConfig>,
-    pub pstb: Option<crate::services::simulation_runner::PstbRunConfig>,
+    pub pac: Option<rspice_simulation::periodic::PacRunConfig>,
+    pub pxf: Option<rspice_simulation::periodic::PxfRunConfig>,
+    pub pnoise: Option<rspice_simulation::periodic::PnoiseRunConfig>,
+    pub pstb: Option<rspice_simulation::periodic::PstbRunConfig>,
 }
 
 /// One fully accepted transient point published by the engine while the
@@ -1936,7 +1936,7 @@ mod tests {
         let pnoise = SimulationRequest::Spec {
             spec: Box::new(AnalysisSpec::Pnoise),
             options: Box::new(SpecExecutionOptions {
-                pnoise: Some(crate::services::simulation_runner::PnoiseRunConfig {
+                pnoise: Some(rspice_simulation::periodic::PnoiseRunConfig {
                     start_freq: 3.0,
                     stop_freq: 30.0,
                     ..Default::default()

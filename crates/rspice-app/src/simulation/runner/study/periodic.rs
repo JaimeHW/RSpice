@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "analysis", content = "config", deny_unknown_fields)]
 pub enum StudyPeriodicOptions {
-    Pac(services::PacRunConfig),
-    Pxf(services::PxfRunConfig),
-    Pnoise(services::PnoiseRunConfig),
-    Pstb(services::PstbRunConfig),
+    Pac(rspice_simulation::periodic::PacRunConfig),
+    Pxf(rspice_simulation::periodic::PxfRunConfig),
+    Pnoise(rspice_simulation::periodic::PnoiseRunConfig),
+    Pstb(rspice_simulation::periodic::PstbRunConfig),
 }
 
 impl StudyPeriodicOptions {
