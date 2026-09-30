@@ -1023,13 +1023,13 @@ fn analysis_catalog_uses_the_mockup_dialog_and_row_contracts() {
 #[test]
 fn analysis_catalog_search_preserves_canonical_group_order() {
     let all = filtered_catalog_kinds("");
-    let unavailable = [
+    let preview = [
         AnalysisKind::Qpac,
         AnalysisKind::Qpnoise,
         AnalysisKind::Qpxf,
     ];
     assert_eq!(all.len(), AnalysisKind::ALL.len());
-    assert!(unavailable.iter().all(|kind| all.contains(kind)));
+    assert!(preview.iter().all(|kind| all.contains(kind)));
     assert_eq!(all.first(), Some(&AnalysisKind::OperatingPoint));
     assert_eq!(all, AnalysisKind::MANIFEST_ORDER.to_vec());
     assert!(
@@ -1044,40 +1044,6 @@ fn analysis_catalog_search_preserves_canonical_group_order() {
     assert_eq!(
         filtered_catalog_kinds("spectral lattice"),
         vec![AnalysisKind::Qpss, AnalysisKind::Qpnoise]
-    );
-}
-
-#[test]
-fn unavailable_analysis_cannot_be_inserted_through_the_surface_action() {
-    let mut app = RSpiceApp::test_instance();
-    let before = app
-        .state
-        .sim_setup
-        .stable_analysis_plan()
-        .unwrap()
-        .instances()
-        .len();
-
-    assert_eq!(
-        insert_analysis_instance(&mut app, AnalysisKind::Qpac),
-        None,
-        "a blocked kind names no instance, because it committed none"
-    );
-
-    let after = app
-        .state
-        .sim_setup
-        .stable_analysis_plan()
-        .unwrap()
-        .instances()
-        .len();
-    assert_eq!(after, before);
-    assert!(
-        app.state
-            .workbench
-            .analysis_lifecycle_status
-            .message()
-            .contains("not available")
     );
 }
 
