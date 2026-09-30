@@ -9,7 +9,7 @@ pub(crate) mod capture_ledger;
 pub(crate) use rspice_simulation_contract::config;
 pub(crate) mod controller;
 #[cfg(test)]
-pub(crate) mod cost_probe;
+pub(crate) use rspice_simulation_contract::cost_probe;
 pub(crate) use rspice_simulation_contract::dependency_contract;
 pub(crate) mod dialog;
 pub(crate) mod engine_bridge;

@@ -126,6 +126,8 @@ pub fn validate_with_task_count(
     enabled_analysis_count: usize,
     exact_task_count: Option<usize>,
 ) -> RunSetValidation {
+    #[cfg(any(test, feature = "derivation-test-observation"))]
+    crate::cost_probe::record(crate::cost_probe::Derivation::RunSetValidation);
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
 

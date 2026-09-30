@@ -9,7 +9,7 @@
 //!
 //! So the three derivations a studio frame is allowed to pay for once are
 //! counted here, and the routes that must not pay twice assert the count.
-//! Test-only: the recording calls are `#[cfg(test)]`, so a shipped build has
+//! Test-only: enabled by `derivation-test-observation`, so a normal build has
 //! no counter and no branch.
 //!
 //! The counts are per thread, because that is where a test's frame runs and
@@ -19,7 +19,7 @@ use std::cell::Cell;
 
 /// One derivation a frame can pay for more than once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Derivation {
+pub enum Derivation {
     /// Expanding the declared run space into its points. The expensive one:
     /// its cost is the size of the space, not the size of the declaration.
     SpaceExpansion,
@@ -44,7 +44,7 @@ const fn slot(derivation: Derivation) -> usize {
 }
 
 /// Note that `derivation` was performed.
-pub(crate) fn record(derivation: Derivation) {
+pub fn record(derivation: Derivation) {
     COUNTS.with(|counts| {
         let mut current = counts.get();
         current[slot(derivation)] += 1;
@@ -54,12 +54,12 @@ pub(crate) fn record(derivation: Derivation) {
 
 /// How many times `derivation` has been performed on this thread since the
 /// last [`reset`].
-pub(crate) fn count(derivation: Derivation) -> usize {
+pub fn count(derivation: Derivation) -> usize {
     COUNTS.with(|counts| counts.get()[slot(derivation)])
 }
 
 /// Forget everything counted so far on this thread.
-pub(crate) fn reset() {
+pub fn reset() {
     COUNTS.with(|counts| counts.set([0; 3]));
 }
 
