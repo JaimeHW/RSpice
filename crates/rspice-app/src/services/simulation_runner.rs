@@ -2,8 +2,7 @@
 //!
 //! Async wrapper around rspice-core for running simulations from the GUI.
 
-use rspice_core::engine::{Engine, SimulationConfig};
-use rspice_core::{SimulationConfigOverrides, resolve_simulation_config};
+use rspice_core::engine::Engine;
 
 mod dcmatch;
 mod disto;
@@ -160,19 +159,7 @@ fn now_ms() -> f64 {
 #[allow(dead_code, reason = "retained by Monte Carlo compatibility runners")]
 const DEFAULT_MONTE_CARLO_SEED: u64 = 0x5EED_5EED;
 
-pub(crate) fn build_engine_config(
-    netlist: &rspice_core::Netlist,
-    options: Option<&rspice_simulation_contract::options::SimulationOptions>,
-) -> SimulationConfig {
-    match options {
-        Some(opts) => opts.resolve_simulation_config(Some(&netlist.options)),
-        None => resolve_simulation_config(
-            &SimulationConfig::default(),
-            Some(&netlist.options),
-            &SimulationConfigOverrides::default(),
-        ),
-    }
-}
+pub(crate) use rspice_simulation::netlist_preparation::build_engine_config;
 
 /// Construct the authoritative engine used to produce or consume an
 /// authenticated periodic operating point.

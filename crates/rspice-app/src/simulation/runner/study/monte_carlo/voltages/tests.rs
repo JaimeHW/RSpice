@@ -91,7 +91,7 @@ fn all_node_monte_carlo_checkpoint_matches_legacy_and_resumes_with_new_histogram
             "START=2 CONFIDENCE=80 CI=BOOTSTRAP RESAMPLES=32 BOOTSEED=77",
         );
         assert_eq!(
-            super::super::prepared_population_identity(
+            rspice_simulation::study::monte_carlo::prepared_population_identity(
                 None,
                 7,
                 variation_source,
@@ -188,7 +188,7 @@ fn all_node_monte_carlo_roster_does_not_require_a_nominal_operating_point() {
     // x=x^2+0.3 has no real solution. Elaboration still defines its voltage
     // roster, so drawing parameters can proceed without solving this circuit.
     let source = "Unsolvable nominal\n.param offset=0.3\nB1 out 0 V=V(out)^2+{offset}\nR1 out 0 1k\n.mc 2 uniform 1 seed 7 params offset\n.end\n";
-    let prepared = prepare(
+    let (_, _, study, basis) = prepare_voltages(
         source,
         None,
         McVariationSource::ParameterTolerance,
@@ -196,13 +196,14 @@ fn all_node_monte_carlo_roster_does_not_require_a_nominal_operating_point() {
         None,
         &NoAbort,
     )
-    .unwrap();
-    assert!(prepared.study.measurements.contains(&"V(OUT)".into()));
+    .unwrap()
+    .into_parts();
+    assert!(study.measurements.contains(&"V(OUT)".into()));
     let mut changed = rspice_core::SimulationResult::new(1, 0);
     changed.node_names = vec!["0".into(), "different".into()];
     changed.node_voltages = vec![0.0, 1.0];
     assert!(matches!(
-        prepared.basis.observe(changed),
+        basis.observe(changed),
         Err(SimulationError::InvalidConfig(_))
     ));
     let mut draft = crate::simulation::dialog::McDialogState::from_config(

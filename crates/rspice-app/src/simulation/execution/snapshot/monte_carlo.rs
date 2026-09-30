@@ -78,20 +78,17 @@ pub(super) fn route_resumes(
                 "Monte Carlo checkpoint request has missing or ambiguous resume policy",
             ));
         }
-        let population =
-            crate::simulation::runner::study::monte_carlo::prepared_population_identity(
-                options.study_base.as_ref(),
-                options.mc_histogram_bins.unwrap_or(20),
-                variation_source,
-                options.mc_statistics.as_ref(),
-                task.executable_netlist_override
-                    .as_deref()
-                    .unwrap_or(source),
-                task.execution_environment.clone(),
-            )
-            .map_err(|error| {
-                invalid(format!("{} checkpoint compatibility: {error}", task.label))
-            })?;
+        let population = rspice_simulation::study::monte_carlo::prepared_population_identity(
+            options.study_base.as_ref(),
+            options.mc_histogram_bins.unwrap_or(20),
+            variation_source,
+            options.mc_statistics.as_ref(),
+            task.executable_netlist_override
+                .as_deref()
+                .unwrap_or(source),
+            task.execution_environment.clone(),
+        )
+        .map_err(|error| invalid(format!("{} checkpoint compatibility: {error}", task.label)))?;
         if let Some(candidates) = candidates {
             let selected = candidates
                 .iter()

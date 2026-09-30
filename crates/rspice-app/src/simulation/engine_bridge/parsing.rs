@@ -4,7 +4,7 @@ use std::path::Path;
 
 use rspice_core::abort_signal::AbortSignal;
 
-use super::{EngineBridge, ensure_not_aborted};
+use super::EngineBridge;
 use rspice_simulation::error::SimulationError;
 
 impl EngineBridge {
@@ -14,41 +14,13 @@ impl EngineBridge {
         source_path: Option<&Path>,
         abort: &dyn AbortSignal,
     ) -> Result<rspice_core::Netlist, SimulationError> {
-        ensure_not_aborted(abort)?;
-        let options = rspice_core::netlist::NetlistParseOptions {
-            resource_limits: self.engine.config().resource_limits,
-            ..Default::default()
-        };
-        let parsed = match source_path {
-            Some(path) => rspice_core::Netlist::parse_with_path_and_options_and_abort(
-                netlist_str,
-                path,
-                options,
-                abort,
-            ),
-            None => rspice_core::Netlist::parse_with_options_and_abort(netlist_str, options, abort),
-        }
-        .map_err(|error| match error {
-            rspice_core::netlist::ParseWithAbortError::Aborted => SimulationError::Aborted,
-            rspice_core::netlist::ParseWithAbortError::Parse(
-                rspice_core::netlist::ParseError::ResourceLimit(error),
-            ) => SimulationError::ResourceLimit {
-                resource: error.resource.as_str().to_string(),
-                requested: error.requested,
-                limit: error.limit,
-            },
-            rspice_core::netlist::ParseWithAbortError::Parse(error) => {
-                SimulationError::ParseError(error.to_string())
-            }
-        });
-        ensure_not_aborted(abort)?;
-        let mut parsed = parsed?;
-        if !self.measurement_references.is_empty() {
-            self.measurement_references
-                .bind(&mut parsed)
-                .map_err(SimulationError::InvalidConfig)?;
-        }
-        Ok(parsed)
+        rspice_simulation::netlist_preparation::parse_analysis_netlist_with_abort(
+            netlist_str,
+            source_path,
+            self.engine.config().resource_limits,
+            &self.measurement_references,
+            abort,
+        )
     }
 
     /// Build an engine instance with netlist `.OPTIONS` layered on top of

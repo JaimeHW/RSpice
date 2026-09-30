@@ -1,10 +1,55 @@
 //! Deck parsing and executable hierarchy checks with typed preparation failures.
 
-use crate::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted};
+use crate::error::{ServiceRunError, ServiceRunResult, SimulationError, ensure_not_aborted};
 use crate::preparation::{PreparationError, PreparationStage};
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::netlist::StatisticalParamMode;
 use std::path::Path;
+
+/// Parse with the runner's exact resource policy and bind its prepared measurements.
+pub fn parse_analysis_netlist_with_abort(
+    netlist_str: &str,
+    source_path: Option<&Path>,
+    resource_limits: rspice_core::ResourceLimits,
+    measurement_references: &crate::measurement_references::PreparedMeasurementReferences,
+    abort: &dyn AbortSignal,
+) -> Result<rspice_core::Netlist, SimulationError> {
+    ensure_not_aborted(abort).map_err(SimulationError::from)?;
+    let options = rspice_core::netlist::NetlistParseOptions {
+        resource_limits,
+        ..Default::default()
+    };
+    let parsed = match source_path {
+        Some(path) => rspice_core::Netlist::parse_with_path_and_options_and_abort(
+            netlist_str,
+            path,
+            options,
+            abort,
+        ),
+        None => rspice_core::Netlist::parse_with_options_and_abort(netlist_str, options, abort),
+    }
+    .map_err(|error| match error {
+        rspice_core::netlist::ParseWithAbortError::Aborted => SimulationError::Aborted,
+        rspice_core::netlist::ParseWithAbortError::Parse(
+            rspice_core::netlist::ParseError::ResourceLimit(error),
+        ) => SimulationError::ResourceLimit {
+            resource: error.resource.as_str().to_string(),
+            requested: error.requested,
+            limit: error.limit,
+        },
+        rspice_core::netlist::ParseWithAbortError::Parse(error) => {
+            SimulationError::ParseError(error.to_string())
+        }
+    });
+    ensure_not_aborted(abort).map_err(SimulationError::from)?;
+    let mut parsed = parsed?;
+    if !measurement_references.is_empty() {
+        measurement_references
+            .bind(&mut parsed)
+            .map_err(SimulationError::InvalidConfig)?;
+    }
+    Ok(parsed)
+}
 
 pub fn parse_runner_netlist_with_abort(
     netlist_text: &str,

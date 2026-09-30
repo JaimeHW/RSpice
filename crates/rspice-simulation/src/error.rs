@@ -177,6 +177,41 @@ impl std::fmt::Display for SimulationError {
 }
 
 impl SimulationError {
+    /// Translate a core failure, retaining matching convergence attribution.
+    ///
+    /// When the engine could name the circuit objects behind this failure,
+    /// the translation keeps the prose and adds them. The engine records an
+    /// attribution wherever a solve gives up, and a later convergence aid may
+    /// still rescue that solve, so the recorded attribution is used only when
+    /// it says it belongs to the error actually being translated.
+    pub fn from_engine(engine: &rspice_core::Engine, err: rspice_core::SimulationError) -> Self {
+        let attribution = Self::engine_attribution_for(engine, &err);
+        let translated = SimulationError::from(err);
+        match attribution {
+            Some(attribution) => SimulationError::Attributed {
+                message: translated.to_string(),
+                attribution,
+            },
+            None => translated,
+        }
+    }
+
+    /// The engine's attribution for `err`, if it recorded one for this error.
+    ///
+    /// The analyses run against engines resolved from `engine`, which
+    /// share its metrics, so the supplied engine is where the record
+    /// lands whichever entry point produced the failure.
+    fn engine_attribution_for(
+        engine: &rspice_core::Engine,
+        err: &rspice_core::SimulationError,
+    ) -> Option<ConvergenceAttribution> {
+        let rendered = err.to_string();
+        let diagnostic = engine.convergence_quality().failure_diagnostic?;
+        diagnostic
+            .describes(&rendered)
+            .then(|| rspice_results::convergence_attribution::from_core(&diagnostic))
+    }
+
     /// The design objects the engine named for this failure, if it named any.
     ///
     /// One reader of the [`Self::Attributed`] payload, so the console anchor
@@ -577,6 +612,32 @@ pub fn ensure_not_aborted(abort: &dyn AbortSignal) -> ServiceRunResult<()> {
         Err(ServiceRunError::Aborted)
     } else {
         Ok(())
+    }
+}
+
+/// Execute an abort-aware service without degrading its typed cancellation
+/// into an invalid-configuration message.
+pub fn run_abort_aware_service<T, F>(abort: &dyn AbortSignal, run: F) -> Result<T, SimulationError>
+where
+    F: FnOnce() -> ServiceRunResult<T>,
+{
+    ensure_not_aborted(abort).map_err(SimulationError::from)?;
+    let result = run();
+    ensure_not_aborted(abort).map_err(SimulationError::from)?;
+    result.map_err(SimulationError::from)
+}
+
+impl From<ServiceRunError> for SimulationError {
+    fn from(error: ServiceRunError) -> Self {
+        match error {
+            ServiceRunError::Aborted => SimulationError::Aborted,
+            ServiceRunError::ResourceLimit(error) => SimulationError::ResourceLimit {
+                resource: error.resource.as_str().to_string(),
+                requested: error.requested,
+                limit: error.limit,
+            },
+            ServiceRunError::Failure(message) => SimulationError::InvalidConfig(message),
+        }
     }
 }
 

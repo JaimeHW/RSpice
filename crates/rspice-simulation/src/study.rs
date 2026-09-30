@@ -2,6 +2,7 @@
 
 mod analysis;
 mod hb;
+pub mod monte_carlo;
 mod periodic;
 mod pss;
 mod qpss;
@@ -15,6 +16,7 @@ pub use spectral::StudyPostprocess;
 
 use crate::error::SimulationError;
 use rspice_app_types::product::{AnalysisInstanceId, ObjectRevision};
+use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::MonteCarloEnvironment;
 use rspice_simulation_contract::config::AnalysisConfig;
 use rspice_simulation_contract::study_measurement::validate_measurements;
@@ -249,4 +251,23 @@ fn validate_qpss_measurements(
         }
     }
     Ok(())
+}
+
+pub fn study_source_at_environment(
+    base: &StudyRunConfig,
+    source: &str,
+    environment: Option<&MonteCarloEnvironment>,
+    abort: &dyn AbortSignal,
+) -> Result<String, SimulationError> {
+    let source = base.execution_source(source)?;
+    match environment {
+        Some(point) => crate::error::run_abort_aware_service(abort, || {
+            crate::netlist_preparation::source_with_run_temperature_with_abort(
+                &source,
+                point.temperature_celsius,
+                abort,
+            )
+        }),
+        None => Ok(source),
+    }
 }

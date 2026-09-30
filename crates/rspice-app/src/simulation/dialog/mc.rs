@@ -2,6 +2,7 @@
 
 #[cfg(test)]
 pub(crate) mod checkpoint;
+#[cfg(test)]
 pub(crate) mod statistics;
 
 pub use rspice_simulation_contract::mc_draft::{McDialogState, McVariationSource};

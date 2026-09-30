@@ -29,7 +29,7 @@ pub(super) fn run_sweep_spec(
         AnalysisSpec::MonteCarlo {
             variation_source, ..
         } => {
-            let augmented = crate::simulation::runner::study::monte_carlo::source_with_statistics(
+            let augmented = rspice_simulation::study::monte_carlo::source_with_statistics(
                 netlist,
                 variation_source,
                 options.mc_statistics.as_ref(),

@@ -22,13 +22,15 @@ use crate::simulation::{config::AnalysisConfig, engine_bridge::EngineBridge};
 use rspice_core::abort_signal::{AbortReason, AbortSignal, ModelRunControl};
 #[cfg(test)]
 use rspice_core::analysis::monte_carlo::Distribution;
+#[cfg(test)]
 use rspice_core::engine::MonteCarloEnvironment;
 #[cfg(test)]
 use rspice_core::engine::MonteCarloStudyConfig;
 use rspice_simulation::error::SimulationError;
 use rspice_simulation::study::{
     StudyAnalysis, StudyHbConfig, StudyOperatingPoint, StudyPostprocess, StudyPssConfig,
-    StudyQpssConfig, StudyRunConfig, resolved_study_environment, validate_base_measurements,
+    StudyQpssConfig, StudyRunConfig, resolved_study_environment, study_source_at_environment,
+    validate_base_measurements,
 };
 #[cfg(test)]
 use rspice_simulation::study::{StudyPeriodicOptions, analysis_for_environment};
@@ -37,8 +39,6 @@ use std::sync::{
     Mutex,
     atomic::{AtomicBool, Ordering},
 };
-
-pub(crate) use rspice_simulation_contract::study_measurement::validate_measurements;
 
 struct StudyAbort<'a> {
     parent: &'a dyn AbortSignal,
@@ -589,25 +589,6 @@ mod tests {
                 }
             }
         }
-    }
-}
-
-fn study_source_at_environment(
-    base: &StudyRunConfig,
-    source: &str,
-    environment: Option<&MonteCarloEnvironment>,
-    abort: &dyn AbortSignal,
-) -> Result<String, SimulationError> {
-    let source = base.execution_source(source)?;
-    match environment {
-        Some(point) => super::spec::run_abort_aware_service(abort, || {
-            rspice_simulation::netlist_preparation::source_with_run_temperature_with_abort(
-                &source,
-                point.temperature_celsius,
-                abort,
-            )
-        }),
-        None => Ok(source),
     }
 }
 

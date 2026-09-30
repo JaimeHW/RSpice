@@ -7,39 +7,8 @@ use super::EngineBridge;
 use rspice_simulation::error::SimulationError;
 
 impl EngineBridge {
-    /// Translate core engine error to UI error.
-    ///
-    /// When the engine could name the circuit objects behind this failure,
-    /// the translation keeps the prose and adds them. The engine records an
-    /// attribution wherever a solve gives up, and a later convergence aid may
-    /// still rescue that solve, so the recorded attribution is used only when
-    /// it says it belongs to the error actually being translated.
     pub(crate) fn translate_error(&self, err: rspice_core::SimulationError) -> SimulationError {
-        let attribution = self.attribution_for(&err);
-        let translated = SimulationError::from(err);
-        match attribution {
-            Some(attribution) => SimulationError::Attributed {
-                message: translated.to_string(),
-                attribution,
-            },
-            None => translated,
-        }
-    }
-
-    /// The engine's attribution for `err`, if it recorded one for this error.
-    ///
-    /// The analyses run against engines resolved from `self.engine`, which
-    /// share its metrics, so the bridge's own engine is where the record
-    /// lands whichever entry point produced the failure.
-    fn attribution_for(
-        &self,
-        err: &rspice_core::SimulationError,
-    ) -> Option<crate::state::ConvergenceAttribution> {
-        let rendered = err.to_string();
-        let diagnostic = self.engine.convergence_quality().failure_diagnostic?;
-        diagnostic
-            .describes(&rendered)
-            .then(|| rspice_results::convergence_attribution::from_core(&diagnostic))
+        SimulationError::from_engine(&self.engine, err)
     }
 }
 

@@ -282,32 +282,7 @@ pub(super) fn ensure_not_aborted(abort: &dyn AbortSignal) -> Result<(), Simulati
     }
 }
 
-/// Execute an abort-aware service without degrading its typed cancellation
-/// into an invalid-configuration message.
-pub(super) fn run_abort_aware_service<T, F>(
-    abort: &dyn AbortSignal,
-    run: F,
-) -> Result<T, SimulationError>
-where
-    F: FnOnce() -> svc_runner::ServiceRunResult<T>,
-{
-    ensure_not_aborted(abort)?;
-    let result = run();
-    ensure_not_aborted(abort)?;
-    result.map_err(translate_service_run_error)
-}
-
-fn translate_service_run_error(error: svc_runner::ServiceRunError) -> SimulationError {
-    match error {
-        svc_runner::ServiceRunError::Aborted => SimulationError::Aborted,
-        svc_runner::ServiceRunError::ResourceLimit(error) => SimulationError::ResourceLimit {
-            resource: error.resource.as_str().to_string(),
-            requested: error.requested,
-            limit: error.limit,
-        },
-        svc_runner::ServiceRunError::Failure(message) => SimulationError::InvalidConfig(message),
-    }
-}
+pub(super) use rspice_simulation::error::run_abort_aware_service;
 
 fn config_backed_spec_routing_error(spec: &AnalysisSpec) -> SimulationError {
     SimulationError::InvalidConfig(format!(

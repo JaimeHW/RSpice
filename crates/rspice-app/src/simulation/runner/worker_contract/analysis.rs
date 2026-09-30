@@ -55,7 +55,7 @@ pub(crate) struct WorkerSpecExecutionOptions {
     #[serde(default)]
     pub mc_histogram_bins: Option<usize>,
     #[serde(default)]
-    pub mc_statistics: Option<crate::simulation::dialog::mc::statistics::McStatisticsConfig>,
+    pub mc_statistics: Option<rspice_simulation_contract::mc_statistics::McStatisticsConfig>,
     pub temp: Option<WorkerTempRunConfig>,
     pub parametric_base: Option<WorkerCornerBaseMode>,
     pub corner: Option<WorkerCornerRunConfig>,

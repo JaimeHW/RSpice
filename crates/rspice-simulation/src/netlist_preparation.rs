@@ -1,10 +1,10 @@
 //! Netlist preparation for exact source composition and process/supply corners.
 
-use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 #[cfg(test)]
 use rspice_core::abort_signal::NoAbort;
 use rspice_core::netlist::{ElementKind, SourceSpec};
+use rspice_core::{SimulationConfig, SimulationConfigOverrides, Value, resolve_simulation_config};
 
 use crate::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use crate::sweeps::CornerRunConfig;
@@ -24,7 +24,8 @@ pub use external_sources::{
 
 mod parsing;
 pub use parsing::{
-    parse_runner_netlist_with_abort, parse_runner_netlist_with_options_and_abort,
+    parse_analysis_netlist_with_abort, parse_runner_netlist_with_abort,
+    parse_runner_netlist_with_options_and_abort,
     parse_runner_netlist_with_resource_limits_and_abort, validated_executable_hierarchy,
 };
 
@@ -370,6 +371,20 @@ pub fn append_project_veriloga_directive(
         return;
     }
     *source = splice_before_terminal_end_card(source, &directive);
+}
+
+pub fn build_engine_config(
+    netlist: &rspice_core::Netlist,
+    options: Option<&rspice_simulation_contract::options::SimulationOptions>,
+) -> SimulationConfig {
+    match options {
+        Some(opts) => opts.resolve_simulation_config(Some(&netlist.options)),
+        None => resolve_simulation_config(
+            &SimulationConfig::default(),
+            Some(&netlist.options),
+            &SimulationConfigOverrides::default(),
+        ),
+    }
 }
 
 #[cfg(test)]
