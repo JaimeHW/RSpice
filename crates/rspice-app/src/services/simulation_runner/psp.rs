@@ -15,11 +15,11 @@ use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::s_param;
 
-use rspice_simulation::error::{ensure_not_aborted, poll_periodically};
 use super::{
     SParameterPort, ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
     parse_runner_netlist_with_abort,
 };
+use rspice_simulation::error::{ensure_not_aborted, poll_periodically};
 
 /// Sweep type for periodic S-parameter analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -989,9 +989,10 @@ mod tests {
         request.stop_freq = 1e4;
         request.points_per_unit = 2;
         let data = hbsp_fixture_request(deck, &request).unwrap();
-        assert_eq!(data.frequencies.len(), 2);
+        assert_eq!(data.frequencies.len(), 3);
         assert_eq!(data.frequencies[0], 1e3);
-        assert_eq!(data.frequencies[1], 1e4);
+        assert!((data.frequencies[1] / (1e3 * 10.0_f64.sqrt()) - 1.0).abs() < 1e-14);
+        assert_eq!(data.frequencies[2], 1e4);
         assert_eq!(data.reference_impedances_ohm, Some(vec![75.0]));
         assert_eq!(data.paths.len(), 1);
         assert_eq!(data.paths[0].base_name, "S11");
