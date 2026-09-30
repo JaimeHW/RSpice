@@ -8,6 +8,7 @@ use crate::veriloga::{PreparedRuntimeError, PreparedVerilogARuntime, PreparedVer
 
 pub mod build_profile;
 pub mod diagnostics;
+pub mod preparation;
 pub mod receipt;
 pub mod worker;
 

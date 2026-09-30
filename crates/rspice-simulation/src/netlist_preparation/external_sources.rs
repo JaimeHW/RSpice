@@ -4,9 +4,11 @@
 //! that would read a file, a library or a co-simulation runtime at solve time.
 //! The judgment is lexical and owns no state.
 
+use crate::preparation::{PreparationError, PreparationStage};
+use crate::project_veriloga::preparation::project_veriloga_directive_matches_exact_identity;
 use rspice_core::netlist::{parse_include_directive, parse_lib_directive};
 
-pub(super) fn deferred_external_source_reason(line: &str) -> Option<&'static str> {
+pub fn deferred_external_source_reason(line: &str) -> Option<&'static str> {
     let line = executable_source_portion(line);
     if line.is_empty() {
         return None;
@@ -77,7 +79,7 @@ pub(super) fn deferred_external_source_reason(line: &str) -> Option<&'static str
     None
 }
 
-pub(super) fn executable_source_portion(line: &str) -> &str {
+fn executable_source_portion(line: &str) -> &str {
     rspice_core::netlist::strip_spice_inline_comment(
         line,
         rspice_core::config::ExpressionDialect::Ngspice,
@@ -98,3 +100,78 @@ fn contains_parameter_assignment(line: &str, parameter: &str) -> bool {
                 .starts_with('=')
     })
 }
+
+pub fn reject_deferred_external_sources_with_project_runtimes(
+    netlist: &str,
+    project_runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
+    measurement_references: &crate::measurement_references::PreparedMeasurementReferences,
+) -> Result<(), PreparationError> {
+    measurement_references
+        .validate_source(netlist)
+        .map_err(|error| {
+            PreparationError::new(
+                PreparationStage::SourceChecks,
+                format!("Executable netlist contains an unsealed external dependency: {error}"),
+            )
+        })?;
+    for (line_number, logical_line) in executable_logical_lines(netlist) {
+        if project_runtimes.sources().any(|runtime| {
+            project_veriloga_directive_matches_exact_identity(
+                &logical_line,
+                runtime.source_key(),
+                runtime.netlist_alias(),
+            )
+        }) {
+            continue;
+        }
+        if let Some(reason) = deferred_external_source_reason(&logical_line) {
+            if reason == "file-backed measurement reference" {
+                continue;
+            }
+            return Err(PreparationError::new(
+                PreparationStage::SourceChecks,
+                format!(
+                    "Executable netlist contains an unsealed external dependency ({reason}) at line {}: {}",
+                    line_number, logical_line
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Fold physical SPICE continuation records exactly as the core parser does
+/// for executable lines: comment removal and trimming happen per physical
+/// line, then a leading `+` appends to the preceding logical record. Auditing
+/// the folded form prevents an external path or parameter name from being
+/// split across continuation boundaries after authorization.
+pub fn executable_logical_lines(source: &str) -> Vec<(usize, String)> {
+    let mut logical_lines = Vec::new();
+    let mut pending: Option<(usize, String)> = None;
+
+    for (index, physical_line) in source.lines().enumerate() {
+        let trimmed = executable_source_portion(physical_line).trim();
+        if trimmed.is_empty() || trimmed.starts_with('*') {
+            continue;
+        }
+
+        if let Some(rest) = trimmed.strip_prefix('+') {
+            let (_, logical) = pending.get_or_insert_with(|| (index + 1, String::new()));
+            logical.push(' ');
+            logical.push_str(rest);
+            continue;
+        }
+
+        if let Some(previous) = pending.replace((index + 1, trimmed.to_owned())) {
+            logical_lines.push(previous);
+        }
+    }
+
+    if let Some(previous) = pending {
+        logical_lines.push(previous);
+    }
+    logical_lines
+}
+
+#[cfg(test)]
+mod tests;

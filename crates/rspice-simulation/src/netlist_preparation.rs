@@ -9,6 +9,12 @@ use rspice_core::netlist::{ElementKind, SourceSpec};
 use crate::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use crate::sweeps::CornerRunConfig;
 
+mod external_sources;
+pub use external_sources::{
+    deferred_external_source_reason, executable_logical_lines,
+    reject_deferred_external_sources_with_project_runtimes,
+};
+
 mod parsing;
 pub use parsing::{
     parse_runner_netlist_with_abort, parse_runner_netlist_with_options_and_abort,

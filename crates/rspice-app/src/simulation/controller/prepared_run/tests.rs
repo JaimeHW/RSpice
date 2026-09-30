@@ -1206,40 +1206,6 @@ fn prepared_waveforms_distinguish_inline_names_from_file_inputs() {
 }
 
 #[test]
-fn every_runtime_external_input_category_fails_closed() {
-    let cases = [
-        ".include model.lib",
-        ".lib model.lib TT",
-        ".spef_include parasitics.spef",
-        ".VERILOGA compact_model.va",
-        ".VA compact_model.va",
-        ".ahdl_include compact_model.va",
-        ".hdl compact_model.va",
-        ".verilog compact_model.va",
-        ".load prior.raw",
-        "Vstim in 0 PWL FILE \"wave.csv\"",
-        ".measure tran fit ERROR V(out) FILE reference.prn DEPVARCOL 2",
-        ".model touchstone transfer (file = \"network.s2p\")",
-        ".model source d_source (input_file = \"stimulus.txt\")",
-        ".model state d_state (state_file = \"state.tbl\")",
-        ".model process d_process (process_file = worker)",
-        ".model cosim d_cosim (simulation = \"payload.dll\")",
-        "Aco [in] [out] null cosim simulation = provider",
-    ];
-
-    for line in cases {
-        let Err(error) = reject_deferred_external_sources(&format!("deck\n{line}\n.end\n")) else {
-            panic!("unsealed runtime input must be rejected: {line}");
-        };
-        assert_eq!(error.stage(), PreparationStage::SourceChecks, "{line}");
-        assert!(
-            error.message().contains("unsealed external dependency"),
-            "{line}"
-        );
-    }
-}
-
-#[test]
 fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
     let mut state = AppState::default();
     state
@@ -1281,8 +1247,19 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
     .expect("derive exact project source key");
     let exact_directive =
         rspice_simulation::netlist_preparation::project_veriloga_directive(&source_key, "owned");
-    let exact_runtimes = project_veriloga_runtimes_referenced_by(&state, &exact_directive)
-        .expect("inspect exact project directive");
+    let exact_runtimes = project_veriloga_runtimes_referenced_by(
+        state.workspace.content.project.id(),
+        &state.workspace.content.project_sources,
+        state
+            .ui
+            .code_workspace
+            .veriloga
+            .receipt
+            .as_ref()
+            .map(|receipt| &receipt.compilation),
+        &exact_directive,
+    )
+    .expect("inspect exact project directive");
     assert_eq!(exact_runtimes.len(), 1);
     reject_deferred_external_sources_with_project_runtimes(
         &exact_directive,
@@ -1294,8 +1271,19 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
     let altered_key = source_key.replacen("__rspice_project__", "__RSPICE_PROJECT__", 1);
     let altered_directive =
         rspice_simulation::netlist_preparation::project_veriloga_directive(&altered_key, "owned");
-    let altered_runtimes = project_veriloga_runtimes_referenced_by(&state, &altered_directive)
-        .expect("inspect altered project directive");
+    let altered_runtimes = project_veriloga_runtimes_referenced_by(
+        state.workspace.content.project.id(),
+        &state.workspace.content.project_sources,
+        state
+            .ui
+            .code_workspace
+            .veriloga
+            .receipt
+            .as_ref()
+            .map(|receipt| &receipt.compilation),
+        &altered_directive,
+    )
+    .expect("inspect altered project directive");
     assert!(
         altered_runtimes.is_empty(),
         "case-altered virtual paths must not acquire the exact project runtime"
@@ -1308,21 +1296,6 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
     .expect_err("case-altered project key must remain an external dependency");
     assert_eq!(error.stage(), PreparationStage::SourceChecks);
     assert!(error.message().contains("unsealed external dependency"));
-}
-
-#[test]
-fn project_veriloga_path_is_exact_while_spice_identifiers_ignore_case() {
-    let source_key = "__rspice_project__/project/digest/Model.va";
-    assert!(project_veriloga_directive_matches_exact_identity(
-        ".VERILOGA \"__rspice_project__/project/digest/Model.va\" OWNED",
-        source_key,
-        "owned",
-    ));
-    assert!(!project_veriloga_directive_matches_exact_identity(
-        ".VERILOGA \"__rspice_project__/project/digest/model.va\" OWNED",
-        source_key,
-        "owned",
-    ));
 }
 
 #[test]
@@ -1398,8 +1371,12 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
             &state.schematic,
         )
         .expect("resolve configured behavioral view");
-    let runtimes = prepared_configuration_veriloga_runtimes(&state, &projection)
-        .expect("compile exact configured source closure");
+    let runtimes = prepared_configuration_veriloga_runtimes(
+        state.workspace.content.project.id(),
+        &state.workspace.content.project_sources,
+        &projection,
+    )
+    .expect("compile exact configured source closure");
 
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
         state.library_manager.catalog(),
@@ -1439,35 +1416,6 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
         .unwrap()
         .install()
         .expect("sealed configured runtime installs in the session cache");
-}
-
-#[test]
-fn continuation_folding_cannot_hide_external_dependencies() {
-    for source in [
-        "deck\nBlookup out 0 V=table\n+ (\"C:/curves/transfer.tbl\")\n.end\n",
-        "deck\nVstim in 0 PWL(\n+ FILE = \"C:/stimulus/wave.csv\"\n+ )\n.end\n",
-        "deck\n.model cosim d_cosim (simulation\n* comment between continued records\n+ = \"C:/plugins/payload.dll\")\n.end\n",
-        "deck\n.model source d_source (input_file\n+ = 'C:/stimulus/input.txt')\n.end\n",
-    ] {
-        let error = reject_deferred_external_sources(source)
-            .expect_err("continued external dependency must fail closed");
-        assert_eq!(error.stage(), PreparationStage::SourceChecks, "{source}");
-        assert!(
-            error.message().contains("unsealed external dependency"),
-            "{source}: {error}"
-        );
-    }
-}
-
-#[test]
-fn benign_continuations_remain_accepted() {
-    for source in [
-        "deck\nBinline out 0 V=table(\n+ V(in), 0, 0, 1, 1)\n.end\n",
-        "deck\n.model diode D(\n+ IS=1e-12\n+ N=1.1)\n.end\n",
-    ] {
-        reject_deferred_external_sources(source)
-            .unwrap_or_else(|error| panic!("benign continuation was rejected: {source}: {error}"));
-    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1662,66 +1610,6 @@ fn unpolled_completion_reentry_does_not_consume_or_replace_authorization() {
         Some(prepared_digest)
     );
     assert!(!controller.runner.can_accept_prepared_task());
-}
-
-#[test]
-fn every_behavioral_file_lookup_alias_fails_closed() {
-    let functions = [
-        "table",
-        "tablefile",
-        "fasttable",
-        "fasttablefile",
-        "cubic",
-        "cubicfile",
-        "akima",
-        "akimafile",
-        "spline",
-        "splinefile",
-        "wodicka",
-        "wodickafile",
-        "bli",
-        "blifile",
-        "barycentric",
-        "barycentricfile",
-    ];
-
-    for function in functions {
-        let line = format!("Blookup out 0 V={function}(\"curve.dat\")");
-        assert_eq!(
-            deferred_external_source_reason(&line),
-            Some("file-backed behavioral lookup"),
-            "{function}"
-        );
-    }
-}
-
-#[test]
-fn external_input_audit_ignores_comments_and_inline_data() {
-    for line in [
-        "* .include ignored.lib",
-        "// .VERILOGA ignored.va",
-        "R1 out 0 1k $ file=ignored.tbl",
-        "R2 out 0 2k ; file=ignored.tbl",
-        "R3 out 0 3k // file=ignored.tbl",
-        ".data sweep_values",
-        "+ 0 1 2 3",
-        ".enddata",
-        "Binline out 0 V=table(V(in), 0, 0, 1, 1)",
-        ".param profile=1",
-    ] {
-        assert_eq!(deferred_external_source_reason(line), None, "{line}");
-    }
-
-    for line in [
-        "Aco $G_DPWR [in] [out] null cosim simulation=provider",
-        ".model source d_source (input_file='stimulus;production.txt')",
-        ".model source d_source (input_file=\"stimulus\\\"production.txt\")",
-    ] {
-        assert!(
-            deferred_external_source_reason(line).is_some(),
-            "executable dependency must survive comment scanning: {line}"
-        );
-    }
 }
 
 #[test]

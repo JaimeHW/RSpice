@@ -37,20 +37,25 @@ use rspice_simulation::sealed_source::{
     generated_executable_source_digest, manual_executable_source_digest,
 };
 
-mod deferred_sources;
 mod dependency_expansion;
 mod measurements;
 mod model_sources;
 pub(crate) mod occurrence_outputs;
 mod periodic_sources;
 
-use deferred_sources::{deferred_external_source_reason, executable_source_portion};
 use dependency_expansion::expand_manual_dependencies;
 use model_sources::validate_projected_model_binding_authority;
 use occurrence_outputs::{effective_plan_capture, projection_occurrence_nets};
 use periodic_sources::validate_prepared_periodic_sources;
 use rspice_simulation::model_sources::prepared_project_model_sources;
-use rspice_simulation::netlist_preparation::validated_executable_hierarchy;
+use rspice_simulation::netlist_preparation::{
+    deferred_external_source_reason, executable_logical_lines,
+    reject_deferred_external_sources_with_project_runtimes, validated_executable_hierarchy,
+};
+use rspice_simulation::project_veriloga::preparation::{
+    prepared_configuration_veriloga_runtimes, prepared_model_library_veriloga_runtimes,
+    prepared_signed_pdk_veriloga_runtimes, project_veriloga_runtimes_referenced_by,
+};
 
 /// Let the deck find the data files its sources name.
 ///
@@ -940,8 +945,11 @@ impl SimulationController {
             .iter()
             .map(crate::simulation::plan::FrozenAnalysisInstance::id)
             .collect::<Vec<_>>();
-        let project_veriloga_runtimes =
-            prepared_configuration_veriloga_runtimes(state, &execution_projection)?;
+        let project_veriloga_runtimes = prepared_configuration_veriloga_runtimes(
+            state.workspace.content.project.id(),
+            &state.workspace.content.project_sources,
+            &execution_projection,
+        )?;
         let external_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?
             .try_merge(prepared_model_library_veriloga_runtimes(&sealed_models)?)
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
@@ -1226,9 +1234,20 @@ impl SimulationController {
         reject_unresolved_device_models(&expanded, has_project_technology)?;
         let project_model_sources =
             prepared_project_model_sources(state.model_library_manager.catalog(), &expanded)?;
-        let project_veriloga_runtimes = project_veriloga_runtimes_referenced_by(state, &expanded)?
-            .try_merge(external_veriloga_runtimes)
-            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+        let project_veriloga_runtimes = project_veriloga_runtimes_referenced_by(
+            state.workspace.content.project.id(),
+            &state.workspace.content.project_sources,
+            state
+                .ui
+                .code_workspace
+                .veriloga
+                .receipt
+                .as_ref()
+                .map(|receipt| &receipt.compilation),
+            &expanded,
+        )?
+        .try_merge(external_veriloga_runtimes)
+        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         let definitions = state
             .sim_setup
             .analysis_plan
@@ -1648,306 +1667,6 @@ fn reject_unresolved_device_models(
     ))
 }
 
-fn prepared_configuration_veriloga_runtimes(
-    state: &AppState,
-    projection: &crate::state::workspace::ConfigurationExecutionProjection,
-) -> Result<rspice_simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
-    let mut prepared =
-        HashMap::<String, rspice_simulation::veriloga::PreparedVerilogARuntime>::new();
-    for execution in projection.plan().bindings() {
-        let Some(binding) = execution.project_veriloga() else {
-            continue;
-        };
-        let bundle = state
-            .workspace
-            .content
-            .project_sources
-            .get_bundle(binding.source_bundle_id())
-            .ok_or_else(|| {
-                PreparationError::new(
-                    PreparationStage::ModelBindings,
-                    format!(
-                        "Configured Verilog-A source bundle {} at {} no longer exists",
-                        binding.source_bundle_id(),
-                        execution.instance_path()
-                    ),
-                )
-            })?;
-        if bundle.closure_digest() != binding.source_closure_digest() {
-            return Err(PreparationError::new(
-                PreparationStage::ModelBindings,
-                format!(
-                    "Configured Verilog-A source bundle {} changed after hierarchy resolution",
-                    binding.source_bundle_id()
-                ),
-            ));
-        }
-        let runtime = rspice_simulation::project_veriloga::compile_project_source_bundle_runtime(
-            state.workspace.content.project.id(),
-            bundle,
-            binding.selected_module(),
-        )
-        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-        if runtime.source_key() != binding.source_key()
-            || !runtime
-                .netlist_alias()
-                .eq_ignore_ascii_case(binding.netlist_alias())
-        {
-            return Err(PreparationError::new(
-                PreparationStage::ModelBindings,
-                format!(
-                    "Configured Verilog-A binding at {} changed while compiling its sealed source",
-                    execution.instance_path()
-                ),
-            ));
-        }
-        let materialized = execution.materialized_binding().ok_or_else(|| {
-            PreparationError::new(
-                PreparationStage::ModelBindings,
-                format!(
-                    "Configured Verilog-A binding at {} has no materialized interface",
-                    execution.instance_path()
-                ),
-            )
-        })?;
-        let compiled_terminals = runtime
-            .terminal_names()
-            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-        if compiled_terminals.len() != materialized.terminal_order.len()
-            || !compiled_terminals
-                .iter()
-                .zip(&materialized.terminal_order)
-                .all(|(compiled, declared)| compiled.eq_ignore_ascii_case(declared))
-        {
-            return Err(PreparationError::new(
-                PreparationStage::ModelBindings,
-                format!(
-                    "Compiled Verilog-A module '{}' at {} does not match the exact declared terminal order [{}]",
-                    binding.selected_module(),
-                    execution.instance_path(),
-                    materialized.terminal_order.join(", ")
-                ),
-            ));
-        }
-        if let Some(existing) = prepared.get(runtime.source_key()) {
-            if existing != &runtime {
-                return Err(PreparationError::new(
-                    PreparationStage::ModelBindings,
-                    format!(
-                        "Configured Verilog-A source key '{}' resolves to conflicting artifacts",
-                        runtime.source_key()
-                    ),
-                ));
-            }
-        } else {
-            prepared.insert(runtime.source_key().to_owned(), runtime);
-        }
-    }
-    rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(
-        prepared.into_values().collect(),
-    )
-    .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
-}
-
-fn prepared_project_veriloga_runtimes(
-    state: &AppState,
-) -> Result<rspice_simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
-    let Some(bundle) = state.workspace.content.project_sources.bundle_for_owner(
-        &crate::state::ProjectSourceOwner::code_workspace(
-            crate::state::ProjectSourceLanguage::VerilogA,
-        ),
-    ) else {
-        return Ok(Default::default());
-    };
-    let document = bundle.root();
-    let retained = state.ui.code_workspace.veriloga.receipt.as_ref();
-    if let Some(receipt) = retained
-        && receipt.compilation.token().project_id == state.workspace.content.project.id()
-        && receipt.compilation.token().bundle_id == bundle.id()
-        && receipt.compilation.token().revision == bundle.revision().get()
-        && receipt.compilation.token().closure_digest == bundle.closure_digest()
-    {
-        let runtime = receipt
-            .compilation
-            .prepare_runtime(state.workspace.content.project.id(), bundle)
-            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-        return rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
-            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error));
-    }
-    if !document.validation_is_current() {
-        return Err(PreparationError::new(
-            PreparationStage::ModelBindings,
-            format!(
-                "Compile the exact current project Verilog-A source '{}' before preparing execution",
-                document.file_name()
-            ),
-        ));
-    }
-    // Persisted validation authenticates only the exact source bytes. Rebuild
-    // transient executable artifacts rather than trusting serialized code or
-    // requiring a redundant manual compile after project/session restore.
-    let (receipt, _) =
-        rspice_simulation::project_veriloga::receipt::compile_project_bundle_receipt(
-            state.workspace.content.project.id(),
-            bundle,
-            None,
-        )
-        .map_err(|diagnostics| {
-            let detail = diagnostics
-                .first()
-                .map(|diagnostic| format!("{}: {}", diagnostic.message, diagnostic.detail))
-                .unwrap_or_else(|| "the compiler returned no diagnostic".to_owned());
-            PreparationError::new(
-                PreparationStage::ModelBindings,
-                format!(
-                    "Could not rebuild validated Verilog-A source '{}': {detail}",
-                    document.file_name()
-                ),
-            )
-        })?;
-    let runtime = receipt
-        .prepare_runtime(state.workspace.content.project.id(), bundle)
-        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-    rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
-        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
-}
-
-fn prepared_signed_pdk_veriloga_runtimes(
-    sealed_models: &crate::state::model_library::SealedModelExecutionSources,
-) -> Result<rspice_simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
-    let Some((package, archive_digest, artifacts, bindings)) =
-        sealed_models.pdk_veriloga_authority()
-    else {
-        return Ok(Default::default());
-    };
-    let runtimes = bindings
-        .iter()
-        .map(|binding| {
-            rspice_simulation::veriloga::compile_signed_pdk_source_runtime(
-                package,
-                archive_digest,
-                artifacts,
-                binding,
-            )
-            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(runtimes)
-        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
-}
-
-fn prepared_model_library_veriloga_runtimes(
-    sealed_models: &crate::state::model_library::SealedModelExecutionSources,
-) -> Result<rspice_simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
-    let Some(authority) = sealed_models
-        .model_library_veriloga_authority()
-        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?
-    else {
-        return Ok(Default::default());
-    };
-    rspice_simulation::project_veriloga::compile_model_library_source_runtimes(&authority)
-        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
-}
-
-fn project_veriloga_runtimes_referenced_by(
-    state: &AppState,
-    source: &str,
-) -> Result<rspice_simulation::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
-    let Some(bundle) = state.workspace.content.project_sources.bundle_for_owner(
-        &crate::state::ProjectSourceOwner::code_workspace(
-            crate::state::ProjectSourceLanguage::VerilogA,
-        ),
-    ) else {
-        return Ok(Default::default());
-    };
-    let key_prefix = format!(
-        "__rspice_project__/{}/{}/{}/",
-        state.workspace.content.project.id(),
-        bundle.id(),
-        bundle.closure_digest()
-    );
-    let key_suffix = format!("/{}", bundle.root().logical_path());
-    let references_project_key = executable_logical_lines(source)
-        .iter()
-        .filter_map(|(_, line)| parse_veriloga_directive_identity(line))
-        .any(|(path, _)| path.starts_with(&key_prefix) && path.ends_with(&key_suffix));
-    if !references_project_key {
-        return Ok(Default::default());
-    }
-    let runtimes = prepared_project_veriloga_runtimes(state)?;
-    let exact_reference = runtimes.sources().any(|runtime| {
-        executable_logical_lines(source).iter().any(|(_, line)| {
-            project_veriloga_directive_matches_exact_identity(
-                line,
-                runtime.source_key(),
-                runtime.netlist_alias(),
-            )
-        })
-    });
-    if !exact_reference {
-        return Ok(Default::default());
-    }
-    Ok(runtimes)
-}
-
-/// Parse the identity-bearing fields from the one project Verilog-A directive
-/// shape emitted by RSpice. SPICE command and model identifiers are
-/// case-insensitive, but the project virtual path is an authenticated key and
-/// must remain byte-for-byte exact.
-fn parse_veriloga_directive_identity(line: &str) -> Option<(&str, Option<&str>)> {
-    let (command, remainder) = take_spice_token(line)?;
-    if !command.eq_ignore_ascii_case(".veriloga") {
-        return None;
-    }
-    let (path, remainder) = take_spice_token(remainder)?;
-    let remainder = remainder.trim();
-    if remainder.is_empty() {
-        return Some((path, None));
-    }
-    let (model_name, trailing) = take_spice_token(remainder)?;
-    trailing
-        .trim()
-        .is_empty()
-        .then_some((path, Some(model_name)))
-}
-
-fn take_spice_token(input: &str) -> Option<(&str, &str)> {
-    let input = input.trim_start();
-    let first = input.chars().next()?;
-    if matches!(first, '\'' | '"') {
-        let quoted = &input[first.len_utf8()..];
-        let mut escaped = false;
-        for (index, character) in quoted.char_indices() {
-            if escaped {
-                escaped = false;
-                continue;
-            }
-            if character == '\\' {
-                escaped = true;
-                continue;
-            }
-            if character == first {
-                return Some((&quoted[..index], &quoted[index + character.len_utf8()..]));
-            }
-        }
-        return None;
-    }
-
-    let end = input.find(char::is_whitespace).unwrap_or(input.len());
-    (end > 0).then_some((&input[..end], &input[end..]))
-}
-
-fn project_veriloga_directive_matches_exact_identity(
-    line: &str,
-    source_key: &str,
-    module_name: &str,
-) -> bool {
-    parse_veriloga_directive_identity(line).is_some_and(|(path, model_name)| {
-        path == source_key
-            && model_name.is_some_and(|model| model.eq_ignore_ascii_case(module_name))
-    })
-}
-
 fn attach_saved_output_contracts(
     tasks: Vec<PreparedTask>,
     outputs: &[crate::state::SavedOutput],
@@ -2172,78 +1891,6 @@ fn reject_deferred_external_sources(netlist: &str) -> Result<(), PreparationErro
         &Default::default(),
     )?;
     validated_executable_hierarchy(netlist).map(|_| ())
-}
-
-fn reject_deferred_external_sources_with_project_runtimes(
-    netlist: &str,
-    project_runtimes: &rspice_simulation::veriloga::PreparedVerilogARuntimeSet,
-    measurement_references: &rspice_simulation::measurement_references::PreparedMeasurementReferences,
-) -> Result<(), PreparationError> {
-    measurement_references
-        .validate_source(netlist)
-        .map_err(|error| {
-            PreparationError::new(
-                PreparationStage::SourceChecks,
-                format!("Executable netlist contains an unsealed external dependency: {error}"),
-            )
-        })?;
-    for (line_number, logical_line) in executable_logical_lines(netlist) {
-        if project_runtimes.sources().any(|runtime| {
-            project_veriloga_directive_matches_exact_identity(
-                &logical_line,
-                runtime.source_key(),
-                runtime.netlist_alias(),
-            )
-        }) {
-            continue;
-        }
-        if let Some(reason) = deferred_external_source_reason(&logical_line) {
-            if reason == "file-backed measurement reference" {
-                continue;
-            }
-            return Err(PreparationError::new(
-                PreparationStage::SourceChecks,
-                format!(
-                    "Executable netlist contains an unsealed external dependency ({reason}) at line {}: {}",
-                    line_number, logical_line
-                ),
-            ));
-        }
-    }
-    Ok(())
-}
-
-/// Fold physical SPICE continuation records exactly as the core parser does
-/// for executable lines: comment removal and trimming happen per physical
-/// line, then a leading `+` appends to the preceding logical record. Auditing
-/// the folded form prevents an external path or parameter name from being
-/// split across continuation boundaries after authorization.
-fn executable_logical_lines(source: &str) -> Vec<(usize, String)> {
-    let mut logical_lines = Vec::new();
-    let mut pending: Option<(usize, String)> = None;
-
-    for (index, physical_line) in source.lines().enumerate() {
-        let trimmed = executable_source_portion(physical_line).trim();
-        if trimmed.is_empty() || trimmed.starts_with('*') {
-            continue;
-        }
-
-        if let Some(rest) = trimmed.strip_prefix('+') {
-            let (_, logical) = pending.get_or_insert_with(|| (index + 1, String::new()));
-            logical.push(' ');
-            logical.push_str(rest);
-            continue;
-        }
-
-        if let Some(previous) = pending.replace((index + 1, trimmed.to_owned())) {
-            logical_lines.push(previous);
-        }
-    }
-
-    if let Some(previous) = pending {
-        logical_lines.push(previous);
-    }
-    logical_lines
 }
 
 fn reject_deferred_corner_model_sources<'a>(
