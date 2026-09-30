@@ -985,7 +985,9 @@ pub(super) fn verify_pinned_model_sources(
     binding
         .validate()
         .map_err(|error| format!("Technology contract is invalid: {error}"))?;
-    manager.validate_attached_technology(Some(binding))?;
+    manager
+        .catalog()
+        .validate_attached_technology(Some(binding))?;
     #[cfg(not(target_arch = "wasm32"))]
     for source in binding.source_closure() {
         let observed = ModelLibraryManager::calculate_source_digest(&source.path)?;

@@ -107,4 +107,6 @@ pub fn check_generated_design(
 
 mod periodic_sources;
 pub use periodic_sources::validate_prepared_periodic_sources;
+mod technology;
 pub mod touchstone;
+pub use technology::{TechnologyDemand, TechnologyDemandReason, technology_demand};

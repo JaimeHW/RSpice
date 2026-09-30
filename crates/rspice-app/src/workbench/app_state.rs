@@ -24,7 +24,8 @@ pub(in crate::workbench) mod session;
 pub(in crate::workbench) mod sim_setup;
 #[cfg(test)]
 mod stack_budget;
-pub(crate) mod technology_demand;
+#[cfg(test)]
+mod technology_demand_tests;
 pub(in crate::workbench) mod viewer_capabilities;
 
 use crate::diagnostics::{ConsoleLevel, ConsoleMessage};
@@ -334,120 +335,17 @@ impl AppState {
     /// execution catalogs. No simulation or governed save may infer authority
     /// from a display label, an active registry package, or model paths alone.
     pub(crate) fn validate_project_technology_contract(&self) -> Result<(), String> {
-        self.workspace
-            .content
-            .project
-            .validate()
-            .map_err(|error| format!("Project technology metadata is invalid: {error}"))?;
         let binding = self
             .workspace
             .content
             .project
-            .technology_binding()
-            .ok_or_else(|| {
-                "Project has no exact authenticated model-source and signed PDK binding".to_owned()
-            })?;
-        if self
-            .workspace
-            .content
-            .project
-            .technology_change_audit()
-            .is_empty()
-        {
-            return Err(
-                "Project technology binding predates checkpoint-backed authority receipts; reattach it before governed saving or simulation"
-                    .to_owned(),
-            );
-        }
-        self.model_library_manager
-            .validate_attached_technology(Some(binding))?;
-        self.pdk_config
-            .technology_registry
-            .validate_project_binding(binding)
-            .map_err(|error| format!("Signed PDK project binding is unavailable: {error}"))?;
-        let signed_pin = binding
-            .signed_package()
-            .expect("validated project technology has an exact signed package");
-        let package = self
-            .pdk_config
-            .technology_registry
-            .validated_packages()
-            .iter()
-            .find(|package| {
-                let manifest = package.manifest();
-                manifest
-                    .package_id
-                    .eq_ignore_ascii_case(signed_pin.package_id())
-                    && manifest.revision == signed_pin.revision()
-                    && package.manifest_digest() == signed_pin.manifest_digest()
-                    && package.archive_digest() == signed_pin.archive_digest()
-            })
-            .expect("validated signed project pin resolves to an exact package");
-        let manifest = package.manifest();
-        let database_unit =
-            crate::quantity::LayoutDatabaseUnit::from_metres(manifest.database_unit_meters)
-                .map_err(|error| format!("Signed project PDK database unit is invalid: {error}"))?;
-        let expected_layout_technology = crate::state::LayoutTechnologyBinding::try_new(
-            manifest.package_id.clone(),
-            manifest.revision.clone(),
-            package.manifest_digest(),
-            package.archive_digest(),
-            manifest.technology_name.clone(),
-            manifest.stack_name.clone(),
-            database_unit,
+            .validated_technology_binding()?;
+        rspice_simulation::pdk::validate_project_technology_inputs(
+            binding,
+            self.model_library_manager.catalog(),
+            self.pdk_config.technology_registry.validated_packages(),
+            self.workspace.content.physical_layout_documents(),
         )
-        .map_err(|error| format!("Signed project PDK layout authority is invalid: {error}"))?;
-        let allowed_layer_purposes = manifest
-            .layers
-            .iter()
-            .flat_map(|layer| {
-                layer.purposes.iter().map(move |purpose| {
-                    (
-                        layer.name.to_ascii_lowercase(),
-                        purpose.to_ascii_lowercase(),
-                    )
-                })
-            })
-            .collect::<std::collections::BTreeSet<_>>();
-        for (key, document) in self.workspace.content.physical_layout_documents() {
-            document
-                .validate()
-                .map_err(|error| format!("Physical layout '{key}' is invalid: {error}"))?;
-            if document.technology() != &expected_layout_technology {
-                return Err(format!(
-                    "Physical layout '{key}' is bound to a different signed technology than the project"
-                ));
-            }
-            for (kind, id, layer, purpose) in document
-                .shapes()
-                .iter()
-                .map(|(id, shape)| {
-                    (
-                        "shape",
-                        id.to_string(),
-                        shape.layer_purpose.layer.as_str(),
-                        shape.layer_purpose.purpose.as_str(),
-                    )
-                })
-                .chain(document.texts().iter().map(|(id, text)| {
-                    (
-                        "text",
-                        id.to_string(),
-                        text.layer_purpose.layer.as_str(),
-                        text.layer_purpose.purpose.as_str(),
-                    )
-                }))
-            {
-                if !allowed_layer_purposes
-                    .contains(&(layer.to_ascii_lowercase(), purpose.to_ascii_lowercase()))
-                {
-                    return Err(format!(
-                        "Physical layout '{key}' {kind} {id} uses layer/purpose '{layer}/{purpose}' outside the exact signed project PDK"
-                    ));
-                }
-            }
-        }
-        Ok(())
     }
 
     /// Resolve the exact currently trusted signed package pinned by this
@@ -468,20 +366,16 @@ impl AppState {
         self.workspace
             .content
             .project
-            .technology_binding()
-            .is_some()
-            && !self
-                .workspace
-                .content
-                .project
-                .technology_change_audit()
-                .is_empty()
+            .has_audited_technology_binding()
     }
 
     /// What the authored plan needs a project technology for, computed before
     /// any netlist exists.
-    pub(crate) fn technology_demand(&self) -> technology_demand::TechnologyDemand {
-        technology_demand::technology_demand(&self.sim_setup, &self.workspace)
+    pub(crate) fn technology_demand(&self) -> rspice_simulation::preparation::TechnologyDemand {
+        rspice_simulation::preparation::technology_demand(
+            &self.sim_setup,
+            self.workspace.content.physical_layout_documents(),
+        )
     }
 
     /// The single technology gate: a project need not have a technology; if it

@@ -273,6 +273,7 @@ fn prepare_pdk_configuration_candidate(
 > {
     let loaded = candidate.replace_from_pdk_config(Some(previous), &mut config)?;
     candidate
+        .catalog()
         .validate_attached_technology(technology_binding)
         .map_err(|error| {
             vec![format!(

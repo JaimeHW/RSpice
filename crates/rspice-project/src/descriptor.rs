@@ -899,6 +899,28 @@ impl ProjectDescriptor {
         Ok(())
     }
 
+    /// Validate the complete project metadata and require its recorded technology binding.
+    pub fn validated_technology_binding(&self) -> Result<&ProjectTechnologyBinding, String> {
+        self.validate()
+            .map_err(|error| format!("Project technology metadata is invalid: {error}"))?;
+        let binding = self.technology_binding().ok_or_else(|| {
+            "Project has no exact authenticated model-source and signed PDK binding".to_owned()
+        })?;
+        if self.technology_change_audit().is_empty() {
+            return Err(
+                "Project technology binding predates checkpoint-backed authority receipts; reattach it before governed saving or simulation"
+                    .to_owned(),
+            );
+        }
+        Ok(binding)
+    }
+
+    /// Whether a technology binding and audit are present; validation is a separate operation.
+    #[must_use]
+    pub fn has_audited_technology_binding(&self) -> bool {
+        self.technology_binding().is_some() && !self.technology_change_audit().is_empty()
+    }
+
     #[must_use]
     pub fn technology_binding(&self) -> Option<&ProjectTechnologyBinding> {
         self.technology_binding.as_ref()

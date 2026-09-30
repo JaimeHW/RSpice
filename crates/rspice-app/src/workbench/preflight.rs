@@ -478,6 +478,7 @@ fn collect_report(state: &AppState) -> PreflightReport {
             }
             if let Err(error) = state
                 .model_library_manager
+                .catalog()
                 .validate_attached_technology(Some(binding))
             {
                 blockers.push(PreflightIssue {

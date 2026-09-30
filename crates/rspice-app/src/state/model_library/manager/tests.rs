@@ -83,6 +83,7 @@ fn byte_backed_import_retains_exact_execution_authority() {
     let binding = crate::state::ProjectTechnologyBinding::from_model_library(library)
         .expect("byte-backed library is attachable");
     manager
+        .catalog()
         .validate_attached_technology(Some(&binding))
         .expect("unchanged byte-backed catalog matches attachment");
 }

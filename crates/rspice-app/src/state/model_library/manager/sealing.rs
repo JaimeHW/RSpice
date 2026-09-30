@@ -24,28 +24,6 @@ impl ModelLibraryManager {
         ))
     }
 
-    /// Prove that the project-owned technology attachment still names the
-    /// exact live execution catalog entry accepted at attachment time.
-    pub fn validate_attached_technology(
-        &self,
-        binding: Option<&crate::state::ProjectTechnologyBinding>,
-    ) -> Result<(), String> {
-        let Some(binding) = binding else {
-            return Ok(());
-        };
-        let library = self.get_library(binding.model_library()).ok_or_else(|| {
-            format!(
-                "Attached technology library '{}' was removed; reattach an authenticated model library before simulation",
-                binding.model_library()
-            )
-        })?;
-        binding.validate_model_library(library).map_err(|error| {
-            format!(
-                "Attached technology contract is stale: {error}. Reattach the current model library before simulation"
-            )
-        })
-    }
-
     /// Build one all-or-nothing source snapshot for a simulation run.
     ///
     /// Every unique pinned member is read exactly once. The digest is computed

@@ -10,11 +10,11 @@
 //! schematic, the process corner, or the retained DRC result is the complete
 //! list of what can change the answer.
 
-use super::technology_demand::technology_demand;
 use crate::state::model_library::ModelLibraryManager;
 use crate::state::{ProjectWorkspace, SchematicState};
 use crate::workbench::app_state::SimSetupState;
 use rspice_design::drc::DrcResult;
+use rspice_simulation::preparation::technology_demand;
 
 /// The user-facing reason a new run cannot start, excluding the transient
 /// "already running" state so a queued re-run can share the same rule.
@@ -72,13 +72,9 @@ pub(crate) fn run_preflight_block_reason(
     }
     // The technology demand row owns this failure when nothing is attached and
     // the plan demands a technology; reporting both would name two remedies.
-    let technology_attached = workspace.content.project.technology_binding().is_some()
-        && !workspace
-            .content
-            .project
-            .technology_change_audit()
-            .is_empty();
-    if (technology_attached || technology_demand(sim_setup, workspace).is_empty())
+    let technology_attached = workspace.content.project.has_audited_technology_binding();
+    if (technology_attached
+        || technology_demand(sim_setup, workspace.content.physical_layout_documents()).is_empty())
         && let Err(error) =
             model_library.reference_process_model_cards(sim_setup.reference_pvt.process)
     {
