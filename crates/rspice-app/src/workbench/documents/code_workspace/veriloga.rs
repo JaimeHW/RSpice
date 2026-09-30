@@ -3,9 +3,8 @@
 use std::sync::{Arc, Mutex, mpsc};
 
 use rspice_veriloga::{
-    CompileDiagnosticPhase, CompileDiagnosticSeverity, RuntimeCompileReport, RuntimeTarget,
-    RuntimeTargetMaturity, RuntimeTargetQualification, RuntimeTargetReadiness,
-    VirtualRuntimeCompilation,
+    RuntimeCompileReport, RuntimeTarget, RuntimeTargetMaturity, RuntimeTargetQualification,
+    RuntimeTargetReadiness, VirtualRuntimeCompilation,
 };
 use sha2::Digest as _;
 
@@ -17,8 +16,6 @@ use crate::state::{
 use crate::workbench::RSpiceApp;
 
 use rspice_simulation::project_veriloga::VerilogASourceOperationToken;
-#[cfg(test)]
-use rspice_veriloga::{VerilogACompiler, VirtualSourceBundle};
 
 use super::{
     CodeDiagnosticCollection, CodeEditorDiagnostic, CodeEditorSeverity, PendingVerilogACompile,
@@ -87,16 +84,7 @@ impl SelectedVerilogASource {
         &self,
         project_id: crate::product::ProjectId,
     ) -> VerilogASourceOperationToken {
-        VerilogASourceOperationToken {
-            project_id,
-            bundle_id: self.bundle.id(),
-            revision: self.bundle.revision().get(),
-            closure_digest: self.bundle.closure_digest(),
-            requested_module_digest: self
-                .selected_module
-                .as_deref()
-                .map(rspice_simulation::project_veriloga::veriloga_selected_module_digest),
-        }
+        VerilogASourceOperationToken::capture(project_id, self.bundle(), self.selected_module())
     }
 
     pub(crate) fn matches_token(
@@ -1232,6 +1220,33 @@ const fn specialist_disposition_label(
     }
 }
 
+impl From<rspice_simulation::project_veriloga::diagnostics::ProjectCompileDiagnostic>
+    for CodeEditorDiagnostic
+{
+    fn from(
+        diagnostic: rspice_simulation::project_veriloga::diagnostics::ProjectCompileDiagnostic,
+    ) -> Self {
+        use rspice_simulation::project_veriloga::diagnostics::ProjectDiagnosticSeverity;
+        let severity = match diagnostic.severity {
+            ProjectDiagnosticSeverity::Info => CodeEditorSeverity::Info,
+            ProjectDiagnosticSeverity::Warning => CodeEditorSeverity::Warning,
+            ProjectDiagnosticSeverity::Error => CodeEditorSeverity::Error,
+        };
+        Self::current(
+            diagnostic.producer,
+            diagnostic.code,
+            severity,
+            diagnostic.message,
+            diagnostic.detail,
+            diagnostic.source_path,
+            diagnostic.source,
+            diagnostic.byte_range,
+            diagnostic.line,
+            diagnostic.column,
+        )
+    }
+}
+
 fn compile_selected_source(selected: &SelectedVerilogASource) -> VerilogACompileOutcome {
     project_compile_outcome(
         selected.bundle(),
@@ -1249,129 +1264,16 @@ pub(super) fn project_compile_outcome(
         rspice_simulation::project_veriloga::ProjectVerilogACompileError,
     >,
 ) -> VerilogACompileOutcome {
-    use rspice_simulation::project_veriloga::ProjectVerilogACompileError;
-
-    match outcome {
+    match rspice_simulation::project_veriloga::diagnostics::project_compile_outcome(bundle, outcome)
+    {
         Ok(report) => VerilogACompileOutcome::Success(report),
-        Err(ProjectVerilogACompileError::BuildProfile(error)) => build_profile_error_outcome(error),
-        Err(ProjectVerilogACompileError::SourceClosure(error)) => {
-            VerilogACompileOutcome::Failure(vec![CodeEditorDiagnostic::current(
-                "rspice.veriloga.bundle",
-                "VA-SOURCE-CLOSURE",
-                CodeEditorSeverity::Error,
-                error,
-                "sealed project source closure",
-                None,
-                None,
-                None,
-                None,
-                None,
-            )])
-        }
-        Err(ProjectVerilogACompileError::RootModuleRequired) => {
-            VerilogACompileOutcome::Failure(vec![CodeEditorDiagnostic::current(
-                "rspice.veriloga.bundle",
-                "VA-ROOT-MODULE-REQUIRED",
-                CodeEditorSeverity::Error,
-                "Select the root module before compiling this multi-file Verilog-A bundle.",
-                "Enter the exact module identifier in the Model project navigator.",
-                None,
-                None,
-                None,
-                None,
-                None,
-            )])
-        }
-        Err(ProjectVerilogACompileError::Compile(error)) => {
-            compile_error_outcome(bundle.root().content(), &error)
-        }
-        Err(ProjectVerilogACompileError::Virtual(failure)) => {
-            virtual_compile_error_outcome(*failure)
-        }
+        Err(diagnostics) => VerilogACompileOutcome::Failure(
+            diagnostics
+                .into_iter()
+                .map(CodeEditorDiagnostic::from)
+                .collect(),
+        ),
     }
-}
-
-fn build_profile_error_outcome(error: String) -> VerilogACompileOutcome {
-    VerilogACompileOutcome::Failure(vec![CodeEditorDiagnostic::current(
-        "rspice.veriloga.build-profile",
-        "VA-BUILD-PROFILE",
-        CodeEditorSeverity::Error,
-        "Verilog-A build profile is invalid",
-        error,
-        None,
-        None,
-        None,
-        None,
-        None,
-    )])
-}
-
-fn compile_error_outcome(
-    source: &str,
-    error: &rspice_veriloga::CompileError,
-) -> VerilogACompileOutcome {
-    let diagnostics = rspice_veriloga::compile_diagnostics(source, error)
-        .into_iter()
-        .map(|diagnostic| {
-            let byte_range = diagnostic.span.as_ref().and_then(|span| {
-                let start = usize::try_from(span.byte_start).ok()?;
-                let end = usize::try_from(span.byte_end).ok()?;
-                (start <= end && end <= source.len()).then_some(start..end)
-            });
-            let position = diagnostic.span.as_ref().and_then(|span| span.start);
-            CodeEditorDiagnostic::current(
-                "rspice.veriloga.compiler",
-                diagnostic.code,
-                editor_severity(diagnostic.severity),
-                diagnostic.message,
-                diagnostic_phase_label(diagnostic.phase),
-                None,
-                None,
-                byte_range,
-                position.and_then(|position| usize::try_from(position.line).ok()),
-                position.and_then(|position| usize::try_from(position.column).ok()),
-            )
-        })
-        .collect();
-    VerilogACompileOutcome::Failure(diagnostics)
-}
-
-fn virtual_compile_error_outcome(
-    failure: rspice_veriloga::VirtualRuntimeCompileFailure,
-) -> VerilogACompileOutcome {
-    let diagnostics = failure
-        .diagnostics
-        .into_iter()
-        .map(|diagnostic| {
-            let byte_range = diagnostic
-                .byte_start
-                .zip(diagnostic.byte_end)
-                .and_then(|(start, end)| (start <= end).then_some(start..end));
-            let source_label = diagnostic.logical_path.as_deref().map_or_else(
-                || diagnostic_phase_label(diagnostic.phase).to_owned(),
-                |path| match (diagnostic.line, diagnostic.column) {
-                    (Some(line), Some(column)) => format!(
-                        "{} · {path}:{line}:{column}",
-                        diagnostic_phase_label(diagnostic.phase)
-                    ),
-                    _ => format!("{} · {path}", diagnostic_phase_label(diagnostic.phase)),
-                },
-            );
-            CodeEditorDiagnostic::current(
-                "rspice.veriloga.compiler",
-                diagnostic.code,
-                CodeEditorSeverity::Error,
-                diagnostic.message,
-                source_label,
-                diagnostic.logical_path,
-                diagnostic.source,
-                byte_range,
-                diagnostic.line,
-                diagnostic.column,
-            )
-        })
-        .collect();
-    VerilogACompileOutcome::Failure(diagnostics)
 }
 
 pub(crate) fn compile_project_bundle_virtual_for_provenance(
@@ -1387,19 +1289,18 @@ pub(crate) fn compile_project_bundle_receipt(
     bundle: &ProjectSourceBundle,
     selected_module: Option<&str>,
 ) -> Result<VerilogACompileReceipt, Vec<CodeEditorDiagnostic>> {
-    let selected = SelectedVerilogASource {
-        bundle: bundle.clone(),
-        selected_module: selected_module.map(str::to_owned),
-    };
-    let token = selected.token(project_id);
-    match compile_selected_source(&selected) {
-        VerilogACompileOutcome::Success(report) => {
-            receipt_from_report(token, &report, Some(bundle))
-                .map_err(|error| vec![diagnostic_capacity_failure(token, error)])
-        }
-        VerilogACompileOutcome::Failure(diagnostics) => Err(diagnostics
+    let token = VerilogASourceOperationToken::capture(project_id, bundle, selected_module);
+    match rspice_simulation::project_veriloga::receipt::compile_project_bundle_receipt(
+        project_id,
+        bundle,
+        selected_module,
+    ) {
+        Ok((compilation, diagnostics)) => receipt_projection(compilation, diagnostics)
+            .map_err(|error| vec![diagnostic_capacity_failure(token, error)]),
+        Err(diagnostics) => Err(diagnostics
             .into_iter()
             .map(|diagnostic| {
+                let diagnostic = CodeEditorDiagnostic::from(diagnostic);
                 let document_id = diagnostic
                     .source_path
                     .clone()
@@ -1419,20 +1320,31 @@ fn receipt_from_report(
     report: &RuntimeCompileReport,
     bundle: Option<&ProjectSourceBundle>,
 ) -> Result<VerilogACompileReceipt, String> {
-    let mut diagnostics = compiler_diagnostics(report, token);
-    diagnostics.extend(
-        bundle
-            .and_then(|bundle| {
-                super::veriloga_profile::resolve_veriloga_build_profile(bundle)
-                    .ok()
-                    .map(|resolved| specialist_diagnostics(report, &resolved.profile, token))
-            })
-            .unwrap_or_default(),
-    );
+    let (compilation, diagnostics) =
+        rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt::from_report(
+            token, report, bundle,
+        )?;
+    receipt_projection(compilation, diagnostics)
+}
+
+fn receipt_projection(
+    compilation: rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt,
+    diagnostics: Vec<rspice_simulation::project_veriloga::diagnostics::ProjectCompileDiagnostic>,
+) -> Result<VerilogACompileReceipt, String> {
+    let token = compilation.token();
+    let report = compilation.report();
+    let diagnostics = diagnostics
+        .into_iter()
+        .map(|diagnostic| {
+            CodeEditorDiagnostic::from(diagnostic).bind_validation(
+                token.bundle_id.to_string(),
+                token.revision,
+                token.closure_digest.to_string(),
+            )
+        })
+        .collect();
     let diagnostics = Arc::new(CodeDiagnosticCollection::try_new(diagnostics)?);
     Ok(VerilogACompileReceipt {
-        token,
-        module_name: report.abi.module_name.to_string(),
         analog_ports: report.abi.analog_port_count(),
         noise_sources: report.abi.noise_source_count,
         state_variables: report.abi.state_variable_count,
@@ -1441,7 +1353,7 @@ fn receipt_from_report(
         wasm_interpreter: target_qualification(report.targets.get(RuntimeTarget::WasmInterpreter)),
         generated_rust: target_qualification(report.targets.get(RuntimeTarget::GeneratedRust)),
         diagnostics,
-        report: Arc::new(report.clone()),
+        compilation,
     })
 }
 
@@ -1468,106 +1380,6 @@ fn diagnostic_capacity_failure(
     )
 }
 
-/// The compiler's own non-fatal findings for a compile that succeeded.
-///
-/// A successful report carries no position that can be trusted against the
-/// editor's buffer: its spans index the preprocessed closure, not any one
-/// document. The finding is therefore published as a document-level
-/// diagnostic — its code, severity and message are exact, and no line is
-/// claimed — exactly as the specialist findings beside it already are.
-fn compiler_diagnostics(
-    report: &RuntimeCompileReport,
-    token: VerilogASourceOperationToken,
-) -> Vec<CodeEditorDiagnostic> {
-    report
-        .diagnostics
-        .iter()
-        .map(|diagnostic| {
-            CodeEditorDiagnostic::current(
-                "rspice.veriloga.compiler",
-                diagnostic.code.as_str(),
-                editor_severity(diagnostic.severity),
-                diagnostic.message.as_str(),
-                diagnostic_phase_label(diagnostic.phase),
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-            .bind_validation(
-                token.bundle_id.to_string(),
-                token.revision,
-                token.closure_digest.to_string(),
-            )
-        })
-        .collect()
-}
-
-const fn editor_severity(severity: CompileDiagnosticSeverity) -> CodeEditorSeverity {
-    match severity {
-        CompileDiagnosticSeverity::Error => CodeEditorSeverity::Error,
-        CompileDiagnosticSeverity::Warning => CodeEditorSeverity::Warning,
-    }
-}
-
-fn specialist_diagnostics(
-    report: &RuntimeCompileReport,
-    profile: &super::veriloga_profile::VerilogABuildProfile,
-    token: VerilogASourceOperationToken,
-) -> Vec<CodeEditorDiagnostic> {
-    report
-        .specialist
-        .findings
-        .iter()
-        .filter(|finding| specialist_check_enabled(profile, finding.check))
-        .map(|finding| {
-            let severity = match finding.severity {
-                rspice_veriloga::SpecialistFindingSeverity::Information => CodeEditorSeverity::Info,
-                rspice_veriloga::SpecialistFindingSeverity::Warning => CodeEditorSeverity::Warning,
-                rspice_veriloga::SpecialistFindingSeverity::Error => CodeEditorSeverity::Error,
-            };
-            let mut detail = finding.detail.clone();
-            if let Some(action) = &finding.action {
-                detail.push_str(" Suggested review: ");
-                detail.push_str(&action.title);
-                detail.push_str(" — ");
-                detail.push_str(&action.replacement_hint);
-            }
-            CodeEditorDiagnostic::current(
-                "rspice.veriloga.specialist",
-                &finding.code,
-                severity,
-                finding.summary.as_str(),
-                detail,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-            .bind_validation(
-                token.bundle_id.to_string(),
-                token.revision,
-                token.closure_digest.to_string(),
-            )
-        })
-        .collect()
-}
-
-const fn specialist_check_enabled(
-    profile: &super::veriloga_profile::VerilogABuildProfile,
-    check: rspice_veriloga::SpecialistCheckKind,
-) -> bool {
-    match check {
-        rspice_veriloga::SpecialistCheckKind::HiddenState => profile.checks.hidden_state,
-        rspice_veriloga::SpecialistCheckKind::Discontinuity => profile.checks.discontinuities,
-        rspice_veriloga::SpecialistCheckKind::UnitsAndRanges => profile.checks.units_and_ranges,
-        rspice_veriloga::SpecialistCheckKind::Convergence => profile.checks.convergence,
-        rspice_veriloga::SpecialistCheckKind::Portability => profile.checks.portability,
-    }
-}
-
 fn target_qualification(target: &RuntimeTargetQualification) -> TargetQualification {
     match (target.readiness, target.maturity) {
         (RuntimeTargetReadiness::Available, RuntimeTargetMaturity::Production) => {
@@ -1586,19 +1398,6 @@ fn target_qualification(target: &RuntimeTargetQualification) -> TargetQualificat
     }
 }
 
-const fn diagnostic_phase_label(phase: CompileDiagnosticPhase) -> &'static str {
-    match phase {
-        CompileDiagnosticPhase::Input => "input",
-        CompileDiagnosticPhase::Lexer => "lexer",
-        CompileDiagnosticPhase::Parser => "parser",
-        CompileDiagnosticPhase::Semantic => "semantic analysis",
-        CompileDiagnosticPhase::CodeGeneration => "code generation",
-        CompileDiagnosticPhase::BackendQualification => "backend qualification",
-        CompileDiagnosticPhase::PerformanceBudget => "performance budget",
-        CompileDiagnosticPhase::ModuleSelection => "module selection",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1611,38 +1410,6 @@ mod tests {
             limits.max_expanded_bytes,
             crate::state::MAX_PROJECT_SOURCE_BUNDLE_BYTES.saturating_mul(2)
         );
-    }
-
-    #[test]
-    fn included_virtual_diagnostic_keeps_the_included_document_identity() {
-        let child = "module selected(p, n);\n  inout p, n;\n  electrical p, n;\n  analog I(p, n) <+ @;\nendmodule\n";
-        let bundle = VirtualSourceBundle::from_sources(
-            "root.va",
-            [("root.va", "`include \"child.va\"\n"), ("child.va", child)],
-        )
-        .expect("valid virtual diagnostic fixture");
-        let failure = VerilogACompiler::default()
-            .compile_virtual_runtime_diagnosed(
-                &bundle,
-                "selected",
-                rspice_veriloga::VirtualCompileLimits::default(),
-            )
-            .expect_err("included syntax error must fail");
-
-        let VerilogACompileOutcome::Failure(diagnostics) = virtual_compile_error_outcome(failure)
-        else {
-            panic!("diagnosed compile failure cannot publish success");
-        };
-        let diagnostic = diagnostics
-            .iter()
-            .find(|diagnostic| diagnostic.source_path.as_deref() == Some("child.va"))
-            .expect("included diagnostic");
-
-        assert_eq!(diagnostic.source.as_deref(), Some(child));
-        assert_eq!(diagnostic.line, Some(4));
-        assert!(diagnostic.detail.contains("child.va:4"));
-        let range = diagnostic.byte_range.clone().expect("included byte range");
-        assert_eq!(&child[range], "@");
     }
 
     fn ensure_legacy_source(app: &mut RSpiceApp) {
@@ -2082,11 +1849,11 @@ mod tests {
         let (sender, receiver) = mpsc::channel();
         sender
             .send(VerilogACompileOutcome::Success(Box::new(
-                (*receipt.report).clone(),
+                (**receipt.compilation.report()).clone(),
             )))
             .unwrap();
         app.state.ui.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
-            token: receipt.token,
+            token: receipt.compilation.token(),
             receiver: Arc::new(Mutex::new(receiver)),
         });
 
@@ -2158,12 +1925,12 @@ mod tests {
         let (sender, receiver) = mpsc::channel();
         sender
             .send(VerilogACompileOutcome::Success(Box::new(
-                (*receipt.report).clone(),
+                (**receipt.compilation.report()).clone(),
             )))
             .unwrap();
         app.state.ui.code_workspace.veriloga.receipt = None;
         app.state.ui.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
-            token: receipt.token,
+            token: receipt.compilation.token(),
             receiver: Arc::new(Mutex::new(receiver)),
         });
         app.state.workspace.open_view(second, ViewType::VerilogA);
@@ -2173,9 +1940,10 @@ mod tests {
         assert!(app.state.ui.code_workspace.veriloga.pending.is_none());
         assert!(app.state.ui.code_workspace.veriloga.receipt.is_none());
         let second_selected = selected_veriloga_source(&app).unwrap();
-        assert!(
-            !second_selected.matches_token(app.state.workspace.content.project.id(), receipt.token)
-        );
+        assert!(!second_selected.matches_token(
+            app.state.workspace.content.project.id(),
+            receipt.compilation.token()
+        ));
     }
 
     #[test]
@@ -2195,11 +1963,11 @@ mod tests {
         let (sender, receiver) = mpsc::channel();
         sender
             .send(VerilogACompileOutcome::Success(Box::new(
-                (*receipt.report).clone(),
+                (**receipt.compilation.report()).clone(),
             )))
             .unwrap();
         app.state.ui.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
-            token: receipt.token,
+            token: receipt.compilation.token(),
             receiver: Arc::new(Mutex::new(receiver)),
         });
         app.state
@@ -2216,7 +1984,10 @@ mod tests {
         assert!(app.state.ui.code_workspace.veriloga.pending.is_none());
         assert!(app.state.ui.code_workspace.veriloga.receipt.is_none());
         let changed = selected_veriloga_source(&app).unwrap();
-        assert!(!changed.matches_token(app.state.workspace.content.project.id(), receipt.token));
+        assert!(!changed.matches_token(
+            app.state.workspace.content.project.id(),
+            receipt.compilation.token()
+        ));
         assert!(!changed.bundle().validation_is_current());
     }
 }

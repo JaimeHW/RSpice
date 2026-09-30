@@ -1806,20 +1806,15 @@ fn prepared_project_veriloga_runtimes(
     let document = bundle.root();
     let retained = state.ui.code_workspace.veriloga.receipt.as_ref();
     if let Some(receipt) = retained
-        && receipt.token.project_id == state.workspace.content.project.id()
-        && receipt.token.bundle_id == bundle.id()
-        && receipt.token.revision == bundle.revision().get()
-        && receipt.token.closure_digest == bundle.closure_digest()
+        && receipt.compilation.token().project_id == state.workspace.content.project.id()
+        && receipt.compilation.token().bundle_id == bundle.id()
+        && receipt.compilation.token().revision == bundle.revision().get()
+        && receipt.compilation.token().closure_digest == bundle.closure_digest()
     {
-        let runtime = rspice_simulation::project_veriloga::prepare_project_runtime(
-            state.workspace.content.project.id(),
-            bundle,
-            &receipt.token,
-            &receipt.module_name,
-            &receipt.report,
-            receipt.module_name.clone(),
-        )
-        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
+        let runtime = receipt
+            .compilation
+            .prepare_runtime(state.workspace.content.project.id(), bundle)
+            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         return rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error));
     }
@@ -1835,24 +1830,25 @@ fn prepared_project_veriloga_runtimes(
     // Persisted validation authenticates only the exact source bytes. Rebuild
     // transient executable artifacts rather than trusting serialized code or
     // requiring a redundant manual compile after project/session restore.
-    let receipt = crate::workbench::documents::code_workspace::compile_project_bundle_receipt(
-        state.workspace.content.project.id(),
-        bundle,
-        None,
-    )
-    .map_err(|diagnostics| {
-        let detail = diagnostics
-            .first()
-            .map(|diagnostic| format!("{}: {}", diagnostic.message, diagnostic.detail))
-            .unwrap_or_else(|| "the compiler returned no diagnostic".to_owned());
-        PreparationError::new(
-            PreparationStage::ModelBindings,
-            format!(
-                "Could not rebuild validated Verilog-A source '{}': {detail}",
-                document.file_name()
-            ),
+    let (receipt, _) =
+        rspice_simulation::project_veriloga::receipt::compile_project_bundle_receipt(
+            state.workspace.content.project.id(),
+            bundle,
+            None,
         )
-    })?;
+        .map_err(|diagnostics| {
+            let detail = diagnostics
+                .first()
+                .map(|diagnostic| format!("{}: {}", diagnostic.message, diagnostic.detail))
+                .unwrap_or_else(|| "the compiler returned no diagnostic".to_owned());
+            PreparationError::new(
+                PreparationStage::ModelBindings,
+                format!(
+                    "Could not rebuild validated Verilog-A source '{}': {detail}",
+                    document.file_name()
+                ),
+            )
+        })?;
     let runtime = receipt
         .prepare_runtime(state.workspace.content.project.id(), bundle)
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;

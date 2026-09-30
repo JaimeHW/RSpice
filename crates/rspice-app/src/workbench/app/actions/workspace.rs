@@ -1345,7 +1345,9 @@ impl AppState {
                 .veriloga
                 .receipt
                 .as_ref()
-                .is_some_and(|receipt| renamed_source_ids.contains(&receipt.token.bundle_id))
+                .is_some_and(|receipt| {
+                    renamed_source_ids.contains(&receipt.compilation.token().bundle_id)
+                })
                 || self
                     .ui
                     .code_workspace
@@ -1837,7 +1839,7 @@ impl AppState {
             .veriloga
             .receipt
             .as_ref()
-            .is_some_and(|receipt| renamed.contains(&receipt.token.bundle_id))
+            .is_some_and(|receipt| renamed.contains(&receipt.compilation.token().bundle_id))
             || self
                 .ui
                 .code_workspace

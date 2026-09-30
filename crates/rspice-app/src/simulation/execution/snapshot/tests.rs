@@ -753,7 +753,10 @@ fn project_runtime() -> rspice_simulation::veriloga::PreparedVerilogARuntime {
         Some("snapshot_owned"),
     )
     .unwrap();
-    receipt.prepare_runtime(project_id, &bundle).unwrap()
+    receipt
+        .compilation
+        .prepare_runtime(project_id, &bundle)
+        .unwrap()
 }
 
 fn signed_pdk_runtime() -> rspice_simulation::veriloga::PreparedVerilogARuntime {

@@ -1673,7 +1673,7 @@ fn restore_project_structure_preserving_documents(
         .veriloga
         .receipt
         .as_ref()
-        .is_some_and(|receipt| removed.contains(&receipt.token.bundle_id))
+        .is_some_and(|receipt| removed.contains(&receipt.compilation.token().bundle_id))
         || state
             .ui
             .code_workspace

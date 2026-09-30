@@ -29,7 +29,9 @@ const CODE_LEFT_PADDING: f32 = 12.0;
 // path made commands such as fold-all change behavior at an arbitrary byte
 // boundary. Empty buffers alone use TextEdit until their first insertion.
 const VIRTUALIZATION_THRESHOLD_BYTES: usize = 1;
-pub const MAX_CODE_DIAGNOSTICS: usize = 1_000_000;
+use rspice_app_types::diagnostics::{
+    MAX_DIAGNOSTICS, insert_diagnostic_id, validate_diagnostic_count,
+};
 
 fn code_editor_frame() -> egui::Frame {
     egui::Frame::new().inner_margin(egui::Margin {
@@ -105,11 +107,8 @@ impl CodeEditorDiagnostic {
         let document_id = source_path
             .clone()
             .unwrap_or_else(|| Arc::<str>::from("workspace"));
-        let range = crate::workbench::documents::canonical_diagnostics::range_from_legacy(
-            byte_range.as_ref(),
-            line,
-            column,
-        );
+        let range =
+            rspice_app_types::diagnostics::diagnostic_range(byte_range.as_ref(), line, column);
         Self {
             canonical: crate::workbench::documents::canonical_diagnostics::CanonicalDiagnosticMetadata::current(
                 Arc::<str>::from(producer.into()),
@@ -209,12 +208,7 @@ pub struct CodeDiagnosticCollection {
 
 impl CodeDiagnosticCollection {
     pub fn try_new(records: Vec<CodeEditorDiagnostic>) -> Result<Self, String> {
-        if records.len() > MAX_CODE_DIAGNOSTICS {
-            return Err(format!(
-                "Diagnostic collection contains {} records; the supported maximum is {MAX_CODE_DIAGNOSTICS}.",
-                records.len()
-            ));
-        }
+        validate_diagnostic_count(records.len())?;
         let mut collection = Self::default();
         collection.records.reserve(records.len());
         for record in records {
@@ -224,9 +218,9 @@ impl CodeDiagnosticCollection {
     }
 
     pub fn try_push(&mut self, record: CodeEditorDiagnostic) -> Result<(), String> {
-        if self.records.len() >= MAX_CODE_DIAGNOSTICS {
+        if self.records.len() >= MAX_DIAGNOSTICS {
             return Err(format!(
-                "Diagnostic collection reached the supported maximum of {MAX_CODE_DIAGNOSTICS} records."
+                "Diagnostic collection reached the supported maximum of {MAX_DIAGNOSTICS} records."
             ));
         }
         self.push_indexed(record)
@@ -269,12 +263,7 @@ impl CodeDiagnosticCollection {
     }
 
     fn push_indexed(&mut self, mut record: CodeEditorDiagnostic) -> Result<(), String> {
-        if !self.diagnostic_ids.insert(record.canonical.diagnostic_id) {
-            return Err(format!(
-                "Diagnostic collection contains duplicate canonical ID {}.",
-                record.canonical.diagnostic_id
-            ));
-        }
+        insert_diagnostic_id(&mut self.diagnostic_ids, record.canonical.diagnostic_id)?;
         let index = self.records.len();
         self.summary.record(record.severity);
         let line = diagnostic_line(&record);

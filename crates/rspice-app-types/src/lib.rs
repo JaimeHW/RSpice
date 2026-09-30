@@ -4,6 +4,7 @@
 //! remain with their owners; only values crossing those boundaries live here.
 
 pub mod canonical;
+pub mod diagnostics;
 pub mod hierarchy_path;
 pub mod product;
 pub mod property;

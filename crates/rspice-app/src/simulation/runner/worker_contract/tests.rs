@@ -817,7 +817,10 @@ fn worker_request_round_trips_project_veriloga_runtime_artifacts() {
         Some("worker_owned"),
     )
     .unwrap();
-    let runtime = receipt.prepare_runtime(project_id, &bundle).unwrap();
+    let runtime = receipt
+        .compilation
+        .prepare_runtime(project_id, &bundle)
+        .unwrap();
     let request = WorkerRequest {
         measurement_references: Default::default(),
         id: 8,

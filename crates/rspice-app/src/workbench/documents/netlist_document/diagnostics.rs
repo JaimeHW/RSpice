@@ -145,7 +145,7 @@ impl Diagnostic {
             || "netlist-editor".to_owned(),
             |path| path.to_string_lossy().into_owned(),
         );
-        let range = crate::workbench::documents::canonical_diagnostics::range_from_legacy(
+        let range = rspice_app_types::diagnostics::diagnostic_range(
             self.span.as_ref(),
             self.line.or(self.source_line),
             self.column,
@@ -162,7 +162,7 @@ impl Diagnostic {
         );
         self.canonical.related_locations = old.related_locations;
         self.canonical.quick_fixes = self.fix.as_ref().and_then(|fix| {
-            let range = crate::workbench::documents::canonical_diagnostics::range_from_legacy(
+            let range = rspice_app_types::diagnostics::diagnostic_range(
                 Some(&fix.span),
                 self.line.or(self.source_line),
                 self.column,

@@ -7,6 +7,8 @@ use sha2::{Digest as _, Sha256};
 use crate::veriloga::{PreparedRuntimeError, PreparedVerilogARuntime, PreparedVerilogARuntimeSet};
 
 pub mod build_profile;
+pub mod diagnostics;
+pub mod receipt;
 pub mod worker;
 
 /// Compilation failures before projection into editor or worker diagnostics.
@@ -158,6 +160,22 @@ pub struct VerilogASourceOperationToken {
     /// Exact explicit module selection requested by a cell-view contract.
     /// `None` preserves the Code Workspace's compiler-selected module mode.
     pub requested_module_digest: Option<rspice_app_types::product::ContentDigest>,
+}
+
+impl VerilogASourceOperationToken {
+    pub fn capture(
+        project_id: rspice_app_types::product::ProjectId,
+        bundle: &ProjectSourceBundle,
+        selected_module: Option<&str>,
+    ) -> Self {
+        Self {
+            project_id,
+            bundle_id: bundle.id(),
+            revision: bundle.revision().get(),
+            closure_digest: bundle.closure_digest(),
+            requested_module_digest: selected_module.map(veriloga_selected_module_digest),
+        }
+    }
 }
 
 /// Bind a compile report only after checking its current project source token.

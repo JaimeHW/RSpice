@@ -523,8 +523,11 @@ mod tests {
             Some("rspice_precision_amp_va"),
         )
         .expect("restored closure compiles without filesystem access");
-        assert_eq!(receipt.token.bundle_id, original.id());
-        assert_eq!(receipt.token.closure_digest, original.closure_digest());
+        assert_eq!(receipt.compilation.token().bundle_id, original.id());
+        assert_eq!(
+            receipt.compilation.token().closure_digest,
+            original.closure_digest()
+        );
         std::fs::remove_dir_all(root).expect("remove fixture");
     }
 

@@ -9,6 +9,7 @@ use crate::{
     state::{ProjectSourceId, ProjectSourceLanguage},
 };
 use rspice_simulation::project_veriloga::VerilogASourceOperationToken;
+#[cfg(test)]
 use rspice_simulation::veriloga::PreparedVerilogARuntime;
 
 use std::collections::HashMap;
@@ -180,8 +181,7 @@ pub enum VerilogACompileOutcome {
 /// Retained metadata from the latest compile of the exact current source.
 #[derive(Debug, Clone)]
 pub struct VerilogACompileReceipt {
-    pub token: VerilogASourceOperationToken,
-    pub module_name: String,
+    pub compilation: rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt,
     pub analog_ports: usize,
     pub noise_sources: usize,
     pub state_variables: usize,
@@ -190,40 +190,6 @@ pub struct VerilogACompileReceipt {
     pub wasm_interpreter: TargetQualification,
     pub generated_rust: TargetQualification,
     pub diagnostics: Arc<super::CodeDiagnosticCollection>,
-    /// The exact runtime artifacts advertised by this receipt. Keeping the
-    /// report alive prevents the Compile action from degrading into a metadata
-    /// preview after publication to the engine's session registry.
-    pub report: Arc<rspice_veriloga::RuntimeCompileReport>,
-}
-
-/// Unpack an editor compile receipt into the identity facts the engine layer
-/// validates. The receipt also carries `CodeEditorDiagnostic`, so it stays
-/// here rather than travelling down to `rspice_simulation::veriloga` with the
-/// runtime it produces.
-impl VerilogACompileReceipt {
-    pub fn prepare_runtime(
-        &self,
-        project_id: crate::product::ProjectId,
-        bundle: &crate::state::ProjectSourceBundle,
-    ) -> Result<PreparedVerilogARuntime, rspice_simulation::veriloga::PreparedRuntimeError> {
-        self.prepare_runtime_with_alias(project_id, bundle, self.module_name.clone())
-    }
-
-    pub fn prepare_runtime_with_alias(
-        &self,
-        project_id: crate::product::ProjectId,
-        bundle: &crate::state::ProjectSourceBundle,
-        netlist_alias: impl Into<String>,
-    ) -> Result<PreparedVerilogARuntime, rspice_simulation::veriloga::PreparedRuntimeError> {
-        rspice_simulation::project_veriloga::prepare_project_runtime(
-            project_id,
-            bundle,
-            &self.token,
-            &self.module_name,
-            &self.report,
-            netlist_alias,
-        )
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -850,6 +816,7 @@ mod tests {
             super::super::compile_project_bundle_receipt(project_id, &bundle, Some(module_name))
                 .unwrap();
         receipt
+            .compilation
             .prepare_runtime_with_alias(project_id, &bundle, alias)
             .unwrap()
     }
@@ -883,10 +850,10 @@ mod tests {
         let receipt = super::super::compile_project_bundle_receipt(project_id, bundle, None)
             .expect("edited current bundle compiles");
 
-        let runtime = receipt.prepare_runtime(project_id, bundle);
+        let runtime = receipt.compilation.prepare_runtime(project_id, bundle);
 
         assert!(runtime.is_ok());
-        assert_eq!(receipt.token.bundle_id, stable_id);
+        assert_eq!(receipt.compilation.token().bundle_id, stable_id);
     }
 
     #[test]

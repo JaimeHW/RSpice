@@ -88,15 +88,23 @@ fn unified_mixed_project_compilation_preserves_profile_and_backend_requirements(
     let project_id = crate::product::ProjectId::new();
     let receipt =
         compile_project_bundle_receipt(project_id, &bundle, Some("project_controlled")).unwrap();
-    assert!(!receipt.report.canonical_ir.digital.processes.is_empty());
+    assert!(
+        !receipt
+            .compilation
+            .report()
+            .canonical_ir
+            .digital
+            .processes
+            .is_empty()
+    );
     let configured =
         compile_project_source_bundle_runtime(project_id, &bundle, "project_controlled").unwrap();
     let editor = super::prepare_project_runtime(
         project_id,
         &bundle,
-        &receipt.token,
+        &receipt.compilation.token(),
         "project_controlled",
-        &receipt.report,
+        receipt.compilation.report(),
         configured.netlist_alias(),
     )
     .unwrap();

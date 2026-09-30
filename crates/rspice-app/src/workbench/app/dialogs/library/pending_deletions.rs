@@ -742,7 +742,7 @@ fn remove_project_sources_for_deleted_scope(
         .veriloga
         .receipt
         .as_ref()
-        .is_some_and(|receipt| removed.contains(&receipt.token.bundle_id))
+        .is_some_and(|receipt| removed.contains(&receipt.compilation.token().bundle_id))
         || state
             .ui
             .code_workspace

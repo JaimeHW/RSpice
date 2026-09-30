@@ -986,7 +986,10 @@ fn current_receipt<'a>(
         .receipt
         .as_ref()
         .filter(|receipt| {
-            selected.matches_token(app.state.workspace.content.project.id(), receipt.token)
+            selected.matches_token(
+                app.state.workspace.content.project.id(),
+                receipt.compilation.token(),
+            )
         })
 }
 
