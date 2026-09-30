@@ -4,7 +4,7 @@ use super::*;
 
 #[derive(Debug, Default)]
 pub(super) struct LiveTransientAccumulator {
-    current_impulses: crate::simulation::runner::CurrentImpulseBuffer,
+    current_impulses: rspice_simulation::live_transient::CurrentImpulseBuffer,
     pub(super) waveforms: Vec<LiveTransientWaveform>,
     digital_events: Vec<DigitalEventTraceEvidence>,
     real_events: Vec<RealEventTraceEvidence>,

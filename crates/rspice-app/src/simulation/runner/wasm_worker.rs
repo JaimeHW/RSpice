@@ -56,12 +56,12 @@ mod browser {
         validate_worker_request_transfer_buffer_lengths, validate_worker_response_id,
         worker_response_from_value,
     };
-    use crate::simulation::runner::{
-        LiveTransientQueue, NetlistInput, SimulationRequest, TransientSampleDelta,
-        push_live_transient_sample,
-    };
+    use crate::simulation::runner::{NetlistInput, SimulationRequest};
     use crate::simulation::status::{EngineAvailability, SimulationProgress, SimulationStatus};
     use rspice_simulation::error::SimulationError;
+    use rspice_simulation::live_transient::{
+        LiveTransientQueue, TransientSampleDelta, push_live_transient_sample,
+    };
     use rspice_simulation::results::SimulationResult;
 
     use rspice_simulation::monte_carlo_checkpoint::{

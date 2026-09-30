@@ -6,7 +6,7 @@ use rspice_core::{CurrentImpulseOwner, CurrentImpulsePoint, CurrentImpulseTrace}
 use serde::{Deserialize, Serialize};
 
 use super::{MAX_PENDING_LIVE_TRANSIENT_SAMPLES, TransientSampleDelta};
-use crate::state::CurrentImpulseHistoryEvidence;
+use rspice_results::current_impulses::CurrentImpulseHistoryEvidence;
 
 const MAX_CURRENT_POINTS: usize = 8_192;
 const MAX_CURRENT_OWNERS: usize = 8_192;
@@ -18,7 +18,7 @@ const MAX_SEQUENCE: u64 = (1_u64 << 53) - 1;
 /// of the analog sample carrying this message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct CurrentImpulseDelta {
+pub struct CurrentImpulseDelta {
     pub start_time_s: f64,
     pub stop_time_s: f64,
     pub first_sequence: u64,
@@ -31,7 +31,7 @@ pub(crate) struct CurrentImpulseDelta {
 /// point. Incomplete empty updates therefore have a distinct wire type.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct CurrentImpulseUpdate {
+pub struct CurrentImpulseUpdate {
     pub owner: CurrentImpulseOwner,
     pub complete: bool,
     pub points: Vec<CurrentImpulsePoint>,
@@ -188,25 +188,25 @@ struct CurrentBatch {
 /// Used once in the pending queue and once in the displayed preview. Each
 /// buffer has one aggregate point/owner budget, independent of queue length.
 #[derive(Debug, Default)]
-pub(in crate::simulation) struct CurrentImpulseBuffer {
+pub struct CurrentImpulseBuffer {
     batch: Option<CurrentBatch>,
     lost: bool,
 }
 
 impl CurrentImpulseBuffer {
-    pub(in crate::simulation) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         *self = Self::default();
     }
 
-    pub(in crate::simulation) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.batch.is_none()
     }
 
-    pub(in crate::simulation) fn mark_lost(&mut self) {
+    pub fn mark_lost(&mut self) {
         self.lost = true;
     }
 
-    pub(in crate::simulation) fn ingest(&mut self, delta: CurrentImpulseDelta) {
+    pub fn ingest(&mut self, delta: CurrentImpulseDelta) {
         if !delta.valid() {
             self.lost = true;
             return;
@@ -265,7 +265,7 @@ impl CurrentImpulseBuffer {
         }
     }
 
-    pub(in crate::simulation) fn history(&self) -> Option<CurrentImpulseHistoryEvidence> {
+    pub fn history(&self) -> Option<CurrentImpulseHistoryEvidence> {
         let batch = self.batch.as_ref()?;
         Some(CurrentImpulseHistoryEvidence {
             start_time_s: batch.start,
@@ -298,17 +298,17 @@ impl CurrentImpulseBuffer {
 }
 
 #[derive(Debug, Default)]
-pub(in crate::simulation) struct LiveTransientQueue {
+pub struct LiveTransientQueue {
     pub(super) samples: VecDeque<TransientSampleDelta>,
     impulses: CurrentImpulseBuffer,
 }
 
 impl LiveTransientQueue {
-    pub(super) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         *self = Self::default();
     }
 
-    pub(super) fn push(&mut self, mut delta: TransientSampleDelta) {
+    pub fn push(&mut self, mut delta: TransientSampleDelta) {
         if !delta.time.is_finite() {
             self.impulses.mark_lost();
             return;
@@ -326,7 +326,7 @@ impl LiveTransientQueue {
         self.samples.push_back(delta);
     }
 
-    pub(super) fn drain(&mut self) -> Vec<TransientSampleDelta> {
+    pub fn drain(&mut self) -> Vec<TransientSampleDelta> {
         let mut samples: Vec<_> = self.samples.drain(..).collect();
         if let Some(impulses) = self.impulses.take_delta() {
             // A separate event-only message preserves the interval even if

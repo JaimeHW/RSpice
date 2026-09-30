@@ -325,7 +325,9 @@ pub(super) fn emit_worker_progress_snapshot(progress: &SimulationProgress) {
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
-pub(super) fn emit_worker_transient_sample(sample: &super::super::TransientSampleDelta) {
+pub(super) fn emit_worker_transient_sample(
+    sample: &rspice_simulation::live_transient::TransientSampleDelta,
+) {
     use wasm_bindgen::JsCast as _;
     use wasm_bindgen::JsValue;
 

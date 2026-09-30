@@ -1208,7 +1208,7 @@ fn live_current_impulses_reach_a_charge_only_preview_and_survive_bad_analog_colu
     let mut delta: TransientSampleDelta = serde_json::from_value(wire).unwrap();
     delta
         .waveforms
-        .push(crate::simulation::runner::TransientWaveformSample {
+        .push(rspice_simulation::live_transient::TransientWaveformSample {
             name: "out".into(),
             value: f64::NAN,
             y_unit: "V".into(),
@@ -1239,7 +1239,7 @@ fn live_transient_accumulator_rejects_partial_or_schema_changing_points() {
         waveforms: waveforms
             .iter()
             .map(
-                |(name, value)| crate::simulation::runner::TransientWaveformSample {
+                |(name, value)| rspice_simulation::live_transient::TransientWaveformSample {
                     name: (*name).to_owned(),
                     value: *value,
                     y_unit: "V".to_owned(),
@@ -1268,13 +1268,15 @@ fn live_transient_accumulator_rejects_partial_or_schema_changing_points() {
 
 #[test]
 fn live_transient_accumulator_keeps_a_change_compressed_event_history() {
-    use crate::simulation::runner::{TransientDigitalEventSample, TransientRealEventSample};
+    use rspice_simulation::live_transient::{
+        TransientDigitalEventSample, TransientRealEventSample,
+    };
 
     let delta =
         |time: f64, events: &[(&str, u8)], real_events: &[(&str, f64)]| TransientSampleDelta {
             current_impulses: None,
             time,
-            waveforms: vec![crate::simulation::runner::TransientWaveformSample {
+            waveforms: vec![rspice_simulation::live_transient::TransientWaveformSample {
                 name: "out".to_owned(),
                 value: time,
                 y_unit: "V".to_owned(),
@@ -1367,7 +1369,7 @@ fn live_transient_accumulator_keeps_a_change_compressed_event_history() {
 
 #[test]
 fn live_transient_accumulator_bounds_the_provisional_event_history() {
-    use crate::simulation::runner::TransientDigitalEventSample;
+    use rspice_simulation::live_transient::TransientDigitalEventSample;
 
     let deltas = (0..LiveTransientAccumulator::MAX_LIVE_EVENT_POINTS + 64)
         .map(|index| TransientSampleDelta {
@@ -1415,12 +1417,12 @@ fn live_transient_accumulator_compacts_aligned_source_traces() {
             current_impulses: None,
             time: index as f64,
             waveforms: vec![
-                crate::simulation::runner::TransientWaveformSample {
+                rspice_simulation::live_transient::TransientWaveformSample {
                     name: "out".to_owned(),
                     value: (index as f64 / 10.0).sin(),
                     y_unit: "V".to_owned(),
                 },
-                crate::simulation::runner::TransientWaveformSample {
+                rspice_simulation::live_transient::TransientWaveformSample {
                     name: "ref".to_owned(),
                     value: (index as f64 / 17.0).cos(),
                     y_unit: "V".to_owned(),
