@@ -387,13 +387,12 @@ impl CheckAndSaveValidationReport {
                     .workspace
                     .content
                     .bind_generated_netlist_provenance(generated.netlist);
-                match crate::simulation::controller::prepared_run::expand_generated_dependencies(
+                match rspice_simulation::netlist_preparation::dependencies::expand_generated_dependencies(
                     &generated_source,
                     root.current_file(),
-                    &crate::state::IncludeSearchChain::for_project(
-                        &state.workspace.content.project,
-                    ),
-                    &state.model_library_manager,
+                    &rspice_simulation::netlist_preparation::IncludeSearchChain::resolve(state.workspace.content.project.include_search_paths(), state.workspace.content.project.data_root()),
+                    state.model_library_manager.catalog(),
+                    state.model_library_manager.resolution_records(),
                 ) {
                     Ok((sealed_source, sealed_dependencies)) => {
                         dependencies.insert(

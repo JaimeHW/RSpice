@@ -1151,8 +1151,9 @@ fn generated_model_section_is_expanded_and_retained_before_dispatch() {
     let (expanded, dependencies) = expand_generated_dependencies(
         &source,
         Some(&directory.join("generated.cir")),
-        &crate::state::IncludeSearchChain::default(),
-        &crate::state::ModelLibraryManager::default(),
+        &rspice_simulation::netlist_preparation::IncludeSearchChain::default(),
+        &rspice_model_library::ModelCatalog::default(),
+        &rspice_model_library::ModelResolutionRecords::default(),
     )
     .expect("configured dependency seals");
 

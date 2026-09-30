@@ -8,6 +8,12 @@ use crate::preparation::{PreparationError, PreparationStage};
 use crate::project_veriloga::preparation::project_veriloga_directive_matches_exact_identity;
 use rspice_core::netlist::{parse_include_directive, parse_lib_directive};
 
+pub fn contains_external_include_directive(source: &str) -> bool {
+    source
+        .lines()
+        .any(|line| parse_include_directive(line).is_some() || parse_lib_directive(line).is_some())
+}
+
 pub fn deferred_external_source_reason(line: &str) -> Option<&'static str> {
     let line = executable_source_portion(line);
     if line.is_empty() {

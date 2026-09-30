@@ -599,11 +599,15 @@ impl RSpiceApp {
         let generated = projected
             .content
             .bind_generated_netlist_provenance(generated.netlist);
-        crate::simulation::controller::prepared_run::expand_generated_dependencies(
+        rspice_simulation::netlist_preparation::dependencies::expand_generated_dependencies(
             &generated,
             root.current_file(),
-            &crate::state::IncludeSearchChain::for_project(&self.state.workspace.content.project),
-            &self.state.model_library_manager,
+            &rspice_simulation::netlist_preparation::IncludeSearchChain::resolve(
+                self.state.workspace.content.project.include_search_paths(),
+                self.state.workspace.content.project.data_root(),
+            ),
+            self.state.model_library_manager.catalog(),
+            self.state.model_library_manager.resolution_records(),
         )
         .map_err(|error| {
             format!("Configuration cannot be published because source sealing failed: {error}")
@@ -1197,13 +1201,18 @@ fn configuration_netlist_digest(
     let source = workspace
         .content
         .bind_generated_netlist_provenance(generated.netlist);
-    let (source, _) = crate::simulation::controller::prepared_run::expand_generated_dependencies(
-        &source,
-        root.current_file(),
-        &crate::state::IncludeSearchChain::for_project(&workspace.content.project),
-        model_libraries,
-    )
-    .map_err(|error| error.to_string())?;
+    let (source, _) =
+        rspice_simulation::netlist_preparation::dependencies::expand_generated_dependencies(
+            &source,
+            root.current_file(),
+            &rspice_simulation::netlist_preparation::IncludeSearchChain::resolve(
+                workspace.content.project.include_search_paths(),
+                workspace.content.project.data_root(),
+            ),
+            model_libraries.catalog(),
+            model_libraries.resolution_records(),
+        )
+        .map_err(|error| error.to_string())?;
     let digest = Sha256::digest(source.as_bytes());
     let text = digest
         .iter()

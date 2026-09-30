@@ -589,8 +589,10 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
     } else {
         None
     };
-    let include_search =
-        crate::state::IncludeSearchChain::for_project(&state.workspace.content.project);
+    let include_search = rspice_simulation::netlist_preparation::IncludeSearchChain::resolve(
+        state.workspace.content.project.include_search_paths(),
+        state.workspace.content.project.data_root(),
+    );
     let (mut diagnostics, symbols) = if buffer.trim().is_empty() {
         (Vec::new(), Some(Vec::new()))
     } else {
@@ -665,7 +667,7 @@ fn parse_buffer(buffer: &str) -> (Vec<Diagnostic>, Option<Vec<completion::Symbol
     parse_buffer_with_context(
         buffer,
         None,
-        &crate::state::IncludeSearchChain::default(),
+        &rspice_simulation::netlist_preparation::IncludeSearchChain::default(),
         platform_include_access(),
         None,
         &NoAbort,
@@ -675,7 +677,7 @@ fn parse_buffer(buffer: &str) -> (Vec<Diagnostic>, Option<Vec<completion::Symbol
 fn parse_buffer_with_context(
     buffer: &str,
     source_path: Option<&Path>,
-    include_search: &crate::state::IncludeSearchChain,
+    include_search: &rspice_simulation::netlist_preparation::IncludeSearchChain,
     include_access: IncludeAccess,
     sealed_sources: Option<&crate::state::model_library::SealedModelExecutionSources>,
     abort: &dyn AbortSignal,
@@ -1306,7 +1308,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         parse_buffer_with_context(
             source,
             Some(root),
-            &crate::state::IncludeSearchChain::default(),
+            &rspice_simulation::netlist_preparation::IncludeSearchChain::default(),
             IncludeAccess::NativeFilesystem,
             None,
             &NoAbort,
@@ -1463,7 +1465,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         let (diagnostics, symbols) = parse_buffer_with_context(
             source,
             Some(Path::new("project/root.cir")),
-            &crate::state::IncludeSearchChain::default(),
+            &rspice_simulation::netlist_preparation::IncludeSearchChain::default(),
             IncludeAccess::AuthenticatedBundleOnly,
             None,
             &NoAbort,
@@ -1485,7 +1487,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         let (diagnostics, symbols) = parse_buffer_with_context(
             source,
             Some(Path::new("project/root.cir")),
-            &crate::state::IncludeSearchChain::default(),
+            &rspice_simulation::netlist_preparation::IncludeSearchChain::default(),
             IncludeAccess::AuthenticatedBundleOnly,
             None,
             &NoAbort,
@@ -1519,7 +1521,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         let (diagnostics, symbols) = parse_buffer_with_context(
             source,
             Some(&root),
-            &crate::state::IncludeSearchChain::default(),
+            &rspice_simulation::netlist_preparation::IncludeSearchChain::default(),
             IncludeAccess::AuthenticatedBundleOnly,
             Some(&sealed),
             &NoAbort,
@@ -1540,7 +1542,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         let (diagnostics, symbols) = parse_buffer_with_context(
             source,
             None,
-            &crate::state::IncludeSearchChain::default(),
+            &rspice_simulation::netlist_preparation::IncludeSearchChain::default(),
             IncludeAccess::NativeFilesystem,
             None,
             &rspice_core::abort_signal::ImmediateAbort,
@@ -2055,8 +2057,10 @@ mod include_shadow_tests {
 
         let deck_path = deck_dir.join("top.cir");
         let source = "shadow deck\n.include models.lib\n.end\n";
-        let chain =
-            crate::state::IncludeSearchChain::resolve(&[first, second], Some(root.as_path()));
+        let chain = rspice_simulation::netlist_preparation::IncludeSearchChain::resolve(
+            &[first, second],
+            Some(root.as_path()),
+        );
         let mut processor = rspice_core::netlist::IncludeProcessor::new(&deck_path);
         chain.apply_to(&mut processor);
         processor
@@ -2101,7 +2105,7 @@ mod include_shadow_tests {
         std::fs::remove_file(root.join("second").join("models.lib")).expect("remove the shadow");
         // Re-walk the chain now that only one candidate holds the name.
         let deck_path = root.join("deck").join("top.cir");
-        let chain = crate::state::IncludeSearchChain::resolve(
+        let chain = rspice_simulation::netlist_preparation::IncludeSearchChain::resolve(
             &[root.join("first"), root.join("second")],
             Some(root.as_path()),
         );

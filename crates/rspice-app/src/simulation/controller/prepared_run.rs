@@ -8,10 +8,6 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-#[cfg(not(target_arch = "wasm32"))]
-use rspice_core::netlist::IncludeProcessor;
-use rspice_core::netlist::{parse_include_directive, parse_lib_directive};
-
 use super::*;
 use crate::simulation::execution::AuthorizedRunDispatch;
 use crate::simulation::execution::ExecutionTargetCapabilities;
@@ -37,20 +33,24 @@ use rspice_simulation::sealed_source::{
     generated_executable_source_digest, manual_executable_source_digest,
 };
 
-mod dependency_expansion;
 #[cfg(test)]
 mod measurement_tests;
 mod model_sources;
 pub(crate) mod occurrence_outputs;
 mod periodic_sources;
 
-use dependency_expansion::expand_manual_dependencies;
 use model_sources::validate_projected_model_binding_authority;
 use occurrence_outputs::{effective_plan_capture, projection_occurrence_nets};
 use periodic_sources::validate_prepared_periodic_sources;
 use rspice_simulation::model_sources::prepared_project_model_sources;
+#[cfg(test)]
+use rspice_simulation::netlist_preparation::dependencies::expand_generated_dependencies;
+use rspice_simulation::netlist_preparation::dependencies::{
+    execution_current_directory, expand_generated_dependencies_with_sealed_sources,
+    expand_manual_dependencies,
+};
 use rspice_simulation::netlist_preparation::{
-    deferred_external_source_reason, executable_logical_lines,
+    contains_external_include_directive, deferred_external_source_reason, executable_logical_lines,
     reject_deferred_external_sources_with_project_runtimes, validated_executable_hierarchy,
 };
 use rspice_simulation::netlist_preparation::{measurements, owned_source};
@@ -415,7 +415,10 @@ impl SimulationController {
         let (source, _) = expand_generated_dependencies_with_sealed_sources(
             &source,
             root_schematic.current_file(),
-            &crate::state::IncludeSearchChain::for_project(&state.workspace.content.project),
+            &rspice_simulation::netlist_preparation::IncludeSearchChain::resolve(
+                state.workspace.content.project.include_search_paths(),
+                state.workspace.content.project.data_root(),
+            ),
             Some(&sealed_models),
         )?;
         Ok(source)
@@ -1005,7 +1008,10 @@ impl SimulationController {
             expand_generated_dependencies_with_sealed_sources(
                 &netlist,
                 root_schematic.current_file(),
-                &crate::state::IncludeSearchChain::for_project(&state.workspace.content.project),
+                &rspice_simulation::netlist_preparation::IncludeSearchChain::resolve(
+                    state.workspace.content.project.include_search_paths(),
+                    state.workspace.content.project.data_root(),
+                ),
                 Some(&sealed_models),
             )?;
         netlist = measurements::materialize(
@@ -1232,7 +1238,10 @@ impl SimulationController {
         let (expanded, canonical_origin, sealed_source_dependencies) = expand_manual_dependencies(
             &composed,
             origin,
-            &crate::state::IncludeSearchChain::for_project(&state.workspace.content.project),
+            &rspice_simulation::netlist_preparation::IncludeSearchChain::resolve(
+                state.workspace.content.project.include_search_paths(),
+                state.workspace.content.project.data_root(),
+            ),
             &sealed_models,
         )?;
         let expanded = owned_source::bind_execution_profile(
@@ -1713,104 +1722,6 @@ fn attach_saved_output_contracts(
         .collect())
 }
 
-pub(crate) fn expand_generated_dependencies(
-    source: &str,
-    origin: Option<&Path>,
-    include_search: &crate::state::IncludeSearchChain,
-    model_libraries: &crate::state::ModelLibraryManager,
-) -> Result<(String, Vec<rspice_core::netlist::ResolvedIncludeDependency>), PreparationError> {
-    #[cfg(target_arch = "wasm32")]
-    let sealed = model_libraries
-        .seal_execution_sources()
-        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = model_libraries;
-
-    expand_generated_dependencies_with_sealed_sources(source, origin, include_search, {
-        #[cfg(target_arch = "wasm32")]
-        {
-            Some(&sealed)
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            None
-        }
-    })
-}
-
-fn expand_generated_dependencies_with_sealed_sources(
-    source: &str,
-    origin: Option<&Path>,
-    include_search: &crate::state::IncludeSearchChain,
-    sealed_sources: Option<&crate::state::model_library::SealedModelExecutionSources>,
-) -> Result<(String, Vec<rspice_core::netlist::ResolvedIncludeDependency>), PreparationError> {
-    if !contains_external_include_directive(source) {
-        return Ok((source.to_owned(), Vec::new()));
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        // The browser resolves only through the authenticated bundle.
-        let _ = include_search;
-        let origin = origin.ok_or_else(|| {
-            PreparationError::new(
-                PreparationStage::SourceChecks,
-                "Configured external SPICE sources require an imported root identity before browser execution",
-            )
-        })?;
-        let origin = absolute_source_identity(origin)?;
-        let sealed_sources = sealed_sources.ok_or_else(|| {
-            PreparationError::new(
-                PreparationStage::ModelBindings,
-                "Configured external SPICE sources have no authenticated browser source bundle",
-            )
-        })?;
-        sealed_sources
-            .expand_root_dependencies(&origin, source, &rspice_core::abort_signal::NoAbort)
-            .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = sealed_sources;
-        let owner = match origin {
-            Some(path) => absolute_source_identity(path)?,
-            None => execution_current_directory()?.join("__rspice_generated_source__.cir"),
-        };
-        let mut processor = IncludeProcessor::new(&owner);
-        include_search.apply_to(&mut processor);
-        let expanded = processor.expand_content(source, &owner).map_err(|error| {
-            PreparationError::new(
-                PreparationStage::SourceChecks,
-                format!("Could not seal configured source dependencies: {error}"),
-            )
-        })?;
-        Ok((expanded, processor.resolved_dependencies().to_vec()))
-    }
-}
-
-fn absolute_source_identity(path: &Path) -> Result<PathBuf, PreparationError> {
-    #[cfg(target_arch = "wasm32")]
-    if rspice_model_library::is_portable_absolute_path(path) {
-        return Ok(path.to_path_buf());
-    }
-    if path.is_absolute() {
-        return Ok(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
-    }
-    let current = std::env::current_dir().map_err(|error| {
-        PreparationError::new(
-            PreparationStage::SourceChecks,
-            format!("Could not resolve manual deck origin: {error}"),
-        )
-    })?;
-    let joined = current.join(path);
-    Ok(joined.canonicalize().unwrap_or(joined))
-}
-
-fn path_identity(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
-}
-
 fn touchstone_export_policy<'a>(
     state: &AppState,
     tasks: impl IntoIterator<Item = &'a QueuedAnalysis>,
@@ -1874,25 +1785,6 @@ fn touchstone_output_prefix(
         .map(OsString::from)
         .unwrap_or_else(|| OsString::from("untitled"));
     Ok((directory, stem))
-}
-
-fn execution_current_directory() -> Result<PathBuf, PreparationError> {
-    match std::env::current_dir() {
-        Ok(path) => Ok(path),
-        #[cfg(target_arch = "wasm32")]
-        Err(_) => Ok(PathBuf::from(".")),
-        #[cfg(not(target_arch = "wasm32"))]
-        Err(error) => Err(PreparationError::new(
-            PreparationStage::AnalysisPlan,
-            format!("Could not resolve the automatic export directory: {error}"),
-        )),
-    }
-}
-
-fn contains_external_include_directive(source: &str) -> bool {
-    source
-        .lines()
-        .any(|line| parse_include_directive(line).is_some() || parse_lib_directive(line).is_some())
 }
 
 #[cfg(test)]

@@ -353,11 +353,15 @@ fn validate_candidate_configuration(
     let generated = workspace
         .content
         .bind_generated_netlist_provenance(generated.netlist);
-    crate::simulation::controller::prepared_run::expand_generated_dependencies(
+    rspice_simulation::netlist_preparation::dependencies::expand_generated_dependencies(
         &generated,
         root.current_file(),
-        &crate::state::IncludeSearchChain::for_project(&app.state.workspace.content.project),
-        &app.state.model_library_manager,
+        &rspice_simulation::netlist_preparation::IncludeSearchChain::resolve(
+            app.state.workspace.content.project.include_search_paths(),
+            app.state.workspace.content.project.data_root(),
+        ),
+        app.state.model_library_manager.catalog(),
+        app.state.model_library_manager.resolution_records(),
     )
     .map_err(|error| {
         format!("Configuration cannot be activated because source sealing failed: {error}")

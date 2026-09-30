@@ -1,5 +1,8 @@
 //! Authentication and materialization of immutable model-source snapshots.
 
+mod catalog_sealing;
+pub use catalog_sealing::{seal_catalog_execution_sources, seal_plan_execution_sources};
+
 mod project_provenance;
 pub use project_provenance::prepared_project_model_sources;
 

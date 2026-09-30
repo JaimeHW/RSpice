@@ -52,35 +52,10 @@ impl ModelLibraryManager {
     /// over those same bytes, and only the authenticated UTF-8 content is
     /// published to the in-memory resolver.
     pub fn seal_execution_sources(&self) -> Result<SealedModelExecutionSources, String> {
-        self.validate_model_resolution_records_against_catalog()?;
-        let mut libraries: Vec<_> = self
-            .catalog
-            .libraries()
-            .filter(|library| library.source_authority.has_execution_source())
-            .map(|library| (library, library.selected_corner.clone()))
-            .collect();
-        libraries.sort_by(|(left, _), (right, _)| left.name.cmp(&right.name));
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            rspice_simulation::model_sources::seal_model_sources(
-                libraries,
-                self.resolution_records.as_map(),
-                |path| std::fs::read(path).map_err(|error| error.to_string()),
-            )
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            rspice_simulation::model_sources::seal_model_sources(
-                libraries,
-                self.resolution_records.as_map(),
-                |path| {
-                    Err(format!(
-                        "browser execution cannot authenticate external model path '{}'",
-                        path.display()
-                    ))
-                },
-            )
-        }
+        rspice_simulation::model_sources::seal_catalog_execution_sources(
+            &self.catalog,
+            &self.resolution_records,
+        )
     }
 
     /// Capture the manager's current executable catalog as an explicit plan
@@ -106,29 +81,11 @@ impl ModelLibraryManager {
         &self,
         bindings: &[SimulationPlanModelBinding],
     ) -> Result<SealedModelExecutionSources, String> {
-        self.validate_model_resolution_records_against_catalog()?;
-        let libraries = self.catalog.resolve_simulation_plan_bindings(bindings)?;
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            rspice_simulation::model_sources::seal_model_sources(
-                libraries,
-                self.resolution_records.as_map(),
-                |path| std::fs::read(path).map_err(|error| error.to_string()),
-            )
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            rspice_simulation::model_sources::seal_model_sources(
-                libraries,
-                self.resolution_records.as_map(),
-                |path| {
-                    Err(format!(
-                        "browser execution cannot authenticate external model path '{}'",
-                        path.display()
-                    ))
-                },
-            )
-        }
+        rspice_simulation::model_sources::seal_plan_execution_sources(
+            &self.catalog,
+            &self.resolution_records,
+            bindings,
+        )
     }
 
     /// Validate binding identities and selected sections against the current

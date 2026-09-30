@@ -298,11 +298,6 @@ impl ModelLibraryManager {
             .clear_definition_provider(scope, definition)
     }
 
-    fn validate_model_resolution_records_against_catalog(&self) -> Result<(), String> {
-        self.resolution_records
-            .validate_against_catalog(&self.catalog)
-    }
-
     /// Create a new manager
     pub fn new() -> Self {
         Self::default()
