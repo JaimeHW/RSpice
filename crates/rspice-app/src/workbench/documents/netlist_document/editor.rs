@@ -528,8 +528,15 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
     let materialized = if state.ui.netlist.active_dependency_identity.is_some() {
         Ok(buffer.clone())
     } else if state.ui.netlist.active_document == super::ActiveNetlistDocument::OwnedSource {
-        crate::workbench::workflows::netlist_workflow::compose_owned_netlist_execution_source(
-            state, &buffer,
+        rspice_simulation::netlist_preparation::owned_source::compose_owned_netlist_execution_source(
+            state.workspace.content.netlist_descriptor.as_ref(),
+            state
+                .workspace
+                .content
+                .netlist_document
+                .as_ref()
+                .and_then(|document| document.generated_artifact()),
+            &buffer,
         )
     } else {
         Ok(buffer.clone())

@@ -2,10 +2,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::product::AnalysisInstanceId;
-use crate::simulation::execution::{PreparationError, PreparationStage};
-use crate::simulation::plan::AnalysisDraft;
-use crate::state::SpecificationDefinition;
+use crate::preparation::{PreparationError, PreparationStage};
+use rspice_app_types::product::AnalysisInstanceId;
+use rspice_results::specification::SpecificationDefinition;
+use rspice_simulation_contract::analysis_draft::AnalysisDraft;
 
 fn failure(message: impl Into<String>) -> PreparationError {
     PreparationError::new(PreparationStage::AnalysisPlan, message)
@@ -32,7 +32,7 @@ fn family(
     None
 }
 
-pub(super) fn materialize(
+pub fn materialize(
     source: &str,
     definitions: &[SpecificationDefinition],
     drafts: &HashMap<AnalysisInstanceId, &AnalysisDraft>,
@@ -61,7 +61,7 @@ pub(super) fn materialize(
     Ok(source)
 }
 
-pub(super) fn append_to_generated_source(
+pub fn append_to_generated_source(
     source: &str,
     definitions: &[SpecificationDefinition],
     drafts: &HashMap<AnalysisInstanceId, &AnalysisDraft>,
@@ -120,13 +120,8 @@ fn append_statements(
     if statements.is_empty() {
         return Ok(source.to_owned());
     }
-    Ok(
-        rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
-            source,
-            &statements.join("\n"),
-        ),
-    )
+    Ok(crate::netlist_preparation::splice_before_terminal_end_card(
+        source,
+        &statements.join("\n"),
+    ))
 }
-
-#[cfg(test)]
-mod tests;

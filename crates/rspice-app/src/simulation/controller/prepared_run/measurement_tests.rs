@@ -1,11 +1,14 @@
 //! Measurement references must survive preparation, dispatch, retention, and project saves.
 
-use super::*;
+use crate::product::AnalysisInstanceId;
 use crate::simulation::config::{AnalysisConfig, TransientAnalysisConfig};
 use crate::simulation::controller::SimulationController;
 use crate::simulation::engine_bridge::EngineBridge;
-use crate::simulation::plan::AnalysisKind;
+use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+use crate::state::SpecificationDefinition;
 use crate::state::{SimulationRunIntent, SpecEntry, SpecPointScope};
+use rspice_simulation::netlist_preparation::measurements::materialize;
+use std::collections::HashMap;
 
 fn definition(name: &str, card: &str) -> SpecificationDefinition {
     let mut definition = SpecificationDefinition::new_from_projection(&SpecEntry {
@@ -24,7 +27,7 @@ fn definition(name: &str, card: &str) -> SpecificationDefinition {
 fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
     use crate::simulation::execution::ExecutionPermitIssuer;
     use crate::state::workspace::MeasurementReferenceSource;
-    let mut state = super::super::tests::runnable_state();
+    let mut state = super::tests::runnable_state();
     let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
     let transient = plan
         .instances()
@@ -159,7 +162,7 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
 
 #[test]
 fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
-    let mut state = super::super::tests::runnable_state();
+    let mut state = super::tests::runnable_state();
     let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
     let transient = plan
         .instances()

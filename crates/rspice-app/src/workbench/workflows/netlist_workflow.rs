@@ -10,7 +10,6 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
 mod bundle;
-mod compose;
 mod external_change;
 mod import;
 mod platform;
@@ -19,7 +18,6 @@ mod staging;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use compose::compose_owned_netlist_execution_source;
 pub(crate) use external_change::apply_staged_external_netlist_change;
 #[cfg(test)]
 pub(crate) use import::apply_imported_netlist;

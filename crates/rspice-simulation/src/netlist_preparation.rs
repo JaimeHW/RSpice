@@ -9,6 +9,9 @@ use rspice_core::netlist::{ElementKind, SourceSpec};
 use crate::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use crate::sweeps::CornerRunConfig;
 
+pub mod measurements;
+pub mod owned_source;
+
 mod external_sources;
 pub use external_sources::{
     deferred_external_source_reason, executable_logical_lines,

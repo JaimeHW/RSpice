@@ -4,9 +4,9 @@
 mod vendor_profiles;
 
 use super::bundle::*;
-use super::compose::*;
 #[cfg(not(target_arch = "wasm32"))]
 use super::external_change::*;
+use rspice_simulation::netlist_preparation::owned_source::compose_owned_netlist_execution_source;
 
 #[test]
 fn dialect_detection_uses_active_body_records_and_export_headers() {
@@ -26,19 +26,6 @@ fn dialect_detection_uses_active_body_records_and_export_headers() {
         super::staging::detect_netlist_dialect("simulator lang=spice; exported\n.op\n.end\n").0,
         NetlistSourceDialect::Spectre
     );
-}
-
-#[test]
-fn narrow_override_reaches_execution_before_the_first_commented_termination() {
-    let base = ".end\r\nR1 1 0 1k\r\n.end; first\r\n.end\r\n";
-    let source =
-        insert_before_end(base, ".options reltol=0.012345").expect("base has a terminator");
-    let parsed = rspice_core::Netlist::parse(&source).expect("composed source parses");
-    assert_eq!(parsed.title, ".end");
-    assert_eq!(parsed.options.reltol, Some(0.012345), "{source}");
-    assert!(source.starts_with(".end\r\nR1 1 0 1k\r\n"), "{source:?}");
-    assert!(source.ends_with(".end; first\r\n.end\r\n"), "{source:?}");
-    assert!(insert_before_end(".end\nR1 1 0 1k", ".op").is_err());
 }
 
 #[test]
@@ -1033,8 +1020,17 @@ fn owned_source_strategy_executes_exact_authored_bytes_without_generated_composi
         crate::state::OwnedNetlistEditStrategy::OwnedSource,
     );
 
-    let composed = compose_owned_netlist_execution_source(&state, authored)
-        .expect("owned source is executable");
+    let composed = compose_owned_netlist_execution_source(
+        state.workspace.content.netlist_descriptor.as_ref(),
+        state
+            .workspace
+            .content
+            .netlist_document
+            .as_ref()
+            .and_then(|document| document.generated_artifact()),
+        authored,
+    )
+    .expect("owned source is executable");
 
     assert_eq!(composed.as_bytes(), authored.as_bytes());
 }
@@ -1048,8 +1044,17 @@ fn parameter_option_override_retains_base_and_appends_override_before_end() {
         crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
     );
 
-    let composed = compose_owned_netlist_execution_source(&state, authored)
-        .expect("parameter override is executable");
+    let composed = compose_owned_netlist_execution_source(
+        state.workspace.content.netlist_descriptor.as_ref(),
+        state
+            .workspace
+            .content
+            .netlist_document
+            .as_ref()
+            .and_then(|document| document.generated_artifact()),
+        authored,
+    )
+    .expect("parameter override is executable");
 
     assert_eq!(
         composed,
@@ -1067,8 +1072,17 @@ fn include_order_override_replaces_all_base_include_cards_and_continuations() {
         crate::state::OwnedNetlistEditStrategy::IncludeOrderOverride,
     );
 
-    let composed = compose_owned_netlist_execution_source(&state, authored)
-        .expect("include-order override is executable");
+    let composed = compose_owned_netlist_execution_source(
+        state.workspace.content.netlist_descriptor.as_ref(),
+        state
+            .workspace
+            .content
+            .netlist_document
+            .as_ref()
+            .and_then(|document| document.generated_artifact()),
+        authored,
+    )
+    .expect("include-order override is executable");
 
     assert_eq!(
         composed,
@@ -1086,8 +1100,17 @@ fn analysis_only_deck_replaces_base_analysis_measurement_and_output_cards() {
         crate::state::OwnedNetlistEditStrategy::AnalysisOnlyDeck,
     );
 
-    let composed = compose_owned_netlist_execution_source(&state, authored)
-        .expect("analysis-only deck is executable");
+    let composed = compose_owned_netlist_execution_source(
+        state.workspace.content.netlist_descriptor.as_ref(),
+        state
+            .workspace
+            .content
+            .netlist_document
+            .as_ref()
+            .and_then(|document| document.generated_artifact()),
+        authored,
+    )
+    .expect("analysis-only deck is executable");
 
     assert_eq!(
         composed,
@@ -1105,8 +1128,17 @@ fn narrow_override_rejects_device_cards_and_cross_strategy_directives() {
         device,
         crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
     );
-    let error = compose_owned_netlist_execution_source(&state, device)
-        .expect_err("device card must fail closed");
+    let error = compose_owned_netlist_execution_source(
+        state.workspace.content.netlist_descriptor.as_ref(),
+        state
+            .workspace
+            .content
+            .netlist_document
+            .as_ref()
+            .and_then(|document| document.generated_artifact()),
+        device,
+    )
+    .expect_err("device card must fail closed");
     assert!(error.contains("'roverride'"));
     assert!(error.contains("line 1"));
 
@@ -1116,8 +1148,17 @@ fn narrow_override_rejects_device_cards_and_cross_strategy_directives() {
         wrong_strategy,
         crate::state::OwnedNetlistEditStrategy::AnalysisOnlyDeck,
     );
-    let error = compose_owned_netlist_execution_source(&state, wrong_strategy)
-        .expect_err("cross-strategy directive must fail closed");
+    let error = compose_owned_netlist_execution_source(
+        state.workspace.content.netlist_descriptor.as_ref(),
+        state
+            .workspace
+            .content
+            .netlist_document
+            .as_ref()
+            .and_then(|document| document.generated_artifact()),
+        wrong_strategy,
+    )
+    .expect_err("cross-strategy directive must fail closed");
     assert!(error.contains("'.include'"));
     assert!(error.contains("line 1"));
 }
@@ -1131,8 +1172,17 @@ fn narrow_override_rejects_orphan_continuation() {
         crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
     );
 
-    let error = compose_owned_netlist_execution_source(&state, authored)
-        .expect_err("orphan continuation must fail closed");
+    let error = compose_owned_netlist_execution_source(
+        state.workspace.content.netlist_descriptor.as_ref(),
+        state
+            .workspace
+            .content
+            .netlist_document
+            .as_ref()
+            .and_then(|document| document.generated_artifact()),
+        authored,
+    )
+    .expect_err("orphan continuation must fail closed");
 
     assert_eq!(
         error,
@@ -1159,8 +1209,17 @@ fn narrow_override_requires_retained_generated_base() {
         owned_includes: Vec::new(),
     });
 
-    let error = compose_owned_netlist_execution_source(&state, authored)
-        .expect_err("missing generated base must fail closed");
+    let error = compose_owned_netlist_execution_source(
+        state.workspace.content.netlist_descriptor.as_ref(),
+        state
+            .workspace
+            .content
+            .netlist_document
+            .as_ref()
+            .and_then(|document| document.generated_artifact()),
+        authored,
+    )
+    .expect_err("missing generated base must fail closed");
 
     assert_eq!(
         error,
@@ -1177,8 +1236,17 @@ fn narrow_override_rejects_generated_base_without_end_terminator() {
         crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
     );
 
-    let error = compose_owned_netlist_execution_source(&state, authored)
-        .expect_err("missing end terminator must fail closed");
+    let error = compose_owned_netlist_execution_source(
+        state.workspace.content.netlist_descriptor.as_ref(),
+        state
+            .workspace
+            .content
+            .netlist_document
+            .as_ref()
+            .and_then(|document| document.generated_artifact()),
+        authored,
+    )
+    .expect_err("missing end terminator must fail closed");
 
     assert_eq!(error, "Retained generated base has no .end terminator.");
 }

@@ -38,7 +38,8 @@ use rspice_simulation::sealed_source::{
 };
 
 mod dependency_expansion;
-mod measurements;
+#[cfg(test)]
+mod measurement_tests;
 mod model_sources;
 pub(crate) mod occurrence_outputs;
 mod periodic_sources;
@@ -52,6 +53,7 @@ use rspice_simulation::netlist_preparation::{
     deferred_external_source_reason, executable_logical_lines,
     reject_deferred_external_sources_with_project_runtimes, validated_executable_hierarchy,
 };
+use rspice_simulation::netlist_preparation::{measurements, owned_source};
 use rspice_simulation::project_veriloga::preparation::{
     prepared_configuration_veriloga_runtimes, prepared_model_library_veriloga_runtimes,
     prepared_signed_pdk_veriloga_runtimes, project_veriloga_runtimes_referenced_by,
@@ -1156,8 +1158,15 @@ impl SimulationController {
         }
 
         let owned_materialized = if owned_active {
-            crate::workbench::workflows::netlist_workflow::compose_owned_netlist_execution_source(
-                state, source,
+            owned_source::compose_owned_netlist_execution_source(
+                state.workspace.content.netlist_descriptor.as_ref(),
+                state
+                    .workspace
+                    .content
+                    .netlist_document
+                    .as_ref()
+                    .and_then(|document| document.generated_artifact()),
+                source,
             )
             .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?
         } else {
@@ -1167,7 +1176,7 @@ impl SimulationController {
             .then_some(state.workspace.content.netlist_descriptor.as_ref())
             .flatten();
         let owned_materialized =
-            manual_deck::adapt_owned_execution_profile(descriptor, &owned_materialized)
+            owned_source::adapt_owned_execution_profile(descriptor, &owned_materialized)
                 .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
         let has_project_technology = state.project_technology_in_effect();
         let sealed_models = if has_project_technology {
@@ -1226,7 +1235,7 @@ impl SimulationController {
             &crate::state::IncludeSearchChain::for_project(&state.workspace.content.project),
             &sealed_models,
         )?;
-        let expanded = manual_deck::bind_execution_profile(
+        let expanded = owned_source::bind_execution_profile(
             descriptor.and_then(|descriptor| descriptor.execution_profile),
             expanded,
         )

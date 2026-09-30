@@ -817,11 +817,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("browser/file_import", "shortcuts/profile_workflow", 1),
     ("shortcuts/library_persistence", "shortcuts/artifacts", 1),
     ("documents/code_workspace", "workflows/export_workflow", 1),
-    (
-        "documents/netlist_document",
-        "workflows/netlist_workflow",
-        1,
-    ),
     // Presentation reaching sideways into a peer surface.
     ("docks", "documents/visualization_studio", 5),
     ("documents/result_document", "chrome", 1),
