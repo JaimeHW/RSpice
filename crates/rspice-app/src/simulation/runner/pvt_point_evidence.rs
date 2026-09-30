@@ -340,3 +340,49 @@ pub(in crate::simulation) fn run_declaration(
 fn analysis_type_for(spec: &AnalysisSpec) -> AnalysisType {
     crate::simulation::execution::canonical_analysis_kind(spec).result_analysis_type()
 }
+
+/// Real OP artifact with exact source binding and worker transport validation.
+pub(in crate::simulation) fn op_dependencies(
+    basis: &str,
+    op_deck: &str,
+    consumer_deck: &str,
+    config: crate::simulation::dialog::OpConfig,
+) -> crate::simulation::execution::ResolvedExecutionDependencies {
+    use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+    use crate::simulation::engine_bridge::EngineBridge;
+    use crate::simulation::execution::ResolvedExecutionDependencies;
+    use crate::simulation::execution::{ExecutionArtifactEnvelope, PreparedDependencyBinding};
+    let snapshot = ContentDigest::from_bytes([91; 32]);
+    let binding = PreparedDependencyBinding::dc_operating_point_seed(
+        AnalysisInstanceId::new(),
+        ObjectRevision::INITIAL,
+        ContentDigest::from_bytes([92; 32]),
+    );
+    let result = EngineBridge::new()
+        .run(
+            &crate::simulation::AnalysisConfig::DcOp(config.clone()),
+            op_deck,
+        )
+        .unwrap();
+    let source = crate::state::content_digest(basis);
+    let artifact = ExecutionArtifactEnvelope::from_dc_operating_point_result(
+        snapshot,
+        binding.producer_instance_id(),
+        binding.producer_source_revision(),
+        binding.producer_config_digest(),
+        source,
+        &config,
+        &result,
+    )
+    .unwrap()
+    .unwrap();
+    let mut dependencies = ResolvedExecutionDependencies::resolve(
+        snapshot,
+        vec![binding.clone()],
+        &HashMap::from([(binding.producer_instance_id(), artifact)]),
+    )
+    .unwrap();
+    dependencies.bind_source(consumer_deck, source);
+    let (metadata, buffers) = dependencies.encode_transfer().unwrap();
+    ResolvedExecutionDependencies::decode_transfer(&metadata, buffers).unwrap()
+}

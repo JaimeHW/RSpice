@@ -400,6 +400,7 @@ mod tests {
         EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve, HbToneSpec,
         SpPort,
     };
+    use crate::simulation::runner::pvt_point_evidence::op_dependencies;
 
     fn digest(byte: u8) -> ContentDigest {
         ContentDigest::from_bytes([byte; 32])
@@ -469,7 +470,7 @@ mod tests {
                 .options
                 .temp
                 .unwrap_or(27.0);
-        let op_dependencies = qpss::op_dependencies(
+        let op_dependencies = op_dependencies(
             netlist,
             netlist,
             netlist,
@@ -1778,14 +1779,25 @@ R2 out 0 1k\n\
         ];
 
         for (family, spec) in cases {
+            let periodic = matches!(spec, AnalysisSpec::HarmonicBalance { .. });
+            let deck = if periodic {
+                "cancellation boundary\nV1 out 0 1\nR1 out 0 1k\n.end\n"
+            } else {
+                "cancellation boundary\n.end\n"
+            };
+            let dependencies = if periodic {
+                op_dependencies(deck, deck, deck, Default::default())
+            } else {
+                ResolvedExecutionDependencies::default()
+            };
             let signal = AbortOnPoll::new(3);
             let result = run_spec_request(
                 &EngineBridge::new(),
                 spec,
                 SpecExecutionOptions::default(),
-                "cancellation boundary\n.end\n",
+                deck,
                 None,
-                &ResolvedExecutionDependencies::default(),
+                &dependencies,
                 &signal,
             );
 

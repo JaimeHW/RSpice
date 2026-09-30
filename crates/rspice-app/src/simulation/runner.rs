@@ -1343,6 +1343,16 @@ mod tests {
             spec: Box::new(spec.clone()),
             options: Box::new(SpecExecutionOptions::default()),
         });
+        let dependencies = if matches!(spec, AnalysisSpec::HarmonicBalance { .. }) {
+            super::pvt_point_evidence::op_dependencies(
+                netlist,
+                netlist,
+                netlist,
+                Default::default(),
+            )
+        } else {
+            ResolvedExecutionDependencies::default()
+        };
         let result = run_simulation_thread_with_progress_observer(
             SimulationRequest::Spec {
                 spec: Box::new(spec),
@@ -1353,7 +1363,7 @@ mod tests {
                 netlist: netlist.to_owned(),
                 source_path: None,
                 project_veriloga_runtimes: Default::default(),
-                dependencies: Default::default(),
+                dependencies,
                 environment: None,
                 stream_transient_samples: false,
             },
@@ -1429,12 +1439,9 @@ mod tests {
     /// A one-tone nonlinear HB solve traces its Newton iterations when the
     /// form asks for them, and traces nothing when it does not.
     ///
-    /// What this fixture's solve actually writes is one `log::debug!` per
-    /// Newton iteration of the nonlinear solve it runs, plus the presolve's
-    /// account of the initial guess — measured, not assumed. The engine has
-    /// other traces behind `HbConfig::verbose` itself (the certified exact
-    /// matrix-free step, the Krylov residual), and they are admitted here by
-    /// the same rule; this deck simply converges before it needs them.
+    /// The fixture requests Krylov corrections, whose iteration and residual
+    /// traces are gated by `HbConfig::verbose`. Its sinusoidal drive requires
+    /// nonlinear corrections after the explicit operating-point startup.
     ///
     /// The quiet half is the half that matters. `Debug` is what the engine
     /// writes its whole solver trace at, and the run that did not ask for it
@@ -1444,7 +1451,7 @@ mod tests {
     #[test]
     fn an_hb_verbose_run_traces_its_newton_iterations_in_the_console() {
         const DECK: &str = "hb verbose diode\n\
-                            VDRIVE in 0 DC 1\n\
+                            VDRIVE in 0 DC 1 SIN(1 0.1 1MEG)\n\
                             R1 in out 100\n\
                             D1 out 0 DMOD\n\
                             .model DMOD D (IS=1u N=1.48)\n\
@@ -1459,7 +1466,7 @@ mod tests {
             oversample: 2,
             collocation_points: None,
             max_mixing_order: 5,
-            use_krylov: false,
+            use_krylov: true,
             gmres_restart: 30,
             source_stepping: false,
             use_exact_jacobian: true,
@@ -1471,7 +1478,8 @@ mod tests {
             .iter()
             .filter(|line| line.severity == crate::diagnostics::LogSeverity::Debug)
             .filter(|line| {
-                line.message.starts_with("Newton iter") || line.message.starts_with("HB ")
+                line.message.starts_with("HB exact matrix-free solve:")
+                    || line.message.starts_with("HB Krylov solve:")
             })
             .count();
         assert!(

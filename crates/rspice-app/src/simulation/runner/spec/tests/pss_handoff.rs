@@ -18,7 +18,7 @@ fn pss_op_handoff_preserves_environment_for_all_consumers() {
     op.run_point.supply_voltage = Some(2.0);
     op.run_point.nominal_supply_voltage = Some(1.0);
     op.run_point.supply_source_names = vec!["VDD".into()];
-    let dependencies = super::qpss::op_dependencies(basis, &op_deck, &pss_deck, op);
+    let dependencies = op_dependencies(basis, &op_deck, &pss_deck, op);
     let environment = dependencies
         .dc_operating_point_seed()
         .unwrap()
