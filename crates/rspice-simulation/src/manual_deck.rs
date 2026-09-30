@@ -4,21 +4,29 @@
 //! analyses the deck itself declares, rather than the ones the Simulate
 //! workspace configured.
 
-use super::*;
+use crate::execution_options::SpecExecutionOptions;
+use crate::preparation::QueuedAnalysis;
 use rspice_core::netlist::{
     AnalysisCommand, ElementKind, FreqVariation, Netlist, PoleZeroAnalysisType,
     PoleZeroTransferType, StepCommand, StepTarget,
 };
+use rspice_simulation_contract::analysis_spec::{AnalysisSpec, HbToneSpec};
+use rspice_simulation_contract::config::{
+    AcAnalysisConfig, AcSweepType, AnalysisConfig, DcSweepConfig, FrequencySweep,
+    NoiseAnalysisConfig, NoiseSweepType, PoleZeroConfig, PzAnalysisType, SensitivityConfig,
+    TransientAnalysisConfig,
+};
 
-use rspice_simulation::sweeps::{
+use crate::sweeps::{
     CornerBaseMode, CornerFrequencySweep, TempRunConfig, expand_step_sweep_values,
 };
 
 mod periodic;
 mod recorded_fft;
 
-pub(super) fn build_manual_deck_queue(
-    state: &AppState,
+/// Parse authored analyses; returned tasks still require snapshot validation and authorization.
+pub fn build_manual_deck_queue(
+    reference_temperature_celsius: f64,
     source: &str,
 ) -> Result<Vec<QueuedAnalysis>, Vec<String>> {
     let source = compose_manual_deck_source(source);
@@ -117,7 +125,7 @@ pub(super) fn build_manual_deck_queue(
             }
             continue;
         }
-        match command_to_queue_item(state, &parsed, command) {
+        match command_to_queue_item(reference_temperature_celsius, &parsed, command) {
             Ok(item) => queue.push(item),
             Err(err) => errors.push(err),
         }
@@ -157,7 +165,11 @@ pub(super) fn build_manual_deck_queue(
                 "Manual-deck {family} requires one unambiguous operating-point seed; found {op_count} .OP analyses."
             ));
         } else if op_count == 0 {
-            match command_to_queue_item(state, &parsed, &AnalysisCommand::Op) {
+            match command_to_queue_item(
+                reference_temperature_celsius,
+                &parsed,
+                &AnalysisCommand::Op,
+            ) {
                 Ok(mut item) => {
                     item.analysis_line = format!(".op (implicit {family} seed)");
                     queue.push(item);
@@ -479,7 +491,7 @@ fn temperature_base_mode(command: &AnalysisCommand) -> Result<CornerBaseMode, St
         } => {
             if let Some(second) = sweep2 {
                 return Ok(CornerBaseMode::DcSweepNested {
-                    modes: crate::simulation::config::DcSweepModes {
+                    modes: rspice_simulation_contract::config::DcSweepModes {
                         primary: mode.into(),
                         secondary: sweep2
                             .as_ref()
@@ -496,7 +508,7 @@ fn temperature_base_mode(command: &AnalysisCommand) -> Result<CornerBaseMode, St
                 });
             }
             Ok(CornerBaseMode::DcSweep {
-                modes: crate::simulation::config::DcSweepModes {
+                modes: rspice_simulation_contract::config::DcSweepModes {
                     primary: mode.into(),
                     secondary: sweep2
                         .as_ref()
@@ -598,9 +610,8 @@ fn command_name(command: &AnalysisCommand) -> &'static str {
     }
 }
 
-pub(super) fn compose_manual_deck_source(source: &str) -> String {
-    let has_end =
-        rspice_simulation::netlist_preparation::terminal_end_card_offset(source).is_some();
+pub fn compose_manual_deck_source(source: &str) -> String {
+    let has_end = crate::netlist_preparation::terminal_end_card_offset(source).is_some();
     if has_end {
         source.to_string()
     } else if source.ends_with('\n') {
@@ -652,9 +663,9 @@ fn pz_analysis_name(analysis_type: PoleZeroAnalysisType) -> String {
 /// reader authored, and it reaches the run whole.
 fn sensitivity_sweep_from_card(
     sweep: &rspice_core::netlist::SensitivityAcSweep,
-) -> Option<crate::simulation::config::SensitivitySweep> {
-    use crate::simulation::config::{AcSweepType, SensitivitySweep};
+) -> Option<rspice_simulation_contract::config::SensitivitySweep> {
     use rspice_core::netlist::FreqVariation;
+    use rspice_simulation_contract::config::{AcSweepType, SensitivitySweep};
 
     if sweep.variation == FreqVariation::Dec
         && sweep.points == 1
@@ -734,7 +745,7 @@ const fn resolved_transient_noise_seed(
 }
 
 fn command_to_queue_item(
-    state: &AppState,
+    reference_temperature_celsius: f64,
     netlist: &Netlist,
     command: &AnalysisCommand,
 ) -> Result<QueuedAnalysis, String> {
@@ -775,7 +786,7 @@ fn command_to_queue_item(
                 step2,
                 // LIST retains the card's visiting order, including retraces.
                 hysteresis: false,
-                modes: crate::simulation::config::DcSweepModes {
+                modes: rspice_simulation_contract::config::DcSweepModes {
                     primary: mode.into(),
                     secondary: sweep2
                         .as_ref()
@@ -794,7 +805,7 @@ fn command_to_queue_item(
                     stop2,
                     step2,
                     hysteresis: false,
-                    modes: crate::simulation::config::DcSweepModes {
+                    modes: rspice_simulation_contract::config::DcSweepModes {
                         primary: mode.into(),
                         secondary: sweep2
                             .as_ref()
@@ -950,7 +961,7 @@ fn command_to_queue_item(
                 z0: 50.0,
                 ports: ports
                     .iter()
-                    .map(|port| crate::simulation::multi_run::SpPort {
+                    .map(|port| rspice_simulation_contract::analysis_spec::SpPort {
                         node_pos: port.node_pos.clone(),
                         node_neg: port.node_neg.clone(),
                         z0: Some(port.z0),
@@ -1073,7 +1084,7 @@ fn command_to_queue_item(
             let temperature = netlist
                 .options
                 .temp
-                .unwrap_or(state.sim_setup.reference_pvt.temperature_celsius)
+                .unwrap_or(reference_temperature_celsius)
                 + 273.15;
             let sweep = match variation {
                 FreqVariation::Dec => NoiseSweepType::Decade,
@@ -1090,8 +1101,9 @@ fn command_to_queue_item(
                 sweep,
                 explicit_frequencies: None,
                 data_table_name: None,
-                contribution_detail: crate::simulation::config::NoiseContributionDetail::Top50,
-                integration_mode: crate::simulation::config::NoiseIntegrationMode::Enabled,
+                contribution_detail:
+                    rspice_simulation_contract::config::NoiseContributionDetail::Top50,
+                integration_mode: rspice_simulation_contract::config::NoiseIntegrationMode::Enabled,
                 temperature,
             };
             Ok(QueuedAnalysis {
@@ -1106,8 +1118,10 @@ fn command_to_queue_item(
                     stop_freq: *stop_freq,
                     explicit_frequencies: None,
                     data_table_name: None,
-                    contribution_detail: crate::simulation::config::NoiseContributionDetail::Top50,
-                    integration_mode: crate::simulation::config::NoiseIntegrationMode::Enabled,
+                    contribution_detail:
+                        rspice_simulation_contract::config::NoiseContributionDetail::Top50,
+                    integration_mode:
+                        rspice_simulation_contract::config::NoiseIntegrationMode::Enabled,
                     temperature_kelvin: temperature,
                 })),
                 analysis_line: ".noise".to_string(),
@@ -1134,7 +1148,7 @@ fn command_to_queue_item(
             let temperature = netlist
                 .options
                 .temp
-                .unwrap_or(state.sim_setup.reference_pvt.temperature_celsius)
+                .unwrap_or(reference_temperature_celsius)
                 + 273.15;
             let config = NoiseAnalysisConfig {
                 output_node: output_node.clone(),
@@ -1146,8 +1160,9 @@ fn command_to_queue_item(
                 stop_freq,
                 explicit_frequencies: Some(frequencies.clone()),
                 data_table_name: Some(table_name.clone()),
-                contribution_detail: crate::simulation::config::NoiseContributionDetail::Top50,
-                integration_mode: crate::simulation::config::NoiseIntegrationMode::Enabled,
+                contribution_detail:
+                    rspice_simulation_contract::config::NoiseContributionDetail::Top50,
+                integration_mode: rspice_simulation_contract::config::NoiseIntegrationMode::Enabled,
                 temperature_kelvin: temperature,
             };
             config.validate().map_err(|errors| errors.join("; "))?;
@@ -1163,8 +1178,10 @@ fn command_to_queue_item(
                     sweep: NoiseSweepType::ExplicitFrequencyList,
                     explicit_frequencies: Some(frequencies),
                     data_table_name: Some(table_name.clone()),
-                    contribution_detail: crate::simulation::config::NoiseContributionDetail::Top50,
-                    integration_mode: crate::simulation::config::NoiseIntegrationMode::Enabled,
+                    contribution_detail:
+                        rspice_simulation_contract::config::NoiseContributionDetail::Top50,
+                    integration_mode:
+                        rspice_simulation_contract::config::NoiseIntegrationMode::Enabled,
                     temperature,
                 },
                 config: Some(AnalysisConfig::Noise(config)),
@@ -1234,7 +1251,7 @@ fn command_to_queue_item(
                 ac_mode: ac_sweep.is_some(),
                 frequency,
                 filter: filter.clone(),
-                sweep: sweep.map(crate::simulation::config::SensitivitySweep::to_spec),
+                sweep: sweep.map(rspice_simulation_contract::config::SensitivitySweep::to_spec),
             };
             Ok(QueuedAnalysis {
                 numeric_override: None,
@@ -1279,8 +1296,8 @@ fn command_to_queue_item(
                     // The directive has no normalization or solver-profile
                     // operands. Preserve raw SPICE semantics and use the
                     // product's standard numerical policy.
-                    normalization: crate::simulation::multi_run::TfNormalization::None,
-                    accuracy: crate::simulation::multi_run::TfAccuracy::Balanced,
+                    normalization: rspice_simulation_contract::analysis_spec::TfNormalization::None,
+                    accuracy: rspice_simulation_contract::analysis_spec::TfAccuracy::Balanced,
                 },
                 spec_options,
             })
@@ -1478,7 +1495,7 @@ fn validate_manual_fourier_current_capability(
 /// Read one card output through the shared `.FOUR` accessor grammar, and say
 /// where a refusal came from: a hand-written deck's own card.
 fn parse_fourier_output(output: &str) -> Result<(String, String), String> {
-    crate::services::simulation_runner::split_fourier_output(output).map_err(|error| {
+    rspice_simulation_contract::fourier_output::split_fourier_output(output).map_err(|error| {
         format!(
             "Manual-deck .FOUR output '{}' is unsupported: {error}",
             output.trim()

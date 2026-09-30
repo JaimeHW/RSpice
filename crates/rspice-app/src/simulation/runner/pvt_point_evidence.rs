@@ -13,7 +13,6 @@ use rspice_core::NoAbort;
 
 use crate::product::ProcessCorner;
 use crate::product::{ContentDigest, ObjectRevision, SimulationPlanId};
-use crate::simulation::controller::QueuedAnalysis;
 use crate::simulation::execution::{
     ExecutionPermitIssuer, ExecutionTargetCapabilities, PreparedRunSnapshot, PreparedTask,
     RunSourceReceipt, SavePolicy, SnapshotParts, TouchstoneExportPolicy,
@@ -23,6 +22,7 @@ use crate::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType,
     SimulationRun, SimulationRunIntent, SimulationRunProvenance,
 };
+use rspice_simulation::preparation::QueuedAnalysis;
 
 use rspice_simulation::error::SimulationError;
 

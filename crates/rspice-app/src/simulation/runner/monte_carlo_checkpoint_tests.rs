@@ -238,8 +238,8 @@ fn monte_carlo_checkpoint_dispatch_rejects_missing_corrupt_duplicate_and_over_bu
 
 #[test]
 fn monte_carlo_checkpoint_dispatch_preparation_identity_binds_capture_range_and_input() {
-    use crate::simulation::controller::QueuedAnalysis;
     use crate::simulation::execution::PreparedTask;
+    use rspice_simulation::preparation::QueuedAnalysis;
     let (mut request, _, bytes) = captured_request();
     let digest = |request: &SimulationRequest| {
         let SimulationRequest::Spec { spec, options } = request else {

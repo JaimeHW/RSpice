@@ -18,18 +18,17 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
 use crate::diagnostics::ConsoleMessage;
-use crate::simulation::config::{
-    AcAnalysisConfig, AcSweepType, DcSweepConfig, NoiseAnalysisConfig, NoiseSweepType,
-    PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
-};
+#[cfg(test)]
+use crate::simulation::config::NoiseSweepType;
 use crate::simulation::execution::TouchstoneExportPolicy;
+use crate::simulation::multi_run::AnalysisSpec;
+#[cfg(test)]
+use crate::simulation::multi_run::FrequencySweep;
 use crate::simulation::multi_run::PssMethod;
 #[cfg(test)]
 use crate::simulation::multi_run::SpPort;
-use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, HbToneSpec};
 use crate::simulation::output_contract::materialize_live_saved_outputs;
 use crate::simulation::output_contract::retain_plan_saved_outputs;
-use crate::simulation::plan::AnalysisNumericOverride;
 use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
@@ -51,7 +50,9 @@ use rspice_simulation::live_transient::{
     TransientDigitalBusSample, TransientDigitalEventSample, TransientRealEventSample,
     TransientSampleDelta,
 };
+use rspice_simulation::manual_deck;
 use rspice_simulation::output_contract::PreparedSavedOutput;
+use rspice_simulation::preparation::QueuedAnalysis;
 use rspice_simulation::prepared_dependency::ExecutionArtifactKind;
 use rspice_simulation_contract::setup_state::SimulationSetup;
 
@@ -64,7 +65,8 @@ use analysis_spec_build::{AnalysisInputs, analysis_inputs};
 #[cfg(test)]
 mod directive_parse_ratchet;
 mod live_transient;
-mod manual_deck;
+#[cfg(test)]
+mod manual_deck_tests;
 mod monte_carlo_checkpoint;
 pub(crate) mod prepared_run;
 #[cfg(test)]
@@ -79,19 +81,6 @@ mod transient_post;
 pub(crate) use transient_post::{DerivedViewerLoadState, build_eye_from_waveform};
 
 use self::live_transient::LiveTransientAccumulator;
-
-#[derive(Debug, Clone)]
-pub(super) struct QueuedAnalysis {
-    pub(super) spec: AnalysisSpec,
-    pub(super) config: Option<AnalysisConfig>,
-    pub(super) spec_options: SpecExecutionOptions,
-    pub(super) analysis_line: String,
-    /// Numerical departures authored against this analysis. Snapshot
-    /// preparation turns them into a second `.OPTIONS` block in this task's own
-    /// deck; a manual deck states its options in the deck itself and therefore
-    /// never carries one.
-    pub(super) numeric_override: Option<AnalysisNumericOverride>,
-}
 
 #[derive(Clone)]
 struct PreparedCampaignMember {

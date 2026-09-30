@@ -3,9 +3,9 @@
 //! the production result-retention path; it does not synthesize solved data.
 
 use super::*;
-use crate::simulation::controller::QueuedAnalysis;
 use crate::simulation::execution::SavePolicy;
 use crate::state::{OutputSelectionMode, SimulationRun};
+use rspice_simulation::preparation::QueuedAnalysis;
 
 pub(super) fn output(kind: SavedOutputKind, name: &str, expression: &str) -> SavedOutput {
     SavedOutput::new(

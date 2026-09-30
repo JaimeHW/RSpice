@@ -11,9 +11,9 @@ use std::sync::Arc;
 
 use crate::product::ProcessCorner;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
+use crate::simulation::multi_run::AnalysisSpec;
 use crate::simulation::plan::AnalysisNumericOverride;
 use crate::simulation::run_set::{RunSetDimensionKind, RunSetState};
-use crate::simulation::{controller::QueuedAnalysis, multi_run::AnalysisSpec};
 use crate::state::{
     HierarchyMapRow, PreparedModelSourceIdentity, PreparedSourceCheckReceipt,
     PreparedSpecification, PreparedSpecificationPolicy, SimulationRunIntent,
@@ -25,6 +25,7 @@ use rspice_simulation::output_contract::output_kind_tag;
 use rspice_simulation::output_contract::policy_tag;
 use rspice_simulation::output_contract::precision_tag;
 use rspice_simulation::output_contract::streaming_tag;
+use rspice_simulation::preparation::QueuedAnalysis;
 // The receipt's source domain is named by `snapshot/run_receipt.rs`; the
 // snapshot suite reaches it through this module's glob.
 #[cfg(test)]

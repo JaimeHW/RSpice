@@ -1777,7 +1777,7 @@ class CiConfigurationTests(unittest.TestCase):
             "crates/rspice-app/src/workbench/workflows/netlist_workflow.rs",
             "crates/rspice-app/src/workbench/documents/netlist_document/baseline.rs",
             "crates/rspice-app/src/workbench/documents/netlist_document/diagnostics.rs",
-            "crates/rspice-app/src/simulation/controller/manual_deck.rs",
+            "crates/rspice-simulation/src/manual_deck.rs",
             "crates/rspice-app/src/simulation/runner/wasm_worker.rs",
             "crates/rspice-app/src/simulation/runner/worker_contract.rs",
             "crates/rspice-app/src/state/simulation/ac_bode.rs",

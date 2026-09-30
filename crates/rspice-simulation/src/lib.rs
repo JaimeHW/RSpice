@@ -11,6 +11,7 @@ pub mod execution_artifact;
 pub mod execution_identity;
 pub mod execution_options;
 pub mod live_transient;
+pub mod manual_deck;
 pub mod measurement_references;
 pub mod model_import;
 pub mod model_sources;

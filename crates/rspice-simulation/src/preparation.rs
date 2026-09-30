@@ -1,4 +1,23 @@
-//! Typed preparation failures shared by source, model and dispatch checks.
+//! Analysis preparation inputs and typed failures shared by source, model and dispatch checks.
+
+use crate::execution_options::SpecExecutionOptions;
+use rspice_simulation_contract::{
+    analysis_spec::AnalysisSpec, config::AnalysisConfig, numeric_override::AnalysisNumericOverride,
+};
+
+/// An authored analysis awaiting snapshot validation and execution authorization.
+#[derive(Debug, Clone)]
+pub struct QueuedAnalysis {
+    pub spec: AnalysisSpec,
+    pub config: Option<AnalysisConfig>,
+    pub spec_options: SpecExecutionOptions,
+    pub analysis_line: String,
+    /// Numerical departures authored against this analysis. Snapshot
+    /// preparation turns them into a second `.OPTIONS` block in this task's own
+    /// deck; a manual deck states its options in the deck itself and therefore
+    /// never carries one.
+    pub numeric_override: Option<AnalysisNumericOverride>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreparationStage {

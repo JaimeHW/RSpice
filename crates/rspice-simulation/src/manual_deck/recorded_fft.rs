@@ -11,9 +11,9 @@
 
 use rspice_core::Netlist;
 
-use crate::simulation::config::FftRequest;
-use crate::simulation::controller::QueuedAnalysis;
-use crate::simulation::multi_run::AnalysisSpec;
+use crate::preparation::QueuedAnalysis;
+use rspice_simulation_contract::analysis_spec::AnalysisSpec;
+use rspice_simulation_contract::config::FftRequest;
 
 /// One queue item per `.fft` card the deck holds, in card order.
 pub(super) fn manual_fft_tasks(parsed: &Netlist) -> Result<Vec<QueuedAnalysis>, Vec<String>> {
@@ -32,7 +32,7 @@ pub(super) fn manual_fft_tasks(parsed: &Netlist) -> Result<Vec<QueuedAnalysis>, 
         tasks.push(QueuedAnalysis {
             spec: AnalysisSpec::Fft { request },
             config: None,
-            spec_options: rspice_simulation::execution_options::SpecExecutionOptions::default(),
+            spec_options: crate::execution_options::SpecExecutionOptions::default(),
             analysis_line,
             numeric_override: None,
         });

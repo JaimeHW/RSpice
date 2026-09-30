@@ -1276,10 +1276,13 @@ impl SimulationController {
             &project_veriloga_runtimes,
             &measurement_references,
         )?;
-        let queued_tasks =
-            manual_deck::build_manual_deck_queue(state, &expanded).map_err(|errors| {
-                PreparationError::new(PreparationStage::SourceChecks, errors.join("; "))
-            })?;
+        let queued_tasks = manual_deck::build_manual_deck_queue(
+            state.sim_setup.reference_pvt.temperature_celsius,
+            &expanded,
+        )
+        .map_err(|errors| {
+            PreparationError::new(PreparationStage::SourceChecks, errors.join("; "))
+        })?;
         let source_digest = manual_executable_source_digest(&expanded);
         let tasks = Self::prepare_manual_tasks(
             source_digest,

@@ -2,83 +2,12 @@
 
 use super::*;
 
-#[test]
-fn manual_deck_planning_has_no_panic_shortcuts() {
-    for source in [
-        include_str!("../manual_deck.rs"),
-        include_str!("periodic.rs"),
-    ] {
-        let production = crate::source_guard::production_source(source);
-        for forbidden in [".expect(", ".unwrap(", "panic!(", "unreachable!("] {
-            assert!(
-                !production.contains(forbidden),
-                "manual-deck production code contains panic shortcut {forbidden}"
-            );
-        }
-    }
-}
-use crate::simulation::multi_run::FrequencySweep;
-use rspice_simulation::sweeps::CornerBaseMode;
-
-#[test]
-fn studio_hb_card_retains_solver_controls_and_automatic_grid() {
-    use crate::simulation::dialog::hb::{HbConfig, HbDialogState, HbSolverType};
-    let config = HbConfig {
-        fundamental_freq: 1000.0,
-        num_harmonics: 5,
-        fundamental_source: Some("V1".into()),
-        maxiter: 42,
-        damping: 0.5,
-        min_damping: 0.02,
-        oversample: 4,
-        reltol: 2e-8,
-        abstol: 3e-13,
-        gmres_restart: 16,
-        solver: HbSolverType::Krylov,
-        source_stepping: true,
-        use_exact_jacobian: false,
-        verbose: true,
-        ..Default::default()
-    };
-    let restored = HbDialogState::from_config(&config).to_config().unwrap();
-    let specs = specs_for(&format!(
-        "HB export\nV1 in 0 AC 1\nR1 in 0 1k\n{}\n.end\n",
-        restored.to_spice()
-    ));
-    let [
-        AnalysisSpec::HarmonicBalance {
-            tones,
-            reltol,
-            abstol,
-            max_iterations,
-            damping,
-            min_damping,
-            oversample,
-            collocation_points,
-            use_krylov,
-            gmres_restart,
-            source_stepping,
-            use_exact_jacobian,
-            verbose,
-            ..
-        },
-        AnalysisSpec::DcOp { .. } | AnalysisSpec::LegacyDcOp,
-    ] = specs.as_slice()
-    else {
-        panic!("{specs:?}");
-    };
-    assert_eq!(tones[0].source.as_deref(), Some("V1"));
-    assert_eq!(tones[0].harmonics, 5);
-    assert_eq!((*reltol, *abstol, *max_iterations), (2e-8, 3e-13, 42));
-    assert_eq!((*damping, *min_damping, *oversample), (0.5, 0.02, 4));
-    assert_eq!(*collocation_points, None);
-    assert!(*use_krylov && *source_stepping && !*use_exact_jacobian && *verbose);
-    assert_eq!(*gmres_restart, 16);
-}
+use crate::sweeps::CornerBaseMode;
+use rspice_simulation_contract::{config::FrequencySweep, run_set::ReferencePoint};
 
 #[test]
 fn studio_sp_card_retains_differential_ports_and_effective_impedances() {
-    use crate::simulation::dialog::sp::{SpConfig, SpPortConfig};
+    use rspice_simulation_contract::sp_config::{SpConfig, SpPortConfig};
     let config = SpConfig {
         z0: 75.0,
         ports: vec![
@@ -114,7 +43,7 @@ fn studio_sp_card_retains_differential_ports_and_effective_impedances() {
 
 #[test]
 fn studio_stb_card_retains_disabled_nyquist() {
-    let config = crate::simulation::dialog::stb::StbConfig {
+    let config = rspice_simulation_contract::stb_draft::StbConfig {
         compute_nyquist: false,
         ..Default::default()
     };
@@ -146,8 +75,8 @@ fn manual_fourier_retains_periods_and_explicit_window() {
 }
 
 fn specs_for(source: &str) -> Vec<AnalysisSpec> {
-    let state = AppState::default();
-    build_manual_deck_queue(&state, source)
+    let reference_pvt = ReferencePoint::default();
+    build_manual_deck_queue(reference_pvt.temperature_celsius, source)
         .expect("manual deck queue")
         .into_iter()
         .map(|q| q.spec)
@@ -238,9 +167,8 @@ fn the_studio_card_round_trips_through_the_manual_deck_reader() {
                 scale,
                 uic: false,
             };
-            let card =
-                rspice_simulation::analysis_preparation::build_transient_noise_command(&authored)
-                    .expect("the plan writes its card");
+            let card = crate::analysis_preparation::build_transient_noise_command(&authored)
+                .expect("the plan writes its card");
             let specs = specs_for(&format!(
                 "round trip\n\
                      V1 in 0 DC 1\n\
@@ -301,11 +229,11 @@ fn a_hand_written_ac_data_deck_is_read_as_the_frequency_table_analysis() {
 #[test]
 fn the_studio_ac_frequency_table_cards_round_trip_through_the_manual_deck_reader() {
     let authored = AnalysisSpec::AcData {
-        table_name: crate::simulation::config::AC_FREQUENCY_TABLE.to_owned(),
+        table_name: rspice_simulation_contract::config::AC_FREQUENCY_TABLE.to_owned(),
         frequencies: vec![37.0, 74.0, 148.5],
         table_options: Default::default(),
     };
-    let cards = rspice_simulation::analysis_preparation::build_ac_data_command(&authored)
+    let cards = crate::analysis_preparation::build_ac_data_command(&authored)
         .expect("the plan writes its card and its table");
     let specs = specs_for(&format!(
         "round trip\n\
@@ -424,9 +352,9 @@ fn manual_deck_preserves_common_analysis_order() {
 
 #[test]
 fn manual_periodic_deck_owns_implicit_seed_and_typed_analysis_options() {
-    let state = AppState::default();
+    let reference_pvt = ReferencePoint::default();
     let queue = build_manual_deck_queue(
-            &state,
+            reference_pvt.temperature_celsius,
             "periodic\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n.pss fund=1Meg points=128 harms=8\n.pac dec 20 1k 100Meg input=V1 out=out maxsideband=4\n.pnoise dec 10 1 1Meg out=out\n.end\n",
         )
         .expect("manual periodic queue");
@@ -523,9 +451,9 @@ fn manual_fourier_preserves_an_explicit_harmonic_count() {
 
 #[test]
 fn manual_fourier_current_output_fails_closed_before_transient_when_unavailable() {
-    let state = AppState::default();
+    let reference_pvt = ReferencePoint::default();
     let semiconductor = build_manual_deck_queue(
-            &state,
+            reference_pvt.temperature_celsius,
             "Fourier diode current\nV1 in 0 SIN(0 1 1k)\nD1 in 0 DMOD\n.model DMOD D\n.four 1k I(D1)\n.tran 10u 5m\n.end\n",
         )
         .expect_err("an unavailable semiconductor terminal current must fail preflight");
@@ -537,7 +465,7 @@ fn manual_fourier_current_output_fails_closed_before_transient_when_unavailable(
     );
 
     let missing = build_manual_deck_queue(
-        &state,
+        reference_pvt.temperature_celsius,
         "Fourier missing current\nV1 in 0 SIN(0 1 1k)\n.four 1k I(R404)\n.tran 10u 5m\n.end\n",
     )
     .expect_err("a missing branch identity must fail preflight");
@@ -546,16 +474,16 @@ fn manual_fourier_current_output_fails_closed_before_transient_when_unavailable(
 
 #[test]
 fn manual_fourier_rejects_missing_or_ambiguous_transient_producers() {
-    let state = AppState::default();
+    let reference_pvt = ReferencePoint::default();
     let missing = build_manual_deck_queue(
-        &state,
+        reference_pvt.temperature_celsius,
         "Fourier deck\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.four 1k V(out)\n.end\n",
     )
     .expect_err(".FOUR without .TRAN must fail closed");
     assert!(missing.join("; ").contains("exactly one .TRAN"));
 
     let ambiguous = build_manual_deck_queue(
-            &state,
+            reference_pvt.temperature_celsius,
             "Fourier deck\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.tran 10u 1m\n.tran 20u 2m\n.four 1k V(out)\n.end\n",
         )
         .expect_err(".FOUR with multiple .TRAN producers must fail closed");
@@ -582,9 +510,9 @@ fn manual_deck_maps_hbint_order_to_exact_collocation_grid() {
 
 #[test]
 fn manual_deck_ac_data_uses_table_frequencies() {
-    let state = AppState::default();
+    let reference_pvt = ReferencePoint::default();
     let queue = build_manual_deck_queue(
-        &state,
+        reference_pvt.temperature_celsius,
         "deck\n\
              I1 out 0 AC 1\n\
              R1 out 0 1k\n\
@@ -616,9 +544,9 @@ fn manual_deck_ac_data_uses_table_frequencies() {
 
 #[test]
 fn manual_deck_ac_data_requires_freq_column() {
-    let state = AppState::default();
+    let reference_pvt = ReferencePoint::default();
     let err = build_manual_deck_queue(
-        &state,
+        reference_pvt.temperature_celsius,
         "deck\n\
              I1 out 0 AC 1\n\
              R1 out 0 1k\n\
@@ -683,10 +611,10 @@ fn manual_deck_sp_uses_rf_port_annotations() {
 
 #[test]
 fn temp_command_queue_fallback_reports_error_without_panicking() {
-    let state = AppState::default();
+    let reference_pvt = ReferencePoint::default();
     let netlist = Netlist::default();
     let err = command_to_queue_item(
-        &state,
+        reference_pvt.temperature_celsius,
         &netlist,
         &AnalysisCommand::Temp {
             temperatures: vec![25.0],
@@ -700,9 +628,9 @@ fn temp_command_queue_fallback_reports_error_without_panicking() {
 
 #[test]
 fn manual_deck_dc_and_noise_build_configs_without_dialog_state() {
-    let state = AppState::default();
+    let reference_pvt = ReferencePoint::default();
     let queue = build_manual_deck_queue(
-        &state,
+        reference_pvt.temperature_celsius,
         "deck\nV1 in 0 0 AC 1\nR1 in out 1k\n.ac lin 5 1 5\n.noise v(out) V1 dec 10 1 1e6\n.end\n",
     )
     .expect("queue builds");
@@ -712,47 +640,10 @@ fn manual_deck_dc_and_noise_build_configs_without_dialog_state() {
 }
 
 #[test]
-fn manual_noise_data_preserves_authored_axis_and_executes_row_contexts() {
-    let state = AppState::default();
-    let source = "noise data deck\n\
-.param rload=1k\n\
-V1 in 0 AC 1\n\
-R1 in out 1k\n\
-Rload out 0 {rload}\n\
-.noise V(out) V1 DATA=points\n\
-.DATA points\n\
-+ rload HERTZ\n\
-+ 1000 10\n\
-+ 2000 1\n\
-.ENDDATA\n\
-.end\n";
-    let queue = build_manual_deck_queue(&state, source).expect("NOISE DATA queues");
-    assert_eq!(queue.len(), 1);
-    assert!(matches!(
-        &queue[0].spec,
-        AnalysisSpec::Noise {
-            sweep: NoiseSweepType::ExplicitFrequencyList,
-            explicit_frequencies: Some(frequencies),
-            data_table_name: Some(table),
-            ..
-        } if frequencies == &[10.0, 1.0] && table.eq_ignore_ascii_case("points")
-    ));
-    let config = queue[0].config.as_ref().expect("exact config retained");
-    let result = crate::simulation::EngineBridge::new()
-        .run_with_abort(config, source, &rspice_core::abort_signal::NoAbort)
-        .expect("NOISE DATA executes through the ordinary config path");
-    assert!(matches!(
-        result,
-        crate::simulation::SimulationResult::Noise { frequencies, .. }
-            if frequencies == vec![10.0, 1.0]
-    ));
-}
-
-#[test]
 fn manual_deck_mc_and_step_are_runnable_specs() {
-    let state = AppState::default();
+    let reference_pvt = ReferencePoint::default();
     let queue = build_manual_deck_queue(
-            &state,
+            reference_pvt.temperature_celsius,
             "deck\n.param rload=1k\nV1 in 0 1\nR1 in out {rload}\nR2 out 0 1k\n.step param rload 500 1500 500\n.mc 8 seed 7 dist uniform spread 0.05\n.end\n",
         )
         .expect("manual deck queue");
@@ -766,9 +657,9 @@ fn manual_deck_mc_and_step_are_runnable_specs() {
 
 #[test]
 fn manual_deck_tf_builds_classic_dc_transfer_spec() {
-    let state = AppState::default();
+    let reference_pvt = ReferencePoint::default();
     let queue = build_manual_deck_queue(
-        &state,
+        reference_pvt.temperature_celsius,
         "deck\nV1 in 0 DC 1\nR1 in out 1k\nR2 out 0 1k\n.tf V(out) V1\n.end\n",
     )
     .expect("classic .tf should produce a runnable typed analysis");
@@ -784,17 +675,17 @@ fn manual_deck_tf_builds_classic_dc_transfer_spec() {
             transfer_gain: true,
             input_resistance: true,
             output_resistance: true,
-            normalization: crate::simulation::multi_run::TfNormalization::None,
-            accuracy: crate::simulation::multi_run::TfAccuracy::Balanced,
+            normalization: rspice_simulation_contract::analysis_spec::TfNormalization::None,
+            accuracy: rspice_simulation_contract::analysis_spec::TfAccuracy::Balanced,
         } if input_source == "V1" && output_expression == "V(OUT)"
     ));
 }
 
 #[test]
 fn manual_deck_tf_preserves_differential_voltage_probe() {
-    let state = AppState::default();
+    let reference_pvt = ReferencePoint::default();
     let queue = build_manual_deck_queue(
-        &state,
+        reference_pvt.temperature_celsius,
         "deck\nV1 in 0 DC 1\nR1 in out 1k\nR2 out ref 1k\nR3 ref 0 1k\n.tf V(out,ref) V1\n.end\n",
     )
     .expect("differential .tf should produce a runnable typed analysis");
@@ -811,9 +702,9 @@ fn manual_deck_tf_preserves_differential_voltage_probe() {
 
 #[test]
 fn manual_deck_tf_preserves_branch_current_probe() {
-    let state = AppState::default();
+    let reference_pvt = ReferencePoint::default();
     let queue = build_manual_deck_queue(
-            &state,
+            reference_pvt.temperature_celsius,
             "deck\nV1 in 0 DC 1\nR1 in mid 1k\nVMEAS mid out DC 0\nR2 out 0 1k\n.tf I(VMEAS) V1\n.end\n",
         )
         .expect("branch-current .tf should produce a runnable typed analysis");
@@ -830,9 +721,9 @@ fn manual_deck_tf_preserves_branch_current_probe() {
 
 #[test]
 fn manual_deck_rejects_multiple_step_commands() {
-    let state = AppState::default();
+    let reference_pvt = ReferencePoint::default();
     let err = build_manual_deck_queue(
-            &state,
+            reference_pvt.temperature_celsius,
             "deck\n.param rload=1k cload=1p\nV1 out 0 1\nR1 out 0 {rload}\nC1 out 0 {cload}\n.step param rload 1k 2k 1k\n.step param cload 1p 2p 1p\n.end\n",
         )
         .expect_err("multiple step commands should be diagnosed");
@@ -845,9 +736,9 @@ fn manual_deck_rejects_multiple_step_commands() {
 
 #[test]
 fn manual_deck_rejects_multiple_monte_carlo_commands() {
-    let state = AppState::default();
+    let reference_pvt = ReferencePoint::default();
     let err = build_manual_deck_queue(
-        &state,
+        reference_pvt.temperature_celsius,
         "deck\n.param rload=1k\nV1 out 0 1\nR1 out 0 {rload}\n.mc 4 seed 1\n.mc 5 seed 2\n.end\n",
     )
     .expect_err("multiple Monte Carlo commands should be diagnosed");
@@ -860,9 +751,12 @@ fn manual_deck_rejects_multiple_monte_carlo_commands() {
 
 #[test]
 fn manual_deck_temp_directive_does_not_block_runnable_analysis() {
-    let state = AppState::default();
-    let queue = build_manual_deck_queue(&state, "deck\n.temp 125\nV1 out 0 1\n.op\n.end\n")
-        .expect("manual deck queue");
+    let reference_pvt = ReferencePoint::default();
+    let queue = build_manual_deck_queue(
+        reference_pvt.temperature_celsius,
+        "deck\n.temp 125\nV1 out 0 1\n.op\n.end\n",
+    )
+    .expect("manual deck queue");
 
     assert_eq!(queue.len(), 1);
     assert!(matches!(queue[0].spec, AnalysisSpec::Parametric));
@@ -877,9 +771,9 @@ fn manual_deck_temp_directive_does_not_block_runnable_analysis() {
 
 #[test]
 fn manual_deck_step_temp_uses_paired_transient_base_analysis() {
-    let state = AppState::default();
+    let reference_pvt = ReferencePoint::default();
     let queue = build_manual_deck_queue(
-            &state,
+            reference_pvt.temperature_celsius,
             "deck\nV1 out 0 pulse(0 1 0 1n 1n 5n 10n)\nR1 out 0 1k\n.tran 1n 10n\n.step temp list 0 25 125\n.end\n",
         )
         .expect("manual deck queue");
@@ -904,9 +798,12 @@ fn manual_deck_step_temp_uses_paired_transient_base_analysis() {
 
 #[test]
 fn manual_deck_temp_list_uses_paired_op_base_analysis() {
-    let state = AppState::default();
-    let queue = build_manual_deck_queue(&state, "deck\n.temp 25 125\nV1 out 0 1\n.op\n.end\n")
-        .expect("manual deck queue");
+    let reference_pvt = ReferencePoint::default();
+    let queue = build_manual_deck_queue(
+        reference_pvt.temperature_celsius,
+        "deck\n.temp 25 125\nV1 out 0 1\n.op\n.end\n",
+    )
+    .expect("manual deck queue");
 
     assert_eq!(queue.len(), 1);
     assert!(matches!(queue[0].spec, AnalysisSpec::Parametric));
@@ -921,9 +818,9 @@ fn manual_deck_temp_list_uses_paired_op_base_analysis() {
 
 #[test]
 fn manual_deck_parameter_step_retains_transient_base_analysis() {
-    let state = AppState::default();
+    let reference_pvt = ReferencePoint::default();
     let queue = build_manual_deck_queue(
-            &state,
+            reference_pvt.temperature_celsius,
             "deck\n.param rload=1k\nV1 out 0 pulse(0 1 0 1n 1n 5n 10n)\nR1 out 0 {rload}\n.tran 1n 10n\n.step param rload 1k 2k 1k\n.end\n",
         )
         .expect("parameter step with transient should be planned");
@@ -938,9 +835,9 @@ fn manual_deck_parameter_step_retains_transient_base_analysis() {
 
 #[test]
 fn manual_temperature_sweep_retains_nested_dc_and_full_transient_forms() {
-    let state = AppState::default();
+    let reference_pvt = ReferencePoint::default();
     let nested = build_manual_deck_queue(
-            &state,
+            reference_pvt.temperature_celsius,
             "deck\nV1 in 0 0\nV2 bias 0 0\nR1 in bias 1k\n.dc V1 0 1 0.5 V2 0 2 1\n.step temp list 25 125\n.end\n",
         )
         .expect("nested DC temperature sweep");
@@ -950,7 +847,7 @@ fn manual_temperature_sweep_retains_nested_dc_and_full_transient_forms() {
     ));
 
     let transient = build_manual_deck_queue(
-            &state,
+            reference_pvt.temperature_celsius,
             "deck\nV1 out 0 pulse(0 1 0 1n 1n 5n 10n)\nR1 out 0 1k\n.tran 1n 20n 2n 0.5n uic\n.step temp list 25 125\n.end\n",
         )
         .expect("full transient temperature sweep");
@@ -972,9 +869,12 @@ fn manual_temperature_sweep_retains_nested_dc_and_full_transient_forms() {
 
 #[test]
 fn manual_deck_temp_only_reports_no_runnable_analysis() {
-    let state = AppState::default();
-    let err = build_manual_deck_queue(&state, "deck\n.temp 25 125\n.end\n")
-        .expect_err("temperature directive alone should not run");
+    let reference_pvt = ReferencePoint::default();
+    let err = build_manual_deck_queue(
+        reference_pvt.temperature_celsius,
+        "deck\n.temp 25 125\n.end\n",
+    )
+    .expect_err("temperature directive alone should not run");
 
     assert!(
         err.iter()
@@ -1000,8 +900,8 @@ fn manual_deck_adds_end_only_when_missing() {
 
 #[test]
 fn manual_deck_reports_no_analysis() {
-    let state = AppState::default();
-    let err = build_manual_deck_queue(&state, "deck\nR1 a 0 1k\n.end\n")
+    let reference_pvt = ReferencePoint::default();
+    let err = build_manual_deck_queue(reference_pvt.temperature_celsius, "deck\nR1 a 0 1k\n.end\n")
         .expect_err("no analysis should fail");
     assert!(
         err.iter()
@@ -1018,7 +918,7 @@ fn manual_deck_reports_no_analysis() {
 /// and a bare card now means what the engine means by it.
 #[test]
 fn a_hand_written_sens_card_keeps_its_filter_and_its_sweep() {
-    use crate::simulation::config::AcSweepType;
+    use rspice_simulation_contract::config::AcSweepType;
 
     let deck =
         |card: &str| format!("sens deck\nV1 in 0 AC 1\nR1 in out 1k\nC1 out 0 1n\n{card}\n.end\n");
@@ -1068,7 +968,7 @@ fn a_hand_written_sens_card_keeps_its_filter_and_its_sweep() {
     assert_eq!(sweep.stop_frequency, 1.0e6);
     assert_eq!(sweep.points, 5);
     assert_eq!(
-        crate::simulation::config::SensitivitySweep::from_spec(sweep).variation,
+        rspice_simulation_contract::config::SensitivitySweep::from_spec(sweep).variation,
         AcSweepType::Octave
     );
 }
@@ -1147,7 +1047,7 @@ fn qpac_manual_deck_preserves_authored_grid_and_all_controls() {
         "QPAC rewrite\nV1 in 0 1\nR1 in out 1k\n{}\n.end\n",
         card.to_spice()
     ));
-    assert_eq!(reparsed, [spec.clone()]);
+    assert_eq!(reparsed, std::slice::from_ref(spec));
 }
 
 #[test]
@@ -1197,12 +1097,12 @@ fn qpxf_manual_deck_preserves_native_sweep_and_complete_selections() {
         "QPXF rewrite\nV1 in 0 1\nR1 in out 1k\n{}\n.end\n",
         spec.qpxf_card().unwrap().to_spice()
     ));
-    assert_eq!(reparsed, [spec.clone()]);
+    assert_eq!(reparsed, std::slice::from_ref(spec));
 }
 
 #[test]
 fn periodic_op_handoff_manual_deck_inserts_one_unambiguous_seed() {
-    let card = crate::simulation::plan::QpssDraft {
+    let card = rspice_simulation_contract::quasi_periodic_draft::QpssDraft {
         tones: "1000,1414.2135623730951".into(),
         harmonics: "1,1".into(),
         dc_initialization: true,
@@ -1220,7 +1120,9 @@ fn periodic_op_handoff_manual_deck_inserts_one_unambiguous_seed() {
                 "Manual QP\nV1 out 0 1\nR1 out 0 1k\n{card}\n{}\n.end\n",
                 if explicit { ".op" } else { "" }
             );
-            let queue = build_manual_deck_queue(&AppState::default(), &source).unwrap();
+            let queue =
+                build_manual_deck_queue(ReferencePoint::default().temperature_celsius, &source)
+                    .unwrap();
             assert_eq!(
                 queue
                     .iter()

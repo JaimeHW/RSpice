@@ -69,12 +69,12 @@ fn base_modes() -> [CornerBaseMode; 6] {
 }
 
 fn run_projected(family: AnalysisType, deck: &str, base: CornerBaseMode) -> SimulationRun {
-    use crate::simulation::controller::QueuedAnalysis;
     use crate::simulation::multi_run::AnalysisSpec;
     use crate::state::{
         SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
         SavedOutputPrecision, SavedOutputStreaming,
     };
+    use rspice_simulation::preparation::QueuedAnalysis;
     let corner = family == AnalysisType::Corner;
     let options = rspice_simulation::execution_options::SpecExecutionOptions {
         corner: corner.then(|| CornerRunConfig {

@@ -97,6 +97,7 @@ pub use pac_pxf::{
     run_pac_analysis_from_hb_with_source_path_and_abort,
     run_pxf_analysis_from_hb_with_source_path_and_abort,
 };
+#[cfg(test)]
 pub use periodic_carrier::PeriodicCarrier;
 pub(crate) use periodic_carrier::PeriodicCarrierState;
 pub(crate) use pnoise::PnoiseData;

@@ -361,8 +361,11 @@ fn the_periodic_small_signal_options_round_trip_through_the_deck_reader() {
         format!("{FIXTURE_DECK}{pss_directive}\n{pac_directive}\n{pnoise_directive}\n.end\n");
     rspice_core::netlist::parse_netlist(&deck)
         .unwrap_or_else(|error| panic!("the engine must read the deck back: {error}\n{deck}"));
-    let queue = super::manual_deck::build_manual_deck_queue(&pac_state, &deck)
-        .unwrap_or_else(|errors| panic!("the deck reader refused: {}", errors.join("; ")));
+    let queue = super::manual_deck::build_manual_deck_queue(
+        pac_state.sim_setup.reference_pvt.temperature_celsius,
+        &deck,
+    )
+    .unwrap_or_else(|errors| panic!("the deck reader refused: {}", errors.join("; ")));
 
     let pac = queue
         .iter()
@@ -518,8 +521,11 @@ fn the_periodic_transfer_and_stability_controls_reach_the_engines_own_card() {
 
     // The same deck through the Studio's own reader, which is the route a
     // hand-written deck takes and the one that builds the typed run.
-    let queue = super::manual_deck::build_manual_deck_queue(&pxf_state, &deck)
-        .unwrap_or_else(|errors| panic!("the deck reader refused: {}", errors.join("; ")));
+    let queue = super::manual_deck::build_manual_deck_queue(
+        pxf_state.sim_setup.reference_pvt.temperature_celsius,
+        &deck,
+    )
+    .unwrap_or_else(|errors| panic!("the deck reader refused: {}", errors.join("; ")));
     let pxf_run = queue
         .iter()
         .find_map(|queued| queued.spec_options.pxf.as_ref())
@@ -622,8 +628,11 @@ fn a_periodic_small_signal_card_names_the_carrier_it_linearizes_around() {
 
     // The same deck through the Studio's own reader: a named `.PSS` carrier is
     // the binding this pipeline already makes, so the deck queues.
-    let queue = super::manual_deck::build_manual_deck_queue(&pac_state, &deck)
-        .unwrap_or_else(|errors| panic!("the deck reader refused: {}", errors.join("; ")));
+    let queue = super::manual_deck::build_manual_deck_queue(
+        pac_state.sim_setup.reference_pvt.temperature_celsius,
+        &deck,
+    )
+    .unwrap_or_else(|errors| panic!("the deck reader refused: {}", errors.join("; ")));
     assert!(queue.iter().any(|queued| queued.spec_options.pac.is_some()));
 }
 
@@ -768,8 +777,11 @@ fn an_autonomous_pss_round_trips_through_the_deck_reader_as_autonomous() {
         );
 
         let deck = format!("{FIXTURE_DECK}{directive}\n.end\n");
-        let queue = super::manual_deck::build_manual_deck_queue(&state, &deck)
-            .unwrap_or_else(|errors| panic!("the deck reader refused: {}", errors.join("; ")));
+        let queue = super::manual_deck::build_manual_deck_queue(
+            state.sim_setup.reference_pvt.temperature_celsius,
+            &deck,
+        )
+        .unwrap_or_else(|errors| panic!("the deck reader refused: {}", errors.join("; ")));
         queue
             .into_iter()
             .map(|queued| queued.spec)
@@ -984,7 +996,11 @@ fn qpss_card_studio_and_manual_deck_resolve_the_same_complete_configuration() {
     let deck = format!(
         "QPSS integration\nVDRIVE in 0 AC .1\nR1 in out 1k\nR2 out 0 1k\nIDRIVE 0 out AC 1u\n{directive}\n.end\n"
     );
-    let queue = super::manual_deck::build_manual_deck_queue(&state, &deck).unwrap();
+    let queue = super::manual_deck::build_manual_deck_queue(
+        state.sim_setup.reference_pvt.temperature_celsius,
+        &deck,
+    )
+    .unwrap();
     assert_eq!(queue.len(), 2, "QPSS also needs an operating-point seed");
     assert_eq!(queue[0].spec.driven_qpss_config().unwrap(), expected);
     assert_eq!(queue[0].analysis_line, directive);

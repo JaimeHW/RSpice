@@ -50,13 +50,13 @@ use super::*;
 // runner's is the `FROM=` selector that says which solve that is. Two
 // different facts about one carrier, and a reader of this file needs to see
 // which one each site means.
-use crate::services::simulation_runner::PeriodicCarrier as CarrierSelector;
-use crate::simulation::multi_run::{AnalysisSpec, PssMethod};
-use rspice_simulation::execution_options::SpecExecutionOptions;
-use rspice_simulation::periodic::{
+use crate::execution_options::SpecExecutionOptions;
+use crate::periodic::{
     PacFrequencySweep, PacRunConfig, PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
     PstbRunConfig, PxfFrequencySweep, PxfRunConfig,
 };
+use rspice_simulation_contract::analysis_spec::{AnalysisSpec, PssMethod};
+use rspice_simulation_contract::periodic_carrier::PeriodicCarrier as CarrierSelector;
 
 #[derive(Debug)]
 struct ParsedCard {
@@ -494,7 +494,7 @@ fn parse_pss(
         Some(spelling) => {
             let spelling = unquote(spelling).trim().to_owned();
             Some(
-                crate::simulation::dialog::IntegrationMethod::from_spice_name(&spelling)
+                rspice_simulation_contract::options::IntegrationMethod::from_spice_name(&spelling)
                     .ok_or_else(|| {
                         format!(".PSS method={spelling:?} is not TRAP, GEAR, EULER or TRAPGEAR")
                     })?,
@@ -1407,7 +1407,7 @@ mod tests {
     /// the two requests are the same run.
     #[test]
     fn pss_solver_controls_round_trip_through_the_deck_reader() {
-        use crate::simulation::dialog::{IntegrationMethod, PssConfig};
+        use rspice_simulation_contract::{options::IntegrationMethod, pss_draft::PssConfig};
 
         const CIRCUIT: &str =
             "pss solver controls\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n";
@@ -1745,146 +1745,6 @@ mod tests {
                 studio.is_err(),
                 "the studio accepted `{card}`, which the engine refuses: {studio:?}"
             );
-        }
-    }
-
-    /// A harmonic-balance carrier is read, bound and run, on every card of the
-    /// family that can read one.
-    ///
-    /// Core's `.PAC`, `.PNOISE` and `.PXF` grammars all admit `FROM=PSS|HB`,
-    /// the plan binds such a card to the deck's preceding `.HB`, and the
-    /// engine runs it through `Engine::run_pac_from_hb_with_abort` and its two
-    /// siblings. This reader used to refuse all three by name with "no route
-    /// in the Studio" — a limitation of this crate stated as a fact about the
-    /// card. The route exists now, so the test that pinned the refusal is
-    /// replaced by one that drives it: the same three cards, in both deck
-    /// shapes, read into a queue whose dependent carries a harmonic-balance
-    /// basis, and then run through the three service entries against a real
-    /// converged `.HB` operating point.
-    #[test]
-    fn an_hb_carrier_accepts_the_periodic_dependents_that_can_read_it() {
-        use crate::services::simulation_runner::{
-            self as svc, HbRunConfig, HbToneRunConfig, run_hb_analysis_with_source_path_and_abort,
-        };
-        use rspice_core::abort_signal::NoAbort;
-
-        const CIRCUIT: &str =
-            "periodic\nV1 in 0 SIN(0 0.001 1Meg) AC 1\nR1 in out 1k\nC1 out 0 159.154943091895p\n";
-        const HB: &str = ".hb 1Meg\n";
-        const FUNDAMENTAL: f64 = 1.0e6;
-
-        // One converged carrier for all three runs, as the plan hands the one
-        // artifact to every dependent bound to that instance.
-        let carrier_deck = format!("{CIRCUIT}.end\n");
-        let operating_point = run_hb_analysis_with_source_path_and_abort(
-            &carrier_deck,
-            &HbRunConfig {
-                tones: vec![HbToneRunConfig::new(FUNDAMENTAL, 12)],
-                reltol: 1.0e-10,
-                ..HbRunConfig::default()
-            },
-            None,
-            &NoAbort,
-        )
-        .expect("the harmonic-balance carrier converges")
-        .operating_point;
-
-        for card in [
-            ".pxf dec 10 1k 1Meg input=V1 out=out from=hb",
-            ".pac dec 10 1k 1Meg input=V1 out=out from=hb",
-            ".pnoise dec 10 1k 1Meg out=out from=hb",
-        ] {
-            for seed in ["", ".pss fund=1Meg\n"] {
-                let source = format!("{CIRCUIT}{HB}{seed}{card}\n.end\n");
-                let netlist = Netlist::parse(&source).unwrap_or_else(|error| {
-                    panic!("the engine accepts `{card}`; this case no longer tests what it claims: {error}")
-                });
-                rspice_core::execution::DeckPlan::from_netlist(
-                    &netlist,
-                    &rspice_core::resource::ResourceLimits::default(),
-                )
-                .unwrap_or_else(|error| {
-                    panic!("the engine binds `{card}` to the deck's .HB carrier: {error}")
-                });
-
-                let tasks = parse_periodic_tasks(&netlist, &source)
-                    .unwrap_or_else(|errors| panic!("`{card}` must read: {errors:?}"));
-                let dependent = tasks
-                    .iter()
-                    .find(|task| {
-                        matches!(
-                            task.spec,
-                            AnalysisSpec::Pac | AnalysisSpec::Pxf | AnalysisSpec::Pnoise
-                        )
-                    })
-                    .unwrap_or_else(|| panic!("`{card}` queues a dependent task"));
-                let options = &dependent.spec_options;
-                // Bound to the harmonic-balance basis, not to the `.PSS`
-                // that may be sitting beside it.
-                let basis = options
-                    .pac
-                    .as_ref()
-                    .map(|config| (config.carrier, config.pss_fundamental_freq))
-                    .or_else(|| {
-                        options
-                            .pxf
-                            .as_ref()
-                            .map(|config| (config.carrier, config.pss_fundamental_freq))
-                    })
-                    .or_else(|| {
-                        options
-                            .pnoise
-                            .as_ref()
-                            .map(|config| (config.carrier, config.pss_fundamental_freq))
-                    })
-                    .unwrap_or_else(|| panic!("`{card}` freezes its run configuration"));
-                assert_eq!(basis.0, CarrierSelector::Hb, "`{card}`");
-                assert!(
-                    (basis.1 - FUNDAMENTAL).abs() < 1.0,
-                    "`{card}` must carry the .HB fundamental, got {}",
-                    basis.1
-                );
-
-                // And it runs. The service entries below are the ones the
-                // dispatch calls once the plan has handed over the artifact.
-                if let Some(config) = options.pac.as_ref() {
-                    let data = svc::run_pac_analysis_from_hb_with_source_path_and_abort(
-                        &carrier_deck,
-                        config,
-                        operating_point.as_ref(),
-                        None,
-                        &NoAbort,
-                    )
-                    .unwrap_or_else(|error| panic!("`{card}` must run: {error}"));
-                    assert!(!data.frequencies.is_empty(), "`{card}`");
-                    assert!(!data.traces.is_empty(), "`{card}`");
-                } else if let Some(config) = options.pxf.as_ref() {
-                    let data = svc::run_pxf_analysis_from_hb_with_source_path_and_abort(
-                        &carrier_deck,
-                        config,
-                        operating_point.as_ref(),
-                        None,
-                        &NoAbort,
-                    )
-                    .unwrap_or_else(|error| panic!("`{card}` must run: {error}"));
-                    assert!(!data.transfer.is_empty(), "`{card}`");
-                } else if let Some(config) = options.pnoise.as_ref() {
-                    let data = svc::run_pnoise_analysis_from_hb_with_source_path_and_abort(
-                        &carrier_deck,
-                        config,
-                        operating_point.as_ref(),
-                        None,
-                        &NoAbort,
-                    )
-                    .unwrap_or_else(|error| panic!("`{card}` must run: {error}"));
-                    assert!(
-                        data.output_noise.iter().all(|value| *value > 0.0),
-                        "`{card}` must publish a positive spectrum"
-                    );
-                } else {
-                    panic!("`{card}` queues one of the three typed configurations");
-                }
-            }
         }
     }
 
