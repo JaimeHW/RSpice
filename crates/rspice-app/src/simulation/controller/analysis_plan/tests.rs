@@ -184,8 +184,8 @@ fn pvt_selected_bases_persist_clone_and_freeze_exact_settings() {
     use crate::simulation::plan::{
         AnalysisNumericOverride, NumericOverrideOption as O, SimulationPlan,
     };
-    use crate::simulation::runner::worker_contract::WorkerCornerBaseMode;
     use rspice_simulation::sweeps::CornerBaseMode;
+    use rspice_simulation_contract::worker_run_config::WorkerCornerBaseMode;
     for wrapper in [AnalysisKind::Temperature, AnalysisKind::Corner] {
         for kind in [
             AnalysisKind::OperatingPoint,
@@ -603,11 +603,7 @@ fn qp_study_freezes_the_exact_producer_and_complete_consumer_controls() {
                     _ => unreachable!(),
                 }
             }
-            assert_ne!(
-                task.config_digest(),
-                PreparedTask::new(mc, task.source_revision(), vec![], "MC", changed)
-                    .config_digest()
-            );
+            assert_ne!(task.config_digest(), queued_digest(&changed));
         }
     }
 }
@@ -790,10 +786,7 @@ fn periodic_rf_study_freezes_all_consumer_options_and_exact_pss_op_chain() {
                 *mixed_mode = false;
             }
         }
-        assert_ne!(
-            task.config_digest(),
-            PreparedTask::new(mc, task.source_revision(), vec![], "MC", changed).config_digest()
-        );
+        assert_ne!(task.config_digest(), queued_digest(&changed));
     }
 }
 
@@ -956,10 +949,7 @@ fn pss_study_freezes_its_exact_op_producer_and_complete_shooting_configuration()
             1 => config.operating_point.config.temperature_celsius = 85.0,
             _ => config.operating_point.numeric_options = ".options RELTOL=.01".into(),
         }
-        assert_ne!(
-            task.config_digest(),
-            PreparedTask::new(mc, task.source_revision(), vec![], "MC", queued).config_digest()
-        );
+        assert_ne!(task.config_digest(), queued_digest(&queued));
     }
 }
 
@@ -1057,10 +1047,7 @@ fn hb_study_freezes_the_selected_instance_and_authenticates_its_native_settings(
         unreachable!()
     };
     *collocation_points = Some(33);
-    assert_ne!(
-        task.config_digest(),
-        PreparedTask::new(mc, task.source_revision(), vec![], "MC", changed).config_digest()
-    );
+    assert_ne!(task.config_digest(), queued_digest(&changed));
 }
 
 #[test]
@@ -1253,10 +1240,7 @@ fn hb_rf_study_freezes_exact_producer_consumer_and_noise_references() {
                     }
                 }
             }
-            assert_ne!(
-                task.config_digest(),
-                PreparedTask::new(mc, task.source_revision(), vec![], "MC", queued).config_digest()
-            );
+            assert_ne!(task.config_digest(), queued_digest(&queued));
         }
     }
 }
@@ -1377,8 +1361,7 @@ fn spectral_study_freezes_the_bound_transient_and_all_postprocess_settings() {
                     config.max_timestep = Some(1e-6);
                 }
             }
-            let changed = PreparedTask::new(mc, task.source_revision(), vec![], "MC", queued);
-            assert_ne!(task.config_digest(), changed.config_digest());
+            assert_ne!(task.config_digest(), queued_digest(&queued));
         }
     }
 }
@@ -1538,8 +1521,7 @@ fn configured_study_freezes_exact_base_and_survives_persistence_and_identity() {
                 }
             }
         }
-        let changed = PreparedTask::new(mc, task.source_revision(), vec![], "MC", queued);
-        assert_ne!(task.config_digest(), changed.config_digest());
+        assert_ne!(task.config_digest(), queued_digest(&queued));
     }
     let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
     plan.set_enabled(ac, false).unwrap();
@@ -1673,8 +1655,7 @@ fn configured_optimization_base_persists_and_freezes_before_live_edits() {
                 }
             }
         }
-        let changed = PreparedTask::new(opt, task.source_revision(), vec![], "OPT", queued);
-        assert_ne!(task.config_digest(), changed.config_digest());
+        assert_ne!(task.config_digest(), queued_digest(&queued));
     }
     assert!(matches!(
         base.analysis.as_basic(),
@@ -1869,4 +1850,16 @@ fn same_kind_sparameter_instances_freeze_independent_export_policies() {
     assert!(first_policy.output_path(4, 1, 2).is_some());
     assert_eq!(second_policy.version(), None);
     assert!(second_policy.output_path(4, 2, 2).is_none());
+}
+
+fn queued_digest(
+    task: &rspice_simulation::preparation::QueuedAnalysis,
+) -> crate::product::ContentDigest {
+    rspice_simulation::execution_identity::analysis_config_digest(
+        &task.analysis_line,
+        &task.spec,
+        task.config.as_ref(),
+        &task.spec_options,
+        task.numeric_override.as_ref(),
+    )
 }
