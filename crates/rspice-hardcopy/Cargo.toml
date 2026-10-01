@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 rspice-app-types.workspace = true
+rspice-formats.workspace = true
 rspice-design = { workspace = true, features = ["symbol-artwork"] }
 rspice-design-model.workspace = true
 rspice-hardcopy-contract.workspace = true

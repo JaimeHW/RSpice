@@ -5566,6 +5566,7 @@ dependencies = [
  "rspice-app-types",
  "rspice-design",
  "rspice-design-model",
+ "rspice-formats",
  "rspice-hardcopy-contract",
  "rspice-results",
  "serde",

@@ -5,9 +5,6 @@
 //! authority, compiles a fresh immutable plan, and only then crosses the file,
 //! browser-print, or native-spool boundary.
 
-#[cfg(target_arch = "wasm32")]
-use sha2::{Digest as _, Sha256};
-
 use super::HardcopyWorkflow;
 use crate::diagnostics::ConsoleMessage;
 use crate::workbench::app::RSpiceApp;
@@ -59,8 +56,6 @@ use crate::workbench::hardcopy_adapters::render::{
     HardcopyPublicationTimestamp, HardcopySceneMetadata,
 };
 use crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
-#[cfg(target_arch = "wasm32")]
-use crate::workbench::workflows::export_workflow::deterministic_stored_zip;
 use crate::workbench::workflows::export_workflow::{
     ObservedExportDestination, SaveDialogConfig, export_completion_message,
 };
@@ -2247,33 +2242,14 @@ impl ActiveBrowserPublication {
 #[cfg(target_arch = "wasm32")]
 fn export_bytes_and_identity(
     publication: &RenderedHardcopyPublication,
-    plan: &HardcopyPlan,
-    multi_part: bool,
 ) -> Result<(Vec<u8>, HardcopyArtifactIdentity), String> {
-    if !multi_part {
-        let part = publication.single_part().ok_or_else(|| {
-            "The renderer returned multiple files for a single-file format.".to_owned()
-        })?;
-        return Ok((
-            part.bytes().to_vec(),
-            publication.identity().map_err(|error| error.to_string())?,
-        ));
-    }
-    let entries = publication
-        .parts()
-        .iter()
-        .map(|part| (part.suggested_filename(), part.bytes()))
-        .collect::<Vec<_>>();
-    let bytes = deterministic_stored_zip(&entries).map_err(|error| error.to_string())?;
-    let digest = ContentDigest::from_bytes(Sha256::digest(&bytes).into());
-    let artifact = HardcopyArtifactIdentity::try_new(
-        digest,
-        bytes.len() as u64,
-        plan.pagination().pages().len() as u32,
-        plan.setup().render().format(),
-    )
-    .map_err(|error| error.to_string())?;
-    Ok((bytes, artifact))
+    let part = publication.single_part().ok_or_else(|| {
+        "The renderer returned multiple files for a single-file format.".to_owned()
+    })?;
+    Ok((
+        part.bytes().to_vec(),
+        publication.identity().map_err(|error| error.to_string())?,
+    ))
 }
 
 fn format_file_contract(

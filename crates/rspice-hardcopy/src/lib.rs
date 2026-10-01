@@ -2,3 +2,4 @@
 
 pub mod render;
 pub mod sources;
+pub mod worker;

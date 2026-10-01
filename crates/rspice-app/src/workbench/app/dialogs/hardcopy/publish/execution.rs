@@ -127,8 +127,9 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
                 super::super::worker::decode_packaged_publication(&plan, &source, buffers)
                     .map_err(|error| record_render_failure(app, &plan, error))
                     .and_then(|packaged| {
+                        let (bytes, artifact, page_count) = packaged.into_parts();
                         app.export_workflow_io
-                            .write_bytes_file_observed(&destination, &packaged.bytes, media_type)
+                            .write_bytes_file_observed(&destination, &bytes, media_type)
                             .map_err(|error| {
                                 record_export_failure(
                                     app,
@@ -138,9 +139,7 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
                             })?;
                         let receipt = HardcopyReceipt::record(
                             &plan,
-                            HardcopyOutcome::ArtifactExported {
-                                artifact: packaged.artifact,
-                            },
+                            HardcopyOutcome::ArtifactExported { artifact },
                         )
                         .map_err(|error| error.to_string())?;
                         retain_hardcopy_receipt(app, receipt)?;
@@ -150,8 +149,8 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
                             &path,
                             Some(format!(
                                 "{} page{} \u{00b7} deterministic ZIP package",
-                                packaged.page_count,
-                                if packaged.page_count == 1 { "" } else { "s" },
+                                page_count,
+                                if page_count == 1 { "" } else { "s" },
                             )),
                             app.export_workflow_io.as_ref(),
                         ))
@@ -160,41 +159,39 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
                 decode_browser_publication(&plan, &source, buffers)
                     .map_err(|error| record_render_failure(app, &plan, error))
                     .and_then(|rendered| {
-                        export_bytes_and_identity(&rendered, &plan, false).and_then(
-                            |(bytes, artifact)| {
-                                app.export_workflow_io
-                                    .write_bytes_file_observed(&destination, &bytes, media_type)
-                                    .map_err(|error| {
-                                        record_export_failure(
-                                            app,
-                                            &plan,
-                                            format!("Could not publish hardcopy: {error}"),
-                                        )
-                                    })?;
-                                let receipt = HardcopyReceipt::record(
-                                    &plan,
-                                    HardcopyOutcome::ArtifactExported { artifact },
-                                )
-                                .map_err(|error| error.to_string())?;
-                                retain_hardcopy_receipt(app, receipt)?;
-                                commit_print_mapping_persistence(app, publication.staged_mapping)?;
-                                Ok(export_completion_message(
-                                    "hardcopy",
-                                    &path,
-                                    Some(format!(
-                                        "{} page{} \u{00b7} {}",
-                                        rendered.page_count(),
-                                        if rendered.page_count() == 1 { "" } else { "s" },
-                                        if rendered.format().is_vector() {
-                                            "vector"
-                                        } else {
-                                            "raster"
-                                        }
-                                    )),
-                                    app.export_workflow_io.as_ref(),
-                                ))
-                            },
-                        )
+                        export_bytes_and_identity(&rendered).and_then(|(bytes, artifact)| {
+                            app.export_workflow_io
+                                .write_bytes_file_observed(&destination, &bytes, media_type)
+                                .map_err(|error| {
+                                    record_export_failure(
+                                        app,
+                                        &plan,
+                                        format!("Could not publish hardcopy: {error}"),
+                                    )
+                                })?;
+                            let receipt = HardcopyReceipt::record(
+                                &plan,
+                                HardcopyOutcome::ArtifactExported { artifact },
+                            )
+                            .map_err(|error| error.to_string())?;
+                            retain_hardcopy_receipt(app, receipt)?;
+                            commit_print_mapping_persistence(app, publication.staged_mapping)?;
+                            Ok(export_completion_message(
+                                "hardcopy",
+                                &path,
+                                Some(format!(
+                                    "{} page{} \u{00b7} {}",
+                                    rendered.page_count(),
+                                    if rendered.page_count() == 1 { "" } else { "s" },
+                                    if rendered.format().is_vector() {
+                                        "vector"
+                                    } else {
+                                        "raster"
+                                    }
+                                )),
+                                app.export_workflow_io.as_ref(),
+                            ))
+                        })
                     })
             }
         }
