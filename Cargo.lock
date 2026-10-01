@@ -5677,6 +5677,7 @@ dependencies = [
 name = "rspice-project-contract"
 version = "0.1.0"
 dependencies = [
+ "ron",
  "rspice-app-types",
  "rspice-design",
  "rspice-design-model",

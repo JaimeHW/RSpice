@@ -13,7 +13,7 @@ workspace = true
 
 [features]
 # Existing application fixtures may model invalid external catalog edits.
-library-test-fixtures = ["rspice-design/schematic-test-fixtures"]
+library-test-fixtures = ["rspice-project-contract/library-test-fixtures"]
 document-fingerprint-observation = []
 
 [dependencies]

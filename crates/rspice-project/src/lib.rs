@@ -16,9 +16,7 @@ pub use rspice_formats::project_results as results;
 
 pub mod registry;
 
-mod libraries;
 mod open_view;
-pub use libraries::ProjectLibraries;
 pub use open_view::OpenCellView;
 
 mod workspace;

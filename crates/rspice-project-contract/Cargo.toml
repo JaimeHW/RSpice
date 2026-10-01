@@ -11,6 +11,9 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+library-test-fixtures = ["rspice-design/schematic-test-fixtures"]
+
 [dependencies]
 rspice-app-types.workspace = true
 rspice-design.workspace = true
@@ -25,3 +28,6 @@ uuid = { workspace = true, features = ["v5"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 uuid = { workspace = true, features = ["js"] }
+
+[dev-dependencies]
+ron = { version = "0.12.2", features = ["integer128"] }
