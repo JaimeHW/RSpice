@@ -1,5 +1,6 @@
 //! Stable source-diagnostic identity and collection bounds shared by producers and views.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 mod metadata;
@@ -102,4 +103,35 @@ pub fn insert_diagnostic_id(ids: &mut HashSet<uuid::Uuid>, id: uuid::Uuid) -> Re
         ));
     }
     Ok(())
+}
+
+/// Log severity level following Spectre conventions
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
+)]
+pub enum LogSeverity {
+    /// Critical errors that halt simulation
+    Error,
+    /// Non-fatal issues that may affect results
+    Warning,
+    /// Important status information
+    #[default]
+    Info,
+    /// Detailed diagnostic information
+    Debug,
+    /// Fine-grained tracing for development
+    Trace,
+}
+
+impl LogSeverity {
+    /// Display name for the severity level
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Error => "ERROR",
+            Self::Warning => "WARN",
+            Self::Info => "INFO",
+            Self::Debug => "DEBUG",
+            Self::Trace => "TRACE",
+        }
+    }
 }

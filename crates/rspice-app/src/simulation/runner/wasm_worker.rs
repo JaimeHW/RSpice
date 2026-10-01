@@ -48,7 +48,6 @@ mod browser {
     use wasm_bindgen::prelude::*;
 
     use super::{next_request_id, request_id_from_js_number, stale_result, stale_worker_epoch};
-    use crate::diagnostics::engine_log::{EngineLogLine, EngineLogQueue};
     use crate::simulation::runner::worker_contract::{
         WORKER_REQUEST_TRANSPORT_PROTOCOL, WorkerProgressSnapshot, WorkerRequest,
         WorkerRequestTransportMetadata, apply_worker_progress_snapshot,
@@ -58,6 +57,7 @@ mod browser {
     };
     use crate::simulation::runner::{NetlistInput, SimulationRequest};
     use crate::simulation::status::{EngineAvailability, SimulationProgress, SimulationStatus};
+    use rspice_simulation::engine_log::{EngineLogLine, EngineLogQueue};
     use rspice_simulation::error::SimulationError;
     use rspice_simulation::live_transient::{
         LiveTransientQueue, TransientSampleDelta, push_live_transient_sample,
@@ -619,7 +619,7 @@ mod browser {
             ));
             return;
         };
-        crate::diagnostics::engine_log::lock_queue(&engine_log).push(line);
+        rspice_simulation::engine_log::lock_queue(&engine_log).push(line);
     }
 
     fn handle_error_message(state: &Rc<RefCell<WorkerState>>, data: &JsValue) {

@@ -29,36 +29,7 @@ use serde::{Deserialize, Serialize};
 // Log Severity Levels
 // =============================================================================
 
-/// Log severity level following Spectre conventions
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
-)]
-pub enum LogSeverity {
-    /// Critical errors that halt simulation
-    Error,
-    /// Non-fatal issues that may affect results
-    Warning,
-    /// Important status information
-    #[default]
-    Info,
-    /// Detailed diagnostic information
-    Debug,
-    /// Fine-grained tracing for development
-    Trace,
-}
-
-impl LogSeverity {
-    /// Display name for the severity level
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::Error => "ERROR",
-            Self::Warning => "WARN",
-            Self::Info => "INFO",
-            Self::Debug => "DEBUG",
-            Self::Trace => "TRACE",
-        }
-    }
-}
+pub use rspice_app_types::diagnostics::LogSeverity;
 
 // =============================================================================
 // Log Source Attribution

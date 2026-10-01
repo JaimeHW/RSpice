@@ -6,6 +6,7 @@
 pub mod analysis_preparation;
 pub mod capture_ledger;
 pub mod compilation;
+pub mod engine_log;
 pub mod error;
 pub mod execution_artifact;
 pub mod execution_identity;
@@ -25,6 +26,7 @@ pub mod pdk;
 pub mod periodic;
 pub mod preparation;
 pub mod prepared_dependency;
+pub mod progress;
 pub mod project_technology;
 pub mod project_veriloga;
 pub mod result_conversion;

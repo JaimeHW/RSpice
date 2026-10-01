@@ -407,7 +407,7 @@ fn emit_worker_monte_carlo_checkpoint(bytes: &[u8]) -> Result<(), SimulationErro
 /// [`emit_worker_transient_sample`], one message per line, keyed by the active
 /// request so a superseded run's lines cannot land in a newer run's Console.
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
-pub(super) fn emit_worker_engine_log(line: &crate::diagnostics::engine_log::EngineLogLine) {
+pub(super) fn emit_worker_engine_log(line: &rspice_simulation::engine_log::EngineLogLine) {
     use wasm_bindgen::JsCast as _;
     use wasm_bindgen::JsValue;
 
@@ -452,11 +452,11 @@ struct WorkerEngineLogger;
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 impl log::Log for WorkerEngineLogger {
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        crate::diagnostics::engine_log::admits(metadata)
+        rspice_simulation::engine_log::admits(metadata)
     }
 
     fn log(&self, record: &log::Record<'_>) {
-        crate::diagnostics::engine_log::offer(record);
+        rspice_simulation::engine_log::offer(record);
     }
 
     fn flush(&self) {}
@@ -476,7 +476,7 @@ fn install_worker_engine_logger() {
         if log::set_boxed_logger(Box::new(WorkerEngineLogger)).is_ok() {
             // No stderr half at all on this image, so the level the process
             // admits is exactly what the run's sink asks for.
-            crate::diagnostics::engine_log::note_stderr_level(log::LevelFilter::Off);
+            rspice_simulation::engine_log::note_stderr_level(log::LevelFilter::Off);
         }
     });
 }
@@ -513,7 +513,7 @@ fn run_decoded_worker_request(
                 checkpoint_observer: Some(Arc::new(emit_worker_monte_carlo_checkpoint)),
                 transient_sample_observer: stream_transient_samples
                     .then_some(emit_worker_transient_sample),
-                engine_log: Some(crate::diagnostics::engine_log::RunLogSink::observed(
+                engine_log: Some(rspice_simulation::engine_log::RunLogSink::observed(
                     emit_worker_engine_log,
                     verbose,
                 )),

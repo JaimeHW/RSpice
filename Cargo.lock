@@ -5731,6 +5731,7 @@ dependencies = [
  "base64 0.23.1",
  "ed25519-dalek",
  "js-sys",
+ "log",
  "num-complex",
  "ron",
  "rspice-app-types",
@@ -5754,6 +5755,7 @@ dependencies = [
  "wasmi",
  "wat",
  "web-sys",
+ "web-time",
 ]
 
 [[package]]

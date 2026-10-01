@@ -17,7 +17,7 @@ use rspice_simulation::error::SimulationError;
 use rspice_simulation::execution_options::SpecExecutionOptions;
 pub(crate) use rspice_simulation_contract::worker_protocol::AnalysisExecutionEnvironment;
 
-use crate::diagnostics::engine_log::{EngineLogLine, EngineLogQueue, RunLogSink};
+use rspice_simulation::engine_log::{EngineLogLine, EngineLogQueue, RunLogSink};
 
 use super::config::AnalysisConfig;
 use super::execution::ResolvedTaskDispatch;
@@ -217,7 +217,7 @@ impl SimulationRunner {
     /// own bound is inside the queue, so a solver that never stops talking
     /// cannot grow this without limit.
     pub(in crate::simulation) fn drain_engine_log(&self) -> Vec<EngineLogLine> {
-        crate::diagnostics::engine_log::lock_queue(&self.engine_log).drain()
+        rspice_simulation::engine_log::lock_queue(&self.engine_log).drain()
     }
 
     /// Latest complete journal, available independently of terminal success.
@@ -427,7 +427,7 @@ impl SimulationRunner {
             Ok(mut samples) => samples.clear(),
             Err(poisoned) => poisoned.into_inner().clear(),
         }
-        crate::diagnostics::engine_log::lock_queue(&self.engine_log).clear();
+        rspice_simulation::engine_log::lock_queue(&self.engine_log).clear();
         {
             let mut progress = lock_progress(&self.progress, "SimulationRunner::start_request");
             *progress = SimulationProgress::new();
@@ -887,7 +887,7 @@ pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observe
     // Whatever the engine logs from here on belongs to this run, and only to
     // it: the guard is removed on every exit path below, including a panic
     // unwinding out of the solver.
-    let _engine_log = engine_log.map(crate::diagnostics::engine_log::install);
+    let _engine_log = engine_log.map(rspice_simulation::engine_log::install);
 
     // Update status: parsing
     {
@@ -1071,7 +1071,7 @@ mod tests {
             },
         );
         result.expect("the specification reaches the engine and converges");
-        crate::diagnostics::engine_log::lock_queue(&queue).drain()
+        rspice_simulation::engine_log::lock_queue(&queue).drain()
     }
 
     /// The receipt names numbers that exist nowhere else.
