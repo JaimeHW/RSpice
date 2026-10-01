@@ -12,9 +12,7 @@
 //! claim, and it is made there.
 
 use super::*;
-use crate::workbench::hardcopy_adapters::sources::{
-    SemanticPlotCursor, SemanticPlotMarker, SemanticPlotTrace,
-};
+use crate::sources::{SemanticPlotCursor, SemanticPlotMarker, SemanticPlotTrace};
 
 fn point(x_um: i64, y_um: i64) -> SemanticPoint {
     SemanticPoint::new(x_um, y_um)
@@ -22,11 +20,11 @@ fn point(x_um: i64, y_um: i64) -> SemanticPoint {
 
 fn overlay_plot() -> SemanticPlot {
     SemanticPlot {
-        viewer: crate::workbench::ResultViewer::Waves,
+        viewer: rspice_results::result_presentation::ResultViewer::Waves,
         page_id: 1,
         pane_id: 0,
-        x_scale: crate::results::visualization_document::AxisScale::Linear,
-        y_scale: crate::results::visualization_document::AxisScale::Linear,
+        x_scale: rspice_results::visualization_document::AxisScale::Linear,
+        y_scale: rspice_results::visualization_document::AxisScale::Linear,
         axis_ticks: Vec::new(),
         traces: vec![SemanticPlotTrace {
             trace_id: 11,
@@ -74,7 +72,7 @@ fn a_single_point_distribution_compiles_to_a_visible_marker() {
     let mut compiler =
         SemanticSceneCompiler::new(bounds, extent, &mapping, SchematicHardcopySetup::default());
     let mut plot = overlay_plot();
-    plot.viewer = crate::workbench::ResultViewer::Hist;
+    plot.viewer = rspice_results::result_presentation::ResultViewer::Hist;
     plot.cursors.clear();
     plot.markers.clear();
     plot.traces[0].paths = vec![vec![point(127_000, 71_437)]];

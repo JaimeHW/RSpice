@@ -5240,7 +5240,6 @@ dependencies = [
  "rand 0.8.6",
  "regex",
  "reqwest",
- "resvg",
  "rfd",
  "ron",
  "ropey",
@@ -5252,6 +5251,7 @@ dependencies = [
  "rspice-design",
  "rspice-design-model",
  "rspice-formats",
+ "rspice-hardcopy",
  "rspice-hardcopy-contract",
  "rspice-model-library",
  "rspice-output",
@@ -5270,7 +5270,6 @@ dependencies = [
  "sha2 0.10.9",
  "similar",
  "thiserror 2.0.20",
- "tiff",
  "time",
  "tokio",
  "tokio-tungstenite",
@@ -5279,7 +5278,6 @@ dependencies = [
  "unicode-normalization",
  "unicode-segmentation",
  "url",
- "usvg",
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -5554,6 +5552,31 @@ dependencies = [
  "sha2 0.10.9",
  "time",
  "zip",
+]
+
+[[package]]
+name = "rspice-hardcopy"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "krilla",
+ "lopdf",
+ "png",
+ "resvg",
+ "rspice-app-types",
+ "rspice-design",
+ "rspice-design-model",
+ "rspice-hardcopy-contract",
+ "rspice-results",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.20",
+ "tiff",
+ "ttf-parser",
+ "unicode-segmentation",
+ "usvg",
+ "uuid",
 ]
 
 [[package]]

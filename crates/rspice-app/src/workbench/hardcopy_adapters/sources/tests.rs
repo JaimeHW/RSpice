@@ -460,7 +460,12 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
             .micrometres(),
         210_000
     );
-    assert_eq!(all.hardcopy_sections().unwrap().len(), 3);
+    assert_eq!(
+        all.hardcopy_sections_for_setup(crate::hardcopy::SchematicHardcopySetup::default())
+            .unwrap()
+            .len(),
+        3
+    );
 
     let worker_bytes = all.worker_snapshot_json().unwrap();
     let round_trip = ResolvedHardcopyDocument::from_worker_snapshot_json(&worker_bytes).unwrap();
@@ -1327,15 +1332,6 @@ fn retained_plot_scene_maps_to_platform_independent_integer_geometry() {
         digest,
         "the publication digest also binds the resolved physical semantics"
     );
-}
-
-#[test]
-fn plot_line_clipping_preserves_true_axis_boundary_intersections() {
-    let clipped = clip_line_to_axis_rect((-1.0, 0.25), (3.0, 0.75), 0.0, 2.0, 0.0, 1.0)
-        .expect("line crosses the visible axis rectangle");
-    assert_eq!(clipped.0, (0.0, 0.375));
-    assert_eq!(clipped.1, (2.0, 0.625));
-    assert!(clip_line_to_axis_rect((-2.0, 2.0), (-1.0, 3.0), 0.0, 1.0, 0.0, 1.0).is_none());
 }
 
 #[test]

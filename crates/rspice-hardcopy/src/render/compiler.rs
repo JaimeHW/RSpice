@@ -1092,7 +1092,9 @@ impl<'a> SemanticSceneCompiler<'a> {
             let logo_height = authored_block
                 .height_um
                 .saturating_sub(inset.saturating_mul(2));
-            let basis = u64::from(crate::state::DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS);
+            let basis = u64::from(
+                rspice_design_model::design_management::DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS,
+            );
             for primitive in logo.primitives() {
                 let points = primitive
                     .points()
@@ -1121,14 +1123,14 @@ impl<'a> SemanticSceneCompiler<'a> {
             .title_block_rows(template)
             .map(|rows| rows as u64)
             .ok_or_else(|| conversion_error("title block has no authored grid"))?;
-        let mut fields = crate::state::resolve_drawing_sheet_title_fields(format, automatic_values)
+        let mut fields = rspice_design_model::design_management::resolve_drawing_sheet_title_fields(format, automatic_values)
             .into_iter()
             .map(|field| {
                 (
                     field.id.display_label().to_owned(),
                     field.value,
                     field.authority
-                        == crate::state::DrawingSheetTitleFieldValueAuthority::Automatic,
+                        == rspice_design_model::design_management::DrawingSheetTitleFieldValueAuthority::Automatic,
                 )
             })
             .collect::<Vec<_>>();
@@ -1168,14 +1170,15 @@ impl<'a> SemanticSceneCompiler<'a> {
         for (index, (label, value, automatic)) in fields.into_iter().enumerate() {
             let row = index as u64 / columns;
             let column = index as u64 % columns;
-            let max_chars = crate::state::drawing_sheet_title_cell_capacity(
-                format,
-                &format.geometry().map_err(|error| {
-                    conversion_error(format!("drawing-sheet geometry: {error}"))
-                })?,
-                visible_field_count,
-            )
-            .ok_or_else(|| conversion_error("title block has no authored cell capacity"))?;
+            let max_chars =
+                rspice_design_model::design_management::drawing_sheet_title_cell_capacity(
+                    format,
+                    &format.geometry().map_err(|error| {
+                        conversion_error(format!("drawing-sheet geometry: {error}"))
+                    })?,
+                    visible_field_count,
+                )
+                .ok_or_else(|| conversion_error("title block has no authored cell capacity"))?;
             let label = if automatic {
                 format!("• {label}")
             } else {
@@ -1323,8 +1326,7 @@ impl<'a> SemanticSceneCompiler<'a> {
             font,
             size_um,
             color,
-            TextAnchor::Start,
-            SceneTextRotation::Upright,
+            (TextAnchor::Start, SceneTextRotation::Upright),
         )
     }
 
@@ -1343,8 +1345,7 @@ impl<'a> SemanticSceneCompiler<'a> {
             font,
             size_um,
             color,
-            TextAnchor::Start,
-            rotation,
+            (TextAnchor::Start, rotation),
         )
     }
 
@@ -1355,8 +1356,7 @@ impl<'a> SemanticSceneCompiler<'a> {
         font: SceneFont,
         size_um: u64,
         color: SemanticColor,
-        anchor: TextAnchor,
-        rotation: SceneTextRotation,
+        (anchor, rotation): (TextAnchor, SceneTextRotation),
     ) -> Result<(), HardcopyRenderError> {
         let normalized = text.replace(['\r', '\n', '\t'], " ");
         if normalized.trim().is_empty() {
@@ -1525,7 +1525,7 @@ impl<'a> SemanticSceneCompiler<'a> {
         component: &Component,
         stroke: StrokeStyle,
     ) -> Result<(), HardcopyRenderError> {
-        let world = |local: crate::state::Point| {
+        let world = |local: rspice_design_model::Point| {
             let transformed = component.transform_point(local);
             SchematicPoint::new(
                 component.pos.x.saturating_add(transformed.x),
@@ -1536,9 +1536,9 @@ impl<'a> SemanticSceneCompiler<'a> {
         let (min, max) = block.body;
         let corners = [
             world(min),
-            world(crate::state::Point::new(max.x, min.y)),
+            world(rspice_design_model::Point::new(max.x, min.y)),
             world(max),
-            world(crate::state::Point::new(min.x, max.y)),
+            world(rspice_design_model::Point::new(min.x, max.y)),
         ];
         self.primitives.push(ScenePrimitive::Polyline {
             points: corners
@@ -1551,7 +1551,11 @@ impl<'a> SemanticSceneCompiler<'a> {
         });
 
         for pin in block.pins {
-            let inner = crate::state::lead_inner(pin.offset, pin.side, Some(block.body));
+            let inner = rspice_design::symbol_generation::lead_inner(
+                pin.offset,
+                pin.side,
+                Some(block.body),
+            );
             self.primitives.push(ScenePrimitive::Line {
                 from: self.schematic_point(world(pin.offset))?,
                 to: self.schematic_point(world(inner))?,
@@ -1564,10 +1568,14 @@ impl<'a> SemanticSceneCompiler<'a> {
                 fill: None,
             });
             if !pin.name.is_empty() {
-                let anchor = crate::state::pin_label_anchor(pin.offset, pin.side, Some(block.body));
+                let anchor = rspice_design::symbol_generation::pin_label_anchor(
+                    pin.offset,
+                    pin.side,
+                    Some(block.body),
+                );
                 self.add_text(
                     self.schematic_point(world(anchor))?,
-                    &crate::state::fit_pin_name(&pin.name),
+                    &rspice_design::symbol_generation::fit_pin_name(&pin.name),
                     SceneFont::Sans,
                     1_900,
                     stroke.color,
@@ -1583,7 +1591,7 @@ impl<'a> SemanticSceneCompiler<'a> {
         component: &Component,
         stroke: StrokeStyle,
     ) -> Result<(), HardcopyRenderError> {
-        let world = |local: crate::state::Point| {
+        let world = |local: rspice_design_model::Point| {
             let transformed = component.transform_point(local);
             SchematicPoint::new(
                 component.pos.x.saturating_add(transformed.x),
@@ -2041,8 +2049,7 @@ impl<'a> SemanticSceneCompiler<'a> {
                         }
                     }
                     y = self.report_block(
-                        block.id(),
-                        block.kind(),
+                        block,
                         report
                             .figures
                             .iter()
@@ -2077,16 +2084,16 @@ impl<'a> SemanticSceneCompiler<'a> {
 
     fn report_block(
         &mut self,
-        block_id: ReportBlockId,
-        block: &ReportBlockKind,
+        block: &ReportBlock,
         figure: Option<&SemanticReportFigure>,
         mut y: u64,
         page_bottom: u64,
         stroke: StrokeStyle,
         page_title: &str,
     ) -> Result<u64, HardcopyRenderError> {
+        let block_id = block.id();
         let mut lines = Vec::<String>::new();
-        match block {
+        match block.kind() {
             ReportBlockKind::PlotFigure(value) => {
                 let figure =
                     figure.ok_or(HardcopyRenderError::UnsupportedAuthenticatedReportBlock(

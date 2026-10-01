@@ -15,9 +15,7 @@ use crate::state::{
 };
 use crate::workbench::ResultViewer;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::workbench::hardcopy_adapters::render::{
-    HardcopyPublicationTimestamp, HardcopyRenderer, HardcopySceneMetadata,
-};
+use crate::workbench::hardcopy_adapters::render::{HardcopyPublicationTimestamp, HardcopyRenderer};
 use crate::workbench::hardcopy_adapters::sources::{
     HardcopySemanticDocument, prepare_retained_hardcopy_resolution,
 };
@@ -155,7 +153,8 @@ fn histogram_publication_renders_every_mode_after_worker_transfer() {
             )
             .unwrap();
             let mut metadata =
-                HardcopySceneMetadata::for_resolved_source(&source, "RSpice").unwrap();
+                crate::workbench::hardcopy_adapters::render::source_metadata(&source, "RSpice")
+                    .unwrap();
             metadata.set_publication_timestamp(
                 HardcopyPublicationTimestamp::from_unix_seconds(1_788_761_600).unwrap(),
             );

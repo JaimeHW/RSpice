@@ -517,8 +517,17 @@ fn app_state_clone_drops_runtime_hardcopy_authority_and_payloads() {
     let metadata = HardcopySceneMetadata::try_new(resolved.authority().display_name(), "RSpice")
         .expect("metadata");
     app.state.dialogs.hardcopy.preview = Some(std::sync::Arc::new(
-        HardcopyRenderer::render_preview_page_resolved(&plan, &resolved, metadata, 0, 72)
-            .expect("preview"),
+        HardcopyRenderer::render_preview_pages_resolved(
+            &plan,
+            &resolved,
+            metadata,
+            &[0],
+            72,
+            || false,
+        )
+        .expect("preview")
+        .pop()
+        .expect("one requested preview page"),
     ));
     app.state.dialogs.hardcopy.source_resolution_generation = 19;
     app.state.dialogs.hardcopy.printer_report =

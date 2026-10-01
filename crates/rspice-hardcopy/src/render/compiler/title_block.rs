@@ -5,7 +5,7 @@
 
 use super::*;
 
-pub(in crate::workbench::hardcopy_adapters::render) fn authored_title_block_rect(
+pub(in crate::render) fn authored_title_block_rect(
     block: DrawingSheetRect,
     rotation: DrawingSheetTitleBlockRotation,
 ) -> Result<DrawingSheetRect, HardcopyRenderError> {
@@ -41,7 +41,7 @@ pub(in crate::workbench::hardcopy_adapters::render) fn authored_title_block_rect
     })
 }
 
-pub(in crate::workbench::hardcopy_adapters::render) fn zone_alpha_label(index: u8) -> String {
+pub(in crate::render) fn zone_alpha_label(index: u8) -> String {
     // Match canvas and preview: engineering drawing zones omit ambiguous
     // letters and fall back to the numeric ordinal once the alphabet ends.
     const LETTERS: &[u8] = b"ABCDEFGHJKLMNPRSTUVWXY";
@@ -51,7 +51,7 @@ pub(in crate::workbench::hardcopy_adapters::render) fn zone_alpha_label(index: u
     )
 }
 
-pub(in crate::workbench::hardcopy_adapters::render) fn midpoint_coordinate(
+pub(in crate::render) fn midpoint_coordinate(
     start: i64,
     end: i64,
     context: &'static str,
@@ -61,10 +61,7 @@ pub(in crate::workbench::hardcopy_adapters::render) fn midpoint_coordinate(
         .ok_or_else(|| conversion_error(format!("{context} coordinate overflow")))
 }
 
-pub(in crate::workbench::hardcopy_adapters::render) fn truncate_title_block_text(
-    value: &str,
-    max_chars: usize,
-) -> String {
+pub(in crate::render) fn truncate_title_block_text(value: &str, max_chars: usize) -> String {
     let count = value.chars().count();
     if count <= max_chars {
         return value.to_owned();

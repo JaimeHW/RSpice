@@ -1796,7 +1796,7 @@ impl PreparedRetainedHardcopyResolution {
             } => {
                 if all_panes {
                     let mut resolved = resolve_all_studio_panes(project_id, &studio, &simulation)?;
-                    resolved.source_key = source_key;
+                    resolved = resolved.with_source_key(source_key)?;
                     Ok(resolved)
                 } else {
                     resolve_active_studio_pane_source(ActiveStudioPaneHardcopySource {

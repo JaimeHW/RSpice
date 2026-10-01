@@ -9,19 +9,15 @@
 
 mod axis;
 mod documents;
-mod geometry;
 mod noise;
 mod prepared;
 mod quick_plots;
 mod quick_view_overlay;
 mod report_inventory;
 mod results;
-mod semantic;
 
 pub use documents::*;
-// Crate-private: `geometry` exposes only `pub(super)` helpers, which the
-// sibling modules reach through `use super::*`.
-pub(crate) use geometry::*;
+pub(crate) use rspice_hardcopy::sources::*;
 // Module-private: `axis`, `noise`, `quick_plots` and `quick_view_overlay`
 // expose only `pub(super)` items, and the siblings reach them through
 // `use super::*`.
@@ -30,8 +26,14 @@ use noise::*;
 pub use prepared::*;
 use quick_plots::*;
 use quick_view_overlay::*;
-pub use results::*;
-pub use semantic::*;
+pub(crate) use results::*;
+use rspice_hardcopy::sources::resolve_semantic_source as finish_resolved;
+#[cfg(test)]
+pub const BLANK_SCHEMATIC_SHEET_WIDTH_UM: i64 = 279_400;
+#[cfg(test)]
+pub const BLANK_SCHEMATIC_SHEET_HEIGHT_UM: i64 = 215_900;
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(super) const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 8;
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha2::{Digest as _, Sha256};
@@ -40,40 +42,32 @@ use uuid::Uuid;
 use crate::io::ProjectSimulationResults;
 use crate::product::{ContentDigest, DatasetId, ObjectRevision, ProjectId, RunId};
 #[cfg(test)]
-use crate::results::report_document::FigureSizing;
 use crate::results::report_document::{
-    FrozenReportArtifact, ReportBlockId, ReportBlockKind, ReportDocument,
-    ReportReferenceCurrentness, ReportReferenceInventory, ReportReferenceMode,
-    ReportReferenceSnapshot, ReportSourceId,
+    FigureSizing, ReportBlockKind, ReportReferenceCurrentness, ReportReferenceMode,
+};
+use crate::results::report_document::{
+    ReportDocument, ReportReferenceInventory, ReportReferenceSnapshot, ReportSourceId,
 };
 use crate::results::visualization_document::{
-    AnnotationAnchor, AxisScale, Page, PageId, Pane, PaneId, TypedValue, VisualizationDocument,
-};
-use crate::results::visualization_raster::{
-    ResolvedCartesianLineScene, VisualizationRasterError, resolve_cartesian_line_scene,
+    AxisScale, Page, PageId, Pane, PaneId, VisualizationDocument,
 };
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType, Bus, BusTap,
     Component, ComponentType, DesignNote, DesignSheet, DocumentationShape,
-    DrawingSheetBorderTemplate, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, Junction,
-    NetLabel, Point, ResolvedSymbolIssueKind, ResolvedSymbolSource, SchematicSheetFormat,
-    SchematicState, Selection, SheetCatalog, SheetId, SimulationRun, SimulationState,
-    SymbolDocument, SymbolResolver, SymbolShape, ViewType, WaveformData, Wire,
+    DrawingSheetTitleFieldId, Junction, NetLabel, ResolvedSymbolIssueKind, ResolvedSymbolSource,
+    SchematicSheetFormat, SchematicState, Selection, SheetCatalog, SheetId, SimulationRun,
+    SimulationState, SymbolDocument, SymbolResolver, ViewType, WaveformData, Wire,
 };
 use crate::workbench::AppState;
 
-use crate::hardcopy::{
-    ActiveHardcopySource, HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope, Length,
-    PrintColor, PrintMappingEntry, PrintMappingSaveScope, PrintMappingTable, PrintObjectIdentity,
-    PrintObjectKind, PrintRedundancy,
-};
+use crate::hardcopy::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
 use crate::workbench::SurfaceId;
 // The persisted source-set records and the validation they share with these
 // adapters are owned one layer down, where `state` can reach them.
 use crate::hardcopy::sources::{
     DISPLAY_NAME_LIMIT, HardcopyPublicationIdentity, HardcopySourceError, HardcopySourceIdentity,
-    HardcopySourceSet, HardcopySourceSetMember, MAX_HARDCOPY_SOURCE_SET_MEMBERS, SOURCE_KEY_LIMIT,
-    canonical_digest, validate_label,
+    HardcopySourceSet, MAX_HARDCOPY_SOURCE_SET_MEMBERS, SOURCE_KEY_LIMIT, canonical_digest,
+    validate_label,
 };
 use crate::workbench::documents::result_document::ResultViewer;
 use crate::workbench::documents::visualization_studio::{
@@ -82,37 +76,6 @@ use crate::workbench::documents::visualization_studio::{
 };
 use crate::workbench::lifecycle::session::SymbolSelection;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
-
-/// Natural physical scale for schematic coordinates.
-///
-/// The authored drawing-sheet contract defines exactly four editor units per
-/// millimetre. Page fitting can subsequently scale this scene, but retaining
-/// the exact 250 micrometre calibration here keeps canvas coordinates,
-/// overflow reports, and 1:1 hardcopy physically identical on every target.
-pub const SCHEMATIC_UNIT_UM: i64 = 250;
-/// Fixed top-left authored page origin in schematic world units.
-pub const SCHEMATIC_SHEET_ORIGIN_X_UNITS: i64 = -140;
-pub const SCHEMATIC_SHEET_ORIGIN_Y_UNITS: i64 = -40;
-/// Natural active-plot canvas (10 by 5.625 inches, 16:9).
-pub const PLOT_WIDTH_UM: i64 = 254_000;
-pub const PLOT_HEIGHT_UM: i64 = 142_875;
-/// Natural report page used to arrange the report's already-authored pages.
-pub const REPORT_PAGE_WIDTH_UM: i64 = 215_900;
-pub const REPORT_PAGE_HEIGHT_UM: i64 = 279_400;
-pub const REPORT_PAGE_GAP_UM: i64 = 5_000;
-#[cfg(test)]
-pub const BLANK_SCHEMATIC_SHEET_WIDTH_UM: i64 = 279_400;
-#[cfg(test)]
-pub const BLANK_SCHEMATIC_SHEET_HEIGHT_UM: i64 = 215_900;
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-pub(crate) const MAX_WORKER_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-pub(super) const WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 3;
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-pub(super) const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 8;
-const SCHEMATIC_EDGE_ALLOWANCE_UNITS: i64 = 16;
-const SYMBOL_EDGE_ALLOWANCE_UNITS: i64 = 10;
-const PLOT_INSET_UM: i64 = 12_700;
 
 pub struct SchematicHardcopySource<'a> {
     pub identity: HardcopySourceIdentity,
@@ -148,25 +111,6 @@ pub struct SymbolHardcopySource<'a> {
     pub identity: HardcopySourceIdentity,
     pub document: &'a SymbolDocument,
     pub selection: Option<&'a SymbolSelection>,
-    pub scope: HardcopyScope,
-}
-
-pub struct PlotHardcopySource<'a> {
-    pub source_key: String,
-    pub display_name: String,
-    pub scene: &'a ResolvedCartesianLineScene,
-    pub scope: HardcopyScope,
-}
-
-/// Active Visualization Studio pane together with the immutable reference
-/// manifest that names its exact document revision and retained datasets.
-pub struct VisualizationPaneHardcopySource<'a> {
-    pub source_key: String,
-    pub display_name: String,
-    pub document: &'a VisualizationDocument,
-    pub reference: &'a ReportReferenceSnapshot,
-    pub page_id: PageId,
-    pub pane_id: PaneId,
     pub scope: HardcopyScope,
 }
 
@@ -260,15 +204,6 @@ impl ResultsQuickViewPresentation {
             histogram_mode: state.analysis.histogram_state.mode,
         }
     }
-}
-
-pub struct ReportHardcopySource<'a> {
-    pub source_key: String,
-    pub document: &'a ReportDocument,
-    /// Exact retained live-source inventory for linked references. Frozen
-    /// blocks authenticate from their embedded artifact and do not require it.
-    pub reference_inventory: Option<&'a ReportReferenceInventory>,
-    pub scope: HardcopyScope,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -956,159 +891,6 @@ pub(crate) fn active_app_hardcopy_source_available(state: &AppState) -> bool {
 /// Resolve an exact ordered source set with a caller-provided retained-source
 /// lookup. This is the state-facing boundary used both by project persistence
 /// and by worker-owned source snapshots.
-pub fn resolve_hardcopy_source_set_with(
-    source_set: &HardcopySourceSet,
-    mut resolve_member: impl FnMut(
-        &HardcopySourceSetMember,
-    ) -> Result<ResolvedHardcopyDocument, HardcopySourceError>,
-) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    source_set.validate()?;
-
-    let mut children = Vec::with_capacity(source_set.members().len());
-    let mut next_y_um = 0_i64;
-    let mut maximum_width_um = 0_i64;
-    for (index, member) in source_set.members().iter().enumerate() {
-        let resolved = resolve_member(member)?;
-        validate_source_set_member_authority(source_set, member, &resolved)?;
-        if matches!(
-            resolved.semantic_document(),
-            HardcopySemanticDocument::Aggregate(_)
-        ) {
-            return Err(HardcopySourceError::InvalidSourceSet(
-                "nested semantic aggregates are not supported".to_owned(),
-            ));
-        }
-
-        let bounds = resolved.bounds();
-        let width = bounds
-            .maximum
-            .x_um
-            .checked_sub(bounds.minimum.x_um)
-            .ok_or(HardcopySourceError::CoordinateOverflow)?;
-        let height = bounds
-            .maximum
-            .y_um
-            .checked_sub(bounds.minimum.y_um)
-            .ok_or(HardcopySourceError::CoordinateOverflow)?;
-        maximum_width_um = maximum_width_um.max(width);
-        let ordinal = u32::try_from(index).map_err(|_| HardcopySourceError::CoordinateOverflow)?;
-        let ResolvedHardcopyDocument {
-            source_key,
-            authority,
-            semantic_document,
-            ..
-        } = resolved;
-        children.push(SemanticAggregateChild {
-            ordinal,
-            source_key,
-            display_name: authority.display_name().to_owned(),
-            document_id: authority.document_id(),
-            revision: authority.revision(),
-            content_digest: authority.content_digest(),
-            local_bounds: bounds,
-            placement_origin: SemanticPoint::new(0, next_y_um),
-            page_break_before: index != 0,
-            publication_page_label: None,
-            document: Box::new(semantic_document),
-        });
-        next_y_um = next_y_um
-            .checked_add(height)
-            .ok_or(HardcopySourceError::CoordinateOverflow)?;
-        if index + 1 != source_set.members().len() {
-            next_y_um = next_y_um
-                .checked_add(REPORT_PAGE_GAP_UM)
-                .ok_or(HardcopySourceError::CoordinateOverflow)?;
-        }
-    }
-
-    // A per-print-set schematic is numbered by the exact ordered schematic
-    // subset in this authenticated aggregate, not by its full source catalog.
-    // The override belongs to the aggregate projection and therefore does not
-    // mutate or misrepresent the retained child source digest.
-    let per_print_set_count = children
-        .iter()
-        .filter(|child| {
-            matches!(
-                child.document.as_ref(),
-                HardcopySemanticDocument::Schematic(schematic)
-                    if schematic.drawing_sheet_page_numbering
-                        == Some(crate::state::SheetPageNumbering::PerPrintSet)
-            )
-        })
-        .count();
-    if per_print_set_count > 0 {
-        let mut page = 0_usize;
-        for child in &mut children {
-            if matches!(
-                child.document.as_ref(),
-                HardcopySemanticDocument::Schematic(schematic)
-                    if schematic.drawing_sheet_page_numbering
-                        == Some(crate::state::SheetPageNumbering::PerPrintSet)
-            ) {
-                page += 1;
-                child.publication_page_label = Some(format!("{page} of {per_print_set_count}"));
-            }
-        }
-    }
-
-    let aggregate = SemanticAggregate {
-        source_set_digest: source_set.definition_digest(),
-        children,
-    };
-    let semantic_document = HardcopySemanticDocument::Aggregate(aggregate);
-    let content_digest = canonical_digest(
-        b"rspice-hardcopy-source-set-aggregate-v1",
-        &(source_set.definition_digest(), &semantic_document),
-    )?;
-    let bounds = SemanticBounds::try_new(
-        SemanticPoint::new(0, 0),
-        SemanticPoint::new(maximum_width_um, next_y_um),
-    )?;
-    finish_resolved(
-        HardcopySourceIdentity::try_new(
-            source_set.source_key(),
-            source_set.document_id(),
-            source_set.revision(),
-            source_set.name(),
-        )?,
-        content_digest,
-        source_set.document_kind(),
-        source_set.scope().clone(),
-        semantic_document,
-        bounds,
-    )
-}
-
-fn validate_source_set_member_authority(
-    source_set: &HardcopySourceSet,
-    expected: &HardcopySourceSetMember,
-    actual: &ResolvedHardcopyDocument,
-) -> Result<(), HardcopySourceError> {
-    let authority = actual.authority();
-    let exact = actual.source_key() == expected.source_key()
-        && authority.display_name() == expected.display_name()
-        && authority.document_id() == expected.document_id()
-        && authority.revision() == expected.revision()
-        && authority.content_digest() == expected.content_digest()
-        && authority.scope() == expected.scope();
-    if !exact {
-        return Err(HardcopySourceError::StaleSourceSetMember {
-            source_key: expected.source_key().to_owned(),
-        });
-    }
-    if source_set.document_kind() != HardcopyDocumentKind::EngineeringDocument
-        && authority.document_kind() != source_set.document_kind()
-    {
-        return Err(HardcopySourceError::InvalidSourceSet(format!(
-            "member {} has kind {:?}, expected {:?}",
-            expected.source_key(),
-            authority.document_kind(),
-            source_set.document_kind()
-        )));
-    }
-    Ok(())
-}
-
 /// Whether the requirement set this run is judged against is empty.
 ///
 /// The run-scoped spelling of the sheet's `resolved_specifications`: a
@@ -1969,35 +1751,6 @@ fn selected_symbol_document(
     Ok(selected)
 }
 
-fn finish_resolved(
-    identity: HardcopySourceIdentity,
-    content_digest: ContentDigest,
-    kind: HardcopyDocumentKind,
-    scope: HardcopyScope,
-    semantic_document: HardcopySemanticDocument,
-    bounds: SemanticBounds,
-) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    let content_extent = bounds.content_extent()?;
-    let default_print_mapping = default_print_mapping(&semantic_document)?;
-    let authority = ActiveHardcopySource::try_new(
-        identity.document_id,
-        identity.revision,
-        content_digest,
-        identity.display_name,
-        kind,
-        scope,
-    )
-    .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?;
-    Ok(ResolvedHardcopyDocument {
-        source_key: identity.source_key,
-        authority,
-        semantic_document,
-        bounds,
-        content_extent,
-        default_print_mapping,
-    })
-}
-
 fn nondegenerate_range(minimum: f64, maximum: f64) -> (f64, f64) {
     if minimum < maximum {
         (minimum, maximum)
@@ -2079,288 +1832,16 @@ fn studio_pane_digest(
     )
 }
 
-pub(super) fn default_print_mapping(
-    document: &HardcopySemanticDocument,
-) -> Result<PrintMappingTable, HardcopySourceError> {
-    let mut entries = Vec::new();
-    match document {
-        HardcopySemanticDocument::Schematic(schematic) => {
-            if let Some(format) = &schematic.drawing_sheet {
-                entries.push(layer_mapping(
-                    "layer:drawing-sheet-paper",
-                    "Drawing sheet paper",
-                    "authored paper edge and printable boundary",
-                )?);
-                if format.border != DrawingSheetBorderTemplate::None
-                    || format.marks.registration
-                    || format.marks.folding
-                {
-                    entries.push(layer_mapping(
-                        "layer:drawing-sheet-frame",
-                        "Drawing sheet frame",
-                        "authored border, zones, and marks",
-                    )?);
-                }
-                if format.title_block.template != DrawingSheetTitleBlockTemplate::None {
-                    entries.push(layer_mapping(
-                        "layer:drawing-sheet-title-block",
-                        "Drawing sheet title block",
-                        "authored title block fields",
-                    )?);
-                }
-                entries.push(layer_mapping(
-                    "layer:schematic-grid",
-                    "Schematic grid",
-                    "authored snap-grid pitch · output inclusion optional",
-                )?);
-            }
-            if !schematic.components.is_empty() {
-                entries.push(layer_mapping(
-                    "layer:schematic-components",
-                    "Components and symbols",
-                    "schematic component color · solid",
-                )?);
-            }
-            if !schematic.wires.is_empty()
-                || !schematic.junctions.is_empty()
-                || !schematic.net_labels.is_empty()
-            {
-                entries.push(layer_mapping(
-                    "layer:schematic-wiring",
-                    "Wires and junctions",
-                    "schematic wire color · solid",
-                )?);
-            }
-            if !schematic.buses.is_empty() || !schematic.bus_taps.is_empty() {
-                entries.push(layer_mapping(
-                    "layer:schematic-buses",
-                    "Buses and taps",
-                    "schematic bus color · heavy solid",
-                )?);
-            }
-            if !schematic.design_notes.is_empty() {
-                entries.push(layer_mapping(
-                    "layer:drawing-annotation",
-                    "Drawing annotations",
-                    "drawing / annotation text",
-                )?);
-            }
-            if !schematic.documentation_shapes.is_empty() {
-                entries.push(layer_mapping(
-                    "layer:drawing-documentation",
-                    "Documentation geometry",
-                    "drawing / documentation stroke",
-                )?);
-            }
-
-            let mut nets = std::collections::BTreeMap::new();
-            for label in &schematic.net_labels {
-                nets.entry(label.name.as_str())
-                    .and_modify(|id: &mut u64| *id = (*id).min(label.id))
-                    .or_insert(label.id);
-            }
-            for (net, stable_id) in nets {
-                entries.push(mapping_entry(
-                    PrintObjectKind::Net,
-                    format!("net:{stable_id}"),
-                    net,
-                    "schematic wire color · solid",
-                    PrintColor::Black,
-                    PrintRedundancy::SolidLine {
-                        width: Length::from_micrometres(250),
-                    },
-                    true,
-                )?);
-            }
-            let mut notes = schematic.design_notes.iter().collect::<Vec<_>>();
-            notes.sort_by_key(|note| note.id);
-            for note in notes {
-                entries.push(mapping_entry(
-                    PrintObjectKind::ReviewAnnotation,
-                    format!("schematic-note:{}", note.id),
-                    format!("{} {}", note.kind.label(), note.id),
-                    note.layer.label(),
-                    PrintColor::Black,
-                    PrintRedundancy::DottedLeader {
-                        width: Length::from_micrometres(200),
-                        spacing: Length::from_micrometres(1_250),
-                    },
-                    false,
-                )?);
-            }
-        }
-        HardcopySemanticDocument::Symbol(symbol) => {
-            if !symbol.body.is_empty() {
-                entries.push(layer_mapping(
-                    "layer:symbol-body",
-                    "Symbol body",
-                    "symbol graphic color · solid",
-                )?);
-            }
-            if !symbol.pins.is_empty() {
-                entries.push(layer_mapping(
-                    "layer:symbol-pins",
-                    "Symbol pins",
-                    "terminal color · solid",
-                )?);
-            }
-        }
-        HardcopySemanticDocument::Plot(plot) => {
-            const SCREEN_STYLES: [&str; 8] = [
-                "cyan · solid",
-                "amber · solid",
-                "green · solid",
-                "violet · solid",
-                "yellow · solid",
-                "blue · solid",
-                "orange · solid",
-                "gray · solid",
-            ];
-            for (index, trace) in plot.traces.iter().enumerate() {
-                let redundancy = match index % 3 {
-                    0 => PrintRedundancy::SolidLine {
-                        width: Length::from_micrometres(300),
-                    },
-                    1 => PrintRedundancy::DashedLine {
-                        width: Length::from_micrometres(300),
-                        dash: Length::from_micrometres(2_000),
-                        gap: Length::from_micrometres(1_000),
-                    },
-                    _ => PrintRedundancy::DottedLeader {
-                        width: Length::from_micrometres(300),
-                        spacing: Length::from_micrometres(1_250),
-                    },
-                };
-                entries.push(mapping_entry(
-                    PrintObjectKind::Trace,
-                    format!("trace:{}", trace.trace_id),
-                    trace.label.clone(),
-                    SCREEN_STYLES[index % SCREEN_STYLES.len()],
-                    PrintColor::Black,
-                    redundancy,
-                    true,
-                )?);
-            }
-            for cursor in &plot.cursors {
-                entries.push(mapping_entry(
-                    PrintObjectKind::Marker,
-                    format!("cursor:{}", cursor.cursor_id),
-                    format!("Cursor {}", cursor.label),
-                    "viewer cursor color · dashed line",
-                    PrintColor::Black,
-                    PrintRedundancy::DashedLine {
-                        width: Length::from_micrometres(200),
-                        dash: Length::from_micrometres(1_250),
-                        gap: Length::from_micrometres(750),
-                    },
-                    true,
-                )?);
-            }
-            for marker in &plot.markers {
-                entries.push(mapping_entry(
-                    PrintObjectKind::Marker,
-                    format!("marker:{}", marker.marker_id),
-                    marker.label.clone(),
-                    "viewer marker color · triangle",
-                    PrintColor::Black,
-                    PrintRedundancy::TriangleWithId {
-                        size: Length::from_micrometres(2_500),
-                    },
-                    true,
-                )?);
-            }
-            for annotation in &plot.annotations {
-                entries.push(mapping_entry(
-                    PrintObjectKind::ReviewAnnotation,
-                    format!("annotation:{}", annotation.annotation_id),
-                    compact_display(&annotation.text, "Plot annotation"),
-                    "viewer annotation color · leader",
-                    PrintColor::Black,
-                    PrintRedundancy::DottedLeader {
-                        width: Length::from_micrometres(200),
-                        spacing: Length::from_micrometres(1_250),
-                    },
-                    false,
-                )?);
-            }
-        }
-        HardcopySemanticDocument::ResultSummary(summary) => {
-            entries.push(layer_mapping(
-                format!(
-                    "layer:result-summary:{}",
-                    summary.viewer.label().to_ascii_lowercase()
-                ),
-                format!("{} result summary", summary.viewer.label()),
-                "result table and semantic diagram styles",
-            )?);
-        }
-        HardcopySemanticDocument::Report(report) => {
-            entries.push(layer_mapping(
-                "layer:report-content",
-                "Report content",
-                "report template styles",
-            )?);
-            for page in &report.pages {
-                for section in page.sections() {
-                    for block in section.blocks() {
-                        if let ReportBlockKind::ReviewNote(note) = block.kind() {
-                            entries.push(mapping_entry(
-                                PrintObjectKind::ReviewAnnotation,
-                                format!("report-review:{}", block.id()),
-                                compact_display(&note.message, "Report review note"),
-                                "report review note · leader",
-                                PrintColor::Black,
-                                PrintRedundancy::DottedLeader {
-                                    width: Length::from_micrometres(200),
-                                    spacing: Length::from_micrometres(1_250),
-                                },
-                                false,
-                            )?);
-                        }
-                    }
-                }
-            }
-        }
-        HardcopySemanticDocument::Aggregate(aggregate) => {
-            for child in &aggregate.children {
-                let child_mapping = default_print_mapping(&child.document)?;
-                for entry in child_mapping.entries() {
-                    let object = entry.object();
-                    let stable_digest = Sha256::digest(
-                        [
-                            b"rspice-aggregate-print-object-v1:".as_slice(),
-                            &child.ordinal.to_be_bytes(),
-                            object.stable_id().as_bytes(),
-                        ]
-                        .concat(),
-                    );
-                    let stable_suffix = stable_digest[..12]
-                        .iter()
-                        .map(|byte| format!("{byte:02x}"))
-                        .collect::<String>();
-                    entries.push(mapping_entry(
-                        object.kind(),
-                        format!("aggregate:{}:{stable_suffix}", child.ordinal),
-                        compact_display(
-                            &format!("{} · {}", child.display_name, object.display_name()),
-                            "Aggregate object",
-                        ),
-                        object.screen_style(),
-                        entry.print_color(),
-                        entry.redundancy(),
-                        entry.include_in_legend(),
-                    )?);
-                }
-            }
-        }
-    }
-    PrintMappingTable::try_new(PrintMappingSaveScope::Document, entries)
-        .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))
-}
-
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
 pub(crate) use test_support::resolve_retained_hardcopy_source;
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+use crate::hardcopy::PrintObjectKind;
+#[cfg(test)]
+use crate::results::report_document::FrozenReportArtifact;
+#[cfg(test)]
+use crate::state::{Point, SymbolShape};

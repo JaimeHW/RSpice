@@ -16,26 +16,34 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::hardcopy::sources::{
+use rspice_app_types::product::{ContentDigest, ObjectRevision};
+use rspice_design::schematic::{
+    bus::{Bus, BusTap},
+    component::Component,
+    design_note::DesignNote,
+    documentation_shape::DocumentationShape,
+    net_label::{Junction, NetLabel},
+    wire::Wire,
+};
+use rspice_design::symbol::SymbolDocument;
+use rspice_design_model::design_management::{
+    DrawingSheetTitleFieldId, SchematicSheetFormat, SheetPageNumbering,
+};
+use rspice_hardcopy_contract::sources::{
     DISPLAY_NAME_LIMIT, MAX_HARDCOPY_SOURCE_SET_MEMBERS, SOURCE_KEY_LIMIT, validate_label,
 };
-use crate::hardcopy::{
+use rspice_hardcopy_contract::{
     ActiveHardcopySource, AuthoredSheetMedia, ContentExtent, HardcopyContentSection,
     HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope, Length, PrintMappingTable,
 };
-use crate::product::{ContentDigest, ObjectRevision};
-use crate::results::report_document::{
+use rspice_results::analysis_payload::AnalysisResultPayload;
+use rspice_results::report_document::{
     FigureSizing, FrozenReportArtifact, ReportBlockId, ReportPage, ReportReferenceMode,
-};
-use crate::state::{
-    AnalysisResultPayload, Bus, BusTap, Component, DesignNote, DocumentationShape,
-    DrawingSheetTitleFieldId, Junction, NetLabel, SchematicSheetFormat, SheetPageNumbering,
-    SymbolDocument, Wire,
 };
 // The visualization document's own axis vocabulary, so the printed page and
 // the authored pane describe a logarithmic axis the same way.
-use crate::results::visualization_document::AxisScale;
-use crate::workbench::documents::result_document::ResultViewer;
+use rspice_results::result_presentation::ResultViewer;
+use rspice_results::visualization_document::AxisScale;
 
 use super::{
     HardcopySourceError, MAX_WORKER_SNAPSHOT_BYTES, WORKER_SNAPSHOT_SCHEMA_VERSION,
@@ -80,7 +88,7 @@ impl SemanticBounds {
         Ok(Self { minimum, maximum })
     }
 
-    pub(crate) fn content_extent(self) -> Result<ContentExtent, HardcopySourceError> {
+    pub fn content_extent(self) -> Result<ContentExtent, HardcopySourceError> {
         let width = self
             .maximum
             .x_um
@@ -392,6 +400,36 @@ pub struct ResolvedHardcopyDocument {
 }
 
 impl ResolvedHardcopyDocument {
+    /// Bind the application route for an already resolved document or aggregate.
+    /// Source authority and content remain unchanged; worker encoding seals this key.
+    pub fn with_source_key(mut self, source_key: String) -> Result<Self, HardcopySourceError> {
+        validate_label("source key", &source_key, SOURCE_KEY_LIMIT)?;
+        self.source_key = source_key;
+        Ok(self)
+    }
+
+    /// Transfer a frozen source into an aggregate without copying its semantic content.
+    pub fn into_aggregate_child(
+        self,
+        ordinal: u32,
+        placement_origin: SemanticPoint,
+        publication_page_label: Option<String>,
+    ) -> SemanticAggregateChild {
+        SemanticAggregateChild {
+            ordinal,
+            source_key: self.source_key,
+            display_name: self.authority.display_name().to_owned(),
+            document_id: self.authority.document_id(),
+            revision: self.authority.revision(),
+            content_digest: self.authority.content_digest(),
+            local_bounds: self.bounds,
+            placement_origin,
+            page_break_before: ordinal != 0,
+            publication_page_label,
+            document: Box::new(self.semantic_document),
+        }
+    }
+
     #[must_use]
     pub fn source_key(&self) -> &str {
         &self.source_key
@@ -423,11 +461,11 @@ impl ResolvedHardcopyDocument {
     /// authored sheet.
     pub fn content_extent_for_setup(
         &self,
-        setup: crate::hardcopy::SchematicHardcopySetup,
+        setup: rspice_hardcopy_contract::SchematicHardcopySetup,
     ) -> Result<ContentExtent, HardcopySourceError> {
-        if setup.extent() == crate::hardcopy::SchematicHardcopyExtent::AuthoredDrawingSheet
+        if setup.extent() == rspice_hardcopy_contract::SchematicHardcopyExtent::AuthoredDrawingSheet
             && setup.outside_content()
-                == crate::hardcopy::OutsideSheetContentPolicy::ClipToAuthoredSheet
+                == rspice_hardcopy_contract::OutsideSheetContentPolicy::ClipToAuthoredSheet
             && let HardcopySemanticDocument::Schematic(schematic) = &self.semantic_document
             && let Some(format) = &schematic.drawing_sheet
         {
@@ -460,13 +498,13 @@ impl ResolvedHardcopyDocument {
         Ok(self.content_extent)
     }
 
-    pub(crate) fn authored_sheet_bounds(
+    pub fn authored_sheet_bounds(
         &self,
-        setup: crate::hardcopy::SchematicHardcopySetup,
+        setup: rspice_hardcopy_contract::SchematicHardcopySetup,
     ) -> Result<Option<SemanticBounds>, HardcopySourceError> {
-        if setup.extent() != crate::hardcopy::SchematicHardcopyExtent::AuthoredDrawingSheet
+        if setup.extent() != rspice_hardcopy_contract::SchematicHardcopyExtent::AuthoredDrawingSheet
             || setup.outside_content()
-                != crate::hardcopy::OutsideSheetContentPolicy::ClipToAuthoredSheet
+                != rspice_hardcopy_contract::OutsideSheetContentPolicy::ClipToAuthoredSheet
         {
             return Ok(None);
         }
@@ -484,9 +522,9 @@ impl ResolvedHardcopyDocument {
         }
     }
 
-    pub(crate) fn aggregate_layout_for_setup(
+    pub fn aggregate_layout_for_setup(
         &self,
-        setup: crate::hardcopy::SchematicHardcopySetup,
+        setup: rspice_hardcopy_contract::SchematicHardcopySetup,
     ) -> Result<Option<Vec<AggregateChildPlacement<'_>>>, HardcopySourceError> {
         match &self.semantic_document {
             HardcopySemanticDocument::Aggregate(aggregate) => {
@@ -552,16 +590,9 @@ impl ResolvedHardcopyDocument {
         Ok(found.then_some(outside))
     }
 
-    /// Default-setup page groups for integration fixtures. Production callers
-    /// use `hardcopy_sections_for_setup` with the selected setup.
-    #[cfg(test)]
-    pub fn hardcopy_sections(&self) -> Result<Vec<HardcopyContentSection>, HardcopySourceError> {
-        self.hardcopy_sections_for_setup(crate::hardcopy::SchematicHardcopySetup::default())
-    }
-
     pub fn hardcopy_sections_for_setup(
         &self,
-        setup: crate::hardcopy::SchematicHardcopySetup,
+        setup: rspice_hardcopy_contract::SchematicHardcopySetup,
     ) -> Result<Vec<HardcopyContentSection>, HardcopySourceError> {
         let HardcopySemanticDocument::Aggregate(aggregate) = &self.semantic_document else {
             return Ok(Vec::new());
@@ -650,7 +681,7 @@ impl ResolvedHardcopyDocument {
 
     /// Bounded serde envelope for browser dedicated-worker transfer.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub(crate) fn worker_snapshot_json(&self) -> Result<Vec<u8>, HardcopySourceError> {
+    pub fn worker_snapshot_json(&self) -> Result<Vec<u8>, HardcopySourceError> {
         let snapshot = ResolvedHardcopyWorkerSnapshot::from_resolved(self)?;
         let bytes = serde_json::to_vec(&snapshot)
             .map_err(|error| HardcopySourceError::Serialization(error.to_string()))?;
@@ -663,7 +694,7 @@ impl ResolvedHardcopyDocument {
     /// Restore and revalidate a dedicated-worker envelope. Callers must pass
     /// the exact byte payload rather than deserializing an unbounded value.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub(crate) fn from_worker_snapshot_json(bytes: &[u8]) -> Result<Self, HardcopySourceError> {
+    pub fn from_worker_snapshot_json(bytes: &[u8]) -> Result<Self, HardcopySourceError> {
         if bytes.len() > MAX_WORKER_SNAPSHOT_BYTES {
             return Err(HardcopySourceError::WorkerSnapshotTooLarge(bytes.len()));
         }
@@ -678,7 +709,7 @@ impl ResolvedHardcopyDocument {
 /// all other document kinds retain their immutable resolved bounds.
 fn aggregate_output_layout(
     aggregate: &SemanticAggregate,
-    setup: crate::hardcopy::SchematicHardcopySetup,
+    setup: rspice_hardcopy_contract::SchematicHardcopySetup,
 ) -> Result<Vec<(&SemanticAggregateChild, ContentExtent, SemanticPoint)>, HardcopySourceError> {
     let mut next_y_um = 0_i64;
     let mut layout = Vec::with_capacity(aggregate.children.len());
@@ -686,9 +717,9 @@ fn aggregate_output_layout(
         let extent = match child.document.as_ref() {
             HardcopySemanticDocument::Schematic(schematic)
                 if setup.extent()
-                    == crate::hardcopy::SchematicHardcopyExtent::AuthoredDrawingSheet
+                    == rspice_hardcopy_contract::SchematicHardcopyExtent::AuthoredDrawingSheet
                     && setup.outside_content()
-                        == crate::hardcopy::OutsideSheetContentPolicy::ClipToAuthoredSheet =>
+                        == rspice_hardcopy_contract::OutsideSheetContentPolicy::ClipToAuthoredSheet =>
             {
                 schematic.drawing_sheet.as_ref().map_or_else(
                     || child.local_bounds.content_extent(),
@@ -716,7 +747,7 @@ fn aggregate_output_layout(
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-pub(crate) struct ResolvedHardcopyWorkerSnapshot {
+struct ResolvedHardcopyWorkerSnapshot {
     schema_version: u32,
     source_key: String,
     document_id: HardcopyDocumentId,
@@ -858,7 +889,7 @@ impl ResolvedHardcopyWorkerSnapshot {
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-fn validate_worker_semantics(
+pub(super) fn validate_worker_semantics(
     document: &HardcopySemanticDocument,
 ) -> Result<(), HardcopySourceError> {
     match document {

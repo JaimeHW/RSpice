@@ -1299,7 +1299,7 @@ mod tests {
     fn fixture_plan(source: &ResolvedHardcopyDocument, setup: HardcopySetup) -> HardcopyPlan {
         let plan_id = HardcopyPlanId::new();
         let sections = source
-            .hardcopy_sections()
+            .hardcopy_sections_for_setup(crate::hardcopy::SchematicHardcopySetup::default())
             .expect("fixture sections resolve");
         if sections.is_empty() {
             HardcopyPlan::compile_with_id(
@@ -1321,7 +1321,7 @@ mod tests {
     }
 
     fn fixture_metadata(source: &ResolvedHardcopyDocument) -> HardcopySceneMetadata {
-        HardcopySceneMetadata::for_resolved_source(source, "RSpice worker tests")
+        crate::workbench::hardcopy_adapters::render::source_metadata(source, "RSpice worker tests")
             .expect("fixture metadata is valid")
     }
 
@@ -1695,7 +1695,8 @@ mod tests {
         )
         .expect("preview transfer authenticates and decodes");
         assert_eq!(preview.page_number(), 1);
-        assert_eq!(preview.dpi(), dpi);
+        let manifest: serde_json::Value = serde_json::from_slice(&response.buffers[0]).unwrap();
+        assert_eq!(manifest["dpi"].as_u64(), Some(u64::from(dpi)));
         assert!(!preview.rgba().is_empty());
 
         let mismatch = execution_error(

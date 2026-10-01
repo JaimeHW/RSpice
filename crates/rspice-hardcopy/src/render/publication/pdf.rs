@@ -530,15 +530,16 @@ pub(super) fn draw_pdf_primitive(
             }
             draw_pdf_text(
                 surface,
-                fonts.get(*font),
-                x,
-                y,
-                coordinate_to_points(transform.length(*size)),
+                (x, y),
                 text,
-                resolve_color(plan, *color),
                 *anchor,
-                !plan.setup().render().fonts().preserve_searchable_text(),
-                NormalizedF32::ONE,
+                PdfTextStyle {
+                    font: fonts.get(*font),
+                    size: coordinate_to_points(transform.length(*size)),
+                    color: resolve_color(plan, *color),
+                    outlined: !plan.setup().render().fonts().preserve_searchable_text(),
+                    opacity: NormalizedF32::ONE,
+                },
             );
             if rotation_degrees.is_some() {
                 surface.pop();
@@ -559,18 +560,28 @@ pub(super) fn draw_pdf_primitive(
     Ok(())
 }
 
-pub(super) fn draw_pdf_text(
-    surface: &mut krilla::surface::Surface<'_>,
-    font: &Font,
-    mut x: f32,
-    y: f32,
+struct PdfTextStyle<'a> {
+    font: &'a Font,
     size: f32,
-    text: &str,
     color: Rgb8,
-    anchor: TextAnchor,
     outlined: bool,
     opacity: NormalizedF32,
+}
+
+fn draw_pdf_text(
+    surface: &mut krilla::surface::Surface<'_>,
+    (mut x, y): (f32, f32),
+    text: &str,
+    anchor: TextAnchor,
+    style: PdfTextStyle<'_>,
 ) {
+    let PdfTextStyle {
+        font,
+        size,
+        color,
+        outlined,
+        opacity,
+    } = style;
     let estimated_width = text.chars().count() as f32 * size * 0.55;
     match anchor {
         TextAnchor::Start => {}
@@ -609,22 +620,20 @@ pub(super) fn draw_pdf_decorations(
         let font_size = um_to_points(DECORATION_TEXT_UM);
         draw_pdf_text(
             surface,
-            &fonts.semibold,
-            left,
-            baseline,
-            font_size,
+            (left, baseline),
             scene.metadata.title(),
-            ink,
             TextAnchor::Start,
-            outlined,
-            NormalizedF32::ONE,
+            PdfTextStyle {
+                font: &fonts.semibold,
+                size: font_size,
+                color: ink,
+                outlined,
+                opacity: NormalizedF32::ONE,
+            },
         );
         draw_pdf_text(
             surface,
-            &fonts.mono,
-            right,
-            baseline,
-            font_size,
+            (right, baseline),
             &format!(
                 "rev {} · page {} / {} · {}",
                 plan.source().revision().get(),
@@ -632,38 +641,44 @@ pub(super) fn draw_pdf_decorations(
                 plan.pagination().pages().len(),
                 page.coordinate()
             ),
-            secondary,
             TextAnchor::End,
-            outlined,
-            NormalizedF32::ONE,
+            PdfTextStyle {
+                font: &fonts.mono,
+                size: font_size,
+                color: secondary,
+                outlined,
+                opacity: NormalizedF32::ONE,
+            },
         );
         if let Some(line) = scene.metadata.header_lines.first() {
             draw_pdf_text(
                 surface,
-                &fonts.sans,
-                (left + right) / 2.0,
-                baseline,
-                font_size,
+                ((left + right) / 2.0, baseline),
                 line,
-                secondary,
                 TextAnchor::Middle,
-                outlined,
-                NormalizedF32::ONE,
+                PdfTextStyle {
+                    font: &fonts.sans,
+                    size: font_size,
+                    color: secondary,
+                    outlined,
+                    opacity: NormalizedF32::ONE,
+                },
             );
         }
     }
     for row in provenance_rows(plan, scene, page)? {
         draw_pdf_text(
             surface,
-            &fonts.mono,
-            um_to_points(row.x_um),
-            um_to_points(row.baseline_um),
-            um_to_points(PROVENANCE_TEXT_UM),
+            (um_to_points(row.x_um), um_to_points(row.baseline_um)),
             &row.text,
-            secondary,
             TextAnchor::Start,
-            outlined,
-            NormalizedF32::ONE,
+            PdfTextStyle {
+                font: &fonts.mono,
+                size: um_to_points(PROVENANCE_TEXT_UM),
+                color: secondary,
+                outlined,
+                opacity: NormalizedF32::ONE,
+            },
         );
     }
     if plan.setup().decorations().includes_legends() && !scene.legend.is_empty() {
@@ -759,15 +774,16 @@ pub(super) fn draw_pdf_decorations(
             }
             draw_pdf_text(
                 surface,
-                &fonts.sans,
-                um_to_points(x_um + 15_000),
-                um_to_points(y_um + 900),
-                um_to_points(2_600),
+                (um_to_points(x_um + 15_000), um_to_points(y_um + 900)),
                 &entry.label,
-                ink,
                 TextAnchor::Start,
-                outlined,
-                NormalizedF32::ONE,
+                PdfTextStyle {
+                    font: &fonts.sans,
+                    size: um_to_points(2_600),
+                    color: ink,
+                    outlined,
+                    opacity: NormalizedF32::ONE,
+                },
             );
         }
     }
@@ -795,15 +811,16 @@ pub(super) fn draw_pdf_watermark(
     surface.push_transform(&Transform::from_rotate_at(-35.0, cx, cy));
     draw_pdf_text(
         surface,
-        &fonts.semibold,
-        cx,
-        cy,
-        size,
+        (cx, cy),
         text,
-        resolve_color(plan, SemanticColor::Secondary),
         TextAnchor::Middle,
-        !plan.setup().render().fonts().preserve_searchable_text(),
-        NormalizedF32::new(0.16).expect("valid opacity"),
+        PdfTextStyle {
+            font: &fonts.semibold,
+            size,
+            color: resolve_color(plan, SemanticColor::Secondary),
+            outlined: !plan.setup().render().fonts().preserve_searchable_text(),
+            opacity: NormalizedF32::new(0.16).expect("valid opacity"),
+        },
     );
     surface.pop();
 }
@@ -845,14 +862,15 @@ pub(super) fn draw_pdf_registration_marks(
     }
     draw_pdf_text(
         surface,
-        &fonts.mono,
-        um_to_points(left + 2_500),
-        um_to_points(top + 3_000),
-        um_to_points(2_200),
+        (um_to_points(left + 2_500), um_to_points(top + 3_000)),
         page.coordinate(),
-        resolve_color(plan, SemanticColor::Secondary),
         TextAnchor::Start,
-        !plan.setup().render().fonts().preserve_searchable_text(),
-        NormalizedF32::ONE,
+        PdfTextStyle {
+            font: &fonts.mono,
+            size: um_to_points(2_200),
+            color: resolve_color(plan, SemanticColor::Secondary),
+            outlined: !plan.setup().render().fonts().preserve_searchable_text(),
+            opacity: NormalizedF32::ONE,
+        },
     );
 }

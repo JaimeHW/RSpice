@@ -245,7 +245,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
             // The transient all-panes definition is addressed through the
             // selected retained pane descriptor, so commit-time revalidation
             // must keep that stable dialog key.
-            resolved.source_key = source_key.to_owned();
+            resolved = resolved.with_source_key(source_key.to_owned())?;
             return Ok(resolved);
         }
         let pane_id = pane.id;

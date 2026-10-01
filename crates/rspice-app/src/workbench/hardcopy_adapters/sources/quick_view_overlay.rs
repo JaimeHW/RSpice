@@ -416,8 +416,7 @@ pub(super) fn resolved_overlay_geometry(
         }
         let point = |y| {
             map_plot_point(
-                x,
-                y,
+                (x, y),
                 frame.x_minimum,
                 frame.y_minimum,
                 frame.x_span,
@@ -471,8 +470,7 @@ pub(super) fn resolved_overlay_geometry(
             source_x_bits: Some(marker.x.to_bits()),
             source_y_bits: Some(source_y.to_bits()),
             position: Some(map_plot_point(
-                x,
-                y,
+                (x, y),
                 frame.x_minimum,
                 frame.y_minimum,
                 frame.x_span,

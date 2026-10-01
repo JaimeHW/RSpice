@@ -65,26 +65,43 @@ pub fn font_definitions() -> FontDefinitions {
 
     fonts.font_data.insert(
         "plex-sans".to_owned(),
-        FontData::from_static(include_bytes!("../../assets/fonts/IBMPlexSans-Regular.ttf")).into(),
+        FontData::from_static(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/IBMPlexSans-Regular.ttf"
+        )))
+        .into(),
     );
     fonts.font_data.insert(
         SANS_MEDIUM.to_owned(),
-        FontData::from_static(include_bytes!("../../assets/fonts/IBMPlexSans-Medium.ttf")).into(),
+        FontData::from_static(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/IBMPlexSans-Medium.ttf"
+        )))
+        .into(),
     );
     fonts.font_data.insert(
         SANS_SEMIBOLD.to_owned(),
-        FontData::from_static(include_bytes!(
-            "../../assets/fonts/IBMPlexSans-SemiBold.ttf"
-        ))
+        FontData::from_static(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/IBMPlexSans-SemiBold.ttf"
+        )))
         .into(),
     );
     fonts.font_data.insert(
         "plex-mono".to_owned(),
-        FontData::from_static(include_bytes!("../../assets/fonts/IBMPlexMono-Regular.ttf")).into(),
+        FontData::from_static(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/IBMPlexMono-Regular.ttf"
+        )))
+        .into(),
     );
     fonts.font_data.insert(
         MONO_MEDIUM.to_owned(),
-        FontData::from_static(include_bytes!("../../assets/fonts/IBMPlexMono-Medium.ttf")).into(),
+        FontData::from_static(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/IBMPlexMono-Medium.ttf"
+        )))
+        .into(),
     );
 
     // Prepend our faces so they take priority; egui defaults stay as fallback.

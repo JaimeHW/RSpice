@@ -10,28 +10,27 @@ use lopdf::Document as ParsedPdf;
 use uuid::Uuid;
 
 use super::*;
-use crate::hardcopy::sources::{
+use crate::sources::{
+    SemanticSchematic, drawing_sheet_artwork_bounds, drawing_sheet_title_values,
+    resolve_hardcopy_source_set_with, resolve_semantic_source, resolve_symbol_document,
+};
+use rspice_design_model::SchematicPageOrientation;
+use rspice_design_model::design_management::{
+    DrawingSheetManagedLogo, DrawingSheetManagedLogoPoint, DrawingSheetManagedLogoPrimitive,
+    DrawingSheetManagedTemplateSnapshot, DrawingSheetStandard, DrawingSheetTitleBlockRotation,
+    DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, DrawingSheetZoneEdges,
+    DrawingSheetZoneLabels, SchematicSheetFormat,
+};
+use rspice_hardcopy_contract::sources::{
     HardcopySourceIdentity, HardcopySourceSet, HardcopySourceSetMember,
 };
-use crate::hardcopy::{
+use rspice_hardcopy_contract::{
     ActiveHardcopySource, DecorationSetup, DuplexMode, FontPolicy, HardcopyContentSection,
     HardcopyDocumentKind, HardcopyScope, HardcopySetup, Orientation, OutsideSheetContentPolicy,
     PageMargins, PaperSize, PhysicalPageSetup, PrintMappingEntry, PrintMappingSaveScope,
     PrintMappingTable, PrintObjectIdentity, PrinterJobSettings, PrinterMediaSource, RenderSetup,
     ScaleMode, SchematicHardcopyExtent, SchematicHardcopySetup, StandardPaper, TilingMode,
     TilingSetup,
-};
-use crate::state::{
-    DrawingSheetManagedLogo, DrawingSheetManagedLogoPoint, DrawingSheetManagedLogoPrimitive,
-    DrawingSheetManagedTemplateSnapshot, DrawingSheetStandard, DrawingSheetTitleBlockRotation,
-    DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, DrawingSheetZoneEdges,
-    DrawingSheetZoneLabels, SchematicPageOrientation, SchematicSheetFormat, SchematicState,
-    SheetCatalog, SheetDefinition, SheetPageNumbering, SheetPortPolicy, SheetTemplate,
-};
-use crate::workbench::hardcopy_adapters::sources::{
-    SchematicHardcopySource, SymbolHardcopySource, resolve_blank_schematic_sheet_with_format,
-    resolve_hardcopy_source_set_with, resolve_schematic_source, resolve_symbol_source,
-    schematic_sheet_identity, source_set_member_from_resolved,
 };
 
 fn digest(byte: u8) -> ContentDigest {
@@ -107,7 +106,8 @@ fn setup_with_watermark(format: OutputFormat, tiled: bool, watermark: Watermark)
             job: PrinterJobSettings::try_new(
                 digest(0x44),
                 "paper-letter",
-                crate::hardcopy::PrinterRasterGeometry::try_new(792, 612, 0, 0, 792, 612).unwrap(),
+                rspice_hardcopy_contract::PrinterRasterGeometry::try_new(792, 612, 0, 0, 792, 612)
+                    .unwrap(),
                 PrinterMediaSource::AutomaticCompatibleTray,
                 72,
                 DuplexMode::Off,
@@ -190,7 +190,8 @@ fn aggregate_plan_and_scene(format: OutputFormat) -> (HardcopyPlan, HardcopyScen
             job: PrinterJobSettings::try_new(
                 digest(0x44),
                 "paper-letter",
-                crate::hardcopy::PrinterRasterGeometry::try_new(792, 612, 0, 0, 792, 612).unwrap(),
+                rspice_hardcopy_contract::PrinterRasterGeometry::try_new(792, 612, 0, 0, 792, 612)
+                    .unwrap(),
                 PrinterMediaSource::AutomaticCompatibleTray,
                 72,
                 DuplexMode::Off,
@@ -381,18 +382,17 @@ fn resolved_symbol() -> ResolvedHardcopyDocument {
         name_anchor: SchematicPoint::new(-20, -25),
         value_anchor: SchematicPoint::new(-20, 25),
     };
-    resolve_symbol_source(SymbolHardcopySource {
-        identity: HardcopySourceIdentity::try_new(
+    resolve_symbol_document(
+        HardcopySourceIdentity::try_new(
             "test-symbol",
             HardcopyDocumentId::try_from_uuid(Uuid::from_u128(77)).unwrap(),
             ObjectRevision::INITIAL,
             "Comparator symbol",
         )
         .unwrap(),
-        document: &document,
-        selection: None,
-        scope: HardcopyScope::ActiveDocument,
-    })
+        document,
+        HardcopyScope::ActiveDocument,
+    )
     .unwrap()
 }
 
@@ -412,18 +412,17 @@ fn resolved_wide_symbol() -> ResolvedHardcopyDocument {
         name_anchor: SchematicPoint::origin(),
         value_anchor: SchematicPoint::origin(),
     };
-    resolve_symbol_source(SymbolHardcopySource {
-        identity: HardcopySourceIdentity::try_new(
+    resolve_symbol_document(
+        HardcopySourceIdentity::try_new(
             "test-wide-symbol",
             HardcopyDocumentId::try_from_uuid(Uuid::from_u128(79)).unwrap(),
             ObjectRevision::INITIAL,
             "Wide comparator symbol",
         )
         .unwrap(),
-        document: &document,
-        selection: None,
-        scope: HardcopyScope::ActiveDocument,
-    })
+        document,
+        HardcopyScope::ActiveDocument,
+    )
     .unwrap()
 }
 
@@ -442,16 +441,40 @@ fn resolved_blank_schematic_with_identity(
     document_id: u128,
     display_name: &str,
 ) -> ResolvedHardcopyDocument {
-    resolve_blank_schematic_sheet_with_format(
-        HardcopySourceIdentity::try_new(
-            source_key,
-            HardcopyDocumentId::try_from_uuid(Uuid::from_u128(document_id)).unwrap(),
-            ObjectRevision::INITIAL,
-            display_name,
-        )
-        .unwrap(),
+    let identity = HardcopySourceIdentity::try_new(
+        source_key,
+        HardcopyDocumentId::try_from_uuid(Uuid::from_u128(document_id)).unwrap(),
+        ObjectRevision::INITIAL,
+        display_name,
+    )
+    .unwrap();
+    let semantic = SemanticSchematic {
+        view_path: identity.source_key.clone(),
+        drawing_sheet: Some(format.clone()),
+        drawing_sheet_title_values: drawing_sheet_title_values(&identity, format, None, None),
+        drawing_sheet_page_numbering: None,
+        grid_pitch_units: 10,
+        components: Vec::new(),
+        wires: Vec::new(),
+        buses: Vec::new(),
+        bus_taps: Vec::new(),
+        junctions: Vec::new(),
+        net_labels: Vec::new(),
+        design_notes: Vec::new(),
+        documentation_shapes: Vec::new(),
+    };
+    let digest = rspice_hardcopy_contract::sources::canonical_digest(
+        b"rspice-hardcopy-blank-schematic-sheet-v1",
+        &semantic,
+    )
+    .unwrap();
+    resolve_semantic_source(
+        identity,
+        digest,
+        HardcopyDocumentKind::SchematicOrSymbol,
         HardcopyScope::CurrentSheet,
-        Some(format),
+        HardcopySemanticDocument::Schematic(Box::new(semantic)),
+        drawing_sheet_artwork_bounds(format).unwrap(),
     )
     .unwrap()
 }
@@ -1466,8 +1489,10 @@ fn hardcopy_zone_alphabet_matches_engineering_drawing_overflow_rules() {
 #[test]
 fn clipped_sheet_set_reflows_each_child_and_compiles_with_matching_sections() {
     let first = resolved_blank_schematic(&SchematicSheetFormat::default());
-    let mut second_format = SchematicSheetFormat::default();
-    second_format.orientation = crate::state::SchematicPageOrientation::Landscape;
+    let second_format = SchematicSheetFormat {
+        orientation: SchematicPageOrientation::Landscape,
+        ..Default::default()
+    };
     let second = resolved_blank_schematic_with_identity(
         &second_format,
         "test-schematic-second-sheet",
@@ -2374,111 +2399,4 @@ fn gray_percent_is_black_ink_coverage_not_reflected_channel_value() {
         print_color_rgb(PrintColor::GrayPercent(60)),
         Rgb8::new(102, 102, 102)
     );
-}
-
-#[test]
-fn named_print_set_projects_per_set_sheet_numbers_without_mutating_child_authority() {
-    let sheet = |name: &str| SheetDefinition {
-        name: name.to_owned(),
-        template: SheetTemplate::AnalogSchematic,
-        port_policy: SheetPortPolicy::TypedOffSheetPorts,
-        explicit_page_number: None,
-    };
-    let schematic = SchematicState::default();
-    let mut catalog = SheetCatalog::default();
-    let first = catalog.create_sheet(sheet("First"), None).unwrap();
-    let second = catalog.create_sheet(sheet("Second"), Some(first)).unwrap();
-    let third = catalog.create_sheet(sheet("Third"), Some(second)).unwrap();
-    let mut settings = catalog.settings().clone();
-    settings.page_numbering = SheetPageNumbering::PerPrintSet;
-    catalog.set_settings(catalog.revision(), settings).unwrap();
-    let project_settings = crate::state::DrawingSheetProjectSettings::default();
-    let base_identity = HardcopySourceIdentity::try_new(
-        "named-set-schematic",
-        HardcopyDocumentId::new(),
-        ObjectRevision::INITIAL,
-        "Active document",
-    )
-    .unwrap();
-    let mut selected = [second, third]
-        .into_iter()
-        .map(|sheet_id| {
-            resolve_schematic_source(SchematicHardcopySource {
-                identity: schematic_sheet_identity(&base_identity, catalog.find(sheet_id).unwrap())
-                    .unwrap(),
-                schematic: &schematic,
-                expected_topology_version: schematic.topology_version(),
-                symbol_resolver: None,
-                sheet_catalog: Some(&catalog),
-                sheet_id: Some(sheet_id),
-                project_default_drawing_sheet: Some(&project_settings.default_format),
-                project_title_block_field_values: Some(&project_settings.title_block_field_values),
-                scope: HardcopyScope::CurrentSheet,
-            })
-            .unwrap()
-        })
-        .collect::<Vec<_>>();
-    for (resolved, expected) in selected.iter().zip(["2 of 3", "3 of 3"]) {
-        let HardcopySemanticDocument::Schematic(schematic) = resolved.semantic_document() else {
-            panic!("expected governed schematic sheet")
-        };
-        assert_eq!(
-            schematic
-                .drawing_sheet_title_values
-                .get(&DrawingSheetTitleFieldId::Page)
-                .map(String::as_str),
-            Some(expected),
-            "the retained child keeps its catalog-relative source semantics"
-        );
-    }
-    let members = selected
-        .iter()
-        .map(source_set_member_from_resolved)
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-    let source_set = HardcopySourceSet::try_new(
-        HardcopyDocumentId::new(),
-        ObjectRevision::INITIAL,
-        "Release subset",
-        HardcopyDocumentKind::SchematicOrSymbol,
-        HardcopyScope::NamedPrintSet("Release subset".to_owned()),
-        members,
-    )
-    .unwrap();
-    let mut selected = selected.drain(..);
-    let aggregate = resolve_hardcopy_source_set_with(&source_set, |_| {
-        Ok(selected.next().expect("one exact retained set member"))
-    })
-    .unwrap();
-    let HardcopySemanticDocument::Aggregate(semantic) = aggregate.semantic_document() else {
-        panic!("expected named aggregate")
-    };
-    assert_eq!(
-        semantic
-            .children
-            .iter()
-            .map(|child| child.publication_page_label.as_deref())
-            .collect::<Vec<_>>(),
-        [Some("1 of 2"), Some("2 of 2")]
-    );
-
-    let scene = scene_from_resolved(
-        &aggregate,
-        aggregate.default_print_mapping(),
-        SchematicHardcopySetup::default(),
-        HardcopySceneMetadata::for_resolved_source(&aggregate, "RSpice test").unwrap(),
-    )
-    .unwrap();
-    let printed_text = scene
-        .primitives()
-        .iter()
-        .filter_map(|primitive| match primitive {
-            ScenePrimitive::Text { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert!(printed_text.contains(&"1 of 2"));
-    assert!(printed_text.contains(&"2 of 2"));
-    assert!(!printed_text.contains(&"2 of 3"));
-    assert!(!printed_text.contains(&"3 of 3"));
 }

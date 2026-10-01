@@ -11,7 +11,7 @@
 use super::*;
 
 impl SemanticSceneCompiler<'_> {
-    pub(in crate::workbench::hardcopy_adapters::render) fn symbol_document(
+    pub(in crate::render) fn symbol_document(
         &mut self,
         symbol: &SymbolDocument,
         component: Option<&Component>,
@@ -182,8 +182,7 @@ impl SemanticSceneCompiler<'_> {
                         SceneFont::Monospace,
                         u64::from(size.height().unsigned_abs()) * SCHEMATIC_UNIT_UM as u64,
                         body_stroke.color,
-                        placed,
-                        SceneTextRotation::Upright,
+                        (placed, SceneTextRotation::Upright),
                     )?;
                 }
             }

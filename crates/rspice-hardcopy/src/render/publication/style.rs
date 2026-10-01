@@ -142,9 +142,7 @@ pub(super) fn resolve_stroke(
     }
 }
 
-pub(in crate::workbench::hardcopy_adapters::render) fn auto_trace_pattern(
-    index: u16,
-) -> StrokePattern {
+pub(in crate::render) fn auto_trace_pattern(index: u16) -> StrokePattern {
     match index % 4 {
         0 => StrokePattern::Solid,
         1 => StrokePattern::Dashed,

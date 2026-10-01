@@ -39,7 +39,7 @@ pub(super) fn mapping_entry(
         .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))
 }
 
-pub(super) fn compact_display(text: &str, fallback: &str) -> String {
+pub fn compact_display(text: &str, fallback: &str) -> String {
     let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let compact = compact.chars().take(96).collect::<String>();
     if compact.is_empty() {
@@ -49,7 +49,7 @@ pub(super) fn compact_display(text: &str, fallback: &str) -> String {
     }
 }
 
-pub(super) fn semantic_is_empty(schematic: &SemanticSchematic) -> bool {
+pub fn semantic_is_empty(schematic: &SemanticSchematic) -> bool {
     schematic.components.is_empty()
         && schematic.wires.is_empty()
         && schematic.buses.is_empty()
@@ -120,7 +120,7 @@ impl BoundsAccumulator {
     }
 }
 
-pub(super) fn schematic_bounds(
+pub fn schematic_bounds(
     schematic: &SemanticSchematic,
 ) -> Result<SemanticBounds, HardcopySourceError> {
     let mut bounds = BoundsAccumulator::default();
@@ -219,7 +219,7 @@ pub(crate) fn authored_sheet_bounds(
 /// Bounds of every drawing-sheet primitive emitted by the scene compiler.
 /// Unlike authored-sheet clipping bounds, this includes configured bleed so
 /// signed bleed coordinates are authenticated before scene compilation.
-pub(crate) fn drawing_sheet_artwork_bounds(
+pub fn drawing_sheet_artwork_bounds(
     format: &SchematicSheetFormat,
 ) -> Result<SemanticBounds, HardcopySourceError> {
     let geometry = format
@@ -229,7 +229,7 @@ pub(crate) fn drawing_sheet_artwork_bounds(
 }
 
 fn drawing_sheet_rect_bounds(
-    rect: crate::state::DrawingSheetRect,
+    rect: rspice_design_model::design_management::DrawingSheetRect,
 ) -> Result<SemanticBounds, HardcopySourceError> {
     let origin_x = SCHEMATIC_SHEET_ORIGIN_X_UNITS
         .checked_mul(SCHEMATIC_UNIT_UM)
@@ -260,7 +260,7 @@ fn drawing_sheet_rect_bounds(
     )
 }
 
-pub(super) fn union_bounds(first: SemanticBounds, second: SemanticBounds) -> SemanticBounds {
+pub fn union_bounds(first: SemanticBounds, second: SemanticBounds) -> SemanticBounds {
     SemanticBounds {
         minimum: SemanticPoint::new(
             first.minimum.x_um.min(second.minimum.x_um),
@@ -334,7 +334,8 @@ pub(super) fn include_symbol_document_bounds(
                 size,
                 align,
             } => {
-                let (min, max) = crate::state::symbol_text_bounds(*anchor, text, *size, *align);
+                let (min, max) =
+                    rspice_design::symbol::symbol_text_bounds(*anchor, text, *size, *align);
                 bounds.include(map(min));
                 bounds.include(map(max));
             }
@@ -364,7 +365,7 @@ pub(super) fn map_result_coordinate(
     Ok(mapped.round() as i64)
 }
 
-pub(super) fn clipped_plot_paths(
+pub fn clipped_plot_paths(
     points: &[(f64, f64)],
     x_minimum: f64,
     x_maximum: f64,
@@ -388,8 +389,7 @@ pub(super) fn clipped_plot_paths(
             return Ok(Vec::new());
         }
         return Ok(vec![vec![map_plot_point(
-            point.0,
-            point.1,
+            (point.0, point.1),
             x_minimum,
             y_minimum,
             x_span,
@@ -407,8 +407,7 @@ pub(super) fn clipped_plot_paths(
             continue;
         };
         let start = map_plot_point(
-            start_x,
-            start_y,
+            (start_x, start_y),
             x_minimum,
             y_minimum,
             x_span,
@@ -417,8 +416,7 @@ pub(super) fn clipped_plot_paths(
             plot_height,
         )?;
         let end = map_plot_point(
-            end_x,
-            end_y,
+            (end_x, end_y),
             x_minimum,
             y_minimum,
             x_span,
@@ -445,7 +443,7 @@ pub(super) fn clipped_plot_paths(
 
 pub(super) fn canonical_marker_semantics(
     scene: &ResolvedCartesianLineScene,
-    marker: &crate::results::visualization_document::Marker,
+    marker: &rspice_results::visualization_document::Marker,
 ) -> SemanticPlotMarker {
     let source_x = typed_numeric_value(&marker.coordinate);
     let source_y = source_x.and_then(|x| {
@@ -469,7 +467,7 @@ pub(super) fn canonical_marker_semantics(
 
 pub(super) fn canonical_cursor_semantics(
     scene: &ResolvedCartesianLineScene,
-    cursor: &crate::results::visualization_raster::ResolvedRasterCursor,
+    cursor: &rspice_results::visualization_raster::ResolvedRasterCursor,
 ) -> Option<SemanticPlotCursor> {
     let start = semantic_position_in_scene(scene, cursor.x(), scene.y_range().minimum).ok()?;
     let end = semantic_position_in_scene(scene, cursor.x(), scene.y_range().maximum).ok()?;
@@ -484,7 +482,7 @@ pub(super) fn canonical_cursor_semantics(
 
 pub(super) fn canonical_annotation_semantics(
     scene: &ResolvedCartesianLineScene,
-    annotation: &crate::results::visualization_document::Annotation,
+    annotation: &rspice_results::visualization_document::Annotation,
 ) -> SemanticPlotAnnotation {
     let (trace_id, source_x, source_y, position) = match &annotation.anchor {
         AnnotationAnchor::Pane {
@@ -544,7 +542,7 @@ pub(super) fn typed_numeric_value(value: &TypedValue) -> Option<f64> {
 }
 
 pub(super) fn trace_y_at_x(
-    points: &[crate::results::visualization_raster::ResolvedRasterPoint],
+    points: &[rspice_results::visualization_raster::ResolvedRasterPoint],
     x: f64,
 ) -> Option<f64> {
     if let Some(point) = points
@@ -578,8 +576,10 @@ pub(super) fn semantic_position_in_scene(
     let x_range = scene.x_range();
     let y_range = scene.y_range();
     map_plot_point(
-        x.clamp(x_range.minimum, x_range.maximum),
-        y.clamp(y_range.minimum, y_range.maximum),
+        (
+            x.clamp(x_range.minimum, x_range.maximum),
+            y.clamp(y_range.minimum, y_range.maximum),
+        ),
         x_range.minimum,
         y_range.minimum,
         x_range.maximum - x_range.minimum,
@@ -589,9 +589,8 @@ pub(super) fn semantic_position_in_scene(
     )
 }
 
-pub(super) fn map_plot_point(
-    x: f64,
-    y: f64,
+pub fn map_plot_point(
+    (x, y): (f64, f64),
     x_minimum: f64,
     y_minimum: f64,
     x_span: f64,
@@ -651,10 +650,8 @@ pub(super) fn clip_line_to_axis_rect(
 
 /// Pin a resolved live document into a persistable source-set member.
 ///
-/// This adapter stays with the application because it reads
-/// [`ResolvedHardcopyDocument`], which resolves live schematic and result
-/// documents. The record type itself is owned by `crate::hardcopy::sources`.
-pub(crate) fn source_set_member_from_resolved(
+/// The record type remains owned by `rspice_hardcopy_contract::sources`.
+pub fn source_set_member_from_resolved(
     resolved: &ResolvedHardcopyDocument,
 ) -> Result<HardcopySourceSetMember, HardcopySourceError> {
     HardcopySourceSetMember::try_new(
@@ -670,7 +667,18 @@ pub(crate) fn source_set_member_from_resolved(
 #[cfg(test)]
 mod drawing_sheet_geometry_tests {
     use super::*;
-    use crate::state::DocumentationShapeGeometry;
+    use rspice_design::schematic::documentation_shape::{
+        DocumentationShape, DocumentationShapeGeometry,
+    };
+
+    #[test]
+    fn plot_line_clipping_preserves_true_axis_boundary_intersections() {
+        let clipped = clip_line_to_axis_rect((-1.0, 0.25), (3.0, 0.75), 0.0, 2.0, 0.0, 1.0)
+            .expect("line crosses the visible axis rectangle");
+        assert_eq!(clipped.0, (0.0, 0.375));
+        assert_eq!(clipped.1, (2.0, 0.625));
+        assert!(clip_line_to_axis_rect((-2.0, 2.0), (-1.0, 3.0), 0.0, 1.0, 0.0, 1.0).is_none());
+    }
 
     #[test]
     fn authored_sheet_bounds_stop_at_paper_even_when_bleed_is_configured() {

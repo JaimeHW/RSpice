@@ -10,63 +10,6 @@ use super::*;
 use crate::workbench::documents::result_document::manifest::manifest_for_run;
 use rspice_results::manifest::ManifestViewModel;
 
-/// Resolve an active Visualization Studio pane without depending on a window,
-/// screenshot, framebuffer, or transient viewer cache.
-pub fn resolve_visualization_pane_source(
-    source: VisualizationPaneHardcopySource<'_>,
-) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    let scene = resolve_cartesian_line_scene(
-        source.document,
-        source.reference,
-        source.page_id,
-        source.pane_id,
-    )
-    .map_err(map_visualization_error)?;
-    let mut resolved = resolve_plot_source(PlotHardcopySource {
-        source_key: source.source_key,
-        display_name: source.display_name,
-        scene: &scene,
-        scope: source.scope,
-    })?;
-    let HardcopySemanticDocument::Plot(plot) = &mut resolved.semantic_document else {
-        unreachable!("plot source resolver always returns plot semantics")
-    };
-    plot.markers = source
-        .document
-        .markers()
-        .iter()
-        .filter(|marker| marker.pane_id == source.pane_id)
-        .map(|marker| canonical_marker_semantics(&scene, marker))
-        .collect();
-    plot.annotations = source
-        .document
-        .annotations()
-        .iter()
-        .filter(|annotation| annotation.pane_id == source.pane_id)
-        .map(|annotation| canonical_annotation_semantics(&scene, annotation))
-        .collect();
-    let content_digest = canonical_digest(
-        b"rspice-hardcopy-visualization-pane-v2",
-        &(scene.source_digest(), &resolved.semantic_document),
-    )?;
-    let document_id = resolved.authority.document_id();
-    let revision = resolved.authority.revision();
-    let display_name = resolved.authority.display_name().to_owned();
-    let document_kind = resolved.authority.document_kind();
-    let scope = resolved.authority.scope().clone();
-    resolved.authority = ActiveHardcopySource::try_new(
-        document_id,
-        revision,
-        content_digest,
-        display_name,
-        document_kind,
-        scope,
-    )
-    .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?;
-    resolved.default_print_mapping = default_print_mapping(&resolved.semantic_document)?;
-    Ok(resolved)
-}
-
 pub(crate) fn resolve_visualization_document_source(
     source_key: String,
     project_id: ProjectId,
@@ -149,7 +92,7 @@ pub(crate) fn resolve_visualization_document_source(
         }
         Ok(actual)
     })?;
-    resolved.source_key = source_key;
+    resolved = resolved.with_source_key(source_key)?;
     Ok(resolved)
 }
 
@@ -461,8 +404,10 @@ pub(crate) fn resolve_active_studio_pane_source(
                 source_x_bits: Some(marker.x.to_bits()),
                 source_y_bits: Some(marker.y.to_bits()),
                 position: Some(map_plot_point(
-                    marker.x.clamp(x_minimum, x_maximum),
-                    marker.y.clamp(y_minimum, y_maximum),
+                    (
+                        marker.x.clamp(x_minimum, x_maximum),
+                        marker.y.clamp(y_minimum, y_maximum),
+                    ),
                     x_minimum,
                     y_minimum,
                     x_maximum - x_minimum,
@@ -489,8 +434,7 @@ pub(crate) fn resolve_active_studio_pane_source(
                 source_x_bits: Some(annotation.x.to_bits()),
                 source_y_bits: None,
                 position: Some(map_plot_point(
-                    annotation.x.clamp(x_minimum, x_maximum),
-                    y_maximum,
+                    (annotation.x.clamp(x_minimum, x_maximum), y_maximum),
                     x_minimum,
                     y_minimum,
                     x_maximum - x_minimum,
@@ -653,25 +597,11 @@ pub(super) fn resolve_results_quick_view_stack(
             .ok_or(HardcopySourceError::CoordinateOverflow)?;
         maximum_width_um = maximum_width_um.max(width);
         let ordinal = u32::try_from(index).map_err(|_| HardcopySourceError::CoordinateOverflow)?;
-        let ResolvedHardcopyDocument {
-            source_key,
-            authority,
-            semantic_document,
-            ..
-        } = resolved;
-        children.push(SemanticAggregateChild {
+        children.push(resolved.into_aggregate_child(
             ordinal,
-            source_key,
-            display_name: authority.display_name().to_owned(),
-            document_id: authority.document_id(),
-            revision: authority.revision(),
-            content_digest: authority.content_digest(),
-            local_bounds: bounds,
-            placement_origin: SemanticPoint::new(0, next_y_um),
-            page_break_before: index != 0,
-            publication_page_label: Some(format!("{} of {strip_count}", index + 1)),
-            document: Box::new(semantic_document),
-        });
+            SemanticPoint::new(0, next_y_um),
+            Some(format!("{} of {strip_count}", index + 1)),
+        ));
         next_y_um = next_y_um
             .checked_add(height)
             .ok_or(HardcopySourceError::CoordinateOverflow)?;
@@ -2175,17 +2105,4 @@ pub(super) fn format_optional_scalar(
             }
         },
     )
-}
-
-pub(super) fn map_visualization_error(error: VisualizationRasterError) -> HardcopySourceError {
-    match error {
-        error @ (VisualizationRasterError::PageNotFound(_)
-        | VisualizationRasterError::PaneNotFound(_)
-        | VisualizationRasterError::DatasetNotFound(_)
-        | VisualizationRasterError::EmptyTrace(_)
-        | VisualizationRasterError::NoVisibleTraces) => {
-            HardcopySourceError::UnretainedResult(error.to_string())
-        }
-        error => HardcopySourceError::InvalidVisualizationSource(error.to_string()),
-    }
 }

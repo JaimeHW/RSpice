@@ -53,6 +53,7 @@ rspice-design = { workspace = true, features = ["symbol-artwork"] }
 rspice-project.workspace = true
 rspice-results = { workspace = true, features = ["engine-evidence"] }
 rspice-hardcopy-contract.workspace = true
+rspice-hardcopy.workspace = true
 rspice-model-library.workspace = true
 rspice-formats = { workspace = true, features = ["columnar", "fst", "hdf5", "monte-carlo-checkpoint", "native-bundle", "result-csv", "result-digital", "result-hdf5", "result-vcd", "result-waveform", "spice-raw", "table-schema", "xlsx"] }
 rspice-simulation-contract.workspace = true
@@ -98,11 +99,7 @@ krilla = { version = "0.8.2", default-features = false, features = ["raster-imag
 egui = { version = "0.35.0", default-features = false }
 egui_extras = { version = "0.35.0", default-features = false }
 
-# SVG parsing and deterministic software rendering. System font discovery stays
-# disabled: hardcopy rendering loads only RSpice's pinned IBM Plex assets.
-usvg.workspace = true
-resvg = { version = "0.47", default-features = false, features = ["text"] }
-tiff = { version = "0.11.3", default-features = false, features = ["deflate"] }
+# Font metrics for the shortcuts PDF use the shared, pinned IBM Plex assets.
 ttf-parser = "0.25.1"
 
 # Native file dialogs

@@ -1738,9 +1738,7 @@ mod tests {
     };
     use crate::product::ObjectRevision;
     #[cfg(not(target_arch = "wasm32"))]
-    use crate::workbench::hardcopy_adapters::render::{
-        HardcopyRenderer, HardcopyScene, HardcopySceneMetadata,
-    };
+    use crate::workbench::hardcopy_adapters::render::{HardcopyRenderer, HardcopySceneMetadata};
 
     fn digest(value: u8) -> ContentDigest {
         ContentDigest::from_bytes([value; 32])
@@ -1883,11 +1881,47 @@ mod tests {
         .unwrap()
     }
     #[cfg(not(target_arch = "wasm32"))]
+    fn resolved_source(plan: &HardcopyPlan) -> super::super::sources::ResolvedHardcopyDocument {
+        use super::super::sources::{
+            SemanticBounds, SemanticPoint, resolve_blank_schematic_sheet_with_format,
+        };
+        use crate::hardcopy::sources::HardcopySourceIdentity;
+        let authority = plan.source();
+        let identity = HardcopySourceIdentity::try_new(
+            "printer-test",
+            authority.document_id(),
+            authority.revision(),
+            authority.display_name(),
+        )
+        .unwrap();
+        let blank = resolve_blank_schematic_sheet_with_format(
+            identity.clone(),
+            authority.scope().clone(),
+            None,
+        )
+        .unwrap();
+        rspice_hardcopy::sources::resolve_semantic_source(
+            identity,
+            authority.content_digest(),
+            authority.document_kind(),
+            authority.scope().clone(),
+            blank.semantic_document().clone(),
+            SemanticBounds::try_new(
+                SemanticPoint::new(0, 0),
+                SemanticPoint::new(
+                    i64::try_from(plan.content_extent().width().micrometres()).unwrap(),
+                    i64::try_from(plan.content_extent().height().micrometres()).unwrap(),
+                ),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
     fn rendered_pages(plan: &HardcopyPlan, dpi: u16) -> RenderedPrinterPages {
         let metadata = HardcopySceneMetadata::try_new("test", "RSpice").unwrap();
-        let scene = HardcopyScene::try_new(plan.content_extent(), metadata, Vec::new(), Vec::new())
-            .unwrap();
-        HardcopyRenderer::render_printer_pages(plan, &scene, dpi).unwrap()
+        HardcopyRenderer::render_printer_pages_resolved(plan, &resolved_source(plan), metadata, dpi)
+            .unwrap()
     }
     #[cfg(not(target_arch = "wasm32"))]
     fn browser_print_plan_and_publication() -> (HardcopyPlan, RenderedHardcopyPublication) {
@@ -1927,8 +1961,8 @@ mod tests {
         )
         .unwrap();
         let metadata = HardcopySceneMetadata::try_new("test", "RSpice").unwrap();
-        let scene = HardcopyScene::try_new(extent, metadata, Vec::new(), Vec::new()).unwrap();
-        let publication = HardcopyRenderer::render(&plan, &scene).unwrap();
+        let publication =
+            HardcopyRenderer::render_resolved(&plan, &resolved_source(&plan), metadata).unwrap();
         (plan, publication)
     }
 

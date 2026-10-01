@@ -1,0 +1,36 @@
+[package]
+name = "rspice-hardcopy"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rspice-app-types.workspace = true
+rspice-design = { workspace = true, features = ["symbol-artwork"] }
+rspice-design-model.workspace = true
+rspice-hardcopy-contract.workspace = true
+rspice-results = { workspace = true, features = ["engine-evidence"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+unicode-segmentation = "1.12"
+sha2.workspace = true
+png = "0.18"
+base64.workspace = true
+# Keep system font discovery disabled; rendering uses the pinned workspace fonts.
+usvg.workspace = true
+krilla = { version = "0.8.2", default-features = false, features = ["raster-images", "simple-text"] }
+resvg = { version = "0.47", default-features = false, features = ["text"] }
+tiff = { version = "0.11.3", default-features = false, features = ["deflate"] }
+ttf-parser = "0.25.1"
+
+[dev-dependencies]
+uuid.workspace = true
+lopdf = { version = "0.44", default-features = false }

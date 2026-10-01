@@ -36,7 +36,7 @@ pub(super) const TIFF_BYTES_PER_PIXEL: u64 = 12;
 /// a dialog comes to offer a setting its own renderer refuses. Pixel counts
 /// rise monotonically with resolution, so bisecting the contract's range finds
 /// the exact boundary.
-pub(crate) fn max_raster_dpi(plan: &HardcopyPlan, format: OutputFormat) -> Option<u16> {
+pub fn max_raster_dpi(plan: &HardcopyPlan, format: OutputFormat) -> Option<u16> {
     let bytes_per_pixel = match format {
         OutputFormat::Png { .. } => PNG_BYTES_PER_PIXEL,
         OutputFormat::Tiff { .. } => TIFF_BYTES_PER_PIXEL,

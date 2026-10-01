@@ -58,7 +58,7 @@ impl SemanticSceneCompiler<'_> {
                 continue;
             }
             let (caption, anchor) = match tick.axis {
-                crate::workbench::hardcopy_adapters::sources::SemanticAxisKind::Horizontal => {
+                crate::sources::SemanticAxisKind::Horizontal => {
                     let foot = if from.y.micrometres() > to.y.micrometres() {
                         from
                     } else {
@@ -66,7 +66,7 @@ impl SemanticSceneCompiler<'_> {
                     };
                     (self.offset_scene_point(foot, 0, 2_600)?, TextAnchor::Middle)
                 }
-                crate::workbench::hardcopy_adapters::sources::SemanticAxisKind::Vertical => {
+                crate::sources::SemanticAxisKind::Vertical => {
                     let foot = if from.x.micrometres() < to.x.micrometres() {
                         from
                     } else {
@@ -82,8 +82,7 @@ impl SemanticSceneCompiler<'_> {
                 SceneFont::Monospace,
                 2_300,
                 color,
-                anchor,
-                SceneTextRotation::Upright,
+                (anchor, SceneTextRotation::Upright),
             )?;
         }
         Ok(())

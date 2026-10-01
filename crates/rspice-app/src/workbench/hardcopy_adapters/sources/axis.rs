@@ -96,8 +96,7 @@ pub(super) fn plot_axes(
             };
             let point = |(x, y)| {
                 map_plot_point(
-                    x,
-                    y,
+                    (x, y),
                     frame.x_minimum,
                     frame.y_minimum,
                     frame.x_span,

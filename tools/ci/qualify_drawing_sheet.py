@@ -44,6 +44,7 @@ SUPPORTED_TARGETS = frozenset(
 SHEET_SOURCE_SCOPES = (
     "crates/rspice-app/src/hardcopy.rs",
     "crates/rspice-hardcopy-contract/src",
+    "crates/rspice-hardcopy/src",
     "crates/rspice-design-model/src/design_management/drawing_sheet.rs",
     "crates/rspice-design-model/src/design_management/drawing_sheet",
     "crates/rspice-design-model/src/sheet_authoring.rs",
@@ -64,6 +65,7 @@ QUALIFICATION_INPUTS = (
     "crates/rspice-core/tests/save_directives.rs",
     "crates/rspice-app/Cargo.toml",
     "crates/rspice-hardcopy-contract/Cargo.toml",
+    "crates/rspice-hardcopy/Cargo.toml",
     "crates/rspice-design-model/Cargo.toml",
     "tools/rspice-sheet-publisher/Cargo.toml",
     "tools/rspice-sheet-publisher/src",
@@ -397,6 +399,12 @@ def command_gates(
                 "hardcopy",
             ),
             201 if host_system == "Windows" else 198,
+        ),
+        Gate(
+            "hardcopy-service",
+            "Frozen hardcopy source and renderer tests",
+            ("cargo", "test", "--locked", "-p", "rspice-hardcopy", "-j", cargo_jobs, "--lib"),
+            56,
         ),
         Gate(
             "publisher-tests",

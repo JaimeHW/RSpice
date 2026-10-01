@@ -20,14 +20,14 @@ use rspice_publication_contract::{
     Validate as _,
 };
 
-use crate::hardcopy::HardcopyScope;
+use crate::hardcopy::{ContentExtent, HardcopyScope};
 use crate::quantity::engineering::format_engineering_value;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SpecEntry};
 use crate::workbench::app_state::AppState;
 use crate::workbench::hardcopy_adapters::render::{
-    HardcopyScene, HardcopySceneMetadata, SceneFill, SceneFont, ScenePoint, ScenePrimitive,
-    SceneTextRotation, SemanticColor, StrokePattern as SceneStrokePattern, StrokeStyle,
-    TextAnchor as SceneTextAnchor, scene_from_resolved,
+    HardcopySceneMetadata, SceneFill, SceneFont, ScenePoint, ScenePrimitive, SceneTextRotation,
+    SemanticColor, StrokePattern as SceneStrokePattern, StrokeStyle, TextAnchor as SceneTextAnchor,
+    scene_from_resolved,
 };
 use crate::workbench::hardcopy_adapters::sources::{
     HardcopySemanticDocument, enumerate_retained_hardcopy_sources,
@@ -646,7 +646,8 @@ fn collect_scenes(
                     source: descriptor.display_name.clone(),
                     reason: error.to_string(),
                 })?;
-        let converted = convert_scene(&scene, &descriptor.display_name)?;
+        let converted =
+            convert_scene(scene.extent(), scene.primitives(), &descriptor.display_name)?;
         if is_schematic {
             sheets.push(SheetScene {
                 name: descriptor.display_name.clone(),
@@ -1004,14 +1005,18 @@ fn convert_primitive(
 /// Convert one compiled hardcopy scene into a contract scene. The compiled
 /// scene is a flat painter's-order list, so the result is a single untagged
 /// group; semantic hover tags arrive when compilation grows group identity.
-fn convert_scene(scene: &HardcopyScene, source: &str) -> Result<Scene, PublicationBuildError> {
-    let mut primitives = Vec::with_capacity(scene.primitives().len());
-    for primitive in scene.primitives() {
+fn convert_scene(
+    extent: ContentExtent,
+    source_primitives: &[ScenePrimitive],
+    source: &str,
+) -> Result<Scene, PublicationBuildError> {
+    let mut primitives = Vec::with_capacity(source_primitives.len());
+    for primitive in source_primitives {
         convert_primitive(primitive, source, &mut primitives)?;
     }
     Ok(Scene {
-        width_um: scene.extent().width().micrometres(),
-        height_um: scene.extent().height().micrometres(),
+        width_um: extent.width().micrometres(),
+        height_um: extent.height().micrometres(),
         groups: vec![PrimitiveGroup {
             tag: None,
             primitives,
@@ -1401,16 +1406,6 @@ mod tests {
         }
     }
 
-    fn test_scene(primitives: Vec<ScenePrimitive>) -> HardcopyScene {
-        let extent = ContentExtent::try_new(
-            Length::from_micrometres(100_000),
-            Length::from_micrometres(80_000),
-        )
-        .expect("extent");
-        let metadata = HardcopySceneMetadata::try_new("Test scene", "RSpice").expect("metadata");
-        HardcopyScene::try_new(extent, metadata, primitives, Vec::new()).expect("scene")
-    }
-
     #[test]
     fn scene_conversion_covers_every_supported_primitive() {
         let stroke_style = |color| {
@@ -1422,7 +1417,7 @@ mod tests {
             )
             .expect("stroke")
         };
-        let scene = test_scene(vec![
+        let scene = vec![
             ScenePrimitive::Line {
                 from: scene_point(1_000, 1_000),
                 to: scene_point(9_000, 1_000),
@@ -1465,9 +1460,13 @@ mod tests {
                 anchor: SceneTextAnchor::Middle,
                 rotation: SceneTextRotation::Clockwise90,
             },
-        ]);
-
-        let converted = convert_scene(&scene, "test").expect("conversion");
+        ];
+        let extent = ContentExtent::try_new(
+            Length::from_micrometres(100_000),
+            Length::from_micrometres(80_000),
+        )
+        .expect("extent");
+        let converted = convert_scene(extent, &scene, "test").expect("conversion");
         assert_eq!(converted.width_um, 100_000);
         assert_eq!(converted.height_um, 80_000);
         assert_eq!(converted.groups.len(), 1);

@@ -137,9 +137,7 @@ pub(crate) use state::{SchematicEditorMut, SchematicEditorRef, SchematicSession}
 /// schematic state reach the constant through its defining module.
 #[cfg(test)]
 pub use symbol_gen::GENERATED_WIDTH;
-pub use symbol_gen::{
-    GENERATED_PIN_LABEL_SIZE, fit_pin_name, inward_step, lead_inner, pin_label_anchor,
-};
+pub use symbol_gen::{GENERATED_PIN_LABEL_SIZE, fit_pin_name, inward_step, lead_inner};
 pub use tool::Tool;
 pub use undo_history::{SchematicSnapshot, UndoSequence, next_undo_sequence};
 pub use validated_revision::{
