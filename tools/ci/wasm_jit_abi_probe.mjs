@@ -1,6 +1,6 @@
-// Independent ABI 17 release fixture. Keep these bytes and opcodes explicit:
+// Independent ABI 19 release fixture. Keep these bytes and opcodes explicit:
 // deriving them from the compiler would let both sides drift together.
-const ABI = 17;
+const ABI = 19;
 const HEADER_BYTES = 176; // ABI 16 adds immutable evaluation-input pointer/length.
 const FRAME_BYTES = 8368; // Header plus the bounded 1,024-element operand region.
 const STACK_BYTES = 8368; // Preserve the WASM stack's 16-byte alignment.
@@ -169,6 +169,9 @@ export async function qualifyAbi(wasm) {
       // integration site.
       ["integral derivative without a runtime session", 480, [1, 0.5, 0.25]],
       ["time derivative without a runtime session", 482, [1, 0.5, 0.25]],
+      ["mixed delay derivative without a runtime session", 483, [1, 0.5, 0.25, 0.125]],
+      ["bounded mixed delay derivative without a runtime session", 484, [1, 0.5, 0.25, 0.125, 2]],
+      ["table derivative action without a runtime session", 402, [1, 0.25]],
     ]) {
       reset();
       expect(label, invoke(opcode, operands), 0, -2);

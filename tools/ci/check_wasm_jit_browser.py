@@ -29,8 +29,12 @@ EXPECTED_STAMPS = 20000
 # ABI 16 (2026-09-13) adds immutable evaluation inputs and grows the header
 # from 168 to 176 bytes. ABI 17 adds checked SSA array-index opcode 3, tested
 # with both tie directions, i64::MIN, non-finite, out-of-bounds and overflow.
-EXPECTED_WASM_JIT_ABI_VERSION = 17
-EXPECTED_ABI_CHECKS = 43
+# ABI 18 adds mixed delay actions (483/484); ABI 19 adds table derivative
+# application (402). Reviewed against the pre-refactor 43d4d30c9 contract:
+# the header, operand region and helper signatures are unchanged. These
+# stateful actions must refuse the fixture's missing runtime session.
+EXPECTED_WASM_JIT_ABI_VERSION = 19
+EXPECTED_ABI_CHECKS = 46
 
 # The page runs on a real clock, so the runner cannot bound it with
 # --virtual-time-budget and read the DOM afterwards: a virtual clock reports a
