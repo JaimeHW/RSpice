@@ -2,24 +2,15 @@
 
 #[cfg(target_arch = "wasm32")]
 use rspice_hardcopy::sources::MAX_WORKER_SNAPSHOT_BYTES;
+#[cfg(test)]
+use rspice_hardcopy::worker::HardcopyWorkerResponse;
 pub(crate) use rspice_hardcopy::worker::decode_packaged_publication;
 use rspice_hardcopy::worker::{
     HARDCOPY_WORKER_PROTOCOL_VERSION, HardcopyWorkerCommand, HardcopyWorkerOperation,
-    HardcopyWorkerRequest, HardcopyWorkerResponse, publication_part_count,
+    HardcopyWorkerRequest, execute_request, publication_part_count,
 };
 #[cfg(target_arch = "wasm32")]
 use rspice_hardcopy::worker::{MAX_REQUEST_BUFFERS, validate_response_buffer_lengths};
-
-fn execute_request(
-    request: HardcopyWorkerRequest,
-    buffers: Vec<Vec<u8>>,
-) -> Result<HardcopyWorkerResponse, String> {
-    use crate::workbench::hardcopy_adapters::sources::PreparedRetainedHardcopyResolution;
-
-    rspice_hardcopy::worker::execute_request_with_source_resolver(request, buffers, |snapshot| {
-        PreparedRetainedHardcopyResolution::from_worker_snapshot_json(snapshot)?.resolve_owned()
-    })
-}
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn run_worker_request_value(

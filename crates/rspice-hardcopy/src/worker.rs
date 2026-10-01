@@ -16,7 +16,6 @@ use crate::render::{
 use crate::sources::{MAX_WORKER_SNAPSHOT_BYTES, ResolvedHardcopyDocument};
 use rspice_app_types::product::ContentDigest;
 use rspice_formats::zip::deterministic_stored_zip;
-use rspice_hardcopy_contract::sources::HardcopySourceError;
 use rspice_hardcopy_contract::{
     HardcopyArtifactIdentity, HardcopyPlan, HardcopyPlanId, HardcopyScope, HardcopySetup,
     MAX_PREVIEW_PAGES, OutputFormat,
@@ -414,12 +413,10 @@ pub fn validate_response_buffer_lengths(
     Ok(())
 }
 
-/// Execute a bounded worker command, using the host's prepared-source decoder
-/// only for source resolution. Rendering and packaging consume authenticated snapshots.
-pub fn execute_request_with_source_resolver(
+/// Execute a bounded worker command over authenticated portable source snapshots.
+pub fn execute_request(
     request: HardcopyWorkerRequest,
     mut buffers: Vec<Vec<u8>>,
-    resolve_prepared: impl FnOnce(&[u8]) -> Result<ResolvedHardcopyDocument, HardcopySourceError>,
 ) -> Result<HardcopyWorkerResponse, String> {
     request.validate()?;
     validate_request_buffer_lengths(buffers.iter().map(Vec::len))?;
@@ -433,7 +430,12 @@ pub fn execute_request_with_source_resolver(
                 );
             }
             let snapshot = buffers.pop().expect("validated one-buffer request");
-            let resolved = resolve_prepared(&snapshot).map_err(|error| error.to_string())?;
+            let resolved =
+                crate::sources::PreparedRetainedHardcopyResolution::from_worker_snapshot_json(
+                    &snapshot,
+                )
+                .and_then(|prepared| prepared.resolve_owned())
+                .map_err(|error| error.to_string())?;
             if resolved.source_key() != source_key || resolved.authority().scope() != &scope {
                 return Err(
                     "Hardcopy worker resolved a source other than the requested retained identity."
