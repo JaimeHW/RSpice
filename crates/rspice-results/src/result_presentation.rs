@@ -11,6 +11,238 @@ use serde::{Deserialize, Serialize};
 use crate::{analysis_result::AnalysisResult, run::SimulationRun, waveform::RetainedWaveform};
 use rspice_app_types::product::{AnalysisInstanceId, DatasetId};
 
+/// The result viewers, in tab order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum ResultViewer {
+    /// Stacked waveform strips, one per analysis.
+    #[default]
+    Waves,
+    /// Swept-source or swept-parameter DC transfer curves.
+    DcSweep,
+    /// Loop-gain stability view with margin markers.
+    Bode,
+    /// Spectrum with harmonic markers.
+    Fft,
+    /// Retained complex harmonic-balance coefficient spectrum.
+    HarmonicBalance,
+    /// Periodic phase-noise spectrum versus offset frequency.
+    PhaseNoise,
+    /// Eye diagram with compliance mask.
+    Eye,
+    /// Monte-Carlo distribution.
+    Hist,
+    /// Per-device operating-point inspector (Spectre-style OP info).
+    Op,
+    /// Ordinary-noise root spectral density with contributor evidence.
+    NoiseContrib,
+    /// Ranked signed parameter-sensitivity contributions.
+    Contribution,
+    /// Scalar DC transfer gain and input/output resistances.
+    TransferFunction,
+    /// Measurements × runs matrix against spec bounds.
+    Specs,
+    /// The retained samples of one analysis, as rows.
+    Table,
+    /// Nyquist loop-gain stability surface.
+    Nyquist,
+    /// Smith-chart RF/network surface.
+    Smith,
+    /// One retained complex response on the polar plane.
+    Polar,
+    /// Complex-plane pole-zero surface.
+    PoleZero,
+    /// Two measured Monte-Carlo columns read as a correlation.
+    Scatter,
+    /// The shape of a retained population against its requirement.
+    BoxViolin,
+    /// Committed XSPICE digital and real-valued event history.
+    Events,
+    /// Safe-operating-area rule evidence with per-rule stress history.
+    Soa,
+    /// Optimizer cost convergence and the candidate history behind it.
+    Optimization,
+    /// Immutable task and retained-value inventory for the active dataset.
+    ///
+    /// This is dataset-native and deliberately has no Visualization Studio
+    /// viewer-document identity.
+    Manifest,
+    /// Exact single-ended and mixed-mode power-wave matrices.
+    NetworkMatrix,
+}
+
+impl ResultViewer {
+    /// Compact command/status label.
+    pub fn label(self) -> &'static str {
+        match self {
+            ResultViewer::Waves => "WAVES",
+            ResultViewer::DcSweep => "DC",
+            ResultViewer::Bode => "BODE",
+            ResultViewer::Fft => "FFT",
+            ResultViewer::HarmonicBalance => "HB",
+            ResultViewer::PhaseNoise => "PNOISE",
+            ResultViewer::Eye => "EYE",
+            ResultViewer::Hist => "HIST",
+            ResultViewer::Op => "OP",
+            ResultViewer::NoiseContrib => "NOISE",
+            ResultViewer::Contribution => "SENS",
+            ResultViewer::TransferFunction => "XF",
+            ResultViewer::Specs => "SPECS",
+            ResultViewer::Table => "TABLE",
+            ResultViewer::Nyquist => "NYQ",
+            ResultViewer::Smith => "SMITH",
+            ResultViewer::Polar => "POLAR",
+            ResultViewer::NetworkMatrix => "NETWORK",
+            ResultViewer::PoleZero => "PZ",
+            ResultViewer::Scatter => "SCATTER",
+            ResultViewer::BoxViolin => "DIST",
+            ResultViewer::Events => "EVENTS",
+            ResultViewer::Soa => "SOA",
+            ResultViewer::Optimization => "OPT",
+            ResultViewer::Manifest => "MANIFEST",
+        }
+    }
+
+    const PRIMARY: [ResultViewer; 24] = [
+        ResultViewer::Waves,
+        ResultViewer::DcSweep,
+        ResultViewer::Bode,
+        ResultViewer::NoiseContrib,
+        ResultViewer::Nyquist,
+        ResultViewer::Fft,
+        ResultViewer::HarmonicBalance,
+        ResultViewer::PhaseNoise,
+        ResultViewer::Smith,
+        ResultViewer::Polar,
+        ResultViewer::NetworkMatrix,
+        ResultViewer::TransferFunction,
+        ResultViewer::Contribution,
+        ResultViewer::Op,
+        ResultViewer::Specs,
+        ResultViewer::Table,
+        ResultViewer::Hist,
+        ResultViewer::Scatter,
+        ResultViewer::BoxViolin,
+        ResultViewer::Eye,
+        ResultViewer::PoleZero,
+        // Specialist sheets last: each needs evidence an ordinary run does not
+        // produce — XSPICE event nodes, or a whole campaign analysis kind — so
+        // leading with them would push the everyday sheets rightward for the
+        // sake of tabs that are usually dim.
+        ResultViewer::Events,
+        ResultViewer::Soa,
+        ResultViewer::Optimization,
+    ];
+    const DATASET_NATIVE: [ResultViewer; 1] = [ResultViewer::Manifest];
+
+    /// Every result presentation, in the established tab order.
+    pub fn all() -> impl Iterator<Item = ResultViewer> {
+        Self::PRIMARY.into_iter().chain(Self::DATASET_NATIVE)
+    }
+
+    /// Human-readable document-tab label from the upgraded Results mockup.
+    pub const fn tab_label(self) -> &'static str {
+        match self {
+            ResultViewer::Waves => "Waves",
+            ResultViewer::DcSweep => "DC Sweep",
+            ResultViewer::Bode => "Bode",
+            ResultViewer::Fft => "FFT",
+            ResultViewer::HarmonicBalance => "HB Tones",
+            ResultViewer::PhaseNoise => "Phase Noise",
+            ResultViewer::Eye => "Eye",
+            ResultViewer::Hist => "Histogram",
+            ResultViewer::Op => "OP",
+            ResultViewer::NoiseContrib => "Noise",
+            ResultViewer::Contribution => "Sensitivity",
+            ResultViewer::TransferFunction => "XF",
+            ResultViewer::Specs => "Specs",
+            ResultViewer::Table => "Table",
+            ResultViewer::Nyquist => "Nyquist",
+            ResultViewer::Smith => "Smith",
+            ResultViewer::Polar => "Polar",
+            ResultViewer::NetworkMatrix => "Network Matrix",
+            ResultViewer::PoleZero => "PZ",
+            ResultViewer::Scatter => "Scatter",
+            ResultViewer::BoxViolin => "Distribution",
+            ResultViewer::Events => "Events",
+            ResultViewer::Soa => "SOA",
+            ResultViewer::Optimization => "Optimization",
+            ResultViewer::Manifest => "Manifest",
+        }
+    }
+
+    /// The Visualization Studio viewer document this sheet renders, if any.
+    ///
+    /// `None` means the sheet is dataset-native: it reads the retained result
+    /// directly and has no place in the Studio's document catalog, so binding
+    /// a page to it would name a renderer that cannot draw the page.
+    ///
+    /// One owner on purpose. Three copies of this map existed — in the
+    /// persistent-document layer, the Studio, and the workbench state — and
+    /// they disagreed about the noise sheet: two said `viewer-bode`, the
+    /// Studio's own said `viewer-spectrum`, which the catalog rejects for a
+    /// `noise` analysis. Whether a noise sheet could be pinned into a
+    /// document depended on which path asked.
+    pub const fn viewer_document_id(self) -> Option<&'static str> {
+        Some(match self {
+            ResultViewer::Manifest => return None,
+            ResultViewer::Waves | ResultViewer::DcSweep => "viewer-waveform",
+            ResultViewer::Bode | ResultViewer::Nyquist | ResultViewer::NoiseContrib => {
+                "viewer-bode"
+            }
+            ResultViewer::Fft | ResultViewer::HarmonicBalance => "viewer-spectrum",
+            ResultViewer::PhaseNoise => "viewer-phase-noise",
+            ResultViewer::Eye => "eye-viewer",
+            ResultViewer::Hist => "viewer-histogram",
+            ResultViewer::Op | ResultViewer::Specs | ResultViewer::Table => "viewer-table",
+            ResultViewer::Contribution => "viewer-contribution",
+            ResultViewer::TransferFunction => "viewer-transfer-function",
+            ResultViewer::Smith => "viewer-smith",
+            ResultViewer::Polar => "viewer-polar",
+            ResultViewer::NetworkMatrix => "viewer-mixed-mode-network",
+            ResultViewer::PoleZero => "viewer-pz",
+            ResultViewer::Scatter => "viewer-scatter",
+            ResultViewer::BoxViolin => "viewer-box-violin",
+            ResultViewer::Events => "viewer-digital-events",
+            ResultViewer::Soa => "viewer-soa",
+            ResultViewer::Optimization => "viewer-optimization",
+        })
+    }
+
+    /// The sheet that draws a retained pane bound to this viewer document.
+    ///
+    /// The inverse of [`Self::viewer_document_id`] is not one-to-one — three
+    /// sheets render `viewer-table` — so the choice has to be made once, here.
+    /// It was made twice instead, and the two answers differed: the persistent
+    /// document layer drew the Table sheet and the Studio drew Specs, so the
+    /// same pane showed exact samples in one surface and a specification matrix
+    /// in the other. Table is the truthful answer, because
+    /// `renderer_supports_analysis` admits a `viewer-table` pane on retained
+    /// waveforms — which is what Table reads and what Specs does not.
+    pub fn from_viewer_document_id(id: &str) -> Option<Self> {
+        Some(match id {
+            "viewer-waveform" => ResultViewer::Waves,
+            "viewer-bode" => ResultViewer::Bode,
+            "viewer-spectrum" => ResultViewer::Fft,
+            "viewer-phase-noise" => ResultViewer::PhaseNoise,
+            "viewer-smith" => ResultViewer::Smith,
+            "viewer-polar" => ResultViewer::Polar,
+            "viewer-mixed-mode-network" => ResultViewer::NetworkMatrix,
+            "viewer-table" => ResultViewer::Table,
+            "viewer-histogram" => ResultViewer::Hist,
+            "viewer-scatter" => ResultViewer::Scatter,
+            "viewer-box-violin" => ResultViewer::BoxViolin,
+            "eye-viewer" => ResultViewer::Eye,
+            "viewer-pz" => ResultViewer::PoleZero,
+            "viewer-contribution" => ResultViewer::Contribution,
+            "viewer-transfer-function" => ResultViewer::TransferFunction,
+            "viewer-digital-events" => ResultViewer::Events,
+            "viewer-soa" => ResultViewer::Soa,
+            "viewer-optimization" => ResultViewer::Optimization,
+            _ => return None,
+        })
+    }
+}
+
 /// Stable identity of one retained analysis within one immutable dataset.
 ///
 /// Current results use the exact prepared-task identity. A legacy result has
@@ -404,6 +636,39 @@ impl ResultPresentation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `viewer_document_id` and `from_viewer_document_id` are one map read in
+    /// two directions, so every answer either gives must agree with the other.
+    /// Three sheets share `viewer-table`, which is exactly where the second
+    /// copy of the inverse had drifted onto a different one.
+    #[test]
+    fn the_viewer_document_map_agrees_with_itself_in_both_directions() {
+        use crate::viewer_catalog::VIEWER_DOCUMENTS;
+
+        for viewer in ResultViewer::all() {
+            let Some(document_id) = viewer.viewer_document_id() else {
+                assert_eq!(
+                    ResultViewer::from_viewer_document_id(viewer.label()),
+                    None,
+                    "{viewer:?} is dataset-native and must not answer to a document id"
+                );
+                continue;
+            };
+            assert!(
+                VIEWER_DOCUMENTS
+                    .iter()
+                    .any(|document| document.id == document_id),
+                "{viewer:?} claims {document_id}, which the catalog does not publish"
+            );
+            let drawn_by = ResultViewer::from_viewer_document_id(document_id)
+                .unwrap_or_else(|| panic!("{document_id} has no sheet"));
+            assert_eq!(
+                drawn_by.viewer_document_id(),
+                Some(document_id),
+                "{document_id} resolves to {drawn_by:?}, which renders something else"
+            );
+        }
+    }
 
     #[test]
     fn marker_history_field_is_optional_but_not_nullable_or_truncated() {

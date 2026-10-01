@@ -168,7 +168,7 @@ fn ordinary_noise_uses_the_frequency_document_identity() {
 #[test]
 fn every_claimed_viewer_document_is_in_the_catalog() {
     use super::super::ResultViewer;
-    for viewer in ResultViewer::every() {
+    for viewer in ResultViewer::all() {
         let Some(id) = viewer.viewer_document_id() else {
             continue;
         };

@@ -119,13 +119,13 @@ fn truthful_results_menu_routes_keep_their_stable_dispatch_identities() {
 /// happens to draw that tab. The registry is what puts a command in the
 /// palette, in the shortcut editor, and within reach of `from_stable_id` — so a
 /// viewer missing from it cannot be bound, searched, or restored from a saved
-/// profile. Driven by `ResultViewer::every()` on purpose: the hand-written list
+/// profile. Driven by `ResultViewer::all()` on purpose: the hand-written list
 /// this replaced went stale for five of the sheets.
 #[test]
 fn every_result_sheet_is_registered_for_commands_and_shortcuts() {
     use crate::workbench::ResultViewer;
 
-    for viewer in ResultViewer::every() {
+    for viewer in ResultViewer::all() {
         let command = Command::ResultViewer(viewer);
         assert!(
             vocabulary::COMMAND_REGISTRY.contains(&command),

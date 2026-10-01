@@ -580,10 +580,7 @@ fn show_surface(viewer: ResultViewer, ui: &mut egui::Ui, state: &mut AppState) {
     // every frame which sheets to offer. Both are part of the frame, and both
     // used to be where the dataset walks were.
     let _ = super::super::sheet_purpose(state);
-    for candidate in ResultViewer::PRIMARY
-        .into_iter()
-        .chain(ResultViewer::DATASET_NATIVE)
-    {
+    for candidate in ResultViewer::all() {
         let _ = super::super::viewer_availability(state, candidate);
     }
     // The wave instrument's sheet bar decides on every frame whether to offer

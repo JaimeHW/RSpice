@@ -1108,8 +1108,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 /// The Specs sheet itself is excluded: it is the sheet the button was pressed
 /// on, so it is not somewhere to open.
 fn source_viewer(analysis: &crate::state::AnalysisResult) -> ResultViewer {
-    ResultViewer::PRIMARY
-        .into_iter()
+    ResultViewer::all()
+        .filter(|viewer| viewer.viewer_document_id().is_some())
         .filter(|viewer| {
             *viewer != ResultViewer::Specs
                 && super::view_context::analysis_supports_viewer(*viewer, analysis)

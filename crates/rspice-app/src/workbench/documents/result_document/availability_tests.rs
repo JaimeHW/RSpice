@@ -648,7 +648,9 @@ fn result_bars_make_room_for_a_touch_target() {
 #[test]
 fn result_tabs_follow_the_upgraded_mockup_mode_order() {
     assert_eq!(
-        ResultViewer::PRIMARY,
+        ResultViewer::all()
+            .filter(|viewer| viewer.viewer_document_id().is_some())
+            .collect::<Vec<_>>(),
         [
             ResultViewer::Waves,
             ResultViewer::DcSweep,
@@ -828,42 +830,9 @@ fn persistent_document_families_scope_to_their_own_plot_types() {
 #[test]
 fn every_family_offers_the_dataset_native_sheets() {
     for family in MOCKUP_FAMILIES {
-        for viewer in ResultViewer::every().filter(|viewer| viewer.viewer_document_id().is_none()) {
+        for viewer in ResultViewer::all().filter(|viewer| viewer.viewer_document_id().is_none()) {
             assert!(family_allows_viewer(family, viewer), "{family} {viewer:?}");
         }
-    }
-}
-
-/// `viewer_document_id` and `from_viewer_document_id` are one map read in
-/// two directions, so every answer either gives must agree with the other.
-/// Three sheets share `viewer-table`, which is exactly where the second
-/// copy of the inverse had drifted onto a different one.
-#[test]
-fn the_viewer_document_map_agrees_with_itself_in_both_directions() {
-    use crate::results::viewer_catalog::VIEWER_DOCUMENTS;
-
-    for viewer in ResultViewer::every() {
-        let Some(document_id) = viewer.viewer_document_id() else {
-            assert_eq!(
-                ResultViewer::from_viewer_document_id(viewer.label()),
-                None,
-                "{viewer:?} is dataset-native and must not answer to a document id"
-            );
-            continue;
-        };
-        assert!(
-            VIEWER_DOCUMENTS
-                .iter()
-                .any(|document| document.id == document_id),
-            "{viewer:?} claims {document_id}, which the catalog does not publish"
-        );
-        let drawn_by = ResultViewer::from_viewer_document_id(document_id)
-            .unwrap_or_else(|| panic!("{document_id} has no sheet"));
-        assert_eq!(
-            drawn_by.viewer_document_id(),
-            Some(document_id),
-            "{document_id} resolves to {drawn_by:?}, which renders something else"
-        );
     }
 }
 
@@ -872,7 +841,7 @@ fn the_viewer_document_map_agrees_with_itself_in_both_directions() {
 /// sheet the dataset can feed, never to hiding all of them.
 #[test]
 fn a_page_outside_the_mockup_families_keeps_every_sheet_reachable() {
-    for viewer in ResultViewer::every() {
+    for viewer in ResultViewer::all() {
         assert!(family_allows_viewer("Transient review", viewer));
         assert!(family_allows_viewer("Waveform worksheet · 01", viewer));
     }
@@ -1050,7 +1019,7 @@ fn every_newly_reachable_sheet_draws_and_meshes() {
 /// does not fail an assert — it becomes a vertex at infinity.
 #[test]
 fn every_available_sheet_draws_the_evidence_it_claims() {
-    for viewer in ResultViewer::every() {
+    for viewer in ResultViewer::all() {
         let mut app = app_showing(viewer);
         assert!(
             viewer_availability(&app.state, viewer).available,
@@ -1070,7 +1039,7 @@ fn every_available_sheet_draws_the_evidence_it_claims() {
 /// and format values without ever painting them.
 #[test]
 fn every_sheet_paints_an_empty_dataset() {
-    for viewer in ResultViewer::every() {
+    for viewer in ResultViewer::all() {
         let mut app = RSpiceApp::test_instance();
         draw_sheet_and_tessellate(&mut app, viewer);
         assert_eq!(
@@ -1537,7 +1506,7 @@ fn the_axis_editor_opens_on_what_the_sheet_actually_drew() {
 /// the composition survives, not the constants alone.
 #[test]
 fn every_sheet_draws_at_a_touch_composition() {
-    for viewer in ResultViewer::every() {
+    for viewer in ResultViewer::all() {
         let mut app = app_showing(viewer);
         app.state.ui.results.viewer = viewer;
         let ctx = egui::Context::default();

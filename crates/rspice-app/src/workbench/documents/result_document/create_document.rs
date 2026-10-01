@@ -1590,7 +1590,7 @@ mod tests {
     #[test]
     fn every_family_offers_the_sheets_its_create_path_can_bind() {
         for family in ResultDocumentFamily::ALL {
-            for viewer in ResultViewer::every() {
+            for viewer in ResultViewer::all() {
                 let Some(document_id) = viewer.viewer_document_id() else {
                     continue;
                 };
