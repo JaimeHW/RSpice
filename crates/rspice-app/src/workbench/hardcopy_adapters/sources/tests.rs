@@ -1336,6 +1336,12 @@ fn production_stacked_results_hardcopy_retains_every_displayed_analysis() {
     .expect("stacked Results prepares")
     .into_worker_snapshot_json()
     .expect("stacked Results serializes");
+    let encoded: serde_json::Value = serde_json::from_slice(&worker_bytes).unwrap();
+    assert_eq!(
+        encoded["payload"]["simulation_results"],
+        serde_json::to_value(crate::io::capture_simulation_results(&state.simulation)).unwrap(),
+        "portable capture preserves the complete result-owner wire value",
+    );
     let resolved = PreparedRetainedHardcopyResolution::from_worker_snapshot_json(&worker_bytes)
         .expect("stacked Results restores")
         .resolve_owned()
@@ -1910,6 +1916,8 @@ fn all_visualization_panes_preserve_retained_pane_order() {
             ),
         ]),
     );
+    run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+        .expect("terminal fixture has explicit legacy provenance");
     let dataset_id = run.dataset_id;
     let mut simulation = SimulationState::default();
     simulation.runs.push(run);
@@ -1942,6 +1950,33 @@ fn all_visualization_panes_preserve_retained_pane_order() {
     studio.active_pane = Some(41);
 
     let resolved = resolve_all_studio_panes(project_id, &studio, &simulation).unwrap();
+    let source_key = format!("project:{}:visualization-pane:41", project_id.as_uuid());
+    let prepared = PreparedRetainedHardcopyResolution {
+        payload: PreparedRetainedHardcopyPayload::Studio {
+            source_key: source_key.clone(),
+            project_id,
+            studio: studio.presentation.clone(),
+            runs: prepared_runs_for_panes(&simulation, &studio.panes),
+            pane_id: 41,
+            all_panes: true,
+            scope: HardcopyScope::AllSheetsOrPanes,
+        },
+    };
+    let bytes = prepared.into_worker_snapshot_json().unwrap();
+    let encoded: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        encoded["payload"]["simulation_results"],
+        serde_json::to_value(crate::io::capture_simulation_results(&simulation)).unwrap(),
+        "portable Studio capture preserves the complete result-owner wire value",
+    );
+    assert_eq!(
+        PreparedRetainedHardcopyResolution::from_worker_snapshot_json(&bytes)
+            .unwrap()
+            .resolve_owned()
+            .unwrap(),
+        resolved.clone().with_source_key(source_key).unwrap(),
+        "worker restoration preserves Studio semantics and retained ordering",
+    );
     let HardcopySemanticDocument::Aggregate(aggregate) = resolved.semantic_document() else {
         panic!("expected aggregate")
     };

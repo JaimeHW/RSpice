@@ -30,6 +30,24 @@ pub struct StudioHardcopyPresentation<'a> {
     pub autoscale: VisualizationAutoscale,
 }
 
+impl<'a> From<&'a rspice_results::studio_presentation::VisualizationStudioPresentation>
+    for StudioHardcopyPresentation<'a>
+{
+    fn from(
+        studio: &'a rspice_results::studio_presentation::VisualizationStudioPresentation,
+    ) -> Self {
+        Self {
+            revision: studio.revision,
+            panes: &studio.panes,
+            markers: &studio.markers,
+            annotations: &studio.annotations,
+            pane_x_ranges: &studio.pane_x_ranges,
+            family_policies: &studio.family_policies,
+            autoscale: studio.autoscale,
+        }
+    }
+}
+
 /// Waveform presentation participates in the existing Studio content identity.
 pub struct StudioWaveformStyle<'a> {
     pub color: &'a str,

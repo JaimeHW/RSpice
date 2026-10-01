@@ -15,15 +15,7 @@ fn studio_source<'a>(
 ) -> StudioHardcopySource<'a, SimulationRun, WaveformData> {
     StudioHardcopySource {
         project_id,
-        studio: StudioHardcopyPresentation {
-            revision: studio.revision,
-            panes: &studio.panes,
-            markers: &studio.markers,
-            annotations: &studio.annotations,
-            pane_x_ranges: &studio.pane_x_ranges,
-            family_policies: &studio.family_policies,
-            autoscale: studio.autoscale,
-        },
+        studio: studio.into(),
         runs: &simulation.runs,
         waveform_style: |waveform| StudioWaveformStyle {
             color: &waveform.color,

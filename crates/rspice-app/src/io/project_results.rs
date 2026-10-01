@@ -5,22 +5,7 @@ use std::collections::HashSet;
 
 impl From<&WaveformData> for ProjectWaveformData {
     fn from(waveform: &WaveformData) -> Self {
-        Self {
-            name: waveform.name.clone(),
-            x: waveform.x.clone(),
-            y: waveform.y.clone(),
-            color: waveform.color.clone(),
-            visible: waveform.visible,
-            unit: waveform.unit.clone(),
-            complex: waveform
-                .complex
-                .as_ref()
-                .map(|complex| ProjectComplexWaveformComponents {
-                    source_name: complex.source_name.clone(),
-                    real: complex.real.clone(),
-                    imag: complex.imag.clone(),
-                }),
-        }
+        Self::from_waveform(&waveform.data, waveform.color.clone(), waveform.visible)
     }
 }
 
@@ -71,6 +56,7 @@ pub(crate) fn capture_simulation_results(state: &SimulationState) -> ProjectSimu
     }
     .into()
 }
+#[cfg(test)]
 pub(crate) fn simulation_state_from_results(
     results: ProjectSimulationResults,
 ) -> Result<SimulationState, String> {
@@ -82,15 +68,12 @@ pub(crate) fn restore_simulation_results(
     results: ProjectSimulationResults,
     state: &mut SimulationState,
 ) -> Result<(), String> {
-    let data = results.into_validated_data()?;
-    let executed_decks = data.executed_decks.into_archive()?;
+    let data = results.restore_with(restore_analysis)?;
     let runs = data
         .runs
         .into_iter()
-        .map(restore_simulation_run)
-        .collect::<Result<Vec<_>, _>>()?;
-    // Restored before the history, so the project's own limit is the one
-    // that prunes it rather than the built-in default.
+        .map(SimulationRun::from_restored)
+        .collect();
     state.retained_dataset_limit = data.retained_dataset_limit;
     state.restore_run_history(
         runs,
@@ -102,15 +85,10 @@ pub(crate) fn restore_simulation_results(
     );
     // After the history, because restoring it drops whatever decks this
     // session was holding for a different project.
-    state.executed_decks = executed_decks;
+    state.executed_decks = data.executed_decks;
     state.imported_monte_carlo_checkpoints = data.imported_monte_carlo_checkpoints;
     Ok(())
 }
-fn restore_simulation_run(run: ProjectSimulationRun) -> Result<SimulationRun, String> {
-    run.into_run_with(restore_analysis)
-        .map(SimulationRun::from_restored)
-}
-
 fn restore_analysis(analysis: ProjectAnalysisResult) -> Result<AnalysisResult, String> {
     let data = analysis.into_analysis_with_waveforms(|mut waveform| {
         let color = std::mem::take(&mut waveform.color);

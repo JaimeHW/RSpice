@@ -71,7 +71,7 @@ pub(super) enum PreparedRetainedHardcopyPayload {
     Results {
         source_key: String,
         project_id: ProjectId,
-        run: SimulationRun,
+        run: HardcopyRun,
         presentation: ResultsQuickViewPresentation,
         scope: HardcopyScope,
     },
@@ -79,7 +79,7 @@ pub(super) enum PreparedRetainedHardcopyPayload {
         source_key: String,
         project_id: ProjectId,
         studio: VisualizationStudioPresentation,
-        simulation: SimulationState,
+        runs: Vec<HardcopyRun>,
         pane_id: u64,
         all_panes: bool,
         scope: HardcopyScope,
@@ -434,19 +434,13 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 presentation,
                 scope,
             } => {
-                let simulation = SimulationState {
-                    next_run_id: run.id,
-                    active_run_idx: Some(0),
-                    active_analysis_idx: (!run.analyses.is_empty()).then_some(0),
-                    runs: vec![run].into(),
-                    ..Default::default()
-                };
+                let simulation_results = capture_prepared_result_history(&[run], true);
                 Self::Results {
                     source_key,
                     project_id,
                     simulation_results: CanonicalHardcopyOwner::capture(
                         "prepared result history",
-                        &crate::io::capture_simulation_results(&simulation),
+                        &simulation_results,
                     )?,
                     presentation,
                     scope,
@@ -456,7 +450,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 source_key,
                 project_id,
                 studio,
-                simulation,
+                runs,
                 pane_id,
                 all_panes,
                 scope,
@@ -466,7 +460,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 studio: CanonicalHardcopyOwner::capture("prepared visualization studio", &studio)?,
                 simulation_results: CanonicalHardcopyOwner::capture(
                     "prepared studio result history",
-                    &crate::io::capture_simulation_results(&simulation),
+                    &capture_prepared_result_history(&runs, false),
                 )?,
                 pane_id,
                 all_panes,
@@ -789,28 +783,29 @@ impl PreparedRetainedHardcopyWorkerPayload {
             } => {
                 let simulation_results = simulation_results
                     .restore::<ProjectSimulationResults>("prepared result history")?;
-                let simulation = crate::io::simulation_state_from_results(simulation_results)
+                let runs = restore_hardcopy_runs(simulation_results)
                     .map_err(HardcopySourceError::InvalidPreparedWorkerSnapshot)?;
                 presentation.validate()?;
-                let analysis_count = simulation.runs.first().map_or(0, |run| run.analyses.len());
-                let has_exact_shape = simulation.runs.len() == 1 && match presentation.viewer() {
-                    ResultViewer::Manifest | ResultViewer::Specs => true,
-                    viewer
-                        if crate::workbench::documents::result_document::viewer_uses_wave_stack(
-                            viewer,
-                        ) =>
-                    {
-                        (1..=MAX_HARDCOPY_SOURCE_SET_MEMBERS).contains(&analysis_count)
-                    }
-                    _ => analysis_count == 1,
-                };
+                let analysis_count = runs.first().map_or(0, |run| run.analyses.len());
+                let has_exact_shape = runs.len() == 1
+                    && match presentation.viewer() {
+                        ResultViewer::Manifest | ResultViewer::Specs => true,
+                        viewer
+                            if rspice_results::result_presentation::viewer_uses_wave_stack(
+                                viewer,
+                            ) =>
+                        {
+                            (1..=MAX_HARDCOPY_SOURCE_SET_MEMBERS).contains(&analysis_count)
+                        }
+                        _ => analysis_count == 1,
+                    };
                 if !has_exact_shape {
                     return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
                         "prepared result history has an analysis count incompatible with its Results viewer"
                             .to_owned(),
                     ));
                 }
-                let run = simulation.runs.into_iter().next().ok_or_else(|| {
+                let run = runs.into_iter().next().ok_or_else(|| {
                     HardcopySourceError::InvalidPreparedWorkerSnapshot(
                         "prepared result history lost its run".to_owned(),
                     )
@@ -844,7 +839,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
             } => {
                 let studio = studio
                     .restore::<VisualizationStudioPresentation>("prepared visualization studio")?;
-                let simulation = crate::io::simulation_state_from_results(
+                let runs = restore_hardcopy_runs(
                     simulation_results
                         .restore::<ProjectSimulationResults>("prepared studio result history")?,
                 )
@@ -853,7 +848,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     project_id,
                     &source_key,
                     &studio,
-                    &simulation,
+                    &runs,
                     pane_id,
                     all_panes,
                 )?;
@@ -861,7 +856,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     source_key,
                     project_id,
                     studio,
-                    simulation,
+                    runs,
                     pane_id,
                     all_panes,
                     scope,
@@ -946,6 +941,39 @@ impl PreparedRetainedHardcopyWorkerPayload {
         };
         Ok(restored)
     }
+}
+
+fn capture_prepared_result_history(
+    runs: &[HardcopyRun],
+    select_first: bool,
+) -> ProjectSimulationResults {
+    use rspice_formats::project_results::{
+        ProjectSimulationResultsData, ProjectSimulationRun, ProjectWaveformData,
+    };
+
+    let active_run = select_first.then(|| runs.first()).flatten();
+    ProjectSimulationResultsData {
+        runs: runs
+            .iter()
+            .map(|run| {
+                ProjectSimulationRun::from_run(run, |waveform: &HardcopyWaveform| {
+                    ProjectWaveformData::from_waveform(
+                        &waveform.data,
+                        waveform.color.clone(),
+                        waveform.visible,
+                    )
+                })
+            })
+            .collect(),
+        next_run_id: runs.iter().map(|run| run.id).max().unwrap_or(0),
+        active_run_stable_id: active_run.map(|run| run.run_id),
+        active_dataset_id: active_run.map(|run| run.dataset_id),
+        active_analysis_sequence: active_run
+            .and_then(|run| run.analyses.first())
+            .map(|analysis| analysis.id),
+        ..ProjectSimulationResultsData::default()
+    }
+    .into()
 }
 
 fn require_project_source_prefix<'a>(
@@ -1076,7 +1104,7 @@ fn validate_prepared_studio_snapshot(
     project_id: ProjectId,
     source_key: &str,
     studio: &VisualizationStudioPresentation,
-    simulation: &SimulationState,
+    runs: &[HardcopyRun],
     pane_id: u64,
     all_panes: bool,
 ) -> Result<(), HardcopySourceError> {
@@ -1122,8 +1150,7 @@ fn validate_prepared_studio_snapshot(
             Ok((pane.dataset_id, pane.analysis_sequence))
         })
         .collect::<Result<std::collections::HashSet<_>, _>>()?;
-    let actual_analyses = simulation
-        .runs
+    let actual_analyses = runs
         .iter()
         .flat_map(|run| {
             run.analyses
@@ -1439,7 +1466,7 @@ impl PreparedRetainedHardcopyResolution {
                         scope,
                         run.as_ref(),
                         &presentation,
-                        |waveform: &WaveformData| waveform.visible,
+                        |waveform: &HardcopyWaveform| waveform.visible,
                     );
                 }
                 let analysis = run.analyses.first().ok_or_else(|| {
@@ -1459,7 +1486,7 @@ impl PreparedRetainedHardcopyResolution {
                     &RetainedQuickViewSource::try_new(
                         run.as_ref(),
                         analysis.id,
-                        |waveform: &WaveformData| waveform.visible,
+                        |waveform: &HardcopyWaveform| waveform.visible,
                     )?,
                     &presentation,
                 )
@@ -1468,24 +1495,24 @@ impl PreparedRetainedHardcopyResolution {
                 source_key,
                 project_id,
                 studio,
-                simulation,
+                runs,
                 pane_id,
                 all_panes,
                 scope,
             } => {
+                let source = StudioHardcopySource {
+                    project_id,
+                    studio: (&studio).into(),
+                    runs: &runs,
+                    waveform_style: |waveform: &HardcopyWaveform| StudioWaveformStyle {
+                        color: &waveform.color,
+                        visible: waveform.visible,
+                    },
+                };
                 if all_panes {
-                    let mut resolved = resolve_all_studio_panes(project_id, &studio, &simulation)?;
-                    resolved = resolved.with_source_key(source_key)?;
-                    Ok(resolved)
+                    resolve_studio_document(&source)?.with_source_key(source_key)
                 } else {
-                    resolve_active_studio_pane_source(ActiveStudioPaneHardcopySource {
-                        source_key,
-                        project_id,
-                        studio: &studio,
-                        simulation: &simulation,
-                        pane_id,
-                        scope,
-                    })
+                    resolve_studio_pane(&source, source_key, pane_id, scope)
                 }
             }
             PreparedRetainedHardcopyPayload::VisualizationDocument {

@@ -11,6 +11,7 @@ mod reports;
 mod result_documents;
 mod result_summary;
 mod result_view;
+mod retained_results;
 mod schematic;
 mod semantic;
 mod studio;
@@ -48,6 +49,7 @@ pub use result_view::{
     QuickFftSettings, QuickHistogramSettings, ResultsQuickViewPresentation,
     RetainedQuickViewSource, resolve_results_quick_view_parts, results_quick_view_identity,
 };
+pub use retained_results::{HardcopyRun, HardcopyWaveform, restore_hardcopy_runs};
 use rspice_app_types::product::ContentDigest;
 use rspice_design::schematic::component::Component;
 use rspice_design::symbol::{SymbolDocument, SymbolShape};

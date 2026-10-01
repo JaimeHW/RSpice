@@ -12,6 +12,7 @@ mod noise;
 mod prepared;
 mod quick_view_overlay;
 mod report_inventory;
+#[cfg(test)]
 mod results;
 
 pub use documents::*;
@@ -22,6 +23,7 @@ pub(crate) use rspice_hardcopy::sources::*;
 use noise::*;
 pub use prepared::*;
 use quick_view_overlay::*;
+#[cfg(test)]
 pub(crate) use results::*;
 #[cfg(test)]
 use rspice_hardcopy::sources::resolve_semantic_source as finish_resolved;
@@ -33,7 +35,7 @@ pub const BLANK_SCHEMATIC_SHEET_HEIGHT_UM: i64 = 215_900;
 pub(super) const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 8;
 
 #[cfg(test)]
-use crate::state::SchematicState;
+use crate::state::{SchematicState, WaveformData};
 #[cfg(test)]
 use rspice_design::symbol_resolver::SymbolResolver;
 
@@ -52,7 +54,7 @@ use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType, Bus, BusTap,
     Component, DesignNote, DocumentationShape, DrawingSheetTitleFieldId, Junction, NetLabel,
     SchematicSheetFormat, Selection, SheetCatalog, SheetId, SimulationRun, SimulationState,
-    SymbolDocument, ViewType, WaveformData, Wire,
+    SymbolDocument, ViewType, Wire,
 };
 use crate::workbench::AppState;
 
@@ -109,6 +111,7 @@ pub struct SymbolHardcopySource<'a> {
 }
 
 /// Adapter over retained Studio presentation and application result history.
+#[cfg(test)]
 pub(crate) struct ActiveStudioPaneHardcopySource<'a> {
     pub source_key: String,
     pub project_id: ProjectId,
@@ -655,7 +658,7 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
                 payload: PreparedRetainedHardcopyPayload::Results {
                     source_key: source_key.to_owned(),
                     project_id,
-                    run: prepared_run,
+                    run: capture_hardcopy_run(prepared_run),
                     presentation: capture_results_quick_view_presentation(state)?,
                     scope,
                 },
@@ -685,13 +688,13 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
             studio.active_pane = Some(pane.id);
             studio.panes.clone()
         };
-        let simulation = prepared_simulation_for_panes(&state.simulation, &relevant_panes);
+        let runs = prepared_runs_for_panes(&state.simulation, &relevant_panes);
         return Ok(PreparedRetainedHardcopyResolution {
             payload: PreparedRetainedHardcopyPayload::Studio {
                 source_key: source_key.to_owned(),
                 project_id,
                 studio,
-                simulation,
+                runs,
                 pane_id: pane.id,
                 all_panes,
                 scope,
@@ -765,10 +768,17 @@ fn prepare_schematic_resolution(
     })
 }
 
-fn prepared_simulation_for_panes(
-    simulation: &SimulationState,
-    panes: &[StudioPane],
-) -> SimulationState {
+fn capture_hardcopy_run(run: SimulationRun) -> HardcopyRun {
+    run.data.map_analyses(|analysis| {
+        analysis.data.map_waveforms(|waveform| HardcopyWaveform {
+            data: waveform.data,
+            color: waveform.color,
+            visible: waveform.visible,
+        })
+    })
+}
+
+fn prepared_runs_for_panes(simulation: &SimulationState, panes: &[StudioPane]) -> Vec<HardcopyRun> {
     let dataset_ids = panes
         .iter()
         .map(|pane| pane.dataset_id)
@@ -777,21 +787,18 @@ fn prepared_simulation_for_panes(
         .iter()
         .map(|pane| (pane.dataset_id, pane.analysis_sequence))
         .collect::<std::collections::HashSet<_>>();
-    SimulationState {
-        runs: simulation
-            .runs
-            .iter()
-            .filter(|run| dataset_ids.contains(&run.dataset_id))
-            .cloned()
-            .map(|mut run| {
-                run.data
-                    .analyses
-                    .retain(|analysis| analysis_ids.contains(&(run.data.dataset_id, analysis.id)));
-                run
-            })
-            .collect(),
-        ..Default::default()
-    }
+    simulation
+        .runs
+        .iter()
+        .filter(|run| dataset_ids.contains(&run.dataset_id))
+        .cloned()
+        .map(|mut run| {
+            run.data
+                .analyses
+                .retain(|analysis| analysis_ids.contains(&(run.data.dataset_id, analysis.id)));
+            capture_hardcopy_run(run)
+        })
+        .collect()
 }
 
 /// Per-frame command predicate. This deliberately performs identity and
