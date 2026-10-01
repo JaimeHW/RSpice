@@ -10,19 +10,17 @@
 mod documents;
 mod noise;
 mod prepared;
-mod quick_plots;
 mod quick_view_overlay;
 mod report_inventory;
 mod results;
 
 pub use documents::*;
 pub(crate) use rspice_hardcopy::sources::*;
-// Module-private: `noise`, `quick_plots` and `quick_view_overlay`
+// Module-private: `noise` and `quick_view_overlay`
 // expose only `pub(super)` items, and the siblings reach them through
 // `use super::*`.
 use noise::*;
 pub use prepared::*;
-use quick_plots::*;
 use quick_view_overlay::*;
 pub(crate) use results::*;
 use rspice_hardcopy::sources::resolve_semantic_source as finish_resolved;
@@ -132,25 +130,6 @@ pub(crate) struct ResultsQuickViewHardcopySource<'a> {
     pub scope: HardcopyScope,
 }
 
-#[derive(Debug, Clone)]
-struct ResultsQuickViewPresentation {
-    viewer: ResultViewer,
-    /// The reading each strip was carrying: hidden traces, placed cursors,
-    /// anchored markers. Frozen here so the worker resolves the page the
-    /// reader reviewed rather than a bare plot of the same samples.
-    overlay: RetainedQuickViewOverlays,
-    specs: Vec<crate::state::SpecEntry>,
-    fft: crate::analysis::FftState,
-    histogram_view: crate::workbench::documents::result_document::PlotView,
-    histogram_selected: usize,
-    histogram_measurement: Option<String>,
-    histogram_bin_count: usize,
-    histogram_custom_range: bool,
-    histogram_custom_min: f64,
-    histogram_custom_max: f64,
-    histogram_mode: crate::analysis::histogram::HistogramDisplayMode,
-}
-
 /// The retained run a quick-view capture is taken from.
 ///
 /// The active Results document is the authority, exactly as it is for the
@@ -166,39 +145,43 @@ fn captured_results_run(state: &AppState) -> Option<&SimulationRun> {
     }
 }
 
-impl ResultsQuickViewPresentation {
-    fn from_state(state: &AppState) -> Result<Self, HardcopySourceError> {
-        let mut fft = crate::analysis::FftState::default();
-        fft.selected_source = state.analysis.fft_state.selected_source.clone();
-        fft.normalization = state.analysis.fft_state.normalization;
-        fft.window = state.analysis.fft_state.window;
-        fft.input_fidelity = state.analysis.fft_state.input_fidelity;
-        fft.time_window_auto = state.analysis.fft_state.time_window_auto;
-        fft.time_window_start = state.analysis.fft_state.time_window_start;
-        fft.time_window_end = state.analysis.fft_state.time_window_end;
-        fft.sample_count_auto = state.analysis.fft_state.sample_count_auto;
-        fft.sample_count = state.analysis.fft_state.sample_count;
-        // Every strip of the captured run, because a stacked wave view
-        // resolves one page per analysis through this one presentation.
-        let overlay = captured_results_run(state)
-            .map(|run| capture_quick_view_overlays(state, run))
-            .transpose()?
-            .unwrap_or_default();
-        Ok(Self {
-            viewer: state.ui.results.viewer,
-            overlay,
-            specs: crate::workbench::documents::result_document::run_specifications(state),
-            fft,
-            histogram_view: state.ui.results.plot_view(ResultViewer::Hist, 0),
-            histogram_selected: 0,
-            histogram_measurement: state.analysis.histogram_state.selected.clone(),
-            histogram_bin_count: state.analysis.histogram_state.bin_count,
-            histogram_custom_range: state.analysis.histogram_state.custom_range,
-            histogram_custom_min: state.analysis.histogram_state.custom_min,
-            histogram_custom_max: state.analysis.histogram_state.custom_max,
-            histogram_mode: state.analysis.histogram_state.mode,
-        })
-    }
+fn capture_results_quick_view_presentation(
+    state: &AppState,
+) -> Result<ResultsQuickViewPresentation, HardcopySourceError> {
+    let fft = &state.analysis.fft_state;
+    let histogram = &state.analysis.histogram_state;
+    let view = state.ui.results.plot_view(ResultViewer::Hist, 0);
+    let overlay = captured_results_run(state)
+        .map(|run| capture_quick_view_overlays(state, run))
+        .transpose()?
+        .unwrap_or_default();
+    ResultsQuickViewPresentation::try_new(
+        state.ui.results.viewer,
+        overlay,
+        crate::workbench::documents::result_document::run_specifications(state),
+        QuickFftSettings {
+            selected_source: fft.selected_source.clone(),
+            normalization: fft.normalization,
+            window: fft.window,
+            input_fidelity: fft.input_fidelity,
+            time_window_auto: fft.time_window_auto,
+            time_window_start: fft.time_window_start,
+            time_window_end: fft.time_window_end,
+            sample_count_auto: fft.sample_count_auto,
+            sample_count: fft.sample_count,
+        },
+        QuickHistogramSettings {
+            x: view.x,
+            y: view.y,
+            selected: 0,
+            measurement: histogram.selected.clone(),
+            bin_count: histogram.bin_count,
+            custom_range: histogram.custom_range,
+            custom_min: histogram.custom_min,
+            custom_max: histogram.custom_max,
+            mode: histogram.mode,
+        },
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -674,7 +657,7 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
                     source_key: source_key.to_owned(),
                     project_id,
                     run: prepared_run,
-                    presentation: ResultsQuickViewPresentation::from_state(state)?,
+                    presentation: capture_results_quick_view_presentation(state)?,
                     scope,
                 },
             });
@@ -919,7 +902,7 @@ fn quick_result_availability(
     if viewer == ResultViewer::Specs {
         // The requirement set a dispatched run was judged against is the one
         // it froze into its receipt, and that is what the capture writes —
-        // `ResultsQuickViewPresentation::from_state` resolves it through the
+        // `capture_results_quick_view_presentation` resolves it through the
         // shared `run_specifications`. Offering the page on the workspace's
         // currently authored set instead made the two disagree in both
         // directions: a receipt-backed run whose frozen requirements had since

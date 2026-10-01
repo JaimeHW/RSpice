@@ -6,14 +6,83 @@
 //! under the same presentation always resolves the same page.
 
 use super::*;
+use rspice_app_types::product::{DatasetId, ObjectRevision, ProjectId, RunId};
+use rspice_hardcopy_contract::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
+use rspice_results::noise_spectrum::{
+    RetainedNoiseReference, retained_noise_contributor, retained_noise_reference,
+    retained_noise_waveform_is_renderable,
+};
+use rspice_results::result_digest::ResultDigestEncoding;
+use rspice_results::{
+    analysis_result::AnalysisResult, analysis_type::AnalysisType,
+    family_metadata::AnalysisResultFamilyMetadata, run::SimulationRun, waveform::RetainedWaveform,
+};
+use uuid::Uuid;
 
-pub(super) fn resolve_results_quick_view_parts(
+mod presentation;
+pub use presentation::{QuickFftSettings, QuickHistogramSettings, ResultsQuickViewPresentation};
+
+/// A successful retained analysis borrowed from its terminal owning run.
+/// This input grants no publication or execution authority.
+pub struct RetainedQuickViewSource<'a, W> {
+    dataset_id: DatasetId,
+    run_id: RunId,
+    analysis: &'a AnalysisResult<W>,
+    is_visible: fn(&W) -> bool,
+}
+
+impl<'a, W: AsRef<RetainedWaveform>> RetainedQuickViewSource<'a, W> {
+    pub fn try_new<A: AsRef<AnalysisResult<W>>>(
+        run: &'a SimulationRun<A>,
+        analysis_id: u64,
+        is_visible: fn(&W) -> bool,
+    ) -> Result<Self, HardcopySourceError> {
+        if !run.lifecycle.is_terminal() {
+            return Err(HardcopySourceError::UnretainedResult(format!(
+                "active dataset {} belongs to a non-terminal run",
+                run.dataset_id,
+            )));
+        }
+        let mut matches = run
+            .analyses
+            .iter()
+            .map(AsRef::as_ref)
+            .filter(|analysis| analysis.id == analysis_id);
+        let analysis = matches.next().ok_or_else(|| {
+            HardcopySourceError::UnretainedResult(format!(
+                "analysis {analysis_id} is not retained in dataset {}",
+                run.dataset_id,
+            ))
+        })?;
+        if matches.next().is_some() {
+            return Err(HardcopySourceError::AmbiguousRetainedAnalysis(analysis_id));
+        }
+        if !analysis.success {
+            return Err(HardcopySourceError::UnretainedResult(format!(
+                "active analysis {} did not complete successfully",
+                analysis.id,
+            )));
+        }
+        analysis
+            .validate_retained_evidence()
+            .map_err(HardcopySourceError::InvalidVisualizationSource)?;
+        Ok(Self {
+            dataset_id: run.dataset_id,
+            run_id: run.run_id,
+            analysis,
+            is_visible,
+        })
+    }
+}
+
+pub fn resolve_results_quick_view_parts<W: AsRef<RetainedWaveform>>(
     source_key: String,
     project_id: ProjectId,
     scope: HardcopyScope,
-    active: ActiveQuickResult<'_>,
+    active: &RetainedQuickViewSource<'_, W>,
     presentation: &ResultsQuickViewPresentation,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
+    presentation.validate()?;
     validate_label("source key", &source_key, SOURCE_KEY_LIMIT)?;
     if !matches!(
         &scope,
@@ -82,16 +151,25 @@ pub(super) fn resolve_results_quick_view_parts(
     let digest = canonical_digest(
         b"rspice-hardcopy-results-quick-view-v2",
         &(
-            active.run.dataset_id,
-            active.run.run_id,
+            active.dataset_id,
+            active.run_id,
             active.analysis.id,
-            active.analysis.result_data_digest(),
+            active
+                .analysis
+                .result_data_ref()
+                .digest(ResultDigestEncoding::CURRENT),
             viewer,
             &semantic_document,
         ),
     )?;
-    let identity =
-        results_quick_view_identity(&source_key, project_id, viewer, active.run, active.analysis)?;
+    let identity = quick_view_identity(
+        &source_key,
+        project_id,
+        viewer,
+        active.dataset_id,
+        active.run_id,
+        active.analysis,
+    )?;
     let bounds = match &semantic_document {
         HardcopySemanticDocument::Plot(_) => SemanticBounds::try_new(
             SemanticPoint::new(0, 0),
@@ -102,7 +180,7 @@ pub(super) fn resolve_results_quick_view_parts(
             SemanticPoint::new(REPORT_PAGE_WIDTH_UM, REPORT_PAGE_HEIGHT_UM),
         )?,
     };
-    finish_resolved(
+    resolve_semantic_source(
         identity,
         digest,
         HardcopyDocumentKind::PlotOrWorksheet,
@@ -112,44 +190,8 @@ pub(super) fn resolve_results_quick_view_parts(
     )
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(super) struct ActiveQuickResult<'a> {
-    pub(super) run: &'a SimulationRun,
-    pub(super) analysis: &'a AnalysisResult,
-}
-
-#[cfg(test)]
-pub(super) fn active_quick_result(
-    state: &AppState,
-    viewer: ResultViewer,
-) -> Result<ActiveQuickResult<'_>, HardcopySourceError> {
-    let run = active_terminal_run(state)?;
-    let analysis_index = quick_result_analysis_index(state, run, viewer).ok_or_else(|| {
-        HardcopySourceError::UnretainedResult(format!(
-            "no retained analysis can provide exact evidence for {}",
-            viewer.label()
-        ))
-    })?;
-    let analysis = run.analyses.get(analysis_index).ok_or_else(|| {
-        HardcopySourceError::UnretainedResult(format!(
-            "active analysis index {analysis_index} is not retained in dataset {}",
-            run.dataset_id
-        ))
-    })?;
-    if !analysis.success {
-        return Err(HardcopySourceError::UnretainedResult(format!(
-            "active analysis {} did not complete successfully",
-            analysis.id
-        )));
-    }
-    analysis
-        .validate_retained_evidence()
-        .map_err(HardcopySourceError::InvalidVisualizationSource)?;
-    Ok(ActiveQuickResult { run, analysis })
-}
-
-pub(super) fn quick_waveform_plot(
-    active: ActiveQuickResult<'_>,
+fn quick_waveform_plot<W: AsRef<RetainedWaveform>>(
+    active: &RetainedQuickViewSource<'_, W>,
     viewer: ResultViewer,
     overlay: &RetainedQuickViewOverlay,
 ) -> Result<SemanticPlot, HardcopySourceError> {
@@ -159,11 +201,14 @@ pub(super) fn quick_waveform_plot(
         .iter()
         // The reader's per-trace override, not the dataset's flag alone: a
         // trace hidden on the sheet was still printed.
-        .filter(|waveform| overlay.trace_is_visible(&waveform.name, waveform.visible))
+        .filter(|waveform| {
+            overlay.trace_is_visible(&waveform.as_ref().name, (active.is_visible)(waveform))
+        })
+        .map(AsRef::as_ref)
         .map(|waveform| QuickResultSeries {
             identity: format!(
                 "{}:{}:{}:{}",
-                active.run.dataset_id, active.run.run_id, active.analysis.id, waveform.name
+                active.dataset_id, active.run_id, active.analysis.id, waveform.name
             ),
             label: waveform.name.clone(),
             points: waveform
@@ -190,7 +235,7 @@ pub(super) fn quick_waveform_plot(
 /// One question, asked of the analysis rather than of the viewer, and
 /// answered the way `waves::build_models` answers it for the sheet: every
 /// frequency family is a decade axis, everything else is linear.
-pub(super) const fn waveform_abscissa_scale(analysis: AnalysisType) -> AxisScale {
+const fn waveform_abscissa_scale(analysis: AnalysisType) -> AxisScale {
     if analysis.is_bode_response()
         || analysis.is_raw_frequency_curve()
         || matches!(
@@ -204,11 +249,16 @@ pub(super) const fn waveform_abscissa_scale(analysis: AnalysisType) -> AxisScale
     }
 }
 
-fn quick_bode_plot(
-    active: ActiveQuickResult<'_>,
+fn quick_bode_plot<W: AsRef<RetainedWaveform>>(
+    active: &RetainedQuickViewSource<'_, W>,
     overlay: &RetainedQuickViewOverlay,
 ) -> Result<SemanticPlot, HardcopySourceError> {
-    let Some(summary) = crate::state::ac_bode_summary_for_analysis(active.analysis, 0) else {
+    let Some(summary) = rspice_results::bode::retained::ac_bode_summary_for_analysis(
+        active.analysis.analysis_type,
+        &active.analysis.waveforms,
+        0,
+        active.is_visible,
+    ) else {
         if active.analysis.analysis_type.is_raw_frequency_curve() {
             return quick_waveform_plot(active, ResultViewer::Bode, overlay);
         }
@@ -219,7 +269,7 @@ fn quick_bode_plot(
     let mut series = vec![QuickResultSeries {
         identity: format!(
             "{}:{}:{}:{}:magnitude-db",
-            active.run.dataset_id, active.run.run_id, active.analysis.id, summary.signal
+            active.dataset_id, active.run_id, active.analysis.id, summary.signal
         ),
         label: format!("|{}| (dB)", summary.signal),
         points: summary
@@ -233,7 +283,7 @@ fn quick_bode_plot(
         series.push(QuickResultSeries {
             identity: format!(
                 "{}:{}:{}:{}:phase-deg",
-                active.run.dataset_id, active.run.run_id, active.analysis.id, summary.signal
+                active.dataset_id, active.run_id, active.analysis.id, summary.signal
             ),
             label: format!("phase({}) (°)", summary.signal),
             points: summary
@@ -259,15 +309,22 @@ fn quick_bode_plot(
     )
 }
 
-fn quick_noise_spectrum_plot(
-    active: ActiveQuickResult<'_>,
+fn quick_noise_spectrum_plot<W: AsRef<RetainedWaveform>>(
+    active: &RetainedQuickViewSource<'_, W>,
     overlay: &RetainedQuickViewOverlay,
 ) -> Result<SemanticPlot, HardcopySourceError> {
-    if crate::workbench::documents::result_document::qpnoise_spectrum_is_renderable(active.analysis)
+    if active.analysis.success
+        && rspice_results::noise_spectrum::qpnoise_is_renderable(active.analysis)
+        && active.analysis.validate_retained_evidence().is_ok()
     {
         return quick_waveform_plot(active, ResultViewer::NoiseContrib, overlay);
     }
-    if !ordinary_noise_spectrum_is_renderable(active.analysis) {
+    if !rspice_results::noise_spectrum::ordinary_noise_spectrum_is_renderable(
+        active.analysis.success,
+        active.analysis.analysis_type,
+        &active.analysis.waveforms,
+        || {},
+    ) {
         return Err(HardcopySourceError::MissingViewerEvidence(
             "ordinary noise spectrum",
         ));
@@ -277,6 +334,7 @@ fn quick_noise_spectrum_plot(
         .analysis
         .waveforms
         .iter()
+        .map(AsRef::as_ref)
         .enumerate()
         .find(|(_, waveform)| {
             retained_noise_reference(&waveform.name) == Some(RetainedNoiseReference::Input)
@@ -289,6 +347,7 @@ fn quick_noise_spectrum_plot(
             .analysis
             .waveforms
             .iter()
+            .map(AsRef::as_ref)
             .enumerate()
             .find(|(_, waveform)| {
                 retained_noise_reference(&waveform.name) == Some(RetainedNoiseReference::Output)
@@ -307,6 +366,7 @@ fn quick_noise_spectrum_plot(
             .analysis
             .waveforms
             .iter()
+            .map(AsRef::as_ref)
             .enumerate()
             .filter(|(_, waveform)| {
                 retained_noise_reference(&waveform.name) != Some(RetainedNoiseReference::Input)
@@ -323,7 +383,7 @@ fn quick_noise_spectrum_plot(
         .map(|(waveform_index, waveform)| QuickResultSeries {
             identity: format!(
                 "{}:{}:{}:{}:noise-amplitude-density:{waveform_index}",
-                active.run.dataset_id, active.run.run_id, active.analysis.id, waveform.name
+                active.dataset_id, active.run_id, active.analysis.id, waveform.name
             ),
             label: format!(
                 "{} ({})",
@@ -355,11 +415,14 @@ fn quick_noise_spectrum_plot(
     )
 }
 
-fn quick_harmonic_balance_plot(
-    active: ActiveQuickResult<'_>,
+fn quick_harmonic_balance_plot<W: AsRef<RetainedWaveform>>(
+    active: &RetainedQuickViewSource<'_, W>,
 ) -> Result<SemanticPlot, HardcopySourceError> {
-    if !crate::workbench::documents::result_document::harmonic_balance_analysis_is_renderable(
-        active.analysis,
+    if !rspice_results::harmonic_spectrum::analysis_is_renderable(
+        active.analysis.success,
+        active.analysis.analysis_type,
+        &active.analysis.waveforms,
+        || {},
     ) {
         return Err(HardcopySourceError::MissingViewerEvidence(
             "harmonic-balance spectrum",
@@ -370,20 +433,22 @@ fn quick_harmonic_balance_plot(
         .waveforms
         .iter()
         .filter(|waveform| {
-            waveform.visible
-                && crate::workbench::documents::result_document::harmonic_balance_waveform_is_renderable(
-                    waveform,
+            (active.is_visible)(waveform)
+                && rspice_results::harmonic_spectrum::spectrum_trace_is_renderable(
+                    waveform.as_ref(),
+                    || {},
                 )
         })
+        .map(AsRef::as_ref)
         .map(|waveform| QuickResultSeries {
             identity: format!(
                 "{}:{}:{}:{}:hb-coefficients",
-                active.run.dataset_id, active.run.run_id, active.analysis.id, waveform.name
+                active.dataset_id, active.run_id, active.analysis.id, waveform.name
             ),
-            label: waveform
-                .complex
-                .as_ref()
-                .map_or_else(|| waveform.name.clone(), |complex| complex.source_name.clone()),
+            label: waveform.complex.as_ref().map_or_else(
+                || waveform.name.clone(),
+                |complex| complex.source_name.clone(),
+            ),
             points: waveform
                 .x
                 .iter()
@@ -395,11 +460,15 @@ fn quick_harmonic_balance_plot(
     quick_plot_from_series(ResultViewer::HarmonicBalance, "Results", 0, series, None)
 }
 
-fn quick_phase_noise_plot(
-    active: ActiveQuickResult<'_>,
+fn quick_phase_noise_plot<W: AsRef<RetainedWaveform>>(
+    active: &RetainedQuickViewSource<'_, W>,
 ) -> Result<SemanticPlot, HardcopySourceError> {
-    if !crate::workbench::documents::result_document::phase_noise_analysis_is_renderable(
-        active.analysis,
+    if !rspice_results::phase_noise::phase_noise_is_renderable(
+        active.analysis.success,
+        active.analysis.analysis_type,
+        active.analysis.family_metadata.as_ref(),
+        &active.analysis.waveforms,
+        || {},
     ) {
         return Err(HardcopySourceError::MissingViewerEvidence(
             "phase-noise spectrum",
@@ -410,15 +479,17 @@ fn quick_phase_noise_plot(
         .waveforms
         .iter()
         .filter(|waveform| {
-            waveform.visible
-                && crate::workbench::documents::result_document::phase_noise_waveform_is_renderable(
-                    waveform,
+            (active.is_visible)(waveform)
+                && rspice_results::phase_noise::phase_noise_waveform_is_renderable(
+                    waveform.as_ref(),
+                    || {},
                 )
         })
+        .map(AsRef::as_ref)
         .map(|waveform| QuickResultSeries {
             identity: format!(
                 "{}:{}:{}:{}:phase-noise",
-                active.run.dataset_id, active.run.run_id, active.analysis.id, waveform.name
+                active.dataset_id, active.run_id, active.analysis.id, waveform.name
             ),
             label: format!("{} - dBc/Hz", waveform.name),
             points: waveform
@@ -442,46 +513,32 @@ fn quick_phase_noise_plot(
     )
 }
 
-#[cfg(test)]
-pub(super) fn active_terminal_run(state: &AppState) -> Result<&SimulationRun, HardcopySourceError> {
-    let run = state.simulation.active_run().ok_or_else(|| {
-        HardcopySourceError::UnretainedResult("no active result dataset is selected".to_owned())
-    })?;
-    if !run.lifecycle.is_terminal() {
-        return Err(HardcopySourceError::UnretainedResult(format!(
-            "active dataset {} belongs to a non-terminal run",
-            run.dataset_id
-        )));
-    }
-    Ok(run)
-}
-
-pub(super) fn quick_fft_plot(
+fn quick_fft_plot<W: AsRef<RetainedWaveform>>(
     presentation: &ResultsQuickViewPresentation,
-    active: ActiveQuickResult<'_>,
+    active: &RetainedQuickViewSource<'_, W>,
 ) -> Result<SemanticPlot, HardcopySourceError> {
     let waveform = selected_retained_waveform(
         active,
-        presentation.fft.selected_source.as_deref(),
+        presentation.fft_selected_source.as_deref(),
         "FFT source waveform",
     )?;
-    let input = crate::analysis::fft::prepare_fft_input_with_options(
+    let input = rspice_results::fft::pipeline::prepare_fft_input_with_options(
         &waveform.name,
         &waveform.x,
         &waveform.y,
-        presentation.fft.input_options_for_waveform(&waveform.x),
+        presentation.fft_input_options(),
     )
     .map_err(|error| {
         HardcopySourceError::InvalidVisualizationSource(format!(
             "FFT input preparation failed: {error}"
         ))
     })?;
-    let data = crate::analysis::fft::data::FftData::from_time_domain_with_normalization(
+    let data = rspice_results::fft::data::FftData::from_time_domain_with_normalization(
         &waveform.name,
         &input.samples,
         input.sample_rate,
-        presentation.fft.window,
-        presentation.fft.normalization,
+        presentation.fft_window(),
+        presentation.fft_normalization(),
     )
     .map_err(|error| {
         HardcopySourceError::InvalidVisualizationSource(format!(
@@ -500,11 +557,7 @@ pub(super) fn quick_fft_plot(
         vec![QuickResultSeries {
             identity: format!(
                 "{}:{}:{}:{}:fft-db:{}",
-                active.run.dataset_id,
-                active.run.run_id,
-                active.analysis.id,
-                waveform.name,
-                data.fft_size
+                active.dataset_id, active.run_id, active.analysis.id, waveform.name, data.fft_size
             ),
             label: data.name.clone(),
             points: data
@@ -519,17 +572,17 @@ pub(super) fn quick_fft_plot(
     )
 }
 
-pub(super) fn quick_eye_plot(
+fn quick_eye_plot<W: AsRef<RetainedWaveform>>(
     presentation: &ResultsQuickViewPresentation,
-    active: ActiveQuickResult<'_>,
+    active: &RetainedQuickViewSource<'_, W>,
 ) -> Result<SemanticPlot, HardcopySourceError> {
     let waveform = selected_retained_waveform(
         active,
-        presentation.fft.selected_source.as_deref(),
+        presentation.fft_selected_source.as_deref(),
         "eye source waveform",
     )?;
     let bit_period = retained_eye_bit_period(&waveform.x, &waveform.y)?;
-    let data = crate::analysis::eye_diagram::EyeDataBuilder::new()
+    let data = rspice_core::analysis::signal_integrity::EyeDataBuilder::new()
         .bit_period(bit_period)
         .ui_count(2)
         .skip_initial(2)
@@ -544,8 +597,8 @@ pub(super) fn quick_eye_plot(
         .map(|(index, trace)| QuickResultSeries {
             identity: format!(
                 "{}:{}:{}:{}:eye:{}:{index}",
-                active.run.dataset_id,
-                active.run.run_id,
+                active.dataset_id,
+                active.run_id,
                 active.analysis.id,
                 waveform.name,
                 bit_period.to_bits()
@@ -562,9 +615,9 @@ pub(super) fn quick_eye_plot(
     quick_plot_from_series(ResultViewer::Eye, "Results", 0, series, None)
 }
 
-pub(super) fn quick_histogram_plot(
+fn quick_histogram_plot<W: AsRef<RetainedWaveform>>(
     presentation: &ResultsQuickViewPresentation,
-    active: ActiveQuickResult<'_>,
+    active: &RetainedQuickViewSource<'_, W>,
 ) -> Result<SemanticPlot, HardcopySourceError> {
     let AnalysisResultFamilyMetadata::MonteCarlo { variables, .. } =
         active.analysis.family_metadata.as_ref().ok_or(
@@ -575,7 +628,7 @@ pub(super) fn quick_histogram_plot(
             "Monte Carlo family metadata",
         ));
     };
-    let variable = crate::analysis::histogram::state::measurement_index(
+    let variable = rspice_results::histogram::measurement_index(
         presentation.histogram_measurement.as_deref(),
         presentation.histogram_selected,
         &variables
@@ -592,7 +645,7 @@ pub(super) fn quick_histogram_plot(
             "Monte Carlo samples",
         ));
     }
-    let mut builder = crate::analysis::HistogramBuilder::new()
+    let mut builder = rspice_results::histogram::HistogramBuilder::new()
         .name(&variable.name)
         .bin_count(presentation.histogram_bin_count.clamp(1, 1000));
     if presentation.histogram_custom_range {
@@ -604,18 +657,15 @@ pub(super) fn quick_histogram_plot(
         builder = builder.range(minimum, maximum);
     }
     let histogram = builder.build(&variable.samples);
-    let display = crate::analysis::histogram::display::HistogramDisplay::new(
+    let display = rspice_results::histogram::display::HistogramDisplay::new(
         &histogram,
         &variable.samples,
-        presentation.histogram_mode,
+        presentation.histogram_mode(),
     )
     .map_err(HardcopySourceError::MissingViewerEvidence)?;
-    let axis = crate::analysis::histogram::display::hist_axis(&histogram);
-    let (x0, x1) = presentation.histogram_view.x.unwrap_or((axis.x0, axis.x1));
-    let (y0, y1) = presentation
-        .histogram_view
-        .y
-        .unwrap_or((0.0, display.y_max()));
+    let axis = rspice_results::histogram::display::hist_axis(&histogram);
+    let (x0, x1) = presentation.histogram_x.unwrap_or((axis.x0, axis.x1));
+    let (y0, y1) = presentation.histogram_y.unwrap_or((0.0, display.y_max()));
     if !x0.is_finite()
         || !x1.is_finite()
         || x0 >= x1
@@ -663,7 +713,7 @@ pub(super) fn quick_histogram_plot(
         0,
         &format!(
             "{}:{}:{}:monte-carlo:{}",
-            active.run.dataset_id, active.run.run_id, active.analysis.id, variable.name,
+            active.dataset_id, active.run_id, active.analysis.id, variable.name,
         ),
     );
     Ok(SemanticPlot {
@@ -690,20 +740,21 @@ pub(super) fn quick_histogram_plot(
     })
 }
 
-pub(super) fn quick_complex_plot(
-    active: ActiveQuickResult<'_>,
+fn quick_complex_plot<W: AsRef<RetainedWaveform>>(
+    active: &RetainedQuickViewSource<'_, W>,
     viewer: ResultViewer,
 ) -> Result<SemanticPlot, HardcopySourceError> {
     let series = active
         .analysis
         .waveforms
         .iter()
-        .filter(|waveform| waveform.visible)
+        .filter(|waveform| (active.is_visible)(waveform))
+        .map(AsRef::as_ref)
         .filter_map(|waveform| waveform.complex.as_ref().map(|complex| (waveform, complex)))
         .map(|(waveform, complex)| QuickResultSeries {
             identity: format!(
                 "{}:{}:{}:{}:complex",
-                active.run.dataset_id, active.run.run_id, active.analysis.id, waveform.name
+                active.dataset_id, active.run_id, active.analysis.id, waveform.name
             ),
             label: waveform.name.clone(),
             points: complex
@@ -717,17 +768,18 @@ pub(super) fn quick_complex_plot(
     quick_plot_from_series(viewer, "Results", 0, series, None)
 }
 
-pub(super) fn selected_retained_waveform<'a>(
-    active: ActiveQuickResult<'a>,
+fn selected_retained_waveform<'a, W: AsRef<RetainedWaveform>>(
+    active: &RetainedQuickViewSource<'a, W>,
     preferred_name: Option<&str>,
     evidence: &'static str,
-) -> Result<&'a WaveformData, HardcopySourceError> {
+) -> Result<&'a RetainedWaveform, HardcopySourceError> {
     let mut candidates = active
         .analysis
         .waveforms
         .iter()
+        .map(AsRef::as_ref)
         .filter(|waveform| {
-            waveform.x.len().min(waveform.y.len()) >= crate::analysis::fft::MIN_FFT_SAMPLES
+            waveform.x.len().min(waveform.y.len()) >= rspice_results::fft::pipeline::MIN_FFT_SAMPLES
         })
         .collect::<Vec<_>>();
     candidates.sort_by(|left, right| left.name.cmp(&right.name));
@@ -761,7 +813,7 @@ pub(super) fn selected_retained_waveform<'a>(
     Ok(selected)
 }
 
-pub(super) fn derived_waveform_source_core(name: &str) -> String {
+fn derived_waveform_source_core(name: &str) -> String {
     let trimmed = name.trim().trim_matches('|');
     trimmed
         .strip_prefix("V(")
@@ -776,10 +828,7 @@ pub(super) fn derived_waveform_source_core(name: &str) -> String {
         .to_ascii_lowercase()
 }
 
-pub(super) fn retained_eye_bit_period(
-    time: &[f64],
-    values: &[f64],
-) -> Result<f64, HardcopySourceError> {
+fn retained_eye_bit_period(time: &[f64], values: &[f64]) -> Result<f64, HardcopySourceError> {
     let sample_count = time.len().min(values.len());
     if sample_count < 8 {
         return Err(HardcopySourceError::MissingViewerEvidence(
@@ -810,7 +859,7 @@ pub(super) fn retained_eye_bit_period(
         ));
     }
     let threshold = (minimum + maximum) * 0.5;
-    let edges = crate::analysis::eye_diagram::find_edges(
+    let edges = rspice_core::analysis::signal_integrity::find_edges(
         &time[..sample_count],
         &values[..sample_count],
         threshold,
@@ -863,19 +912,42 @@ pub(super) fn retained_eye_bit_period(
     }
 }
 
-pub(super) fn results_quick_view_identity(
+pub fn results_quick_view_identity<W: AsRef<RetainedWaveform>, A>(
     source_key: &str,
     project_id: ProjectId,
     viewer: ResultViewer,
-    run: &SimulationRun,
-    analysis: &AnalysisResult,
+    run: &SimulationRun<A>,
+    analysis: &AnalysisResult<W>,
+) -> Result<HardcopySourceIdentity, HardcopySourceError> {
+    quick_view_identity(
+        source_key,
+        project_id,
+        viewer,
+        run.dataset_id,
+        run.run_id,
+        analysis,
+    )
+}
+
+fn quick_view_identity<W: AsRef<RetainedWaveform>>(
+    source_key: &str,
+    project_id: ProjectId,
+    viewer: ResultViewer,
+    dataset_id: DatasetId,
+    run_id: RunId,
+    analysis: &AnalysisResult<W>,
 ) -> Result<HardcopySourceIdentity, HardcopySourceError> {
     let mut identity_name = source_key.as_bytes().to_vec();
     identity_name.extend_from_slice(viewer.label().as_bytes());
-    identity_name.extend_from_slice(run.dataset_id.as_uuid().as_bytes());
-    identity_name.extend_from_slice(run.run_id.as_uuid().as_bytes());
+    identity_name.extend_from_slice(dataset_id.as_uuid().as_bytes());
+    identity_name.extend_from_slice(run_id.as_uuid().as_bytes());
     identity_name.extend_from_slice(&analysis.id.to_be_bytes());
-    identity_name.extend_from_slice(analysis.result_data_digest().as_bytes());
+    identity_name.extend_from_slice(
+        analysis
+            .result_data_ref()
+            .digest(ResultDigestEncoding::CURRENT)
+            .as_bytes(),
+    );
     HardcopySourceIdentity::try_new(
         source_key,
         HardcopyDocumentId::try_from_uuid(Uuid::new_v5(&project_id.as_uuid(), &identity_name))
@@ -884,3 +956,6 @@ pub(super) fn results_quick_view_identity(
         format!("Results - {}", viewer.label()),
     )
 }
+
+#[cfg(test)]
+mod tests;

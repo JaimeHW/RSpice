@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 rspice-app-types.workspace = true
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false }
 rspice-formats.workspace = true
 rspice-design = { workspace = true, features = ["symbol-artwork"] }
 rspice-design-model.workspace = true

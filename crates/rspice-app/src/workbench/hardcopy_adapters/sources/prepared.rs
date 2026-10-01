@@ -223,313 +223,6 @@ impl PreparedSchematicInterfaceOwner {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-enum PreparedFftNormalization {
-    Peak,
-    Rms,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-enum PreparedFftWindow {
-    Rectangular,
-    Hanning,
-    Hamming,
-    Blackman,
-    BlackmanHarris,
-    FlatTop,
-    Kaiser,
-    Gaussian,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-enum PreparedFftInputFidelity {
-    Reference,
-    Interactive,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-enum PreparedHistogramMode {
-    Count,
-    Pdf,
-    Cdf,
-    Percent,
-}
-
-/// Only the persisted controls that affect quick-result semantic geometry.
-/// FFT caches and every other viewer/runtime field are deliberately absent.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct PreparedResultsPresentation {
-    viewer: ResultViewer,
-    /// The reading the sheet was carrying: hidden traces, placed cursors,
-    /// anchored markers. It travels with the controls because the page is
-    /// resolved on the worker, and a page missing the reader's own annotation
-    /// is not the page they reviewed.
-    #[serde(default)]
-    overlay: RetainedQuickViewOverlays,
-    specs: Vec<crate::state::SpecEntry>,
-    fft_selected_source: Option<String>,
-    fft_normalization: PreparedFftNormalization,
-    fft_window: PreparedFftWindow,
-    fft_input_fidelity: PreparedFftInputFidelity,
-    fft_time_window_auto: bool,
-    fft_time_window_start: f64,
-    fft_time_window_end: f64,
-    fft_sample_count_auto: bool,
-    fft_sample_count: usize,
-    #[serde(default)]
-    histogram_x: Option<(f64, f64)>,
-    #[serde(default)]
-    histogram_y: Option<(f64, f64)>,
-    histogram_selected: usize,
-    #[serde(default)]
-    histogram_measurement: Option<String>,
-    histogram_bin_count: usize,
-    histogram_custom_range: bool,
-    histogram_custom_min: f64,
-    histogram_custom_max: f64,
-    histogram_mode: PreparedHistogramMode,
-}
-
-impl PreparedResultsPresentation {
-    fn capture(value: ResultsQuickViewPresentation) -> Result<Self, HardcopySourceError> {
-        validate_optional_label(
-            "prepared FFT source",
-            value.fft.selected_source.as_deref(),
-            DISPLAY_NAME_LIMIT,
-        )?;
-        let captured = Self {
-            viewer: value.viewer,
-            overlay: value.overlay,
-            specs: value.specs,
-            fft_selected_source: value.fft.selected_source,
-            fft_normalization: match value.fft.normalization {
-                crate::analysis::fft::data::SpectrumNormalization::Peak => {
-                    PreparedFftNormalization::Peak
-                }
-                crate::analysis::fft::data::SpectrumNormalization::Rms => {
-                    PreparedFftNormalization::Rms
-                }
-            },
-            fft_window: match value.fft.window {
-                crate::analysis::WindowFunction::Rectangular => PreparedFftWindow::Rectangular,
-                crate::analysis::WindowFunction::Hanning => PreparedFftWindow::Hanning,
-                crate::analysis::WindowFunction::Hamming => PreparedFftWindow::Hamming,
-                crate::analysis::WindowFunction::Blackman => PreparedFftWindow::Blackman,
-                crate::analysis::WindowFunction::BlackmanHarris => {
-                    PreparedFftWindow::BlackmanHarris
-                }
-                crate::analysis::WindowFunction::FlatTop => PreparedFftWindow::FlatTop,
-                crate::analysis::WindowFunction::Kaiser => PreparedFftWindow::Kaiser,
-                crate::analysis::WindowFunction::Gaussian => PreparedFftWindow::Gaussian,
-            },
-            fft_input_fidelity: match value.fft.input_fidelity {
-                crate::analysis::InputFidelity::Reference => PreparedFftInputFidelity::Reference,
-                crate::analysis::InputFidelity::Interactive => {
-                    PreparedFftInputFidelity::Interactive
-                }
-            },
-            fft_time_window_auto: value.fft.time_window_auto,
-            fft_time_window_start: value.fft.time_window_start,
-            fft_time_window_end: value.fft.time_window_end,
-            fft_sample_count_auto: value.fft.sample_count_auto,
-            fft_sample_count: value.fft.sample_count,
-            histogram_x: value.histogram_view.x,
-            histogram_y: value.histogram_view.y,
-            histogram_selected: value.histogram_selected,
-            histogram_measurement: value.histogram_measurement,
-            histogram_bin_count: value.histogram_bin_count,
-            histogram_custom_range: value.histogram_custom_range,
-            histogram_custom_min: value.histogram_custom_min,
-            histogram_custom_max: value.histogram_custom_max,
-            histogram_mode: match value.histogram_mode {
-                crate::analysis::HistogramDisplayMode::Count => PreparedHistogramMode::Count,
-                crate::analysis::HistogramDisplayMode::Pdf => PreparedHistogramMode::Pdf,
-                crate::analysis::HistogramDisplayMode::Cdf => PreparedHistogramMode::Cdf,
-                crate::analysis::HistogramDisplayMode::Percent => PreparedHistogramMode::Percent,
-            },
-        };
-        captured.validate()?;
-        Ok(captured)
-    }
-
-    fn validate(&self) -> Result<(), HardcopySourceError> {
-        self.overlay.validate()?;
-        validate_optional_label(
-            "prepared histogram measurement",
-            self.histogram_measurement.as_deref(),
-            DISPLAY_NAME_LIMIT,
-        )?;
-        for (low, high) in [self.histogram_x, self.histogram_y].into_iter().flatten() {
-            if !low.is_finite() || !high.is_finite() || low >= high || !(high - low).is_finite() {
-                return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-                    "prepared histogram viewport is not a finite interval".to_owned(),
-                ));
-            }
-        }
-        if self.specs.len() > 10_000 {
-            return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-                "prepared specification count exceeds the governed limit".to_owned(),
-            ));
-        }
-        for (index, spec) in self.specs.iter().enumerate() {
-            spec.validate().map_err(|error| {
-                HardcopySourceError::InvalidPreparedWorkerSnapshot(format!(
-                    "prepared specification {index} is invalid: {error}"
-                ))
-            })?;
-        }
-        validate_optional_label(
-            "prepared FFT source",
-            self.fft_selected_source.as_deref(),
-            DISPLAY_NAME_LIMIT,
-        )?;
-        for (field, value) in [
-            ("FFT time-window start", self.fft_time_window_start),
-            ("FFT time-window end", self.fft_time_window_end),
-            ("histogram custom minimum", self.histogram_custom_min),
-            ("histogram custom maximum", self.histogram_custom_max),
-        ] {
-            if !value.is_finite() {
-                return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(format!(
-                    "{field} is not finite"
-                )));
-            }
-        }
-        if self.fft_sample_count == 0 {
-            return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-                "FFT sample count is zero".to_owned(),
-            ));
-        }
-        if self.histogram_bin_count == 0 {
-            return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-                "histogram bin count is zero".to_owned(),
-            ));
-        }
-        if !self.fft_time_window_auto && self.fft_time_window_start >= self.fft_time_window_end {
-            return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-                "manual FFT time window is empty or reversed".to_owned(),
-            ));
-        }
-        if self.histogram_custom_range && self.histogram_custom_min >= self.histogram_custom_max {
-            return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-                "custom histogram range is empty or reversed".to_owned(),
-            ));
-        }
-        Ok(())
-    }
-
-    fn restore(self) -> Result<ResultsQuickViewPresentation, HardcopySourceError> {
-        self.validate()?;
-        let mut fft = crate::analysis::FftState::default();
-        fft.selected_source = self.fft_selected_source;
-        fft.normalization = match self.fft_normalization {
-            PreparedFftNormalization::Peak => {
-                crate::analysis::fft::data::SpectrumNormalization::Peak
-            }
-            PreparedFftNormalization::Rms => crate::analysis::fft::data::SpectrumNormalization::Rms,
-        };
-        fft.window = match self.fft_window {
-            PreparedFftWindow::Rectangular => crate::analysis::WindowFunction::Rectangular,
-            PreparedFftWindow::Hanning => crate::analysis::WindowFunction::Hanning,
-            PreparedFftWindow::Hamming => crate::analysis::WindowFunction::Hamming,
-            PreparedFftWindow::Blackman => crate::analysis::WindowFunction::Blackman,
-            PreparedFftWindow::BlackmanHarris => crate::analysis::WindowFunction::BlackmanHarris,
-            PreparedFftWindow::FlatTop => crate::analysis::WindowFunction::FlatTop,
-            PreparedFftWindow::Kaiser => crate::analysis::WindowFunction::Kaiser,
-            PreparedFftWindow::Gaussian => crate::analysis::WindowFunction::Gaussian,
-        };
-        fft.input_fidelity = match self.fft_input_fidelity {
-            PreparedFftInputFidelity::Reference => crate::analysis::InputFidelity::Reference,
-            PreparedFftInputFidelity::Interactive => crate::analysis::InputFidelity::Interactive,
-        };
-        fft.time_window_auto = self.fft_time_window_auto;
-        fft.time_window_start = self.fft_time_window_start;
-        fft.time_window_end = self.fft_time_window_end;
-        fft.sample_count_auto = self.fft_sample_count_auto;
-        fft.sample_count = self.fft_sample_count;
-        Ok(ResultsQuickViewPresentation {
-            viewer: self.viewer,
-            overlay: self.overlay,
-            specs: self.specs,
-            fft,
-            histogram_view: crate::workbench::documents::result_document::PlotView {
-                x: self.histogram_x,
-                y: self.histogram_y,
-            },
-            histogram_selected: self.histogram_selected,
-            histogram_measurement: self.histogram_measurement,
-            histogram_bin_count: self.histogram_bin_count,
-            histogram_custom_range: self.histogram_custom_range,
-            histogram_custom_min: self.histogram_custom_min,
-            histogram_custom_max: self.histogram_custom_max,
-            histogram_mode: match self.histogram_mode {
-                PreparedHistogramMode::Count => crate::analysis::HistogramDisplayMode::Count,
-                PreparedHistogramMode::Pdf => crate::analysis::HistogramDisplayMode::Pdf,
-                PreparedHistogramMode::Cdf => crate::analysis::HistogramDisplayMode::Cdf,
-                PreparedHistogramMode::Percent => crate::analysis::HistogramDisplayMode::Percent,
-            },
-        })
-    }
-}
-
-#[cfg(test)]
-mod histogram_tests {
-    use super::*;
-
-    #[test]
-    fn histogram_worker_controls_round_trip_and_validate_the_viewport() {
-        let state = AppState::default();
-        for mode in crate::analysis::HistogramDisplayMode::ALL {
-            let mut presentation = ResultsQuickViewPresentation::from_state(&state).unwrap();
-            presentation.histogram_mode = mode;
-            presentation.histogram_measurement = Some("gain".to_owned());
-            presentation.histogram_view.x = Some((1e-15, 2e-15));
-            presentation.histogram_view.y = Some((0.0, 100.0));
-            let prepared = PreparedResultsPresentation::capture(presentation).unwrap();
-            let bytes = serde_json::to_vec(&prepared).unwrap();
-            let restored = serde_json::from_slice::<PreparedResultsPresentation>(&bytes)
-                .unwrap()
-                .restore()
-                .unwrap();
-            assert_eq!(restored.histogram_mode, mode);
-            assert_eq!(restored.histogram_measurement.as_deref(), Some("gain"));
-            assert_eq!(restored.histogram_view.x, Some((1e-15, 2e-15)));
-            assert_eq!(restored.histogram_view.y, Some((0.0, 100.0)));
-
-            let mut legacy = serde_json::to_value(&prepared).unwrap();
-            legacy
-                .as_object_mut()
-                .unwrap()
-                .remove("histogram_measurement");
-            legacy.as_object_mut().unwrap().remove("histogram_x");
-            legacy.as_object_mut().unwrap().remove("histogram_y");
-            let restored = serde_json::from_value::<PreparedResultsPresentation>(legacy)
-                .unwrap()
-                .restore()
-                .unwrap();
-            assert_eq!(restored.histogram_measurement, None);
-            assert_eq!(restored.histogram_view.x, None);
-            assert_eq!(restored.histogram_view.y, None);
-
-            for range in [
-                (2.0, 1.0),
-                (1.0, 1.0),
-                (0.0, f64::INFINITY),
-                (-f64::MAX, f64::MAX),
-            ] {
-                let mut invalid = prepared.clone();
-                invalid.histogram_x = Some(range);
-                assert!(invalid.restore().is_err());
-            }
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "source-family", rename_all = "kebab-case", deny_unknown_fields)]
 pub(super) enum PreparedRetainedHardcopyWorkerPayload {
@@ -557,7 +250,7 @@ pub(super) enum PreparedRetainedHardcopyWorkerPayload {
         source_key: String,
         project_id: ProjectId,
         simulation_results: CanonicalHardcopyOwner,
-        presentation: PreparedResultsPresentation,
+        presentation: ResultsQuickViewPresentation,
         scope: HardcopyScope,
     },
     Studio {
@@ -751,7 +444,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                         "prepared result history",
                         &crate::io::capture_simulation_results(&simulation),
                     )?,
-                    presentation: PreparedResultsPresentation::capture(presentation)?,
+                    presentation,
                     scope,
                 }
             }
@@ -1093,9 +786,9 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     .restore::<ProjectSimulationResults>("prepared result history")?;
                 let simulation = crate::io::simulation_state_from_results(simulation_results)
                     .map_err(HardcopySourceError::InvalidPreparedWorkerSnapshot)?;
-                let presentation = presentation.restore()?;
+                presentation.validate()?;
                 let analysis_count = simulation.runs.first().map_or(0, |run| run.analyses.len());
-                let has_exact_shape = simulation.runs.len() == 1 && match presentation.viewer {
+                let has_exact_shape = simulation.runs.len() == 1 && match presentation.viewer() {
                     ResultViewer::Manifest | ResultViewer::Specs => true,
                     viewer
                         if crate::workbench::documents::result_document::viewer_uses_wave_stack(
@@ -1248,17 +941,6 @@ impl PreparedRetainedHardcopyWorkerPayload {
         };
         Ok(restored)
     }
-}
-
-fn validate_optional_label(
-    field: &'static str,
-    value: Option<&str>,
-    maximum_bytes: usize,
-) -> Result<(), HardcopySourceError> {
-    if let Some(value) = value {
-        validate_label(field, value, maximum_bytes)?;
-    }
-    Ok(())
 }
 
 fn require_project_source_prefix<'a>(
@@ -1469,19 +1151,19 @@ fn prepared_payload_identity(
             presentation,
             scope,
         } => {
-            if presentation.viewer == ResultViewer::Manifest {
+            if presentation.viewer() == ResultViewer::Manifest {
                 return Ok((
                     super::results::results_manifest_identity(source_key, *project_id, run)?,
                     scope.clone(),
                 ));
             }
-            if presentation.viewer == ResultViewer::Specs {
+            if presentation.viewer() == ResultViewer::Specs {
                 return Ok((
                     super::results::results_specs_identity(
                         source_key,
                         *project_id,
                         run,
-                        &presentation.specs,
+                        presentation.specs(),
                     )?,
                     scope.clone(),
                 ));
@@ -1492,7 +1174,7 @@ fn prepared_payload_identity(
                         source_key,
                         *project_id,
                         run,
-                        presentation.viewer,
+                        presentation.viewer(),
                     )?,
                     scope.clone(),
                 ));
@@ -1506,9 +1188,9 @@ fn prepared_payload_identity(
                 results_quick_view_identity(
                     source_key,
                     *project_id,
-                    presentation.viewer,
-                    run,
-                    analysis,
+                    presentation.viewer(),
+                    run.as_ref(),
+                    analysis.as_ref(),
                 )?,
                 scope.clone(),
             ))
@@ -1724,7 +1406,7 @@ impl PreparedRetainedHardcopyResolution {
                 presentation,
                 scope,
             } => {
-                if presentation.viewer == ResultViewer::Manifest {
+                if presentation.viewer() == ResultViewer::Manifest {
                     if !run.lifecycle.is_terminal() {
                         return Err(HardcopySourceError::UnretainedResult(
                             "prepared manifest dataset is not terminal".to_owned(),
@@ -1734,7 +1416,7 @@ impl PreparedRetainedHardcopyResolution {
                         source_key, project_id, scope, &run,
                     );
                 }
-                if presentation.viewer == ResultViewer::Specs {
+                if presentation.viewer() == ResultViewer::Specs {
                     if !run.lifecycle.is_terminal() {
                         return Err(HardcopySourceError::UnretainedResult(
                             "prepared specifications dataset is not terminal".to_owned(),
@@ -1745,7 +1427,7 @@ impl PreparedRetainedHardcopyResolution {
                         project_id,
                         scope,
                         &run,
-                        &presentation.specs,
+                        presentation.specs(),
                     );
                 }
                 if run.analyses.len() > 1 {
@@ -1772,17 +1454,15 @@ impl PreparedRetainedHardcopyResolution {
                         "prepared result is not terminal and successful".to_owned(),
                     ));
                 }
-                analysis
-                    .validate_retained_evidence()
-                    .map_err(HardcopySourceError::InvalidVisualizationSource)?;
                 resolve_results_quick_view_parts(
                     source_key,
                     project_id,
                     scope,
-                    ActiveQuickResult {
-                        run: &run,
-                        analysis,
-                    },
+                    &RetainedQuickViewSource::try_new(
+                        run.as_ref(),
+                        analysis.id,
+                        |waveform: &WaveformData| waveform.visible,
+                    )?,
                     &presentation,
                 )
             }

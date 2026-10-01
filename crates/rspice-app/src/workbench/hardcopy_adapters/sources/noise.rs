@@ -1,10 +1,5 @@
 //! Ordinary-noise hardcopy bindings use the sheet's offering and canonical trace rules.
 
-pub(super) use rspice_results::noise_spectrum::{
-    RetainedNoiseReference, retained_noise_contributor, retained_noise_reference,
-    retained_noise_waveform_is_renderable,
-};
-
 pub(super) use crate::workbench::documents::result_document::{
     ordinary_noise_spectrum_is_renderable, selected_noise_analysis_index,
 };

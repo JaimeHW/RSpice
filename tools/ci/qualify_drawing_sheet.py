@@ -398,13 +398,13 @@ def command_gates(
                 "--lib",
                 "hardcopy",
             ),
-            193 if host_system == "Windows" else 190,
+            192 if host_system == "Windows" else 189,
         ),
         Gate(
             "hardcopy-service",
             "Frozen hardcopy source and renderer tests",
             ("cargo", "test", "--locked", "-p", "rspice-hardcopy", "-j", cargo_jobs, "--lib"),
-            75,
+            77,
         ),
         Gate(
             "publisher-tests",

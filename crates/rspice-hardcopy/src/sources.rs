@@ -9,6 +9,7 @@ mod plots;
 mod quick_plot;
 mod reports;
 mod result_summary;
+mod result_view;
 mod schematic;
 mod semantic;
 
@@ -35,6 +36,10 @@ pub use quick_plot::{
 };
 pub use reports::{ReportHardcopySource, resolve_report_source};
 pub use result_summary::{is_curve_viewer, semantic_result_summary};
+pub use result_view::{
+    QuickFftSettings, QuickHistogramSettings, ResultsQuickViewPresentation,
+    RetainedQuickViewSource, resolve_results_quick_view_parts, results_quick_view_identity,
+};
 use rspice_app_types::product::ContentDigest;
 use rspice_design::schematic::component::Component;
 use rspice_design::symbol::{SymbolDocument, SymbolShape};

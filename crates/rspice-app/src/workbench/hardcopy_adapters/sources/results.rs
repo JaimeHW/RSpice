@@ -503,6 +503,43 @@ pub(crate) fn resolve_active_studio_pane_source(
     )
 }
 
+#[cfg(test)]
+pub(super) fn active_quick_result(
+    state: &AppState,
+    viewer: ResultViewer,
+) -> Result<RetainedQuickViewSource<'_, WaveformData>, HardcopySourceError> {
+    let run = active_terminal_run(state)?;
+    let analysis_index = quick_result_analysis_index(state, run, viewer).ok_or_else(|| {
+        HardcopySourceError::UnretainedResult(format!(
+            "no retained analysis can provide exact evidence for {}",
+            viewer.label()
+        ))
+    })?;
+    let analysis = run.analyses.get(analysis_index).ok_or_else(|| {
+        HardcopySourceError::UnretainedResult(format!(
+            "active analysis index {analysis_index} is not retained in dataset {}",
+            run.dataset_id
+        ))
+    })?;
+    RetainedQuickViewSource::try_new(run.as_ref(), analysis.id, |waveform: &WaveformData| {
+        waveform.visible
+    })
+}
+
+#[cfg(test)]
+pub(super) fn active_terminal_run(state: &AppState) -> Result<&SimulationRun, HardcopySourceError> {
+    let run = state.simulation.active_run().ok_or_else(|| {
+        HardcopySourceError::UnretainedResult("no active result dataset is selected".to_owned())
+    })?;
+    if !run.lifecycle.is_terminal() {
+        return Err(HardcopySourceError::UnretainedResult(format!(
+            "active dataset {} belongs to a non-terminal run",
+            run.dataset_id
+        )));
+    }
+    Ok(run)
+}
+
 /// Resolve the exact result document currently selected in the ordinary
 /// Results workspace. Specialized viewers read their durable analysis model
 /// directly; table viewers read the selected immutable simulation result.
@@ -510,8 +547,8 @@ pub(crate) fn resolve_active_studio_pane_source(
 pub(crate) fn resolve_results_quick_view_source(
     source: ResultsQuickViewHardcopySource<'_>,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    let presentation = ResultsQuickViewPresentation::from_state(source.state)?;
-    if presentation.viewer == ResultViewer::Manifest {
+    let presentation = capture_results_quick_view_presentation(source.state)?;
+    if presentation.viewer() == ResultViewer::Manifest {
         let run = active_terminal_run(source.state)?;
         return resolve_results_manifest_source(
             source.source_key,
@@ -520,12 +557,12 @@ pub(crate) fn resolve_results_quick_view_source(
             run,
         );
     }
-    let active = active_quick_result(source.state, presentation.viewer)?;
+    let active = active_quick_result(source.state, presentation.viewer())?;
     resolve_results_quick_view_parts(
         source.source_key,
         source.project_id,
         source.scope,
-        active,
+        &active,
         &presentation,
     )
 }
@@ -540,7 +577,7 @@ pub(super) fn resolve_results_quick_view_stack(
     run: &SimulationRun,
     presentation: &ResultsQuickViewPresentation,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    if !crate::workbench::documents::result_document::viewer_uses_wave_stack(presentation.viewer)
+    if !crate::workbench::documents::result_document::viewer_uses_wave_stack(presentation.viewer())
         || run.analyses.len() < 2
         || run.analyses.len() > MAX_HARDCOPY_SOURCE_SET_MEMBERS
     {
@@ -556,14 +593,15 @@ pub(super) fn resolve_results_quick_view_stack(
                 analysis.id
             )));
         }
-        analysis
-            .validate_retained_evidence()
-            .map_err(HardcopySourceError::InvalidVisualizationSource)?;
         resolved_strips.push(resolve_results_quick_view_parts(
             format!("{source_key}:analysis:{}", analysis.id),
             project_id,
             HardcopyScope::ActivePlotDocument,
-            ActiveQuickResult { run, analysis },
+            &RetainedQuickViewSource::try_new(
+                run.as_ref(),
+                analysis.id,
+                |waveform: &WaveformData| waveform.visible,
+            )?,
             presentation,
         )?);
     }
@@ -572,7 +610,7 @@ pub(super) fn resolve_results_quick_view_stack(
         b"rspice-hardcopy-results-analysis-stack-set-v1",
         &(
             run.dataset_id,
-            presentation.viewer,
+            presentation.viewer(),
             run.analyses
                 .iter()
                 .map(|analysis| (analysis.id, analysis.result_data_digest()))
@@ -621,12 +659,12 @@ pub(super) fn resolve_results_quick_view_stack(
             run.dataset_id,
             run.run_id,
             run.dataset_content_digest(),
-            presentation.viewer,
+            presentation.viewer(),
             &semantic_document,
         ),
     )?;
     finish_resolved(
-        results_stack_identity(&source_key, project_id, run, presentation.viewer)?,
+        results_stack_identity(&source_key, project_id, run, presentation.viewer())?,
         content_digest,
         HardcopyDocumentKind::PlotOrWorksheet,
         scope,

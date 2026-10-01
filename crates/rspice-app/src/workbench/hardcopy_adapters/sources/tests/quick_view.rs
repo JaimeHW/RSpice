@@ -301,7 +301,8 @@ fn eye_quick_view_reconstructs_the_interactive_source_contract() {
     ));
     state.analysis.eye_diagram_state.load_data(stale_eye);
 
-    let period = retained_eye_bit_period(&time, &selected).unwrap();
+    // This alternating stimulus has successive rising edges two time units apart.
+    let period = 2.0;
     let expected = crate::analysis::eye_diagram::EyeDataBuilder::new()
         .bit_period(period)
         .ui_count(2)

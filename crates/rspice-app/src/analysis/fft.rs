@@ -27,7 +27,7 @@ pub use pipeline::{
 };
 #[cfg(test)]
 pub use state::FftFailure;
-pub use state::{FftState, InputFidelity};
+pub use state::FftState;
 pub use window::WindowFunction;
 
 /// Build arbitrary spectrum fixtures while retaining calibrated rectangular metadata.

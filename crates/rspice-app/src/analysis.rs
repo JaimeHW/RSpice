@@ -40,7 +40,8 @@ pub(crate) mod smith_chart;
 // the lib *with* `cfg(test)`; an import still reported unused there is used by
 // nobody and is safe to delete. Cross-check `--target wasm32-unknown-unknown`
 // the same way before deleting anything a browser-only path might name.
-pub use fft::{FftState, InputFidelity, WindowFunction};
+#[cfg(test)]
+pub use fft::WindowFunction;
 // Reached only by tests, and `bode`, `eye_diagram` and `fft` are private
 // modules, so these aliases are the only path to the types.
 pub use histogram::{HistogramBuilder, HistogramDisplayMode};

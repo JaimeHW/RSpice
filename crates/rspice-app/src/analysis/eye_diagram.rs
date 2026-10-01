@@ -9,7 +9,7 @@ pub(crate) mod state;
 pub use rspice_core::analysis::signal_integrity::EyeTrace;
 pub use rspice_core::analysis::signal_integrity::{
     EyeData, EyeDataBuilder, EyeMeasurements, UiEstimateRejection, calculate_eye_measurements,
-    crossing_phase_at, estimate_unit_interval, find_edges, fold_anchor,
+    crossing_phase_at, estimate_unit_interval, fold_anchor,
 };
 pub use state::{
     EyeDiagramState, EyeRateEditor, EyeTimebase, EyeTimebaseKey, EyeTimebaseProvenance,
