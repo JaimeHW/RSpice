@@ -203,9 +203,7 @@ pub use symbol::{
     SymbolEditorMetadata, SymbolPin, SymbolPinElectricalKind, SymbolShape, SymbolTextAlign,
     SymbolTextPlacement, SymbolTextSize, pin_side_against_body, symbol_text_bounds,
 };
-pub use symbol_resolver::{
-    ResolvedCellSymbol, ResolvedSymbolIssueKind, ResolvedSymbolSource, SymbolResolver,
-};
+pub use symbol_resolver::{ResolvedCellSymbol, ResolvedSymbolSource, SymbolResolver};
 pub(crate) use workspace::PreparedProjectLibraryMutation;
 pub use workspace::{
     CaptureGroup, CaptureGroupMembership, CaptureGroupRule, CellViewRef, ComplexExpressionPolicy,

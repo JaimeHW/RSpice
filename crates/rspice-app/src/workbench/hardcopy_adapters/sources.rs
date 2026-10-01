@@ -53,8 +53,7 @@ use crate::results::visualization_document::{
 };
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType, Bus, BusTap,
-    Component, ComponentType, DesignNote, DesignSheet, DocumentationShape,
-    DrawingSheetTitleFieldId, Junction, NetLabel, ResolvedSymbolIssueKind, ResolvedSymbolSource,
+    Component, DesignNote, DocumentationShape, DrawingSheetTitleFieldId, Junction, NetLabel,
     SchematicSheetFormat, SchematicState, Selection, SheetCatalog, SheetId, SimulationRun,
     SimulationState, SymbolDocument, SymbolResolver, ViewType, WaveformData, Wire,
 };
@@ -77,34 +76,31 @@ use crate::workbench::documents::visualization_studio::{
 use crate::workbench::lifecycle::session::SymbolSelection;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
-pub struct SchematicHardcopySource<'a> {
-    pub identity: HardcopySourceIdentity,
-    pub schematic: &'a SchematicState,
-    pub expected_topology_version: u64,
-    pub symbol_resolver: Option<&'a SymbolResolver<'a>>,
-    /// Optional governed multi-sheet partition. Absence means the legacy
-    /// single-sheet document. When present, `sheet_id` must name an exact
-    /// retained catalog sheet and only objects owned by that sheet resolve.
-    pub sheet_catalog: Option<&'a SheetCatalog>,
-    pub sheet_id: Option<SheetId>,
-    /// Current project default used by the canvas for ungoverned documents
-    /// and for governed sheets that follow the project default.
-    pub project_default_drawing_sheet: Option<&'a SchematicSheetFormat>,
-    /// Canonical project-owned values used by every sheet title block.
-    pub project_title_block_field_values:
-        Option<&'a std::collections::BTreeMap<DrawingSheetTitleFieldId, String>>,
-    pub scope: HardcopyScope,
-}
-
-pub struct SchematicSheetSetHardcopySource<'a> {
-    pub identity: HardcopySourceIdentity,
-    pub schematic: &'a SchematicState,
-    pub expected_topology_version: u64,
-    pub symbol_resolver: Option<&'a SymbolResolver<'a>>,
-    pub sheet_catalog: &'a SheetCatalog,
-    pub project_default_drawing_sheet: &'a SchematicSheetFormat,
-    pub project_title_block_field_values:
-        &'a std::collections::BTreeMap<DrawingSheetTitleFieldId, String>,
+fn capture_schematic_selection<'a>(
+    selection: &'a Selection,
+    scope: &HardcopyScope,
+) -> Option<SchematicHardcopySelection<'a>> {
+    matches!(scope, HardcopyScope::Selection).then(|| SchematicHardcopySelection {
+        components: &selection.components,
+        wires: selection
+            .wires
+            .iter()
+            .copied()
+            .chain(selection.wire_segments.iter().map(|handle| handle.wire_id))
+            .chain(selection.wire_vertices.iter().map(|handle| handle.wire_id))
+            .collect(),
+        junctions: selection
+            .junctions
+            .iter()
+            .map(|junction| junction.pos)
+            .collect(),
+        buses: &selection.buses,
+        bus_taps: &selection.bus_taps,
+        net_labels: &selection.net_labels,
+        design_notes: &selection.design_notes,
+        documentation_shapes: &selection.documentation_shapes,
+        has_probes: !selection.probes.is_empty(),
+    })
 }
 
 pub struct SymbolHardcopySource<'a> {
@@ -1443,9 +1439,10 @@ pub(crate) fn resolve_active_app_hardcopy_source(
                     );
                     resolve_schematic_source(SchematicHardcopySource {
                         identity,
-                        schematic: &state.schematic,
+                        schematic: state.schematic.editor_ref().design,
+                        selection: None,
                         expected_topology_version: state.schematic.topology_version(),
-                        symbol_resolver: Some(&resolver),
+                        symbol_resolver: Some(resolver.design_resolver()),
                         sheet_catalog: None,
                         sheet_id: None,
                         project_default_drawing_sheet: Some(
@@ -1624,30 +1621,6 @@ fn active_cell_view_identity(
     )?)
 }
 
-pub(super) fn schematic_sheet_identity(
-    base: &HardcopySourceIdentity,
-    sheet: &DesignSheet,
-) -> Result<HardcopySourceIdentity, HardcopySourceError> {
-    let mut identity_material = b"rspice-hardcopy-schematic-sheet-v1:".to_vec();
-    identity_material.extend_from_slice(sheet.id().as_uuid().as_bytes());
-    let mut identity = HardcopySourceIdentity::try_new(
-        format!("{}:sheet:{}", base.source_key, sheet.id()),
-        HardcopyDocumentId::try_from_uuid(Uuid::new_v5(
-            &base.document_id.as_uuid(),
-            &identity_material,
-        ))
-        .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
-        ObjectRevision::new(sheet.revision())
-            .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
-        compact_display(
-            &format!("{} · {}", base.display_name, sheet.name()),
-            "Schematic sheet",
-        ),
-    )?;
-    identity.publication.clone_from(&base.publication);
-    Ok(identity)
-}
-
 fn require_active_result_document(
     state: &AppState,
     expected_dataset: DatasetId,
@@ -1661,58 +1634,6 @@ fn require_active_result_document(
             "result dataset",
         )),
     }
-}
-
-fn resolve_component_symbol(
-    component: &Component,
-    resolver: Option<&SymbolResolver<'_>>,
-) -> Result<(Option<SymbolDocument>, Option<SemanticSymbolSource>), HardcopySourceError> {
-    if component.kind != ComponentType::CellInstance {
-        return Ok((None, None));
-    }
-    let binding = component.library_cell.as_ref().ok_or_else(|| {
-        HardcopySourceError::UnresolvedCellSymbol {
-            component_id: component.id,
-            reason: "cell instance has no library/cell/view binding".to_owned(),
-        }
-    })?;
-    if binding.is_executable_builtin() {
-        // Compiled catalog devices are not authored project masters. Preserve
-        // the instance for deterministic catalog/fallback rendering.
-        return Ok((None, None));
-    }
-    let resolver = resolver.ok_or_else(|| HardcopySourceError::UnresolvedCellSymbol {
-        component_id: component.id,
-        reason: "no symbol resolver was supplied for the active project snapshot".to_owned(),
-    })?;
-    let resolved = resolver.resolve_binding(binding).ok_or_else(|| {
-        HardcopySourceError::UnresolvedCellSymbol {
-            component_id: component.id,
-            reason: format!(
-                "no authored or generated symbol is retained for {}/{}",
-                binding.library, binding.cell
-            ),
-        }
-    })?;
-    if resolved
-        .issues()
-        .iter()
-        .any(|issue| issue.kind == ResolvedSymbolIssueKind::InvalidMetadata)
-    {
-        return Err(HardcopySourceError::InvalidAuthoredSymbol(component.id));
-    }
-    let source = match resolved.source() {
-        ResolvedSymbolSource::Authored => SemanticSymbolSource::Authored,
-        ResolvedSymbolSource::Generated => SemanticSymbolSource::Generated,
-    };
-    let mut printable_document = resolved.document().clone();
-    // The reconciled pin contract, not orphan metadata, is what the
-    // schematic renderer exposes. Freeze exactly that connectable set.
-    printable_document.pins = resolved
-        .connectable_pins()
-        .map(|pin| crate::state::SymbolPin::new(pin.name.clone(), pin.direction, Some(pin.offset)))
-        .collect();
-    Ok((Some(printable_document), Some(source)))
 }
 
 fn selected_symbol_document(

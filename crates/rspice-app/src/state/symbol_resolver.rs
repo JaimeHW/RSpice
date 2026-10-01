@@ -1,9 +1,7 @@
 //! Resolve symbols over the current editor buffers and library catalog.
 
 use super::{CellViewRef, LibraryCellInstance, LibraryManager};
-pub use rspice_design::resolved_symbol::{
-    ResolvedCellSymbol, ResolvedSymbolIssueKind, ResolvedSymbolSource,
-};
+pub use rspice_design::resolved_symbol::{ResolvedCellSymbol, ResolvedSymbolSource};
 use rspice_design::schematic::{document::SchematicDocument, owned::Schematic};
 use rspice_design::symbol_resolver as resolution;
 use std::collections::HashMap;
@@ -17,6 +15,9 @@ impl<'a, S: AsRef<SchematicDocument>> SymbolResolver<'a, S> {
         Self {
             resolver: resolution::SymbolResolver::new(libraries.catalog(), schematic_buffers),
         }
+    }
+    pub(crate) fn design_resolver(&self) -> &resolution::SymbolResolver<'a, S> {
+        &self.resolver
     }
     pub fn resolve_binding(&self, binding: &LibraryCellInstance) -> Option<ResolvedCellSymbol> {
         self.resolver.resolve_binding(binding)

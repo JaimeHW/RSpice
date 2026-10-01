@@ -71,7 +71,8 @@ mod tests {
                         catalog.find(sheet_id).unwrap(),
                     )
                     .unwrap(),
-                    schematic: &schematic,
+                    schematic: schematic.editor_ref().design,
+                    selection: None,
                     expected_topology_version: schematic.topology_version(),
                     symbol_resolver: None,
                     sheet_catalog: Some(&catalog),

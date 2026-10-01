@@ -1685,9 +1685,9 @@ impl PreparedRetainedHardcopyResolution {
                     })?;
                     return resolve_all_schematic_sheets(SchematicSheetSetHardcopySource {
                         identity,
-                        schematic: &schematic,
+                        schematic: schematic.editor_ref().design,
                         expected_topology_version: schematic.topology_version(),
-                        symbol_resolver: Some(&resolver),
+                        symbol_resolver: Some(resolver.design_resolver()),
                         sheet_catalog: catalog,
                         project_default_drawing_sheet: &project_default_drawing_sheet,
                         project_title_block_field_values: &project_title_block_field_values,
@@ -1695,9 +1695,10 @@ impl PreparedRetainedHardcopyResolution {
                 }
                 resolve_schematic_source(SchematicHardcopySource {
                     identity,
-                    schematic: &schematic,
+                    schematic: schematic.editor_ref().design,
+                    selection: capture_schematic_selection(&schematic.session.selection, &scope),
                     expected_topology_version: schematic.topology_version(),
-                    symbol_resolver: Some(&resolver),
+                    symbol_resolver: Some(resolver.design_resolver()),
                     sheet_catalog: sheet_catalog.as_ref(),
                     sheet_id,
                     project_default_drawing_sheet: Some(&project_default_drawing_sheet),

@@ -19,6 +19,7 @@ rspice-design-model.workspace = true
 rspice-hardcopy-contract.workspace = true
 rspice-results = { workspace = true, features = ["engine-evidence"] }
 serde.workspace = true
+uuid.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 unicode-segmentation = "1.12"
@@ -33,5 +34,4 @@ tiff = { version = "0.11.3", default-features = false, features = ["deflate"] }
 ttf-parser = "0.25.1"
 
 [dev-dependencies]
-uuid.workspace = true
 lopdf = { version = "0.44", default-features = false }

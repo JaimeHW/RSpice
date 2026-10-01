@@ -7,6 +7,7 @@ mod geometry;
 mod mapping;
 mod plots;
 mod reports;
+mod schematic;
 mod semantic;
 
 pub(crate) use geometry::authored_sheet_bounds;
@@ -47,6 +48,10 @@ use rspice_results::visualization_document::{
 };
 use rspice_results::visualization_raster::{
     ResolvedCartesianLineScene, VisualizationRasterError, resolve_cartesian_line_scene,
+};
+pub use schematic::{
+    SchematicHardcopySelection, SchematicHardcopySource, SchematicSheetSetHardcopySource,
+    resolve_all_schematic_sheets, resolve_schematic_source, schematic_sheet_identity,
 };
 pub use semantic::*;
 use sha2::{Digest as _, Sha256};

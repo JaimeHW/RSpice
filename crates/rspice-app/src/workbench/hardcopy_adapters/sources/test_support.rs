@@ -55,9 +55,10 @@ pub(crate) fn resolve_retained_hardcopy_source(
             let identity = schematic_sheet_identity(&base_identity, sheet)?;
             return resolve_schematic_source(SchematicHardcopySource {
                 identity,
-                schematic: &state.schematic,
+                schematic: state.schematic.editor_ref().design,
+                selection: capture_schematic_selection(&state.schematic.session.selection, &scope),
                 expected_topology_version: state.schematic.topology_version(),
-                symbol_resolver: Some(&resolver),
+                symbol_resolver: Some(resolver.design_resolver()),
                 sheet_catalog: Some(catalog),
                 sheet_id: Some(sheet.id()),
                 project_default_drawing_sheet: Some(
@@ -102,9 +103,9 @@ pub(crate) fn resolve_retained_hardcopy_source(
                         })?;
                     return resolve_all_schematic_sheets(SchematicSheetSetHardcopySource {
                         identity,
-                        schematic: &state.schematic,
+                        schematic: state.schematic.editor_ref().design,
                         expected_topology_version: state.schematic.topology_version(),
-                        symbol_resolver: Some(&resolver),
+                        symbol_resolver: Some(resolver.design_resolver()),
                         sheet_catalog,
                         project_default_drawing_sheet: &state
                             .workspace
@@ -144,9 +145,13 @@ pub(crate) fn resolve_retained_hardcopy_source(
                 };
                 resolve_schematic_source(SchematicHardcopySource {
                     identity,
-                    schematic: &state.schematic,
+                    schematic: state.schematic.editor_ref().design,
+                    selection: capture_schematic_selection(
+                        &state.schematic.session.selection,
+                        &scope,
+                    ),
                     expected_topology_version: state.schematic.topology_version(),
-                    symbol_resolver: Some(&resolver),
+                    symbol_resolver: Some(resolver.design_resolver()),
                     sheet_catalog,
                     sheet_id,
                     project_default_drawing_sheet: matches!(
