@@ -13,12 +13,16 @@ workspace = true
 
 [features]
 default = []
+# Plot painting shares the results owner's exact axis and sampling contracts.
+plot = ["dep:rspice-app-types", "dep:rspice-results"]
 # Existing CPU render helpers shared by widget and application tests.
 test-support = ["dep:sha2"]
 
 [dependencies]
 egui = { version = "0.35.0", default-features = false }
 serde.workspace = true
+rspice-app-types = { workspace = true, optional = true }
+rspice-results = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 
 [dev-dependencies]

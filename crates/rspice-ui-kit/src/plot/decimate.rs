@@ -32,7 +32,7 @@ pub enum DisplayDecimation {
 pub struct DecimationCache {
     map: HashMap<CacheKey, Entry>,
     /// Retained source identity when trace keys are scoped to a source owner.
-    source: Option<crate::source_revision::SourceRevision>,
+    source: Option<rspice_app_types::source_revision::SourceRevision>,
     /// Data version the cache contents belong to.
     version: u64,
     /// Frame tick, advanced once per frame by `ensure_version` — eviction
@@ -131,7 +131,7 @@ impl DecimationCache {
     /// Bind logical trace keys to their current source before reading them.
     /// A restored source or an edited clone can reuse numeric IDs and versions;
     /// retaining this small revision prevents either from reusing old samples.
-    pub(crate) fn ensure_source(&mut self, source: &crate::source_revision::SourceRevision) {
+    pub fn ensure_source(&mut self, source: &rspice_app_types::source_revision::SourceRevision) {
         if self.source.as_ref() != Some(source) {
             self.invalidate();
             self.source = Some(source.clone());
@@ -139,7 +139,7 @@ impl DecimationCache {
     }
 
     /// Discard derived samples while preserving the configured memory budget.
-    pub(crate) fn invalidate(&mut self) {
+    pub fn invalidate(&mut self) {
         self.map.clear();
         self.resident_bytes = 0;
     }
@@ -191,6 +191,9 @@ impl DecimationCache {
     /// would be answering a question those curves have no single answer to.
     /// See [`decimate_pixel_cells`]. A trace that declares no shape is read as
     /// ascending, which is what every caller meant before shapes existed.
+    // Preserve the existing cache contract: source identity/data, projection,
+    // reduction mode and sweep classification are independently supplied.
+    #[expect(clippy::too_many_arguments)]
     pub fn series(
         &mut self,
         mode: DisplayDecimation,

@@ -5812,6 +5812,8 @@ name = "rspice-ui-kit"
 version = "0.1.0"
 dependencies = [
  "egui",
+ "rspice-app-types",
+ "rspice-results",
  "serde",
  "serde_json",
  "sha2 0.10.9",

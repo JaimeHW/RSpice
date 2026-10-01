@@ -38,7 +38,7 @@ rspice-automation-protocol = { path = "../rspice-automation-protocol", version =
 # links this crate rather than the GUI.
 rspice-design-model = { workspace = true }
 rspice-app-types.workspace = true
-rspice-ui-kit.workspace = true
+rspice-ui-kit = { workspace = true, features = ["plot"] }
 rspice-design = { workspace = true, features = ["symbol-artwork"] }
 rspice-project.workspace = true
 rspice-results = { workspace = true, features = ["engine-evidence"] }

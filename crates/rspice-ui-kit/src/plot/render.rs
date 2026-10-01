@@ -5,8 +5,8 @@ use egui::{
     vec2,
 };
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::Tokens;
+use crate::theme::{self, FontWeight};
+use crate::tokens::Tokens;
 
 use super::cursor::CursorPair;
 use super::decimate::{DecimationCache, DisplayDecimation};
@@ -183,7 +183,7 @@ const BAND_FILL_ALPHA: f32 = 0.28;
 /// stimulus instrument's proof band and the properties dialog's preview card —
 /// and a band that read as a fill on one and as a stack of quads on the other
 /// would be two answers to what a range looks like in this product.
-pub(crate) fn paint_min_max_band(
+pub fn paint_min_max_band(
     painter: &egui::Painter,
     columns: &[(Pos2, Pos2)],
     color: Color32,
@@ -414,7 +414,7 @@ fn axis_accessibility_range(axis: &super::spec::Axis) -> String {
 }
 
 fn plot_accessibility_label(spec: &PlotSpec<'_>, cursors: Option<&CursorPair>) -> String {
-    use crate::ui::accessibility::counted;
+    use crate::accessibility::counted;
     let trace_count = spec
         .traces
         .iter()
@@ -1246,8 +1246,8 @@ fn draw_readout(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::plot::format::tick_label;
-    use crate::ui::plot::{Axis, Marker, Trace, XScale};
+    use crate::plot::format::tick_label;
+    use crate::plot::{Axis, Marker, Trace, XScale};
 
     #[test]
     fn an_ordinary_curve_stays_a_single_unbroken_run() {
@@ -1413,7 +1413,7 @@ mod tests {
         frames: &[Vec<egui::Event>],
     ) -> (Vec<egui::epaint::ClippedShape>, ViewChange) {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        crate::Theme::default().apply(&ctx);
         let mut cache = DecimationCache::default();
         let mut view = ViewChange::default();
         let mut shapes = Vec::new();
@@ -1648,7 +1648,7 @@ mod tests {
 
         let outcome = |mode: InteractionMode| {
             let ctx = egui::Context::default();
-            crate::ui::Theme::default().apply(&ctx);
+            crate::Theme::default().apply(&ctx);
             let mut cache = DecimationCache::default();
             let mut view = ViewChange::default();
             for events in drag_frames(shift) {
@@ -1784,7 +1784,7 @@ mod tests {
         .accessible_name("Transient waveform plot");
         spec.traces.push(Trace::new(&x, &y, egui::Color32::WHITE));
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        crate::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let output = ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {

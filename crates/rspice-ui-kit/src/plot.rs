@@ -24,7 +24,7 @@ mod decimate;
 mod render;
 mod spec;
 
-pub(crate) use rspice_results::{number_format as format, plot_axis as scale};
+pub use rspice_results::{number_format as format, plot_axis as scale};
 
 /// Sweep-shape classification and branch-aware sampling.
 ///
@@ -32,16 +32,15 @@ pub(crate) use rspice_results::{number_format as format, plot_axis as scale};
 /// reading `sample::SweepShape` is told where the answer comes from, and the
 /// branch queries beside it read as one contract rather than as loose
 /// functions among the plot's own types.
-pub(crate) use rspice_results::sampling as sample;
+pub use rspice_results::sampling as sample;
 
 pub use cursor::CursorPair;
-#[cfg(test)]
-pub(crate) use decimate::TraceView;
+pub use decimate::TraceView;
 pub use decimate::{DecimationCache, DisplayDecimation, SampleInterpolation, sample_at};
 pub use format::{fmt_si, fmt_si_significant, fmt_significant, si_tick_label, tick_with_unit};
-pub(crate) use render::paint_min_max_band;
+pub use render::paint_min_max_band;
 pub use render::{
-    InteractionMode, PlotResponse, ViewChange, plot_rect, set_interaction_mode, show,
+    InteractionMode, PlotResponse, ReadoutRow, ViewChange, plot_rect, set_interaction_mode, show,
     square_outer_rect,
 };
 pub use scale::{MAX_AXIS_TICKS, XScale, anchor_label, linear_ticks};
