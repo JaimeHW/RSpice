@@ -64,15 +64,19 @@ class DependencyPolicyTests(unittest.TestCase):
             {
                 "rspice-formats": {"rspice-project"},
                 "rspice-project-contract": {"rspice-project"},
+                "rspice-worker": {"rspice-project"},
             },
-            {"rspice-simulation": {"rspice-project-contract", "rspice-project"}},
+            {"rspice-simulation": {"rspice-project-contract", "rspice-project"},
+             "rspice-worker": {"rspice-simulation", "rspice-project"}},
         )
         self.assertEqual(
             issues,
             [
                 "rspice-formats has forbidden application dependency rspice-project",
                 "rspice-project-contract has forbidden application dependency rspice-project",
+                "rspice-worker has forbidden application dependency rspice-project",
                 "rspice-simulation reaches project aggregate rspice-project",
+                "rspice-worker reaches project aggregate rspice-project",
             ],
         )
 

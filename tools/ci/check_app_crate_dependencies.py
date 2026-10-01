@@ -52,7 +52,7 @@ ALLOWED: dict[str, set[str]] = {
     "rspice-worker": {
         "rspice-app-types", "rspice-results", "rspice-model-library",
         "rspice-simulation-contract", "rspice-hardcopy-contract", "rspice-design",
-        "rspice-project", "rspice-formats", "rspice-simulation", "rspice-hardcopy",
+        "rspice-project-contract", "rspice-formats", "rspice-simulation", "rspice-hardcopy",
     },
 }
 HEADLESS = set(ALLOWED) - {
@@ -85,7 +85,7 @@ def violations(
         if name in HEADLESS:
             for dep in sorted(dep for dep in closure if dep.startswith("egui") or dep in GUI_PACKAGES):
                 issues.append(f"{name} reaches GUI package {dep}")
-        if name in {"rspice-simulation", "rspice-project-contract"} and "rspice-project" in closure:
+        if name in {"rspice-simulation", "rspice-project-contract", "rspice-worker"} and "rspice-project" in closure:
             issues.append(f"{name} reaches project aggregate rspice-project")
         if name in {"rspice-app-types", "rspice-units"}:
             for dep in sorted(
@@ -117,11 +117,14 @@ def main() -> int:
         if name not in ALLOWED:
             continue
         direct[name] = {
-            dep["name"] for dep in package["dependencies"] if dep["kind"] != "dev"
+            dep["name"] for dep in package["dependencies"]
+            if dep["kind"] != "dev" or name == "rspice-worker"
         }
         tree = run(
             "cargo", "tree", "--locked", "-p", name, "--all-features",
-            "--target", "all", "--edges", "normal,build", "--prefix", "none",
+            "--target", "all", "--edges",
+            "normal,build,dev" if name == "rspice-worker" else "normal,build",
+            "--prefix", "none",
             "--format", "{p}",
         )
         closures[name] = {
