@@ -49,8 +49,9 @@ pub(super) enum PreparedRetainedHardcopyPayload {
     Schematic {
         project_id: ProjectId,
         identity: HardcopySourceIdentity,
-        schematic: SchematicState,
-        library_manager: crate::state::LibraryManager,
+        schematic: rspice_design::schematic::owned::Schematic,
+        selection: Selection,
+        library_manager: rspice_project::ProjectLibraries,
         schematic_buffers:
             std::collections::HashMap<String, rspice_design::schematic::owned::Schematic>,
         sheet_catalog: Option<SheetCatalog>,
@@ -164,8 +165,10 @@ struct PreparedSchematicOwner {
 }
 
 impl PreparedSchematicOwner {
-    fn capture(mut schematic: SchematicState) -> Self {
-        let selection = std::mem::take(&mut schematic.session.selection);
+    fn capture(
+        schematic: rspice_design::schematic::owned::Schematic,
+        selection: Selection,
+    ) -> Self {
         let document = schematic.into_document();
         Self {
             components: document.components,
@@ -180,9 +183,9 @@ impl PreparedSchematicOwner {
         }
     }
 
-    fn restore(self) -> SchematicState {
-        let mut schematic =
-            SchematicState::from_document(rspice_design::schematic::document::SchematicDocument {
+    fn restore(self) -> (rspice_design::schematic::owned::Schematic, Selection) {
+        let schematic = rspice_design::schematic::owned::Schematic::from_document(
+            rspice_design::schematic::document::SchematicDocument {
                 components: self.components,
                 wires: self.wires,
                 buses: self.buses,
@@ -192,9 +195,9 @@ impl PreparedSchematicOwner {
                 design_notes: self.design_notes,
                 documentation_shapes: self.documentation_shapes,
                 ..Default::default()
-            });
-        schematic.session.selection = self.selection;
-        schematic
+            },
+        );
+        (schematic, self.selection)
     }
 }
 
@@ -365,6 +368,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 project_id,
                 identity,
                 schematic,
+                selection,
                 library_manager,
                 schematic_buffers,
                 sheet_catalog,
@@ -374,7 +378,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 all_sheets,
                 scope,
             } => {
-                let schematic = PreparedSchematicOwner::capture(schematic);
+                let schematic = PreparedSchematicOwner::capture(schematic, selection);
                 let mut library_manager = library_manager;
                 library_manager.selected_library = None;
                 library_manager.selected_cell = None;
@@ -726,11 +730,11 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 all_sheets,
                 scope,
             } => {
-                let schematic = schematic
+                let (schematic, selection) = schematic
                     .restore::<PreparedSchematicOwner>("prepared schematic")?
                     .restore();
                 let library_manager = library_manager
-                    .restore::<crate::state::LibraryManager>("prepared symbol library")?;
+                    .restore::<rspice_project::ProjectLibraries>("prepared symbol library")?;
                 let schematic_buffers = schematic_buffers
                     .restore::<std::collections::BTreeMap<String, PreparedSchematicInterfaceOwner>>(
                         "prepared schematic symbol buffers",
@@ -751,6 +755,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     project_id,
                     identity,
                     schematic,
+                    selection,
                     library_manager,
                     schematic_buffers,
                     sheet_catalog,
@@ -1349,6 +1354,7 @@ impl PreparedRetainedHardcopyResolution {
                 project_id: _,
                 identity,
                 schematic,
+                selection,
                 library_manager,
                 schematic_buffers,
                 sheet_catalog,
@@ -1358,7 +1364,10 @@ impl PreparedRetainedHardcopyResolution {
                 all_sheets,
                 scope,
             } => {
-                let resolver = SymbolResolver::new(&library_manager, &schematic_buffers);
+                let resolver = rspice_design::symbol_resolver::SymbolResolver::new(
+                    library_manager.catalog(),
+                    &schematic_buffers,
+                );
                 if all_sheets {
                     let catalog = sheet_catalog.as_ref().ok_or_else(|| {
                         HardcopySourceError::InvalidSheetPartition(
@@ -1367,9 +1376,9 @@ impl PreparedRetainedHardcopyResolution {
                     })?;
                     return resolve_all_schematic_sheets(SchematicSheetSetHardcopySource {
                         identity,
-                        schematic: schematic.editor_ref().design,
+                        schematic: &schematic,
                         expected_topology_version: schematic.topology_version(),
-                        symbol_resolver: Some(resolver.design_resolver()),
+                        symbol_resolver: Some(&resolver),
                         sheet_catalog: catalog,
                         project_default_drawing_sheet: &project_default_drawing_sheet,
                         project_title_block_field_values: &project_title_block_field_values,
@@ -1377,10 +1386,10 @@ impl PreparedRetainedHardcopyResolution {
                 }
                 resolve_schematic_source(SchematicHardcopySource {
                     identity,
-                    schematic: schematic.editor_ref().design,
-                    selection: capture_schematic_selection(&schematic.session.selection, &scope),
+                    schematic: &schematic,
+                    selection: capture_schematic_selection(&selection, &scope),
                     expected_topology_version: schematic.topology_version(),
-                    symbol_resolver: Some(resolver.design_resolver()),
+                    symbol_resolver: Some(&resolver),
                     sheet_catalog: sheet_catalog.as_ref(),
                     sheet_id,
                     project_default_drawing_sheet: Some(&project_default_drawing_sheet),

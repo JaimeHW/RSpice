@@ -355,10 +355,6 @@ impl SchematicState {
         (self.design.document(), &mut self.session.selection)
     }
 
-    pub(crate) fn into_document(self) -> SchematicDocument {
-        self.design.into_document()
-    }
-
     /// Fixtures can model invalid or externally changed content without a
     /// mutable document accessor in production.
     #[cfg(test)]

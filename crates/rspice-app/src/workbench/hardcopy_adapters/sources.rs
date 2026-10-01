@@ -32,6 +32,11 @@ pub const BLANK_SCHEMATIC_SHEET_HEIGHT_UM: i64 = 215_900;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub(super) const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 8;
 
+#[cfg(test)]
+use crate::state::SchematicState;
+#[cfg(test)]
+use rspice_design::symbol_resolver::SymbolResolver;
+
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use uuid::Uuid;
 
@@ -46,8 +51,8 @@ use crate::results::visualization_document::{Page, PageId, Pane, PaneId, Visuali
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType, Bus, BusTap,
     Component, DesignNote, DocumentationShape, DrawingSheetTitleFieldId, Junction, NetLabel,
-    SchematicSheetFormat, SchematicState, Selection, SheetCatalog, SheetId, SimulationRun,
-    SimulationState, SymbolDocument, SymbolResolver, ViewType, WaveformData, Wire,
+    SchematicSheetFormat, Selection, SheetCatalog, SheetId, SimulationRun, SimulationState,
+    SymbolDocument, ViewType, WaveformData, Wire,
 };
 use crate::workbench::AppState;
 
@@ -734,7 +739,8 @@ fn prepare_schematic_resolution(
         payload: PreparedRetainedHardcopyPayload::Schematic {
             project_id: state.workspace.content.project.id(),
             identity,
-            schematic: state.schematic.clone(),
+            schematic: state.schematic.editor_ref().design.clone(),
+            selection: state.schematic.session.selection.clone(),
             library_manager: state.library_manager.clone(),
             schematic_buffers: state.workspace.content.schematic_buffers.clone(),
             sheet_catalog,
@@ -1367,7 +1373,7 @@ pub(crate) fn resolve_active_app_hardcopy_source(
             match state.workspace.content.active_view_type() {
                 ViewType::Schematic | ViewType::Testbench => {
                     let resolver = SymbolResolver::new(
-                        &state.library_manager,
+                        state.library_manager.catalog(),
                         &state.workspace.content.schematic_buffers,
                     );
                     resolve_schematic_source(SchematicHardcopySource {
@@ -1375,7 +1381,7 @@ pub(crate) fn resolve_active_app_hardcopy_source(
                         schematic: state.schematic.editor_ref().design,
                         selection: None,
                         expected_topology_version: state.schematic.topology_version(),
-                        symbol_resolver: Some(resolver.design_resolver()),
+                        symbol_resolver: Some(&resolver),
                         sheet_catalog: None,
                         sheet_id: None,
                         project_default_drawing_sheet: Some(

@@ -49,7 +49,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
         {
             let base_identity = active_cell_view_identity(state)?;
             let resolver = SymbolResolver::new(
-                &state.library_manager,
+                state.library_manager.catalog(),
                 &state.workspace.content.schematic_buffers,
             );
             let identity = schematic_sheet_identity(&base_identity, sheet)?;
@@ -58,7 +58,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
                 schematic: state.schematic.editor_ref().design,
                 selection: capture_schematic_selection(&state.schematic.session.selection, &scope),
                 expected_topology_version: state.schematic.topology_version(),
-                symbol_resolver: Some(resolver.design_resolver()),
+                symbol_resolver: Some(&resolver),
                 sheet_catalog: Some(catalog),
                 sheet_id: Some(sheet.id()),
                 project_default_drawing_sheet: Some(
@@ -86,7 +86,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
         return match state.workspace.content.active_view_type() {
             ViewType::Schematic | ViewType::Testbench => {
                 let resolver = SymbolResolver::new(
-                    &state.library_manager,
+                    state.library_manager.catalog(),
                     &state.workspace.content.schematic_buffers,
                 );
                 if matches!(scope, HardcopyScope::AllSheetsOrPanes) {
@@ -105,7 +105,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
                         identity,
                         schematic: state.schematic.editor_ref().design,
                         expected_topology_version: state.schematic.topology_version(),
-                        symbol_resolver: Some(resolver.design_resolver()),
+                        symbol_resolver: Some(&resolver),
                         sheet_catalog,
                         project_default_drawing_sheet: &state
                             .workspace
@@ -151,7 +151,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
                         &scope,
                     ),
                     expected_topology_version: state.schematic.topology_version(),
-                    symbol_resolver: Some(resolver.design_resolver()),
+                    symbol_resolver: Some(&resolver),
                     sheet_catalog,
                     sheet_id,
                     project_default_drawing_sheet: matches!(

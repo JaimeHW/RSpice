@@ -16,9 +16,6 @@ impl<'a, S: AsRef<SchematicDocument>> SymbolResolver<'a, S> {
             resolver: resolution::SymbolResolver::new(libraries.catalog(), schematic_buffers),
         }
     }
-    pub(crate) fn design_resolver(&self) -> &resolution::SymbolResolver<'a, S> {
-        &self.resolver
-    }
     pub fn resolve_binding(&self, binding: &LibraryCellInstance) -> Option<ResolvedCellSymbol> {
         self.resolver.resolve_binding(binding)
     }

@@ -766,10 +766,8 @@ fn a_repainted_instances_card_walks_the_sheet_once() {
     let existing = state
         .workspace
         .active_schematic()
-        .map(|source| source.clone_editor())
-        .expect("an active schematic")
-        .into_document()
-        .components;
+        .map(|source| source.document().components.clone())
+        .expect("an active schematic");
     place(&mut state, existing.into_iter().chain([second]).collect());
     assert_eq!(
         count(&mut state),
