@@ -96,16 +96,18 @@ pub use physical_layout::{
 pub use physical_layout::{LayoutInstance, LayoutOrientation, LayoutTransform};
 #[cfg(not(target_arch = "wasm32"))]
 pub use project_sources::MAX_PROJECT_SOURCE_DEPENDENCIES;
+#[cfg(not(target_arch = "wasm32"))]
+pub use project_sources::MAX_PROJECT_SOURCE_DEPENDENCY_DEPTH;
 pub use project_sources::{
     AutomationStarterFile, DEFAULT_AUTOMATION_PERMISSIONS, DEFAULT_AUTOMATION_PYTHON,
     DEFAULT_AUTOMATION_RUN_PLAN, DEFAULT_ENVIRONMENT_LOCK, MAX_PROJECT_CODE_SOURCE_BYTES,
-    MAX_PROJECT_SOURCE_BUNDLE_BYTES, MAX_PROJECT_SOURCE_DEPENDENCY_DEPTH, MAX_PROJECT_SOURCE_FILES,
-    MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES, MAX_PROJECT_SOURCE_QUALIFICATION_RECORDS,
-    PROJECT_SOURCE_REGISTRY_SCHEMA_VERSION, ProjectSourceBundle, ProjectSourceDependency,
-    ProjectSourceDocument, ProjectSourceFile, ProjectSourceId, ProjectSourceLanguage,
-    ProjectSourceOwner, ProjectSourceQualificationAttempt, ProjectSourceQualificationCheck,
-    ProjectSourceQualificationDisposition, ProjectSourceQualificationTarget, ProjectSourceRegistry,
-    ProjectSourceRole, ProjectSourceRoleBinding,
+    MAX_PROJECT_SOURCE_BUNDLE_BYTES, MAX_PROJECT_SOURCE_FILES,
+    MAX_PROJECT_SOURCE_QUALIFICATION_RECORDS, PROJECT_SOURCE_REGISTRY_SCHEMA_VERSION,
+    ProjectSourceBundle, ProjectSourceDependency, ProjectSourceDocument, ProjectSourceFile,
+    ProjectSourceId, ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceQualificationAttempt,
+    ProjectSourceQualificationCheck, ProjectSourceQualificationDisposition,
+    ProjectSourceQualificationTarget, ProjectSourceRegistry, ProjectSourceRole,
+    ProjectSourceRoleBinding,
 };
 pub(crate) use project_sources::{
     CanonicalCellViewOwnerKey, canonical_cell_view_owner_key, project_source_path_key,

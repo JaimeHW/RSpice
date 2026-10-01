@@ -8,18 +8,7 @@ fn import(
     files: Vec<(String, Vec<u8>)>,
     section: Option<&str>,
 ) -> Result<(String, ModelLibrary), String> {
-    let veriloga_limits = rspice_veriloga::VirtualCompileLimits::default();
-    import_source_bundle(
-        display_name,
-        root_member,
-        files,
-        section,
-        ImportLimits {
-            max_files: veriloga_limits.max_files,
-            max_total_bytes: veriloga_limits.max_total_source_bytes,
-        },
-        veriloga_limits,
-    )
+    import_project_source_bundle(display_name, root_member, files, section)
 }
 
 #[test]
