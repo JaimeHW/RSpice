@@ -104,13 +104,17 @@ fn workbench_without_a_project_page_defaults_to_overview() {
 
 #[test]
 fn visualization_studio_presentation_round_trips_with_the_workbench() {
+    use crate::workbench::documents::visualization_studio::{
+        ViewerTool, VisualizationSection, VisualizationStudioState,
+    };
+
     let mut state = WorkbenchState::default();
-    state.visualization_studio.section =
-        crate::workbench::documents::visualization_studio::VisualizationSection::Axes;
-    state.visualization_studio.tool =
-        crate::workbench::documents::visualization_studio::ViewerTool::Pan;
+    state.visualization_studio.section = VisualizationSection::Axes;
+    state.visualization_studio.tool = ViewerTool::Pan;
     state.visualization_studio.zoom = 2.5;
     state.visualization_studio.selected_viewer_document = "viewer-bode".to_owned();
+
+    state.visualization_studio.family_query = "session-only filter".to_owned();
 
     let encoded = serde_json::to_string(&state).expect("workbench serializes");
     let restored: WorkbenchState =
@@ -118,17 +122,46 @@ fn visualization_studio_presentation_round_trips_with_the_workbench() {
 
     assert_eq!(
         restored.visualization_studio.section,
-        crate::workbench::documents::visualization_studio::VisualizationSection::Axes
+        VisualizationSection::Axes
     );
-    assert_eq!(
-        restored.visualization_studio.tool,
-        crate::workbench::documents::visualization_studio::ViewerTool::Pan
-    );
+    assert_eq!(restored.visualization_studio.tool, ViewerTool::Pan);
     assert_eq!(restored.visualization_studio.zoom, 2.5);
     assert_eq!(
         restored.visualization_studio.selected_viewer_document,
         "viewer-bode"
     );
+
+    let presentation_json = serde_json::to_value(&state.visualization_studio).unwrap();
+    let fields = presentation_json.as_object().unwrap();
+    assert_eq!(fields.len(), 25);
+    assert!(!fields.contains_key("presentation"));
+    assert!(!fields.contains_key("family_query"));
+    assert!(restored.visualization_studio.family_query.is_empty());
+    let presentation: rspice_results::studio_presentation::VisualizationStudioPresentation =
+        serde_json::from_value(presentation_json.clone()).unwrap();
+    assert_eq!(presentation, state.visualization_studio.presentation);
+    assert_eq!(
+        serde_json::to_value(&presentation).unwrap(),
+        presentation_json
+    );
+
+    let ron = ron::ser::to_string_pretty(
+        &state.visualization_studio,
+        ron::ser::PrettyConfig::default().struct_names(true),
+    )
+    .unwrap();
+    assert!(ron.starts_with("VisualizationStudioState("));
+    assert_eq!(
+        ron,
+        ron::ser::to_string_pretty(
+            &presentation,
+            ron::ser::PrettyConfig::default().struct_names(true),
+        )
+        .unwrap(),
+    );
+    let restored: VisualizationStudioState = ron::from_str(&ron).unwrap();
+    assert_eq!(restored.presentation, presentation);
+    assert!(restored.family_query.is_empty());
 }
 
 #[test]

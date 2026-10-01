@@ -1070,23 +1070,20 @@ fn page_editor_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
             return true;
         }
         let result = app.state.workbench.visualization_studio.transact(|studio| {
+            let studio = &mut studio.presentation;
             let pane = studio
                 .panes
                 .iter_mut()
                 .find(|pane| pane.id == pane_id)
                 .ok_or_else(|| "The selected visualization pane no longer exists".to_owned())?;
             pane.page = page;
-            let policy_revision = studio
-                .report_page_policies
-                .get(&pane.page)
-                .map(|policy| {
-                    policy
-                        .revision
-                        .checked_add(1)
-                        .ok_or_else(|| "Report page revision space is exhausted".to_owned())
-                })
-                .transpose()?
-                .unwrap_or(1);
+            let policy_revision = match studio.report_page_policies.get(&pane.page) {
+                Some(policy) => policy
+                    .revision
+                    .checked_add(1)
+                    .ok_or_else(|| "Report page revision space is exhausted".to_owned())?,
+                None => 1,
+            };
             studio.report_page_policies.insert(
                 pane.page.clone(),
                 VisualizationReportPagePolicy {
@@ -1705,9 +1702,9 @@ pub(super) fn commit_comparison_execution(
         edits.push(DocumentEdit::RecordComparison(execution.receipt));
         transact_active_project_document(app, edits)?;
         reconcile_document(app);
-        let studio = &mut app.state.workbench.visualization_studio;
-        studio.difference_trace_sets = projected_studio.difference_trace_sets;
+        let studio = &mut app.state.workbench.visualization_studio.presentation;
         studio.next_identity = studio.next_identity.max(projected_studio.next_identity);
+        studio.difference_trace_sets = projected_studio.presentation.difference_trace_sets;
         studio.normalize();
         return Ok(());
     }

@@ -61,11 +61,13 @@ use crate::hardcopy::sources::{
     validate_label,
 };
 use crate::workbench::documents::result_document::ResultViewer;
-use crate::workbench::documents::visualization_studio::{
-    VisualizationPane as StudioPane, VisualizationStudioState,
-};
+#[cfg(test)]
+use crate::workbench::documents::visualization_studio::VisualizationStudioState;
 use crate::workbench::lifecycle::session::SymbolSelection;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
+use rspice_results::studio_presentation::{
+    VisualizationPane as StudioPane, VisualizationStudioPresentation,
+};
 
 fn capture_schematic_selection<'a>(
     selection: &'a Selection,
@@ -101,14 +103,11 @@ pub struct SymbolHardcopySource<'a> {
     pub scope: HardcopyScope,
 }
 
-/// Direct adapter over the application's retained Visualization Studio model.
-/// It is crate-visible because the studio state itself is an internal UI
-/// document; callers outside the workbench use the canonical
-/// `VisualizationDocument` adapter above.
+/// Adapter over retained Studio presentation and application result history.
 pub(crate) struct ActiveStudioPaneHardcopySource<'a> {
     pub source_key: String,
     pub project_id: ProjectId,
-    pub studio: &'a VisualizationStudioState,
+    pub studio: &'a VisualizationStudioPresentation,
     pub simulation: &'a SimulationState,
     pub pane_id: u64,
     pub scope: HardcopyScope,
@@ -673,7 +672,7 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
         })
     {
         let all_panes = matches!(scope, HardcopyScope::AllSheetsOrPanes);
-        let mut studio = state.workbench.visualization_studio.clone();
+        let mut studio = state.workbench.visualization_studio.presentation.clone();
         let relevant_panes = if all_panes {
             studio.panes.clone()
         } else {

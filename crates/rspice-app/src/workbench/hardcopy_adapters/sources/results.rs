@@ -10,7 +10,7 @@ use super::*;
 
 fn studio_source<'a>(
     project_id: ProjectId,
-    studio: &'a VisualizationStudioState,
+    studio: &'a VisualizationStudioPresentation,
     simulation: &'a SimulationState,
 ) -> StudioHardcopySource<'a, SimulationRun, WaveformData> {
     StudioHardcopySource {
@@ -34,7 +34,7 @@ fn studio_source<'a>(
 
 pub(crate) fn resolve_all_studio_panes(
     project_id: ProjectId,
-    studio: &VisualizationStudioState,
+    studio: &VisualizationStudioPresentation,
     simulation: &SimulationState,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
     resolve_studio_document(&studio_source(project_id, studio, simulation))

@@ -77,7 +77,7 @@ pub(super) enum PreparedRetainedHardcopyPayload {
     Studio {
         source_key: String,
         project_id: ProjectId,
-        studio: VisualizationStudioState,
+        studio: VisualizationStudioPresentation,
         simulation: SimulationState,
         pane_id: u64,
         all_panes: bool,
@@ -837,8 +837,8 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 all_panes,
                 scope,
             } => {
-                let studio =
-                    studio.restore::<VisualizationStudioState>("prepared visualization studio")?;
+                let studio = studio
+                    .restore::<VisualizationStudioPresentation>("prepared visualization studio")?;
                 let simulation = crate::io::simulation_state_from_results(
                     simulation_results
                         .restore::<ProjectSimulationResults>("prepared studio result history")?,
@@ -1070,7 +1070,7 @@ fn validate_prepared_schematic_identity(
 fn validate_prepared_studio_snapshot(
     project_id: ProjectId,
     source_key: &str,
-    studio: &VisualizationStudioState,
+    studio: &VisualizationStudioPresentation,
     simulation: &SimulationState,
     pane_id: u64,
     all_panes: bool,
