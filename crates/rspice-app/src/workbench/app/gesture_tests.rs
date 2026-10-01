@@ -548,6 +548,92 @@ fn gesture_window_projection_preserves_ownership_and_inactive_save_baselines() {
 }
 
 #[test]
+fn gesture_occurrence_and_sheet_changes_cancel_the_original_transaction() {
+    use crate::state::{
+        LibraryCellInstance, SheetDefinition, SheetPortPolicy, SheetTemplate, ViewType,
+    };
+    for occurrence_change in [false, true] {
+        let mut fixture = Fixture::new(false);
+        let master = fixture.second_document();
+        let child = fixture.app.state.schematic.clone();
+        fixture.app.state.schematic = SchematicState::default();
+        for x in [0, 200] {
+            fixture.app.state.schematic.add_library_cell_component(
+                Point::new(x, 0),
+                LibraryCellInstance::new(&master.library, &master.cell, &master.view),
+            );
+        }
+        fixture.app.state.sync_active_schematic_to_workspace();
+        fixture
+            .app
+            .state
+            .workspace
+            .insert_schematic_editor(master.key(), child);
+        fixture
+            .app
+            .state
+            .descend_into_instance(Some("X1".into()), master.clone());
+        let id = fixture.app.state.schematic.document().components[0].id;
+        let first = fixture
+            .app
+            .state
+            .workspace
+            .content
+            .design_management
+            .bootstrap_for_cell_view(&master.key(), "Sheet 1", [id])
+            .unwrap();
+        let catalog = fixture
+            .app
+            .state
+            .workspace
+            .content
+            .design_management
+            .sheet_catalog_mut(&master.key())
+            .unwrap();
+        let second = catalog
+            .create_sheet(
+                SheetDefinition {
+                    name: "Sheet 2".into(),
+                    template: SheetTemplate::AnalogSchematic,
+                    port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                    explicit_page_number: Some(2),
+                },
+                Some(first),
+            )
+            .unwrap();
+        catalog.set_active(first).unwrap();
+        fixture.drag(DragType::MoveSelection);
+        if occurrence_change {
+            fixture.app.state.workspace.ascend_one().unwrap();
+            fixture
+                .app
+                .state
+                .workspace
+                .descend_into("X2".into(), master, ViewType::Schematic);
+        } else {
+            fixture
+                .app
+                .state
+                .workspace
+                .content
+                .design_management
+                .sheet_catalog_mut(&master.key())
+                .unwrap()
+                .set_active(second)
+                .unwrap();
+        }
+        assert!(!fixture.app.state.schematic_drag_in_progress());
+        fixture.frame(vec![fixture.button(170.0, false)], true);
+        assert_eq!(
+            fixture.app.state.schematic.document().components[0].pos,
+            Point::new(100, 100)
+        );
+        assert!(!fixture.app.state.schematic.has_pending_operation());
+        assert!(!fixture.app.state.schematic.can_undo());
+    }
+}
+
+#[test]
 fn gesture_new_window_owner_and_owner_window_close_restore_the_old_buffer() {
     use crate::workbench::state::WorkspaceDocumentId;
     for close_owner in [false, true] {

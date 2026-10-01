@@ -296,9 +296,6 @@ pub(super) fn active_wire_at(state: &AppState, point: crate::state::Point) -> Op
 pub(super) fn active_junction_at(state: &AppState, point: crate::state::Point) -> Option<u64> {
     super::schematic_design_view(state).active_junction_at(point)
 }
-pub(super) fn active_wire_point_is_draggable(state: &AppState, point: crate::state::Point) -> bool {
-    super::schematic_design_view(state).active_wire_point_is_draggable(point)
-}
 
 /// Run a topology operation with hidden-sheet conductors removed from the
 /// mutable working set, then restore them unchanged. Operations such as

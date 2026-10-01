@@ -17,4 +17,5 @@ pub mod keyboard_navigation;
 
 pub mod design_view;
 pub mod pointer_target;
+pub mod selection_drag;
 pub mod snap_resolution;

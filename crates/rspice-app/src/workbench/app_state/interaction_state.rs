@@ -111,6 +111,8 @@ pub struct DragState {
 struct SchematicDragOwner {
     project: crate::product::ProjectId,
     document: crate::state::CellViewRef,
+    occurrence: Option<rspice_design::occurrence::DocumentOccurrence>,
+    sheet: Option<(Option<rspice_design_model::design_management::SheetId>, u64)>,
     window: crate::workbench::ApplicationWindowId,
     viewport: egui::ViewportId,
     operation_id: u64,
@@ -161,6 +163,8 @@ impl super::AppState {
         let owner = SchematicDragOwner {
             project: self.workspace.content.project.id(),
             document: self.workspace.content.active_schematic_reference(),
+            occurrence: self.workspace.content.active_occurrence().cloned(),
+            sheet: self.schematic_drag_sheet(),
             window: self.workbench.window_session.current(),
             viewport: ctx.viewport_id(),
             operation_id: self
@@ -172,7 +176,7 @@ impl super::AppState {
         true
     }
 
-    pub(crate) fn schematic_drag_in_progress(&self) -> bool {
+    fn schematic_drag_operation_is_current(&self) -> bool {
         self.dialogs
             .interaction
             .drag
@@ -183,6 +187,47 @@ impl super::AppState {
                     && owner.document == self.workspace.content.active_schematic_reference()
                     && Some(owner.operation_id) == self.schematic.pending_operation_id()
             })
+    }
+
+    fn schematic_drag_sheet(
+        &self,
+    ) -> Option<(Option<rspice_design_model::design_management::SheetId>, u64)> {
+        self.workspace
+            .content
+            .design_management
+            .sheet_catalog(&self.workspace.content.active_schematic_reference().key())
+            .map(|catalog| (catalog.active_sheet_id(), catalog.revision()))
+    }
+
+    pub(crate) fn schematic_drag_in_progress(&self) -> bool {
+        self.schematic_drag_operation_is_current()
+            && self
+                .dialogs
+                .interaction
+                .drag
+                .owner
+                .as_ref()
+                .is_some_and(|owner| {
+                    owner.occurrence.as_ref() == self.workspace.content.active_occurrence()
+                        && owner.sheet == self.schematic_drag_sheet()
+                })
+    }
+
+    pub(crate) fn schematic_drag_snapshot(
+        &self,
+        ctx: &egui::Context,
+    ) -> Option<rspice_schematic_editor::view::selection_drag::ActiveSelectionDrag> {
+        if !self.schematic_drag_owned_by_context(ctx) {
+            return None;
+        }
+        let drag = &self.dialogs.interaction.drag;
+        Some(
+            rspice_schematic_editor::view::selection_drag::ActiveSelectionDrag {
+                kind: drag.drag_type,
+                last_position: drag.last_pos.map(|(x, y)| crate::state::Point::new(x, y)),
+                operation_id: drag.owner.as_ref()?.operation_id,
+            },
+        )
     }
 
     pub(crate) fn schematic_drag_owned_by_context(&self, ctx: &egui::Context) -> bool {
@@ -202,7 +247,9 @@ impl super::AppState {
     /// Cancel only the transaction owned by this pointer gesture. A stale
     /// release must never modify a newly opened document or another operation.
     pub(crate) fn cancel_schematic_drag(&mut self) -> bool {
-        let active = self.schematic_drag_in_progress();
+        // Occurrence/sheet changes invalidate input but still roll back the
+        // matching active transaction rather than an inactive buffer copy.
+        let active = self.schematic_drag_operation_is_current();
         let Some(owner) = self.dialogs.interaction.drag.owner.take() else {
             return false;
         };
@@ -284,23 +331,7 @@ impl super::AppState {
 // Drag Type Enum
 // =============================================================================
 
-/// Type of drag operation
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum DragType {
-    /// No drag operation
-    #[default]
-    None,
-    /// Moving selected components/wires
-    MoveSelection,
-    /// Drawing a box selection rectangle
-    BoxSelect,
-    /// Panning the viewport
-    Pan,
-    /// Dragging a wire endpoint
-    WireEndpoint,
-    /// Dragging a wire vertex
-    WireVertex,
-}
+pub use rspice_schematic_editor::session::drag::DragType;
 
 // =============================================================================
 // Tests

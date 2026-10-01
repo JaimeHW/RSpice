@@ -13,7 +13,7 @@ use crate::state::{
     SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicProbe,
     Tool, ViewType,
 };
-use crate::workbench::app_state::{AppState, DragType};
+use crate::workbench::app_state::AppState;
 use rspice_design::connectivity::summary::{DesignNet, projection_nets};
 
 use super::SchematicSymbolContext;
@@ -22,9 +22,9 @@ use super::bus_interaction::{BusTapCandidateError, resolve_bus_tap_candidate_on_
 use super::coordinates::screen_to_schematic;
 use super::drawing::{WireScreenHit, nearest_wire_screen_hit};
 use super::navigation::primary_pan_gesture_active;
+use super::selection_drag::handle_select_dragging;
 use super::sheet_visibility::{
-    active_junction_at, active_wire_at, active_wire_point_is_draggable, objects_on_active_sheet,
-    retain_selection_on_active_sheet, select_in_rect_on_active_sheet, with_active_wire_topology,
+    active_junction_at, active_wire_at, objects_on_active_sheet, retain_selection_on_active_sheet,
 };
 use super::snap_resolution::{
     conductor_attachment_pitch, resolve_grid_pointer, resolve_target_pointer,
@@ -32,6 +32,10 @@ use super::snap_resolution::{
 };
 use super::stretch_interaction::handle_armed_stretch_selection;
 use super::viewport::Viewport;
+#[cfg(test)]
+use rspice_schematic_editor::view::selection_drag::{
+    select_drag_can_start, select_drag_is_authorized,
+};
 
 mod pin_placement;
 mod pointer_target;
@@ -735,271 +739,6 @@ fn report_unrepresentable_conductor_attachment(ui: &Ui, state: &mut AppState) {
         .toasts
         .warn_with_title(ui.ctx(), "Wire attachment unavailable", message.clone());
     state.push_user_message(ConsoleMessage::warning(message));
-}
-
-fn handle_select_dragging(
-    ui: &Ui,
-    response: &Response,
-    state: &mut AppState,
-    viewport: &Viewport,
-    symbol_context: &SchematicSymbolContext,
-) {
-    if !select_drag_is_authorized(
-        state.schematic.session.editor.tool,
-        state.dialogs.move_selection.armed,
-    ) {
-        return;
-    }
-
-    let filter = state.ui.schematic_selection_filter;
-    if filter.wires
-        && let Some(pos) = response.hover_pos()
-    {
-        let wire_position =
-            resolve_target_pointer(state, symbol_context, viewport, pos).snapped_position;
-        if active_wire_point_is_draggable(state, wire_position) {
-            state.dialogs.interaction.hover_wire_vertex = Some((wire_position.x, wire_position.y));
-        } else {
-            state.dialogs.interaction.hover_wire_vertex = None;
-        }
-    } else {
-        state.dialogs.interaction.hover_wire_vertex = None;
-    }
-
-    if response.drag_started_by(egui::PointerButton::Primary)
-        && let Some(pos) = ui.input(|input| input.pointer.press_origin())
-    {
-        let grid_pos = resolve_grid_pointer(state, viewport, pos).snapped_position;
-        let wire_position =
-            resolve_target_pointer(state, symbol_context, viewport, pos).snapped_position;
-        let hit_pos = screen_to_schematic(viewport, pos);
-        let hit_radius = target_acquisition_radius(viewport);
-        let target = pointer_target(
-            state,
-            PointerHit::new(grid_pos, hit_pos),
-            hit_radius,
-            symbol_context,
-            ui.ctx(),
-            viewport,
-            pos,
-        );
-
-        if !select_drag_can_start(primary_pan_gesture_active(ui, response)) {
-            return;
-        } else if state.schematic_edit_read_only() {
-            // No moves on read-only views — every drag is a marquee.
-            state
-                .schematic
-                .session
-                .editor
-                .selection_rect
-                .start_at(grid_pos);
-        } else {
-            match target {
-                Some(PointerTarget::Component(id)) => {
-                    if !state.schematic.session.editor.selection.has_component(id) {
-                        state.schematic.session.editor.selection.clear();
-                        state
-                            .schematic
-                            .session
-                            .editor
-                            .selection
-                            .select_component(id);
-                    }
-                    start_selection_drag(state, grid_pos, ui.ctx());
-                }
-                Some(PointerTarget::DesignNote(id)) => {
-                    if !state.schematic.session.editor.selection.has_design_note(id) {
-                        state
-                            .schematic
-                            .session
-                            .editor
-                            .selection
-                            .select_only_design_note(id);
-                    }
-                    start_selection_drag(state, grid_pos, ui.ctx());
-                }
-                Some(PointerTarget::DocumentationShape(id)) => {
-                    if !state
-                        .schematic
-                        .session
-                        .editor
-                        .selection
-                        .has_documentation_shape(id)
-                    {
-                        state
-                            .schematic
-                            .session
-                            .editor
-                            .selection
-                            .select_only_documentation_shape(id);
-                    }
-                    start_selection_drag(state, grid_pos, ui.ctx());
-                }
-                Some(PointerTarget::Probe(id)) => {
-                    if !state.schematic.session.editor.selection.has_probe(id) {
-                        state
-                            .schematic
-                            .session
-                            .editor
-                            .selection
-                            .select_only_probe(id);
-                    }
-                    start_selection_drag(state, grid_pos, ui.ctx());
-                }
-                Some(PointerTarget::NetLabel(id)) => {
-                    if !state.schematic.session.editor.selection.has_net_label(id) {
-                        state
-                            .schematic
-                            .session
-                            .editor
-                            .selection
-                            .select_only_net_label(id);
-                    }
-                    start_selection_drag(state, grid_pos, ui.ctx());
-                }
-                Some(PointerTarget::BusTap(id)) => {
-                    if !state.schematic.session.editor.selection.has_bus_tap(id) {
-                        state
-                            .schematic
-                            .session
-                            .editor
-                            .selection
-                            .select_only_bus_tap(id);
-                    }
-                    start_selection_drag(state, grid_pos, ui.ctx());
-                }
-                Some(PointerTarget::Junction(_))
-                    if filter.wires && active_wire_point_is_draggable(state, wire_position) =>
-                {
-                    start_wire_vertex_drag(state, wire_position, ui.ctx());
-                }
-                Some(PointerTarget::Bus(id)) => {
-                    if !state.schematic.session.editor.selection.has_bus(id) {
-                        state.schematic.session.editor.selection.select_only_bus(id);
-                    }
-                    start_selection_drag(state, grid_pos, ui.ctx());
-                }
-                Some(PointerTarget::Wire(_))
-                    if filter.wires && active_wire_point_is_draggable(state, wire_position) =>
-                {
-                    start_wire_vertex_drag(state, wire_position, ui.ctx());
-                }
-                _ => state
-                    .schematic
-                    .session
-                    .editor
-                    .selection_rect
-                    .start_at(grid_pos),
-            }
-        }
-    }
-
-    if response.dragged_by(egui::PointerButton::Primary)
-        && let Some(pos) = response.hover_pos()
-    {
-        let grid_pos = resolve_grid_pointer(state, viewport, pos).snapped_position;
-
-        if state.schematic_drag_owned_by_context(ui.ctx())
-            && state.dialogs.interaction.drag.drag_type == DragType::WireVertex
-            && let Some((old_x, old_y)) = state.dialogs.interaction.drag.last_pos
-        {
-            let old_pos = Point::new(old_x, old_y);
-            if with_active_wire_topology(state, |schematic| {
-                schematic.move_all_vertices_at(old_pos, grid_pos)
-            }) {
-                state
-                    .dialogs
-                    .interaction
-                    .drag
-                    .update((grid_pos.x, grid_pos.y));
-            }
-        } else if state.schematic_drag_owned_by_context(ui.ctx())
-            && state.dialogs.interaction.drag.drag_type == DragType::MoveSelection
-            && let Some((last_x, last_y)) = state.dialogs.interaction.drag.last_pos
-        {
-            let delta = Point::new(
-                grid_pos.x.saturating_sub(last_x),
-                grid_pos.y.saturating_sub(last_y),
-            );
-
-            if delta.x != 0 || delta.y != 0 {
-                with_active_wire_topology(state, |schematic| {
-                    schematic.move_selection_with_rubber_band_resolved(delta, |component| {
-                        symbol_context.terminal_points(component)
-                    })
-                });
-                state
-                    .dialogs
-                    .interaction
-                    .drag
-                    .update((grid_pos.x, grid_pos.y));
-            }
-        } else if state.schematic.session.editor.selection_rect.is_active() {
-            state
-                .schematic
-                .session
-                .editor
-                .selection_rect
-                .update(grid_pos);
-        }
-    }
-
-    if response.drag_stopped_by(egui::PointerButton::Primary) {
-        if state.schematic_drag_owned_by_context(ui.ctx()) {
-            let automatic_junctions = state
-                .schematic
-                .document()
-                .document_policy
-                .wire_junctions
-                .automatic_junctions();
-            with_active_wire_topology(state, |schematic| {
-                schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions)
-            });
-            // One undo entry for the whole gesture (no-ops deduplicate).
-            if state.schematic.end_operation() {
-                state.sync_active_schematic_to_workspace();
-            }
-            state.dialogs.interaction.drag.cancel();
-        } else {
-            let left_to_right = state.schematic.session.editor.selection_rect.current.x
-                >= state.schematic.session.editor.selection_rect.start.x;
-            let Some((min_x, min_y, max_x, max_y)) =
-                state.schematic.session.editor.selection_rect.finish()
-            else {
-                return;
-            };
-            let add_mode =
-                ui.input(|i| i.modifiers.ctrl || i.modifiers.shift || i.modifiers.command);
-            let enclosed_only = state
-                .schematic
-                .document()
-                .document_policy
-                .selection_crossing
-                .enclosed_only(left_to_right);
-            select_in_rect_on_active_sheet(
-                state,
-                symbol_context,
-                super::SelectionWindow::new(min_x, min_y, max_x, max_y, enclosed_only),
-                add_mode,
-            );
-        }
-    }
-}
-
-fn start_wire_vertex_drag(state: &mut AppState, position: Point, ctx: &egui::Context) {
-    state.begin_schematic_drag((position.x, position.y), DragType::WireVertex, ctx);
-}
-
-fn start_selection_drag(state: &mut AppState, position: Point, ctx: &egui::Context) {
-    state.begin_schematic_drag((position.x, position.y), DragType::MoveSelection, ctx);
-}
-fn select_drag_can_start(primary_pan_requested: bool) -> bool {
-    !primary_pan_requested
-}
-
-fn select_drag_is_authorized(tool: Tool, move_selection_armed: bool) -> bool {
-    tool == Tool::Select && !move_selection_armed
 }
 
 fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos: Point) {
