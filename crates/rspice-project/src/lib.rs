@@ -27,7 +27,7 @@ pub use workspace::{
     MAX_PROJECT_VISUALIZATION_DOCUMENTS, PreparedAnnotation, PreparedPhysicalLayoutCatalog,
     PreparedReferences, ProjectConfigurationMutationError, ProjectHierarchy,
     ProjectReferenceTransaction, ProjectWorkspace, ReferenceChanges, SimulationConfigurationError,
-    VisualizationDocumentPersistenceError, bind_generated_netlist_provenance, reference_from_key,
+    VisualizationDocumentPersistenceError, reference_from_key,
 };
 
 mod file;

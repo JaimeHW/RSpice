@@ -307,7 +307,7 @@ where
         .reference_model_execution_plan(inputs.analysis.sim_setup.reference_pvt.process)
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
     let model_cards = model_execution_plan.model_cards();
-    let generated_source = rspice_project::bind_generated_netlist_provenance(
+    let generated_source = rspice_design::netlist_document::bind_generated_netlist_provenance(
         inputs.design_management,
         inputs.configuration_sets,
         generated.netlist,

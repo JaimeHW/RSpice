@@ -28,3 +28,26 @@ pub use search::{
     BoundedFindMatches, FindDirection, FindError, FindMatch, FindOptions,
     find_all_in_source_bounded, replace_source_ranges,
 };
+
+/// Bind canonical design-management and configuration provenance into generated source.
+pub fn bind_generated_netlist_provenance(
+    design_management: &rspice_design_model::design_management::DesignManagementCatalog,
+    configuration_sets: &crate::configuration_set::ConfigurationSetCatalog,
+    mut source: String,
+) -> String {
+    let insertion = source.find('\n').map_or(0, |index| index + 1);
+    let mut provenance = design_management
+        .semantic_digest()
+        .map(|digest| format!("* RSpice design-management digest {digest}\n"))
+        .unwrap_or_else(|error| format!("* RSpice design-management INVALID ({error})\n"));
+    if let Some(configuration) = configuration_sets.active() {
+        provenance.push_str(&format!(
+            "* RSpice configuration-set {} revision {} digest {}\n",
+            configuration.id(),
+            configuration.revision(),
+            configuration.semantic_digest()
+        ));
+    }
+    source.insert_str(insertion, &provenance);
+    source
+}

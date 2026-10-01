@@ -29,7 +29,6 @@ mod errors;
 mod hierarchy;
 mod open_documents;
 mod operations;
-pub use operations::bind_generated_netlist_provenance;
 mod plan_data;
 mod reference_changes;
 mod reference_preparation;
