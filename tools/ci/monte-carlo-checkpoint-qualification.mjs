@@ -101,6 +101,11 @@ function population(run) {
 
 async function qualify() {
   const first = await openWorker();
+  const incompatible = request(7, 3);
+  incompatible.protocolVersion -= 1;
+  const rejected = await run(first, incompatible);
+  assert(rejected.error?.includes("request transport") && rejected.checkpoints.length === 0,
+    "Worker accepted an incompatible request protocol");
   const interrupted = await run(first, request(1, 3), true);
   assert(interrupted.terminated && interrupted.checkpoints.length === 1,
     `Did not retain a checkpoint before hard termination: ${json(interrupted)}`);
@@ -135,7 +140,8 @@ async function qualify() {
     "Worker accepted corrupted transferred bytes");
   return {status: "passed", retainedBeforeTermination: 1, resumedTrials: 5, freshTrials: 6,
     cachedPublications: 1, histogramBins: varying.histogram.length,
-    completeCheckpointBytes: completeBytes.length, refusedChangedCircuit: true, refusedCorruption: true};
+    completeCheckpointBytes: completeBytes.length, refusedChangedCircuit: true, refusedCorruption: true,
+    refusedIncompatibleProtocol: true};
 }
 
 let verdict;
