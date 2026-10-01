@@ -19,7 +19,6 @@ pub(crate) mod drawing_sheet;
 mod interaction;
 mod keyboard_navigation;
 mod mobile_controls;
-mod navigation;
 mod preview;
 pub(crate) use rspice_schematic_editor::view::resolved_symbol_render;
 pub(crate) use rspice_schematic_editor::view::symbol_context::SchematicSymbolContext;
@@ -34,7 +33,7 @@ pub(crate) mod violations;
 
 use rspice_schematic_editor::view::geometry::segment_intersects_rect;
 use rspice_schematic_editor::view::{
-    coordinates, design_notes, documentation_shapes, drawing, grid, net_labels, viewport,
+    coordinates, design_notes, documentation_shapes, drawing, grid, navigation, net_labels, viewport,
 };
 
 use self::coordinates::viewport_from_camera;
@@ -694,7 +693,13 @@ pub fn render_schematic_view(
     // the camera is built and the scene is painted — the old order drew
     // last frame's state, so the canvas trailed the cursor by a full
     // frame during pans and drags.
-    handle_viewport_navigation(ui, &response, available, state);
+    handle_viewport_navigation(
+        ui,
+        &response,
+        available,
+        &mut state.schematic.session.zoom,
+        &mut state.schematic.session.pan,
+    );
     let viewport = viewport_from_camera(
         state.schematic.session.pan,
         state.schematic.session.zoom,
