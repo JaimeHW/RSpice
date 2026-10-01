@@ -16,8 +16,18 @@ class DependencyPolicyTests(unittest.TestCase):
         )
         self.assertEqual(
             violations(
-                {"rspice-formats": {"rspice-app-types", "rspice-results", "rspice-core"}},
-                {"rspice-formats": {"rspice-app-types", "rspice-results", "rspice-core"}},
+                {
+                    "rspice-formats": {
+                        "rspice-app-types", "rspice-results", "rspice-core", "rspice-model-library",
+                    },
+                    "rspice-project": {"rspice-formats"},
+                },
+                {
+                    "rspice-formats": {
+                        "rspice-app-types", "rspice-results", "rspice-core", "rspice-model-library",
+                    },
+                    "rspice-project": {"rspice-project", "rspice-formats", "rspice-results"},
+                },
                 {"rspice-formats", "csv", "serde"},
                 {"rspice-formats", "serde_json", "sha2"},
                 {"rspice-formats", "serde_json"},
@@ -48,12 +58,16 @@ class DependencyPolicyTests(unittest.TestCase):
         )
 
         issues = violations(
-            {"rspice-project-contract": {"rspice-project"}},
+            {
+                "rspice-formats": {"rspice-project"},
+                "rspice-project-contract": {"rspice-project"},
+            },
             {"rspice-simulation": {"rspice-project-contract", "rspice-project"}},
         )
         self.assertEqual(
             issues,
             [
+                "rspice-formats has forbidden application dependency rspice-project",
                 "rspice-project-contract has forbidden application dependency rspice-project",
                 "rspice-simulation reaches project aggregate rspice-project",
             ],

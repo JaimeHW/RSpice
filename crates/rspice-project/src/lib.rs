@@ -12,7 +12,7 @@ pub use execution_context::{
 };
 pub use rspice_project_contract::*;
 
-pub mod results;
+pub use rspice_formats::project_results as results;
 
 pub mod registry;
 

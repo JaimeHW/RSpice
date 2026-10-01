@@ -5544,6 +5544,8 @@ dependencies = [
  "parquet",
  "rspice-app-types",
  "rspice-core",
+ "rspice-design-model",
+ "rspice-model-library",
  "rspice-results",
  "rust_xlsxwriter",
  "rustyhdf5",
@@ -5551,6 +5553,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "time",
+ "uuid",
  "zip",
 ]
 
@@ -5657,6 +5660,7 @@ dependencies = [
  "rspice-core",
  "rspice-design",
  "rspice-design-model",
+ "rspice-formats",
  "rspice-hardcopy-contract",
  "rspice-model-library",
  "rspice-project-contract",

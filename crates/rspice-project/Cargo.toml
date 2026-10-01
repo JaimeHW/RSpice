@@ -14,10 +14,10 @@ workspace = true
 [features]
 # Existing application fixtures may model invalid external catalog edits.
 library-test-fixtures = ["rspice-design/schematic-test-fixtures"]
-result-validation-observation = []
 document-fingerprint-observation = []
 
 [dependencies]
+rspice-formats = { workspace = true, features = ["project-results"] }
 rspice-results = { workspace = true, features = ["engine-evidence"] }
 ron = { version = "0.12.2", features = ["integer128"] }
 rspice-app-types.workspace = true

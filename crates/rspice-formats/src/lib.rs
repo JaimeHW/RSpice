@@ -16,6 +16,8 @@ pub mod monte_carlo_checkpoint;
 pub mod native_bundle;
 pub mod numeric;
 pub mod numpy;
+#[cfg(feature = "project-results")]
+pub mod project_results;
 pub mod psf;
 #[cfg(feature = "result-csv")]
 pub mod result_csv;

@@ -55,7 +55,7 @@ rspice-results = { workspace = true, features = ["engine-evidence"] }
 rspice-hardcopy-contract.workspace = true
 rspice-hardcopy.workspace = true
 rspice-model-library.workspace = true
-rspice-formats = { workspace = true, features = ["columnar", "fst", "hdf5", "monte-carlo-checkpoint", "native-bundle", "result-csv", "result-digital", "result-hdf5", "result-vcd", "result-waveform", "spice-raw", "table-schema", "xlsx"] }
+rspice-formats = { workspace = true, features = ["columnar", "fst", "hdf5", "monte-carlo-checkpoint", "native-bundle", "project-results", "result-csv", "result-digital", "result-hdf5", "result-vcd", "result-waveform", "spice-raw", "table-schema", "xlsx"] }
 rspice-simulation-contract.workspace = true
 rspice-simulation.workspace = true
 
@@ -109,10 +109,11 @@ rfd = { version = "0.17", features = ["file-handle-inner"] }
 dirs = "6.0"
 
 [dev-dependencies]
+rspice-formats = { workspace = true, features = ["result-validation-observation"] }
 rspice-simulation = { workspace = true, features = ["pdk-test-fixtures"] }
 rspice-simulation-contract = { workspace = true, features = ["derivation-test-observation"] }
 csv.workspace = true
-rspice-project = { workspace = true, features = ["result-validation-observation", "document-fingerprint-observation", "library-test-fixtures"] }
+rspice-project = { workspace = true, features = ["document-fingerprint-observation", "library-test-fixtures"] }
 rspice-model-library = { workspace = true, features = ["catalog-test-observation"] }
 rspice-design = { workspace = true, features = ["symbol-test-observation", "schematic-test-fixtures"] }
 zip = { version = "7.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }

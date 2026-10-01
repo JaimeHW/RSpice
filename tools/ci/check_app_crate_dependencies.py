@@ -31,8 +31,9 @@ ALLOWED: dict[str, set[str]] = {
         "rspice-project-contract",
         "rspice-app-types", "rspice-design", "rspice-model-library",
         "rspice-simulation-contract", "rspice-results", "rspice-hardcopy-contract",
+        "rspice-formats",
     },
-    "rspice-formats": {"rspice-app-types", "rspice-results"},
+    "rspice-formats": {"rspice-app-types", "rspice-results", "rspice-model-library"},
     "rspice-simulation": {
         "rspice-project-contract",
         "rspice-app-types", "rspice-design", "rspice-model-library",

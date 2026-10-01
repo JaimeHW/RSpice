@@ -3,7 +3,7 @@
 use super::*;
 
 fn validation_passes() -> usize {
-    rspice_project::results::RESULT_VALIDATIONS.with(std::cell::Cell::get)
+    rspice_formats::project_results::RESULT_VALIDATIONS.with(std::cell::Cell::get)
 }
 
 #[test]

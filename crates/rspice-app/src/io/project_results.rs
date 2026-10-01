@@ -1,6 +1,6 @@
 //! Application capture and restoration of portable project results.
 use crate::state::{AnalysisResult, SimulationRun, SimulationState, WaveformData};
-use rspice_project::results::*;
+use rspice_formats::project_results::*;
 use std::collections::HashSet;
 
 impl From<&WaveformData> for ProjectWaveformData {

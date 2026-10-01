@@ -12,6 +12,12 @@ rust-version.workspace = true
 workspace = true
 
 [features]
+# Versioned retained history, provenance and exact executed decks.
+project-results = [
+    "dep:rspice-app-types", "dep:rspice-core", "dep:rspice-design-model",
+    "dep:rspice-model-library", "dep:rspice-results", "dep:serde_json", "dep:uuid",
+]
+result-validation-observation = ["project-results"]
 table-schema = ["dep:serde_json"]
 # Reuse canonical retained results without enabling the engine in default codecs.
 result-csv = ["dep:rspice-app-types", "dep:rspice-core", "dep:rspice-results", "dep:serde_json"]
@@ -45,10 +51,13 @@ rustyhdf5 = { version = "1.93", default-features = false, optional = true }
 rust_xlsxwriter = { version = "0.92", default-features = false, optional = true }
 rspice-app-types = { workspace = true, optional = true }
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, optional = true }
+rspice-design-model = { workspace = true, optional = true }
+rspice-model-library = { workspace = true, optional = true }
 rspice-results = { workspace = true, optional = true, features = ["engine-evidence"] }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 time.workspace = true
 zip = { version = "7.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 

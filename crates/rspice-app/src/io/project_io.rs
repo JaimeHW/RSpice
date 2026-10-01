@@ -2,8 +2,8 @@
 
 pub use crate::state::project_snapshot::ProjectSnapshot;
 use rspice_app_types::product::ContentDigest;
+pub use rspice_formats::project_results::*;
 use rspice_project::persistence::ProjectBytes;
-pub use rspice_project::results::*;
 pub use rspice_project::{MAX_PROJECT_FILE_BYTES, ProjectIoError};
 #[cfg(any(not(target_arch = "wasm32"), test))]
 use std::path::PathBuf;
