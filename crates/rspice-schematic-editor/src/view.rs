@@ -12,3 +12,5 @@ pub mod viewport;
 pub mod design_notes;
 pub mod drawing;
 pub mod symbol_context;
+
+pub mod keyboard_navigation;

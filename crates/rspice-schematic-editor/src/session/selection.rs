@@ -202,6 +202,26 @@ pub use rspice_design::schematic::selection::{JunctionSelection, Selection};
 // Tests
 // =============================================================================
 
+/// Stable canvas object currently owned by schematic keyboard traversal.
+///
+/// The authored document selection remains the command authority for objects
+/// that already participate in editing. Probe flags deliberately remain
+/// output-intent markers rather than pretending to support edit operations;
+/// this transient identity gives them the same visible keyboard focus without
+/// inventing probe clipboard/delete semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SchematicKeyboardFocus {
+    Component(u64),
+    Wire(u64),
+    Bus(u64),
+    BusTap(u64),
+    Junction(u64),
+    NetLabel(u64),
+    Probe(u64),
+    DesignNote(u64),
+    DocumentationShape(u64),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
