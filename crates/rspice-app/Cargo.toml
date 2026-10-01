@@ -21,20 +21,9 @@ name = "rspice-app"
 path = "src/main.rs"
 test = false
 
-[[bin]]
-name = "rspice-ui-worker"
-path = "src/worker_main.rs"
-test = false
-required-features = ["browser-worker"]
-
 [features]
 default = []
 generated-veriloga-catalog = ["rspice-design/generated-veriloga-catalog", "rspice-simulation/generated-veriloga-catalog"]
-browser-worker = [
-    "rspice-simulation/browser-worker",
-    "rspice-core/veriloga-wasm-jit",
-    "rspice-veriloga/wasm-jit",
-]
 # Read-only rendered-control observation for the actual browser qualification
 # harness. Normal application and release builds do not enable this feature.
 browser-qualification = []
@@ -229,7 +218,7 @@ ed25519-dalek = { version = "2", default-features = false, features = ["std", "z
 # No rayon/simd on wasm; the "wasm" feature wires up wasm-bindgen. The
 # interactive image retains portable Verilog-A artifacts and validation, while
 # secondary-module emission and verification are owned exclusively by the
-# `browser-worker` feature above. Keeping that ownership explicit prevents the
+# `rspice-worker` package. Keeping that ownership explicit prevents the
 # secondary-module emitter and verifier from being duplicated in both images.
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga", "wasm"] }
 tokio = { version = "1", features = ["sync", "macros", "rt", "time"] }

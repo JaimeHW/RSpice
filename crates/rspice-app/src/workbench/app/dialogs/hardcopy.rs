@@ -34,8 +34,6 @@ mod worker;
 pub(crate) const DEFAULT_RASTER_DPI: u16 = 600;
 
 pub(crate) use publish::open_hardcopy_workflow;
-#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
-pub(crate) use worker::run_worker_request_value;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum HardcopyDialogPage {

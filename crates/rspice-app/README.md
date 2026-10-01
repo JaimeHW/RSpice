@@ -396,8 +396,7 @@ UI's waveform containers. Platform differences are set in `Cargo.toml`:
   tokio runtime; `web-sys`/`wasm-bindgen` for the DOM. Runs execute in a module
   worker, so cancellation terminates the worker and does not leave detached
   computation. The separately qualified browser JIT
-  (`rspice-core/veriloga-wasm-jit`) is added by the `browser-worker` feature,
-  not by the base wasm32 image.
+  (`rspice-core/veriloga-wasm-jit`) belongs to `rspice-worker`.
 
 Native execution remains on a background thread and every analysis family now
 cooperatively polls the same typed abort signal through parsing, expansion,
@@ -448,7 +447,6 @@ screen-reader and device qualification remains a release gate.
 | Feature | Default | Effect |
 | :--- | :--- | :--- |
 | `generated-veriloga-catalog` | off | Turns on `rspice-core/veriloga-builtins`, so a build ships the generated Verilog-A device catalog. Every release image sets it |
-| `browser-worker` | off | Builds the isolated browser simulation/compiler/hardcopy worker entry image; never enable this on the interactive UI image because it defeats code-size separation |
 | `browser-qualification` | off | Exposes the actual browser UI's rendered control tree for functional WebDriver tests; polls for observation requests every 100 ms while idle |
 
 `default = []`, and this crate declares no other flags. Nothing native is
@@ -472,9 +470,9 @@ cargo test -p rspice-app
 # Browser release images are deliberately built separately so Cargo feature
 # unification cannot pull worker execution paths back into the UI image.
 cargo build --locked --profile web-release -p rspice-app --bin rspice-app --features generated-veriloga-catalog --target wasm32-unknown-unknown
-cargo build --locked --profile web-release -p rspice-app --bin rspice-ui-worker --features browser-worker,generated-veriloga-catalog --target wasm32-unknown-unknown
+cargo build --locked --profile web-release -p rspice-worker --bin rspice-worker --features generated-veriloga-catalog --target wasm32-unknown-unknown
 wasm-bindgen --target web --out-name rspice-ui --out-dir crates/rspice-app/web/pkg target/wasm32-unknown-unknown/web-release/rspice-app.wasm
-wasm-bindgen --target web --out-name rspice-ui-worker --out-dir crates/rspice-app/web/pkg target/wasm32-unknown-unknown/web-release/rspice-ui-worker.wasm
+wasm-bindgen --target web --out-name rspice-ui-worker --out-dir crates/rspice-app/web/pkg target/wasm32-unknown-unknown/web-release/rspice-worker.wasm
 python3 tools/ci/check_wasm_jit_browser.py
 ```
 

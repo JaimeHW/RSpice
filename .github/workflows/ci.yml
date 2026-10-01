@@ -623,10 +623,10 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --locked -p rspice-app --features generated-veriloga-catalog --target wasm32-unknown-unknown
-      - name: Check rspice-app browser worker
+      - name: Check rspice-worker
         env:
           RUSTFLAGS: -D warnings
-        run: cargo check --locked -p rspice-app --bin rspice-ui-worker --features browser-worker --target wasm32-unknown-unknown
+        run: cargo check --locked -p rspice-worker --bin rspice-worker --target wasm32-unknown-unknown
       - name: Check standalone engineering formats
         run: |
           for features in "" table-schema native-bundle result-csv result-vcd result-digital \
@@ -679,10 +679,10 @@ jobs:
         env:
           WASM_BINDGEN_USE_DEDICATED_WORKER: '1'
         run: cargo test --locked -p rspice-app --target wasm32-unknown-unknown --test browser_clock
-      - name: Test UI worker structured-clone transport in Node
+      - name: Test worker structured-clone transport in Node
         run: |
           node --version
-          cargo test --locked -p rspice-app --target wasm32-unknown-unknown --features browser-worker --test browser_worker_transport
+          cargo test --locked -p rspice-worker --target wasm32-unknown-unknown --test browser_worker_transport
 
   wasm-ui-size:
     name: Browser build & qualification
@@ -711,15 +711,15 @@ jobs:
           --label rspice-ui
       - name: Build production browser worker image
         run: >-
-          cargo build --locked --profile web-release -p rspice-app
-          --bin rspice-ui-worker --features browser-worker,generated-veriloga-catalog
+          cargo build --locked --profile web-release -p rspice-worker
+          --bin rspice-worker --features generated-veriloga-catalog
           --target wasm32-unknown-unknown
       - name: Generate production browser worker bindings
         run: >-
           wasm-bindgen --target web
           --out-name rspice-ui-worker
           --out-dir crates/rspice-app/web/pkg
-          target/wasm32-unknown-unknown/web-release/rspice-ui-worker.wasm
+          target/wasm32-unknown-unknown/web-release/rspice-worker.wasm
       - name: Report browser worker image size
         run: >-
           python3 tools/ci/check_wasm_artifact_size.py

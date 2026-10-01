@@ -656,7 +656,7 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("WASM_BINDGEN_USE_DEDICATED_WORKER: '1'", job)
         self.assertIn("cargo test --locked -p rspice-wasm -p rspice-cloud-client --lib --target wasm32-unknown-unknown", job)
         self.assertEqual(job.count("--test browser_clock"), 2)
-        self.assertIn("cargo test --locked -p rspice-app --target wasm32-unknown-unknown --features browser-worker --test browser_worker_transport", job)
+        self.assertIn("cargo test --locked -p rspice-worker --target wasm32-unknown-unknown --test browser_worker_transport", job)
 
     def test_browser_size_reports_measure_the_delivered_bindgen_modules(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
@@ -1387,7 +1387,7 @@ class CiConfigurationTests(unittest.TestCase):
             workflow,
         )
         self.assertIn(
-            "cargo check --locked -p rspice-app --bin rspice-ui-worker --features browser-worker --target wasm32-unknown-unknown",
+            "cargo check --locked -p rspice-worker --bin rspice-worker --target wasm32-unknown-unknown",
             workflow,
         )
         self.assertIn(
@@ -1398,7 +1398,7 @@ class CiConfigurationTests(unittest.TestCase):
             "cargo build --locked --profile web-release -p rspice-app --bin rspice-app --features generated-veriloga-catalog --target wasm32-unknown-unknown",
             workflow,
         )
-        self.assertIn("--bin rspice-ui-worker --features browser-worker,generated-veriloga-catalog", workflow)
+        self.assertIn("--bin rspice-worker --features generated-veriloga-catalog", workflow)
         self.assertIn("--bin rspice-app --features browser-qualification,generated-veriloga-catalog", workflow)
         self.assertIn("node --test tools/ci/test_wasm_loader.mjs", workflow)
         self.assertIn("tools/ci/check_wasm_artifact_size.py", workflow)
@@ -1677,7 +1677,7 @@ class CiConfigurationTests(unittest.TestCase):
         declared = set(re.findall(r"^([\w-]+)\s*=", features_block.group(1), re.MULTILINE))
         self.assertEqual(
             declared,
-            {"default", "generated-veriloga-catalog", "browser-worker", "browser-qualification"},
+            {"default", "generated-veriloga-catalog", "browser-qualification"},
             "rspice-app declares a Cargo feature the README does not describe; add "
             "the row, or drop the flag if no cfg reads it",
         )

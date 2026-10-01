@@ -1,7 +1,7 @@
 //! Exercise the shipping simulation entry point and structured-clone boundary
 //! in a JavaScript runtime, where JSON-only round trips cannot qualify u64s.
 
-#![cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+#![cfg(target_arch = "wasm32")]
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_test::wasm_bindgen_test;
@@ -52,7 +52,7 @@ fn run(seed: u64, source: &str) -> serde_json::Value {
         "buffers": [], "byteBuffers": []
     });
     let value = js_sys::JSON::parse(&request.to_string()).unwrap();
-    let response = rspice_app::run_rspice_ui_worker_request(value)
+    let response = rspice_worker::run_rspice_ui_worker_request(value)
         .expect("worker must return valid Monte Carlo results");
     let response = structured_clone(&response);
     let response: serde_json::Value = serde_wasm_bindgen::from_value(response).unwrap();
@@ -120,15 +120,16 @@ fn transient_quality_survives_the_worker_and_structured_clone_before_output_crop
         },
         "buffers": [], "byteBuffers": []
     });
-    let response =
-        rspice_app::run_rspice_ui_worker_request(js_sys::JSON::parse(&request.to_string()).unwrap())
-            .unwrap();
+    let response = rspice_worker::run_rspice_ui_worker_request(
+        js_sys::JSON::parse(&request.to_string()).unwrap(),
+    )
+    .unwrap();
     let response = structured_clone(&response);
     assert_eq!(
         js_sys::Reflect::get(&response, &"protocolVersion".into())
             .unwrap()
             .as_f64(),
-        Some(35.0)
+        Some(36.0)
     );
     let buffers = js_sys::Reflect::get(&response, &"buffers".into())
         .unwrap()
@@ -171,15 +172,16 @@ fn nested_dc_curves_and_exact_traversal_survive_the_worker_and_structured_clone(
             "dependency_buffer_count":0
         },"buffers":[], "byteBuffers":[]
     });
-    let response =
-        rspice_app::run_rspice_ui_worker_request(js_sys::JSON::parse(&request.to_string()).unwrap())
-            .unwrap();
+    let response = rspice_worker::run_rspice_ui_worker_request(
+        js_sys::JSON::parse(&request.to_string()).unwrap(),
+    )
+    .unwrap();
     let response = structured_clone(&response);
     assert_eq!(
         js_sys::Reflect::get(&response, &"protocolVersion".into())
             .unwrap()
             .as_f64(),
-        Some(35.0)
+        Some(36.0)
     );
     let buffers = js_sys::Reflect::get(&response, &"buffers".into())
         .unwrap()
@@ -256,9 +258,10 @@ fn scoped_soa_current_rules_reach_the_solver_and_transfer_complete_evidence() {
             "dependency_buffer_count": 0
         }, "buffers": [], "byteBuffers": []
     });
-    let response =
-        rspice_app::run_rspice_ui_worker_request(js_sys::JSON::parse(&request.to_string()).unwrap())
-            .unwrap();
+    let response = rspice_worker::run_rspice_ui_worker_request(
+        js_sys::JSON::parse(&request.to_string()).unwrap(),
+    )
+    .unwrap();
     let response = structured_clone(&response);
     let buffers = js_sys::Reflect::get(&response, &"buffers".into())
         .unwrap()
@@ -318,9 +321,10 @@ fn optimization_expression_reaches_a_current_target_through_the_worker() {
         },
         "buffers": [], "byteBuffers": []
     });
-    let response =
-        rspice_app::run_rspice_ui_worker_request(js_sys::JSON::parse(&request.to_string()).unwrap())
-            .unwrap();
+    let response = rspice_worker::run_rspice_ui_worker_request(
+        js_sys::JSON::parse(&request.to_string()).unwrap(),
+    )
+    .unwrap();
     let response = structured_clone(&response);
     let metadata: serde_json::Value = serde_wasm_bindgen::from_value(
         js_sys::Reflect::get(&response, &"response".into()).unwrap(),
@@ -359,7 +363,7 @@ fn envelope_initializer_settings_execute_and_pss_budget_survives_worker_transpor
             },
             "buffers": [], "byteBuffers": []
         });
-        let response = rspice_app::run_rspice_ui_worker_request(
+        let response = rspice_worker::run_rspice_ui_worker_request(
             js_sys::JSON::parse(&request.to_string()).unwrap(),
         )
         .unwrap();
@@ -421,7 +425,7 @@ fn optimization_rejects_failed_and_overflowed_costs_through_the_worker() {
                 "dependency_buffer_count": 0
             }, "buffers": [], "byteBuffers": []
         });
-        let response = rspice_app::run_rspice_ui_worker_request(
+        let response = rspice_worker::run_rspice_ui_worker_request(
             js_sys::JSON::parse(&request.to_string()).unwrap(),
         )
         .unwrap();

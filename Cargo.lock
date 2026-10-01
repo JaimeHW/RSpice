@@ -6234,6 +6234,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "rspice-worker"
+version = "0.1.0"
+dependencies = [
+ "js-sys",
+ "rspice-core",
+ "rspice-design",
+ "rspice-hardcopy",
+ "rspice-simulation",
+ "rspice-veriloga",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "uuid",
+ "wasm-bindgen",
+ "wasm-bindgen-test",
+ "web-time",
+]
+
+[[package]]
 name = "rspice-xspice-catalog-dump"
 version = "0.1.0"
 dependencies = [

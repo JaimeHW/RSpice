@@ -1,0 +1,41 @@
+[package]
+name = "rspice-worker"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "rspice-worker"
+path = "src/main.rs"
+test = false
+
+[features]
+default = []
+generated-veriloga-catalog = ["rspice-simulation/generated-veriloga-catalog"]
+
+[dependencies]
+rspice-simulation = { workspace = true, features = ["browser-worker"] }
+rspice-hardcopy.workspace = true
+rspice-design.workspace = true
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga-wasm-jit"] }
+rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0", features = ["wasm-jit"] }
+serde.workspace = true
+serde_json.workspace = true
+web-time.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["wasm"] }
+wasm-bindgen.workspace = true
+js-sys.workspace = true
+serde-wasm-bindgen = "0.6"
+uuid = { workspace = true, features = ["js"] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test.workspace = true

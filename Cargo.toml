@@ -37,6 +37,7 @@ members = [
     "crates/rspice-formats",
     "crates/rspice-simulation-contract",
     "crates/rspice-simulation",
+    "crates/rspice-worker",
     "crates/rspice-veriloga",
     "crates/rspice-python",
     "crates/rspice-wasm",

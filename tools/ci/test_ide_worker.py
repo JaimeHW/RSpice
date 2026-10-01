@@ -8,9 +8,10 @@ IDE_DIRS = [
     ROOT / "crates" / "rspice-app" / "web",
 ]
 UI_SRC = ROOT / "crates" / "rspice-app" / "src"
-RUNNER = UI_SRC / "simulation" / "runner.rs"
-WASM_WORKER = UI_SRC / "simulation" / "runner" / "wasm_worker.rs"
-WORKER_CONTRACT = UI_SRC / "simulation" / "runner" / "worker_contract.rs"
+SIMULATION_SRC = ROOT / "crates" / "rspice-simulation" / "src"
+RUNNER = SIMULATION_SRC / "runner.rs"
+WASM_WORKER = SIMULATION_SRC / "runner" / "wasm_worker.rs"
+WORKER_CONTRACT = SIMULATION_SRC / "runner" / "worker_contract.rs"
 MAIN = UI_SRC / "main.rs"
 APP = UI_SRC / "workbench" / "app.rs"
 HARDCOPY_WORKER = UI_SRC / "workbench" / "app" / "dialogs" / "hardcopy" / "worker.rs"
@@ -382,7 +383,7 @@ class IdeWorkerRoutingTests(unittest.TestCase):
         self.assertRegex(
             wasm_worker,
             re.compile(
-                r"fn\s+create_worker\(\).*?"
+                r"fn\s+create_worker\(state:\s*&Rc<RefCell<WorkerState>>\).*?"
                 r"let\s+worker_url\s*=\s*global_worker_url\(\)\.ok_or_else\(.*?\)\?;.*?"
                 r"new_with_options\(&worker_url,\s*&options\)",
                 re.S,
@@ -444,7 +445,7 @@ class IdeWorkerRoutingTests(unittest.TestCase):
         self.assertIn("validate_worker_response_id", wasm_worker)
         self.assertRegex(
             wasm_worker,
-            re.compile(r"snapshot\.apply_to\(&mut\s+progress\)", re.S),
+            re.compile(r"apply_worker_progress_snapshot\(snapshot,\s*&mut\s+progress\)", re.S),
             "main-thread worker bridge must apply progress snapshots to SimulationProgress",
         )
 
@@ -453,7 +454,7 @@ class IdeWorkerRoutingTests(unittest.TestCase):
         self.assertRegex(
             wasm_worker,
             re.compile(
-                r"fn\s+drop_cached_worker.*clear_global_worker\(\)",
+                r"fn\s+drop_cached_worker.*clear_global_worker\(state\)",
                 re.S,
             ),
             "fatal worker errors must drop both the handle and global cached worker",
