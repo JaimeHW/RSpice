@@ -35,6 +35,7 @@ pub mod probe;
 pub mod replacement;
 pub mod replacement_edit;
 pub mod rotation;
+pub mod selection;
 pub mod stimulus_provenance;
 pub mod stretch;
 pub mod terminal_connection;
