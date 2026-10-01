@@ -404,10 +404,12 @@ fn sensitivity_dc_limit_and_disabled_ac_fields_reach_the_solver_and_results() {
             assert!((raw.value().unwrap() + 0.00025).abs() < 1e-10);
             assert!((normalized.value().unwrap() + 0.5).abs() < 1e-6);
         }
-        let retained = super::sensitivity_result::analysis_result(
+        let retained = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
+            SimulationResult::SensitivityStudy {
+                evidence: evidence.clone(),
+            },
             AnalysisType::Sensitivity,
             "SENS",
-            evidence.clone(),
         );
         assert!(retained.success);
         let payload: crate::state::AnalysisResultPayload = serde_json::from_value(

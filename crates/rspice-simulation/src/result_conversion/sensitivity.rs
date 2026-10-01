@@ -1,6 +1,6 @@
 //! Retaining one `.SENS` study as a result.
 //!
-//! Layer: controller, result retention. A study produces no waveform: what it
+//! Layer: engine result retention. A study produces no waveform: what it
 //! produces is one column of derivatives per variable per solved point, and
 //! every one of those numbers is the engine's. So the whole answer is the
 //! payload, and this file only decides whether the run's evidence is evidence.
@@ -12,24 +12,28 @@
 
 use std::sync::Arc;
 
-use crate::state::{AnalysisResult, AnalysisResultPayload, AnalysisType, SensitivityStudyEvidence};
+use rspice_results::analysis_payload::AnalysisResultPayload;
+use rspice_results::analysis_result::AnalysisResult;
+use rspice_results::analysis_type::AnalysisType;
+use rspice_results::sensitivity::SensitivityStudyEvidence;
 
 /// The retained result one sensitivity study becomes.
 pub(super) fn analysis_result(
     analysis_type: AnalysisType,
     label: &str,
     evidence: Arc<SensitivityStudyEvidence>,
+    now: impl Fn() -> f64,
 ) -> AnalysisResult {
     let payload = AnalysisResultPayload::SensitivityStudy { evidence };
     match payload.validate_for(analysis_type) {
-        Ok(()) => {
-            AnalysisResult::new(1, analysis_type, label.to_string()).with_result_payload(payload)
-        }
+        Ok(()) => AnalysisResult::new(1, analysis_type, label.to_string(), now())
+            .with_result_payload(payload),
         Err(error) => AnalysisResult::failed(
             1,
             analysis_type,
             label.to_string(),
             format!("Invalid retained analysis payload: {error}"),
+            now(),
         ),
     }
 }
@@ -37,8 +41,8 @@ pub(super) fn analysis_result(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{SensitivityBasisEvidence, SensitivityStudyRow};
     use rspice_core::analysis::sensitivity::SensitivityValue;
+    use rspice_results::sensitivity::{SensitivityBasisEvidence, SensitivityStudyRow};
 
     fn evidence() -> SensitivityStudyEvidence {
         SensitivityStudyEvidence {
@@ -57,7 +61,12 @@ mod tests {
 
     #[test]
     fn a_valid_study_is_retained_whole_and_an_invalid_one_fails_with_its_reason() {
-        let retained = analysis_result(AnalysisType::Sensitivity, "SENS", Arc::new(evidence()));
+        let retained = analysis_result(
+            AnalysisType::Sensitivity,
+            "SENS",
+            Arc::new(evidence()),
+            || 0.0,
+        );
         assert!(retained.success);
         let Some(AnalysisResultPayload::SensitivityStudy { evidence: kept }) =
             retained.result_payload.as_ref()
@@ -70,7 +79,7 @@ mod tests {
         // A column that does not span the grid is not the engine's answer.
         let mut broken = evidence();
         broken.rows[0].normalized.clear();
-        let failed = analysis_result(AnalysisType::Sensitivity, "SENS", Arc::new(broken));
+        let failed = analysis_result(AnalysisType::Sensitivity, "SENS", Arc::new(broken), || 0.0);
         assert!(!failed.success);
         assert!(
             failed
@@ -86,7 +95,7 @@ mod tests {
     /// under a sheet that would read it as something else.
     #[test]
     fn a_study_under_the_wrong_analysis_type_is_refused() {
-        let wrong = analysis_result(AnalysisType::Ac, "AC", Arc::new(evidence()));
+        let wrong = analysis_result(AnalysisType::Ac, "AC", Arc::new(evidence()), || 0.0);
         assert!(!wrong.success);
     }
 }

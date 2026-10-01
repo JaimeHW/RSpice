@@ -30,14 +30,12 @@ use crate::simulation::multi_run::SpPort;
 use crate::simulation::output_contract::materialize_live_saved_outputs;
 use crate::simulation::output_contract::retain_plan_saved_outputs;
 use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
+#[cfg(test)]
+use crate::state::AnalysisResultFamilyMetadata;
 use crate::state::{
-    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
-    AnalysisResultSourceDomain, AnalysisType, ComplexResultValue, DcOpResult,
-    DigitalEventPointEvidence, DigitalEventTraceEvidence, MonteCarloVariableMetadata,
-    OperatingPointValue, PeriodicNoiseOutputQuantity, RealEventPointEvidence,
-    RealEventTraceEvidence, SimulationRunIntent, SimulationRunLifecycle, SoaEvaluationEvidence,
-    SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
-    SoaViolationSeverityEvidence, WaveformData,
+    AnalysisResult, AnalysisResultPayload, AnalysisResultProvenance, AnalysisResultSourceDomain,
+    AnalysisType, DigitalEventPointEvidence, DigitalEventTraceEvidence, RealEventPointEvidence,
+    RealEventTraceEvidence, SimulationRunIntent, SimulationRunLifecycle, WaveformData,
 };
 use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCacheProvenance};
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
@@ -73,11 +71,9 @@ mod monte_carlo_checkpoint;
 pub(crate) mod prepared_run;
 #[cfg(test)]
 mod projection_ratchet;
-mod recorded_fft_result;
 mod results_convert;
 mod results_post;
 mod results_update;
-mod sensitivity_result;
 mod touchstone;
 mod transient_post;
 pub(crate) use transient_post::{DerivedViewerLoadState, build_eye_from_waveform};
@@ -1733,7 +1729,9 @@ impl SimulationController {
                     // sheet, because the reader is looking at the run here.
                     if let crate::simulation::SimulationResult::Fft { spectrum, .. } = &sim_result
                         && let Some(notice) =
-                            recorded_fft_result::incomplete_history_notice(spectrum)
+                            rspice_simulation::result_conversion::incomplete_history_notice(
+                                spectrum,
+                            )
                     {
                         state.push_sim_message(ConsoleMessage::warning(notice));
                     }

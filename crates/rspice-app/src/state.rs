@@ -141,29 +141,25 @@ pub use simulation::{
     DigitalBusEvidence, DigitalBusSourceEvidence, DigitalEventPointEvidence,
     DigitalEventTraceEvidence, EvidenceDomain, ExecutedDeck, ExecutedDeckArchive,
     ExecutedDeckPoint, ExecutionTarget, FamilyMeasurementEvidence, FamilyMemberId,
-    FamilyMemberMeasurements, FloquetOrbitKindEvidence, FloquetSpectrumCertificateEvidence,
-    FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence, HierarchyMapRow,
-    MonteCarloVariableMetadata, NoiseContributorRow, NoiseFigureEvidence, NoiseSummary,
-    OccurrenceProbeSpelling, OperatingPointAccuracyEvidence, OperatingPointAnnotationEvidence,
-    OperatingPointDeviceDetailEvidence, OperatingPointHomotopyEvidence,
-    OperatingPointInitialGuessEvidence, OperatingPointNodeInitializationEvidence,
-    OperatingPointPreviousStateEvidence, OperatingPointProcessEvidence,
-    OperatingPointSaveDeviceEvidence, OperatingPointTemperatureEvidence, OperatingPointValue,
-    PeriodicNoiseConversionEvidence, PeriodicNoiseOutputQuantity, PoleZeroRootSetEvidence,
-    PoleZeroSpectrumCertificate, PreparedModelSourceIdentity, PreparedRunReceipt,
-    PreparedRunReceiptInput, PreparedRunTaskReceipt, PreparedSourceCheckReceipt,
-    PreparedSpecification, PreparedSpecificationPolicy, PssFloquetMultiplierEvidence,
-    PstbFloquetModeEvidence, PstbStabilityClassificationEvidence, RealEventPointEvidence,
-    RealEventTraceEvidence, ResultImportFormat, ResultImportSource, RunHistory, RunRetention,
-    SavedOutputDcMember, SavedOutputMaterializationStatus, SavedOutputReceipt,
-    SensitivityResultMode, SensitivityResultRow, SharedWaveformValues, SignOffStanding,
-    SimulationCampaignMembership, SimulationRun, SimulationRunIntent, SimulationRunLifecycle,
-    SimulationRunProvenance, SimulationState, SoaEvaluationEvidence, SoaParameterEvidence,
-    SoaRuleVerdictEvidence, SoaSourceHistory, SoaSourceWaveform, SoaViolationEvidence,
-    SoaViolationSeverityEvidence, SpecificationVerdictStatus, TransferFunctionAccuracyEvidence,
-    TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
-    TransferFunctionScalarEvidence, WaveformData, absent_deck_reason, ac_bode_shape_for_analysis,
-    ac_bode_shape_for_selection, ac_bode_summary_for_analysis, ac_bode_summary_for_selection,
+    FamilyMemberMeasurements, FloquetOrbitKindEvidence, FloquetSpectrumEvidence,
+    FloquetStabilityVerdictEvidence, HierarchyMapRow, MonteCarloVariableMetadata,
+    NoiseContributorRow, NoiseFigureEvidence, NoiseSummary, OccurrenceProbeSpelling,
+    OperatingPointAnnotationEvidence, OperatingPointDeviceDetailEvidence,
+    OperatingPointInitialGuessEvidence, OperatingPointValue, PeriodicNoiseConversionEvidence,
+    PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate, PreparedModelSourceIdentity,
+    PreparedRunReceipt, PreparedRunReceiptInput, PreparedRunTaskReceipt,
+    PreparedSourceCheckReceipt, PreparedSpecification, PreparedSpecificationPolicy,
+    PstbStabilityClassificationEvidence, RealEventPointEvidence, RealEventTraceEvidence,
+    ResultImportFormat, ResultImportSource, RunHistory, RunRetention, SavedOutputDcMember,
+    SavedOutputMaterializationStatus, SavedOutputReceipt, SensitivityResultMode,
+    SensitivityResultRow, SharedWaveformValues, SignOffStanding, SimulationCampaignMembership,
+    SimulationRun, SimulationRunIntent, SimulationRunLifecycle, SimulationRunProvenance,
+    SimulationState, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
+    SoaSourceHistory, SoaSourceWaveform, SpecificationVerdictStatus,
+    TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
+    TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence, WaveformData,
+    absent_deck_reason, ac_bode_shape_for_analysis, ac_bode_shape_for_selection,
+    ac_bode_summary_for_analysis, ac_bode_summary_for_selection,
 };
 pub use simulation::{
     ConvergenceReport, PeriodicConvergenceEvidence, PeriodicInitializationMethod,
@@ -174,6 +170,15 @@ pub use simulation::{
 };
 pub use simulation::{DcMismatchContributorEvidence, DcMismatchEvidence, DcMismatchScopeEvidence};
 pub use simulation::{FftSpectrumEvidence, FftSpectrumStatusEvidence};
+#[cfg(test)]
+pub use simulation::{
+    FloquetSpectrumCertificateEvidence, OperatingPointAccuracyEvidence,
+    OperatingPointHomotopyEvidence, OperatingPointNodeInitializationEvidence,
+    OperatingPointPreviousStateEvidence, OperatingPointProcessEvidence,
+    OperatingPointSaveDeviceEvidence, OperatingPointTemperatureEvidence,
+    PeriodicNoiseOutputQuantity, PssFloquetMultiplierEvidence, PstbFloquetModeEvidence,
+    SoaViolationEvidence, SoaViolationSeverityEvidence,
+};
 pub use simulation::{SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow};
 // Test-only, like the attribution vocabulary above: outside tests the
 // compatibility mode of a recorded spectrum is only ever read through the

@@ -49,6 +49,12 @@ impl AsRef<RetainedWaveform> for RetainedWaveform {
     }
 }
 
+impl AsMut<RetainedWaveform> for RetainedWaveform {
+    fn as_mut(&mut self) -> &mut RetainedWaveform {
+        self
+    }
+}
+
 impl RetainedWaveform {
     /// Create a new waveform trace
     pub fn new(

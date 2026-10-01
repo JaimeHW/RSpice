@@ -51,6 +51,12 @@ impl AsRef<RetainedWaveform> for WaveformData {
     }
 }
 
+impl AsMut<RetainedWaveform> for WaveformData {
+    fn as_mut(&mut self) -> &mut RetainedWaveform {
+        &mut self.data
+    }
+}
+
 impl WaveformData {
     pub fn new(
         name: impl Into<String>,

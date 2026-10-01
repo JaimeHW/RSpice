@@ -88,6 +88,56 @@ pub struct AnalysisResult<W = RetainedWaveform> {
     pub import_source: Option<ResultImportSource>,
 }
 
+impl<W> AnalysisResult<W> {
+    /// Change the waveform wrapper while retaining every analysis field and exact data owner.
+    pub fn map_waveforms<V>(self, map: impl FnMut(W) -> V) -> AnalysisResult<V> {
+        let Self {
+            id,
+            analysis_type,
+            label,
+            timestamp,
+            waveforms,
+            dc_op,
+            device_op,
+            noise_summary,
+            family_metadata,
+            result_payload,
+            native_scalar_units,
+            monte_carlo_checkpoint,
+            measurements,
+            saved_output_receipts,
+            success,
+            error_message,
+            failure_attribution,
+            convergence,
+            provenance,
+            import_source,
+        } = self;
+        AnalysisResult {
+            id,
+            analysis_type,
+            label,
+            timestamp,
+            waveforms: waveforms.into_iter().map(map).collect(),
+            dc_op,
+            device_op,
+            noise_summary,
+            family_metadata,
+            result_payload,
+            native_scalar_units,
+            monte_carlo_checkpoint,
+            measurements,
+            saved_output_receipts,
+            success,
+            error_message,
+            failure_attribution,
+            convergence,
+            provenance,
+            import_source,
+        }
+    }
+}
+
 impl<W> AsRef<AnalysisResult<W>> for AnalysisResult<W> {
     fn as_ref(&self) -> &AnalysisResult<W> {
         self

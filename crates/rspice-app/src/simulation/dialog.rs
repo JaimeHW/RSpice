@@ -54,9 +54,13 @@ pub(crate) mod soa;
 pub(crate) mod options;
 
 pub use op::OpDialogState;
+#[cfg(test)]
 pub use rspice_simulation_contract::config::{
-    OpAccuracy, OpAnnotation, OpConfig, OpDeviceDetail, OpHomotopy, OpInitialGuess,
-    OpNodeInitialization, OpPreviousState, OpRunPointContext, OpSaveDevice, OpTemperatureMode,
+    OpAccuracy, OpAnnotation, OpDeviceDetail, OpHomotopy,
+};
+pub use rspice_simulation_contract::config::{
+    OpConfig, OpInitialGuess, OpNodeInitialization, OpPreviousState, OpRunPointContext,
+    OpSaveDevice, OpTemperatureMode,
 };
 
 // Re-exports. Each analysis re-exports the dialog state its panel owns. The

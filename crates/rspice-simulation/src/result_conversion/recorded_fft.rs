@@ -1,6 +1,6 @@
 //! Retaining one recorded `.FFT` spectrum as a result.
 //!
-//! Layer: controller, result retention. The coefficients become one complex
+//! Layer: engine result retention. The coefficients become one complex
 //! waveform in the Fourier family — which is the family the Results contract
 //! already defines as bins, a window and a derivation receipt — and everything
 //! a waveform cannot say becomes the result's payload.
@@ -12,8 +12,10 @@
 
 use std::collections::HashMap;
 
-use rspice_simulation::results::RecordedFftSpectrum;
-use crate::state::{AnalysisResult, AnalysisResultPayload, AnalysisType};
+use crate::results::RecordedFftSpectrum;
+use rspice_results::analysis_payload::AnalysisResultPayload;
+use rspice_results::analysis_result::AnalysisResult;
+use rspice_results::analysis_type::AnalysisType;
 
 /// The unit the engine's own rule gives this spectrum's magnitudes.
 fn magnitude_unit(spectrum: &RecordedFftSpectrum) -> String {
@@ -41,12 +43,12 @@ fn magnitude_unit(spectrum: &RecordedFftSpectrum) -> String {
 /// Empty for an incomplete record: there is nothing to draw.
 fn spectrum_waveforms(
     spectrum: &RecordedFftSpectrum,
-) -> HashMap<String, rspice_simulation::results::WaveformData> {
+) -> HashMap<String, crate::results::WaveformData> {
     if !spectrum.evidence.status.is_complete() {
         return HashMap::new();
     }
     let name = spectrum.evidence.output.clone();
-    let mut waveform = rspice_simulation::results::WaveformData::new_complex(
+    let mut waveform = crate::results::WaveformData::new_complex(
         name.clone(),
         spectrum.frequency.clone(),
         spectrum.real.clone(),
@@ -58,7 +60,7 @@ fn spectrum_waveforms(
 
 /// Build the retained result for one recorded spectrum.
 ///
-/// `complex_waveforms` is the controller's own complex conversion, passed in
+/// `complex_waveforms` is the shared complex conversion, passed in
 /// rather than duplicated: magnitude and phase are derived exactly once, by
 /// the same code every other retained coefficient spectrum goes through.
 pub(super) fn analysis_result(
@@ -67,8 +69,9 @@ pub(super) fn analysis_result(
     spectrum: &RecordedFftSpectrum,
     complex_waveforms: impl FnOnce(
         Vec<f64>,
-        HashMap<String, rspice_simulation::results::WaveformData>,
-    ) -> Vec<crate::state::WaveformData>,
+        HashMap<String, crate::results::WaveformData>,
+    ) -> Vec<rspice_results::waveform::RetainedWaveform>,
+    now: impl Fn() -> f64,
 ) -> AnalysisResult {
     if let Err(error) = spectrum.validate() {
         return AnalysisResult::failed(
@@ -76,9 +79,10 @@ pub(super) fn analysis_result(
             analysis_type,
             label.to_string(),
             format!("Invalid recorded FFT spectrum: {error}"),
+            now(),
         );
     }
-    let mut result = AnalysisResult::new(1, analysis_type, label.to_string());
+    let mut result = AnalysisResult::new(1, analysis_type, label.to_string(), now());
     if spectrum.evidence.status.is_complete() {
         let waveforms = complex_waveforms(spectrum.frequency.clone(), spectrum_waveforms(spectrum));
         result = result.with_waveforms(waveforms);
@@ -89,11 +93,9 @@ pub(super) fn analysis_result(
 }
 
 /// The Console line a short record earns at completion.
-pub(in crate::simulation) fn incomplete_history_notice(
-    spectrum: &RecordedFftSpectrum,
-) -> Option<String> {
+pub fn incomplete_history_notice(spectrum: &RecordedFftSpectrum) -> Option<String> {
     let evidence = &spectrum.evidence;
-    let crate::state::FftSpectrumStatusEvidence::IncompleteHistory {
+    let rspice_results::fft::spectrum::FftSpectrumStatusEvidence::IncompleteHistory {
         available_start_s,
         available_stop_s,
     } = evidence.status

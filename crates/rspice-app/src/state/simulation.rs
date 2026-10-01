@@ -53,9 +53,12 @@ pub use rspice_results::fft::spectrum::{FftSpectrumEvidence, FftSpectrumStatusEv
 pub use rspice_results::fft::spectrum::FftSpectrumModeEvidence;
 
 pub use rspice_results::floquet::{
-    FloquetOrbitKindEvidence, FloquetSpectrumCertificateEvidence, FloquetSpectrumEvidence,
-    FloquetStabilityVerdictEvidence, PssFloquetMultiplierEvidence, PstbFloquetModeEvidence,
+    FloquetOrbitKindEvidence, FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence,
     PstbStabilityClassificationEvidence,
+};
+#[cfg(test)]
+pub use rspice_results::floquet::{
+    FloquetSpectrumCertificateEvidence, PssFloquetMultiplierEvidence, PstbFloquetModeEvidence,
 };
 pub use rspice_results::pole_zero::{PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate};
 
@@ -77,23 +80,30 @@ pub use rspice_results::events::{
     DigitalBusEvidence, DigitalBusSourceEvidence, DigitalEventPointEvidence,
     DigitalEventTraceEvidence, RealEventPointEvidence, RealEventTraceEvidence,
 };
+#[cfg(test)]
+pub use rspice_results::family_metadata::PeriodicNoiseOutputQuantity;
 pub use rspice_results::family_metadata::{
-    AnalysisResultFamilyMetadata, MonteCarloVariableMetadata, PeriodicNoiseOutputQuantity,
+    AnalysisResultFamilyMetadata, MonteCarloVariableMetadata,
 };
 pub use rspice_results::operating_point::{
-    DcOpResult, OperatingPointAccuracyEvidence, OperatingPointAnnotationEvidence,
-    OperatingPointDeviceDetailEvidence, OperatingPointHomotopyEvidence,
-    OperatingPointInitialGuessEvidence, OperatingPointNodeInitializationEvidence,
-    OperatingPointPreviousStateEvidence, OperatingPointProcessEvidence,
-    OperatingPointSaveDeviceEvidence, OperatingPointTemperatureEvidence, OperatingPointValue,
+    DcOpResult, OperatingPointAnnotationEvidence, OperatingPointDeviceDetailEvidence,
+    OperatingPointInitialGuessEvidence, OperatingPointValue,
+};
+#[cfg(test)]
+pub use rspice_results::operating_point::{
+    OperatingPointAccuracyEvidence, OperatingPointHomotopyEvidence,
+    OperatingPointNodeInitializationEvidence, OperatingPointPreviousStateEvidence,
+    OperatingPointProcessEvidence, OperatingPointSaveDeviceEvidence,
+    OperatingPointTemperatureEvidence,
 };
 pub use rspice_results::provenance::{
     AnalysisResultProvenance, AnalysisResultPvtPoint, AnalysisResultSourceDomain,
 };
 pub use rspice_results::soa_evidence::{
-    SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
-    SoaViolationSeverityEvidence,
+    SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
 };
+#[cfg(test)]
+pub use rspice_results::soa_evidence::{SoaViolationEvidence, SoaViolationSeverityEvidence};
 pub use rspice_results::soa_source::{SoaSourceHistory, SoaSourceWaveform};
 pub use rspice_results::transfer_function::{
     TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
