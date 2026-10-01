@@ -27,8 +27,9 @@
 //! }
 //! ```
 
-use super::{Component, Junction, Point, Wire};
-use crate::state::ResolvedCellSymbol;
+use rspice_design::resolved_symbol::ResolvedCellSymbol;
+use rspice_design::schematic::{component::Component, net_label::Junction, wire::Wire};
+use rspice_design_model::Point;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -744,13 +745,17 @@ impl SnapEngine {
 
 #[cfg(test)]
 mod tests {
-    use super::super::ComponentType;
     use super::*;
-    use crate::state::{
-        Cell, Library, LibraryCellInstance, LibraryManager, PortDirection, PortSpec,
-        ResolvedCellSymbol, SchematicState, SymbolDocument, SymbolPin, SymbolResolver, View,
-        ViewType,
+    use rspice_design::{
+        library::{Cell, Library, LibraryCatalog, View, ViewType},
+        schematic::{
+            component::LibraryCellInstance, component_type::ComponentType,
+            document::SchematicDocument,
+        },
+        symbol::{SymbolDocument, SymbolPin},
+        symbol_resolver::SymbolResolver,
     };
+    use rspice_design_model::port::{PortDirection, PortSpec};
     use std::collections::HashMap;
 
     fn engine_with(f: impl FnOnce(&mut SnapEngine)) -> SnapEngine {
@@ -780,7 +785,7 @@ mod tests {
             ..SymbolDocument::default()
         };
 
-        let mut libraries = LibraryManager::new();
+        let mut libraries = LibraryCatalog::default();
         let mut library = Library::new("work");
         let mut cell = Cell::new("amp");
         let mut symbol_view = View::new("symbol", ViewType::Symbol);
@@ -797,7 +802,7 @@ mod tests {
             port("OUT", PortDirection::Out),
         ]);
 
-        let buffers = HashMap::<String, SchematicState>::new();
+        let buffers = HashMap::<String, SchematicDocument>::new();
         SymbolResolver::new(&libraries, &buffers)
             .resolve_binding(&binding)
             .expect("symbol resolves")

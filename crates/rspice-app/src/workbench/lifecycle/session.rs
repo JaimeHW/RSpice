@@ -1075,7 +1075,12 @@ mod symbol_selection_tests {
             serde_json::from_value(serde_json::json!({})).expect("legacy session without a filter");
         let restored = UiSessionState::from(wire);
 
-        assert!(restored.schematic_selection_filter.all_enabled());
+        assert!(
+            restored.schematic_selection_filter.instances
+                && restored.schematic_selection_filter.wires
+                && restored.schematic_selection_filter.labels
+                && restored.schematic_selection_filter.annotations
+        );
     }
 
     #[test]

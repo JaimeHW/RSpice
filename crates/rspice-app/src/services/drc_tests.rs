@@ -734,8 +734,8 @@ fn the_second_extraction_has_no_survivors() {
 fn the_canvas_keeps_no_connectivity_owner_of_its_own() {
     for (path, source) in [
         (
-            "state/schematic/net_highlight.rs",
-            include_str!("../state/schematic/net_highlight.rs"),
+            "rspice-schematic-editor/src/session/net_highlight.rs",
+            include_str!("../../../rspice-schematic-editor/src/session/net_highlight.rs"),
         ),
         (
             "schematic/view/scene.rs",

@@ -29,7 +29,7 @@ use super::snap::SnapEngine;
 use super::tool::Tool;
 use super::wire::WireDrawing;
 #[cfg(test)]
-use super::wire::{Wire, WireConnection};
+use rspice_design::schematic::wire::{Wire, WireConnection};
 
 mod components;
 mod editor_ops;

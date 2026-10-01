@@ -2,7 +2,7 @@
 //!
 //! Current tool mode for schematic interaction.
 
-use super::component_type::ComponentType;
+use rspice_design::schematic::component_type::ComponentType;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================

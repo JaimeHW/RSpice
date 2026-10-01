@@ -3,8 +3,8 @@
 //! Interactive wire placement state machine for schematic editors.
 //! Tracks in-progress wire drawing with preview and routing mode support.
 
-use super::super::point::Point;
 use super::routing::WireRoutingMode;
+use rspice_design_model::Point;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================

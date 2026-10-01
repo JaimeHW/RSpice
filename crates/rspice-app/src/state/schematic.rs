@@ -42,23 +42,23 @@ mod ground_names;
 mod hierarchy;
 use rspice_design::schematic::hierarchy as hierarchy_edit;
 pub(crate) mod named_net;
-mod net_highlight;
 use rspice_design::schematic::net_label;
+use rspice_schematic_editor::session::net_highlight;
 mod placement_authority;
 mod point;
 mod port;
 use rspice_design::schematic::probe;
 use rspice_design::schematic::replacement;
 use rspice_design::schematic::rotation;
-mod selection;
-mod snap;
+use rspice_schematic_editor::session::selection;
+use rspice_schematic_editor::session::snap;
 mod state;
 use rspice_design::symbol_generation as symbol_gen;
-mod tool;
+use rspice_schematic_editor::session::tool;
 mod undo_history;
 mod validated_revision;
 mod visibility;
-mod wire;
+use rspice_schematic_editor::session::wire;
 
 // Re-exports. This block used to say "re-export all public types for backwards
 // compatibility", which an application crate has no one to keep compatibility
@@ -107,7 +107,9 @@ pub use hierarchy::{
     hierarchy_terminal_direction, hierarchy_terminal_discipline,
 };
 pub use net_highlight::NetHighlightState;
-pub use net_label::{Junction, NetLabel, NetLabelKind};
+#[cfg(test)]
+pub use net_label::Junction;
+pub use net_label::{NetLabel, NetLabelKind};
 pub use placement_authority::PlacementAuthority;
 pub use point::Point;
 #[cfg(test)]
@@ -123,6 +125,8 @@ pub use replacement::{
     SchematicReplacementTerminal,
 };
 pub use rotation::Rotation;
+#[cfg(test)]
+pub use rspice_design::schematic::wire::WireConnection;
 pub use selection::{
     DuplicateExternalNets, JunctionSelection, SchematicSelectionFilter, Selection,
 };
@@ -147,6 +151,4 @@ pub use visibility::{
     SchematicParameterLabelVisibility, SchematicReviewMarkerVisibility, SchematicVisibilityPolicy,
     SchematicWireRoutingStyle,
 };
-#[cfg(test)]
-pub use wire::WireConnection;
 pub use wire::{Wire, WireRoutingMode, WireSegment};

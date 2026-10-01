@@ -1,6 +1,6 @@
 //! Schematic selection gestures and editor filter preferences.
 
-use super::Point;
+use rspice_design_model::Point;
 use serde::{Deserialize, Serialize};
 
 /// Session-owned schematic selection classes.
@@ -44,21 +44,6 @@ pub enum DuplicateExternalNets {
 }
 
 impl SchematicSelectionFilter {
-    #[must_use]
-    #[cfg(test)]
-    pub const fn all_enabled(self) -> bool {
-        self.instances && self.wires && self.labels && self.annotations
-    }
-
-    #[must_use]
-    #[cfg(test)]
-    pub const fn enabled_count(self) -> usize {
-        self.instances as usize
-            + self.wires as usize
-            + self.labels as usize
-            + self.annotations as usize
-    }
-
     /// Remove objects belonging to disabled classes from a live selection.
     ///
     /// Wire handles, junctions, buses and taps all belong to the electrical
@@ -225,8 +210,15 @@ mod tests {
     fn schematic_selection_filter_defaults_to_every_mockup_class() {
         let filter = SchematicSelectionFilter::default();
 
-        assert!(filter.all_enabled());
-        assert_eq!(filter.enabled_count(), 4);
+        assert_eq!(
+            filter,
+            SchematicSelectionFilter {
+                instances: true,
+                wires: true,
+                labels: true,
+                annotations: true,
+            }
+        );
     }
 
     #[test]

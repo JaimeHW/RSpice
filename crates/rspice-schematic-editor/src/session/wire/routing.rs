@@ -3,7 +3,7 @@
 //! Wire routing algorithms and route optimization functions for
 //! interactive wire drawing in schematic editors.
 
-use super::super::point::Point;
+use rspice_design_model::Point;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
