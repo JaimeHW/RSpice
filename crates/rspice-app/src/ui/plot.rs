@@ -21,10 +21,10 @@
 
 mod cursor;
 mod decimate;
-mod format;
 mod render;
-mod scale;
 mod spec;
+
+pub(crate) use rspice_results::{number_format as format, plot_axis as scale};
 
 /// Sweep-shape classification and branch-aware sampling.
 ///
@@ -39,7 +39,6 @@ pub use cursor::CursorPair;
 pub(crate) use decimate::TraceView;
 pub use decimate::{
     DEFAULT_DISPLAY_CACHE_MIB, DecimationCache, DisplayDecimation, SampleInterpolation, sample_at,
-    sample_at_with,
 };
 pub use format::{fmt_si, fmt_si_significant, fmt_significant, si_tick_label, tick_with_unit};
 pub(crate) use render::paint_min_max_band;

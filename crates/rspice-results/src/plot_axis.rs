@@ -1,6 +1,6 @@
 //! Axis scales and tick generation.
 
-use super::format::{
+use super::number_format::{
     offset_anchor_label, tick_label, tick_label_with_step, tick_offset_label, wants_offset_notation,
 };
 

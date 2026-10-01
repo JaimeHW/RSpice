@@ -12,7 +12,9 @@ use std::sync::Arc;
 
 use super::sample::{LogicalView, SweepClass, SweepShape, XOrientation};
 use super::scale::XScale;
-pub use rspice_results::sampling::{SampleInterpolation, sample_at, sample_at_with};
+#[cfg(test)]
+use rspice_results::sampling::sample_at_with;
+pub use rspice_results::sampling::{SampleInterpolation, sample_at};
 
 /// Viewer-only sampling policy. None of these modes mutate or replace the
 /// source waveform arrays.

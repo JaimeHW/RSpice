@@ -510,7 +510,7 @@ pub(crate) fn resolve_active_studio_pane_source(
 pub(crate) fn resolve_results_quick_view_source(
     source: ResultsQuickViewHardcopySource<'_>,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    let presentation = ResultsQuickViewPresentation::from_state(source.state);
+    let presentation = ResultsQuickViewPresentation::from_state(source.state)?;
     if presentation.viewer == ResultViewer::Manifest {
         let run = active_terminal_run(source.state)?;
         return resolve_results_manifest_source(

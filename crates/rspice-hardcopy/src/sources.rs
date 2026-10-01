@@ -6,6 +6,7 @@ mod design;
 mod geometry;
 mod mapping;
 mod plots;
+mod quick_plot;
 mod reports;
 mod result_summary;
 mod schematic;
@@ -26,6 +27,12 @@ pub use geometry::{
 };
 use mapping::default_print_mapping;
 pub use plots::{resolve_plot_source, resolve_visualization_pane_source};
+pub use quick_plot::{
+    PlotFrame, QuickResultSeries, RetainedCursorInterpolation, RetainedQuickMarker,
+    RetainedQuickViewOverlay, RetainedQuickViewOverlays, RetainedQuickViewport,
+    nondegenerate_range, plot_axes, quick_plot_from_scaled_series, quick_plot_from_series,
+    stable_page_id, stable_quick_trace_id,
+};
 pub use reports::{ReportHardcopySource, resolve_report_source};
 pub use result_summary::{is_curve_viewer, semantic_result_summary};
 use rspice_app_types::product::ContentDigest;

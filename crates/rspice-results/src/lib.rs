@@ -42,10 +42,12 @@ pub mod network_matrix;
 #[cfg(feature = "engine-evidence")]
 pub mod noise;
 pub mod noise_spectrum;
+pub mod number_format;
 pub mod nyquist;
 pub mod operating_point;
 pub mod optimization;
 pub mod phase_noise;
+pub mod plot_axis;
 #[cfg(feature = "engine-evidence")]
 pub mod pole_zero;
 pub mod provenance;

@@ -529,70 +529,6 @@ fn a_printed_quick_view_carries_the_markers_and_cursors_the_reader_placed() {
     assert!(bare.cursors.is_empty());
 }
 
-/// A retained document marker reaches the page as itself.
-///
-/// The two stores allocate independently and label distinctly, so a `D`
-/// marker must arrive with its own tag rather than being restated as a quick
-/// one. A spec limit arrives as the full-height line the sheet draws, because
-/// it constrains the axis position rather than one curve.
-#[test]
-fn a_retained_document_marker_and_a_spec_limit_reach_the_page_as_themselves() {
-    use crate::workbench::documents::result_document::MarkerKind;
-
-    let series = vec![QuickResultSeries {
-        identity: "trace-identity".to_owned(),
-        label: "V(out)".to_owned(),
-        points: vec![(0.0, 0.0), (1.0, 4.0), (2.0, 8.0)],
-    }];
-    let overlay = RetainedQuickViewOverlay::for_test(
-        None,
-        None,
-        vec![
-            RetainedQuickMarker {
-                label: "D7 · settling".to_owned(),
-                kind: MarkerKind::Peak,
-                x: 1.0,
-                trace_name: Some("V(out)".to_owned()),
-            },
-            RetainedQuickMarker {
-                label: "M2 · upper limit".to_owned(),
-                kind: MarkerKind::Spec,
-                x: 2.0,
-                trace_name: None,
-            },
-            RetainedQuickMarker {
-                label: "M3 · other pane".to_owned(),
-                kind: MarkerKind::Note,
-                x: 1.0,
-                trace_name: Some("V(elsewhere)".to_owned()),
-            },
-        ],
-    );
-
-    let plot = quick_plot_from_series(ResultViewer::Waves, "Results", 0, series, Some(&overlay))
-        .expect("plot resolves");
-
-    assert_eq!(
-        plot.markers
-            .iter()
-            .map(|marker| marker.label.as_str())
-            .collect::<Vec<_>>(),
-        ["D7 · settling"],
-        "a spec limit is a line, and a marker whose trace is not on this page is skipped"
-    );
-    assert_eq!(plot.markers[0].source_y_bits, Some(4.0f64.to_bits()));
-    assert_eq!(
-        plot.cursors
-            .iter()
-            .map(|cursor| cursor.label.as_str())
-            .collect::<Vec<_>>(),
-        ["M2 · upper limit"]
-    );
-    let limit = &plot.cursors[0];
-    assert_eq!(limit.start.x_um, limit.end.x_um);
-    assert_eq!(limit.source_x_bits, 2.0f64.to_bits());
-}
-
 /// A trace the reader hid does not print.
 ///
 /// The capture filtered on the dataset's own `visible` flag, which a session
@@ -1164,4 +1100,39 @@ fn a_pane_ordinate_does_not_bound_a_page_that_merges_every_pane() {
         !printed(&state, "V(out)").is_empty(),
         "the volt trace is still on the page"
     );
+}
+
+#[test]
+fn linear_axes_are_captioned_on_both_dimensions_and_keep_offset_anchors() {
+    let frame = PlotFrame {
+        x_minimum: 1e9,
+        x_maximum: 1e9 + 0.001,
+        y_minimum: 0.0,
+        y_maximum: 1.0,
+        x_span: (1e9 + 0.001) - 1e9,
+        y_span: 1.0,
+        plot_width: PLOT_WIDTH_UM - 2 * PLOT_INSET_UM,
+        plot_height: PLOT_HEIGHT_UM - 2 * PLOT_INSET_UM,
+    };
+    let (ticks, captions) = plot_axes(AxisScale::Linear, AxisScale::Linear, &frame).unwrap();
+    let screen = crate::ui::plot::Axis::linear(frame.x_minimum, frame.x_maximum, "");
+    let anchor = screen
+        .offset_anchor()
+        .expect("this span requires an offset anchor");
+    assert!(
+        captions
+            .iter()
+            .any(|caption| caption.text == format!("x: {anchor}"))
+    );
+    for kind in [SemanticAxisKind::Horizontal, SemanticAxisKind::Vertical] {
+        let axis: Vec<_> = ticks.iter().filter(|tick| tick.axis == kind).collect();
+        assert!(!axis.is_empty());
+        assert!(axis.iter().all(|tick| tick.major && !tick.label.is_empty()));
+        for tick in axis {
+            match kind {
+                SemanticAxisKind::Horizontal => assert_eq!(tick.start.x_um, tick.end.x_um),
+                SemanticAxisKind::Vertical => assert_eq!(tick.start.y_um, tick.end.y_um),
+            }
+        }
+    }
 }

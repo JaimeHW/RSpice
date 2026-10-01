@@ -485,7 +485,7 @@ mod histogram_tests {
     fn histogram_worker_controls_round_trip_and_validate_the_viewport() {
         let state = AppState::default();
         for mode in crate::analysis::HistogramDisplayMode::ALL {
-            let mut presentation = ResultsQuickViewPresentation::from_state(&state);
+            let mut presentation = ResultsQuickViewPresentation::from_state(&state).unwrap();
             presentation.histogram_mode = mode;
             presentation.histogram_measurement = Some("gain".to_owned());
             presentation.histogram_view.x = Some((1e-15, 2e-15));

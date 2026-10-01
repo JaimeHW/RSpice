@@ -13,8 +13,8 @@
 
 use super::*;
 
-use crate::results::visualization_document::AxisScale;
-use crate::ui::plot::fmt_si_significant;
+use rspice_results::number_format::fmt_si_significant;
+use rspice_results::visualization_document::AxisScale;
 
 /// The widest span, in decades, over which a printed axis rules its mantissas.
 ///
@@ -41,7 +41,7 @@ pub(super) fn project(scale: AxisScale, value: f64) -> Option<f64> {
 
 /// Resolve both axes in source space before mapping ticks to the page.
 /// Offset labels retain their anchor as a caption, as on the interactive plot.
-pub(super) fn plot_axes(
+pub fn plot_axes(
     x_scale: AxisScale,
     y_scale: AxisScale,
     frame: &PlotFrame,
@@ -68,8 +68,8 @@ pub(super) fn plot_axes(
         let rules = if scale == AxisScale::Logarithmic {
             logarithmic_rules(min, max)
         } else {
-            let axis = crate::ui::plot::Axis::linear(min, max, "");
-            if let Some(anchor) = axis.offset_anchor() {
+            let axis = rspice_results::plot_axis::linear_ticks(min, max, 6);
+            if let Some(anchor) = rspice_results::plot_axis::anchor_label(&axis, "") {
                 let (label, y) = match kind {
                     SemanticAxisKind::Horizontal => ("x", PLOT_HEIGHT_UM - 1_500),
                     SemanticAxisKind::Vertical => ("y", 9_000),
@@ -155,32 +155,6 @@ fn logarithmic_rules(min: f64, max: f64) -> Vec<(f64, String, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn linear_axes_are_captioned_on_both_dimensions_and_keep_offset_anchors() {
-        let frame = log_frame(1e9, 1e9 + 0.001);
-        let (ticks, captions) = plot_axes(AxisScale::Linear, AxisScale::Linear, &frame).unwrap();
-        let screen = crate::ui::plot::Axis::linear(frame.x_minimum, frame.x_maximum, "");
-        let anchor = screen
-            .offset_anchor()
-            .expect("this span requires an offset anchor");
-        assert!(
-            captions
-                .iter()
-                .any(|caption| caption.text == format!("x: {anchor}"))
-        );
-        for kind in [SemanticAxisKind::Horizontal, SemanticAxisKind::Vertical] {
-            let axis: Vec<_> = ticks.iter().filter(|tick| tick.axis == kind).collect();
-            assert!(!axis.is_empty());
-            assert!(axis.iter().all(|tick| tick.major && !tick.label.is_empty()));
-            for tick in axis {
-                match kind {
-                    SemanticAxisKind::Horizontal => assert_eq!(tick.start.x_um, tick.end.x_um),
-                    SemanticAxisKind::Vertical => assert_eq!(tick.start.y_um, tick.end.y_um),
-                }
-            }
-        }
-    }
 
     #[test]
     fn logarithmic_ordinates_are_mapped_as_decades() {

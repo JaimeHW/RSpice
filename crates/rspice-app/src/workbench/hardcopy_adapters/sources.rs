@@ -7,7 +7,6 @@
 //! No type in this module contains pixels, an egui paint command, or a screen
 //! rectangle.
 
-mod axis;
 mod documents;
 mod noise;
 mod prepared;
@@ -18,10 +17,9 @@ mod results;
 
 pub use documents::*;
 pub(crate) use rspice_hardcopy::sources::*;
-// Module-private: `axis`, `noise`, `quick_plots` and `quick_view_overlay`
+// Module-private: `noise`, `quick_plots` and `quick_view_overlay`
 // expose only `pub(super)` items, and the siblings reach them through
 // `use super::*`.
-use axis::*;
 use noise::*;
 pub use prepared::*;
 use quick_plots::*;
@@ -169,7 +167,7 @@ fn captured_results_run(state: &AppState) -> Option<&SimulationRun> {
 }
 
 impl ResultsQuickViewPresentation {
-    fn from_state(state: &AppState) -> Self {
+    fn from_state(state: &AppState) -> Result<Self, HardcopySourceError> {
         let mut fft = crate::analysis::FftState::default();
         fft.selected_source = state.analysis.fft_state.selected_source.clone();
         fft.normalization = state.analysis.fft_state.normalization;
@@ -183,9 +181,10 @@ impl ResultsQuickViewPresentation {
         // Every strip of the captured run, because a stacked wave view
         // resolves one page per analysis through this one presentation.
         let overlay = captured_results_run(state)
-            .map(|run| RetainedQuickViewOverlays::capture(state, run))
+            .map(|run| capture_quick_view_overlays(state, run))
+            .transpose()?
             .unwrap_or_default();
-        Self {
+        Ok(Self {
             viewer: state.ui.results.viewer,
             overlay,
             specs: crate::workbench::documents::result_document::run_specifications(state),
@@ -198,7 +197,7 @@ impl ResultsQuickViewPresentation {
             histogram_custom_min: state.analysis.histogram_state.custom_min,
             histogram_custom_max: state.analysis.histogram_state.custom_max,
             histogram_mode: state.analysis.histogram_state.mode,
-        }
+        })
     }
 }
 
@@ -675,7 +674,7 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
                     source_key: source_key.to_owned(),
                     project_id,
                     run: prepared_run,
-                    presentation: ResultsQuickViewPresentation::from_state(state),
+                    presentation: ResultsQuickViewPresentation::from_state(state)?,
                     scope,
                 },
             });
@@ -1672,15 +1671,6 @@ fn selected_symbol_document(
     Ok(selected)
 }
 
-fn nondegenerate_range(minimum: f64, maximum: f64) -> (f64, f64) {
-    if minimum < maximum {
-        (minimum, maximum)
-    } else {
-        let padding = (minimum.abs() * 0.05).max(1.0e-12);
-        (minimum - padding, maximum + padding)
-    }
-}
-
 fn stable_trace_id(dataset_id: DatasetId, analysis_sequence: u64, name: &str) -> u64 {
     let mut hasher = Sha256::new();
     hasher.update(b"rspice-studio-trace-id-v1");
@@ -1688,13 +1678,6 @@ fn stable_trace_id(dataset_id: DatasetId, analysis_sequence: u64, name: &str) ->
     hasher.update(analysis_sequence.to_be_bytes());
     hasher.update(name.as_bytes());
     let digest = hasher.finalize();
-    let mut bytes = [0_u8; 8];
-    bytes.copy_from_slice(&digest[..8]);
-    u64::from_be_bytes(bytes).max(1)
-}
-
-fn stable_page_id(page: &str) -> u64 {
-    let digest = Sha256::digest([b"rspice-studio-page-id-v1".as_slice(), page.as_bytes()].concat());
     let mut bytes = [0_u8; 8];
     bytes.copy_from_slice(&digest[..8]);
     u64::from_be_bytes(bytes).max(1)
