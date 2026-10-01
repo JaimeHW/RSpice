@@ -99,6 +99,15 @@ class DrawingSheetQualificationTests(unittest.TestCase):
     def test_gate_ids_are_unique_locked_and_test_filters_are_nonvacuous(self) -> None:
         gates = command_gates(2, ("x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"))
         self.assertEqual(len(gates), len({gate.gate_id for gate in gates}))
+        tested_packages = {
+            gate.command[gate.command.index("-p") + 1]
+            for gate in gates
+            if "test" in gate.command
+        }
+        self.assertTrue(
+            {"rspice-app", "rspice-hardcopy-contract", "rspice-hardcopy"}
+            <= tested_packages
+        )
         for gate in gates:
             self.assertEqual(gate.command[0], "cargo")
             self.assertIn("--locked", gate.command)

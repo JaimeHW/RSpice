@@ -401,10 +401,16 @@ def command_gates(
             192 if host_system == "Windows" else 189,
         ),
         Gate(
+            "hardcopy-contract",
+            "Hardcopy planning, source authority, and print contract tests",
+            ("cargo", "test", "--locked", "-p", "rspice-hardcopy-contract", "-j", cargo_jobs, "--lib"),
+            31,
+        ),
+        Gate(
             "hardcopy-service",
             "Frozen hardcopy source and renderer tests",
             ("cargo", "test", "--locked", "-p", "rspice-hardcopy", "-j", cargo_jobs, "--lib"),
-            77,
+            81,
         ),
         Gate(
             "publisher-tests",
