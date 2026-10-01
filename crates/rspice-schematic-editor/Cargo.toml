@@ -1,0 +1,27 @@
+[package]
+name = "rspice-schematic-editor"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Read-only geometry observation shared by editor and app interaction tests.
+test-support = []
+
+[dependencies]
+egui = { version = "0.35.0", default-features = false }
+rspice-app-types.workspace = true
+rspice-design = { workspace = true, features = ["symbol-artwork"] }
+rspice-design-model.workspace = true
+rspice-ui-kit.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+rspice-ui-kit = { workspace = true, features = ["test-support"] }

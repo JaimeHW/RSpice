@@ -3,7 +3,7 @@
 //! Provides concise, descriptive source labels for schematic rendering without
 //! changing netlist serialization semantics.
 
-use crate::state::{Component, ComponentType};
+use rspice_design::schematic::{component::Component, component_type::ComponentType};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -61,7 +61,7 @@ pub fn component_value_label_cached(component: &Component) -> Rc<str> {
 }
 
 fn format_source_label(component: &Component) -> String {
-    let params = crate::state::parse_params_string(&component.params);
+    let params = rspice_design::parameters::parse_params_string(&component.params);
     let primary = primary_or_default(component.value.as_str(), "0");
 
     match component.kind {
@@ -581,7 +581,7 @@ fn is_default_value(value: &str, default: &str) -> bool {
 }
 
 fn parse_numeric(value: &str) -> Option<f64> {
-    crate::quantity::parse_engineering_value(value)
+    rspice_app_types::quantity::parse_engineering_value(value)
         .ok()
         .or_else(|| value.parse::<f64>().ok())
 }
@@ -620,7 +620,8 @@ fn looks_like_placeholder(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::component_value_label;
-    use crate::state::{Component, ComponentType, Point};
+    use rspice_design::schematic::{component::Component, component_type::ComponentType};
+    use rspice_design_model::Point;
 
     /// A label leaves out the lines that only repeat a default, and it decides
     /// that by parsing. An `ac=0V` — the AC default, written the way a reader

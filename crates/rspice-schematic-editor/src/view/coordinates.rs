@@ -5,13 +5,13 @@
 
 use egui::{Pos2, Rect};
 
-use crate::state::Point;
-use crate::workbench::app_state::AppState;
+use rspice_design_model::Point;
 
 use super::viewport::Viewport;
 
-pub(super) fn viewport_from_state(
-    state: &AppState,
+pub fn viewport_from_camera(
+    pan: (f64, f64),
+    zoom: f64,
     bounds: Rect,
     pixels_per_point: f32,
 ) -> Viewport {
@@ -22,16 +22,13 @@ pub(super) fn viewport_from_state(
     let ppp = pixels_per_point.max(0.5);
     let snap = |v: f64| ((v as f32) * ppp).round() / ppp;
     Viewport {
-        offset: Pos2::new(
-            snap(state.schematic.session.pan.0),
-            snap(state.schematic.session.pan.1),
-        ),
-        zoom: state.schematic.session.zoom as f32,
+        offset: Pos2::new(snap(pan.0), snap(pan.1)),
+        zoom: zoom as f32,
         bounds,
     }
 }
 
-pub(super) fn screen_to_grid(viewport: &Viewport, grid_size: i32, screen_pos: Pos2) -> Point {
+pub fn screen_to_grid(viewport: &Viewport, grid_size: i32, screen_pos: Pos2) -> Point {
     let zoom = viewport.zoom as f64;
     let pan_x = viewport.offset.x as f64;
     let pan_y = viewport.offset.y as f64;
@@ -48,7 +45,7 @@ pub(super) fn screen_to_grid(viewport: &Viewport, grid_size: i32, screen_pos: Po
 /// Convert a screen coordinate to the nearest integer schematic coordinate
 /// without applying grid snapping. Hit-testing uses this projection so its
 /// tolerance can be expressed in screen pixels independently of grid cadence.
-pub(super) fn screen_to_schematic(viewport: &Viewport, screen_pos: Pos2) -> Point {
+pub fn screen_to_schematic(viewport: &Viewport, screen_pos: Pos2) -> Point {
     let zoom = viewport.zoom as f64;
     let pan_x = viewport.offset.x as f64;
     let pan_y = viewport.offset.y as f64;

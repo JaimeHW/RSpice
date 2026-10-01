@@ -2,7 +2,7 @@
 //!
 //! The placeable devices, grouped into the sections the palette shows.
 
-use crate::state::ComponentType;
+use rspice_design::schematic::component_type::ComponentType;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComponentPaletteEntry {

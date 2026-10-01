@@ -2,25 +2,28 @@
 
 use egui::{Color32, Painter, Pos2, Rect, Stroke};
 
-use crate::state::{DocumentationShape, DocumentationShapeGeometry, Point, arc_parameters};
+use rspice_design::schematic::documentation_shape::{
+    DocumentationShape, DocumentationShapeGeometry, arc_parameters,
+};
+use rspice_design_model::Point;
 
 use super::viewport::Viewport;
 
 const HIT_TOLERANCE_POINTS: f32 = 6.0;
 const RECTANGLE_CORNER_POINTS: f32 = 6.0;
 
-pub(super) fn world_bounds(shape: &DocumentationShape) -> (Point, Point) {
+pub fn world_bounds(shape: &DocumentationShape) -> (Point, Point) {
     shape.bounds()
 }
 
-pub(super) fn draw_documentation_shape(
+pub fn draw_documentation_shape(
     painter: &Painter,
     viewport: &Viewport,
     shape: &DocumentationShape,
     selected: bool,
     hovered: bool,
 ) {
-    let palette = crate::ui::tokens::active_palette();
+    let palette = rspice_ui_kit::tokens::active_palette();
     let color = if selected {
         palette.accent
     } else if hovered {
@@ -39,7 +42,7 @@ pub(super) fn draw_documentation_shape(
     }
 }
 
-pub(super) fn draw_geometry(
+pub fn draw_geometry(
     painter: &Painter,
     viewport: &Viewport,
     geometry: &DocumentationShapeGeometry,
@@ -156,7 +159,7 @@ fn arc_segment_count(radius: f64, sweep: f64, zoom: f32) -> usize {
     ((sweep.abs() * (radius * f64::from(zoom)).sqrt() * 0.8).ceil() as usize).clamp(12, 512)
 }
 
-pub(super) fn documentation_shape_at(
+pub fn documentation_shape_at(
     viewport: &Viewport,
     shapes: &[DocumentationShape],
     pointer: Pos2,
@@ -246,7 +249,7 @@ fn distance_to_segment(point: Pos2, start: Pos2, end: Pos2) -> f32 {
     point.distance(start + segment * t)
 }
 
-pub(super) fn shape_intersects_rect(
+pub fn shape_intersects_rect(
     shape: &DocumentationShape,
     min_x: i32,
     min_y: i32,
@@ -263,7 +266,9 @@ pub(super) fn shape_intersects_rect(
     }
     shape_segments(&shape.geometry)
         .into_iter()
-        .any(|(start, end)| super::segment_intersects_rect(start, end, min_x, min_y, max_x, max_y))
+        .any(|(start, end)| {
+            super::geometry::segment_intersects_rect(start, end, min_x, min_y, max_x, max_y)
+        })
 }
 
 fn shape_segments(geometry: &DocumentationShapeGeometry) -> Vec<(Point, Point)> {
@@ -304,20 +309,22 @@ fn shape_segments(geometry: &DocumentationShapeGeometry) -> Vec<(Point, Point)> 
     }
 }
 
-pub(super) fn preview_stroke(valid: bool) -> Stroke {
-    let palette = crate::ui::tokens::active_palette();
+pub fn preview_stroke(valid: bool) -> Stroke {
+    let palette = rspice_ui_kit::tokens::active_palette();
     Stroke::new(1.4, if valid { palette.accent } else { palette.err })
 }
 
-pub(super) fn preview_anchor_color(valid: bool) -> Color32 {
-    let palette = crate::ui::tokens::active_palette();
+pub fn preview_anchor_color(valid: bool) -> Color32 {
+    let palette = rspice_ui_kit::tokens::active_palette();
     if valid { palette.accent } else { palette.err }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{DocumentationShape, DocumentationShapeGeometry};
+    use rspice_design::schematic::documentation_shape::{
+        DocumentationShape, DocumentationShapeGeometry,
+    };
 
     #[test]
     fn three_point_arc_bounds_include_cardinal_extrema() {
@@ -352,7 +359,11 @@ mod tests {
             bounds: Rect::from_min_size(Pos2::ZERO, egui::vec2(200.0, 200.0)),
         };
         assert_eq!(
-            documentation_shape_at(&viewport, &[shape.clone()], Pos2::new(50.0, 11.0)),
+            documentation_shape_at(
+                &viewport,
+                std::slice::from_ref(&shape),
+                Pos2::new(50.0, 11.0)
+            ),
             Some(3)
         );
         assert_eq!(

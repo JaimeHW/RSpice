@@ -15,8 +15,27 @@ use std::cell::RefCell;
 
 use egui::{Color32, Mesh, Painter, Rect, Shape, pos2, vec2};
 
-use crate::state::GridStyle;
-use crate::workbench::app_state::AppState;
+use serde::{Deserialize, Serialize};
+
+/// Canvas grid rendering style selected by the toolbar cycle and the richer
+/// canvas-settings transaction. Snapping remains independently configurable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum GridStyle {
+    /// One dot per snap point (default).
+    #[default]
+    Dots,
+    /// Hairline rules per snap point.
+    Lines,
+    /// No grid.
+    Off,
+}
+
+impl GridStyle {
+    /// Whether any grid renders.
+    pub fn visible(self) -> bool {
+        self != GridStyle::Off
+    }
+}
 
 /// Minimum cell pitch in device pixels before selecting the next coarser
 /// engineering step.
@@ -43,21 +62,23 @@ thread_local! {
 
 /// Draw the schematic grid in the workbench's active style, clipped to the
 /// authored drawing area while retaining the world-origin lattice phase.
-pub(super) fn draw_grid(
+pub fn draw_grid(
     painter: &Painter,
     canvas_bounds: Rect,
     clip_bounds: Rect,
-    state: &AppState,
+    style: GridStyle,
+    grid_size: i32,
+    pan: (f64, f64),
+    zoom: f64,
 ) {
-    let style = state.ui.grid;
     if !style.visible() || !clip_bounds.is_positive() {
         return;
     }
 
-    let grid_size = state.schematic.document().grid_size as f32;
-    let zoom = state.schematic.session.zoom as f32;
-    let pan_x = state.schematic.session.pan.0 as f32;
-    let pan_y = state.schematic.session.pan.1 as f32;
+    let grid_size = grid_size as f32;
+    let zoom = zoom as f32;
+    let pan_x = pan.0 as f32;
+    let pan_y = pan.1 as f32;
 
     let pixels_per_point = painter.ctx().pixels_per_point().max(f32::EPSILON);
     let base_pitch = grid_size * zoom;
@@ -70,7 +91,7 @@ pub(super) fn draw_grid(
     // Dots and rules share the authored canvas-grid token. The style changes
     // geometry only; silently dimming one mode makes the same visibility
     // preference produce two different contrast contracts.
-    let color = crate::ui::tokens::active_palette().canvas_grid;
+    let color = rspice_ui_kit::tokens::active_palette().canvas_grid;
 
     // Lattice extent: cover the bounds plus one period on each side; the
     // painter's clip rect trims the overhang.

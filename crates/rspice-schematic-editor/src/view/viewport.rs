@@ -4,18 +4,18 @@
 
 use egui::{Pos2, Rect};
 
-use crate::state::Point;
+use rspice_design_model::Point;
 
 /// Viewport transformation helper
-pub(super) struct Viewport {
-    pub(super) offset: Pos2,
-    pub(super) zoom: f32,
-    pub(super) bounds: Rect,
+pub struct Viewport {
+    pub offset: Pos2,
+    pub zoom: f32,
+    pub bounds: Rect,
 }
 
 impl Viewport {
     /// Convert schematic coordinates to screen coordinates
-    pub(super) fn schematic_to_screen(&self, point: Point) -> Pos2 {
+    pub fn schematic_to_screen(&self, point: Point) -> Pos2 {
         Pos2::new(
             self.bounds.min.x + self.offset.x + (point.x as f32) * self.zoom,
             self.bounds.min.y + self.offset.y + (point.y as f32) * self.zoom,
@@ -25,7 +25,7 @@ impl Viewport {
     /// The visible region in schematic coordinates, expanded by `margin`
     /// world units on every side (labels and symbol bodies overhang their
     /// anchor points). Used for viewport culling.
-    pub(super) fn visible_world_rect(&self, margin: f32) -> (f32, f32, f32, f32) {
+    pub fn visible_world_rect(&self, margin: f32) -> (f32, f32, f32, f32) {
         let inv = 1.0 / self.zoom.max(f32::EPSILON);
         let x0 = -self.offset.x * inv;
         let y0 = -self.offset.y * inv;

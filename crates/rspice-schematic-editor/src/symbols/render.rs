@@ -198,6 +198,10 @@ pub fn draw_baked(
 // =============================================================================
 
 /// Render a symbol to an egui painter with position, scale, rotation, mirroring, and stroke
+#[expect(
+    clippy::too_many_arguments,
+    reason = "independent placement and stroke inputs"
+)]
 pub fn draw_symbol(
     painter: &Painter,
     symbol: &Symbol,
@@ -223,6 +227,10 @@ pub fn draw_symbol(
 }
 
 /// Draw immutable asset geometry at placement-specific dimensions.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "independent asset dimensions, placement and stroke inputs"
+)]
 pub fn draw_symbol_with_dimensions(
     painter: &Painter,
     symbol: &Symbol,
@@ -407,6 +415,10 @@ fn draw_path_segment(painter: &Painter, points: &[Pos2], stroke: Stroke) {
 /// Non-uniform scaling is applied BEFORE rotation to ensure the symbol fills
 /// exactly its target dimensions. This guarantees terminals land on grid lines.
 /// Mirroring is applied BEFORE rotation but AFTER scaling.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "precomputed transform factors avoid repeated trigonometry per point"
+)]
 fn transform_point_nonuniform(
     x: f32,
     y: f32,

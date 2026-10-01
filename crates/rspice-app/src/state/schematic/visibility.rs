@@ -7,18 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Canvas grid rendering style selected by the toolbar cycle and the richer
-/// canvas-settings transaction. Snapping remains independently configurable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum GridStyle {
-    /// One dot per snap point (default).
-    #[default]
-    Dots,
-    /// Hairline rules per snap point.
-    Lines,
-    /// No grid.
-    Off,
-}
+pub use rspice_schematic_editor::view::grid::GridStyle;
 
 /// Device-local construction layers drawn around the permanent schematic
 /// paper boundary.

@@ -15,8 +15,9 @@ use std::sync::Arc;
 
 use egui::{Color32, Context, Galley, Painter, Pos2, Rect, Stroke, vec2};
 
-use crate::state::{CrossSheetPortDirection, NetLabel, Point};
-use crate::ui::theme::{self, FontWeight};
+use rspice_design::schematic::net_label::NetLabel;
+use rspice_design_model::{Point, design_management::CrossSheetPortDirection};
+use rspice_ui_kit::theme::{self, FontWeight};
 
 use super::viewport::Viewport;
 
@@ -163,7 +164,7 @@ fn paint_connector_tab(
     }
 }
 
-pub(super) fn draw_net_label(
+pub fn draw_net_label(
     painter: &Painter,
     viewport: &Viewport,
     label: &NetLabel,
@@ -171,7 +172,7 @@ pub(super) fn draw_net_label(
     hovered: bool,
     preview: bool,
 ) {
-    let palette = crate::ui::tokens::active_palette();
+    let palette = rspice_ui_kit::tokens::active_palette();
     let text_color = if label.name.trim().is_empty() {
         palette.err
     } else if preview {
@@ -220,13 +221,13 @@ pub(super) fn draw_net_label(
 
 /// Return the topmost label whose exact shaped-text bounds contain the pointer.
 /// Reverse order matches paint order when labels overlap.
-pub(super) fn net_label_at(
+pub fn net_label_at(
     ctx: &Context,
     viewport: &Viewport,
     labels: &[NetLabel],
     pointer: Pos2,
 ) -> Option<u64> {
-    let color = crate::ui::tokens::active_palette().net_label;
+    let color = rspice_ui_kit::tokens::active_palette().net_label;
     labels.iter().rev().find_map(|label| {
         screen_layout(ctx, viewport, label, color)
             .filter(|layout| {
@@ -237,20 +238,20 @@ pub(super) fn net_label_at(
     })
 }
 
-#[cfg(test)]
-pub(super) fn hit_bounds(ctx: &Context, viewport: &Viewport, label: &NetLabel) -> Option<Rect> {
+#[cfg(any(test, feature = "test-support"))]
+pub fn hit_bounds(ctx: &Context, viewport: &Viewport, label: &NetLabel) -> Option<Rect> {
     screen_layout(
         ctx,
         viewport,
         label,
-        crate::ui::tokens::active_palette().net_label,
+        rspice_ui_kit::tokens::active_palette().net_label,
     )
     .map(|layout| layout.decoration_rect.union(layout.attachment_hit_rect))
 }
 
 /// Intrinsic world-space bounds used by fit-to-content and marquee selection.
 /// Pointer hit testing deliberately uses the exact shaped screen galley above.
-pub(super) fn world_bounds(label: &NetLabel) -> (Point, Point) {
+pub fn world_bounds(label: &NetLabel) -> (Point, Point) {
     let display_name = if label.name.trim().is_empty() {
         INVALID_LABEL_PLACEHOLDER
     } else {
@@ -289,7 +290,7 @@ mod tests {
 
     fn initialized_context() -> Context {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_ui_kit::Theme::default().apply(&ctx);
         let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
         ctx
     }
@@ -299,7 +300,7 @@ mod tests {
         let ctx = initialized_context();
         let viewport = viewport();
         let label = NetLabel::new(41, Point::new(40, 30), "afe_out");
-        let color = crate::ui::tokens::active_palette().net_label;
+        let color = rspice_ui_kit::tokens::active_palette().net_label;
         let layout = screen_layout(&ctx, &viewport, &label, color).expect("visible label");
         let hit_bounds = layout.decoration_rect.union(layout.attachment_hit_rect);
 
@@ -380,9 +381,9 @@ mod tests {
             5,
             Point::new(50, 40),
             "BIAS",
-            crate::state::CrossSheetPortDirection::Output,
+            rspice_design_model::design_management::CrossSheetPortDirection::Output,
         );
-        let color = crate::ui::tokens::active_palette().net_label;
+        let color = rspice_ui_kit::tokens::active_palette().net_label;
         let layout = screen_layout(&ctx, &viewport, &connector, color).expect("visible connector");
         let (tab, _) = layout
             .connector_tab
@@ -425,7 +426,7 @@ mod tests {
             1,
             Point::new(0, 0),
             "BIAS",
-            crate::state::CrossSheetPortDirection::Input,
+            rspice_design_model::design_management::CrossSheetPortDirection::Input,
         );
         let (local_min, local_max) = world_bounds(&local);
         let (connector_min, connector_max) = world_bounds(&connector);
@@ -436,7 +437,7 @@ mod tests {
 
     #[test]
     fn every_direction_paints_ink_inside_the_tab_and_leaves_the_gap_clear() {
-        for direction in crate::state::NetLabelKind::DIRECTIONS {
+        for direction in rspice_design::schematic::net_label::NetLabelKind::DIRECTIONS {
             let viewport = Viewport {
                 offset: Pos2::new(30.0, 90.0),
                 zoom: 3.0,
@@ -444,20 +445,21 @@ mod tests {
             };
             let connector = NetLabel::off_sheet(2, Point::new(0, 0), "BIAS", direction);
             let mut tab = Rect::NOTHING;
-            let canvas = crate::ui::raster::render(Vec2::new(240.0, 120.0), |ui, background| {
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE.fill(background))
-                    .show(ui, |ui| {
-                        let painter = ui.painter();
-                        let color = crate::ui::tokens::active_palette().net_label;
-                        tab = screen_layout(painter.ctx(), &viewport, &connector, color)
-                            .expect("visible connector")
-                            .connector_tab
-                            .expect("an off-sheet connector has a tab")
-                            .0;
-                        draw_net_label(painter, &viewport, &connector, false, false, false);
-                    });
-            });
+            let canvas =
+                rspice_ui_kit::raster::render(Vec2::new(240.0, 120.0), |ui, background| {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE.fill(background))
+                        .show(ui, |ui| {
+                            let painter = ui.painter();
+                            let color = rspice_ui_kit::tokens::active_palette().net_label;
+                            tab = screen_layout(painter.ctx(), &viewport, &connector, color)
+                                .expect("visible connector")
+                                .connector_tab
+                                .expect("an off-sheet connector has a tab")
+                                .0;
+                            draw_net_label(painter, &viewport, &connector, false, false, false);
+                        });
+                });
 
             let inside: Vec<egui::Color32> = canvas.pixels_in(tab).collect();
             assert!(!inside.is_empty(), "{direction:?}: the tab is off canvas");

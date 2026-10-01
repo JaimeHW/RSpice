@@ -39,6 +39,7 @@ rspice-automation-protocol = { path = "../rspice-automation-protocol", version =
 rspice-design-model = { workspace = true }
 rspice-app-types.workspace = true
 rspice-ui-kit = { workspace = true, features = ["plot"] }
+rspice-schematic-editor.workspace = true
 rspice-design = { workspace = true, features = ["symbol-artwork"] }
 rspice-project.workspace = true
 rspice-results = { workspace = true, features = ["engine-evidence"] }
@@ -99,6 +100,7 @@ rfd = { version = "0.17", features = ["file-handle-inner"] }
 dirs = "6.0"
 
 [dev-dependencies]
+rspice-schematic-editor = { workspace = true, features = ["test-support"] }
 rspice-ui-kit = { workspace = true, features = ["test-support"] }
 rspice-formats = { workspace = true, features = ["result-validation-observation"] }
 rspice-simulation = { workspace = true, features = ["pdk-test-fixtures"] }

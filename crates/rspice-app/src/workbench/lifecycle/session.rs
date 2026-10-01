@@ -607,13 +607,6 @@ fn bounds_intersect(
     a_min.x <= b_max.x && a_max.x >= b_min.x && a_min.y <= b_max.y && a_max.y >= b_min.y
 }
 
-impl GridStyle {
-    /// Whether any grid renders.
-    pub fn visible(self) -> bool {
-        self != GridStyle::Off
-    }
-}
-
 /// Transient, device-local recovery point for a visibility-policy change.
 #[derive(Debug, Clone)]
 pub(crate) struct SchematicVisibilityRecovery {

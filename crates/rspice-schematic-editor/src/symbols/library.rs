@@ -100,7 +100,10 @@ impl SymbolLibrary {
     }
 
     #[cfg(test)]
-    fn get(&self, kind: crate::state::ComponentType) -> Option<&Symbol> {
+    fn get(
+        &self,
+        kind: rspice_design::schematic::component_type::ComponentType,
+    ) -> Option<&Symbol> {
         self.artwork
             .get_with_rotation(kind, 0)
             .map(|(symbol, _)| symbol)
@@ -110,7 +113,7 @@ impl SymbolLibrary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::ComponentType;
+    use rspice_design::schematic::component_type::ComponentType;
 
     /// The loop probe as the schematic renderer actually draws it.
     ///
@@ -142,7 +145,7 @@ mod tests {
         let resistor_centre = egui::pos2(280.0, 180.0);
 
         let library = SymbolLibrary::load_embedded().expect("library loads");
-        let canvas = crate::ui::raster::render(egui::vec2(560.0, 260.0), |ui, _| {
+        let canvas = rspice_ui_kit::raster::render(egui::vec2(560.0, 260.0), |ui, _| {
             let painter = ui.painter().clone();
             let stroke = egui::Stroke::new(2.0, egui::Color32::from_rgb(240, 240, 240));
             for (centre, kind) in [
@@ -231,8 +234,8 @@ mod tests {
 #[cfg(test)]
 mod browser_audit {
     use super::*;
-    use crate::schematic::component_palette;
-    use crate::state::ComponentType;
+    use crate::component_palette;
+    use rspice_design::schematic::component_type::ComponentType;
 
     /// Endpoints reachable by the pen in a path (segment ends only).
     fn endpoints(symbol: &Symbol) -> Vec<(f32, f32)> {

@@ -14,18 +14,12 @@
 //! - This module provides the egui view layer
 //! - User interactions are translated to state mutations
 
-pub(crate) mod bus_geometry;
-mod component_palette;
-pub use component_palette::{ComponentPaletteEntry, component_palette};
+pub use rspice_schematic_editor::{ComponentPaletteEntry, SymbolLibrary, component_palette};
+pub(crate) use rspice_schematic_editor::{bus_geometry, symbols};
+use rspice_schematic_editor::{port_overlay, source_labels};
 pub(crate) mod export;
-mod port_overlay;
-mod source_labels;
 pub(crate) mod symbol_editor;
-pub(crate) mod symbols;
 mod vector_display;
 pub(crate) mod view;
 
 pub(crate) use vector_display::bus_notations;
-
-// Re-export main types
-pub use symbols::SymbolLibrary;

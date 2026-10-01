@@ -5,12 +5,13 @@
 //! geometry. Electrical connectivity remains defined only by the durable
 //! `bus_point` and `connection_point` endpoints.
 
-use crate::state::{BusTap, BusTapOrientation, Point};
+use rspice_design::schematic::bus::{BusTap, BusTapOrientation};
+use rspice_design_model::Point;
 
 const TAP_LEAD: i32 = 10;
 const BREAKOUT_OFFSET: i32 = 4;
 
-pub(crate) fn bus_tap_route_points(tap: &BusTap) -> Vec<Point> {
+pub fn bus_tap_route_points(tap: &BusTap) -> Vec<Point> {
     let orientation = resolved_orientation(tap);
     // A final lead cannot fit when the target is at, behind, or no farther
     // than one lead length from the source in the requested direction.
@@ -107,7 +108,7 @@ fn push_unique(points: &mut Vec<Point>, point: Point) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{Bus, BusDeclaration, BusSlice};
+    use rspice_design::schematic::bus::{Bus, BusDeclaration, BusSlice};
 
     fn tap(orientation: BusTapOrientation, connection: Point) -> BusTap {
         let bus = Bus::segment(

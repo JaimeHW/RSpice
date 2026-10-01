@@ -1,11 +1,11 @@
 //! Runtime direction marks layered over the canonical interface-port body.
 
-use crate::state::PortDirection;
+use rspice_design_model::port::PortDirection;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct OverlayPoint {
-    pub(super) x: f32,
-    pub(super) y: f32,
+pub struct OverlayPoint {
+    pub x: f32,
+    pub y: f32,
 }
 
 impl OverlayPoint {
@@ -15,9 +15,9 @@ impl OverlayPoint {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct OverlaySegment {
-    pub(super) start: OverlayPoint,
-    pub(super) end: OverlayPoint,
+pub struct OverlaySegment {
+    pub start: OverlayPoint,
+    pub end: OverlayPoint,
 }
 
 const fn segment(x1: f32, y1: f32, x2: f32, y2: f32) -> OverlaySegment {
@@ -46,7 +46,7 @@ const IN_OUT: &[OverlaySegment] = &[
 ];
 const SUPPLY: &[OverlaySegment] = &[segment(2.0, -3.0, 2.0, 3.0), segment(-1.0, -3.0, 5.0, -3.0)];
 
-pub(super) const fn direction_segments(direction: PortDirection) -> &'static [OverlaySegment] {
+pub const fn direction_segments(direction: PortDirection) -> &'static [OverlaySegment] {
     match direction {
         PortDirection::In => IN,
         PortDirection::Out => OUT,
@@ -56,7 +56,7 @@ pub(super) const fn direction_segments(direction: PortDirection) -> &'static [Ov
 }
 
 /// EDA transform order: mirror in symbol-local coordinates, then rotate.
-pub(super) fn transform_point(
+pub fn transform_point(
     point: OverlayPoint,
     rotation_degrees: i32,
     mirror_h: bool,

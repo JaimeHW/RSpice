@@ -448,7 +448,15 @@ pub(super) fn draw_base(
     painter.rect_filled(paper, 0.0, palette.paper);
 
     if lod.show_grid {
-        draw_grid(painter, available, drawing_area.intersect(available), state);
+        draw_grid(
+            painter,
+            available,
+            drawing_area.intersect(available),
+            state.ui.grid,
+            state.schematic.document().grid_size,
+            state.schematic.session.pan,
+            state.schematic.session.zoom,
+        );
     }
     if lod.show_margins && layers.margins && sheet.format.border != DrawingSheetBorderTemplate::None
     {
