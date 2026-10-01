@@ -1,7 +1,6 @@
 //! Project-owned documents, configuration and revisioned catalogs.
 
 use crate::OpenCellView;
-use crate::descriptor::*;
 use rspice_app_types::product::{
     AnalysisInstanceId, CaptureGroupId, ContentDigest, DesignVariableId, ObjectRevision,
     ResultDocumentId, RevisionError, SavedOutputId, SimulationPlanId, SpecificationId,
@@ -10,6 +9,7 @@ use rspice_design::library::ViewType;
 use rspice_design::owned_netlist::*;
 use rspice_design::project_sources::*;
 use rspice_design_model::cell_view::{CellViewRef, DEFAULT_SCHEMATIC_VIEW};
+use rspice_project_contract::*;
 use rspice_results::specification::*;
 use rspice_simulation_contract::capture_group::{self, CaptureGroup, CaptureGroupError};
 use rspice_simulation_contract::design_variable::*;

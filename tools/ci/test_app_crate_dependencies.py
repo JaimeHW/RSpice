@@ -47,6 +47,18 @@ class DependencyPolicyTests(unittest.TestCase):
             ["rspice-formats with only table-schema reaches simulator package rspice-core"],
         )
 
+        issues = violations(
+            {"rspice-project-contract": {"rspice-project"}},
+            {"rspice-simulation": {"rspice-project-contract", "rspice-project"}},
+        )
+        self.assertEqual(
+            issues,
+            [
+                "rspice-project-contract has forbidden application dependency rspice-project",
+                "rspice-simulation reaches project aggregate rspice-project",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

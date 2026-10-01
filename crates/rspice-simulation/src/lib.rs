@@ -25,6 +25,7 @@ pub mod pdk;
 pub mod periodic;
 pub mod preparation;
 pub mod prepared_dependency;
+pub mod project_technology;
 pub mod project_veriloga;
 pub mod result_conversion;
 pub mod results;

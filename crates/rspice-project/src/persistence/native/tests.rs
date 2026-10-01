@@ -276,12 +276,12 @@ fn independent_copy_rejects_canonical_paths_and_aliases_and_forks_identity() {
             .unwrap();
     let file = project();
     let source_identity = file.workspace.project.id();
-    let source_name = file.workspace.project.name.clone();
+    let source_name = file.workspace.project.name().to_owned();
     destination.publish(&storage, file).unwrap();
     let copy: ProjectFile =
         serde_json::from_slice(storage.bytes.borrow().as_deref().unwrap()).unwrap();
     assert_ne!(copy.workspace.project.id(), source_identity);
-    assert_eq!(copy.workspace.project.name, source_name);
+    assert_eq!(copy.workspace.project.name(), source_name);
     assert_eq!(storage.observations.get(), 1);
 }
 

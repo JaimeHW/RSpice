@@ -52,6 +52,8 @@ pub use rspice_model_library::pdk::{
     PdkAdministrativeAuthority, PdkTrustAuditAction, PdkTrustAuditReceipt, TrustedPdkPublisherKey,
 };
 #[cfg(test)]
+pub use rspice_simulation::pdk::PdkTechnologyRegistry;
+#[cfg(test)]
 pub(crate) use rspice_simulation::pdk::test_fixtures::{
     fixture_archive as signed_technology_test_fixture,
     fixture_archive_with_symbols as signed_symbol_technology_test_fixture,
@@ -59,8 +61,7 @@ pub(crate) use rspice_simulation::pdk::test_fixtures::{
     fixture_archive_with_veriloga_source as signed_veriloga_source_test_fixture,
 };
 pub use rspice_simulation::pdk::{
-    PdkConfig, PdkTechnologyAuditAction, PdkTechnologyAuditReceipt, PdkTechnologyRegistry,
-    ValidatedPdkTechnologyPackage,
+    PdkConfig, PdkTechnologyAuditAction, PdkTechnologyAuditReceipt, ValidatedPdkTechnologyPackage,
 };
 pub use technology_callback::{PdkCallbackExecutionInput, ProjectPdkCallbackReceipt};
 #[cfg(test)]

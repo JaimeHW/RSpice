@@ -24,12 +24,17 @@ ALLOWED: dict[str, set[str]] = {
     "rspice-design": {
         "rspice-app-types", "rspice-model-library", "rspice-hardcopy-contract",
     },
+    "rspice-project-contract": {
+        "rspice-app-types", "rspice-design", "rspice-model-library",
+    },
     "rspice-project": {
+        "rspice-project-contract",
         "rspice-app-types", "rspice-design", "rspice-model-library",
         "rspice-simulation-contract", "rspice-results", "rspice-hardcopy-contract",
     },
     "rspice-formats": {"rspice-app-types", "rspice-results"},
     "rspice-simulation": {
+        "rspice-project-contract",
         "rspice-app-types", "rspice-design", "rspice-model-library",
         "rspice-simulation-contract", "rspice-results", "rspice-formats",
     },
@@ -77,6 +82,8 @@ def violations(
         if name in HEADLESS:
             for dep in sorted(dep for dep in closure if dep.startswith("egui") or dep in GUI_PACKAGES):
                 issues.append(f"{name} reaches GUI package {dep}")
+        if name in {"rspice-simulation", "rspice-project-contract"} and "rspice-project" in closure:
+            issues.append(f"{name} reaches project aggregate rspice-project")
         if name in {"rspice-app-types", "rspice-units"}:
             for dep in sorted(
                 dep for dep in closure

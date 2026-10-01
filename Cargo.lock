@@ -5633,8 +5633,24 @@ dependencies = [
  "rspice-design-model",
  "rspice-hardcopy-contract",
  "rspice-model-library",
+ "rspice-project-contract",
  "rspice-results",
  "rspice-simulation-contract",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.20",
+ "uuid",
+]
+
+[[package]]
+name = "rspice-project-contract"
+version = "0.1.0"
+dependencies = [
+ "rspice-app-types",
+ "rspice-design",
+ "rspice-design-model",
+ "rspice-model-library",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -5722,6 +5738,7 @@ dependencies = [
  "rspice-design",
  "rspice-design-model",
  "rspice-model-library",
+ "rspice-project-contract",
  "rspice-results",
  "rspice-simulation-contract",
  "rspice-veriloga",

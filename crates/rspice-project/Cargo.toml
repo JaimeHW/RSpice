@@ -21,6 +21,7 @@ document-fingerprint-observation = []
 rspice-results = { workspace = true, features = ["engine-evidence"] }
 ron = { version = "0.12.2", features = ["integer128"] }
 rspice-app-types.workspace = true
+rspice-project-contract.workspace = true
 rspice-design.workspace = true
 rspice-hardcopy-contract.workspace = true
 rspice-design-model.workspace = true
@@ -32,7 +33,6 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
-unicode-segmentation = "1.12"
 uuid = { workspace = true, features = ["v5"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

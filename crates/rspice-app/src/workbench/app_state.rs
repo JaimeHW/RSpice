@@ -333,8 +333,8 @@ impl AppState {
 
     pub(crate) fn technology_inputs(
         &self,
-    ) -> crate::simulation::project_technology::ProjectTechnologyInputs<'_> {
-        crate::simulation::project_technology::ProjectTechnologyInputs {
+    ) -> rspice_simulation::project_technology::ProjectTechnologyInputs<'_> {
+        rspice_simulation::project_technology::ProjectTechnologyInputs {
             project: &self.workspace.content.project,
             sim_setup: &self.sim_setup,
             models: self.model_library_manager.catalog(),

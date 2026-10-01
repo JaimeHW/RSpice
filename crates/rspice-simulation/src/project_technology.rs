@@ -1,11 +1,11 @@
 //! Project technology validation and source sealing over borrowed authorities.
 
-pub(crate) struct ProjectTechnologyInputs<'a> {
-    pub project: &'a rspice_project::ProjectDescriptor,
+pub struct ProjectTechnologyInputs<'a> {
+    pub project: &'a rspice_project_contract::ProjectDescriptor,
     pub sim_setup: &'a rspice_simulation_contract::setup_state::SimulationSetup,
     pub models: &'a rspice_model_library::ModelCatalog,
     pub resolutions: &'a rspice_model_library::ModelResolutionRecords,
-    pub registry: &'a crate::state::pdk_config::PdkTechnologyRegistry,
+    pub registry: &'a crate::pdk::PdkTechnologyRegistry,
     pub layouts: &'a std::collections::BTreeMap<
         String,
         rspice_design::physical_layout::PhysicalLayoutDocument,
@@ -13,9 +13,9 @@ pub(crate) struct ProjectTechnologyInputs<'a> {
 }
 
 impl ProjectTechnologyInputs<'_> {
-    pub(crate) fn validate_project_technology_contract(&self) -> Result<(), String> {
+    pub fn validate_project_technology_contract(&self) -> Result<(), String> {
         let binding = self.project.validated_technology_binding()?;
-        rspice_simulation::pdk::validate_project_technology_inputs(
+        crate::pdk::validate_project_technology_inputs(
             binding,
             self.models,
             self.registry.validated_packages(),
@@ -23,24 +23,24 @@ impl ProjectTechnologyInputs<'_> {
         )
     }
 
-    pub(crate) fn project_technology_in_effect(&self) -> bool {
+    pub fn project_technology_in_effect(&self) -> bool {
         self.project.has_audited_technology_binding()
     }
 
-    pub(crate) fn technology_demand(&self) -> rspice_simulation::preparation::TechnologyDemand {
-        rspice_simulation::preparation::technology_demand(self.sim_setup, self.layouts)
+    pub fn technology_demand(&self) -> crate::preparation::TechnologyDemand {
+        crate::preparation::technology_demand(self.sim_setup, self.layouts)
     }
 
-    pub(crate) fn technology_gate_block_reason(&self) -> Result<(), String> {
+    pub fn technology_gate_block_reason(&self) -> Result<(), String> {
         if self.project.technology_binding().is_some() {
             return self.validate_project_technology_contract();
         }
         self.technology_demand().block_reason().map_or(Ok(()), Err)
     }
 
-    pub(crate) fn seal_project_execution_model_sources(
+    pub fn seal_project_execution_model_sources(
         &self,
-    ) -> Result<rspice_simulation::model_sources::SealedModelExecutionSources, String> {
+    ) -> Result<crate::model_sources::SealedModelExecutionSources, String> {
         self.validate_project_technology_contract()?;
         let project_binding = self
             .project
@@ -60,7 +60,7 @@ impl ProjectTechnologyInputs<'_> {
             .map_err(|error| {
                 format!("Signed PDK model sources cannot be sealed for project execution: {error}")
             })?;
-        rspice_simulation::model_sources::seal_plan_execution_sources(
+        crate::model_sources::seal_plan_execution_sources(
             self.models,
             self.resolutions,
             &self.sim_setup.model_bindings,

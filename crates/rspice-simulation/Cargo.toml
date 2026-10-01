@@ -23,6 +23,7 @@ wat = { version = "1", optional = true }
 num-complex.workspace = true
 base64.workspace = true
 rspice-app-types.workspace = true
+rspice-project-contract.workspace = true
 rspice-results = { workspace = true, features = ["engine-evidence"] }
 rspice-design.workspace = true
 rspice-design-model.workspace = true

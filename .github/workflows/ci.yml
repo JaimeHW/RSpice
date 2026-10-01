@@ -49,7 +49,7 @@ jobs:
             checked=$((checked + 1))
           done
           echo "rustfmt checked $checked workspace member(s)"
-          test "$checked" -ge 35
+          test "$checked" -ge 36
       - name: Lint GitHub workflows
         run: |
           export GOBIN="$RUNNER_TEMP/actionlint-bin"
@@ -79,7 +79,7 @@ jobs:
           cargo test --locked -p rspice-formats --no-default-features --features hdf5 --lib
           cargo test --locked -p rspice-formats --no-default-features --features spice-raw --lib
           cargo test --locked -p rspice-formats --no-default-features --features xlsx --lib
-          cargo test --locked -p rspice-app-types -p rspice-results -p rspice-hardcopy-contract -p rspice-model-library -p rspice-formats -p rspice-simulation-contract -p rspice-simulation -p rspice-design -p rspice-project --lib
+          cargo test --locked -p rspice-app-types -p rspice-results -p rspice-hardcopy-contract -p rspice-model-library -p rspice-formats -p rspice-simulation-contract -p rspice-simulation -p rspice-design -p rspice-project-contract -p rspice-project --lib
       - name: UI incremental build identity regressions
         run: python3 tools/ci/test_ui_build_identity.py
       - name: Browser artifact reporting regression tests

@@ -4,16 +4,13 @@ mod accepted;
 mod candidate;
 pub use accepted::AcceptedProject;
 
-mod descriptor;
 mod execution_context;
-mod library_publication;
 
-pub use descriptor::*;
 pub use execution_context::{
     PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION, ProjectExecutionContext, ProjectModelLibrary,
     persisted_active_model_section_names,
 };
-pub use library_publication::*;
+pub use rspice_project_contract::*;
 
 pub mod results;
 
