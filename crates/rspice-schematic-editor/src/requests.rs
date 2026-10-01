@@ -6,6 +6,7 @@ use rspice_design::schematic::selection::Selection;
 use rspice_design_model::{cell_view::CellViewRef, design_management::SheetId};
 
 use crate::session::selection::SchematicKeyboardFocus;
+use crate::view::pointer_target::PointerTarget;
 
 /// Expected source identity, not permission to mutate the design.
 /// The app compares this with its current owners before applying a request.
@@ -26,6 +27,11 @@ pub struct EditorRequestSource {
 pub enum EditorAction {
     DeleteSelection,
     Focus(SchematicKeyboardFocus),
+    SelectPointer {
+        target: Option<PointerTarget>,
+        additive: bool,
+        alt_held: bool,
+    },
 }
 
 #[derive(Debug, Clone)]

@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub use rspice_schematic_editor::view::grid::GridStyle;
+pub use crate::view::grid::GridStyle;
 
 /// Device-local construction layers drawn around the permanent schematic
 /// paper boundary.

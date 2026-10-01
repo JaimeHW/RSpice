@@ -4,15 +4,15 @@
 //! selected or highlighted, and the labels that need to be drawn, so the
 //! painter walks a prepared list rather than the whole design.
 
+use rspice_schematic_editor::view::design_view::design_note_visible;
 use std::collections::BTreeMap;
 
 use egui::{Painter, Rect, Stroke};
 
 use crate::schematic::bus_notations;
 use crate::state::{
-    CellViewRef, CrossProbeIndex, DesignNote, DesignNoteKind, DesignReviewState, Point,
-    SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicHierarchyVisibility,
-    SchematicNetHighlighting, SchematicReviewMarkerVisibility,
+    CellViewRef, CrossProbeIndex, DesignNote, Point, SchematicAnnotationVisibility,
+    SchematicBackAnnotationContent, SchematicHierarchyVisibility, SchematicNetHighlighting,
 };
 use crate::workbench::app_state::{AppState, SchematicKeyboardFocus};
 use rspice_design::connectivity::summary::projection_nets;
@@ -968,34 +968,7 @@ fn points_bounds(points: &[Point]) -> Option<(Point, Point)> {
 }
 
 pub(super) fn visible_design_notes(state: &AppState) -> std::borrow::Cow<'_, [DesignNote]> {
-    let active = objects_on_active_sheet(state, &state.schematic.document().design_notes, |note| {
-        note.id
-    });
-    if state.ui.schematic_visibility.review_markers == SchematicReviewMarkerVisibility::All {
-        return active;
-    }
-    std::borrow::Cow::Owned(
-        active
-            .iter()
-            .filter(|note| design_note_visible(note, state.ui.schematic_visibility.review_markers))
-            .cloned()
-            .collect(),
-    )
-}
-
-fn design_note_visible(note: &DesignNote, visibility: SchematicReviewMarkerVisibility) -> bool {
-    if note.kind != DesignNoteKind::ReviewNote {
-        return true;
-    }
-    match visibility {
-        SchematicReviewMarkerVisibility::Hidden => false,
-        SchematicReviewMarkerVisibility::All => true,
-        SchematicReviewMarkerVisibility::OpenAndAssigned => {
-            note.review.as_ref().is_some_and(|review| {
-                review.state == DesignReviewState::Open || review.assignee.is_some()
-            })
-        }
-    }
+    super::schematic_design_view(state).visible_design_notes()
 }
 
 /// Conductor colours for the net-class mode, one colour per electrical net.
@@ -1901,58 +1874,6 @@ mod tests {
 
         assert!(annotations[1].label.contains("P(vbias)"));
         assert!(annotations[1].label.ends_with('W'));
-    }
-
-    #[test]
-    fn review_marker_visibility_preserves_non_review_documentation() {
-        let plain = crate::state::DesignNote::new(
-            10,
-            Point::origin(),
-            DesignNoteKind::PlainText,
-            "Bias network",
-        )
-        .expect("plain note");
-        let mut review = crate::state::DesignNote::new(
-            11,
-            Point::origin(),
-            DesignNoteKind::ReviewNote,
-            "Check startup margin",
-        )
-        .expect("review note");
-
-        assert!(design_note_visible(
-            &plain,
-            SchematicReviewMarkerVisibility::Hidden
-        ));
-        assert!(design_note_visible(
-            &review,
-            SchematicReviewMarkerVisibility::OpenAndAssigned
-        ));
-        review
-            .assign_review(Some("Analog design"))
-            .expect("assign note");
-        review
-            .set_review_state(DesignReviewState::Resolved)
-            .expect("resolve note");
-        assert!(design_note_visible(
-            &review,
-            SchematicReviewMarkerVisibility::OpenAndAssigned
-        ));
-        review
-            .assign_review(None::<String>)
-            .expect("clear assignment");
-        assert!(!design_note_visible(
-            &review,
-            SchematicReviewMarkerVisibility::OpenAndAssigned
-        ));
-        assert!(design_note_visible(
-            &review,
-            SchematicReviewMarkerVisibility::All
-        ));
-        assert!(!design_note_visible(
-            &review,
-            SchematicReviewMarkerVisibility::Hidden
-        ));
     }
 
     #[test]

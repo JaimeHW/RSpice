@@ -1,5 +1,6 @@
 //! Focused schematic keyboard input over read-only design and editor views.
 
+use super::design_view::DesignView;
 use super::symbol_context::SchematicSymbolContext;
 use crate::requests::{EditorAction, EditorRequest, EditorRequestSource};
 use crate::session::{
@@ -8,20 +9,15 @@ use crate::session::{
     tool::Tool,
 };
 use egui::{Event, InputState, Key, Popup, Response};
-use rspice_design::schematic::{
-    design_note::DesignNote, document::SchematicDocument, selection::Selection,
-};
+use rspice_design::schematic::{document::SchematicDocument, selection::Selection};
 use rspice_design_model::Point;
-use std::borrow::Cow;
 
 /// Read-only inputs needed to resolve spatial keyboard traversal.
 pub struct KeyboardNavigationView<'a> {
-    pub document: &'a SchematicDocument,
+    pub design: DesignView<'a>,
     pub editor: &'a EditorSession,
     pub keyboard_focus: Option<SchematicKeyboardFocus>,
     pub filter: SchematicSelectionFilter,
-    pub object_is_visible: &'a dyn Fn(u64) -> bool,
-    pub visible_notes: &'a dyn Fn() -> Cow<'a, [DesignNote]>,
 }
 
 #[derive(Clone, Copy)]
@@ -183,8 +179,8 @@ fn traversal_candidates(
     };
 
     if filter.instances {
-        for component in &view.document.components {
-            if (view.object_is_visible)(component.id) {
+        for component in &view.design.document.components {
+            if view.design.object_is_visible(component.id) {
                 let (min, max) = symbol_context.component_bounds(component);
                 push(
                     SchematicKeyboardFocus::Component(component.id),
@@ -195,37 +191,37 @@ fn traversal_candidates(
     }
 
     if filter.wires {
-        for wire in &view.document.wires {
-            if (view.object_is_visible)(wire.id)
+        for wire in &view.design.document.wires {
+            if view.design.object_is_visible(wire.id)
                 && let Some(center) = points_center(&wire.points)
             {
                 push(SchematicKeyboardFocus::Wire(wire.id), center);
             }
         }
-        for bus in &view.document.buses {
-            if (view.object_is_visible)(bus.id)
+        for bus in &view.design.document.buses {
+            if view.design.object_is_visible(bus.id)
                 && let Some(center) = points_center(&bus.points)
             {
                 push(SchematicKeyboardFocus::Bus(bus.id), center);
             }
         }
-        for tap in &view.document.bus_taps {
-            if (view.object_is_visible)(tap.id)
+        for tap in &view.design.document.bus_taps {
+            if view.design.object_is_visible(tap.id)
                 && let Some(center) = points_center(&crate::bus_geometry::bus_tap_route_points(tap))
             {
                 push(SchematicKeyboardFocus::BusTap(tap.id), center);
             }
         }
-        for junction in &view.document.junctions {
-            if (view.object_is_visible)(junction.id) {
+        for junction in &view.design.document.junctions {
+            if view.design.object_is_visible(junction.id) {
                 push(SchematicKeyboardFocus::Junction(junction.id), junction.pos);
             }
         }
     }
 
     if filter.labels {
-        for label in &view.document.net_labels {
-            if (view.object_is_visible)(label.id) {
+        for label in &view.design.document.net_labels {
+            if view.design.object_is_visible(label.id) {
                 let (min, max) = super::net_labels::world_bounds(label);
                 push(
                     SchematicKeyboardFocus::NetLabel(label.id),
@@ -233,23 +229,23 @@ fn traversal_candidates(
                 );
             }
         }
-        for probe in &view.document.probes {
-            if (view.object_is_visible)(probe.id) {
+        for probe in &view.design.document.probes {
+            if view.design.object_is_visible(probe.id) {
                 push(SchematicKeyboardFocus::Probe(probe.id), probe.position);
             }
         }
     }
 
     if filter.annotations {
-        for note in (view.visible_notes)().iter() {
+        for note in view.design.visible_design_notes().iter() {
             let (min, max) = super::design_notes::conservative_world_bounds(note);
             push(
                 SchematicKeyboardFocus::DesignNote(note.id),
                 bounds_center(min, max),
             );
         }
-        for shape in &view.document.documentation_shapes {
-            if (view.object_is_visible)(shape.id) {
+        for shape in &view.design.document.documentation_shapes {
+            if view.design.object_is_visible(shape.id) {
                 let (min, max) = super::documentation_shapes::world_bounds(shape);
                 push(
                     SchematicKeyboardFocus::DocumentationShape(shape.id),
@@ -284,6 +280,7 @@ fn selected_keyboard_object(view: &KeyboardNavigationView<'_>) -> Option<Schemat
     }
     if let Some(position) = selection.single_junction()
         && let Some(junction) = view
+            .design
             .document
             .junctions
             .iter()
@@ -383,12 +380,15 @@ mod tests {
         editor: &'a EditorSession,
     ) -> KeyboardNavigationView<'a> {
         KeyboardNavigationView {
-            document,
+            design: DesignView {
+                document,
+                canvas_cache: None,
+                sheet_catalog: None,
+                review_markers: crate::session::visibility::SchematicReviewMarkerVisibility::All,
+            },
             editor,
             keyboard_focus: None,
             filter: SchematicSelectionFilter::default(),
-            object_is_visible: &|_| true,
-            visible_notes: &|| Cow::Borrowed(&[]),
         }
     }
     fn document_with_every_keyboard_object_class() -> SchematicDocument {
@@ -549,9 +549,7 @@ mod tests {
     fn candidate_catalog_covers_every_schematic_keyboard_taxonomy_in_scene_order() {
         let document = document_with_every_keyboard_object_class();
         let editor = EditorSession::default();
-        let notes = || Cow::Borrowed(document.design_notes.as_slice());
-        let mut state = view(&document, &editor);
-        state.visible_notes = &notes;
+        let state = view(&document, &editor);
         let context = SchematicSymbolContext::default();
         let objects = traversal_candidates(&state, &context)
             .into_iter()
@@ -578,9 +576,7 @@ mod tests {
     fn candidate_catalog_honors_the_existing_selection_class_filter() {
         let document = document_with_every_keyboard_object_class();
         let editor = EditorSession::default();
-        let notes = || Cow::Borrowed(document.design_notes.as_slice());
         let mut state = view(&document, &editor);
-        state.visible_notes = &notes;
         state.filter.instances = false;
         state.filter.wires = false;
         state.filter.labels = false;

@@ -5,6 +5,7 @@ pub mod net_highlight;
 pub mod selection;
 pub mod snap;
 pub mod tool;
+pub mod visibility;
 pub mod wire;
 
 pub mod canvas_cache;

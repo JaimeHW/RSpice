@@ -94,17 +94,10 @@ fn object_is_on_active_sheet_in_workspace(
     object_id: u64,
 ) -> bool {
     let key = workspace.content.active_schematic_reference().key();
-    let Some(catalog) = workspace.content.design_management.sheet_catalog(&key) else {
-        return true;
-    };
-    let Some(active_sheet_id) = catalog.active_sheet_id() else {
-        return true;
-    };
-    workspace
-        .content
-        .design_management
-        .sheet_for_object_or_active(&key, object_id)
-        == Some(active_sheet_id)
+    rspice_schematic_editor::view::design_view::object_is_on_active_sheet(
+        workspace.content.design_management.sheet_catalog(&key),
+        object_id,
+    )
 }
 
 /// Return candidates in their authored z-order, excluding objects owned by a
@@ -116,20 +109,7 @@ pub(super) fn objects_on_active_sheet<'a, T: Clone>(
     objects: &'a [T],
     id: impl Fn(&T) -> u64,
 ) -> Cow<'a, [T]> {
-    if objects
-        .iter()
-        .all(|object| object_is_on_active_sheet(state, id(object)))
-    {
-        Cow::Borrowed(objects)
-    } else {
-        Cow::Owned(
-            objects
-                .iter()
-                .filter(|object| object_is_on_active_sheet(state, id(object)))
-                .cloned()
-                .collect(),
-        )
-    }
+    super::schematic_design_view(state).objects_on_active_sheet(objects, id)
 }
 
 /// Build a live selection containing only objects owned by the active sheet.
@@ -311,37 +291,13 @@ pub(super) fn select_in_rect_on_active_sheet(
 }
 
 pub(super) fn active_wire_at(state: &AppState, point: crate::state::Point) -> Option<u64> {
-    if let Some(cache) = state.schematic.canvas_cache() {
-        return cache
-            .wire_indices_at_point(point)
-            .into_iter()
-            .filter_map(|index| state.schematic.document().wires.get(index))
-            .find(|wire| object_is_on_active_sheet(state, wire.id) && wire.contains_point(point))
-            .map(|wire| wire.id);
-    }
-    state.schematic.document().wires.iter().find_map(|wire| {
-        (object_is_on_active_sheet(state, wire.id) && wire.contains_point(point)).then_some(wire.id)
-    })
+    super::schematic_design_view(state).active_wire_at(point)
 }
-
 pub(super) fn active_junction_at(state: &AppState, point: crate::state::Point) -> Option<u64> {
-    state
-        .schematic
-        .document()
-        .junctions
-        .iter()
-        .find(|junction| junction.pos == point && object_is_on_active_sheet(state, junction.id))
-        .map(|junction| junction.id)
+    super::schematic_design_view(state).active_junction_at(point)
 }
-
 pub(super) fn active_wire_point_is_draggable(state: &AppState, point: crate::state::Point) -> bool {
-    active_junction_at(state, point).is_some()
-        || state
-            .schematic
-            .document()
-            .wires
-            .iter()
-            .any(|wire| object_is_on_active_sheet(state, wire.id) && wire.points.contains(&point))
+    super::schematic_design_view(state).active_wire_point_is_draggable(point)
 }
 
 /// Run a topology operation with hidden-sheet conductors removed from the

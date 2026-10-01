@@ -1475,96 +1475,16 @@ fn handle_select_click(
         viewport,
         pointer_pos,
     );
-    let session = &mut state.schematic.session;
-    match target {
-        Some(PointerTarget::Component(id)) => {
-            session.editor.net_highlight.clear();
-            if additive {
-                session.editor.selection.toggle_component(id);
-            } else {
-                session.editor.selection.clear();
-                session.editor.selection.select_component(id);
-            }
-        }
-        Some(PointerTarget::DesignNote(id)) => {
-            session.editor.net_highlight.clear();
-            if additive {
-                session.editor.selection.toggle_design_note(id);
-            } else {
-                session.editor.selection.select_only_design_note(id);
-            }
-        }
-        Some(PointerTarget::DocumentationShape(id)) => {
-            session.editor.net_highlight.clear();
-            if additive {
-                session.editor.selection.toggle_documentation_shape(id);
-            } else {
-                session.editor.selection.select_only_documentation_shape(id);
-            }
-        }
-        Some(PointerTarget::Probe(id)) => {
-            session.editor.net_highlight.clear();
-            if additive {
-                session.editor.selection.toggle_probe(id);
-            } else {
-                session.editor.selection.select_only_probe(id);
-            }
-        }
-        Some(PointerTarget::NetLabel(id)) => {
-            session.editor.net_highlight.clear();
-            if additive {
-                session.editor.selection.toggle_net_label(id);
-            } else {
-                session.editor.selection.select_only_net_label(id);
-            }
-        }
-        Some(PointerTarget::BusTap(id)) => {
-            session.editor.net_highlight.clear();
-            if additive {
-                session.editor.selection.toggle_bus_tap(id);
-            } else {
-                session.editor.selection.select_only_bus_tap(id);
-            }
-        }
-        Some(PointerTarget::Junction(pos)) => {
-            session.editor.net_highlight.clear();
-            if additive {
-                if session.editor.selection.has_junction(pos) {
-                    session.editor.selection.deselect_junction(pos);
-                } else {
-                    session.editor.selection.select_junction(pos);
-                }
-            } else {
-                session.editor.selection.select_only_junction(pos);
-            }
-        }
-        Some(PointerTarget::Bus(id)) => {
-            session.editor.net_highlight.clear();
-            if additive {
-                session.editor.selection.toggle_bus(id);
-            } else {
-                session.editor.selection.select_only_bus(id);
-            }
-        }
-        Some(PointerTarget::Wire(id)) => {
-            if alt_held {
-                session.editor.selection.clear();
-                highlight_canvas_net(state, |net| net.wire_ids.contains(&id));
-            } else if additive {
-                session.editor.net_highlight.clear();
-                session.editor.selection.toggle_wire(id);
-            } else {
-                session.editor.net_highlight.clear();
-                session.editor.selection.clear();
-                session.editor.selection.select_wire(id);
-            }
-        }
-        None if !additive => {
-            session.editor.selection.clear();
-            session.editor.net_highlight.clear();
-        }
-        None => {}
-    }
+    let request = rspice_schematic_editor::requests::EditorRequest {
+        source: super::requests::editor_request_source(state),
+        selection: state.schematic.session.editor.selection.clone(),
+        action: rspice_schematic_editor::requests::EditorAction::SelectPointer {
+            target,
+            additive,
+            alt_held,
+        },
+    };
+    super::requests::apply_editor_request(state, request);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2155,7 +2075,7 @@ fn live_design_nets(state: &AppState) -> std::sync::Arc<Vec<DesignNet>> {
 /// together and carry the node name a probe would emit. A gesture the design
 /// resolves no net for lights nothing rather than falling back to whichever
 /// group the pointer happened to land on.
-fn highlight_canvas_net(state: &mut AppState, select: impl Fn(&DesignNet) -> bool) {
+pub(super) fn highlight_canvas_net(state: &mut AppState, select: impl Fn(&DesignNet) -> bool) {
     let lit = live_design_nets(state)
         .iter()
         .find(|net| select(net))

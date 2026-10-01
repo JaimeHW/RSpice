@@ -20,6 +20,7 @@ mod interaction;
 mod keyboard_navigation;
 mod mobile_controls;
 mod preview;
+mod requests;
 pub(crate) use rspice_schematic_editor::view::resolved_symbol_render;
 pub(crate) use rspice_schematic_editor::view::symbol_context::SchematicSymbolContext;
 use rspice_schematic_editor::view::symbol_context::SelectionWindow;
@@ -125,6 +126,22 @@ fn apply_schematic_canvas_focus_request(ui: &Ui, state: &AppState) {
         }
     } else {
         ctx.request_repaint();
+    }
+}
+
+pub(super) fn schematic_design_view(
+    state: &AppState,
+) -> rspice_schematic_editor::view::design_view::DesignView<'_> {
+    let key = state.workspace.content.active_schematic_reference().key();
+    rspice_schematic_editor::view::design_view::DesignView {
+        document: state.schematic.document(),
+        canvas_cache: state.schematic.canvas_cache(),
+        sheet_catalog: state
+            .workspace
+            .content
+            .design_management
+            .sheet_catalog(&key),
+        review_markers: state.ui.schematic_visibility.review_markers,
     }
 }
 

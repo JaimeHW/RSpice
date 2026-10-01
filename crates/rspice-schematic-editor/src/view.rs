@@ -14,3 +14,7 @@ pub mod drawing;
 pub mod symbol_context;
 
 pub mod keyboard_navigation;
+
+pub mod design_view;
+pub mod pointer_target;
+pub mod snap_resolution;

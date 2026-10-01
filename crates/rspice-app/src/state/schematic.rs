@@ -57,7 +57,7 @@ use rspice_design::symbol_generation as symbol_gen;
 use rspice_schematic_editor::session::tool;
 mod undo_history;
 mod validated_revision;
-mod visibility;
+use rspice_schematic_editor::session::visibility;
 use rspice_schematic_editor::session::wire;
 
 // Re-exports. This block used to say "re-export all public types for backwards
