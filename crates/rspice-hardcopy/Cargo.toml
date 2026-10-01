@@ -18,6 +18,7 @@ rspice-formats = { workspace = true, features = ["project-results"] }
 rspice-design = { workspace = true, features = ["symbol-artwork"] }
 rspice-design-model.workspace = true
 rspice-hardcopy-contract.workspace = true
+rspice-project-contract.workspace = true
 rspice-results = { workspace = true, features = ["engine-evidence"] }
 serde.workspace = true
 uuid.workspace = true

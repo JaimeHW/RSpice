@@ -7,21 +7,21 @@
 //! No type in this module contains pixels, an egui paint command, or a screen
 //! rectangle.
 
+#[cfg(test)]
 mod documents;
 mod noise;
-mod prepared;
 mod quick_view_overlay;
 mod report_inventory;
 #[cfg(test)]
 mod results;
 
+#[cfg(test)]
 pub use documents::*;
 pub(crate) use rspice_hardcopy::sources::*;
 // Module-private: `noise` and `quick_view_overlay`
 // expose only `pub(super)` items, and the siblings reach them through
 // `use super::*`.
 use noise::*;
-pub use prepared::*;
 use quick_view_overlay::*;
 #[cfg(test)]
 pub(crate) use results::*;
@@ -31,30 +31,30 @@ use rspice_hardcopy::sources::resolve_semantic_source as finish_resolved;
 pub const BLANK_SCHEMATIC_SHEET_WIDTH_UM: i64 = 279_400;
 #[cfg(test)]
 pub const BLANK_SCHEMATIC_SHEET_HEIGHT_UM: i64 = 215_900;
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-pub(super) const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 8;
 
 #[cfg(test)]
-use crate::state::{SchematicState, WaveformData};
+use crate::state::{
+    DrawingSheetTitleFieldId, SchematicSheetFormat, SchematicState, Selection, SymbolDocument,
+    WaveformData, Wire,
+};
 #[cfg(test)]
 use rspice_design::symbol_resolver::SymbolResolver;
 
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use uuid::Uuid;
 
-use crate::io::ProjectSimulationResults;
-use crate::product::{ContentDigest, DatasetId, ObjectRevision, ProjectId};
+use crate::product::DatasetId;
+#[cfg(test)]
+use crate::product::{ContentDigest, ObjectRevision, ProjectId};
 #[cfg(test)]
 use crate::results::report_document::{
     FigureSizing, ReportBlockKind, ReportReferenceCurrentness, ReportReferenceMode,
 };
+#[cfg(test)]
 use crate::results::report_document::{ReportDocument, ReportReferenceInventory};
-use crate::results::visualization_document::{Page, PageId, Pane, PaneId, VisualizationDocument};
+use crate::results::visualization_document::{Page, Pane, VisualizationDocument};
 use crate::state::{
-    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType, Bus, BusTap,
-    Component, DesignNote, DocumentationShape, DrawingSheetTitleFieldId, Junction, NetLabel,
-    SchematicSheetFormat, Selection, SheetCatalog, SheetId, SimulationRun, SimulationState,
-    SymbolDocument, ViewType, Wire,
+    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType,
+    SheetCatalog, SheetId, SimulationRun, SimulationState, ViewType,
 };
 use crate::workbench::AppState;
 
@@ -62,47 +62,42 @@ use crate::hardcopy::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
 use crate::workbench::SurfaceId;
 // The persisted source-set records and the validation they share with these
 // adapters are owned one layer down, where `state` can reach them.
+#[cfg(test)]
+use crate::hardcopy::sources::canonical_digest;
 use crate::hardcopy::sources::{
-    DISPLAY_NAME_LIMIT, HardcopyPublicationIdentity, HardcopySourceError, HardcopySourceIdentity,
-    HardcopySourceSet, MAX_HARDCOPY_SOURCE_SET_MEMBERS, SOURCE_KEY_LIMIT, canonical_digest,
-    validate_label,
+    HardcopyPublicationIdentity, HardcopySourceError, HardcopySourceIdentity, HardcopySourceSet,
+    MAX_HARDCOPY_SOURCE_SET_MEMBERS,
 };
 use crate::workbench::documents::result_document::ResultViewer;
 #[cfg(test)]
 use crate::workbench::documents::visualization_studio::VisualizationStudioState;
+#[cfg(test)]
 use crate::workbench::lifecycle::session::SymbolSelection;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
-use rspice_results::studio_presentation::{
-    VisualizationPane as StudioPane, VisualizationStudioPresentation,
-};
+use rspice_results::studio_presentation::VisualizationPane as StudioPane;
+#[cfg(test)]
+use rspice_results::studio_presentation::VisualizationStudioPresentation;
 
-fn capture_schematic_selection<'a>(
-    selection: &'a Selection,
-    scope: &HardcopyScope,
-) -> Option<SchematicHardcopySelection<'a>> {
-    matches!(scope, HardcopyScope::Selection).then(|| SchematicHardcopySelection {
-        components: &selection.components,
-        wires: selection
-            .wires
-            .iter()
-            .copied()
-            .chain(selection.wire_segments.iter().map(|handle| handle.wire_id))
-            .chain(selection.wire_vertices.iter().map(|handle| handle.wire_id))
-            .collect(),
-        junctions: selection
-            .junctions
-            .iter()
-            .map(|junction| junction.pos)
-            .collect(),
-        buses: &selection.buses,
-        bus_taps: &selection.bus_taps,
-        net_labels: &selection.net_labels,
-        design_notes: &selection.design_notes,
-        documentation_shapes: &selection.documentation_shapes,
-        has_probes: !selection.probes.is_empty(),
-    })
+/// Cheap, semantic-free descriptor used by command enablement and the
+/// hardcopy dialog's document/scope selectors. Building this value never
+/// clones an engineering document, resolves a plot scene, or hashes samples.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetainedHardcopySourceDescriptor {
+    pub source_key: String,
+    pub display_name: String,
+    pub document_kind: HardcopyDocumentKind,
+    pub allowed_scopes: Vec<HardcopyScope>,
+    pub availability: RetainedHardcopySourceAvailability,
 }
 
+impl RetainedHardcopySourceDescriptor {
+    #[must_use]
+    pub fn supports_scope(&self, scope: &HardcopyScope) -> bool {
+        self.allowed_scopes.contains(scope)
+    }
+}
+
+#[cfg(test)]
 pub struct SymbolHardcopySource<'a> {
     pub identity: HardcopySourceIdentity,
     pub document: &'a SymbolDocument,
@@ -467,12 +462,12 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
-        return Ok(PreparedRetainedHardcopyResolution {
-            payload: PreparedRetainedHardcopyPayload::SourceSet {
+        return PreparedRetainedHardcopyResolution::try_capture(
+            RetainedHardcopySourceInput::SourceSet {
                 source_set: source_set.clone(),
                 members,
             },
-        });
+        );
     }
 
     let project_id = state.workspace.content.project.id();
@@ -559,14 +554,14 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
                 let document = state
                     .load_active_symbol_document()
                     .map_err(HardcopySourceError::StaleActiveDocumentAuthority)?;
-                Ok(PreparedRetainedHardcopyResolution {
-                    payload: PreparedRetainedHardcopyPayload::Symbol {
+                PreparedRetainedHardcopyResolution::try_capture(
+                    RetainedHardcopySourceInput::Symbol {
                         project_id,
                         identity,
                         document,
                         scope,
                     },
-                })
+                )
             }
             view_type => Err(HardcopySourceError::UnsupportedDocument(format!(
                 "active design view type {view_type:?} has no semantic hardcopy adapter"
@@ -581,8 +576,8 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
         && source_key == visualization_document_pane_source_key(project_id, document.id(), pane.id)
     {
         let all_panes = matches!(scope, HardcopyScope::AllSheetsOrPanes);
-        return Ok(PreparedRetainedHardcopyResolution {
-            payload: PreparedRetainedHardcopyPayload::VisualizationDocument {
+        return PreparedRetainedHardcopyResolution::try_capture(
+            RetainedHardcopySourceInput::VisualizationDocument {
                 source_key: source_key.to_owned(),
                 project_id,
                 document: document.clone(),
@@ -591,7 +586,7 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
                 all_panes,
                 scope,
             },
-        });
+        );
     }
 
     if let Ok(displayed) =
@@ -654,15 +649,15 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
                 prepared_run.analyses = vec![analysis.clone()];
                 prepared_run
             };
-            return Ok(PreparedRetainedHardcopyResolution {
-                payload: PreparedRetainedHardcopyPayload::Results {
+            return PreparedRetainedHardcopyResolution::try_capture(
+                RetainedHardcopySourceInput::Results {
                     source_key: source_key.to_owned(),
                     project_id,
                     run: capture_hardcopy_run(prepared_run),
                     presentation: capture_results_quick_view_presentation(state)?,
                     scope,
                 },
-            });
+            );
         }
     }
 
@@ -689,8 +684,8 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
             studio.panes.clone()
         };
         let runs = prepared_runs_for_panes(&state.simulation, &relevant_panes);
-        return Ok(PreparedRetainedHardcopyResolution {
-            payload: PreparedRetainedHardcopyPayload::Studio {
+        return PreparedRetainedHardcopyResolution::try_capture(
+            RetainedHardcopySourceInput::Studio {
                 source_key: source_key.to_owned(),
                 project_id,
                 studio,
@@ -699,7 +694,7 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
                 all_panes,
                 scope,
             },
-        });
+        );
     }
 
     if let Some(document_id) = state.workbench.report_authoring.selected_document {
@@ -713,15 +708,15 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
                 .find(|document| document.id() == document_id)
                 .ok_or_else(|| HardcopySourceError::SourceNotRetained(source_key.to_owned()))?;
             let reference_inventory = report_inventory::reference_inventory(state, document)?;
-            return Ok(PreparedRetainedHardcopyResolution {
-                payload: PreparedRetainedHardcopyPayload::Report {
+            return PreparedRetainedHardcopyResolution::try_capture(
+                RetainedHardcopySourceInput::Report {
                     project_id,
                     source_key: source_key.to_owned(),
                     document: document.clone(),
                     reference_inventory,
                     scope,
                 },
-            });
+            );
         }
     }
 
@@ -738,33 +733,31 @@ fn prepare_schematic_resolution(
     all_sheets: bool,
     scope: HardcopyScope,
 ) -> Result<PreparedRetainedHardcopyResolution, HardcopySourceError> {
-    Ok(PreparedRetainedHardcopyResolution {
-        payload: PreparedRetainedHardcopyPayload::Schematic {
-            project_id: state.workspace.content.project.id(),
-            identity,
-            schematic: state.schematic.editor_ref().design.clone(),
-            selection: state.schematic.session.selection.clone(),
-            library_manager: state.library_manager.clone(),
-            schematic_buffers: state.workspace.content.schematic_buffers.clone(),
-            sheet_catalog,
-            sheet_id,
-            project_default_drawing_sheet: state
-                .workspace
-                .content
-                .design_management
-                .drawing_sheet_settings()
-                .default_format
-                .clone(),
-            project_title_block_field_values: state
-                .workspace
-                .content
-                .design_management
-                .drawing_sheet_settings()
-                .title_block_field_values
-                .clone(),
-            all_sheets,
-            scope,
-        },
+    PreparedRetainedHardcopyResolution::try_capture(RetainedHardcopySourceInput::Schematic {
+        project_id: state.workspace.content.project.id(),
+        identity,
+        schematic: state.schematic.editor_ref().design.clone(),
+        selection: state.schematic.session.selection.clone(),
+        library_manager: state.library_manager.clone(),
+        schematic_buffers: state.workspace.content.schematic_buffers.clone(),
+        sheet_catalog,
+        sheet_id,
+        project_default_drawing_sheet: state
+            .workspace
+            .content
+            .design_management
+            .drawing_sheet_settings()
+            .default_format
+            .clone(),
+        project_title_block_field_values: state
+            .workspace
+            .content
+            .design_management
+            .drawing_sheet_settings()
+            .title_block_field_values
+            .clone(),
+        all_sheets,
+        scope,
     })
 }
 
@@ -1582,6 +1575,7 @@ fn require_active_result_document(
     }
 }
 
+#[cfg(test)]
 fn selected_symbol_document(
     document: &SymbolDocument,
     selection: &SymbolSelection,

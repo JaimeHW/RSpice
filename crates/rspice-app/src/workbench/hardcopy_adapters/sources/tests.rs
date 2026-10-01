@@ -302,7 +302,7 @@ fn schematic_selection_exports_only_selected_durable_objects() {
         let resolved = resolve_schematic_source(SchematicHardcopySource {
             identity: identity("schematic"),
             schematic: schematic.editor_ref().design,
-            selection: capture_schematic_selection(
+            selection: SchematicHardcopySelection::capture(
                 &schematic.session.selection,
                 &HardcopyScope::Selection,
             ),
@@ -347,7 +347,7 @@ fn selected_probe_is_rejected_explicitly_without_mutating_the_schematic() {
     let error = resolve_schematic_source(SchematicHardcopySource {
         identity: identity("schematic"),
         schematic: schematic.editor_ref().design,
-        selection: capture_schematic_selection(
+        selection: SchematicHardcopySelection::capture(
             &schematic.session.selection,
             &HardcopyScope::Selection,
         ),
@@ -1951,8 +1951,8 @@ fn all_visualization_panes_preserve_retained_pane_order() {
 
     let resolved = resolve_all_studio_panes(project_id, &studio, &simulation).unwrap();
     let source_key = format!("project:{}:visualization-pane:41", project_id.as_uuid());
-    let prepared = PreparedRetainedHardcopyResolution {
-        payload: PreparedRetainedHardcopyPayload::Studio {
+    let prepared =
+        PreparedRetainedHardcopyResolution::try_capture(RetainedHardcopySourceInput::Studio {
             source_key: source_key.clone(),
             project_id,
             studio: studio.presentation.clone(),
@@ -1960,8 +1960,8 @@ fn all_visualization_panes_preserve_retained_pane_order() {
             pane_id: 41,
             all_panes: true,
             scope: HardcopyScope::AllSheetsOrPanes,
-        },
-    };
+        })
+        .unwrap();
     let bytes = prepared.into_worker_snapshot_json().unwrap();
     let encoded: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(

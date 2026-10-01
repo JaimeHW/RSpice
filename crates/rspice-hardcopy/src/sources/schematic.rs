@@ -27,7 +27,35 @@ pub struct SchematicHardcopySelection<'a> {
     pub has_probes: bool,
 }
 
-impl SchematicHardcopySelection<'_> {
+impl<'a> SchematicHardcopySelection<'a> {
+    /// Capture the durable selected objects for the requested publication scope.
+    pub fn capture(
+        selection: &'a rspice_design::schematic::selection::Selection,
+        scope: &HardcopyScope,
+    ) -> Option<Self> {
+        matches!(scope, HardcopyScope::Selection).then(|| SchematicHardcopySelection {
+            components: &selection.components,
+            wires: selection
+                .wires
+                .iter()
+                .copied()
+                .chain(selection.wire_segments.iter().map(|handle| handle.wire_id))
+                .chain(selection.wire_vertices.iter().map(|handle| handle.wire_id))
+                .collect(),
+            junctions: selection
+                .junctions
+                .iter()
+                .map(|junction| junction.pos)
+                .collect(),
+            buses: &selection.buses,
+            bus_taps: &selection.bus_taps,
+            net_labels: &selection.net_labels,
+            design_notes: &selection.design_notes,
+            documentation_shapes: &selection.documentation_shapes,
+            has_probes: !selection.probes.is_empty(),
+        })
+    }
+
     fn is_empty(&self) -> bool {
         self.components.is_empty()
             && self.wires.is_empty()

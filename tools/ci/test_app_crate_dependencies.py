@@ -21,12 +21,14 @@ class DependencyPolicyTests(unittest.TestCase):
                         "rspice-app-types", "rspice-results", "rspice-core", "rspice-model-library",
                     },
                     "rspice-project": {"rspice-formats"},
+                    "rspice-hardcopy": {"rspice-project-contract"},
                 },
                 {
                     "rspice-formats": {
                         "rspice-app-types", "rspice-results", "rspice-core", "rspice-model-library",
                     },
                     "rspice-project": {"rspice-project", "rspice-formats", "rspice-results"},
+                    "rspice-hardcopy": {"rspice-hardcopy", "rspice-project-contract", "rspice-design"},
                 },
                 {"rspice-formats", "csv", "serde"},
                 {"rspice-formats", "serde_json", "sha2"},

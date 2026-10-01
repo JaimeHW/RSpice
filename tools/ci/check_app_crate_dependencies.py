@@ -40,7 +40,7 @@ ALLOWED: dict[str, set[str]] = {
         "rspice-simulation-contract", "rspice-results", "rspice-formats",
     },
     "rspice-hardcopy": {
-        "rspice-app-types", "rspice-hardcopy-contract", "rspice-design",
+        "rspice-app-types", "rspice-hardcopy-contract", "rspice-design", "rspice-project-contract",
         "rspice-results", "rspice-formats",
     },
     "rspice-ui-kit": {"rspice-app-types", "rspice-results"},

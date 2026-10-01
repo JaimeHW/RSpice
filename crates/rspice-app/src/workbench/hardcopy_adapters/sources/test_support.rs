@@ -56,7 +56,10 @@ pub(crate) fn resolve_retained_hardcopy_source(
             return resolve_schematic_source(SchematicHardcopySource {
                 identity,
                 schematic: state.schematic.editor_ref().design,
-                selection: capture_schematic_selection(&state.schematic.session.selection, &scope),
+                selection: SchematicHardcopySelection::capture(
+                    &state.schematic.session.selection,
+                    &scope,
+                ),
                 expected_topology_version: state.schematic.topology_version(),
                 symbol_resolver: Some(&resolver),
                 sheet_catalog: Some(catalog),
@@ -146,7 +149,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
                 resolve_schematic_source(SchematicHardcopySource {
                     identity,
                     schematic: state.schematic.editor_ref().design,
-                    selection: capture_schematic_selection(
+                    selection: SchematicHardcopySelection::capture(
                         &state.schematic.session.selection,
                         &scope,
                     ),

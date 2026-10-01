@@ -6,6 +6,7 @@ mod design;
 mod geometry;
 mod mapping;
 mod plots;
+mod prepared;
 mod quick_plot;
 mod reports;
 mod result_documents;
@@ -32,6 +33,7 @@ pub use geometry::{
 };
 use mapping::default_print_mapping;
 pub use plots::{resolve_plot_source, resolve_visualization_pane_source};
+pub use prepared::{PreparedRetainedHardcopyResolution, RetainedHardcopySourceInput};
 pub use quick_plot::{
     PlotFrame, QuickResultSeries, RetainedCursorInterpolation, RetainedQuickMarker,
     RetainedQuickViewOverlay, RetainedQuickViewOverlays, RetainedQuickViewport,

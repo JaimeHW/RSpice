@@ -1,15 +1,7 @@
-//! Retained and prepared hardcopy sources.
+//! Owned hardcopy inputs and authenticated native/worker source resolution.
 //!
-//! A *retained* source is a cheap descriptor — enough for command enablement
-//! and the dialog's document and scope selectors, and building one never
-//! clones an engineering document, resolves a plot scene, or hashes samples.
-//! A *prepared* source is the sealed form a publication executes against.
-//!
-//! Preparation is the authority boundary. Everything a run will read is
-//! identified here by digest and revision, and every validator refuses on a
-//! mismatch rather than substituting what is current. A published sheet has
-//! to be reproducible from what it says it came from, so a source set that
-//! drifted after preparation is an error, not a silent re-resolve.
+//! Capture checks identity and shape. Worker decoding also checks byte budgets,
+//! the closed schema, canonical owners and transport digest before resolution.
 
 // A prepared source is the sealed form of a whole engineering document, so
 // the schematic variant is inherently far larger than the symbol or results
@@ -18,40 +10,48 @@
 #![allow(clippy::large_enum_variant)]
 
 use super::*;
+use rspice_app_types::product::{ObjectRevision, ProjectId};
+use rspice_design::schematic::{
+    bus::{Bus, BusTap},
+    design_note::DesignNote,
+    documentation_shape::DocumentationShape,
+    net_label::{Junction, NetLabel},
+    selection::Selection,
+    wire::Wire,
+};
+use rspice_design_model::design_management::{
+    DrawingSheetInheritance, DrawingSheetTitleFieldId, SheetCatalog, SheetId,
+    validate_project_drawing_sheet_title_field_values,
+};
+use rspice_formats::project_results::ProjectSimulationResults;
+use rspice_hardcopy_contract::sources::MAX_HARDCOPY_SOURCE_SET_MEMBERS;
+use rspice_results::{
+    report_document::{ReportDocument, ReportReferenceInventory},
+    studio_presentation::VisualizationStudioPresentation,
+};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use uuid::Uuid;
 
-/// Cheap, semantic-free descriptor used by command enablement and the
-/// hardcopy dialog's document/scope selectors. Building this value never
-/// clones an engineering document, resolves a plot scene, or hashes samples.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RetainedHardcopySourceDescriptor {
-    pub source_key: String,
-    pub display_name: String,
-    pub document_kind: HardcopyDocumentKind,
-    pub allowed_scopes: Vec<HardcopyScope>,
-    pub availability: RetainedHardcopySourceAvailability,
-}
+const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 8;
 
-impl RetainedHardcopySourceDescriptor {
-    #[must_use]
-    pub fn supports_scope(&self, scope: &HardcopyScope) -> bool {
-        self.allowed_scopes.contains(scope)
-    }
-}
+#[cfg(test)]
+mod tests;
 
 /// Owned, `Send`-safe retained-source snapshot prepared on the UI thread
 /// without hashing samples, resolving symbols, or constructing semantic
 /// geometry. The worker consumes it with [`Self::resolve_owned`].
-pub(crate) struct PreparedRetainedHardcopyResolution {
-    pub(super) payload: PreparedRetainedHardcopyPayload,
+pub struct PreparedRetainedHardcopyResolution {
+    payload: RetainedHardcopySourceInput,
 }
 
-pub(super) enum PreparedRetainedHardcopyPayload {
+/// Unprepared source owners captured by a host; these inputs grant no publication permission.
+pub enum RetainedHardcopySourceInput {
     Schematic {
         project_id: ProjectId,
         identity: HardcopySourceIdentity,
         schematic: rspice_design::schematic::owned::Schematic,
         selection: Selection,
-        library_manager: rspice_project::ProjectLibraries,
+        library_manager: rspice_project_contract::ProjectLibraries,
         schematic_buffers:
             std::collections::HashMap<String, rspice_design::schematic::owned::Schematic>,
         sheet_catalog: Option<SheetCatalog>,
@@ -113,7 +113,7 @@ pub(super) enum PreparedRetainedHardcopyPayload {
 /// any source resolution begins.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
-pub(super) struct CanonicalHardcopyOwner(pub(super) serde_json::Value);
+struct CanonicalHardcopyOwner(serde_json::Value);
 
 impl CanonicalHardcopyOwner {
     fn capture<T: Serialize>(field: &'static str, owner: &T) -> Result<Self, HardcopySourceError> {
@@ -228,7 +228,7 @@ impl PreparedSchematicInterfaceOwner {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "source-family", rename_all = "kebab-case", deny_unknown_fields)]
-pub(super) enum PreparedRetainedHardcopyWorkerPayload {
+enum PreparedRetainedHardcopyWorkerPayload {
     Schematic {
         project_id: ProjectId,
         identity: HardcopySourceIdentity,
@@ -289,10 +289,10 @@ pub(super) enum PreparedRetainedHardcopyWorkerPayload {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct PreparedRetainedHardcopyWorkerSnapshot {
-    pub(super) schema_version: u32,
-    pub(super) payload: PreparedRetainedHardcopyWorkerPayload,
-    pub(super) transport_digest: ContentDigest,
+struct PreparedRetainedHardcopyWorkerSnapshot {
+    schema_version: u32,
+    payload: PreparedRetainedHardcopyWorkerPayload,
+    transport_digest: ContentDigest,
 }
 
 #[derive(Serialize)]
@@ -301,219 +301,10 @@ struct PreparedRetainedHardcopyWorkerDigestMaterial<'a> {
     payload: &'a serde_json::Value,
 }
 
-impl PreparedRetainedHardcopyWorkerSnapshot {
-    fn capture(prepared: PreparedRetainedHardcopyResolution) -> Result<Self, HardcopySourceError> {
-        let payload = PreparedRetainedHardcopyWorkerPayload::capture(prepared.payload)?;
-        let mut snapshot = Self {
-            schema_version: PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION,
-            payload,
-            transport_digest: ContentDigest::from_bytes([0; 32]),
-        };
-        snapshot.validate_shape()?;
-        snapshot.transport_digest = snapshot.compute_transport_digest()?;
-        Ok(snapshot)
-    }
-
-    pub(super) fn compute_transport_digest(&self) -> Result<ContentDigest, HardcopySourceError> {
-        // Authenticate the canonical JSON value that crosses the worker
-        // boundary. Hashing the typed payload directly let randomized map
-        // iteration leak into serialization order; a valid snapshot could
-        // then reject itself after JSON round-trip. `serde_json::Map` gives
-        // the value a stable key order while preserving exact scalar values.
-        let payload = serde_json::to_value(&self.payload)
-            .map_err(|error| HardcopySourceError::Serialization(error.to_string()))?;
-        canonical_digest(
-            b"rspice-prepared-hardcopy-worker-snapshot-v2",
-            &PreparedRetainedHardcopyWorkerDigestMaterial {
-                schema_version: self.schema_version,
-                payload: &payload,
-            },
-        )
-    }
-
-    fn validate(&self) -> Result<(), HardcopySourceError> {
-        self.validate_shape()?;
-        let actual = self.compute_transport_digest()?;
-        if actual != self.transport_digest {
-            return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(format!(
-                "transport digest does not authenticate the prepared owner snapshot (expected {}, computed {})",
-                self.transport_digest, actual
-            )));
-        }
-        Ok(())
-    }
-
-    fn validate_shape(&self) -> Result<(), HardcopySourceError> {
-        if self.schema_version != PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION {
-            return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(format!(
-                "unsupported schema version {}",
-                self.schema_version
-            )));
-        }
-        self.payload.validate_shape(false)
-    }
-
-    fn into_prepared(self) -> Result<PreparedRetainedHardcopyResolution, HardcopySourceError> {
-        self.validate()?;
-        Ok(PreparedRetainedHardcopyResolution {
-            payload: self.payload.restore()?,
-        })
-    }
-}
-
-impl PreparedRetainedHardcopyWorkerPayload {
-    fn capture(payload: PreparedRetainedHardcopyPayload) -> Result<Self, HardcopySourceError> {
-        Ok(match payload {
-            PreparedRetainedHardcopyPayload::Schematic {
-                project_id,
-                identity,
-                schematic,
-                selection,
-                library_manager,
-                schematic_buffers,
-                sheet_catalog,
-                sheet_id,
-                project_default_drawing_sheet,
-                project_title_block_field_values,
-                all_sheets,
-                scope,
-            } => {
-                let schematic = PreparedSchematicOwner::capture(schematic, selection);
-                let mut library_manager = library_manager;
-                library_manager.selected_library = None;
-                library_manager.selected_cell = None;
-                library_manager.selected_view = None;
-                library_manager.filter_text.clear();
-                library_manager.show_read_only = false;
-                let schematic_buffers = schematic_buffers
-                    .into_iter()
-                    .map(|(key, schematic)| {
-                        (key, PreparedSchematicInterfaceOwner::capture(schematic))
-                    })
-                    .collect::<std::collections::BTreeMap<_, _>>();
-                Self::Schematic {
-                    project_id,
-                    identity,
-                    schematic: CanonicalHardcopyOwner::capture("prepared schematic", &schematic)?,
-                    library_manager: CanonicalHardcopyOwner::capture(
-                        "prepared symbol library",
-                        &library_manager,
-                    )?,
-                    schematic_buffers: CanonicalHardcopyOwner::capture(
-                        "prepared schematic symbol buffers",
-                        &schematic_buffers,
-                    )?,
-                    sheet_catalog: sheet_catalog
-                        .as_ref()
-                        .map(|catalog| {
-                            CanonicalHardcopyOwner::capture("prepared sheet catalog", catalog)
-                        })
-                        .transpose()?,
-                    sheet_id,
-                    project_default_drawing_sheet,
-                    project_title_block_field_values,
-                    all_sheets,
-                    scope,
-                }
-            }
-            PreparedRetainedHardcopyPayload::Symbol {
-                project_id,
-                identity,
-                document,
-                scope,
-            } => Self::Symbol {
-                project_id,
-                identity,
-                document: CanonicalHardcopyOwner::capture("prepared symbol document", &document)?,
-                scope,
-            },
-            PreparedRetainedHardcopyPayload::Results {
-                source_key,
-                project_id,
-                run,
-                presentation,
-                scope,
-            } => {
-                let simulation_results = capture_prepared_result_history(&[run], true);
-                Self::Results {
-                    source_key,
-                    project_id,
-                    simulation_results: CanonicalHardcopyOwner::capture(
-                        "prepared result history",
-                        &simulation_results,
-                    )?,
-                    presentation,
-                    scope,
-                }
-            }
-            PreparedRetainedHardcopyPayload::Studio {
-                source_key,
-                project_id,
-                studio,
-                runs,
-                pane_id,
-                all_panes,
-                scope,
-            } => Self::Studio {
-                source_key,
-                project_id,
-                studio: CanonicalHardcopyOwner::capture("prepared visualization studio", &studio)?,
-                simulation_results: CanonicalHardcopyOwner::capture(
-                    "prepared studio result history",
-                    &capture_prepared_result_history(&runs, false),
-                )?,
-                pane_id,
-                all_panes,
-                scope,
-            },
-            PreparedRetainedHardcopyPayload::VisualizationDocument {
-                source_key,
-                project_id,
-                document,
-                page_id,
-                pane_id,
-                all_panes,
-                scope,
-            } => Self::VisualizationDocument {
-                source_key,
-                project_id,
-                document: CanonicalHardcopyOwner::capture(
-                    "prepared visualization document",
-                    &document,
-                )?,
-                page_id,
-                pane_id,
-                all_panes,
-                scope,
-            },
-            PreparedRetainedHardcopyPayload::Report {
-                project_id,
-                source_key,
-                document,
-                reference_inventory,
-                scope,
-            } => Self::Report {
-                project_id,
-                source_key,
-                document: CanonicalHardcopyOwner::capture("prepared report document", &document)?,
-                reference_inventory,
-                scope,
-            },
-            PreparedRetainedHardcopyPayload::SourceSet {
-                source_set,
-                members,
-            } => Self::SourceSet {
-                source_set,
-                members: members
-                    .into_iter()
-                    .map(|member| Self::capture(member.payload))
-                    .collect::<Result<Vec<_>, _>>()?,
-            },
-        })
-    }
-
-    fn validate_shape(&self, nested: bool) -> Result<(), HardcopySourceError> {
-        match self {
+// Native capture and transport decoding enforce the same metadata shape.
+macro_rules! validate_prepared_shape {
+    ($payload:expr, $nested:expr) => {{
+        match $payload {
             Self::Schematic {
                 project_id,
                 identity,
@@ -526,17 +317,15 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 ..
             } => {
                 validate_project_source_identity(*project_id, identity, "cell-view")?;
-                crate::state::validate_project_drawing_sheet_title_field_values(
-                    project_title_block_field_values,
-                )
-                .map_err(|error| {
-                    HardcopySourceError::InvalidPreparedWorkerSnapshot(error.to_string())
-                })?;
+                validate_project_drawing_sheet_title_field_values(project_title_block_field_values)
+                    .map_err(|error| {
+                        HardcopySourceError::InvalidPreparedWorkerSnapshot(error.to_string())
+                    })?;
                 project_default_drawing_sheet.validate().map_err(|error| {
                     HardcopySourceError::InvalidPreparedWorkerSnapshot(error.to_string())
                 })?;
                 if project_default_drawing_sheet.inheritance
-                    != crate::state::DrawingSheetInheritance::ProjectDefault
+                    != DrawingSheetInheritance::ProjectDefault
                 {
                     return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
                         "prepared schematic project default has non-default inheritance".to_owned(),
@@ -685,7 +474,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 source_set,
                 members,
             } => {
-                if nested {
+                if $nested {
                     return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
                         "prepared source sets cannot nest".to_owned(),
                     ));
@@ -706,9 +495,304 @@ impl PreparedRetainedHardcopyWorkerPayload {
             }
         }
         Ok(())
+    }};
+}
+
+impl RetainedHardcopySourceInput {
+    fn validate_shape(&self, nested: bool) -> Result<(), HardcopySourceError> {
+        validate_prepared_shape!(self, nested)
     }
 
-    fn restore(self) -> Result<PreparedRetainedHardcopyPayload, HardcopySourceError> {
+    fn validate_owner_bindings(&self) -> Result<(), HardcopySourceError> {
+        match self {
+            Self::Schematic {
+                project_id,
+                identity,
+                sheet_catalog,
+                sheet_id,
+                ..
+            } => validate_prepared_schematic_identity(
+                *project_id,
+                identity,
+                sheet_catalog.as_ref(),
+                *sheet_id,
+            ),
+            Self::Symbol {
+                project_id,
+                identity,
+                ..
+            } => validate_prepared_base_design_identity(*project_id, identity),
+            Self::Results {
+                source_key,
+                project_id,
+                run,
+                presentation,
+                ..
+            } => validate_prepared_result_history(
+                source_key,
+                *project_id,
+                std::slice::from_ref(run),
+                presentation,
+            ),
+            Self::Studio {
+                source_key,
+                project_id,
+                studio,
+                runs,
+                pane_id,
+                all_panes,
+                ..
+            } => validate_prepared_studio_snapshot(
+                *project_id,
+                source_key,
+                studio,
+                runs,
+                *pane_id,
+                *all_panes,
+            ),
+            Self::VisualizationDocument {
+                source_key,
+                project_id,
+                document,
+                page_id,
+                pane_id,
+                ..
+            } => validate_prepared_visualization_identity(
+                source_key,
+                *project_id,
+                document,
+                *page_id,
+                *pane_id,
+            ),
+            Self::Report {
+                source_key,
+                project_id,
+                document,
+                ..
+            } => validate_prepared_report_identity(source_key, *project_id, document),
+            // Exact source-set identities include sample digests. The existing
+            // resolver checks them after each member resolves, off the UI thread.
+            Self::SourceSet { .. } => Ok(()),
+        }
+    }
+}
+
+impl PreparedRetainedHardcopyWorkerSnapshot {
+    fn capture(prepared: PreparedRetainedHardcopyResolution) -> Result<Self, HardcopySourceError> {
+        let payload = PreparedRetainedHardcopyWorkerPayload::capture(prepared.payload)?;
+        let mut snapshot = Self {
+            schema_version: PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION,
+            payload,
+            transport_digest: ContentDigest::from_bytes([0; 32]),
+        };
+        snapshot.validate_shape()?;
+        snapshot.transport_digest = snapshot.compute_transport_digest()?;
+        Ok(snapshot)
+    }
+
+    fn compute_transport_digest(&self) -> Result<ContentDigest, HardcopySourceError> {
+        // Authenticate the canonical JSON value that crosses the worker
+        // boundary. Hashing the typed payload directly let randomized map
+        // iteration leak into serialization order; a valid snapshot could
+        // then reject itself after JSON round-trip. `serde_json::Map` gives
+        // the value a stable key order while preserving exact scalar values.
+        let payload = serde_json::to_value(&self.payload)
+            .map_err(|error| HardcopySourceError::Serialization(error.to_string()))?;
+        canonical_digest(
+            b"rspice-prepared-hardcopy-worker-snapshot-v2",
+            &PreparedRetainedHardcopyWorkerDigestMaterial {
+                schema_version: self.schema_version,
+                payload: &payload,
+            },
+        )
+    }
+
+    fn validate(&self) -> Result<(), HardcopySourceError> {
+        self.validate_shape()?;
+        let actual = self.compute_transport_digest()?;
+        if actual != self.transport_digest {
+            return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(format!(
+                "transport digest does not authenticate the prepared owner snapshot (expected {}, computed {})",
+                self.transport_digest, actual
+            )));
+        }
+        Ok(())
+    }
+
+    fn validate_shape(&self) -> Result<(), HardcopySourceError> {
+        if self.schema_version != PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION {
+            return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(format!(
+                "unsupported schema version {}",
+                self.schema_version
+            )));
+        }
+        self.payload.validate_shape(false)
+    }
+
+    fn into_prepared(self) -> Result<PreparedRetainedHardcopyResolution, HardcopySourceError> {
+        self.validate()?;
+        Ok(PreparedRetainedHardcopyResolution {
+            payload: self.payload.restore()?,
+        })
+    }
+}
+
+impl PreparedRetainedHardcopyWorkerPayload {
+    fn capture(payload: RetainedHardcopySourceInput) -> Result<Self, HardcopySourceError> {
+        Ok(match payload {
+            RetainedHardcopySourceInput::Schematic {
+                project_id,
+                identity,
+                schematic,
+                selection,
+                library_manager,
+                schematic_buffers,
+                sheet_catalog,
+                sheet_id,
+                project_default_drawing_sheet,
+                project_title_block_field_values,
+                all_sheets,
+                scope,
+            } => {
+                let schematic = PreparedSchematicOwner::capture(schematic, selection);
+                let mut library_manager = library_manager;
+                library_manager.selected_library = None;
+                library_manager.selected_cell = None;
+                library_manager.selected_view = None;
+                library_manager.filter_text.clear();
+                library_manager.show_read_only = false;
+                let schematic_buffers = schematic_buffers
+                    .into_iter()
+                    .map(|(key, schematic)| {
+                        (key, PreparedSchematicInterfaceOwner::capture(schematic))
+                    })
+                    .collect::<std::collections::BTreeMap<_, _>>();
+                Self::Schematic {
+                    project_id,
+                    identity,
+                    schematic: CanonicalHardcopyOwner::capture("prepared schematic", &schematic)?,
+                    library_manager: CanonicalHardcopyOwner::capture(
+                        "prepared symbol library",
+                        &library_manager,
+                    )?,
+                    schematic_buffers: CanonicalHardcopyOwner::capture(
+                        "prepared schematic symbol buffers",
+                        &schematic_buffers,
+                    )?,
+                    sheet_catalog: sheet_catalog
+                        .as_ref()
+                        .map(|catalog| {
+                            CanonicalHardcopyOwner::capture("prepared sheet catalog", catalog)
+                        })
+                        .transpose()?,
+                    sheet_id,
+                    project_default_drawing_sheet,
+                    project_title_block_field_values,
+                    all_sheets,
+                    scope,
+                }
+            }
+            RetainedHardcopySourceInput::Symbol {
+                project_id,
+                identity,
+                document,
+                scope,
+            } => Self::Symbol {
+                project_id,
+                identity,
+                document: CanonicalHardcopyOwner::capture("prepared symbol document", &document)?,
+                scope,
+            },
+            RetainedHardcopySourceInput::Results {
+                source_key,
+                project_id,
+                run,
+                presentation,
+                scope,
+            } => {
+                let simulation_results = capture_prepared_result_history(&[run], true);
+                Self::Results {
+                    source_key,
+                    project_id,
+                    simulation_results: CanonicalHardcopyOwner::capture(
+                        "prepared result history",
+                        &simulation_results,
+                    )?,
+                    presentation,
+                    scope,
+                }
+            }
+            RetainedHardcopySourceInput::Studio {
+                source_key,
+                project_id,
+                studio,
+                runs,
+                pane_id,
+                all_panes,
+                scope,
+            } => Self::Studio {
+                source_key,
+                project_id,
+                studio: CanonicalHardcopyOwner::capture("prepared visualization studio", &studio)?,
+                simulation_results: CanonicalHardcopyOwner::capture(
+                    "prepared studio result history",
+                    &capture_prepared_result_history(&runs, false),
+                )?,
+                pane_id,
+                all_panes,
+                scope,
+            },
+            RetainedHardcopySourceInput::VisualizationDocument {
+                source_key,
+                project_id,
+                document,
+                page_id,
+                pane_id,
+                all_panes,
+                scope,
+            } => Self::VisualizationDocument {
+                source_key,
+                project_id,
+                document: CanonicalHardcopyOwner::capture(
+                    "prepared visualization document",
+                    &document,
+                )?,
+                page_id,
+                pane_id,
+                all_panes,
+                scope,
+            },
+            RetainedHardcopySourceInput::Report {
+                project_id,
+                source_key,
+                document,
+                reference_inventory,
+                scope,
+            } => Self::Report {
+                project_id,
+                source_key,
+                document: CanonicalHardcopyOwner::capture("prepared report document", &document)?,
+                reference_inventory,
+                scope,
+            },
+            RetainedHardcopySourceInput::SourceSet {
+                source_set,
+                members,
+            } => Self::SourceSet {
+                source_set,
+                members: members
+                    .into_iter()
+                    .map(|member| Self::capture(member.payload))
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+        })
+    }
+
+    fn validate_shape(&self, nested: bool) -> Result<(), HardcopySourceError> {
+        validate_prepared_shape!(self, nested)
+    }
+
+    fn restore(self) -> Result<RetainedHardcopySourceInput, HardcopySourceError> {
         self.validate_shape(false)?;
         let restored = match self {
             Self::Schematic {
@@ -728,7 +812,9 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     .restore::<PreparedSchematicOwner>("prepared schematic")?
                     .restore();
                 let library_manager = library_manager
-                    .restore::<rspice_project::ProjectLibraries>("prepared symbol library")?;
+                    .restore::<rspice_project_contract::ProjectLibraries>(
+                        "prepared symbol library",
+                    )?;
                 let schematic_buffers = schematic_buffers
                     .restore::<std::collections::BTreeMap<String, PreparedSchematicInterfaceOwner>>(
                         "prepared schematic symbol buffers",
@@ -745,7 +831,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     sheet_catalog.as_ref(),
                     sheet_id,
                 )?;
-                PreparedRetainedHardcopyPayload::Schematic {
+                RetainedHardcopySourceInput::Schematic {
                     project_id,
                     identity,
                     schematic,
@@ -767,7 +853,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 scope,
             } => {
                 validate_prepared_base_design_identity(project_id, &identity)?;
-                PreparedRetainedHardcopyPayload::Symbol {
+                RetainedHardcopySourceInput::Symbol {
                     project_id,
                     identity,
                     document: document.restore::<SymbolDocument>("prepared symbol document")?,
@@ -785,42 +871,13 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     .restore::<ProjectSimulationResults>("prepared result history")?;
                 let runs = restore_hardcopy_runs(simulation_results)
                     .map_err(HardcopySourceError::InvalidPreparedWorkerSnapshot)?;
-                presentation.validate()?;
-                let analysis_count = runs.first().map_or(0, |run| run.analyses.len());
-                let has_exact_shape = runs.len() == 1
-                    && match presentation.viewer() {
-                        ResultViewer::Manifest | ResultViewer::Specs => true,
-                        viewer
-                            if rspice_results::result_presentation::viewer_uses_wave_stack(
-                                viewer,
-                            ) =>
-                        {
-                            (1..=MAX_HARDCOPY_SOURCE_SET_MEMBERS).contains(&analysis_count)
-                        }
-                        _ => analysis_count == 1,
-                    };
-                if !has_exact_shape {
-                    return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-                        "prepared result history has an analysis count incompatible with its Results viewer"
-                            .to_owned(),
-                    ));
-                }
+                validate_prepared_result_history(&source_key, project_id, &runs, &presentation)?;
                 let run = runs.into_iter().next().ok_or_else(|| {
                     HardcopySourceError::InvalidPreparedWorkerSnapshot(
                         "prepared result history lost its run".to_owned(),
                     )
                 })?;
-                let expected_key = format!(
-                    "project:{}:result-dataset:{}",
-                    project_id.as_uuid(),
-                    run.dataset_id
-                );
-                if source_key != expected_key {
-                    return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-                        "result dataset identity does not match its source key".to_owned(),
-                    ));
-                }
-                PreparedRetainedHardcopyPayload::Results {
+                RetainedHardcopySourceInput::Results {
                     source_key,
                     project_id,
                     run,
@@ -852,7 +909,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     pane_id,
                     all_panes,
                 )?;
-                PreparedRetainedHardcopyPayload::Studio {
+                RetainedHardcopySourceInput::Studio {
                     source_key,
                     project_id,
                     studio,
@@ -873,21 +930,14 @@ impl PreparedRetainedHardcopyWorkerPayload {
             } => {
                 let document =
                     document.restore::<VisualizationDocument>("prepared visualization document")?;
-                let expected_key =
-                    visualization_document_pane_source_key(project_id, document.id(), pane_id);
-                if source_key != expected_key
-                    || !document.pages().iter().any(|page| page.id == page_id)
-                    || !document
-                        .panes()
-                        .iter()
-                        .any(|pane| pane.id == pane_id && pane.page_id == page_id)
-                {
-                    return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-                        "result-document source identity is not retained by its exact document"
-                            .to_owned(),
-                    ));
-                }
-                PreparedRetainedHardcopyPayload::VisualizationDocument {
+                validate_prepared_visualization_identity(
+                    &source_key,
+                    project_id,
+                    &document,
+                    page_id,
+                    pane_id,
+                )?;
+                RetainedHardcopySourceInput::VisualizationDocument {
                     source_key,
                     project_id,
                     document,
@@ -905,14 +955,8 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 scope,
             } => {
                 let document = document.restore::<ReportDocument>("prepared report document")?;
-                let expected_key =
-                    format!("project:{}:report:{}", project_id.as_uuid(), document.id());
-                if source_key != expected_key {
-                    return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-                        "report document identity does not match its source key".to_owned(),
-                    ));
-                }
-                PreparedRetainedHardcopyPayload::Report {
+                validate_prepared_report_identity(&source_key, project_id, &document)?;
+                RetainedHardcopySourceInput::Report {
                     project_id,
                     source_key,
                     document,
@@ -933,7 +977,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 validate_prepared_source_set_members(&source_set, &members)?;
-                PreparedRetainedHardcopyPayload::SourceSet {
+                RetainedHardcopySourceInput::SourceSet {
                     source_set,
                     members,
                 }
@@ -941,6 +985,82 @@ impl PreparedRetainedHardcopyWorkerPayload {
         };
         Ok(restored)
     }
+}
+
+fn validate_prepared_result_history(
+    source_key: &str,
+    project_id: ProjectId,
+    runs: &[HardcopyRun],
+    presentation: &ResultsQuickViewPresentation,
+) -> Result<(), HardcopySourceError> {
+    presentation.validate()?;
+    let analysis_count = runs.first().map_or(0, |run| run.analyses.len());
+    let has_exact_shape = runs.len() == 1
+        && match presentation.viewer() {
+            ResultViewer::Manifest | ResultViewer::Specs => true,
+            viewer if rspice_results::result_presentation::viewer_uses_wave_stack(viewer) => {
+                (1..=MAX_HARDCOPY_SOURCE_SET_MEMBERS).contains(&analysis_count)
+            }
+            _ => analysis_count == 1,
+        };
+    if !has_exact_shape {
+        return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
+            "prepared result history has an analysis count incompatible with its Results viewer"
+                .to_owned(),
+        ));
+    }
+    let run = runs.first().ok_or_else(|| {
+        HardcopySourceError::InvalidPreparedWorkerSnapshot(
+            "prepared result history lost its run".to_owned(),
+        )
+    })?;
+    let expected_key = format!(
+        "project:{}:result-dataset:{}",
+        project_id.as_uuid(),
+        run.dataset_id
+    );
+    if source_key != expected_key {
+        return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
+            "result dataset identity does not match its source key".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_prepared_visualization_identity(
+    source_key: &str,
+    project_id: ProjectId,
+    document: &VisualizationDocument,
+    page_id: PageId,
+    pane_id: PaneId,
+) -> Result<(), HardcopySourceError> {
+    let expected_key = visualization_document_pane_source_key(project_id, document.id(), pane_id);
+    if source_key != expected_key
+        || !document.pages().iter().any(|page| page.id == page_id)
+        || !document
+            .panes()
+            .iter()
+            .any(|pane| pane.id == pane_id && pane.page_id == page_id)
+    {
+        return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
+            "result-document source identity is not retained by its exact document".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_prepared_report_identity(
+    source_key: &str,
+    project_id: ProjectId,
+    document: &ReportDocument,
+) -> Result<(), HardcopySourceError> {
+    let expected_key = format!("project:{}:report:{}", project_id.as_uuid(), document.id());
+    if source_key != expected_key {
+        return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
+            "report document identity does not match its source key".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn capture_prepared_result_history(
@@ -1170,13 +1290,13 @@ fn prepared_payload_identity(
     prepared: &PreparedRetainedHardcopyResolution,
 ) -> Result<(HardcopySourceIdentity, HardcopyScope), HardcopySourceError> {
     match &prepared.payload {
-        PreparedRetainedHardcopyPayload::Schematic {
+        RetainedHardcopySourceInput::Schematic {
             identity, scope, ..
         }
-        | PreparedRetainedHardcopyPayload::Symbol {
+        | RetainedHardcopySourceInput::Symbol {
             identity, scope, ..
         } => Ok((identity.clone(), scope.clone())),
-        PreparedRetainedHardcopyPayload::Results {
+        RetainedHardcopySourceInput::Results {
             source_key,
             project_id,
             run,
@@ -1185,29 +1305,19 @@ fn prepared_payload_identity(
         } => {
             if presentation.viewer() == ResultViewer::Manifest {
                 return Ok((
-                    results_manifest_identity(source_key, *project_id, run.as_ref())?,
+                    results_manifest_identity(source_key, *project_id, run)?,
                     scope.clone(),
                 ));
             }
             if presentation.viewer() == ResultViewer::Specs {
                 return Ok((
-                    results_specs_identity(
-                        source_key,
-                        *project_id,
-                        run.as_ref(),
-                        presentation.specs(),
-                    )?,
+                    results_specs_identity(source_key, *project_id, run, presentation.specs())?,
                     scope.clone(),
                 ));
             }
             if run.analyses.len() > 1 {
                 return Ok((
-                    results_stack_identity(
-                        source_key,
-                        *project_id,
-                        run.as_ref(),
-                        presentation.viewer(),
-                    )?,
+                    results_stack_identity(source_key, *project_id, run, presentation.viewer())?,
                     scope.clone(),
                 ));
             }
@@ -1221,13 +1331,13 @@ fn prepared_payload_identity(
                     source_key,
                     *project_id,
                     presentation.viewer(),
-                    run.as_ref(),
-                    analysis.as_ref(),
+                    run,
+                    analysis,
                 )?,
                 scope.clone(),
             ))
         }
-        PreparedRetainedHardcopyPayload::Studio {
+        RetainedHardcopySourceInput::Studio {
             source_key,
             project_id,
             studio,
@@ -1249,7 +1359,7 @@ fn prepared_payload_identity(
                 scope.clone(),
             ))
         }
-        PreparedRetainedHardcopyPayload::VisualizationDocument {
+        RetainedHardcopySourceInput::VisualizationDocument {
             source_key,
             document,
             scope,
@@ -1265,7 +1375,7 @@ fn prepared_payload_identity(
             )?,
             scope.clone(),
         )),
-        PreparedRetainedHardcopyPayload::Report {
+        RetainedHardcopySourceInput::Report {
             source_key,
             document,
             scope,
@@ -1281,7 +1391,7 @@ fn prepared_payload_identity(
             )?,
             scope.clone(),
         )),
-        PreparedRetainedHardcopyPayload::SourceSet { .. } => {
+        RetainedHardcopySourceInput::SourceSet { .. } => {
             Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
                 "prepared source sets cannot nest".to_owned(),
             ))
@@ -1317,11 +1427,23 @@ fn validate_prepared_source_set_members(
 }
 
 impl PreparedRetainedHardcopyResolution {
+    /// Check source ownership and metadata without hashing samples or resolving
+    /// geometry. Full content authentication remains at decode/resolution; this
+    /// capture grants no permission to publish.
+    pub fn try_capture(payload: RetainedHardcopySourceInput) -> Result<Self, HardcopySourceError> {
+        payload.validate_shape(false)?;
+        payload.validate_owner_bindings()?;
+        Ok(Self { payload })
+    }
+
+    fn validate_shape(&self, nested: bool) -> Result<(), HardcopySourceError> {
+        self.payload.validate_shape(nested)
+    }
+
     /// Serialize the exact prepared owner snapshot for a browser dedicated
     /// worker. Consuming `self` avoids cloning large retained result arrays.
     /// The returned bytes are bounded and authenticated as one atomic unit.
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub(crate) fn into_worker_snapshot_json(self) -> Result<Vec<u8>, HardcopySourceError> {
+    pub fn into_worker_snapshot_json(self) -> Result<Vec<u8>, HardcopySourceError> {
         let snapshot = PreparedRetainedHardcopyWorkerSnapshot::capture(self)?;
         let bytes = serde_json::to_vec(&snapshot)
             .map_err(|error| HardcopySourceError::Serialization(error.to_string()))?;
@@ -1356,8 +1478,7 @@ impl PreparedRetainedHardcopyResolution {
     /// Deserialize a dedicated-worker request only after its byte boundary,
     /// closed schema, transport digest, owner schemas, and source identities
     /// all validate. No partially restored source can escape on failure.
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub(crate) fn from_worker_snapshot_json(bytes: &[u8]) -> Result<Self, HardcopySourceError> {
+    pub fn from_worker_snapshot_json(bytes: &[u8]) -> Result<Self, HardcopySourceError> {
         if bytes.len() > MAX_WORKER_SNAPSHOT_BYTES {
             return Err(HardcopySourceError::PreparedWorkerSnapshotTooLarge(
                 bytes.len(),
@@ -1375,9 +1496,9 @@ impl PreparedRetainedHardcopyResolution {
         snapshot.into_prepared()
     }
 
-    pub(crate) fn resolve_owned(self) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
+    pub fn resolve_owned(self) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
         match self.payload {
-            PreparedRetainedHardcopyPayload::Schematic {
+            RetainedHardcopySourceInput::Schematic {
                 project_id: _,
                 identity,
                 schematic,
@@ -1414,7 +1535,7 @@ impl PreparedRetainedHardcopyResolution {
                 resolve_schematic_source(SchematicHardcopySource {
                     identity,
                     schematic: &schematic,
-                    selection: capture_schematic_selection(&selection, &scope),
+                    selection: SchematicHardcopySelection::capture(&selection, &scope),
                     expected_topology_version: schematic.topology_version(),
                     symbol_resolver: Some(&resolver),
                     sheet_catalog: sheet_catalog.as_ref(),
@@ -1424,18 +1545,13 @@ impl PreparedRetainedHardcopyResolution {
                     scope,
                 })
             }
-            PreparedRetainedHardcopyPayload::Symbol {
+            RetainedHardcopySourceInput::Symbol {
                 project_id: _,
                 identity,
                 document,
                 scope,
-            } => resolve_symbol_source(SymbolHardcopySource {
-                identity,
-                document: &document,
-                selection: None,
-                scope,
-            }),
-            PreparedRetainedHardcopyPayload::Results {
+            } => resolve_symbol_document(identity, document, scope),
+            RetainedHardcopySourceInput::Results {
                 source_key,
                 project_id,
                 run,
@@ -1491,7 +1607,7 @@ impl PreparedRetainedHardcopyResolution {
                     &presentation,
                 )
             }
-            PreparedRetainedHardcopyPayload::Studio {
+            RetainedHardcopySourceInput::Studio {
                 source_key,
                 project_id,
                 studio,
@@ -1515,7 +1631,7 @@ impl PreparedRetainedHardcopyResolution {
                     resolve_studio_pane(&source, source_key, pane_id, scope)
                 }
             }
-            PreparedRetainedHardcopyPayload::VisualizationDocument {
+            RetainedHardcopySourceInput::VisualizationDocument {
                 source_key,
                 project_id,
                 document,
@@ -1526,7 +1642,7 @@ impl PreparedRetainedHardcopyResolution {
             } => resolve_visualization_document_source(
                 source_key, project_id, &document, page_id, pane_id, all_panes, scope,
             ),
-            PreparedRetainedHardcopyPayload::Report {
+            RetainedHardcopySourceInput::Report {
                 project_id: _,
                 source_key,
                 document,
@@ -1538,7 +1654,7 @@ impl PreparedRetainedHardcopyResolution {
                 reference_inventory: Some(&reference_inventory),
                 scope,
             }),
-            PreparedRetainedHardcopyPayload::SourceSet {
+            RetainedHardcopySourceInput::SourceSet {
                 source_set,
                 members,
             } => {
