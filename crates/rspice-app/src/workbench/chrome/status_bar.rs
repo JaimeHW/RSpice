@@ -718,7 +718,7 @@ fn zoom_factor(app: &RSpiceApp) -> f64 {
     if app.state.workbench.workspace == Workspace::Design
         && app.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol
     {
-        f64::from(app.state.ui.symbol.zoom)
+        f64::from(app.state.ui.symbol.editor.zoom)
     } else {
         app.state.schematic.session.editor.zoom
     }

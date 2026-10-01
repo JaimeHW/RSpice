@@ -81,8 +81,8 @@ pub(super) fn active_symbol_editor(app: &RSpiceApp) -> bool {
 /// and target classes remain independent in Grid, snap and wire routing.
 pub(super) fn cycle_canvas_grid(app: &mut RSpiceApp) {
     if active_symbol_editor(app) {
-        let enabled = !app.state.ui.symbol.show_grid;
-        app.state.ui.symbol.show_grid = enabled;
+        let enabled = !app.state.ui.symbol.editor.show_grid;
+        app.state.ui.symbol.editor.show_grid = enabled;
         return;
     }
 
@@ -257,12 +257,12 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
         }
         Workspace::Design => {
             if app.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
-                app.state.ui.symbol.zoom = 1.0;
-                app.state.ui.symbol.pan = (0.0, 0.0);
-                app.state.ui.symbol.needs_fit = true;
-                app.state.ui.symbol.clear_selection();
-                app.state.ui.symbol.marquee_start = None;
-                app.state.ui.symbol.marquee_current = None;
+                app.state.ui.symbol.editor.zoom = 1.0;
+                app.state.ui.symbol.editor.pan = (0.0, 0.0);
+                app.state.ui.symbol.editor.needs_fit = true;
+                app.state.ui.symbol.editor.clear_selection();
+                app.state.ui.symbol.editor.marquee_start = None;
+                app.state.ui.symbol.editor.marquee_current = None;
             } else {
                 app.state.schematic.session.editor.zoom = 1.0;
                 app.state.schematic.session.editor.pan = (0.0, 0.0);

@@ -113,7 +113,7 @@ fn pins_section(
                 .state
                 .store_active_symbol_editor_bundle(document, metadata)
             {
-                Ok(()) => app.state.ui.symbol.select_pin(name),
+                Ok(()) => app.state.ui.symbol.editor.select_pin(name),
                 Err(error) => app
                     .state
                     .push_user_message(crate::diagnostics::ConsoleMessage::warning(error)),
@@ -175,14 +175,22 @@ fn pins_section(
             } else {
                 t.color.err
             })
-            .selected(app.state.ui.symbol.selection.pins.contains(&pin.name))
+            .selected(
+                app.state
+                    .ui
+                    .symbol
+                    .editor
+                    .selection
+                    .pins
+                    .contains(&pin.name),
+            )
             .show(ui);
         if row.response.clicked() {
             select = Some(pin.name.clone());
         }
     }
     if let Some(name) = select {
-        app.state.ui.symbol.select_pin(name);
+        app.state.ui.symbol.editor.select_pin(name);
     }
 }
 
@@ -254,14 +262,14 @@ fn body_section(ui: &mut Ui, app: &mut RSpiceApp, document: &SymbolDocument) {
         let row = TreeRow::new(&shape_label(shape))
             .indent(1)
             .meta(&meta)
-            .selected(app.state.ui.symbol.selection.shapes.contains(&index))
+            .selected(app.state.ui.symbol.editor.selection.shapes.contains(&index))
             .show(ui);
         if row.response.clicked() {
             select = Some(index);
         }
     }
     if let Some(index) = select {
-        app.state.ui.symbol.select_shape(index);
+        app.state.ui.symbol.editor.select_shape(index);
     }
 }
 
@@ -286,10 +294,18 @@ fn attributes_section(ui: &mut Ui, app: &mut RSpiceApp, metadata: &SymbolEditorM
             .mono()
             .indent(1)
             .meta(meta)
-            .selected(app.state.ui.symbol.selection.attributes.contains(&kind))
+            .selected(
+                app.state
+                    .ui
+                    .symbol
+                    .editor
+                    .selection
+                    .attributes
+                    .contains(&kind),
+            )
             .show(ui);
         if row.response.clicked() {
-            app.state.ui.symbol.select_attribute(kind);
+            app.state.ui.symbol.editor.select_attribute(kind);
         }
     }
 }

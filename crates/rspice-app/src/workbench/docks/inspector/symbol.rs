@@ -45,7 +45,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
     let mut changed = false;
     let mut intent = SymbolCommitIntent::default();
-    let selection = app.state.ui.symbol.effective_selection();
+    let selection = app.state.ui.symbol.editor.effective_selection();
     let total = selection.pins.len() + selection.shapes.len() + selection.attributes.len();
     if total == 0 {
         empty_selection_section(ui);
@@ -185,11 +185,11 @@ fn summary_status(t: &Tokens, summary: PinSummary) -> (String, egui::Color32) {
 /// Record one undo snapshot for the open inspector field, however many
 /// keystrokes it receives.
 fn record_once(state: &mut AppState, before: &SymbolDocument) {
-    if state.ui.symbol.inspector_undo_recorded {
+    if state.ui.symbol.editor.inspector_undo_recorded {
         return;
     }
     state.record_symbol_edit(before);
-    state.ui.symbol.inspector_undo_recorded = true;
+    state.ui.symbol.editor.inspector_undo_recorded = true;
 }
 
 /// An editable integer coordinate. Illegal text is simply not applied; the
@@ -222,7 +222,7 @@ fn coordinate_row(
         // The row shows the document's value again the moment the field is
         // not being typed into, and the next session starts a new undo step.
         ui.data_mut(|data| data.remove_temp::<String>(id));
-        app.state.ui.symbol.inspector_undo_recorded = false;
+        app.state.ui.symbol.editor.inspector_undo_recorded = false;
     }
     changed
 }
@@ -253,7 +253,7 @@ fn text_row(
     }
     if response.lost_focus() {
         ui.data_mut(|data| data.remove_temp::<String>(id));
-        app.state.ui.symbol.inspector_undo_recorded = false;
+        app.state.ui.symbol.editor.inspector_undo_recorded = false;
     }
     accepted
 }
@@ -330,7 +330,7 @@ fn pin_section(
             .renames
             .insert(current_name.clone(), new_name.clone());
         document.pins[order].name = new_name.clone();
-        app.state.ui.symbol.select_pin(new_name);
+        app.state.ui.symbol.editor.select_pin(new_name);
         changed = true;
     }
 
@@ -403,7 +403,7 @@ fn pin_section(
         {
             app.state.record_symbol_edit(&before);
             document.pins.swap(order, order - 1);
-            app.state.ui.symbol.inspector_undo_recorded = false;
+            app.state.ui.symbol.editor.inspector_undo_recorded = false;
             changed = true;
         }
         if ui
@@ -412,7 +412,7 @@ fn pin_section(
         {
             app.state.record_symbol_edit(&before);
             document.pins.swap(order, order + 1);
-            app.state.ui.symbol.inspector_undo_recorded = false;
+            app.state.ui.symbol.editor.inspector_undo_recorded = false;
             changed = true;
         }
     });
@@ -472,7 +472,7 @@ fn pin_section(
         app.state.record_symbol_edit(&before);
         let bounds = document.body_bounds();
         document.pins[order].set_side_and_offset(side, offset, bounds);
-        app.state.ui.symbol.inspector_undo_recorded = false;
+        app.state.ui.symbol.editor.inspector_undo_recorded = false;
         changed = true;
     }
     ui.add_space(4.0);
@@ -485,8 +485,8 @@ fn pin_section(
     {
         app.state.record_symbol_edit(&before);
         document.pins.remove(order);
-        app.state.ui.symbol.clear_selection();
-        app.state.ui.symbol.inspector_undo_recorded = false;
+        app.state.ui.symbol.editor.clear_selection();
+        app.state.ui.symbol.editor.inspector_undo_recorded = false;
         changed = true;
     }
     changed
@@ -817,14 +817,22 @@ fn contract_section(
             .indent(1)
             .meta(&meta)
             .chip_dot(if placed { t.color.ok } else { t.color.err })
-            .selected(app.state.ui.symbol.selection.pins.contains(&port.name))
+            .selected(
+                app.state
+                    .ui
+                    .symbol
+                    .editor
+                    .selection
+                    .pins
+                    .contains(&port.name),
+            )
             .show(ui);
         if row.response.clicked() && pin.is_some() {
             select = Some(port.name.clone());
         }
     }
     if let Some(name) = select {
-        app.state.ui.symbol.select_pin(name);
+        app.state.ui.symbol.editor.select_pin(name);
     }
 
     // Pins the symbol places that no port declares are the other half of a

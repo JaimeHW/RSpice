@@ -56,16 +56,16 @@ fn canvas_grid_command_does_not_reinterpret_symbol_snap_policy() {
             "symbol",
         ));
     assert!(active_symbol_editor(&app));
-    app.state.ui.symbol.show_grid = true;
-    app.state.ui.symbol.snap_to_grid = false;
+    app.state.ui.symbol.editor.show_grid = true;
+    app.state.ui.symbol.editor.snap_to_grid = false;
 
     Command::CycleGrid.execute(&mut app);
-    assert!(!app.state.ui.symbol.show_grid);
-    assert!(!app.state.ui.symbol.snap_to_grid);
+    assert!(!app.state.ui.symbol.editor.show_grid);
+    assert!(!app.state.ui.symbol.editor.snap_to_grid);
 
     Command::CycleGrid.execute(&mut app);
-    assert!(app.state.ui.symbol.show_grid);
-    assert!(!app.state.ui.symbol.snap_to_grid);
+    assert!(app.state.ui.symbol.editor.show_grid);
+    assert!(!app.state.ui.symbol.editor.snap_to_grid);
 }
 
 #[test]

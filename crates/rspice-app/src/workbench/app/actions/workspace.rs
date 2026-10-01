@@ -323,12 +323,13 @@ impl AppState {
                 self.open_workspace_view(reference);
                 self.workbench
                     .activate(crate::workbench::state::Workspace::Design);
-                self.ui.symbol.select_pin(pin_name);
+                self.ui.symbol.editor.select_pin(pin_name);
                 if let Some(point) = point {
-                    let zoom = self.ui.symbol.zoom.max(1.0);
-                    self.ui.symbol.pan = (-(point.x as f32) * zoom, -(point.y as f32) * zoom);
+                    let zoom = self.ui.symbol.editor.zoom.max(1.0);
+                    self.ui.symbol.editor.pan =
+                        (-(point.x as f32) * zoom, -(point.y as f32) * zoom);
                 }
-                self.ui.symbol.needs_fit = false;
+                self.ui.symbol.editor.needs_fit = false;
             }
             LogAnchor::Simulation { nets, devices } => {
                 self.highlight_failed_run_sites(&nets, &devices);

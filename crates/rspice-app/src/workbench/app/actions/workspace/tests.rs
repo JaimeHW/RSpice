@@ -1303,7 +1303,7 @@ fn symbol_log_anchor_opens_symbol_view_and_selects_pin() {
     });
 
     assert_eq!(state.workspace.content.active_view, reference);
-    assert_eq!(state.ui.symbol.selected_pin.as_deref(), Some("IN"));
+    assert_eq!(state.ui.symbol.editor.selected_pin.as_deref(), Some("IN"));
     assert_eq!(state.workbench.workspace, Workspace::Design);
 }
 
@@ -1311,7 +1311,7 @@ fn symbol_log_anchor_opens_symbol_view_and_selects_pin() {
 fn symbol_violation_cycle_opens_symbol_view_and_selects_pin() {
     let mut state = state_with_amp_symbol_pin("IN", None);
     state.run_active_symbol_pin_checks();
-    state.ui.symbol.clear_selection();
+    state.ui.symbol.editor.clear_selection();
 
     crate::schematic::view::violations::cycle_violation(&mut state, 1);
 
@@ -1319,7 +1319,7 @@ fn symbol_violation_cycle_opens_symbol_view_and_selects_pin() {
         state.workspace.content.active_view,
         CellViewRef::new("work", "amp", "symbol")
     );
-    assert_eq!(state.ui.symbol.selected_pin.as_deref(), Some("IN"));
+    assert_eq!(state.ui.symbol.editor.selected_pin.as_deref(), Some("IN"));
 }
 
 #[test]

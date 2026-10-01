@@ -203,9 +203,11 @@ pub use symbol::{
     MAX_SYMBOL_PIN_NAME_BYTES, MAX_SYMBOL_TEXT_BYTES, PinFindingKind, PinSummary,
     SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_TERMINAL_GRID, SymbolAttributeKind, SymbolDocument,
     SymbolEditorMetadata, SymbolPin, SymbolPinElectricalKind, SymbolShape, SymbolTextAlign,
-    SymbolTextSize, pin_side_against_body, symbol_text_bounds,
+    SymbolTextSize, pin_side_against_body,
 };
-pub use symbol_resolver::{ResolvedCellSymbol, ResolvedSymbolSource, SymbolResolver};
+#[cfg(test)]
+pub use symbol_resolver::ResolvedCellSymbol;
+pub use symbol_resolver::{ResolvedSymbolSource, SymbolResolver};
 pub(crate) use workspace::PreparedProjectLibraryMutation;
 pub use workspace::{
     CaptureGroup, CaptureGroupMembership, CaptureGroupRule, CellViewRef, ComplexExpressionPolicy,

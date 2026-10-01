@@ -53,7 +53,6 @@ use rspice_design::schematic::rotation;
 use rspice_schematic_editor::session::selection;
 use rspice_schematic_editor::session::snap;
 mod state;
-use rspice_design::symbol_generation as symbol_gen;
 use rspice_schematic_editor::session::tool;
 mod undo_history;
 mod validated_revision;
@@ -136,7 +135,6 @@ pub use state::{
     StretchTarget,
 };
 pub(crate) use state::{SchematicEditorMut, SchematicEditorRef, SchematicSession};
-pub use symbol_gen::lead_inner;
 pub use tool::Tool;
 pub use undo_history::{SchematicSnapshot, UndoSequence, next_undo_sequence};
 pub use validated_revision::{

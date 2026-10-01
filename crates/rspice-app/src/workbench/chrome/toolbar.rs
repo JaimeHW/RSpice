@@ -689,7 +689,7 @@ fn design_grid_and_snap_menu(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Lay
 /// Symbol geometry has its own undo stack, so undo and redo route through
 /// the symbol document rather than the schematic's.
 fn symbol_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    let active = app.state.ui.symbol.tool;
+    let active = app.state.ui.symbol.editor.tool;
     for (command, icon, tool) in SYMBOL_DIRECT_TOOLBAR_COMMANDS {
         toolbar_icon_command_selected(ui, app, command, icon, active == tool, layout);
     }
@@ -727,14 +727,14 @@ fn symbol_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     toolbar_icon_command(ui, app, Command::ZoomFit, WorkbenchIcon::ZoomFit, layout);
     symbol_toggle(
         ui,
-        &mut app.state.ui.symbol.show_grid,
+        &mut app.state.ui.symbol.editor.show_grid,
         WorkbenchIcon::Grid,
         "Show grid",
         layout,
     );
     symbol_toggle(
         ui,
-        &mut app.state.ui.symbol.snap_to_grid,
+        &mut app.state.ui.symbol.editor.snap_to_grid,
         WorkbenchIcon::Check,
         "Snap to grid",
         layout,
@@ -743,7 +743,7 @@ fn symbol_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     context_separator(ui, layout);
     symbol_toggle(
         ui,
-        &mut app.state.ui.symbol.preview_as_placed,
+        &mut app.state.ui.symbol.editor.preview_as_placed,
         WorkbenchIcon::Focus,
         "Preview as placed on a sheet",
         layout,
@@ -779,12 +779,12 @@ fn symbol_grid_spacing(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpe
         return;
     }
     egui::ComboBox::from_id_salt("symbol-editor.grid-spacing")
-        .selected_text(app.state.ui.symbol.grid_spacing.label())
+        .selected_text(app.state.ui.symbol.editor.grid_spacing.label())
         .width(72.0)
         .show_ui(ui, |ui| {
             for spacing in crate::workbench::SymbolGridSpacing::ALL {
                 ui.selectable_value(
-                    &mut app.state.ui.symbol.grid_spacing,
+                    &mut app.state.ui.symbol.editor.grid_spacing,
                     spacing,
                     spacing.label(),
                 );

@@ -437,7 +437,7 @@ impl Command {
             Self::Cut => {
                 if active_symbol_editor(app) {
                     !state.active_view_read_only()
-                        && !state.ui.symbol.effective_selection().is_empty()
+                        && !state.ui.symbol.editor.effective_selection().is_empty()
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic_edit_read_only()
@@ -447,7 +447,7 @@ impl Command {
             Self::Delete => {
                 if active_symbol_editor(app) {
                     !state.active_view_read_only()
-                        && !state.ui.symbol.effective_selection().is_empty()
+                        && !state.ui.symbol.editor.effective_selection().is_empty()
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic_edit_read_only()
@@ -457,7 +457,7 @@ impl Command {
             Self::Duplicate => {
                 if active_symbol_editor(app) {
                     !state.active_view_read_only()
-                        && !state.ui.symbol.effective_selection().is_empty()
+                        && !state.ui.symbol.editor.effective_selection().is_empty()
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic_edit_read_only()
@@ -468,7 +468,7 @@ impl Command {
                 if state.workbench.workspace == Workspace::Results {
                     state.ui.results.cursors.a.is_some()
                 } else if active_symbol_editor(app) {
-                    !state.ui.symbol.effective_selection().is_empty()
+                    !state.ui.symbol.editor.effective_selection().is_empty()
                 } else {
                     active_schematic_editor(app)
                         && schematic_selection_has_live_object(&state.schematic)
@@ -476,7 +476,7 @@ impl Command {
             }
             Self::Paste => {
                 if active_symbol_editor(app) {
-                    !state.active_view_read_only() && !state.ui.symbol.clipboard.is_empty()
+                    !state.active_view_read_only() && !state.ui.symbol.editor.clipboard.is_empty()
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic_edit_read_only()
@@ -569,7 +569,7 @@ impl Command {
             Self::RevisionHistory => state.project_lifecycle.is_open(),
             Self::ObjectProperties => {
                 if active_symbol_editor(app) {
-                    let selection = state.ui.symbol.effective_selection();
+                    let selection = state.ui.symbol.editor.effective_selection();
                     selection.pins.len() + selection.shapes.len() == 1
                 } else {
                     active_schematic_editor(app)
@@ -697,9 +697,9 @@ impl Command {
             Self::SymbolRotatePin | Self::SymbolMirrorPin => {
                 active_symbol_editor(app)
                     && !state.active_view_read_only()
-                    && state.ui.symbol.effective_selection().pins.len() == 1
-                    && state.ui.symbol.effective_selection().shapes.is_empty()
-                    && state.ui.symbol.effective_selection().attributes.is_empty()
+                    && state.ui.symbol.editor.effective_selection().pins.len() == 1
+                    && state.ui.symbol.editor.effective_selection().shapes.is_empty()
+                    && state.ui.symbol.editor.effective_selection().attributes.is_empty()
             }
             // Nothing to reconcile against without a declared interface, and
             // the command must say so by reporting unavailable rather than
@@ -1247,8 +1247,8 @@ impl Command {
                         crate::workbench::documents::result_document::ViewGesture::ZoomIn,
                     );
                 } else if active_symbol_editor(app) {
-                    app.state.ui.symbol.zoom =
-                        (app.state.ui.symbol.zoom * COMMAND_ZOOM_FACTOR as f32).min(16.0);
+                    app.state.ui.symbol.editor.zoom =
+                        (app.state.ui.symbol.editor.zoom * COMMAND_ZOOM_FACTOR as f32).min(16.0);
                 } else {
                     app.state.schematic.session.editor.zoom =
                         (app.state.schematic.session.editor.zoom * COMMAND_ZOOM_FACTOR).min(8.0);
@@ -1261,8 +1261,8 @@ impl Command {
                         crate::workbench::documents::result_document::ViewGesture::ZoomOut,
                     );
                 } else if active_symbol_editor(app) {
-                    app.state.ui.symbol.zoom =
-                        (app.state.ui.symbol.zoom / COMMAND_ZOOM_FACTOR as f32).max(0.1);
+                    app.state.ui.symbol.editor.zoom =
+                        (app.state.ui.symbol.editor.zoom / COMMAND_ZOOM_FACTOR as f32).max(0.1);
                 } else {
                     app.state.schematic.session.editor.zoom =
                         (app.state.schematic.session.editor.zoom / COMMAND_ZOOM_FACTOR).max(0.25);
@@ -1277,7 +1277,7 @@ impl Command {
                         crate::workbench::documents::result_document::ViewGesture::Fit,
                     );
                 } else if active_symbol_editor(app) {
-                    app.state.ui.symbol.needs_fit = true;
+                    app.state.ui.symbol.editor.needs_fit = true;
                 } else {
                     app.state.schematic.session.editor.needs_drawing_sheet_fit = true;
                     app.state.schematic.session.editor.needs_fit = false;
@@ -1289,7 +1289,7 @@ impl Command {
             }
             Self::ZoomOneToOne => {
                 if active_symbol_editor(app) {
-                    app.state.ui.symbol.zoom = 1.0;
+                    app.state.ui.symbol.editor.zoom = 1.0;
                 } else {
                     app.state.schematic.session.editor.zoom = 1.0;
                 }
@@ -1463,7 +1463,7 @@ impl Command {
             Self::NextWorkspace => app.state.workbench.cycle_workspace(false),
             Self::SelectTool => {
                 if active_symbol_editor(app) {
-                    app.state.ui.symbol.tool = crate::workbench::SymbolTool::Select;
+                    app.state.ui.symbol.editor.tool = crate::workbench::SymbolTool::Select;
                 } else {
                     set_tool(app, Tool::Select);
                 }
@@ -1593,7 +1593,7 @@ impl Command {
                 crate::workbench::app::open_project_revision_history(&mut app.state);
             }
             Self::SymbolPinTool => {
-                app.state.ui.symbol.tool = super::SymbolTool::PlacePin;
+                app.state.ui.symbol.editor.tool = super::SymbolTool::PlacePin;
                 let next = app
                     .state
                     .load_active_symbol_document()
@@ -1606,32 +1606,32 @@ impl Command {
                             .map(|pin| pin.name.clone())
                     });
                 if let Some(pin) = next {
-                    app.state.ui.symbol.select_pin(pin);
+                    app.state.ui.symbol.editor.select_pin(pin);
                 } else {
-                    app.state.ui.symbol.clear_selection();
+                    app.state.ui.symbol.editor.clear_selection();
                 }
             }
             Self::SymbolPolylineTool => {
-                app.state.ui.symbol.tool = super::SymbolTool::Line;
-                app.state.ui.symbol.pending_polyline.clear();
+                app.state.ui.symbol.editor.tool = super::SymbolTool::Line;
+                app.state.ui.symbol.editor.pending_polyline.clear();
             }
             Self::SymbolRectangleTool => {
-                app.state.ui.symbol.tool = super::SymbolTool::Rectangle;
-                app.state.ui.symbol.shape_start = None;
+                app.state.ui.symbol.editor.tool = super::SymbolTool::Rectangle;
+                app.state.ui.symbol.editor.shape_start = None;
             }
             Self::SymbolCircleTool => {
-                app.state.ui.symbol.tool = super::SymbolTool::Circle;
-                app.state.ui.symbol.shape_start = None;
+                app.state.ui.symbol.editor.tool = super::SymbolTool::Circle;
+                app.state.ui.symbol.editor.shape_start = None;
             }
             Self::SymbolArcTool => {
-                app.state.ui.symbol.tool = super::SymbolTool::Arc;
-                app.state.ui.symbol.shape_start = None;
+                app.state.ui.symbol.editor.tool = super::SymbolTool::Arc;
+                app.state.ui.symbol.editor.shape_start = None;
             }
             Self::SymbolPolygonTool => {
-                app.state.ui.symbol.tool = super::SymbolTool::Polygon;
-                app.state.ui.symbol.pending_polyline.clear();
+                app.state.ui.symbol.editor.tool = super::SymbolTool::Polygon;
+                app.state.ui.symbol.editor.pending_polyline.clear();
             }
-            Self::SymbolTextTool => app.state.ui.symbol.tool = super::SymbolTool::Text,
+            Self::SymbolTextTool => app.state.ui.symbol.editor.tool = super::SymbolTool::Text,
             Self::SymbolRotatePin => {
                 crate::schematic::symbol_editor::rotate_selected_pin(&mut app.state)
             }

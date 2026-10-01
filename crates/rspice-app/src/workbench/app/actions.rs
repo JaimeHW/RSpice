@@ -452,11 +452,11 @@ impl RSpiceApp {
                 true
             }
             ShortcutCommand::SelectTool => {
-                self.state.ui.symbol.tool = SymbolTool::Select;
+                self.state.ui.symbol.editor.tool = SymbolTool::Select;
                 true
             }
             ShortcutCommand::SymbolPinTool => {
-                self.state.ui.symbol.tool = SymbolTool::PlacePin;
+                self.state.ui.symbol.editor.tool = SymbolTool::PlacePin;
                 let next = self
                     .state
                     .load_active_symbol_document()
@@ -469,39 +469,39 @@ impl RSpiceApp {
                             .map(|pin| pin.name.clone())
                     });
                 if let Some(pin) = next {
-                    self.state.ui.symbol.select_pin(pin);
+                    self.state.ui.symbol.editor.select_pin(pin);
                 } else {
-                    self.state.ui.symbol.clear_selection();
+                    self.state.ui.symbol.editor.clear_selection();
                 }
                 true
             }
             ShortcutCommand::SymbolPolylineTool => {
-                self.state.ui.symbol.tool = SymbolTool::Line;
-                self.state.ui.symbol.pending_polyline.clear();
+                self.state.ui.symbol.editor.tool = SymbolTool::Line;
+                self.state.ui.symbol.editor.pending_polyline.clear();
                 true
             }
             ShortcutCommand::SymbolRectangleTool => {
-                self.state.ui.symbol.tool = SymbolTool::Rectangle;
-                self.state.ui.symbol.shape_start = None;
+                self.state.ui.symbol.editor.tool = SymbolTool::Rectangle;
+                self.state.ui.symbol.editor.shape_start = None;
                 true
             }
             ShortcutCommand::SymbolCircleTool => {
-                self.state.ui.symbol.tool = SymbolTool::Circle;
-                self.state.ui.symbol.shape_start = None;
+                self.state.ui.symbol.editor.tool = SymbolTool::Circle;
+                self.state.ui.symbol.editor.shape_start = None;
                 true
             }
             ShortcutCommand::SymbolArcTool => {
-                self.state.ui.symbol.tool = SymbolTool::Arc;
-                self.state.ui.symbol.shape_start = None;
+                self.state.ui.symbol.editor.tool = SymbolTool::Arc;
+                self.state.ui.symbol.editor.shape_start = None;
                 true
             }
             ShortcutCommand::SymbolPolygonTool => {
-                self.state.ui.symbol.tool = SymbolTool::Polygon;
-                self.state.ui.symbol.pending_polyline.clear();
+                self.state.ui.symbol.editor.tool = SymbolTool::Polygon;
+                self.state.ui.symbol.editor.pending_polyline.clear();
                 true
             }
             ShortcutCommand::SymbolTextTool => {
-                self.state.ui.symbol.tool = SymbolTool::Text;
+                self.state.ui.symbol.editor.tool = SymbolTool::Text;
                 true
             }
             ShortcutCommand::SymbolRotatePin
@@ -524,11 +524,11 @@ impl RSpiceApp {
             }
             ShortcutCommand::Cancel => {
                 self.finish_pending_symbol_polyline_from_shortcut();
-                self.state.ui.symbol.tool = SymbolTool::Select;
-                self.state.ui.symbol.clear_drag_state();
-                self.state.ui.symbol.shape_start = None;
-                self.state.ui.symbol.marquee_start = None;
-                self.state.ui.symbol.marquee_current = None;
+                self.state.ui.symbol.editor.tool = SymbolTool::Select;
+                self.state.ui.symbol.editor.clear_drag_state();
+                self.state.ui.symbol.editor.shape_start = None;
+                self.state.ui.symbol.editor.marquee_start = None;
+                self.state.ui.symbol.editor.marquee_current = None;
                 true
             }
             ShortcutCommand::ZoomIn | ShortcutCommand::ZoomOut => {
@@ -536,12 +536,12 @@ impl RSpiceApp {
                 true
             }
             ShortcutCommand::ZoomFit => {
-                self.state.ui.symbol.needs_fit = true;
+                self.state.ui.symbol.editor.needs_fit = true;
                 true
             }
             ShortcutCommand::ZoomOneToOne => {
-                self.state.ui.symbol.zoom = 4.0;
-                self.state.ui.symbol.pan = (0.0, 0.0);
+                self.state.ui.symbol.editor.zoom = 4.0;
+                self.state.ui.symbol.editor.pan = (0.0, 0.0);
                 true
             }
             ShortcutCommand::RunChecks => {
@@ -633,6 +633,7 @@ impl RSpiceApp {
         self.state
             .ui
             .symbol
+            .editor
             .set_selection(SymbolSelection::all_in(&document));
     }
 
@@ -644,15 +645,16 @@ impl RSpiceApp {
                 return;
             }
         };
-        let selection = self.state.ui.symbol.effective_selection();
-        self.state.ui.symbol.clipboard = symbol_clipboard_from_selection(&document, &selection);
+        let selection = self.state.ui.symbol.editor.effective_selection();
+        self.state.ui.symbol.editor.clipboard =
+            symbol_clipboard_from_selection(&document, &selection);
     }
 
     pub(crate) fn paste_symbol_shape(&mut self) {
         if self.state.deny_read_only_edit() {
             return;
         }
-        let clipboard = self.state.ui.symbol.clipboard.clone();
+        let clipboard = self.state.ui.symbol.editor.clipboard.clone();
         if clipboard.is_empty() {
             return;
         }
@@ -701,7 +703,7 @@ impl RSpiceApp {
             selection.pins.insert(pin.name.clone());
             document.pins.push(pin);
         }
-        self.state.ui.symbol.set_selection(selection);
+        self.state.ui.symbol.editor.set_selection(selection);
         if let Err(error) = self
             .state
             .store_active_symbol_editor_bundle(&document, &metadata)
@@ -711,7 +713,7 @@ impl RSpiceApp {
     }
 
     pub(crate) fn delete_selected_symbol_item(&mut self, cut: bool) {
-        let selection = self.state.ui.symbol.effective_selection();
+        let selection = self.state.ui.symbol.editor.effective_selection();
         if selection.is_empty() {
             return;
         }
@@ -761,11 +763,11 @@ impl RSpiceApp {
 
         if cut {
             clipboard.shapes.reverse();
-            self.state.ui.symbol.clipboard = clipboard;
+            self.state.ui.symbol.editor.clipboard = clipboard;
         }
         if changed {
             self.state.record_symbol_edit(&before);
-            self.state.ui.symbol.clear_selection();
+            self.state.ui.symbol.editor.clear_selection();
             if let Err(error) = self
                 .state
                 .store_active_symbol_editor_bundle(&document, &metadata)
@@ -780,7 +782,7 @@ impl RSpiceApp {
         pin_transform: impl Fn(Point, Point) -> Point,
         shape_transform: impl Fn(&mut SymbolShape, Point),
     ) {
-        let selection = self.state.ui.symbol.effective_selection();
+        let selection = self.state.ui.symbol.editor.effective_selection();
         if selection.is_empty() {
             return;
         }
@@ -863,12 +865,12 @@ impl RSpiceApp {
     }
 
     fn finish_pending_symbol_polyline_from_shortcut(&mut self) {
-        if self.state.ui.symbol.pending_polyline.len() < 2 {
-            self.state.ui.symbol.pending_polyline.clear();
+        if self.state.ui.symbol.editor.pending_polyline.len() < 2 {
+            self.state.ui.symbol.editor.pending_polyline.clear();
             return;
         }
         if self.state.deny_read_only_edit() {
-            self.state.ui.symbol.pending_polyline.clear();
+            self.state.ui.symbol.editor.pending_polyline.clear();
             return;
         }
         let mut document = match self.state.load_active_symbol_document() {
@@ -879,14 +881,14 @@ impl RSpiceApp {
             }
         };
         let before = document.clone();
-        let points = std::mem::take(&mut self.state.ui.symbol.pending_polyline);
+        let points = std::mem::take(&mut self.state.ui.symbol.editor.pending_polyline);
         document.body.push(SymbolShape::Polyline {
             points,
             closed: false,
         });
         self.state.record_symbol_edit(&before);
         if let Some(index) = document.body.len().checked_sub(1) {
-            self.state.ui.symbol.select_shape(index);
+            self.state.ui.symbol.editor.select_shape(index);
         }
         if let Err(error) = self.state.store_active_symbol_document(&document) {
             self.state.push_user_message(ConsoleMessage::warning(error));
@@ -1568,15 +1570,21 @@ mod symbol_action_tests {
 
         app.execute_shortcut_command(ShortcutCommand::SymbolPinTool);
         assert_eq!(
-            app.state.ui.symbol.tool,
+            app.state.ui.symbol.editor.tool,
             crate::workbench::SymbolTool::PlacePin
         );
-        assert_eq!(app.state.ui.symbol.selected_pin.as_deref(), Some("NEXT"));
+        assert_eq!(
+            app.state.ui.symbol.editor.selected_pin.as_deref(),
+            Some("NEXT")
+        );
 
-        app.state.ui.symbol.pending_polyline = vec![Point::new(0, 0)];
+        app.state.ui.symbol.editor.pending_polyline = vec![Point::new(0, 0)];
         app.execute_shortcut_command(ShortcutCommand::SymbolPolylineTool);
-        assert_eq!(app.state.ui.symbol.tool, crate::workbench::SymbolTool::Line);
-        assert!(app.state.ui.symbol.pending_polyline.is_empty());
+        assert_eq!(
+            app.state.ui.symbol.editor.tool,
+            crate::workbench::SymbolTool::Line
+        );
+        assert!(app.state.ui.symbol.editor.pending_polyline.is_empty());
 
         for (command, expected) in [
             (
@@ -1604,22 +1612,22 @@ mod symbol_action_tests {
                 crate::workbench::SymbolTool::Select,
             ),
         ] {
-            app.state.ui.symbol.shape_start = Some(Point::new(10, 10));
+            app.state.ui.symbol.editor.shape_start = Some(Point::new(10, 10));
             app.execute_shortcut_command(command);
-            assert_eq!(app.state.ui.symbol.tool, expected);
+            assert_eq!(app.state.ui.symbol.editor.tool, expected);
             if matches!(
                 command,
                 ShortcutCommand::SymbolRectangleTool
                     | ShortcutCommand::SymbolCircleTool
                     | ShortcutCommand::SymbolArcTool
             ) {
-                assert!(app.state.ui.symbol.shape_start.is_none());
+                assert!(app.state.ui.symbol.editor.shape_start.is_none());
             }
         }
 
-        app.state.ui.symbol.needs_fit = false;
+        app.state.ui.symbol.editor.needs_fit = false;
         app.execute_shortcut_command(ShortcutCommand::ZoomFit);
-        assert!(app.state.ui.symbol.needs_fit);
+        assert!(app.state.ui.symbol.editor.needs_fit);
     }
 
     #[test]
