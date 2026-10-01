@@ -52,29 +52,20 @@ struct HarmonicBalanceModel {
 /// corresponding complex coefficients.  Name matching is intentionally not
 /// sufficient: users may name an unrelated waveform with vertical bars.
 pub(super) fn spectrum_trace_is_renderable(waveform: &WaveformData) -> bool {
-    if waveform.complex.is_none() || waveform.x.len() != waveform.y.len() || waveform.x.is_empty() {
-        return false;
-    }
-    super::frame_work::note(super::frame_work::DatasetWalk::HarmonicSpectrumScan);
-    waveform
-        .x
-        .iter()
-        .zip(waveform.y.iter())
-        .all(|(&frequency, &magnitude)| {
-            frequency.is_finite() && frequency >= 0.0 && magnitude.is_finite()
-        })
-        && waveform.x.windows(2).all(|window| window[0] <= window[1])
+    rspice_results::harmonic_spectrum::spectrum_trace_is_renderable(waveform.as_ref(), || {
+        super::frame_work::note(super::frame_work::DatasetWalk::HarmonicSpectrumScan);
+    })
 }
 
 /// Whether this exact retained analysis can drive the discrete retained
 /// coefficient-spectrum viewer.
 pub(super) fn analysis_is_renderable(analysis: &AnalysisResult) -> bool {
-    analysis.success
-        && matches!(
-            analysis.analysis_type,
-            AnalysisType::HarmonicBalance | AnalysisType::Fourier | AnalysisType::Qpss
-        )
-        && analysis.waveforms.iter().any(spectrum_trace_is_renderable)
+    rspice_results::harmonic_spectrum::analysis_is_renderable(
+        analysis.success,
+        analysis.analysis_type,
+        &analysis.waveforms,
+        || super::frame_work::note(super::frame_work::DatasetWalk::HarmonicSpectrumScan),
+    )
 }
 
 /// Availability helper for the dataset quick view. Persistent documents bind

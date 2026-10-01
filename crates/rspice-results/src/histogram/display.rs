@@ -1,11 +1,11 @@
 //! Distribution plot geometry shared by the interactive sheet and publication.
 
 use super::HistogramDisplayMode;
-use rspice_results::histogram::{Histogram, HistogramDistribution};
+use super::{Histogram, HistogramDistribution};
 use std::ops::Deref;
 
 #[derive(Debug, Clone)]
-pub(crate) struct HistogramDisplay {
+pub struct HistogramDisplay {
     data: HistogramDistribution,
 }
 
@@ -87,13 +87,13 @@ impl HistogramDisplay {
 
 /// The common auto-fit window for both screen and hardcopy.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct HistAxis {
+pub struct HistAxis {
     pub x0: f64,
     pub x1: f64,
     pub degenerate_at: Option<f64>,
 }
 
-pub(crate) fn hist_axis(histogram: &Histogram) -> HistAxis {
+pub fn hist_axis(histogram: &Histogram) -> HistAxis {
     let (min, max) = histogram.range();
     let span = max - min;
     if min < max {

@@ -84,18 +84,22 @@ pub(super) fn ordinary_noise_spectrum_is_renderable_in(
 /// requirement that the solve behind it completed. Free of the dataset, so
 /// it is the cheap half of every gate below.
 fn is_ordinary_noise_result(analysis: &AnalysisResult) -> bool {
-    analysis.success
-        && matches!(
-            analysis.analysis_type,
-            AnalysisType::Noise | AnalysisType::Hbnoise
-        )
+    rspice_results::noise_spectrum::is_ordinary_noise_result(
+        analysis.success,
+        analysis.analysis_type,
+    )
 }
 
 /// The same question without a session to memoize against, for the printed
 /// page and the visualization document, which resolve a run they hold
 /// directly rather than the one the workspace has open.
 pub(super) fn ordinary_noise_spectrum_is_renderable(analysis: &AnalysisResult) -> bool {
-    is_ordinary_noise_result(analysis) && resolve_noise_spectrum_shape(analysis).is_some()
+    rspice_results::noise_spectrum::ordinary_noise_spectrum_is_renderable(
+        analysis.success,
+        analysis.analysis_type,
+        &analysis.waveforms,
+        || super::frame_work::note(super::frame_work::DatasetWalk::NoiseSpectrumScan),
+    )
 }
 
 /// Why the stability card has no numbers to show.

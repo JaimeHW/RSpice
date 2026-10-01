@@ -11,10 +11,9 @@ use std::sync::Arc;
 use thiserror::Error;
 
 mod data_ops;
-mod modes;
 mod view;
 
-pub use modes::InputFidelity;
+pub use rspice_results::fft::InputFidelity;
 const DEFAULT_MANUAL_SAMPLE_COUNT: usize = 4096;
 
 /// Typed failure from either FFT input preparation or spectrum construction.

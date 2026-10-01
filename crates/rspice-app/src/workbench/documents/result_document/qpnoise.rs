@@ -3,12 +3,7 @@ use rspice_core::engine::{
     QpnoiseAnalysisResult, QpnoiseObservation, QpnoiseUnavailable, QpnoiseValue, QpxfQuantity,
 };
 pub(super) fn is_renderable(analysis: &crate::state::AnalysisResult) -> bool {
-    analysis.analysis_type == crate::state::AnalysisType::Qpnoise
-        && matches!(
-            analysis.result_payload,
-            Some(crate::state::AnalysisResultPayload::Qpnoise { .. })
-        )
-        && !analysis.waveforms.is_empty()
+    rspice_results::noise_spectrum::qpnoise_is_renderable(analysis.as_ref())
 }
 
 fn value(v: QpnoiseValue, unit: &str) -> String {

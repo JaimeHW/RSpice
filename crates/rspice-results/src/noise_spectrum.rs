@@ -135,3 +135,34 @@ fn noise_waveform_is_renderable(waveform: &RetainedWaveform, note_scan: &mut imp
 pub fn retained_noise_waveform_is_renderable<W: AsRef<RetainedWaveform>>(waveform: &W) -> bool {
     noise_waveform_is_renderable(waveform.as_ref(), &mut || {})
 }
+
+/// The ordinary-noise result kinds admitted by both display and publication.
+pub fn is_ordinary_noise_result(
+    success: bool,
+    analysis_type: crate::analysis_type::AnalysisType,
+) -> bool {
+    use crate::analysis_type::AnalysisType;
+    success && matches!(analysis_type, AnalysisType::Noise | AnalysisType::Hbnoise)
+}
+
+/// Resolve an ordinary-noise offering from retained data with optional scan accounting.
+pub fn ordinary_noise_spectrum_is_renderable<W: AsRef<RetainedWaveform>>(
+    success: bool,
+    analysis_type: crate::analysis_type::AnalysisType,
+    waveforms: &[W],
+    note_scan: impl FnMut(),
+) -> bool {
+    is_ordinary_noise_result(success, analysis_type)
+        && resolve_noise_spectrum_shape(waveforms, note_scan).is_some()
+}
+
+/// QPNOISE shape classification; consumers still validate its retained evidence.
+#[cfg(feature = "engine-evidence")]
+pub fn qpnoise_is_renderable<W>(analysis: &crate::analysis_result::AnalysisResult<W>) -> bool {
+    analysis.analysis_type == crate::analysis_type::AnalysisType::Qpnoise
+        && matches!(
+            analysis.result_payload,
+            Some(crate::analysis_payload::AnalysisResultPayload::Qpnoise { .. })
+        )
+        && !analysis.waveforms.is_empty()
+}

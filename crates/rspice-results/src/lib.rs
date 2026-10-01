@@ -29,6 +29,7 @@ pub mod family_metadata;
 pub mod fft;
 #[cfg(feature = "engine-evidence")]
 pub mod floquet;
+pub mod harmonic_spectrum;
 pub mod histogram;
 pub mod interpolation;
 #[cfg(feature = "engine-evidence")]

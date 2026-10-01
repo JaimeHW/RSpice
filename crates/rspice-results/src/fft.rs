@@ -55,3 +55,25 @@ pub const fn fft_format_to_core(
         FftSpectrumFormatEvidence::Unnormalized => rspice_core::netlist::FftFormat::Unnormalized,
     }
 }
+
+/// FFT input fidelity mode.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum InputFidelity {
+    /// Preserve source detail for analysis-grade spectra (default).
+    #[default]
+    Reference,
+    /// Enforce capped point count for faster interaction on large datasets.
+    Interactive,
+}
+
+#[cfg(feature = "engine-evidence")]
+impl InputFidelity {
+    /// Pipeline policy for this fidelity.
+    pub fn input_policy(&self) -> pipeline::FftInputPolicy {
+        match self {
+            Self::Reference => pipeline::FftInputPolicy::reference(),
+            Self::Interactive => pipeline::FftInputPolicy::interactive_default(),
+        }
+    }
+}
