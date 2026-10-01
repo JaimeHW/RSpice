@@ -3,8 +3,8 @@
 
 use egui::{Rect, Response, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
-use crate::ui::theme::{self, FontWeight, mix};
-use crate::ui::tokens::{self, Tokens};
+use crate::theme::{self, FontWeight, mix};
+use crate::tokens::{self, Tokens};
 
 /// What happened to a [`TreeRow`] this frame.
 pub struct TreeRowResult {
@@ -68,7 +68,7 @@ impl<'a> TreeRow<'a> {
     ///
     /// This painted egui's tick box until the whole product's booleans were
     /// one control. The switch it paints now is the design system's own, from
-    /// [`crate::ui::widgets::paint_switch`] — so the form row that falls back
+    /// [`crate::widgets::paint_switch`] — so the form row that falls back
     /// to this shape in a narrow column no longer shows a reader an idiom
     /// nothing else in the application uses.
     pub fn switch(mut self, value: &'a mut bool) -> Self {
@@ -301,7 +301,7 @@ mod tests {
         mut add_contents: impl FnMut(&mut egui::Ui),
     ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        crate::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| add_contents(ui));
@@ -345,7 +345,7 @@ mod tests {
     fn a_disabled_switch_row_does_not_toggle_when_it_is_clicked() {
         fn press(enabled: bool) -> bool {
             let ctx = egui::Context::default();
-            crate::ui::Theme::default().apply(&ctx);
+            crate::Theme::default().apply(&ctx);
             let mut value = false;
             let mut at = egui::Pos2::ZERO;
             // Two passes to measure the row against the fonts, then one that

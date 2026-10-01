@@ -3,8 +3,8 @@
 
 use egui::{Response, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
-use crate::ui::theme::{self, FontWeight, mix};
-use crate::ui::tokens::{self, Tokens};
+use crate::theme::{self, FontWeight, mix};
+use crate::tokens::{self, Tokens};
 
 /// A 22 px toggle chip with a mono label. Returns the response; the caller
 /// owns the toggle state (`on`).

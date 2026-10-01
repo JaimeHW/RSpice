@@ -13,21 +13,21 @@
 
 use egui::{Rect, Vec2};
 
-use crate::ui::tokens::Mode;
+use crate::tokens::Mode;
 
 /// Every text run one pass painted, with the surface it was painted on.
-pub(crate) struct PaintedRuns {
+pub struct PaintedRuns {
     /// `(text, run rect, clip rect)`, in paint order.
-    pub(crate) runs: Vec<(String, Rect, Rect)>,
+    pub runs: Vec<(String, Rect, Rect)>,
     /// The largest opaque card painted inside the viewport: the dialog surface.
-    pub(crate) surface: Rect,
+    pub surface: Rect,
 }
 
 impl PaintedRuns {
     /// Single-line editors scroll their content within a fixed clip. Require
     /// those explicitly named runs to retain a visible horizontal slice and
     /// keep the clip inside the card; all other text must fit in full.
-    pub(crate) fn assert_inside_clip_and_surface_with_horizontal_scroll(
+    pub fn assert_inside_clip_and_surface_with_horizontal_scroll(
         &self,
         label: &str,
         scroll_values: &[&str],
@@ -76,7 +76,7 @@ impl PaintedRuns {
     }
 
     /// Where a run with exactly this text was painted.
-    pub(crate) fn rect_of(&self, text: &str) -> Option<Rect> {
+    pub fn rect_of(&self, text: &str) -> Option<Rect> {
         self.runs
             .iter()
             .find(|(painted, _, _)| painted == text)
@@ -90,16 +90,16 @@ impl PaintedRuns {
 /// More than one pass is the norm rather than a precaution: the first builds
 /// the font set and measures a content-height surface, and only a pass laid out
 /// against both measurements paints where the reader will see it.
-pub(crate) fn painted_runs(
+pub fn painted_runs(
     screen: Vec2,
     mode: Mode,
     passes: usize,
     mut pass: impl FnMut(&egui::Context),
 ) -> PaintedRuns {
     let ctx = egui::Context::default();
-    crate::ui::Theme {
+    crate::Theme {
         mode,
-        ..crate::ui::Theme::default()
+        ..crate::Theme::default()
     }
     .apply(&ctx);
     let input = || egui::RawInput {

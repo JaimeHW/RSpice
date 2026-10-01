@@ -8,8 +8,8 @@ use egui::{
     Align2, Area, Context, Frame, Id, Margin, Order, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2,
 };
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::theme::{self, FontWeight};
+use crate::tokens::{self, Tokens};
 
 use super::notice;
 
@@ -363,6 +363,9 @@ impl Toasts {
         self.enqueue(ctx, category, kind, title, message, Some(action), true);
     }
 
+    // Retain the existing notification contract: content, routing, tone and
+    // visible deduplication are independent inputs.
+    #[expect(clippy::too_many_arguments)]
     fn enqueue(
         &mut self,
         ctx: &Context,
@@ -1120,7 +1123,7 @@ mod tests {
     #[test]
     fn a_toast_lives_until_its_deadline_and_a_timeout_leaves_it_unread() {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        crate::Theme::default().apply(&ctx);
         let mut toasts = Toasts::default();
         toasts.info(&ctx, "first");
         assert_eq!(

@@ -7,8 +7,8 @@
 
 use egui::{Align, Frame, Layout, Margin, Rect, Stroke, Ui, Vec2};
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::theme::{self, FontWeight};
+use crate::tokens::{self, Tokens};
 
 const SPLIT_VIEWPORT_BREAKPOINT: f32 = 760.0;
 const COMPACT_COLUMNS_BREAKPOINT: f32 = 980.0;
@@ -21,14 +21,14 @@ const PANE_MIN_HEIGHT: f32 = 414.0;
 const OPTIONS_HEIGHT: f32 = 356.0;
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct SchematicCommandPreview<'a> {
+pub struct SchematicCommandPreview<'a> {
     pub subject: &'a str,
     pub location: &'a str,
     pub electrical_outcome: &'a str,
     pub grid: &'a str,
 }
 
-pub(crate) fn schematic_command_workflow<R>(
+pub fn schematic_command_workflow<R>(
     ui: &mut Ui,
     code: &str,
     preview: SchematicCommandPreview<'_>,
@@ -45,7 +45,7 @@ pub(crate) fn schematic_command_workflow<R>(
         .corner_radius(10.0)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
-            let viewport_width = crate::ui::viewport::root_viewport_width(ui.ctx());
+            let viewport_width = crate::viewport::root_viewport_width(ui.ctx());
             if uses_columns(viewport_width) {
                 let (right_fraction, right_minimum) = right_track(viewport_width);
                 let right = (ui.available_width() * right_fraction).max(right_minimum);
@@ -177,8 +177,7 @@ fn section_head(ui: &mut Ui, title: &str, status: &str, ok: bool) {
 
 fn schematic_canvas(ui: &mut Ui, preview: SchematicCommandPreview<'_>) {
     let t = Tokens::get(ui.ctx());
-    let height = if crate::ui::viewport::root_viewport_width(ui.ctx()) <= SPLIT_VIEWPORT_BREAKPOINT
-    {
+    let height = if crate::viewport::root_viewport_width(ui.ctx()) <= SPLIT_VIEWPORT_BREAKPOINT {
         COMPACT_CANVAS_HEIGHT
     } else {
         CANVAS_HEIGHT
@@ -306,7 +305,7 @@ fn status_grid(ui: &mut Ui, electrical_outcome: &str) {
         ("Commit", "stable IDs + one undo record"),
     ];
     let gap = 8.0;
-    if uses_columns(crate::ui::viewport::root_viewport_width(ui.ctx())) {
+    if uses_columns(crate::viewport::root_viewport_width(ui.ctx())) {
         let width = ((ui.available_width() - gap * 2.0) / 3.0).max(1.0);
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = gap;

@@ -238,11 +238,7 @@ impl Theme {
     /// restore the user's Compact or Relaxed metrics immediately.
     /// Apply responsive metrics with the user's validated minimum target.
     /// Device capability may increase this value but never reduce it.
-    pub(crate) fn apply_responsive_metrics_with_target(
-        self,
-        ctx: &Context,
-        touch_target: Option<f32>,
-    ) {
+    pub fn apply_responsive_metrics_with_target(self, ctx: &Context, touch_target: Option<f32>) {
         let mut effective = self;
         effective.mode = self.mode.effective(ctx);
         let mut t = effective.tokens();

@@ -5261,6 +5261,7 @@ dependencies = [
  "rspice-results",
  "rspice-simulation",
  "rspice-simulation-contract",
+ "rspice-ui-kit",
  "rspice-veriloga",
  "rustyhdf5",
  "semver",
@@ -5804,6 +5805,16 @@ dependencies = [
  "thiserror 2.0.20",
  "unicode-segmentation",
  "uuid",
+]
+
+[[package]]
+name = "rspice-ui-kit"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]

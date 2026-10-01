@@ -1,13 +1,13 @@
 //! Shared text helpers for UI copy and assistive-technology contracts.
 
 /// Format a count with correct singular/plural grammar.
-pub(crate) fn counted(count: usize, singular: &str, plural: &str) -> String {
+pub fn counted(count: usize, singular: &str, plural: &str) -> String {
     format!("{count} {}", if count == 1 { singular } else { plural })
 }
 
 /// The bare pluralizing suffix for a count, for copy that inflects a regular
 /// noun inside a larger sentence. An irregular noun takes [`counted`].
-pub(crate) const fn plural_suffix(count: usize) -> &'static str {
+pub const fn plural_suffix(count: usize) -> &'static str {
     if count == 1 { "" } else { "s" }
 }
 

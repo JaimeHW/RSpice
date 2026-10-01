@@ -3,8 +3,8 @@
 
 use egui::{Response, TextEdit, Ui, vec2};
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::theme::{self, FontWeight};
+use crate::tokens::{self, Tokens};
 
 /// Label column width of inspector form grids.
 pub(crate) const LABEL_COL: f32 = 92.0;
@@ -21,7 +21,7 @@ pub(crate) const LABEL_COL: f32 = 92.0;
 /// Naming the node is the only route that survives that, and it belongs to the
 /// constructors that use it so a call site cannot forget it: `mono_input` takes
 /// the row's own label and there is no spelling of it that omits one.
-pub(crate) fn name_control(ui: &Ui, response: &Response, name: &str) {
+pub fn name_control(ui: &Ui, response: &Response, name: &str) {
     debug_assert!(
         !name.trim().is_empty(),
         "a control announces the label its row states; an unnamed one is unreachable"

@@ -3,8 +3,8 @@
 
 use egui::{Ui, WidgetInfo, WidgetType, vec2};
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::theme::{self, FontWeight};
+use crate::tokens::{self, Tokens};
 
 /// Render a measurement table across the available width.
 pub fn measurement_table(ui: &mut Ui, rows: &[(&str, &str)]) {

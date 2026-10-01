@@ -33,7 +33,7 @@ use egui::{Color32, Rect, Vec2};
 
 /// A rasterized render, and the colour it was cleared to.
 #[derive(Clone)]
-pub(crate) struct Canvas {
+pub struct Canvas {
     width: usize,
     height: usize,
     /// What every pixel started as, so "nothing painted here" is a comparison
@@ -58,11 +58,11 @@ impl Canvas {
         }
     }
 
-    pub(crate) fn width(&self) -> usize {
+    pub fn width(&self) -> usize {
         self.width
     }
 
-    pub(crate) fn background(&self) -> Color32 {
+    pub fn background(&self) -> Color32 {
         self.background
     }
 
@@ -106,7 +106,7 @@ fn blend_pixel(dst: &mut Color32, src: [f32; 4]) {
 impl Canvas {
     /// The last row that anything painted on, so a surface shorter than the
     /// canvas is not reported as acres of empty space.
-    pub(crate) fn content_height(&self) -> usize {
+    pub fn content_height(&self) -> usize {
         (0..self.height)
             .rev()
             .find(|row| {
@@ -122,7 +122,7 @@ impl Canvas {
     /// Clamped to the canvas, and empty when the rect falls outside it — so an
     /// assertion phrased over this iterator must also check that it yielded
     /// something, or a rect placed off-canvas passes it vacuously.
-    pub(crate) fn pixels_in(&self, rect: Rect) -> impl Iterator<Item = Color32> + '_ {
+    pub fn pixels_in(&self, rect: Rect) -> impl Iterator<Item = Color32> + '_ {
         let columns = covered(rect.min.x, rect.max.x, self.width);
         let rows = covered(rect.min.y, rect.max.y, self.height);
         rows.flat_map(move |y| {
@@ -142,7 +142,7 @@ impl Canvas {
     /// lossy straight-alpha conversion used only by [`Self::png`], while the
     /// crop height makes vertical clipping visible even if all surviving
     /// pixels are unchanged.
-    pub(crate) fn regression_fingerprint(&self, height: usize) -> String {
+    pub fn regression_fingerprint(&self, height: usize) -> String {
         use sha2::{Digest as _, Sha256};
 
         assert!(
@@ -168,7 +168,7 @@ impl Canvas {
     /// during a test run.  A changed render therefore fails CI with the exact
     /// replacement fingerprint in the diagnostic; accepting it remains an
     /// explicit code review decision.
-    pub(crate) fn assert_regression(&self, name: &str, height: usize, expected_fingerprint: &str) {
+    pub fn assert_regression(&self, name: &str, height: usize, expected_fingerprint: &str) {
         assert_eq!(
             expected_fingerprint.len(),
             64,
@@ -185,7 +185,7 @@ impl Canvas {
     /// A PNG with stored (uncompressed) deflate blocks, cropped to `height`
     /// rows. The crate has no image dependency and this is a review artifact,
     /// so size does not matter.
-    pub(crate) fn png(&self, height: usize) -> Vec<u8> {
+    pub fn png(&self, height: usize) -> Vec<u8> {
         let mut raw = Vec::with_capacity(height * (self.width * 4 + 1));
         for y in 0..height {
             raw.push(0); // filter: none
@@ -253,7 +253,7 @@ fn covered(min: f32, max: f32, extent: usize) -> std::ops::Range<usize> {
 /// whole surface followed by a software fill of every triangle it tessellates
 /// to, so a render is far from free. Render once and assert over cropped
 /// regions with [`Canvas::pixels_in`] rather than rendering once per claim.
-pub(crate) fn render(size: Vec2, pass: impl FnMut(&mut egui::Ui, Color32)) -> Canvas {
+pub fn render(size: Vec2, pass: impl FnMut(&mut egui::Ui, Color32)) -> Canvas {
     render_at_pointer(super::Theme::default(), size, None, pass)
 }
 
@@ -264,7 +264,7 @@ pub(crate) fn render(size: Vec2, pass: impl FnMut(&mut egui::Ui, Color32)) -> Ca
 /// differ by inversion, and a tone that separates from its background in one
 /// can sit on top of it in the other. A review that has to cover both needs
 /// the mode as an input rather than a global the renderer assumes.
-pub(crate) fn render_themed(
+pub fn render_themed(
     theme: super::Theme,
     size: Vec2,
     pass: impl FnMut(&mut egui::Ui, Color32),
@@ -278,7 +278,7 @@ pub(crate) fn render_themed(
 /// The tooltip delay and the still-pointer requirement are cleared: a headless
 /// pass has no wall clock for either to elapse against, and a pointer that
 /// never moves is as still as one gets.
-pub(crate) fn render_with_pointer(
+pub fn render_with_pointer(
     size: Vec2,
     pointer: egui::Pos2,
     pass: impl FnMut(&mut egui::Ui, Color32),
@@ -599,8 +599,7 @@ fn regression_fingerprint_authenticates_geometry_background_crop_and_pixels() {
 
 /// Which rows of a rasterized `text` carry ink, at the mono size a surface
 /// would paint it at.
-#[cfg(test)]
-pub(crate) fn glyph_ink_rows(text: &str, size: f32) -> Vec<usize> {
+pub fn glyph_ink_rows(text: &str, size: f32) -> Vec<usize> {
     const CANVAS: egui::Vec2 = egui::vec2(40.0, 30.0);
     let canvas = render(CANVAS, |ui, background| {
         egui::CentralPanel::default()

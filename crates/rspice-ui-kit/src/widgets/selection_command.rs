@@ -6,20 +6,20 @@
 
 use egui::{Align, Frame, Layout, Margin, Rect, Stroke, Ui, Vec2};
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::theme::{self, FontWeight};
+use crate::tokens::{self, Tokens};
 
 /// A point in the previewed document's own integer coordinate space.
 ///
 /// The widget only normalises these into the preview rect. It never asks what
 /// they mean, which is why the design system does not depend on the schematic
 /// model to draw a schematic preview.
-pub(crate) type PreviewPoint = (i32, i32);
+pub type PreviewPoint = (i32, i32);
 
 /// How a design note should read. Callers map their own domain enum onto this;
 /// the widget picks a colour and an underline from it and nothing else.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NotePreviewStyle {
+pub enum NotePreviewStyle {
     Muted,
     Accent,
     AccentUnderlined,
@@ -28,7 +28,7 @@ pub(crate) enum NotePreviewStyle {
 
 /// How an already-tessellated documentation outline should be stroked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ShapePreviewStroke {
+pub enum ShapePreviewStroke {
     /// Two opposite corners of a rectangle.
     Rectangle,
     /// An open polyline through every point.
@@ -57,7 +57,7 @@ const PANE_MIN_HEIGHT: f32 = 414.0;
 const OPTIONS_HEIGHT: f32 = 356.0;
 
 #[derive(Debug, Clone)]
-pub(crate) enum SelectionPreview {
+pub enum SelectionPreview {
     Bus {
         points: Vec<PreviewPoint>,
         label: String,
@@ -86,13 +86,13 @@ pub(crate) enum SelectionPreview {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct SelectionImpact<'a> {
+pub struct SelectionImpact<'a> {
     pub scope: &'a str,
     pub effect: &'a str,
     pub recovery: &'a str,
 }
 
-pub(crate) fn workflow_preview_status(ui: &mut Ui, ok: bool, headline: &str, detail: &str) {
+pub fn workflow_preview_status(ui: &mut Ui, ok: bool, headline: &str, detail: &str) {
     let t = Tokens::get(ui.ctx());
     let divider = ui
         .allocate_exact_size(Vec2::new(ui.available_width(), 1.0), egui::Sense::hover())
@@ -138,7 +138,7 @@ pub(crate) fn workflow_preview_status(ui: &mut Ui, ok: bool, headline: &str, det
         });
 }
 
-pub(crate) fn selection_command_workflow<R>(
+pub fn selection_command_workflow<R>(
     ui: &mut Ui,
     code: &str,
     preview: &SelectionPreview,
@@ -156,7 +156,7 @@ pub(crate) fn selection_command_workflow<R>(
         .corner_radius(10.0)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
-            let viewport_width = crate::ui::viewport::root_viewport_width(ui.ctx());
+            let viewport_width = crate::viewport::root_viewport_width(ui.ctx());
             if selection_workflow_uses_columns(viewport_width) {
                 let (right_fraction, right_minimum) =
                     selection_workflow_right_track(viewport_width);

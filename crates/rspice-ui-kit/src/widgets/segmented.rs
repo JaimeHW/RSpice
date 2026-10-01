@@ -10,8 +10,8 @@
 
 use egui::{Rect, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::theme::{self, FontWeight};
+use crate::tokens::{self, Tokens};
 
 /// `.segmented button { min-width: 54px; padding: 0 8px; }`
 const SEGMENT_MIN_WIDTH: f32 = 54.0;
@@ -20,7 +20,7 @@ const PHONE_MAX_WIDTH: f32 = 560.0;
 
 /// How the group sizes itself against the space it is given.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SegmentedWidth {
+pub enum SegmentedWidth {
     /// Hug the options, as `display: inline-flex` does. The group is an
     /// object in a row, not the row itself.
     Natural,
@@ -33,7 +33,7 @@ pub(crate) enum SegmentedWidth {
 /// Contiguous option buttons matching the mockup `.segmented` control.
 ///
 /// Returns whether the selection changed.
-pub(crate) fn segmented(
+pub fn segmented(
     ui: &mut Ui,
     id_salt: &'static str,
     options: &[&str],
@@ -180,7 +180,7 @@ mod tests {
     #[test]
     fn segmented_options_keep_mockup_natural_widths() {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        crate::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let input = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 600.0))),

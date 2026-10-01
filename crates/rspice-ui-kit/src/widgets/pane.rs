@@ -10,8 +10,8 @@
 
 use egui::{Align, CornerRadius, Layout, Rect, Sense, Stroke, Ui, UiBuilder, pos2, vec2};
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::theme::{self, FontWeight};
+use crate::tokens::{self, Tokens};
 
 /// Height of the `.hd` header strip.
 pub const PANE_HEADER_H: f32 = 36.0;

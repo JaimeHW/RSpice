@@ -3,9 +3,9 @@
 
 use egui::{Rect, Response, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
-use crate::ui::icons::Icon;
-use crate::ui::theme::{self, FontWeight, mix};
-use crate::ui::tokens::{self, Tokens};
+use crate::icons::Icon;
+use crate::theme::{self, FontWeight, mix};
+use crate::tokens::{self, Tokens};
 
 use super::mark_response_disabled;
 
@@ -464,7 +464,7 @@ mod tests {
         mut add_contents: impl FnMut(&mut egui::Ui),
     ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        crate::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| add_contents(ui));
@@ -490,7 +490,7 @@ mod tests {
         }
 
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        crate::Theme::default().apply(&ctx);
         // A tooltip opens on the pointer, and a headless pass has none. This
         // is egui's own switch for laying every popup out anyway; it does not
         // bypass the check that decides *which* tooltip a response owns, so a

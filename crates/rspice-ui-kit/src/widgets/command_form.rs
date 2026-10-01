@@ -20,8 +20,8 @@
 
 use egui::{Color32, Context, Id, Response, Ui, vec2};
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::theme::{self, FontWeight};
+use crate::tokens::{self, Tokens};
 
 use super::dialog::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 use super::form;
@@ -51,7 +51,7 @@ const STACKED_LABEL_GAP: f32 = 4.0;
 /// Row kinds are added as a form needs them. There is no generic "widget row":
 /// a row is a labelled control of a known kind, so the geometry below is the
 /// only geometry any of these forms can have.
-pub(crate) struct FormRows<'u> {
+pub struct FormRows<'u> {
     ui: &'u mut Ui,
     label_col: f32,
     stacked: bool,
@@ -131,7 +131,7 @@ impl<'u> FormRows<'u> {
     /// A field that takes focus from the keyboard rather than a click shows its
     /// content selected, so a prefilled name is replaced by typing over it and
     /// a click still lands the caret where it was aimed.
-    pub(crate) fn text(&mut self, label: &str, id: Id, value: &mut String, hint: &str) -> Response {
+    pub fn text(&mut self, label: &str, id: Id, value: &mut String, hint: &str) -> Response {
         self.row(label, |ui, width| {
             let t = Tokens::get(ui.ctx());
             let response = ui.add_sized(
@@ -150,7 +150,7 @@ impl<'u> FormRows<'u> {
 
     /// One contiguous group of exclusive options. Returns `true` when the
     /// selection changed this frame.
-    pub(crate) fn segmented(
+    pub fn segmented(
         &mut self,
         label: &str,
         id_salt: &'static str,
@@ -163,7 +163,7 @@ impl<'u> FormRows<'u> {
     }
 
     /// One dropdown. Returns the picked index when the reader picked one.
-    pub(crate) fn select(
+    pub fn select(
         &mut self,
         label: &str,
         id_salt: &str,
@@ -181,7 +181,7 @@ impl<'u> FormRows<'u> {
     ///
     /// It wraps rather than eliding: what it says is the *content* of the
     /// draft, and half of it is not worth having.
-    pub(crate) fn derived(&mut self, text: &str) {
+    pub fn derived(&mut self, text: &str) {
         let t = Tokens::get(self.ui.ctx());
         let indent = self.control_indent();
         self.ui.add_space(DERIVED_GAP);
@@ -304,7 +304,7 @@ fn middle_elided(ui: &Ui, text: &str, font: &egui::FontId, color: Color32, width
 ///
 /// Built, shown and discarded in a frame: the draft it edits lives in the
 /// caller's dialog state, not here.
-pub(crate) struct CommandForm<'a> {
+pub struct CommandForm<'a> {
     title: &'a str,
     primary: &'a str,
     context: Option<&'a str>,
@@ -316,7 +316,7 @@ pub(crate) struct CommandForm<'a> {
 }
 
 impl<'a> CommandForm<'a> {
-    pub(crate) fn new(title: &'a str, primary: &'a str) -> Self {
+    pub fn new(title: &'a str, primary: &'a str) -> Self {
         Self {
             title,
             primary,
@@ -334,45 +334,45 @@ impl<'a> CommandForm<'a> {
     /// It carries only what depends on the draft or the selection — a cell
     /// path, a clicked object. A constant here would be a kicker with extra
     /// steps, so `None` prints nothing at all rather than a placeholder.
-    pub(crate) fn context(mut self, context: Option<&'a str>) -> Self {
+    pub fn context(mut self, context: Option<&'a str>) -> Self {
         self.context = context;
         self
     }
 
     /// The sentence assistive technology reads for the whole surface.
-    pub(crate) fn describe(mut self, description: &'a str) -> Self {
+    pub fn describe(mut self, description: &'a str) -> Self {
         self.describe = Some(description);
         self
     }
 
-    pub(crate) fn primary_enabled(mut self, enabled: bool) -> Self {
+    pub fn primary_enabled(mut self, enabled: bool) -> Self {
         self.primary_enabled = enabled;
         self
     }
 
     /// Disable every row, for a form that can still be read but not filled —
     /// a read-only document, or one that changed under an open form.
-    pub(crate) fn fields_enabled(mut self, enabled: bool) -> Self {
+    pub fn fields_enabled(mut self, enabled: bool) -> Self {
         self.fields_enabled = enabled;
         self
     }
 
     /// The validation slot: `Ok(None)` says nothing, `Ok(Some(_))` states a
     /// neutral fact, `Err(_)` states why the primary is refused.
-    pub(crate) fn status(mut self, status: Result<Option<&'a str>, &'a str>) -> Self {
+    pub fn status(mut self, status: Result<Option<&'a str>, &'a str>) -> Self {
         self.status = status;
         self
     }
 
     /// How many lines the status slot reserves. The slot is that tall whether
     /// or not it says anything, so the footer never moves as a draft changes.
-    pub(crate) fn status_lines(mut self, lines: usize) -> Self {
+    pub fn status_lines(mut self, lines: usize) -> Self {
         self.status_lines = lines.max(1);
         self
     }
 
     /// Show the form. `body` returns the control that takes initial focus.
-    pub(crate) fn show(
+    pub fn show(
         self,
         ctx: &Context,
         body: impl FnOnce(&mut FormRows<'_>) -> Option<Id>,
@@ -498,8 +498,8 @@ fn mark_invalid(ctx: &Context, field: Option<Id>, message: &str) {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use crate::ui::tokens::Mode;
-    use crate::ui::widgets::painted_runs::painted_runs;
+    use crate::tokens::Mode;
+    use crate::widgets::painted_runs::painted_runs;
 
     /// A fixture body of the shape every command form in this family has: one
     /// text row with a derived line, two segmented rows, one select.
@@ -623,7 +623,7 @@ mod tests {
     #[test]
     fn a_context_line_is_elided_in_the_middle() {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        crate::Theme::default().apply(&ctx);
         let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(

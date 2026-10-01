@@ -15,8 +15,8 @@
 
 use egui::{Rect, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::theme::{self, FontWeight};
+use crate::tokens::{self, Tokens};
 
 /// Height of the track. Four points shorter than the strips it sits in, so it
 /// reads as an object in the row rather than as the row.
@@ -32,7 +32,7 @@ const SLIDE_SECONDS: f32 = 0.12;
 
 /// One option of a [`view_switch`].
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ViewOption<'a> {
+pub struct ViewOption<'a> {
     /// The word on the option.
     pub label: &'a str,
     /// Why the option cannot be chosen right now, when it cannot.
@@ -41,7 +41,7 @@ pub(crate) struct ViewOption<'a> {
 
 /// Paint the switch and report the option the reader chose, if they chose a
 /// different one.
-pub(crate) fn view_switch(
+pub fn view_switch(
     ui: &mut Ui,
     id_salt: &'static str,
     options: &[ViewOption<'_>],
@@ -209,7 +209,7 @@ mod tests {
     #[test]
     fn options_are_announced_with_their_availability() {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        crate::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let output = ctx.run_ui(
             egui::RawInput {

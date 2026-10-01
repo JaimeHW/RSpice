@@ -3,8 +3,8 @@
 
 use egui::{Response, Sense, Ui, WidgetInfo, WidgetType, vec2};
 
-use crate::ui::theme::{self, FontWeight, mix};
-use crate::ui::tokens::{self, Tokens};
+use crate::theme::{self, FontWeight, mix};
+use crate::tokens::{self, Tokens};
 
 /// A panel section header ("HIERARCHY", "RUN HISTORY", …) with an optional
 /// right-aligned action ("Descend", "Clear", "+ Add"). Returns the action's

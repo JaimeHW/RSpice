@@ -30,8 +30,8 @@ use egui::{
     Stroke, Ui, UiKind, WidgetInfo, WidgetType, vec2,
 };
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::theme::{self, FontWeight};
+use crate::tokens::{self, Tokens};
 
 mod keyboard;
 
@@ -582,8 +582,8 @@ impl DialogRenderedFocus {
 /// The caller can inspect the freshly edited draft before retaining focus
 /// for a discard confirmation. Accepted cancellation restores the original
 /// focus automatically, including on early returns.
-pub(crate) struct DialogResponse {
-    pub(crate) choice: DialogChoice,
+pub struct DialogResponse {
+    pub choice: DialogChoice,
     cancel_focus: Option<DialogCancelFocus>,
 }
 
@@ -599,7 +599,7 @@ struct DialogCancelFocus {
 impl DialogResponse {
     /// Keep the cancelled dialog open and focus its confirmation control.
     /// Call only after applying the workflow's current close policy.
-    pub(crate) fn retain_cancel_focus(&mut self, target: DialogInitialFocus) {
+    pub fn retain_cancel_focus(&mut self, target: DialogInitialFocus) {
         if let Some(focus) = &mut self.cancel_focus {
             focus.retained_target = Some(target);
         }
@@ -654,7 +654,7 @@ pub enum DialogHintTone {
 }
 
 impl DialogHintTone {
-    const fn color(self, c: &crate::ui::palette::Palette) -> Color32 {
+    const fn color(self, c: &crate::palette::Palette) -> Color32 {
         match self {
             Self::Neutral => c.text_faint,
             Self::Warn => c.warn,
@@ -1001,7 +1001,7 @@ impl<'a> Dialog<'a> {
     /// itself with a rule leaves bare body between that rule and the footer. A
     /// content-height surface reports `None`: filling it would hold the surface
     /// at whatever height it was first laid out in.
-    pub(crate) fn body_fill_floor(ui: &Ui) -> Option<f32> {
+    pub fn body_fill_floor(ui: &Ui) -> Option<f32> {
         ui.data(|data| data.get_temp::<Option<f32>>(body_fill_floor_id()))
             .flatten()
     }
@@ -1057,7 +1057,7 @@ impl<'a> Dialog<'a> {
     /// processing body edits. Keep the response local to this render call;
     /// dropping it completes cancellation focus handling. Other choices
     /// restore focus immediately, before the caller handles their action.
-    pub(crate) fn show_transaction(
+    pub fn show_transaction(
         mut self,
         ctx: &Context,
         body: impl FnOnce(&mut Ui) -> Option<Id>,
@@ -1591,7 +1591,7 @@ impl<'a> Dialog<'a> {
                             },
                         );
                         let close_response =
-                            crate::ui::widgets::IconButton::new(crate::ui::icons::Icon::Close)
+                            crate::widgets::IconButton::new(crate::icons::Icon::Close)
                                 .size(close_size.x, close_size.y)
                                 .tooltip("Close (Esc)")
                                 .show(ui);
@@ -1857,7 +1857,7 @@ impl<'a> Dialog<'a> {
                     } else {
                         29.0
                     };
-                    let primary = crate::ui::widgets::Button::new(&self.primary)
+                    let primary = crate::widgets::Button::new(&self.primary)
                         .accent()
                         .destructive(self.destructive)
                         .enabled(self.primary_enabled)
@@ -1870,7 +1870,7 @@ impl<'a> Dialog<'a> {
                         choice = DialogChoice::Primary;
                     }
                     if let Some(label) = self.secondary.as_deref() {
-                        let secondary = crate::ui::widgets::Button::new(label)
+                        let secondary = crate::widgets::Button::new(label)
                             .enabled(self.secondary_enabled)
                             .min_width(action_width)
                             .max_width(action_width)
@@ -1882,7 +1882,7 @@ impl<'a> Dialog<'a> {
                         }
                     }
                     if let Some(label) = self.ghost.as_deref() {
-                        let ghost = crate::ui::widgets::Button::new(label)
+                        let ghost = crate::widgets::Button::new(label)
                             .ghost()
                             .enabled(self.ghost_enabled)
                             .min_width(action_width)
@@ -1901,7 +1901,7 @@ impl<'a> Dialog<'a> {
                     if self.secondary_leading
                         && let Some(label) = self.secondary.as_deref()
                     {
-                        let secondary = crate::ui::widgets::Button::new(label)
+                        let secondary = crate::widgets::Button::new(label)
                             .enabled(self.secondary_enabled)
                             .show(ui);
                         secondary_id = self.secondary_enabled.then_some(secondary.id);
@@ -1925,7 +1925,7 @@ impl<'a> Dialog<'a> {
                         .on_hover_text(hint);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let primary = crate::ui::widgets::Button::new(&self.primary)
+                        let primary = crate::widgets::Button::new(&self.primary)
                             .accent()
                             .destructive(self.destructive)
                             .enabled(self.primary_enabled)
@@ -1937,7 +1937,7 @@ impl<'a> Dialog<'a> {
                         if !self.secondary_leading
                             && let Some(label) = self.secondary.as_deref()
                         {
-                            let secondary = crate::ui::widgets::Button::new(label)
+                            let secondary = crate::widgets::Button::new(label)
                                 .enabled(self.secondary_enabled)
                                 .show(ui);
                             secondary_id = self.secondary_enabled.then_some(secondary.id);
@@ -1947,7 +1947,7 @@ impl<'a> Dialog<'a> {
                         }
                         if let Some(label) = self.ghost.as_deref() {
                             let button =
-                                crate::ui::widgets::Button::new(label).enabled(self.ghost_enabled);
+                                crate::widgets::Button::new(label).enabled(self.ghost_enabled);
                             let ghost = if component_editor {
                                 button.show(ui)
                             } else {

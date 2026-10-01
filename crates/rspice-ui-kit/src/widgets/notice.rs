@@ -11,22 +11,22 @@
 
 use egui::{Color32, Painter, Rect, Response, Sense, Shape, Stroke, Ui, Vec2, pos2, vec2};
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::theme::{self, FontWeight};
+use crate::tokens::{self, Tokens};
 
 use super::toast::ToastKind;
 
 /// Side of the severity glyph, in both the toast and the panel row.
-pub(crate) const GLYPH_SIDE: f32 = 16.0;
+pub const GLYPH_SIDE: f32 = 16.0;
 /// Side of the dismiss mark's own target on a pointer device.
-pub(crate) const DISMISS_SIDE: f32 = 20.0;
+pub const DISMISS_SIDE: f32 = 20.0;
 /// Height of the offer link on a pointer device.
-pub(crate) const OFFER_HEIGHT: f32 = 22.0;
+pub const OFFER_HEIGHT: f32 = 22.0;
 const OFFER_ARROW_SIDE: f32 = 12.0;
 const OFFER_ARROW_GAP: f32 = 4.0;
 
 /// The colour a severity is drawn in.
-pub(crate) fn tone_color(tokens: &Tokens, kind: ToastKind) -> Color32 {
+pub fn tone_color(tokens: &Tokens, kind: ToastKind) -> Color32 {
     match kind {
         ToastKind::Success => tokens.color.ok,
         ToastKind::Info => tokens.color.info,
@@ -36,7 +36,7 @@ pub(crate) fn tone_color(tokens: &Tokens, kind: ToastKind) -> Color32 {
 }
 
 /// Paint the severity glyph into `rect`. Authored on a 24-unit grid.
-pub(crate) fn paint_tone_glyph(painter: &Painter, rect: Rect, kind: ToastKind, color: Color32) {
+pub fn paint_tone_glyph(painter: &Painter, rect: Rect, kind: ToastKind, color: Color32) {
     let side = rect.width().min(rect.height());
     let scale = side / 24.0;
     let origin = rect.center() - Vec2::splat(side * 0.5);
@@ -96,7 +96,7 @@ pub(crate) fn paint_tone_glyph(painter: &Painter, rect: Rect, kind: ToastKind, c
 ///
 /// `subject` is the notice the offer belongs to. A list of notices is a list
 /// of identical links to a screen reader unless each one says whose it is.
-pub(crate) fn offer_link(ui: &mut Ui, label: &str, subject: &str, large_target: bool) -> Response {
+pub fn offer_link(ui: &mut Ui, label: &str, subject: &str, large_target: bool) -> Response {
     let t = Tokens::get(ui.ctx());
     let font = theme::sans(tokens::FS_0, FontWeight::Medium);
     let galley = ui
@@ -165,7 +165,7 @@ fn paint_offer_arrow(painter: &Painter, rect: Rect, color: Color32) {
 ///
 /// `label` names what is dismissed, because a screen reader meets a column of
 /// these and "Dismiss" alone would say the same thing on every row.
-pub(crate) fn dismiss_button(ui: &Ui, rect: Rect, id: egui::Id, label: &str) -> Response {
+pub fn dismiss_button(ui: &Ui, rect: Rect, id: egui::Id, label: &str) -> Response {
     let t = Tokens::get(ui.ctx());
     let response = ui.interact(rect, id, Sense::click());
     response.widget_info(|| {
@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn every_severity_glyph_stays_inside_its_box() {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        crate::Theme::default().apply(&ctx);
         let rect = Rect::from_min_size(pos2(20.0, 20.0), Vec2::splat(GLYPH_SIDE));
         for kind in [
             ToastKind::Success,

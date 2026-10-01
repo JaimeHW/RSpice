@@ -3,10 +3,10 @@
 
 use egui::{Id, Sense, Shape, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::theme::{self, FontWeight};
+use crate::tokens::{self, Tokens};
 
-pub(crate) struct SelectOutput {
+pub struct SelectOutput {
     pub picked: Option<usize>,
     pub response: egui::Response,
 }
@@ -27,7 +27,7 @@ pub fn select(
 /// Select control with individually unavailable choices. Disabled options
 /// remain visible to preserve the authored domain and expose a precise reason,
 /// but cannot be selected by pointer or keyboard.
-pub(crate) fn select_with_disabled(
+pub fn select_with_disabled(
     ui: &mut Ui,
     id_salt: &str,
     accessible_label: &str,
@@ -49,7 +49,7 @@ pub(crate) fn select_with_disabled(
     .picked
 }
 
-pub(crate) fn select_with_response(
+pub fn select_with_response(
     ui: &mut Ui,
     id_salt: &str,
     accessible_label: &str,
@@ -72,7 +72,7 @@ pub(crate) fn select_with_response(
 /// Mockup-authored engineering-field select. Field values and options use the
 /// same mono face as adjacent exact-value inputs without changing toolbar or
 /// navigation selects globally.
-pub(crate) fn select_mono_with_response(
+pub fn select_mono_with_response(
     ui: &mut Ui,
     id_salt: &str,
     accessible_label: &str,
@@ -92,6 +92,9 @@ pub(crate) fn select_mono_with_response(
     )
 }
 
+// The caller independently supplies the control identity, content, style,
+// width and unavailable choices. Keep the existing rendering contract.
+#[expect(clippy::too_many_arguments)]
 fn select_with_font(
     ui: &mut Ui,
     id_salt: &str,

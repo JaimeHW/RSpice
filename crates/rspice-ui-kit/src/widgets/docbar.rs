@@ -3,7 +3,7 @@
 
 use egui::{InnerResponse, Ui, vec2};
 
-use crate::ui::tokens::Tokens;
+use crate::tokens::Tokens;
 
 const RESULTS_DOCBAR_INSET: f32 = 8.0;
 

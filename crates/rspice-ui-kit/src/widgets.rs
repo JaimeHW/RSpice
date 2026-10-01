@@ -1,7 +1,7 @@
 //! The widget vocabulary of the design system.
 //!
 //! Each submodule implements one widget family, styled exclusively from the
-//! active [`crate::ui::tokens::Tokens`]. Widgets take data in and report
+//! active [`crate::tokens::Tokens`]. Widgets take data in and report
 //! interactions out via [`egui::Response`] (or small result enums) — they
 //! never reach into application state.
 
@@ -15,7 +15,7 @@
 /// no diagnostic: the code reads as if it explains itself and nothing renders.
 /// Hover for a disabled response is resolved from the rect rather than the
 /// flag, so clearing it costs no hit testing.
-pub(crate) fn mark_response_disabled(response: &mut egui::Response) {
+pub fn mark_response_disabled(response: &mut egui::Response) {
     response.flags.remove(egui::response::Flags::ENABLED);
 }
 
@@ -25,9 +25,9 @@ mod command_form;
 mod dialog;
 mod docbar;
 mod form;
-pub(crate) mod notice;
-#[cfg(all(test, not(target_arch = "wasm32")))]
-pub(crate) mod painted_runs;
+pub mod notice;
+#[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
+pub mod painted_runs;
 mod pane;
 mod schematic_command;
 mod section;
@@ -43,31 +43,32 @@ mod view_switch;
 
 pub use button::{Button, IconButton};
 pub use chip::chip;
-pub(crate) use command_form::CommandForm;
+pub use command_form::{CommandForm, FormRows};
 pub use dialog::{
-    Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogSize, DialogTransactionTone,
+    Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogResponse, DialogSize,
+    DialogTransactionTone,
 };
 pub use docbar::docbar_at_height;
-pub(crate) use form::name_control;
+pub use form::name_control;
 pub use form::{choice_row, input_row, kv_row, mono_input, switch_row};
 pub use pane::{
     PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W, PaneSide, pane_footer, pane_header,
     pane_section_label, two_pane,
 };
-pub(crate) use schematic_command::{SchematicCommandPreview, schematic_command_workflow};
+pub use schematic_command::{SchematicCommandPreview, schematic_command_workflow};
 pub use section::section_header;
-pub(crate) use segmented::{SegmentedWidth, segmented};
-pub use select::select;
-pub(crate) use select::{select_mono_with_response, select_with_disabled, select_with_response};
-pub(crate) use selection_command::{
+pub use segmented::{SegmentedWidth, segmented};
+pub use select::{SelectOutput, select};
+pub use select::{select_mono_with_response, select_with_disabled, select_with_response};
+pub use selection_command::{
     NotePreviewStyle, PreviewPoint, SelectionImpact, SelectionPreview, ShapePreviewStroke,
     selection_command_workflow, workflow_preview_status,
 };
 pub use status_mark::{StatusMark, paint_status_mark};
-pub(crate) use switch::{SWITCH_WIDTH, paint_switch};
+pub use switch::{SWITCH_WIDTH, paint_switch};
 pub use table::measurement_table;
 pub use toast::{
     MirroredEntry, NotificationAction, NotificationCategory, NotificationRecord, ToastKind, Toasts,
 };
 pub use tree::{TreeRow, TreeRowResult};
-pub(crate) use view_switch::{ViewOption, view_switch};
+pub use view_switch::{ViewOption, view_switch};

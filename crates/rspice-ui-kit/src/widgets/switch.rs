@@ -14,10 +14,10 @@
 
 use egui::{Rect, Stroke, Ui, vec2};
 
-use crate::ui::tokens::Tokens;
+use crate::tokens::Tokens;
 
 /// Track width. Callers reserve this much for the control itself.
-pub(crate) const SWITCH_WIDTH: f32 = 30.0;
+pub const SWITCH_WIDTH: f32 = 30.0;
 
 /// Track height.
 const SWITCH_HEIGHT: f32 = 17.0;
@@ -28,7 +28,7 @@ const SWITCH_HEIGHT: f32 = 17.0;
 /// control it belongs to. Neither is read from the `Ui`: every caller here is a
 /// self-painted row that already resolved both, and a switch inside a disabled
 /// row must not light up under a pointer that cannot move it.
-pub(crate) fn paint_switch(ui: &Ui, center: egui::Pos2, on: bool, hovered: bool, clip_rect: Rect) {
+pub fn paint_switch(ui: &Ui, center: egui::Pos2, on: bool, hovered: bool, clip_rect: Rect) {
     let t = Tokens::get(ui.ctx());
     let rect = Rect::from_center_size(center, vec2(SWITCH_WIDTH, SWITCH_HEIGHT));
     let fill = if on {

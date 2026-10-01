@@ -1692,3 +1692,74 @@ fn source_files_stay_within_the_line_budget() {
     }
     assert!(failures.is_empty(), "{failures}");
 }
+
+#[test]
+fn every_production_dialog_callsite_supplies_a_description() {
+    let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let mut sources = rust_sources(&source_root.join("rspice-app/src"));
+    sources.extend(rust_sources(&source_root.join("rspice-ui-kit/src")));
+
+    let mut audited = 0;
+    let mut missing = Vec::new();
+    for path in sources {
+        let relative = path
+            .strip_prefix(&source_root)
+            .expect("source beneath crate root")
+            .to_string_lossy()
+            .replace('\\', "/");
+        // The primitive contains deliberately partial construction tests;
+        // feature-availability descriptions have their own route-specific
+        // source contract because their purpose text depends on the route.
+        // Extracted test modules are also non-production sources and may
+        // intentionally exercise incomplete builder chains.
+        if relative.ends_with("/tests.rs")
+            || relative.contains("/tests/")
+            || matches!(
+                relative.as_str(),
+                "rspice-ui-kit/src/widgets/dialog.rs"
+                    | "rspice-app/src/workbench/feature_availability.rs"
+            )
+        {
+            continue;
+        }
+
+        let source = std::fs::read_to_string(&path).expect("read Rust source");
+        let production_source = source.split("\n#[cfg(test)]").next().unwrap_or(&source);
+        for (offset, _) in production_source.match_indices("Dialog::new(") {
+            if offset > 0
+                && (production_source.as_bytes()[offset - 1].is_ascii_alphanumeric()
+                    || production_source.as_bytes()[offset - 1] == b'_')
+            {
+                // Exclude other types whose names end in `Dialog`, such
+                // as native `FileDialog` and persisted dialog-state data.
+                continue;
+            }
+            audited += 1;
+            let tail = &production_source[offset..];
+            let chain_end = [
+                tail.find(".show("),
+                tail.find(".show_with_initial_body_focus("),
+                tail.find(';'),
+            ]
+            .into_iter()
+            .flatten()
+            .min()
+            .unwrap_or(tail.len());
+            if !tail[..chain_end].contains(".description(") {
+                let line = production_source[..offset]
+                    .bytes()
+                    .filter(|byte| *byte == b'\n')
+                    .count()
+                    + 1;
+                missing.push(format!("{relative}:{line}"));
+            }
+        }
+    }
+
+    assert!(audited > 0, "source audit did not find a production dialog");
+    assert!(
+        missing.is_empty(),
+        "production dialogs must publish explicit purpose text:\n{}",
+        missing.join("\n")
+    );
+}

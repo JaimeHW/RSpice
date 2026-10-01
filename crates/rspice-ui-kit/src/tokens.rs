@@ -3,7 +3,7 @@
 //! A [`Tokens`] value bundles the active color [`Palette`] with the metric
 //! scales (spacing, type, control sizes, radii) for the reviewed visual
 //! identity in one [`Mode`] × [`Density`] combination. The active tokens are installed
-//! into the egui [`Context`] by [`crate::ui::theme::Theme::apply`] and read
+//! into the egui [`Context`] by [`crate::theme::Theme::apply`] and read
 //! back by widgets via [`Tokens::get`], so every part of the UI renders from
 //! the same token set with no per-callsite color or size literals.
 

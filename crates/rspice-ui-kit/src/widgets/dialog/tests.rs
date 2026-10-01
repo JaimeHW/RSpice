@@ -362,7 +362,7 @@ fn catalog_body_and_note_footer_are_explicit_opt_ins() {
 #[test]
 fn retained_cancel_focus_moves_escape_to_discard_then_confirm_restores_workspace() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut underlying = String::new();
     focus_underlying_editor(&ctx, &mut underlying);
@@ -491,7 +491,7 @@ fn transaction_state_is_absent_when_idle_and_exposes_an_assertive_strip_on_error
     assert!(idle.transaction_state.is_none());
 
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let output = ctx.run_ui(raw_input(Vec::new()), |ctx| {
         let _ = Dialog::new("Test", TEST_TITLE, "Accept")
@@ -527,7 +527,7 @@ fn close_only_workflow_hides_redundant_footer() {
 #[test]
 fn capability_review_phone_footer_stays_horizontal_and_compact() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let input = egui::RawInput {
         screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(390.0, 844.0))),
@@ -585,7 +585,7 @@ fn capability_review_phone_footer_stays_horizontal_and_compact() {
 #[test]
 fn capability_review_desktop_close_control_uses_mockup_icon_button_target() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let input = egui::RawInput {
         screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1_440.0, 900.0))),
@@ -619,7 +619,7 @@ fn capability_review_desktop_close_control_uses_mockup_icon_button_target() {
 #[test]
 fn dialog_publishes_modal_accessibility_semantics() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut underlying = String::new();
 
@@ -643,7 +643,7 @@ fn dialog_publishes_modal_accessibility_semantics() {
 #[test]
 fn requested_body_control_receives_initial_focus_once() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     let mut preferred_id = None;
 
     let _output = ctx.run_ui(raw_input(Vec::new()), |ctx| {
@@ -662,7 +662,7 @@ fn requested_body_control_receives_initial_focus_once() {
 #[test]
 fn known_body_control_processes_opening_input_and_preserves_later_focus() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
     let first = Id::new("known-dialog-first-field");
     let second = Id::new("known-dialog-second-field");
@@ -699,7 +699,7 @@ fn known_body_control_processes_opening_input_and_preserves_later_focus() {
 fn unavailable_known_body_control_falls_back_without_editing_another_field() {
     for enabled in [false, true] {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        crate::Theme::default().apply(&ctx);
         ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
         let declared = Id::new("unavailable-declared-field");
         let mut text = "unchanged".to_owned();
@@ -730,7 +730,7 @@ fn unavailable_known_body_control_falls_back_without_editing_another_field() {
 #[test]
 fn escape_keeps_preceding_edits_and_routes_later_input_once_to_restored_focus() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
     let first = Id::new("escape-first-field");
     let second = Id::new("escape-second-field");
@@ -778,7 +778,7 @@ fn escape_keeps_preceding_edits_and_routes_later_input_once_to_restored_focus() 
 #[test]
 fn enter_before_escape_submits_before_the_later_cancellation() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
     let mut text = String::new();
     let field = Id::new("ordered-submit-field");
@@ -821,7 +821,7 @@ fn enter_before_escape_submits_before_the_later_cancellation() {
 #[test]
 fn escape_edits_only_the_top_dialog_and_returns_following_text_to_the_parent() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
     let parent = Id::new("escape-parent-field");
     let child = Id::new("escape-child-field");
@@ -877,7 +877,7 @@ fn escape_edits_only_the_top_dialog_and_returns_following_text_to_the_parent() {
 fn escape_continuation_does_not_revive_removed_or_disabled_focus() {
     for removed in [false, true] {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        crate::Theme::default().apply(&ctx);
         ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
         let mut underlying = String::new();
         focus_underlying_editor(&ctx, &mut underlying);
@@ -911,7 +911,7 @@ fn escape_continuation_does_not_revive_removed_or_disabled_focus() {
 #[test]
 fn escape_dismisses_an_open_popup_before_its_dialog() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
     let popup = Id::new("dialog-escape-popup");
     let mut underlying = String::new();
@@ -950,7 +950,7 @@ fn escape_dismisses_an_open_popup_before_its_dialog() {
 #[test]
 fn unavailable_initial_focus_target_falls_back_to_modal_container() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
 
     let _output = ctx.run_ui(raw_input(Vec::new()), |ctx| {
         let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
@@ -970,7 +970,7 @@ fn unavailable_initial_focus_target_falls_back_to_modal_container() {
 #[test]
 fn modal_focus_is_trapped_and_restored_without_leaking_text() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     let mut underlying = "baseline".to_owned();
     focus_underlying_editor(&ctx, &mut underlying);
     assert_eq!(ctx.memory(|memory| memory.focused()), Some(underlying_id()));
@@ -1038,7 +1038,7 @@ fn modal_focus_is_trapped_and_restored_without_leaking_text() {
 #[test]
 fn focused_body_button_owns_enter_instead_of_primary() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     let mut underlying = String::new();
     let mut activated = false;
 
@@ -1066,7 +1066,7 @@ fn focused_body_button_owns_enter_instead_of_primary() {
 #[test]
 fn body_close_request_cancels_and_restores_prior_focus() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     let mut underlying = String::new();
     focus_underlying_editor(&ctx, &mut underlying);
 
@@ -1081,7 +1081,7 @@ fn body_close_request_cancels_and_restores_prior_focus() {
 #[test]
 fn enter_submits_by_default_but_multiline_opt_out_keeps_newlines() {
     let submit_ctx = Context::default();
-    crate::ui::Theme::default().apply(&submit_ctx);
+    crate::Theme::default().apply(&submit_ctx);
     let mut underlying = String::new();
     let _ = run_dialog(
         &submit_ctx,
@@ -1105,7 +1105,7 @@ fn enter_submits_by_default_but_multiline_opt_out_keeps_newlines() {
     assert_eq!(submit_ctx.memory(|memory| memory.focused()), None);
 
     let multiline_ctx = Context::default();
-    crate::ui::Theme::default().apply(&multiline_ctx);
+    crate::Theme::default().apply(&multiline_ctx);
     let mut underlying = String::new();
     let mut body_text = String::new();
     let _ = run_dialog(
@@ -1133,94 +1133,12 @@ fn enter_submits_by_default_but_multiline_opt_out_keeps_newlines() {
     assert_eq!(body_text, "\n");
 }
 
-fn collect_rust_sources(directory: &std::path::Path, sources: &mut Vec<std::path::PathBuf>) {
-    for entry in std::fs::read_dir(directory).expect("read source directory") {
-        let path = entry.expect("read source entry").path();
-        if path.is_dir() {
-            collect_rust_sources(&path, sources);
-        } else if path.extension().is_some_and(|extension| extension == "rs") {
-            sources.push(path);
-        }
-    }
-}
-
-#[test]
-fn every_production_dialog_callsite_supplies_a_description() {
-    let source_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut sources = Vec::new();
-    collect_rust_sources(&source_root, &mut sources);
-    sources.sort();
-
-    let mut audited = 0;
-    let mut missing = Vec::new();
-    for path in sources {
-        let relative = path
-            .strip_prefix(&source_root)
-            .expect("source beneath crate root")
-            .to_string_lossy()
-            .replace('\\', "/");
-        // The primitive contains deliberately partial construction tests;
-        // feature-availability descriptions have their own route-specific
-        // source contract because their purpose text depends on the route.
-        // Extracted test modules are also non-production sources and may
-        // intentionally exercise incomplete builder chains.
-        if relative.ends_with("/tests.rs")
-            || relative.contains("/tests/")
-            || matches!(
-                relative.as_str(),
-                "ui/widgets/dialog.rs" | "workbench/feature_availability.rs"
-            )
-        {
-            continue;
-        }
-
-        let source = std::fs::read_to_string(&path).expect("read Rust source");
-        let production_source = source.split("\n#[cfg(test)]").next().unwrap_or(&source);
-        for (offset, _) in production_source.match_indices("Dialog::new(") {
-            if offset > 0
-                && (production_source.as_bytes()[offset - 1].is_ascii_alphanumeric()
-                    || production_source.as_bytes()[offset - 1] == b'_')
-            {
-                // Exclude other types whose names end in `Dialog`, such
-                // as native `FileDialog` and persisted dialog-state data.
-                continue;
-            }
-            audited += 1;
-            let tail = &production_source[offset..];
-            let chain_end = [
-                tail.find(".show("),
-                tail.find(".show_with_initial_body_focus("),
-                tail.find(';'),
-            ]
-            .into_iter()
-            .flatten()
-            .min()
-            .unwrap_or(tail.len());
-            if !tail[..chain_end].contains(".description(") {
-                let line = production_source[..offset]
-                    .bytes()
-                    .filter(|byte| *byte == b'\n')
-                    .count()
-                    + 1;
-                missing.push(format!("{relative}:{line}"));
-            }
-        }
-    }
-
-    assert!(audited > 0, "source audit did not find a production dialog");
-    assert!(
-        missing.is_empty(),
-        "production dialogs must publish explicit purpose text:\n{}",
-        missing.join("\n")
-    );
-}
-
 /// Render one `flush_body` dialog until its surface height settles, and return
 /// the region the body laid its content out in, the surface's content box —
 /// the resolved surface rect less its border — and the footer's height.
 fn settled_flush_body_geometry(size: DialogSize, rows: usize) -> (Rect, Rect, f32) {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_440.0, 900.0));
     let input = egui::RawInput {
         screen_rect: Some(screen),
@@ -1307,7 +1225,7 @@ fn a_flush_body_is_given_exactly_the_room_its_surface_leaves_it() {
 /// every dialog is rendered with.
 fn body_scrollbar_gutter() -> f32 {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     let gutter = ctx.global_style().spacing.scroll.allocated_width();
     assert!(
         gutter > 0.0,
@@ -1360,7 +1278,7 @@ fn a_content_height_dialog_settles_in_one_pass_and_stops_moving() {
     const GROWN_ROWS: usize = 18;
 
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
 
     // The crawl needs a surface that has already come down onto its content,
     // and content that then outgrows it.
@@ -1462,7 +1380,7 @@ fn a_dialog_seeded_a_row_short_of_its_content_paints_its_final_row() {
     // less than that.
     let settled = {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        crate::Theme::default().apply(&ctx);
         for _ in 0..3 {
             let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
                 let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
@@ -1482,7 +1400,7 @@ fn a_dialog_seeded_a_row_short_of_its_content_paints_its_final_row() {
 
     let mut first_row = Rect::NOTHING;
     let mut final_row = Rect::NOTHING;
-    let canvas = crate::ui::raster::render(vec2(1_000.0, 800.0), |ui, _| {
+    let canvas = crate::raster::render(vec2(1_000.0, 800.0), |ui, _| {
         let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
             .description(TEST_DESCRIPTION)
             .initial_height(settled - ROW_HEIGHT)
@@ -1550,7 +1468,7 @@ fn the_opening_sizing_pass_measures_the_surface_the_first_visible_pass_draws() {
     }
 
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     let sizing = pass(&ctx);
     let first_visible = pass(&ctx);
     let settled = pass(&ctx);
