@@ -1,16 +1,21 @@
-//! Sweep configuration and bounded point preparation shared by execution hosts.
+//! Sweep configuration, bounded point preparation, and retained family assembly.
 
 use crate::error::ServiceRunError;
 use rspice_app_types::product::ProcessCorner;
 
 mod config;
 mod corner_points;
+mod mapping;
+mod point_results;
 mod step_points;
 mod worker;
 
 pub use config::{
     CornerBaseMode, CornerFrequencySweep, CornerMetricLabel, CornerPoint, CornerRunConfig,
     TempRunConfig, validate_base_mode,
+};
+pub use point_results::{
+    SweepPointResult, corner_family_of_points, point_node_values, temperature_family_of_points,
 };
 pub use step_points::{
     StepSweepExpandError, expand_step_sweep_values, expand_step_sweep_values_with_abort,

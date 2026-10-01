@@ -133,7 +133,6 @@ pub use sparameter::{
     run_sparameter_analysis_with_source_path_and_abort,
 };
 pub use stb::run_stb_analysis_with_sweep_and_source_path_and_abort;
-pub(crate) use sweeps::{SweepPointResult, map_corner_results, map_temperature_results};
 pub use sweeps::{
     run_parametric_analysis_with_base_and_source_path_and_abort,
     run_parametric_analysis_with_source_path_and_abort,

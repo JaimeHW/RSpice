@@ -2,13 +2,12 @@
 //!
 //! Steps one design parameter and returns a result set per point.
 
-use super::mapping::describe_step_target;
 use super::types::ParametricData;
 use rspice_core::abort_signal::AbortSignal;
 #[cfg(test)]
 use rspice_core::abort_signal::NoAbort;
 use rspice_core::engine::Engine;
-use rspice_core::netlist::{AnalysisCommand, StepSweep, StepTarget};
+use rspice_core::netlist::{AnalysisCommand, StepCommand, StepSweep, StepTarget};
 use rspice_simulation::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted};
 use rspice_simulation::sweeps::expand_step_sweep_values_with_abort;
 use rspice_simulation::sweeps::{CornerBaseMode, CornerFrequencySweep};
@@ -177,6 +176,25 @@ pub fn run_parametric_analysis_with_base_and_source_path_and_abort(
 /// its slot holds the placeholder row the assembly closed with `v = 0`, so
 /// carrying it would put a corner distribution under a net that has no
 /// voltage.
+fn describe_step_target(step_cmd: &StepCommand) -> String {
+    if let StepSweep::Data { table_name } = &step_cmd.sweep {
+        return format!("DATA {table_name}");
+    }
+
+    match step_cmd.target {
+        StepTarget::Param => format!("PARAM {}", step_cmd.name),
+        StepTarget::Device => match step_cmd.param_name.as_deref() {
+            Some(param) => format!("DEVICE {}.{}", step_cmd.name, param),
+            None => format!("DEVICE {}", step_cmd.name),
+        },
+        StepTarget::Model => {
+            let param = step_cmd.param_name.as_deref().unwrap_or("PARAM");
+            format!("MODEL {}.{}", step_cmd.name, param)
+        }
+        StepTarget::Temp => "TEMP".to_string(),
+    }
+}
+
 fn analog_node_voltages(result: &rspice_core::SimulationResult) -> (Vec<String>, Vec<f64>) {
     result
         .node_names

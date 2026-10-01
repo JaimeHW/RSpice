@@ -1,43 +1,19 @@
-//! Mapping sweep results back to their points.
-//!
-//! Each run returns results for one point; this labels them with the
-//! parameter values that produced them so a plot can be swept by parameter
-//! rather than by run index.
+//! Mapping solved sweep results back to their declared points.
 
-use super::types::SweepPointResult;
+#![allow(clippy::needless_range_loop, clippy::type_complexity)]
+
+use super::point_results::SweepPointResult;
+use super::{CornerMetricLabel, CornerPoint};
+use crate::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
-use rspice_core::netlist::{StepCommand, StepSweep, StepTarget};
-use rspice_simulation::error::{
-    ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically,
-};
-use rspice_simulation::sweeps::{CornerMetricLabel, CornerPoint};
-
-pub(super) fn describe_step_target(step_cmd: &StepCommand) -> String {
-    if let StepSweep::Data { table_name } = &step_cmd.sweep {
-        return format!("DATA {table_name}");
-    }
-
-    match step_cmd.target {
-        StepTarget::Param => format!("PARAM {}", step_cmd.name),
-        StepTarget::Device => match step_cmd.param_name.as_deref() {
-            Some(param) => format!("DEVICE {}.{}", step_cmd.name, param),
-            None => format!("DEVICE {}", step_cmd.name),
-        },
-        StepTarget::Model => {
-            let param = step_cmd.param_name.as_deref().unwrap_or("PARAM");
-            format!("MODEL {}.{}", step_cmd.name, param)
-        }
-        StepTarget::Temp => "TEMP".to_string(),
-    }
-}
 
 /// Lay solved temperature points onto the axis a parametric plot reads.
 ///
 /// Reachable outside the sweep runners for the same reason
 /// [`map_corner_results`] is: a temperature step's family is assembled from the
 /// results of its per-point tasks rather than from a solve of its own.
-pub(crate) fn map_temperature_results(
+pub(super) fn map_temperature_results(
     results: &[(Value, SweepPointResult)],
     metric_label: CornerMetricLabel,
     abort: &dyn AbortSignal,
@@ -74,7 +50,7 @@ pub(crate) fn map_temperature_results(
 /// Reachable outside the sweep runners because the corner family is assembled
 /// from the results of the per-point tasks rather than from a solve of its
 /// own; this is the single assembler both would otherwise have to agree with.
-pub(crate) fn map_corner_results(
+pub(super) fn map_corner_results(
     results: &[(CornerPoint, SweepPointResult)],
     metric_label: CornerMetricLabel,
     abort: &dyn AbortSignal,

@@ -1,7 +1,7 @@
 //! A family's signal basis must describe every retained point without invention.
 
 use super::*;
-use crate::state::{AnalysisType, SimulationState};
+use crate::state::{AnalysisResultPayload, AnalysisType, SimulationState};
 use rspice_simulation::sweeps::{CornerFrequencySweep, CornerRunConfig, TempRunConfig};
 
 const CONDITIONAL: &str = "Conditional family\n\
@@ -285,7 +285,7 @@ fn assert_basis_failure(temperatures: [f64; 2]) {
                     "{family:?} {base:?}: {:?}",
                     point.error_message
                 );
-                let values = point_node_values(point, &base)
+                let values = point_node_values(point.as_ref(), &base)
                     .unwrap()
                     .expect("the point retains node values");
                 assert_eq!(

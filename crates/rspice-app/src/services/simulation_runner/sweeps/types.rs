@@ -10,11 +10,3 @@ pub struct ParametricData {
     pub voltages: Vec<(String, Vec<Value>)>,
     pub num_failures: usize,
 }
-
-/// One scalar per node at a single swept point, in a node order the caller
-/// keeps identical across points: the mappers pair names and values by index.
-#[derive(Debug, Clone)]
-pub(crate) struct SweepPointResult {
-    pub(crate) node_names: Vec<String>,
-    pub(crate) node_values: Vec<Value>,
-}
