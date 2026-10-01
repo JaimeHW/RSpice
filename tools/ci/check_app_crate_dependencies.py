@@ -93,6 +93,15 @@ def violations(
                 if dep in ENGINE_PACKAGES or dep.startswith("rspice-veriloga-model-")
             ):
                 issues.append(f"{name} reaches simulator package {dep}")
+        if name == "rspice-ui-kit":
+            forbidden = (
+                application_names - {name, "rspice-units"} - ALLOWED[name]
+            ) | ENGINE_PACKAGES | GUI_PACKAGES
+            for dep in sorted(
+                dep for dep in closure
+                if dep in forbidden or dep.startswith("rspice-veriloga-model-")
+            ):
+                issues.append(f"rspice-ui-kit reaches non-presentation package {dep}")
     for label, dependencies in (
         ("without optional features", portable_formats),
         ("with only native-bundle", native_bundle_formats),
@@ -118,12 +127,12 @@ def main() -> int:
             continue
         direct[name] = {
             dep["name"] for dep in package["dependencies"]
-            if dep["kind"] != "dev" or name == "rspice-worker"
+            if dep["kind"] != "dev" or name in {"rspice-worker", "rspice-ui-kit"}
         }
         tree = run(
             "cargo", "tree", "--locked", "-p", name, "--all-features",
             "--target", "all", "--edges",
-            "normal,build,dev" if name == "rspice-worker" else "normal,build",
+            "normal,build,dev" if name in {"rspice-worker", "rspice-ui-kit"} else "normal,build",
             "--prefix", "none",
             "--format", "{p}",
         )

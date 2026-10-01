@@ -22,6 +22,7 @@ class DependencyPolicyTests(unittest.TestCase):
                     },
                     "rspice-project": {"rspice-formats"},
                     "rspice-hardcopy": {"rspice-project-contract"},
+                    "rspice-ui-kit": {"egui", "rspice-results"},
                 },
                 {
                     "rspice-formats": {
@@ -29,6 +30,7 @@ class DependencyPolicyTests(unittest.TestCase):
                     },
                     "rspice-project": {"rspice-project", "rspice-formats", "rspice-results"},
                     "rspice-hardcopy": {"rspice-hardcopy", "rspice-project-contract", "rspice-design"},
+                    "rspice-ui-kit": {"egui", "rspice-results", "rspice-app-types", "rspice-units"},
                 },
                 {"rspice-formats", "csv", "serde"},
                 {"rspice-formats", "serde_json", "sha2"},
@@ -58,6 +60,14 @@ class DependencyPolicyTests(unittest.TestCase):
         self.assertEqual(
             violations({}, {}, table_schema_formats={"rspice-formats", "rspice-core"}),
             ["rspice-formats with only table-schema reaches simulator package rspice-core"],
+        )
+        self.assertEqual(
+            violations({}, {"rspice-ui-kit": {"egui", "rspice-core", "rspice-project", "eframe"}}),
+            [
+                "rspice-ui-kit reaches non-presentation package eframe",
+                "rspice-ui-kit reaches non-presentation package rspice-core",
+                "rspice-ui-kit reaches non-presentation package rspice-project",
+            ],
         )
 
         issues = violations(
