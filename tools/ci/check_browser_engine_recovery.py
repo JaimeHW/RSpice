@@ -134,9 +134,9 @@ def run(browser, fault, cancel_startup=False):
                         for control in controls(browser.snapshot())), "the recovered run's results")
     browser.capture("completed")
     choose_command(browser, "Open recovery center")
-    wait_for(lambda: has_control(browser, "Checkpoint now…"), "the recovery workspace")
+    wait_for(lambda: has_control(browser, "Create checkpoint"), "the recovery workspace")
     started_ms = time.time_ns() // 1_000_000
-    browser.click("Checkpoint now…", "button")
+    browser.click("Create checkpoint", "button")
 
     def published():
         records = checkpoint_records(browser)
@@ -195,7 +195,7 @@ def main():
         except BaseException as error:
             failure = {"error": str(error), "diagnostic_errors": []}
             fault.release.set()
-            for collect in (lambda: browser.capture("failure"), lambda: check_console(browser, fault)):
+            for collect in (lambda: browser.capture("failure-ui"), lambda: check_console(browser, fault)):
                 try:
                     collect()
                 except Exception as diagnostic_error:
