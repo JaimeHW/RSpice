@@ -10,10 +10,10 @@ use std::fmt;
 use crate::state::{Point, Selection};
 use crate::workbench::app_state::AppState;
 
-use super::SchematicSymbolContext;
 use super::design_notes;
 use super::documentation_shapes;
 use super::sheet_visibility::object_is_on_active_sheet;
+use super::{SchematicSymbolContext, schematic_symbol_context};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SelectionLayoutCommand {
@@ -123,7 +123,7 @@ pub(crate) fn selection_layout_availability(
     state: &AppState,
     command: SelectionLayoutCommand,
 ) -> Result<(), SelectionLayoutError> {
-    let context = SchematicSymbolContext::from_state(state);
+    let context = schematic_symbol_context(state);
     selection_layout_targets(state, &context, command).map(|_| ())
 }
 
@@ -480,7 +480,7 @@ mod tests {
                 .iter()
                 .map(|component| component.pos)
                 .collect();
-            let context = SchematicSymbolContext::from_state(&state);
+            let context = schematic_symbol_context(&state);
 
             assert!(apply_selection_layout(&mut state, &context, command).unwrap());
             assert_eq!(state.schematic.undo_description(), Some(command.label()));
@@ -506,7 +506,7 @@ mod tests {
     fn distribution_uses_equal_visible_gaps_and_stable_tie_breaking() {
         let mut state =
             selected_components(&[(30, 80, 70), (10, 0, 10), (20, 30, 40), (15, 30, 25)]);
-        let context = SchematicSymbolContext::from_state(&state);
+        let context = schematic_symbol_context(&state);
 
         assert!(
             apply_selection_layout(
@@ -516,7 +516,7 @@ mod tests {
             )
             .unwrap()
         );
-        let context = SchematicSymbolContext::from_state(&state);
+        let context = schematic_symbol_context(&state);
         let mut bounds: Vec<_> = state
             .schematic
             .document()
@@ -547,7 +547,7 @@ mod tests {
                 vec![Point::origin(), Point::new(10, 0)],
             ));
         state.schematic.session.selection.select_wire(9);
-        let context = SchematicSymbolContext::from_state(&state);
+        let context = schematic_symbol_context(&state);
         assert_eq!(
             apply_selection_layout(&mut state, &context, SelectionLayoutCommand::AlignLeft),
             Err(SelectionLayoutError::IncompatibleSelection)
@@ -575,7 +575,7 @@ mod tests {
         state.schematic.init_undo_history();
         let original = state.schematic.document().probes.clone();
         let topology = state.schematic.topology_version();
-        let context = SchematicSymbolContext::from_state(&state);
+        let context = schematic_symbol_context(&state);
 
         assert!(
             apply_selection_layout(&mut state, &context, SelectionLayoutCommand::AlignLeft)
@@ -622,7 +622,7 @@ mod tests {
             .assign_objects(catalog.revision(), second, [2])
             .expect("hidden assignment");
         catalog.set_active(first).expect("active sheet");
-        let context = SchematicSymbolContext::from_state(&state);
+        let context = schematic_symbol_context(&state);
         let before = state.schematic.document().components.clone();
 
         assert_eq!(

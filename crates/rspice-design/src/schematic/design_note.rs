@@ -527,6 +527,16 @@ pub struct DesignNoteRenderContext<'a> {
     pub conductor_count: usize,
 }
 
+impl<'a> DesignNoteRenderContext<'a> {
+    pub fn for_document(document: &super::document::SchematicDocument, view_path: &'a str) -> Self {
+        Self {
+            view_path,
+            component_count: document.components.len(),
+            conductor_count: document.wires.len() + document.buses.len(),
+        }
+    }
+}
+
 impl DesignNote {
     pub fn rendered_text(&self, context: &DesignNoteRenderContext<'_>) -> String {
         match self.kind {

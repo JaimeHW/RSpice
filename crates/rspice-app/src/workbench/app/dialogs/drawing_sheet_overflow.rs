@@ -6,11 +6,11 @@
 
 use egui::{Align, Context, Frame, Label, Layout, RichText, Stroke, Ui, vec2};
 
-use crate::schematic::view::SchematicSymbolContext;
 use crate::schematic::view::drawing_sheet::{
     ActiveDrawingSheet, DrawingSheetOverflowItem, DrawingSheetOverflowSummary,
     DrawingSheetOverflowTarget, drawing_sheet_overflow_summary, show_drawing_sheet_overflow_target,
 };
+use crate::schematic::view::schematic_symbol_context;
 use crate::state::{DrawingSheetDisplayUnit, ViewType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -53,7 +53,7 @@ impl RSpiceApp {
         }
 
         let (report, format, display_unit) = {
-            let symbol_context = SchematicSymbolContext::from_state(&self.state);
+            let symbol_context = schematic_symbol_context(&self.state);
             let sheet = ActiveDrawingSheet::resolve(&self.state);
             let format = sheet.format_label();
             (

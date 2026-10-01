@@ -22,10 +22,10 @@ use crate::ui::theme;
 use crate::ui::tokens::{Mode, Tokens};
 use crate::workbench::app_state::AppState;
 
-use super::SchematicSymbolContext;
 use super::grid::draw_grid;
 use super::sheet_visibility::object_is_on_active_sheet;
 use super::viewport::Viewport;
+use super::{SchematicSymbolContext, schematic_symbol_context};
 
 /// Canonical mockup calibration: four schematic world units per millimetre.
 pub(crate) const DRAWING_SHEET_UNITS_PER_MM: f64 = 4.0;
@@ -683,7 +683,7 @@ pub(crate) fn drawing_sheet_overflow_summary(
 /// navigate to an object that was moved or removed after the prior frame.
 pub(crate) fn show_first_drawing_sheet_overflow(state: &mut AppState) -> bool {
     let first_target = {
-        let symbol_context = SchematicSymbolContext::from_state(state);
+        let symbol_context = schematic_symbol_context(state);
         let sheet = ActiveDrawingSheet::resolve(state);
         drawing_sheet_overflow_summary(state, &symbol_context, &sheet).first_target
     };
@@ -696,7 +696,7 @@ pub(crate) fn show_drawing_sheet_overflow_target(
     target: DrawingSheetOverflowTarget,
 ) -> bool {
     let center = {
-        let symbol_context = SchematicSymbolContext::from_state(state);
+        let symbol_context = schematic_symbol_context(state);
         let sheet = ActiveDrawingSheet::resolve(state);
         drawing_sheet_overflow_summary(state, &symbol_context, &sheet)
             .items
@@ -999,7 +999,7 @@ fn active_object_bounds<'a>(
 pub(crate) fn drawing_sheet_printable_preview(
     state: &AppState,
 ) -> Vec<DrawingSheetPrintablePreview> {
-    let symbol_context = SchematicSymbolContext::from_state(state);
+    let symbol_context = schematic_symbol_context(state);
     active_object_bounds(state, &symbol_context)
         .into_iter()
         .map(|object| {
@@ -1950,7 +1950,7 @@ mod tests {
                 22,
                 vec![Point::new(500, 650), Point::new(520, 650)],
             ));
-        let symbol_context = SchematicSymbolContext::from_state(&state);
+        let symbol_context = schematic_symbol_context(&state);
         let sheet = ActiveDrawingSheet::resolve(&state);
 
         let report = drawing_sheet_overflow_summary(&state, &symbol_context, &sheet);
@@ -2026,7 +2026,7 @@ mod tests {
                 )
                 .expect("valid documentation line"),
             );
-        let symbol_context = SchematicSymbolContext::from_state(&state);
+        let symbol_context = schematic_symbol_context(&state);
         let sheet = ActiveDrawingSheet::resolve(&state);
 
         let report = drawing_sheet_overflow_summary(&state, &symbol_context, &sheet);
@@ -2062,7 +2062,7 @@ mod tests {
             Component::new(61, ComponentType::Resistor, Point::new(1_000, 100))
                 .with_name_value("R_INSTANCE_NAME_REACHES_BEYOND_THE_PAPER_EDGE", "1k"),
         );
-        let symbol_context = SchematicSymbolContext::from_state(&state);
+        let symbol_context = schematic_symbol_context(&state);
         let sheet = ActiveDrawingSheet::resolve(&state);
         let (body_min, body_max) =
             symbol_context.component_bounds(&state.schematic.document().components[0]);
@@ -2104,7 +2104,7 @@ mod tests {
             .document_mut_for_test()
             .wires
             .push(Wire::new(91, route));
-        let symbol_context = SchematicSymbolContext::from_state(&state);
+        let symbol_context = schematic_symbol_context(&state);
         let object = active_object_bounds(&state, &symbol_context)
             .into_iter()
             .find(|object| object.target == DrawingSheetOverflowTarget::Wire(91))
@@ -2150,7 +2150,7 @@ mod tests {
                 vec![Point::new(1_080, 120), Point::new(1_120, 120)],
             ));
         let expected_center = {
-            let symbol_context = SchematicSymbolContext::from_state(&state);
+            let symbol_context = schematic_symbol_context(&state);
             let sheet = ActiveDrawingSheet::resolve(&state);
             drawing_sheet_overflow_summary(&state, &symbol_context, &sheet).items[0].center()
         };

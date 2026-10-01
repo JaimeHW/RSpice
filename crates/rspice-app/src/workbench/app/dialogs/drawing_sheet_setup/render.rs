@@ -1773,7 +1773,7 @@ fn prospective_overflow_count(
         sheet_name: current.sheet_name,
         page_label: current.page_label,
     };
-    let symbols = crate::schematic::view::SchematicSymbolContext::from_state(state);
+    let symbols = crate::schematic::view::schematic_symbol_context(state);
     Some(
         crate::schematic::view::drawing_sheet::drawing_sheet_overflow_summary(
             state,

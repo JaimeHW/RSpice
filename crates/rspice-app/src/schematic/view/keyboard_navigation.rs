@@ -366,6 +366,7 @@ fn directional_score(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schematic::view::schematic_symbol_context;
     use egui::{Context, Id, Modifiers, RawInput, Rect, Sense, pos2, vec2};
 
     use crate::state::{Component, ComponentType, Point};
@@ -548,7 +549,7 @@ mod tests {
     #[test]
     fn candidate_catalog_covers_every_schematic_keyboard_taxonomy_in_scene_order() {
         let state = state_with_every_keyboard_object_class();
-        let context = SchematicSymbolContext::from_state(&state);
+        let context = schematic_symbol_context(&state);
         let objects = traversal_candidates(&state, &context)
             .into_iter()
             .map(|candidate| candidate.object)
@@ -576,7 +577,7 @@ mod tests {
         state.ui.schematic_selection_filter.instances = false;
         state.ui.schematic_selection_filter.wires = false;
         state.ui.schematic_selection_filter.labels = false;
-        let context = SchematicSymbolContext::from_state(&state);
+        let context = schematic_symbol_context(&state);
         let objects = traversal_candidates(&state, &context)
             .into_iter()
             .map(|candidate| candidate.object)
@@ -705,7 +706,7 @@ mod tests {
                 } else {
                     ui.memory_mut(|memory| memory.request_focus(Id::new("other-control")));
                 }
-                let symbol_context = SchematicSymbolContext::from_state(state);
+                let symbol_context = schematic_symbol_context(state);
                 let handled = handle_keyboard_object_navigation(&response, state, &symbol_context);
                 let key_still_available = ui
                     .ctx()

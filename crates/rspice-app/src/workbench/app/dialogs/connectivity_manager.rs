@@ -839,7 +839,7 @@ fn endpoint_choices_for_violation(
     else {
         return Vec::new();
     };
-    let symbol_context = crate::schematic::view::SchematicSymbolContext::from_state(state);
+    let symbol_context = crate::schematic::view::schematic_symbol_context(state);
     let Some(start) = symbol_context
         .named_terminal_points(component)
         .into_iter()

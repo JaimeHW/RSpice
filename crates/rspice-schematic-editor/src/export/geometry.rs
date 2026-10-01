@@ -138,11 +138,7 @@ fn design_note_export_text(
     note: &DesignNote,
     view_path: &str,
 ) -> String {
-    note.rendered_text(&DesignNoteRenderContext {
-        view_path,
-        component_count: document.components.len(),
-        conductor_count: document.wires.len() + document.buses.len(),
-    })
+    note.rendered_text(&DesignNoteRenderContext::for_document(document, view_path))
 }
 
 pub(super) fn include_design_note_bounds(

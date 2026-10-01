@@ -8,17 +8,25 @@ use std::collections::HashMap;
 use egui::emath::GuiRounding as _;
 use egui::{Painter, Pos2, Rect, Stroke, Vec2};
 
-use crate::state::{
-    Bus, BusTap, Component, ComponentType, Point, PortDirection, PortSpec, ResolvedSymbolSource,
-    SchematicProbe, Wire,
+use rspice_design::resolved_symbol::ResolvedSymbolSource;
+use rspice_design::schematic::{
+    bus::{Bus, BusTap},
+    component::Component,
+    component_display::SchematicParameterLabelVisibility,
+    component_type::ComponentType,
+    probe::SchematicProbe,
+    wire::Wire,
 };
-use crate::workbench::app_state::AppState;
+use rspice_design_model::{
+    Point,
+    port::{PortDirection, PortSpec},
+};
 
 use super::super::symbols::{SymbolLibrary, draw_baked};
-use super::SchematicSymbolContext;
 use super::resolved_symbol_render::{
     draw_resolved_symbol_with_visibility, resolved_symbol_world_bounds,
 };
+use super::symbol_context::SchematicSymbolContext;
 use super::viewport::Viewport;
 
 const DEFAULT_WIRE_STROKE_WIDTH: f32 = 1.1;
@@ -37,7 +45,7 @@ const _: [(); 1] = [(); (SELECTED_WIRE_STROKE_WIDTH.to_bits() == 2.0f32.to_bits(
 const _: [(); 1] = [(); (HIGHLIGHTED_WIRE_STROKE_WIDTH.to_bits() == 2.0f32.to_bits()) as usize];
 
 /// Draw a wire on the canvas
-pub(super) fn draw_wire(
+pub fn draw_wire(
     painter: &Painter,
     viewport: &Viewport,
     wire: &Wire,
@@ -49,7 +57,7 @@ pub(super) fn draw_wire(
 
 /// Draw one conductor polyline: a wire, or several wires chained end to end
 /// by [`chain_conductors`].
-pub(super) fn draw_conductor(
+pub fn draw_conductor(
     painter: &Painter,
     viewport: &Viewport,
     points: &[Point],
@@ -57,7 +65,7 @@ pub(super) fn draw_conductor(
     highlight_color: Option<egui::Color32>,
 ) {
     // Priority: selected > highlighted > default
-    let palette = crate::ui::tokens::active_palette();
+    let palette = rspice_ui_kit::tokens::active_palette();
     let (color, width) = if selected {
         (palette.accent, SELECTED_WIRE_STROKE_WIDTH) // Accent for selected
     } else if let Some(color) = highlight_color {
@@ -90,7 +98,7 @@ pub(super) fn draw_conductor(
 /// Axis-aligned segments are snapped to the pixel grid exactly as egui snaps
 /// a `LineSegment`, so a one-pixel wire at 100% zoom stays crisp and lines up
 /// with the pin leads the symbol painter still draws as segments.
-pub(super) fn conductor_shapes(
+fn conductor_shapes(
     mut points: Vec<Pos2>,
     stroke: Stroke,
     pixels_per_point: f32,
@@ -170,7 +178,7 @@ fn snap_open_end(end: &mut Pos2, inward: Pos2, quarter_pixel: f32, pixels_per_po
 }
 
 /// Paint a conductor polyline as one mitered path.
-pub(super) fn paint_conductor(painter: &Painter, points: Vec<Pos2>, stroke: Stroke) {
+pub fn paint_conductor(painter: &Painter, points: Vec<Pos2>, stroke: Stroke) {
     for shape in conductor_shapes(points, stroke, painter.pixels_per_point()) {
         painter.add(shape);
     }
@@ -183,9 +191,7 @@ pub(super) fn paint_conductor(painter: &Painter, points: Vec<Pos2>, stroke: Stro
 /// an end on another conductor's interior vertex keep their butt end, which
 /// is either open or hidden inside the through conductor. A continuation that
 /// folds straight back is never chained.
-pub(super) fn chain_conductors<'a>(
-    polylines: impl IntoIterator<Item = &'a [Point]>,
-) -> Vec<Vec<Point>> {
+pub fn chain_conductors<'a>(polylines: impl IntoIterator<Item = &'a [Point]>) -> Vec<Vec<Point>> {
     let mut chains: Vec<Vec<Point>> = polylines
         .into_iter()
         .map(|points| {
@@ -264,8 +270,8 @@ fn folds_back(a: Point, b: Point, c: Point) -> bool {
 /// Draw a typed multi-conductor bus. Buses deliberately use the same
 /// conductor color as scalar nets, with the mockup's three parallel strokes
 /// so type remains legible in monochrome exports and color-vision variants.
-pub(super) fn draw_bus(painter: &Painter, viewport: &Viewport, bus: &Bus, selected: bool) {
-    let palette = crate::ui::tokens::active_palette();
+pub fn draw_bus(painter: &Painter, viewport: &Viewport, bus: &Bus, selected: bool) {
+    let palette = rspice_ui_kit::tokens::active_palette();
     let color = if selected {
         palette.accent
     } else {
@@ -293,9 +299,9 @@ pub(super) fn draw_bus(painter: &Painter, viewport: &Viewport, bus: &Bus, select
             viewport.schematic_to_screen(*anchor) + Vec2::new(8.0, -8.0),
             egui::Align2::LEFT_BOTTOM,
             declaration.to_string(),
-            crate::ui::theme::mono(
-                crate::ui::tokens::FS_0,
-                crate::ui::theme::FontWeight::Medium,
+            rspice_ui_kit::theme::mono(
+                rspice_ui_kit::tokens::FS_0,
+                rspice_ui_kit::theme::FontWeight::Medium,
             ),
             if selected {
                 palette.accent
@@ -308,8 +314,8 @@ pub(super) fn draw_bus(painter: &Painter, viewport: &Viewport, bus: &Bus, select
 
 /// Draw a typed bus breakout. The selector is part of the durable electrical
 /// intent and therefore appears beside the tap in the canvas and SVG.
-pub(super) fn draw_bus_tap(painter: &Painter, viewport: &Viewport, tap: &BusTap, selected: bool) {
-    let palette = crate::ui::tokens::active_palette();
+pub fn draw_bus_tap(painter: &Painter, viewport: &Viewport, tap: &BusTap, selected: bool) {
+    let palette = rspice_ui_kit::tokens::active_palette();
     let color = if selected {
         palette.accent
     } else {
@@ -321,7 +327,7 @@ pub(super) fn draw_bus_tap(painter: &Painter, viewport: &Viewport, tap: &BusTap,
         DEFAULT_BUS_TAP_STROKE_WIDTH
     };
     let connection = viewport.schematic_to_screen(tap.connection_point);
-    let route: Vec<Pos2> = crate::schematic::bus_geometry::bus_tap_route_points(tap)
+    let route: Vec<Pos2> = crate::bus_geometry::bus_tap_route_points(tap)
         .into_iter()
         .map(|point| viewport.schematic_to_screen(point))
         .collect();
@@ -334,9 +340,9 @@ pub(super) fn draw_bus_tap(painter: &Painter, viewport: &Viewport, tap: &BusTap,
         connection + Vec2::new(5.0, -7.0),
         egui::Align2::LEFT_BOTTOM,
         tap.slice.to_string(),
-        crate::ui::theme::mono(
-            crate::ui::tokens::FS_0,
-            crate::ui::theme::FontWeight::Medium,
+        rspice_ui_kit::theme::mono(
+            rspice_ui_kit::tokens::FS_0,
+            rspice_ui_kit::theme::FontWeight::Medium,
         ),
         if selected {
             palette.accent
@@ -350,7 +356,7 @@ pub(super) fn draw_bus_tap(painter: &Painter, viewport: &Viewport, tap: &BusTap,
 /// and exact source/reference label. The marker scales with the drawing so it
 /// stays anchored to its authored schematic coordinate at every zoom.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ProbeVisualStatus {
+pub enum ProbeVisualStatus {
     Materialized,
     Hidden,
     Pending,
@@ -370,7 +376,7 @@ impl ProbeVisualStatus {
     }
 }
 
-pub(super) fn draw_probe(
+pub fn draw_probe(
     painter: &Painter,
     viewport: &Viewport,
     probe: &SchematicProbe,
@@ -378,7 +384,7 @@ pub(super) fn draw_probe(
     selected: bool,
     hovered: bool,
 ) {
-    let palette = crate::ui::tokens::active_palette();
+    let palette = rspice_ui_kit::tokens::active_palette();
     let status_color = match status {
         ProbeVisualStatus::Materialized => palette.ok,
         ProbeVisualStatus::Hidden => palette.text_faint,
@@ -425,9 +431,9 @@ pub(super) fn draw_probe(
         center + Vec2::new(13.0, -9.0) * viewport.zoom,
         egui::Align2::LEFT_BOTTOM,
         format!("{}{}", probe.reference, status.suffix()),
-        crate::ui::theme::mono(
-            crate::ui::tokens::FS_0 * viewport.zoom,
-            crate::ui::theme::FontWeight::Medium,
+        rspice_ui_kit::theme::mono(
+            rspice_ui_kit::tokens::FS_0 * viewport.zoom,
+            rspice_ui_kit::theme::FontWeight::Medium,
         ),
         status_color,
     );
@@ -436,14 +442,14 @@ pub(super) fn draw_probe(
 /// Conservative zoom-independent authored bounds for fitting and culling.
 /// The label font scales with the schematic, so its screen-space advance maps
 /// to a stable world-space estimate just like component labels.
-pub(super) fn probe_world_bounds(probe: &SchematicProbe) -> (Point, Point) {
+pub fn probe_world_bounds(probe: &SchematicProbe) -> (Point, Point) {
     probe.world_bounds()
 }
 
 /// Resolve a retained probe marker in screen space. The minimum radius keeps
 /// markers usable when zoomed far out while the upper range still follows the
 /// authored drawing scale.
-pub(super) fn probe_at_screen(
+pub fn probe_at_screen(
     viewport: &Viewport,
     probes: &[SchematicProbe],
     pointer: Pos2,
@@ -467,13 +473,13 @@ pub(super) fn probe_at_screen(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct WireScreenHit {
-    pub(super) wire_id: u64,
+pub struct WireScreenHit {
+    pub wire_id: u64,
     /// Integer schematic attachment on the conductor when representable,
     /// quantized along the conductor to the grid pitch when one is given. A
     /// visual hit on a malformed/non-integral conductor deliberately has no
     /// attachment.
-    pub(super) attachment: Option<Point>,
+    pub attachment: Option<Point>,
     distance_sq: f32,
     authored_index: usize,
 }
@@ -486,7 +492,7 @@ pub(super) struct WireScreenHit {
 /// coordinate, so the attachment stays on its body), and the nearer of that
 /// grid point and the segment's endpoints wins. Without one the exact pointer
 /// projection is the attachment, which is the `Free` grid contract.
-pub(super) fn nearest_wire_screen_hit(
+pub fn nearest_wire_screen_hit(
     viewport: &Viewport,
     wires: &[Wire],
     pointer: Pos2,
@@ -605,7 +611,7 @@ fn offset_polyline(points: &[Pos2], offset: f32) -> Vec<Pos2> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct BusHit {
+pub struct BusHit {
     pub bus_id: u64,
     pub point: Point,
     pub segment_start: Point,
@@ -615,13 +621,13 @@ pub(super) struct BusHit {
 /// Find the nearest bus segment and project the cursor onto it. The search is
 /// deterministic (distance then durable id), so overlapping malformed buses
 /// never cause frame-to-frame target flicker.
-pub(super) fn nearest_bus_hit(buses: &[Bus], requested: Point, radius: i32) -> Option<BusHit> {
+pub fn nearest_bus_hit(buses: &[Bus], requested: Point, radius: i32) -> Option<BusHit> {
     let radius_sq = i128::from(radius.max(0)).pow(2);
     buses
         .iter()
         .flat_map(|bus| {
             bus.points.windows(2).filter_map(move |segment| {
-                let point = crate::state::nearest_lattice_point_on_segment(
+                let point = rspice_design::schematic::bus::nearest_lattice_point_on_segment(
                     requested, segment[0], segment[1],
                 );
                 let dx = i128::from(point.x) - i128::from(requested.x);
@@ -643,14 +649,14 @@ pub(super) fn nearest_bus_hit(buses: &[Bus], requested: Point, radius: i32) -> O
         .map(|(_, _, hit)| hit)
 }
 
-pub(super) fn bus_tap_at(taps: &[BusTap], requested: Point, radius: i32) -> Option<u64> {
+pub fn bus_tap_at(taps: &[BusTap], requested: Point, radius: i32) -> Option<u64> {
     let radius_sq = i128::from(radius.max(0)).pow(2);
     taps.iter()
         .filter_map(|tap| {
-            crate::schematic::bus_geometry::bus_tap_route_points(tap)
+            crate::bus_geometry::bus_tap_route_points(tap)
                 .windows(2)
                 .map(|segment| {
-                    let point = crate::state::nearest_lattice_point_on_segment(
+                    let point = rspice_design::schematic::bus::nearest_lattice_point_on_segment(
                         requested, segment[0], segment[1],
                     );
                     let dx = i128::from(point.x) - i128::from(requested.x);
@@ -666,14 +672,14 @@ pub(super) fn bus_tap_at(taps: &[BusTap], requested: Point, radius: i32) -> Opti
 }
 
 /// Draw a component on the canvas
-pub(super) fn draw_component(
+pub fn draw_component(
     painter: &Painter,
     viewport: &Viewport,
     component: &Component,
     selected: bool,
     symbol_library: Option<&SymbolLibrary>,
     symbol_context: &SchematicSymbolContext,
-    parameter_labels: crate::state::SchematicParameterLabelVisibility,
+    parameter_labels: SchematicParameterLabelVisibility,
 ) {
     // Component uses `pos` not `position`, `kind` not `component_type`
     let pos = viewport.schematic_to_screen(component.pos);
@@ -681,7 +687,7 @@ pub(super) fn draw_component(
 
     // Grid lines now visible through components (no opaque background)
 
-    let palette = crate::ui::tokens::active_palette();
+    let palette = rspice_ui_kit::tokens::active_palette();
     let outline_color = if selected {
         palette.accent // Accent for selected
     } else {
@@ -787,14 +793,13 @@ pub(super) fn draw_component(
     // A resolved authored cell symbol prints its own name and value against
     // the anchors in its symbol document. Canonical catalog artwork and error
     // states use the ordinary instance labels here.
-    if !symbol_drew_its_own_labels
-        && parameter_labels != crate::state::SchematicParameterLabelVisibility::Hidden
+    if !symbol_drew_its_own_labels && parameter_labels != SchematicParameterLabelVisibility::Hidden
     {
         draw_component_labels(painter, pos, scale, component, parameter_labels);
     }
 }
 
-pub(super) fn port_symbol_stroke(
+pub fn port_symbol_stroke(
     symbol_stroke: Stroke,
     scale: f32,
     selected: bool,
@@ -811,7 +816,11 @@ pub(super) fn port_symbol_stroke(
     Stroke::new(width * scale, symbol_stroke.color)
 }
 
-pub(super) fn draw_port_direction_overlay(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Independent canvas transform, port direction, and paint inputs."
+)]
+pub fn draw_port_direction_overlay(
     painter: &Painter,
     pos: Pos2,
     scale: f32,
@@ -822,15 +831,11 @@ pub(super) fn draw_port_direction_overlay(
     stroke: Stroke,
 ) {
     let screen_point = |point| {
-        let point = crate::schematic::port_overlay::transform_point(
-            point,
-            rotation_degrees,
-            mirror_h,
-            mirror_v,
-        );
+        let point =
+            crate::port_overlay::transform_point(point, rotation_degrees, mirror_h, mirror_v);
         Pos2::new(pos.x + point.x * scale, pos.y + point.y * scale)
     };
-    for segment in crate::schematic::port_overlay::direction_segments(direction) {
+    for segment in crate::port_overlay::direction_segments(direction) {
         painter.line_segment(
             [screen_point(segment.start), screen_point(segment.end)],
             stroke,
@@ -838,7 +843,7 @@ pub(super) fn draw_port_direction_overlay(
     }
 }
 
-pub(super) fn draw_symbol_resolution_error(
+pub fn draw_symbol_resolution_error(
     painter: &Painter,
     pos: Pos2,
     scale: f32,
@@ -864,7 +869,7 @@ pub(super) fn draw_symbol_resolution_error(
 /// Resolve authored artwork only when every visible lead anchor is exactly
 /// the same point as the frozen executable terminal layout. A mismatch uses
 /// another authored cell symbol when available, otherwise an explicit error.
-pub(super) fn compatible_builtin_xspice_asset<'a>(
+pub fn compatible_builtin_xspice_asset<'a>(
     component: &'a Component,
     library: &'a SymbolLibrary,
 ) -> Option<(&'a SymbolLibrary, &'a str, f32, f32)> {
@@ -889,7 +894,7 @@ pub(super) fn compatible_builtin_xspice_asset<'a>(
 /// Carry artwork leads out to terminals the drawing itself does not reach,
 /// which happens when a long interface widens the block past the size the
 /// artwork was authored for.
-pub(super) fn draw_artwork_lead_extensions(
+pub fn draw_artwork_lead_extensions(
     painter: &Painter,
     pos: Pos2,
     scale: f32,
@@ -897,7 +902,7 @@ pub(super) fn draw_artwork_lead_extensions(
     stroke: Stroke,
 ) {
     for (edge, terminal) in component.artwork_lead_extensions() {
-        let to_screen = |point: crate::state::Point| {
+        let to_screen = |point: Point| {
             let transformed = component.transform_point(point);
             Pos2::new(
                 pos.x + transformed.x as f32 * scale,
@@ -988,22 +993,22 @@ fn compute_label_layout(pos: Pos2, scale: f32, component: &Component) -> LabelLa
     // Tall devices (BJTs, MOSFETs): name above, value on right side.
     let is_tall_device = matches!(
         component.kind,
-        crate::state::ComponentType::NpnBjt
-            | crate::state::ComponentType::PnpBjt
-            | crate::state::ComponentType::NpnBjt4
-            | crate::state::ComponentType::PnpBjt4
-            | crate::state::ComponentType::NpnBjt5
-            | crate::state::ComponentType::PnpBjt5
-            | crate::state::ComponentType::Nmos
-            | crate::state::ComponentType::Pmos
-            | crate::state::ComponentType::Njfet
-            | crate::state::ComponentType::Pjfet
-            | crate::state::ComponentType::Nmesfet
-            | crate::state::ComponentType::Pmesfet
-            | crate::state::ComponentType::NVdmos
-            | crate::state::ComponentType::PVdmos
-            | crate::state::ComponentType::NmosSoi
-            | crate::state::ComponentType::PmosSoi
+        ComponentType::NpnBjt
+            | ComponentType::PnpBjt
+            | ComponentType::NpnBjt4
+            | ComponentType::PnpBjt4
+            | ComponentType::NpnBjt5
+            | ComponentType::PnpBjt5
+            | ComponentType::Nmos
+            | ComponentType::Pmos
+            | ComponentType::Njfet
+            | ComponentType::Pjfet
+            | ComponentType::Nmesfet
+            | ComponentType::Pmesfet
+            | ComponentType::NVdmos
+            | ComponentType::PVdmos
+            | ComponentType::NmosSoi
+            | ComponentType::PmosSoi
     );
 
     // Calculate label margin from component edge.
@@ -1054,10 +1059,10 @@ fn draw_component_labels(
     pos: Pos2,
     scale: f32,
     component: &Component,
-    visibility: crate::state::SchematicParameterLabelVisibility,
+    visibility: SchematicParameterLabelVisibility,
 ) {
     // Skip labels for Ground (too small, clutters schematic)
-    if matches!(component.kind, crate::state::ComponentType::Ground) {
+    if matches!(component.kind, ComponentType::Ground) {
         return;
     }
 
@@ -1067,14 +1072,14 @@ fn draw_component_labels(
     if name_size < 4.0 {
         return;
     }
-    let name_font = crate::ui::theme::sans(name_size, crate::ui::theme::FontWeight::Medium);
-    let value_font = crate::ui::theme::sans(
+    let name_font = rspice_ui_kit::theme::sans(name_size, rspice_ui_kit::theme::FontWeight::Medium);
+    let value_font = rspice_ui_kit::theme::sans(
         quantize_font_size(9.0 * scale),
-        crate::ui::theme::FontWeight::Regular,
+        rspice_ui_kit::theme::FontWeight::Regular,
     );
 
     let layout = compute_label_layout(pos, scale, component);
-    let palette = crate::ui::tokens::active_palette();
+    let palette = rspice_ui_kit::tokens::active_palette();
 
     // Draw component name (reference designator)
     if component.display_mode.show_name(visibility) && !component.name.is_empty() {
@@ -1101,25 +1106,17 @@ fn draw_component_labels(
 }
 
 /// Draw a junction (net connection point)
-pub(super) fn draw_junction(
+pub fn draw_junction(
     painter: &Painter,
     viewport: &Viewport,
     position: Point,
-    state: &AppState,
+    is_selected: bool,
+    is_hovered: bool,
 ) {
     let pos = viewport.schematic_to_screen(position);
     let radius = 1.5 * viewport.zoom; // Match wire/symbol stroke width
 
-    // Check if this junction is being hovered (for visual feedback)
-    let is_hovered = state
-        .dialogs
-        .interaction
-        .hover_wire_vertex
-        .map(|(x, y)| x == position.x && y == position.y)
-        .unwrap_or(false);
-    let is_selected = state.schematic.session.selection.has_junction(position);
-
-    let palette = crate::ui::tokens::active_palette();
+    let palette = rspice_ui_kit::tokens::active_palette();
     if is_hovered || is_selected {
         // Draw larger highlight ring when hovered
         let highlight_radius = radius * 2.5;
@@ -1144,8 +1141,9 @@ pub(super) fn draw_junction(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{BusDeclaration, BusSlice, BusTapOrientation};
     use egui::{Context, Id, LayerId, Order, Shape};
+    use rspice_design::schematic::bus::BusTapOrientation;
+    use rspice_design_model::bus::{BusDeclaration, BusSlice};
 
     fn wire_stroke_width(selected: bool, highlighted: bool, zoom: f32) -> f32 {
         let ctx = Context::default();
@@ -1166,7 +1164,7 @@ mod tests {
             &viewport,
             &wire,
             selected,
-            highlighted.then_some(crate::ui::tokens::active_palette().warn),
+            highlighted.then_some(rspice_ui_kit::tokens::active_palette().warn),
         );
 
         let mut widths = Vec::new();
@@ -1192,7 +1190,7 @@ mod tests {
     #[test]
     fn canonical_vector_port_body_and_overlay_use_bus_weight() {
         let scale = 1.5;
-        let symbol = Stroke::new(scale, crate::ui::tokens::active_palette().symbol);
+        let symbol = Stroke::new(scale, rspice_ui_kit::tokens::active_palette().symbol);
         let spec = |name: &str| PortSpec {
             name: name.to_owned(),
             direction: PortDirection::InOut,
@@ -1221,12 +1219,14 @@ mod tests {
     fn catalog_svg_is_used_only_when_its_leads_match_every_electrical_terminal() {
         let library = SymbolLibrary::load_embedded().expect("symbol library");
         let component = |model_type: &str| {
-            let descriptor = crate::state::engine_only_xspice_devices()
+            let descriptor = rspice_design::schematic::device_catalog::engine_only_xspice_devices()
                 .iter()
                 .find(|descriptor| descriptor.model_type == model_type)
                 .expect("catalog descriptor");
-            let binding =
-                crate::state::builtin_xspice_library_binding(descriptor).expect("catalog binding");
+            let binding = rspice_design::schematic::device_catalog::builtin_xspice_library_binding(
+                descriptor,
+            )
+            .expect("catalog binding");
             Component::new(1, ComponentType::CellInstance, Point::origin())
                 .with_library_cell(binding)
         };
@@ -1273,8 +1273,12 @@ mod tests {
 
         let library = SymbolLibrary::load_embedded().expect("symbol library");
         let mut matched = Vec::new();
-        for descriptor in crate::state::engine_only_xspice_devices() {
-            let Ok(binding) = crate::state::builtin_xspice_library_binding(descriptor) else {
+        for descriptor in rspice_design::schematic::device_catalog::engine_only_xspice_devices() {
+            let Ok(binding) =
+                rspice_design::schematic::device_catalog::builtin_xspice_library_binding(
+                    descriptor,
+                )
+            else {
                 continue;
             };
             let component = Component::new(1, ComponentType::CellInstance, Point::origin())
@@ -1287,7 +1291,7 @@ mod tests {
             let (_, height) = component.symbol_dimensions();
             assert_eq!(
                 (artwork_width, artwork_height),
-                (crate::state::GENERATED_WIDTH, height),
+                (rspice_design::symbol_generation::GENERATED_WIDTH, height),
                 "{} artwork must be drawn in the box it was authored for",
                 descriptor.model_type
             );
@@ -1303,25 +1307,29 @@ mod tests {
     /// terminals, so nothing is left floating off the drawing.
     #[test]
     fn artwork_leads_extend_to_terminals_the_drawing_does_not_reach() {
-        let descriptor = crate::state::engine_only_xspice_devices()
+        let descriptor = rspice_design::schematic::device_catalog::engine_only_xspice_devices()
             .iter()
             .find(|descriptor| descriptor.model_type == "d_fdiv")
             .expect("catalog descriptor");
         let binding =
-            crate::state::builtin_xspice_library_binding(descriptor).expect("catalog binding");
+            rspice_design::schematic::device_catalog::builtin_xspice_library_binding(descriptor)
+                .expect("catalog binding");
         let component = Component::new(1, ComponentType::CellInstance, Point::origin())
             .with_library_cell(binding);
 
         let (width, _) = component.symbol_dimensions();
         assert!(
-            width > crate::state::GENERATED_WIDTH,
+            width > rspice_design::symbol_generation::GENERATED_WIDTH,
             "freq_in/freq_out do not fit the nominal body"
         );
         let extensions = component.artwork_lead_extensions();
         assert_eq!(extensions.len(), 2, "{extensions:?}");
         for (edge, terminal) in extensions {
             assert_eq!(edge.y, terminal.y, "a lead extension must run straight");
-            assert_eq!(edge.x.abs(), crate::state::GENERATED_WIDTH / 2);
+            assert_eq!(
+                edge.x.abs(),
+                rspice_design::symbol_generation::GENERATED_WIDTH / 2
+            );
             assert_eq!(terminal.x.abs(), width / 2);
         }
     }
@@ -1518,7 +1526,7 @@ mod tests {
     #[test]
     fn nearest_lattice_point_handles_extreme_diagonal_coordinates() {
         assert_eq!(
-            crate::state::nearest_lattice_point_on_segment(
+            rspice_design::schematic::bus::nearest_lattice_point_on_segment(
                 Point::origin(),
                 Point::new(i32::MIN, i32::MIN),
                 Point::new(i32::MAX, i32::MAX),

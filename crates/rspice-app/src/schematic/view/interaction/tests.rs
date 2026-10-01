@@ -7,6 +7,7 @@
 use std::collections::HashSet;
 
 use super::*;
+use crate::schematic::view::schematic_symbol_context;
 use crate::state::{
     Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType,
     DesignNoteKind, DocumentationShapeKind, Junction, NetLabel, PendingDesignNotePlacement,
@@ -262,7 +263,7 @@ fn component_probe_never_fabricates_a_voltage_node_from_instance_identity() {
         Component::new(17, ComponentType::CellInstance, Point::origin())
             .with_name_value("XAMP", ""),
     );
-    let symbols = SchematicSymbolContext::from_state(&state);
+    let symbols = schematic_symbol_context(&state);
 
     assert_eq!(
         component_probe_expression(&state, 17, Point::origin(), &symbols),
@@ -278,7 +279,7 @@ fn voltage_source_component_probe_preserves_device_current_semantics() {
         Component::new(23, ComponentType::VoltageSource, Point::origin())
             .with_name_value("VBIAS", "1.8"),
     );
-    let symbols = SchematicSymbolContext::from_state(&state);
+    let symbols = schematic_symbol_context(&state);
 
     assert_eq!(
         component_probe_expression(&state, 23, Point::origin(), &symbols),
@@ -292,7 +293,7 @@ fn ordinary_component_body_probe_requests_device_current_not_nearest_pin_voltage
     state.schematic.document_mut_for_test().components.push(
         Component::new(24, ComponentType::Resistor, Point::origin()).with_name_value("RLOAD", "1k"),
     );
-    let symbols = SchematicSymbolContext::from_state(&state);
+    let symbols = schematic_symbol_context(&state);
 
     assert_eq!(
         component_probe_expression(&state, 24, Point::origin(), &symbols),
@@ -306,7 +307,7 @@ fn exact_component_terminal_probe_requests_its_node_voltage() {
     state.schematic.document_mut_for_test().components.push(
         Component::new(25, ComponentType::Resistor, Point::origin()).with_name_value("RLOAD", "1k"),
     );
-    let symbols = SchematicSymbolContext::from_state(&state);
+    let symbols = schematic_symbol_context(&state);
 
     assert_eq!(
         component_probe_expression(&state, 25, Point::new(-20, 0), &symbols),
@@ -333,7 +334,7 @@ fn synthesized_and_multi_port_component_bodies_fail_closed() {
             .document_mut_for_test()
             .components
             .push(Component::new(id, kind, Point::origin()));
-        let symbols = SchematicSymbolContext::from_state(&state);
+        let symbols = schematic_symbol_context(&state);
 
         assert_eq!(
             component_probe_expression(&state, id, Point::origin(), &symbols),
@@ -817,7 +818,7 @@ fn armed_move_commits_once_syncs_workspace_and_retains_selection() {
     state.schematic.init_undo_history();
     arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
     state.dialogs.move_selection.preview_delta = Point::new(0, 10);
-    let symbols = SchematicSymbolContext::from_state(&state);
+    let symbols = schematic_symbol_context(&state);
 
     commit_armed_move_selection(&mut state, &symbols);
 
@@ -1613,7 +1614,7 @@ fn double_click_property_dispatch_selects_taps_before_their_source_bus() {
     .unwrap();
     state.schematic.document_mut_for_test().buses.push(bus);
     state.schematic.document_mut_for_test().bus_taps.push(tap);
-    let symbol_context = SchematicSymbolContext::from_state(&state);
+    let symbol_context = schematic_symbol_context(&state);
     let ctx = egui::Context::default();
     let viewport = pointer_viewport();
     let screen_point = egui::pos2(10.0, 0.0);

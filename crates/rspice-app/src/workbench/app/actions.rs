@@ -18,7 +18,7 @@ pub(in crate::workbench) mod workspace;
 use egui::{Context, Popup};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::schematic::view::SchematicSymbolContext;
+use crate::schematic::view::schematic_symbol_context;
 use crate::state::{Point, SymbolDocument, SymbolShape};
 use crate::workbench::commands::vocabulary::Command as ShortcutCommand;
 use crate::workbench::{
@@ -579,7 +579,7 @@ impl RSpiceApp {
     }
 
     fn rotate_schematic_selection_with_symbols(&mut self) {
-        let symbol_context = SchematicSymbolContext::from_state(&self.state);
+        let symbol_context = schematic_symbol_context(&self.state);
         crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(&mut self.state);
         crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
             &mut self.state,
@@ -592,7 +592,7 @@ impl RSpiceApp {
     }
 
     fn mirror_schematic_selection_h_with_symbols(&mut self) {
-        let symbol_context = SchematicSymbolContext::from_state(&self.state);
+        let symbol_context = schematic_symbol_context(&self.state);
         crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(&mut self.state);
         crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
             &mut self.state,
@@ -605,7 +605,7 @@ impl RSpiceApp {
     }
 
     fn mirror_schematic_selection_v_with_symbols(&mut self) {
-        let symbol_context = SchematicSymbolContext::from_state(&self.state);
+        let symbol_context = schematic_symbol_context(&self.state);
         crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(&mut self.state);
         crate::schematic::view::sheet_visibility::with_hidden_wire_topology_preserved(
             &mut self.state,

@@ -7,7 +7,7 @@
 use egui::{Context, Ui};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::schematic::view::SchematicSymbolContext;
+use crate::schematic::view::schematic_symbol_context;
 use crate::state::{MoveSelectionMode, Point, Tool};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -246,7 +246,7 @@ fn workflow_body(
 fn selection_summary(state: &AppState) -> String {
     let selection = &state.schematic.session.selection;
     let count = state.schematic.live_movable_selection_count();
-    let symbol_context = SchematicSymbolContext::from_state(state);
+    let symbol_context = schematic_symbol_context(state);
     let terminals: std::collections::HashSet<Point> = state
         .schematic
         .document()

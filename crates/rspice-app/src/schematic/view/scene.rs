@@ -10,7 +10,7 @@ use egui::{Painter, Rect, Stroke};
 
 use crate::schematic::bus_notations;
 use crate::state::{
-    CellViewRef, Component, CrossProbeIndex, DesignNote, DesignNoteKind, DesignReviewState, Point,
+    CellViewRef, CrossProbeIndex, DesignNote, DesignNoteKind, DesignReviewState, Point,
     SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicHierarchyVisibility,
     SchematicNetHighlighting, SchematicReviewMarkerVisibility,
 };
@@ -36,6 +36,7 @@ use super::sheet_visibility::{
     objects_on_active_sheet,
 };
 use super::viewport::Viewport;
+use rspice_design::schematic::design_note::DesignNoteRenderContext;
 
 /// Culling margin in world units: symbols extend up to ~40 units from their
 /// anchor and labels overhang further; generous slack keeps pop-in impossible
@@ -53,13 +54,6 @@ const EMPTY_HINT_MOBILE_LINES: [&str; 4] = [
     "The toolbar provides wiring, labels, and probes",
     "File > Open project loads an existing design",
 ];
-
-pub(super) fn component_cull_bounds(
-    component: &Component,
-    symbol_context: &SchematicSymbolContext,
-) -> (Point, Point) {
-    symbol_context.component_bounds(component)
-}
 
 pub(super) fn draw_scene(
     painter: &Painter,
@@ -219,7 +213,7 @@ pub(super) fn draw_scene(
         if !object_is_on_active_sheet(state, component.id) {
             continue;
         }
-        let (min, max) = component_cull_bounds(component, symbol_context);
+        let (min, max) = symbol_context.component_bounds(component);
         if (max.x as f32) < wx0
             || (min.x as f32) > wx1
             || (max.y as f32) < wy0
@@ -257,7 +251,13 @@ pub(super) fn draw_scene(
         if jx < wx0 || jx > wx1 || jy < wy0 || jy > wy1 {
             continue;
         }
-        draw_junction(painter, viewport, junction.pos, state);
+        draw_junction(
+            painter,
+            viewport,
+            junction.pos,
+            state.schematic.session.selection.has_junction(junction.pos),
+            state.dialogs.interaction.hover_wire_vertex == Some((junction.pos.x, junction.pos.y)),
+        );
     }
 
     draw_operating_point_annotations(painter, available, viewport, state);
@@ -359,7 +359,16 @@ pub(super) fn draw_scene(
             .pointer_hover_pos()
             .filter(|pointer| available.contains(*pointer))
             .and_then(|pointer| {
-                design_note_at(painter.ctx(), viewport, notes.as_ref(), state, pointer)
+                design_note_at(
+                    painter.ctx(),
+                    viewport,
+                    notes.as_ref(),
+                    &DesignNoteRenderContext::for_document(
+                        state.schematic.document(),
+                        &state.workspace.content.active_view.display_path(),
+                    ),
+                    pointer,
+                )
             })
     } else {
         None
@@ -387,7 +396,10 @@ pub(super) fn draw_scene(
             painter,
             viewport,
             note,
-            state,
+            &DesignNoteRenderContext::for_document(
+                state.schematic.document(),
+                &state.workspace.content.active_view.display_path(),
+            ),
             selected,
             hovered_note == Some(note.id),
         );
@@ -1493,22 +1505,14 @@ mod tests {
     use super::*;
     use crate::state::SchematicState;
     use crate::state::{
-        AnalysisResult, AnalysisType, ComponentType, DcOpResult, Junction, OperatingPointValue,
-        PortDirection, PortSpec, ResolvedCellSymbol, SimulationRun, SymbolDocument, SymbolPin,
-        SymbolShape, ViewType, Wire,
+        AnalysisResult, AnalysisType, Component, ComponentType, DcOpResult, Junction,
+        OperatingPointValue, SimulationRun, ViewType, Wire,
     };
     use crate::workbench::app_state::AppState;
     use std::collections::HashMap;
 
     /// The canvas every parent-context render in this module uses.
     const PARENT_CONTEXT_VIEWPORT: egui::Vec2 = egui::vec2(220.0, 140.0);
-
-    fn port(name: &str, direction: PortDirection) -> PortSpec {
-        PortSpec {
-            name: name.to_owned(),
-            direction,
-        }
-    }
 
     /// One conductor on a sheet, so an ancestor has something to contribute.
     fn sheet_with_one_wire() -> SchematicState {
@@ -1736,39 +1740,6 @@ mod tests {
         assert_eq!(
             probe_visual_status(&probe, &statuses),
             ProbeVisualStatus::Disabled
-        );
-    }
-
-    #[test]
-    fn component_cull_bounds_use_resolved_symbol_bounds() {
-        let component = Component::new(1, ComponentType::CellInstance, Point::new(100, 50));
-        let symbol = ResolvedCellSymbol::from_authored_document(
-            SymbolDocument {
-                body: vec![SymbolShape::Polyline {
-                    points: vec![Point::new(80, -10), Point::new(120, 10)],
-                    closed: false,
-                }],
-                pins: vec![SymbolPin::new(
-                    "OUT",
-                    PortDirection::Out,
-                    Some(Point::new(120, 0)),
-                )],
-                ..SymbolDocument::default()
-            },
-            &[port("OUT", PortDirection::Out)],
-        );
-        let mut resolved_by_component_id = HashMap::new();
-        resolved_by_component_id.insert(component.id, symbol);
-        let context = SchematicSymbolContext {
-            resolved_by_component_id,
-            resolved_by_binding: Vec::new(),
-            pending_library_symbol: None,
-            revision: 0,
-        };
-
-        assert_eq!(
-            component_cull_bounds(&component, &context),
-            (Point::new(80, 10), Point::new(220, 90))
         );
     }
 

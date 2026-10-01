@@ -3,7 +3,6 @@
 pub use rspice_design::schematic::bus::{
     Bus, BusDeclaration, BusDirection, BusNotation, BusParseError, BusPropertyImpact, BusSlice,
     BusTap, BusTapOrientation, BusTargetKind, declared_vector, declared_width,
-    nearest_lattice_point_on_segment,
 };
 
 use super::{Point, WireRoutingMode};

@@ -11,7 +11,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::schematic::view::SchematicSymbolContext;
+use crate::schematic::view::schematic_symbol_context;
 use crate::schematic::view::sheet_visibility::{
     selectable_objects_on_active_sheet, selection_filtered_to_active_sheet,
     with_hidden_wire_topology_preserved,
@@ -749,7 +749,7 @@ fn named_external_attachments(state: &AppState) -> Result<Vec<(Point, String)>, 
         .iter()
         .map(|label| label.name.as_str())
         .collect::<HashSet<_>>();
-    let symbols = SchematicSymbolContext::from_state(state);
+    let symbols = schematic_symbol_context(state);
     let terminal_points = state
         .schematic
         .document()

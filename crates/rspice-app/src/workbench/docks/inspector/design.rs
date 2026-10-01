@@ -17,10 +17,10 @@ use std::collections::{HashMap, HashSet};
 use egui::{Color32, RichText, Ui};
 
 use crate::schematic::view::{
-    SchematicSymbolContext,
     drawing_sheet::{
         ActiveDrawingSheet, DrawingSheetOverflowSummary, drawing_sheet_overflow_summary,
     },
+    schematic_symbol_context,
     sheet_visibility::{self, SheetScope},
 };
 use crate::state::{
@@ -945,7 +945,7 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
 
 fn drawing_sheet_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
     let sheet = ActiveDrawingSheet::resolve(&app.state);
-    let symbol_context = SchematicSymbolContext::from_state(&app.state);
+    let symbol_context = schematic_symbol_context(&app.state);
     let overflow = drawing_sheet_overflow_summary(&app.state, &symbol_context, &sheet);
     let source = drawing_sheet_source_label(sheet.format.inheritance);
     let physical = sheet.geometry.physical;

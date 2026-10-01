@@ -4,7 +4,7 @@
 //! command is omitted from a menu when its behavior is not implemented; the
 //! UI does not advertise speculative or placeholder capability.
 
-use crate::schematic::view::SchematicSymbolContext;
+use crate::schematic::view::schematic_symbol_context;
 use crate::state::{ComponentType, Tool};
 use crate::workbench::app::sheets as sheet_actions;
 use crate::workbench::commands::vocabulary::Command;
@@ -1663,7 +1663,7 @@ impl Command {
             Self::Place(ComponentType::Port) => Self::PlacePin.execute(app),
             Self::Place(kind) => set_tool(app, Tool::Place(kind)),
             Self::RotateSelection => {
-                let symbol_context = SchematicSymbolContext::from_state(&app.state);
+                let symbol_context = schematic_symbol_context(&app.state);
                 crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
                     &mut app.state,
                 );
@@ -1677,7 +1677,7 @@ impl Command {
                 );
             }
             Self::MirrorSelectionHorizontal => {
-                let symbol_context = SchematicSymbolContext::from_state(&app.state);
+                let symbol_context = schematic_symbol_context(&app.state);
                 crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
                     &mut app.state,
                 );
@@ -1691,7 +1691,7 @@ impl Command {
                 );
             }
             Self::MirrorSelectionVertical => {
-                let symbol_context = SchematicSymbolContext::from_state(&app.state);
+                let symbol_context = schematic_symbol_context(&app.state);
                 crate::schematic::view::sheet_visibility::retain_selection_on_active_sheet(
                     &mut app.state,
                 );
@@ -1714,7 +1714,7 @@ impl Command {
             | Self::DistributeSelectionVertical => {
                 let command =
                     selection_layout_command(self).expect("selection layout command is mapped");
-                let symbol_context = SchematicSymbolContext::from_state(&app.state);
+                let symbol_context = schematic_symbol_context(&app.state);
                 match crate::schematic::view::selection_layout::apply_selection_layout(
                     &mut app.state,
                     &symbol_context,

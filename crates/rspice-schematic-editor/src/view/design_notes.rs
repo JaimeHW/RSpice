@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use egui::{Color32, Context, Galley, Painter, Pos2, Rect, Stroke, vec2};
 
-use crate::state::{DesignNote, DesignNoteKind, DesignNoteRenderContext, Point};
-use crate::ui::theme::{self, FontWeight};
-use crate::workbench::app_state::AppState;
+use rspice_design::schematic::design_note::{DesignNote, DesignNoteKind, DesignNoteRenderContext};
+use rspice_design_model::Point;
+use rspice_ui_kit::theme::{self, FontWeight};
 
 use super::viewport::Viewport;
 
@@ -23,16 +23,6 @@ struct DesignNoteScreenLayout {
     lines: Vec<(Arc<Galley>, Pos2)>,
     bounds: Rect,
     anchor: Pos2,
-}
-
-fn resolved_text(note: &DesignNote, state: &AppState) -> String {
-    let view_path = state.workspace.content.active_view.display_path();
-    note.rendered_text(&DesignNoteRenderContext {
-        view_path: &view_path,
-        component_count: state.schematic.document().components.len(),
-        conductor_count: state.schematic.document().wires.len()
-            + state.schematic.document().buses.len(),
-    })
 }
 
 fn screen_layout(
@@ -80,7 +70,7 @@ fn screen_layout(
 }
 
 fn note_color(kind: DesignNoteKind, selected: bool) -> Color32 {
-    let palette = crate::ui::tokens::active_palette();
+    let palette = rspice_ui_kit::tokens::active_palette();
     if selected {
         return palette.accent;
     }
@@ -92,17 +82,17 @@ fn note_color(kind: DesignNoteKind, selected: bool) -> Color32 {
     }
 }
 
-pub(super) fn draw_design_note(
+pub fn draw_design_note(
     painter: &Painter,
     viewport: &Viewport,
     note: &DesignNote,
-    state: &AppState,
+    context: &DesignNoteRenderContext<'_>,
     selected: bool,
     hovered: bool,
 ) {
-    let palette = crate::ui::tokens::active_palette();
+    let palette = rspice_ui_kit::tokens::active_palette();
     let color = note_color(note.kind, selected);
-    let text = resolved_text(note, state);
+    let text = note.rendered_text(context);
     let Some(layout) = screen_layout(painter.ctx(), viewport, note, &text, color) else {
         return;
     };
@@ -164,15 +154,15 @@ pub(super) fn draw_design_note(
     }
 }
 
-pub(super) fn design_note_at(
+pub fn design_note_at(
     ctx: &Context,
     viewport: &Viewport,
     notes: &[DesignNote],
-    state: &AppState,
+    context: &DesignNoteRenderContext<'_>,
     pointer: Pos2,
 ) -> Option<u64> {
     notes.iter().rev().find_map(|note| {
-        let text = resolved_text(note, state);
+        let text = note.rendered_text(context);
         screen_layout(ctx, viewport, note, &text, note_color(note.kind, false))
             .filter(|layout| {
                 layout.bounds.contains(pointer)
@@ -184,7 +174,7 @@ pub(super) fn design_note_at(
 }
 
 /// Intrinsic world bounds for culling, zoom-to-fit, and marquee selection.
-pub(super) fn world_bounds(note: &DesignNote, rendered_text: &str) -> (Point, Point) {
+pub fn world_bounds(note: &DesignNote, rendered_text: &str) -> (Point, Point) {
     let lines: Vec<&str> = rendered_text.split('\n').collect();
     let longest = lines
         .iter()
@@ -206,7 +196,7 @@ pub(super) fn world_bounds(note: &DesignNote, rendered_text: &str) -> (Point, Po
     )
 }
 
-pub(super) fn conservative_world_bounds(note: &DesignNote) -> (Point, Point) {
+pub fn conservative_world_bounds(note: &DesignNote) -> (Point, Point) {
     let source = note
         .text
         .replace("${view}", &"W".repeat(64))
@@ -221,13 +211,13 @@ pub(super) fn conservative_world_bounds(note: &DesignNote) -> (Point, Point) {
 }
 
 #[cfg(test)]
-pub(super) fn hit_bounds(
+fn hit_bounds(
     ctx: &Context,
     viewport: &Viewport,
     note: &DesignNote,
-    state: &AppState,
+    context: &DesignNoteRenderContext<'_>,
 ) -> Option<Rect> {
-    let text = resolved_text(note, state);
+    let text = note.rendered_text(context);
     screen_layout(ctx, viewport, note, &text, note_color(note.kind, false))
         .map(|layout| layout.bounds)
 }
@@ -238,7 +228,7 @@ mod tests {
 
     fn initialized_context() -> Context {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_ui_kit::Theme::default().apply(&ctx);
         let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
         ctx
     }
@@ -251,7 +241,11 @@ mod tests {
             zoom: 2.0,
             bounds: Rect::from_min_size(Pos2::ZERO, egui::Vec2::splat(500.0)),
         };
-        let mut state = AppState::default();
+        let context = DesignNoteRenderContext {
+            view_path: "work/top/schematic",
+            component_count: 0,
+            conductor_count: 0,
+        };
         let note = DesignNote::new(
             31,
             Point::new(50, 40),
@@ -259,29 +253,19 @@ mod tests {
             "Bias network\nKeep clear",
         )
         .unwrap();
-        state
-            .schematic
-            .document_mut_for_test()
-            .design_notes
-            .push(note.clone());
-        let bounds = hit_bounds(&ctx, &viewport, &note, &state).expect("visible note");
+        let notes = vec![note.clone()];
+        let bounds = hit_bounds(&ctx, &viewport, &note, &context).expect("visible note");
 
         assert_eq!(
-            design_note_at(
-                &ctx,
-                &viewport,
-                &state.schematic.document().design_notes,
-                &state,
-                bounds.center()
-            ),
+            design_note_at(&ctx, &viewport, &notes, &context, bounds.center()),
             Some(31)
         );
         assert_eq!(
             design_note_at(
                 &ctx,
                 &viewport,
-                &state.schematic.document().design_notes,
-                &state,
+                &notes,
+                &context,
                 bounds.right_bottom() + egui::Vec2::splat(0.1)
             ),
             None
@@ -296,26 +280,18 @@ mod tests {
             zoom: 1.0,
             bounds: Rect::from_min_size(Pos2::ZERO, egui::Vec2::splat(500.0)),
         };
-        let mut state = AppState::default();
-        state.schematic.document_mut_for_test().design_notes = vec![
+        let context = DesignNoteRenderContext {
+            view_path: "work/top/schematic",
+            component_count: 0,
+            conductor_count: 0,
+        };
+        let notes = vec![
             DesignNote::new(1, Point::new(20, 20), DesignNoteKind::PlainText, "same").unwrap(),
             DesignNote::new(2, Point::new(20, 20), DesignNoteKind::ReviewNote, "same").unwrap(),
         ];
-        let bounds = hit_bounds(
-            &ctx,
-            &viewport,
-            &state.schematic.document().design_notes[1],
-            &state,
-        )
-        .unwrap();
+        let bounds = hit_bounds(&ctx, &viewport, &notes[1], &context).unwrap();
         assert_eq!(
-            design_note_at(
-                &ctx,
-                &viewport,
-                &state.schematic.document().design_notes,
-                &state,
-                bounds.center()
-            ),
+            design_note_at(&ctx, &viewport, &notes, &context, bounds.center()),
             Some(2)
         );
     }

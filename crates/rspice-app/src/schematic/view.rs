@@ -3,15 +3,11 @@
 //! The main schematic canvas using egui's painter for vectorized rendering.
 //! This will be optimized for 60fps with direct GPU rendering.
 
-use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use egui::{Sense, Ui, WidgetInfo, WidgetType};
 
-use crate::state::{
-    Component, ComponentType, Point, ResolvedCellSymbol, ResolvedSymbolSource, SchematicState,
-    SymbolResolver,
-};
+use crate::state::ComponentType;
 use crate::workbench::app_state::AppState;
 
 use super::symbols::SymbolLibrary;
@@ -19,8 +15,6 @@ use super::symbols::SymbolLibrary;
 mod array_interaction;
 mod bus_interaction;
 mod context_menu;
-mod design_notes;
-mod drawing;
 pub(crate) mod drawing_sheet;
 mod interaction;
 mod keyboard_navigation;
@@ -28,6 +22,8 @@ mod mobile_controls;
 mod navigation;
 mod preview;
 pub(crate) use rspice_schematic_editor::view::resolved_symbol_render;
+pub(crate) use rspice_schematic_editor::view::symbol_context::SchematicSymbolContext;
+use rspice_schematic_editor::view::symbol_context::SelectionWindow;
 mod scene;
 pub(crate) mod selection_layout;
 pub(crate) mod sheet_visibility;
@@ -36,11 +32,9 @@ mod snap_resolution;
 mod stretch_interaction;
 pub(crate) mod violations;
 
-use rspice_schematic_editor::view::geometry::{
-    point_in_rect, rects_intersect, segment_intersects_rect,
-};
+use rspice_schematic_editor::view::geometry::segment_intersects_rect;
 use rspice_schematic_editor::view::{
-    coordinates, documentation_shapes, grid, net_labels, viewport,
+    coordinates, design_notes, documentation_shapes, drawing, grid, net_labels, viewport,
 };
 
 use self::coordinates::viewport_from_camera;
@@ -49,7 +43,6 @@ use self::interaction::handle_tool_interactions;
 use self::keyboard_navigation::handle_keyboard_object_navigation;
 use self::navigation::handle_viewport_navigation;
 use self::preview::{draw_interaction_previews, draw_shelf_drag_preview};
-use self::resolved_symbol_render::resolved_symbol_world_bounds;
 use self::scene::draw_scene;
 use self::shelf_drag::{
     ShelfDropOutcome, can_accept_shelf_drop, commit_shelf_drop, handle_placement_transform_keys,
@@ -135,369 +128,18 @@ fn apply_schematic_canvas_focus_request(ui: &Ui, state: &AppState) {
     }
 }
 
-#[derive(Default)]
-pub(crate) struct SchematicSymbolContext {
-    resolved_by_component_id: HashMap<u64, ResolvedCellSymbol>,
-    resolved_by_binding: Vec<(crate::state::LibraryCellInstance, ResolvedCellSymbol)>,
-    pending_library_symbol: Option<ResolvedCellSymbol>,
-    revision: u64,
-}
-
-impl SchematicSymbolContext {
-    pub(crate) fn from_state(state: &AppState) -> Self {
-        let resolver = SymbolResolver::new(
-            &state.library_manager,
-            &state.workspace.content.schematic_buffers,
-        );
-        let mut resolved_by_component_id = HashMap::new();
-        let mut resolved_by_binding = Vec::new();
-        for component in state
-            .schematic
-            .document()
-            .components
-            .iter()
-            .filter(|component| component.kind == ComponentType::CellInstance)
-        {
-            let Some(binding) = component.library_cell.as_ref() else {
-                continue;
-            };
-            let Some(resolved) = resolver
-                .resolve_binding(binding)
-                .filter(|symbol| symbol.source() == ResolvedSymbolSource::Authored)
-            else {
-                continue;
-            };
-            resolved_by_component_id.insert(component.id, resolved.clone());
-            if !resolved_by_binding
-                .iter()
-                .any(|(candidate, _)| candidate == binding)
-            {
-                resolved_by_binding.push((binding.clone(), resolved));
-            }
-        }
-        let pending_library_symbol = state
-            .schematic
-            .session
-            .pending_library_cell
-            .as_ref()
-            .and_then(|binding| resolver.resolve_binding(binding))
-            .filter(|symbol| symbol.source() == ResolvedSymbolSource::Authored);
-        let revision = symbol_context_revision(state);
-
-        Self {
-            resolved_by_component_id,
-            resolved_by_binding,
-            pending_library_symbol,
-            revision,
-        }
-    }
-
-    pub(super) fn resolved_symbol(&self, component: &Component) -> Option<&ResolvedCellSymbol> {
-        self.resolved_by_component_id
-            .get(&component.id)
-            .or_else(|| {
-                let binding = component.library_cell.as_ref()?;
-                self.resolved_by_binding
-                    .iter()
-                    .find_map(|(candidate, symbol)| (candidate == binding).then_some(symbol))
-            })
-    }
-
-    pub(super) fn pending_library_symbol(&self) -> Option<&ResolvedCellSymbol> {
-        self.pending_library_symbol.as_ref()
-    }
-
-    pub(super) const fn revision(&self) -> u64 {
-        self.revision
-    }
-
-    pub(crate) fn terminal_points(&self, component: &Component) -> Vec<Point> {
-        component
-            .terminal_positions_resolved(self.resolved_symbol(component))
-            .into_iter()
-            .map(|(_, position)| position)
-            .collect()
-    }
-
-    pub(crate) fn named_terminal_points(&self, component: &Component) -> Vec<(String, Point)> {
-        component
-            .terminal_positions_resolved(self.resolved_symbol(component))
-            .into_iter()
-            .map(|(name, position)| (name.to_owned(), position))
-            .collect()
-    }
-
-    /// Authoritative world bounds of the rendered instance, including custom
-    /// symbol artwork. Geometry editors use this same extent so validation can
-    /// never route through shapes that the user can see on the canvas.
-    pub(crate) fn component_bounds_tuple(&self, component: &Component) -> (i32, i32, i32, i32) {
-        let (min, max) = self.component_bounds(component);
-        (min.x, min.y, max.x, max.y)
-    }
-
-    pub(super) fn component_at_resolved_terminal(
-        &self,
-        components: &[Component],
-        pos: Point,
-    ) -> Option<u64> {
-        components
-            .iter()
-            .find(|component| self.terminal_points(component).contains(&pos))
-            .map(|component| component.id)
-    }
-
-    pub(super) fn component_at_resolved_symbol(
-        &self,
-        components: &[Component],
-        pos: Point,
-    ) -> Option<u64> {
-        self.component_at_resolved_terminal(components, pos)
-            .or_else(|| {
-                components
-                    .iter()
-                    .map(|component| (component.id, self.component_bounds(component)))
-                    .find(|(_, (min, max))| {
-                        pos.x >= min.x && pos.x <= max.x && pos.y >= min.y && pos.y <= max.y
-                    })
-                    .map(|(id, _)| id)
-            })
-    }
-
-    pub(super) fn component_bounds(&self, component: &Component) -> (Point, Point) {
-        if let Some(symbol) = self.resolved_symbol(component)
-            && let Some(bounds) = resolved_symbol_world_bounds(component, symbol)
-        {
-            return bounds;
-        }
-        let (min_x, min_y, max_x, max_y) = component.bounding_box();
-        (Point::new(min_x, min_y), Point::new(max_x, max_y))
-    }
-
-    pub(super) fn content_bounds(
-        &self,
-        schematic: &SchematicState,
-    ) -> Option<(i32, i32, i32, i32)> {
-        if schematic.document().components.is_empty()
-            && schematic.document().wires.is_empty()
-            && schematic.document().buses.is_empty()
-            && schematic.document().bus_taps.is_empty()
-            && schematic.document().junctions.is_empty()
-            && schematic.document().net_labels.is_empty()
-            && schematic.document().design_notes.is_empty()
-            && schematic.document().documentation_shapes.is_empty()
-            && schematic.document().probes.is_empty()
-        {
-            return None;
-        }
-
-        let mut min_x = i32::MAX;
-        let mut min_y = i32::MAX;
-        let mut max_x = i32::MIN;
-        let mut max_y = i32::MIN;
-        let mut include = |min: Point, max: Point| {
-            min_x = min_x.min(min.x);
-            min_y = min_y.min(min.y);
-            max_x = max_x.max(max.x);
-            max_y = max_y.max(max.y);
-        };
-
-        for component in &schematic.document().components {
-            let (min, max) = self.component_bounds(component);
-            include(min, max);
-        }
-
-        for wire in &schematic.document().wires {
-            for point in &wire.points {
-                include(*point, *point);
-            }
-        }
-
-        for bus in &schematic.document().buses {
-            for point in &bus.points {
-                include(*point, *point);
-            }
-        }
-
-        for tap in &schematic.document().bus_taps {
-            for point in crate::schematic::bus_geometry::bus_tap_route_points(tap) {
-                include(point, point);
-            }
-        }
-
-        for junction in &schematic.document().junctions {
-            include(junction.pos, junction.pos);
-        }
-
-        for label in &schematic.document().net_labels {
-            let (min, max) = net_labels::world_bounds(label);
-            include(min, max);
-        }
-
-        for note in &schematic.document().design_notes {
-            let (min, max) = design_notes::conservative_world_bounds(note);
-            include(min, max);
-        }
-
-        for shape in &schematic.document().documentation_shapes {
-            let (min, max) = documentation_shapes::world_bounds(shape);
-            include(min, max);
-        }
-
-        for probe in &schematic.document().probes {
-            let (min, max) = drawing::probe_world_bounds(probe);
-            include(min, max);
-        }
-
-        Some((min_x, min_y, max_x, max_y))
-    }
-
-    pub(super) fn select_in_rect(
-        &self,
-        schematic: &mut SchematicState,
-        window: SelectionWindow,
-        add_to_selection: bool,
-    ) -> usize {
-        let SelectionWindow {
-            min_x,
-            min_y,
-            max_x,
-            max_y,
-            enclosed_only,
-        } = window;
-        if !add_to_selection {
-            schematic.session.selection.clear();
-        }
-
-        let (document, selection) = schematic.document_and_selection();
-        let mut count = 0;
-
-        for component in &document.components {
-            let (min, max) = self.component_bounds(component);
-            let matches = if enclosed_only {
-                rect_contains_rect(min, max, min_x, min_y, max_x, max_y)
-            } else {
-                rects_intersect(min, max, min_x, min_y, max_x, max_y)
-            };
-            if matches && !selection.has_component(component.id) {
-                selection.select_component(component.id);
-                count += 1;
-            }
-        }
-
-        for wire in &document.wires {
-            let wire_in_rect = if enclosed_only {
-                wire.points
-                    .iter()
-                    .all(|point| point_in_rect(*point, min_x, min_y, max_x, max_y))
-            } else {
-                wire.points.windows(2).any(|points| {
-                    segment_intersects_rect(points[0], points[1], min_x, min_y, max_x, max_y)
-                })
-            };
-            if wire_in_rect && !selection.has_wire(wire.id) {
-                selection.select_wire(wire.id);
-                count += 1;
-            }
-        }
-
-        for bus in &document.buses {
-            let bus_in_rect = if enclosed_only {
-                bus.points
-                    .iter()
-                    .all(|point| point_in_rect(*point, min_x, min_y, max_x, max_y))
-            } else {
-                bus.points.windows(2).any(|points| {
-                    segment_intersects_rect(points[0], points[1], min_x, min_y, max_x, max_y)
-                })
-            };
-            if bus_in_rect && !selection.has_bus(bus.id) {
-                selection.select_bus(bus.id);
-                count += 1;
-            }
-        }
-
-        for tap in &document.bus_taps {
-            let route = crate::schematic::bus_geometry::bus_tap_route_points(tap);
-            let tap_in_rect = if enclosed_only {
-                route
-                    .iter()
-                    .all(|point| point_in_rect(*point, min_x, min_y, max_x, max_y))
-            } else {
-                route.windows(2).any(|segment| {
-                    segment_intersects_rect(segment[0], segment[1], min_x, min_y, max_x, max_y)
-                })
-            };
-            if tap_in_rect && !selection.has_bus_tap(tap.id) {
-                selection.select_bus_tap(tap.id);
-                count += 1;
-            }
-        }
-
-        for junction in &document.junctions {
-            if point_in_rect(junction.pos, min_x, min_y, max_x, max_y)
-                && !selection.has_junction(junction.pos)
-            {
-                selection.select_junction(junction.pos);
-                count += 1;
-            }
-        }
-
-        for label in &document.net_labels {
-            let (min, max) = net_labels::world_bounds(label);
-            let matches = if enclosed_only {
-                rect_contains_rect(min, max, min_x, min_y, max_x, max_y)
-            } else {
-                rects_intersect(min, max, min_x, min_y, max_x, max_y)
-            };
-            if matches && !selection.has_net_label(label.id) {
-                selection.net_labels.insert(label.id);
-                count += 1;
-            }
-        }
-
-        for note in &document.design_notes {
-            let (min, max) = design_notes::conservative_world_bounds(note);
-            let matches = if enclosed_only {
-                rect_contains_rect(min, max, min_x, min_y, max_x, max_y)
-            } else {
-                rects_intersect(min, max, min_x, min_y, max_x, max_y)
-            };
-            if matches && !selection.has_design_note(note.id) {
-                selection.select_design_note(note.id);
-                count += 1;
-            }
-        }
-
-        for shape in &document.documentation_shapes {
-            let matches = documentation_shapes::shape_intersects_rect(
-                shape,
-                min_x,
-                min_y,
-                max_x,
-                max_y,
-                enclosed_only,
-            );
-            if matches && !selection.has_documentation_shape(shape.id) {
-                selection.select_documentation_shape(shape.id);
-                count += 1;
-            }
-        }
-
-        for probe in &document.probes {
-            let (min, max) = probe.world_bounds();
-            let matches = if enclosed_only {
-                rect_contains_rect(min, max, min_x, min_y, max_x, max_y)
-            } else {
-                rects_intersect(min, max, min_x, min_y, max_x, max_y)
-            };
-            if matches && !selection.has_probe(probe.id) {
-                selection.select_probe(probe.id);
-                count += 1;
-            }
-        }
-
-        count
-    }
+/// Compose the editor's resolved symbols from the current app-owned sources.
+pub(crate) fn schematic_symbol_context(state: &AppState) -> SchematicSymbolContext {
+    let resolver = rspice_design::symbol_resolver::SymbolResolver::new(
+        state.library_manager.catalog(),
+        &state.workspace.content.schematic_buffers,
+    );
+    SchematicSymbolContext::new(
+        state.schematic.document(),
+        state.schematic.session.pending_library_cell.as_ref(),
+        &resolver,
+        symbol_context_revision(state),
+    )
 }
 
 fn symbol_context_revision(state: &AppState) -> u64 {
@@ -524,44 +166,6 @@ fn symbol_context_revision(state: &AppState) -> u64 {
     hasher.finish()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct SelectionWindow {
-    min_x: i32,
-    min_y: i32,
-    max_x: i32,
-    max_y: i32,
-    enclosed_only: bool,
-}
-
-impl SelectionWindow {
-    pub(super) const fn new(
-        min_x: i32,
-        min_y: i32,
-        max_x: i32,
-        max_y: i32,
-        enclosed_only: bool,
-    ) -> Self {
-        Self {
-            min_x,
-            min_y,
-            max_x,
-            max_y,
-            enclosed_only,
-        }
-    }
-}
-
-fn rect_contains_rect(
-    min: Point,
-    max: Point,
-    min_x: i32,
-    min_y: i32,
-    max_x: i32,
-    max_y: i32,
-) -> bool {
-    min.x >= min_x && min.y >= min_y && max.x <= max_x && max.y <= max_y
-}
-
 fn refresh_symbol_context_after_interactions(
     state: &AppState,
     symbol_context: &mut SchematicSymbolContext,
@@ -570,7 +174,7 @@ fn refresh_symbol_context_after_interactions(
     if state.schematic.topology_version() == before_topology_version {
         return false;
     }
-    *symbol_context = SchematicSymbolContext::from_state(state);
+    *symbol_context = schematic_symbol_context(state);
     true
 }
 
@@ -1048,7 +652,7 @@ pub fn render_schematic_view(
     symbol_library: Option<&SymbolLibrary>,
 ) {
     let available = ui.available_rect_before_wrap();
-    let mut symbol_context = SchematicSymbolContext::from_state(state);
+    let mut symbol_context = schematic_symbol_context(state);
     let drawing_sheet = ActiveDrawingSheet::resolve(state);
 
     if state.schematic.session.needs_drawing_sheet_fit {
@@ -1061,7 +665,7 @@ pub fn render_schematic_view(
         );
     } else if state.schematic.session.needs_fit {
         state.schematic.session.needs_fit = false;
-        let bounds = symbol_context.content_bounds(&state.schematic);
+        let bounds = symbol_context.content_bounds(state.schematic.document());
         state.schematic.zoom_to_fit_bounds(
             bounds,
             available.width() as f64,
@@ -1350,8 +954,8 @@ fn symbol_preview_scale(rect: egui::Rect, target_width: f32, target_height: f32)
 mod tests {
     use super::*;
     use crate::state::{
-        Cell, Library, LibraryCellInstance, NetLabel, PortDirection, PortSpec, SymbolDocument,
-        SymbolPin, SymbolShape, View, ViewType,
+        Cell, Component, Library, LibraryCellInstance, Point, PortDirection, PortSpec,
+        SchematicState, SymbolDocument, SymbolPin, View, ViewType,
     };
 
     #[test]
@@ -1517,204 +1121,6 @@ mod tests {
     }
 
     #[test]
-    fn component_at_resolved_symbol_hits_authored_body_outside_generic_bounds() {
-        let component = Component::new(1, ComponentType::CellInstance, Point::new(100, 50));
-        let symbol = ResolvedCellSymbol::from_authored_document(
-            SymbolDocument {
-                body: vec![SymbolShape::Polyline {
-                    points: vec![Point::new(80, -10), Point::new(120, 10)],
-                    closed: false,
-                }],
-                pins: vec![SymbolPin::new(
-                    "OUT",
-                    PortDirection::Out,
-                    Some(Point::new(120, 0)),
-                )],
-                ..SymbolDocument::default()
-            },
-            &[port("OUT", PortDirection::Out)],
-        );
-        let mut resolved_by_component_id = HashMap::new();
-        resolved_by_component_id.insert(component.id, symbol);
-        let context = SchematicSymbolContext {
-            resolved_by_component_id,
-            resolved_by_binding: Vec::new(),
-            pending_library_symbol: None,
-            revision: 0,
-        };
-
-        assert_eq!(
-            context.component_at_resolved_symbol(&[component], Point::new(200, 50)),
-            Some(1)
-        );
-    }
-
-    #[test]
-    fn content_bounds_include_authored_symbol_body() {
-        let component = Component::new(1, ComponentType::CellInstance, Point::new(100, 50));
-        let symbol = ResolvedCellSymbol::from_authored_document(
-            SymbolDocument {
-                body: vec![SymbolShape::Polyline {
-                    points: vec![Point::new(80, -10), Point::new(120, 10)],
-                    closed: false,
-                }],
-                pins: vec![SymbolPin::new(
-                    "OUT",
-                    PortDirection::Out,
-                    Some(Point::new(120, 0)),
-                )],
-                ..SymbolDocument::default()
-            },
-            &[port("OUT", PortDirection::Out)],
-        );
-        let mut resolved_by_component_id = HashMap::new();
-        resolved_by_component_id.insert(component.id, symbol);
-        let context = SchematicSymbolContext {
-            resolved_by_component_id,
-            resolved_by_binding: Vec::new(),
-            pending_library_symbol: None,
-            revision: 0,
-        };
-        let mut schematic = SchematicState::default();
-        schematic.document_mut_for_test().components.push(component);
-
-        assert_eq!(context.content_bounds(&schematic), Some((80, 10, 220, 90)));
-    }
-
-    #[test]
-    fn content_bounds_and_marquee_selection_include_net_label_text() {
-        let mut schematic = SchematicState::default();
-        let label = NetLabel::new(77, Point::new(100, 80), "afe_out");
-        let (min, max) = net_labels::world_bounds(&label);
-        schematic.document_mut_for_test().net_labels.push(label);
-        let context = SchematicSymbolContext::default();
-
-        assert_eq!(
-            context.content_bounds(&schematic),
-            Some((min.x, min.y, max.x, max.y))
-        );
-        assert_eq!(
-            context.select_in_rect(
-                &mut schematic,
-                SelectionWindow::new(min.x + 2, min.y + 2, max.x - 2, max.y - 2, false),
-                false,
-            ),
-            1
-        );
-        assert_eq!(schematic.session.selection.single_net_label(), Some(77));
-    }
-
-    #[test]
-    fn content_bounds_and_marquee_selection_include_design_note_text() {
-        let mut schematic = SchematicState::default();
-        let note = crate::state::DesignNote::new(
-            78,
-            Point::new(100, 80),
-            crate::state::DesignNoteKind::PlainText,
-            "Bias network\nKeep clear",
-        )
-        .unwrap();
-        let (min, max) = design_notes::conservative_world_bounds(&note);
-        schematic.document_mut_for_test().design_notes.push(note);
-        let context = SchematicSymbolContext::default();
-
-        assert_eq!(
-            context.content_bounds(&schematic),
-            Some((min.x, min.y, max.x, max.y))
-        );
-        assert_eq!(
-            context.select_in_rect(
-                &mut schematic,
-                SelectionWindow::new(min.x, min.y, max.x, max.y, false),
-                false,
-            ),
-            1
-        );
-        assert_eq!(schematic.session.selection.single_design_note(), Some(78));
-    }
-
-    #[test]
-    fn select_in_rect_commits_authored_body_intersections() {
-        let component = Component::new(1, ComponentType::CellInstance, Point::new(100, 50));
-        let symbol = ResolvedCellSymbol::from_authored_document(
-            SymbolDocument {
-                body: vec![SymbolShape::Polyline {
-                    points: vec![Point::new(80, -10), Point::new(120, 10)],
-                    closed: false,
-                }],
-                pins: vec![SymbolPin::new(
-                    "OUT",
-                    PortDirection::Out,
-                    Some(Point::new(120, 0)),
-                )],
-                ..SymbolDocument::default()
-            },
-            &[port("OUT", PortDirection::Out)],
-        );
-        let mut resolved_by_component_id = HashMap::new();
-        resolved_by_component_id.insert(component.id, symbol);
-        let context = SchematicSymbolContext {
-            resolved_by_component_id,
-            resolved_by_binding: Vec::new(),
-            pending_library_symbol: None,
-            revision: 0,
-        };
-        let mut schematic = SchematicState::default();
-        schematic.document_mut_for_test().components.push(component);
-
-        let selected = context.select_in_rect(
-            &mut schematic,
-            SelectionWindow::new(190, 40, 210, 60, false),
-            false,
-        );
-
-        assert_eq!(selected, 1);
-        assert!(schematic.session.selection.has_component(1));
-    }
-
-    #[test]
-    fn enclosed_selection_rejects_partial_component_intersections() {
-        let mut schematic = SchematicState::default();
-        schematic
-            .document_mut_for_test()
-            .components
-            .push(Component::new(
-                1,
-                ComponentType::Resistor,
-                Point::new(100, 50),
-            ));
-        let context = SchematicSymbolContext::default();
-
-        assert_eq!(
-            context.select_in_rect(
-                &mut schematic,
-                SelectionWindow::new(95, 45, 105, 55, true),
-                false,
-            ),
-            0
-        );
-        assert!(!schematic.session.selection.has_component(1));
-    }
-
-    #[test]
-    fn intersecting_selection_detects_wire_crossing_without_an_inside_vertex() {
-        let mut schematic = SchematicState::default();
-        schematic.add_wire(vec![Point::new(0, 50), Point::new(100, 50)]);
-        let wire_id = schematic.document().wires[0].id;
-        let context = SchematicSymbolContext::default();
-
-        assert_eq!(
-            context.select_in_rect(
-                &mut schematic,
-                SelectionWindow::new(40, 40, 60, 60, false),
-                false,
-            ),
-            1
-        );
-        assert!(schematic.session.selection.has_wire(wire_id));
-    }
-
-    #[test]
     fn second_refresh_resolves_cell_added_after_initial_interaction_refresh() {
         let mut state = AppState::default();
         let mut library = Library::new("work");
@@ -1735,7 +1141,7 @@ mod tests {
         library.add_cell(cell);
         state.library_manager.add_library(library);
 
-        let mut context = SchematicSymbolContext::from_state(&state);
+        let mut context = schematic_symbol_context(&state);
         let before_interactions_topology = state.schematic.topology_version();
         assert!(!refresh_symbol_context_after_interactions(
             &state,
@@ -1788,7 +1194,7 @@ mod tests {
             .schematic
             .add_library_cell_component(Point::origin(), binding);
 
-        let context = SchematicSymbolContext::from_state(&state);
+        let context = schematic_symbol_context(&state);
         let component = state
             .schematic
             .document()

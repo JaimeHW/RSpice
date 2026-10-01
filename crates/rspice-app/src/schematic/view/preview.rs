@@ -36,6 +36,7 @@ use super::snap_resolution::{
     conductor_attachment_pitch, resolve_grid_pointer, resolve_target_pointer,
 };
 use super::viewport::Viewport;
+use rspice_design::schematic::design_note::DesignNoteRenderContext;
 
 const WIRE_PREVIEW_STROKE_WIDTH: f32 = 1.5;
 const COMPONENT_PREVIEW_GHOST_ALPHA: f32 = 0.55;
@@ -231,7 +232,14 @@ fn draw_move_selection_preview(
                     .any(|junction| junction == *candidate_junction)
             })
         {
-            draw_junction(painter, viewport, junction.pos, state);
+            draw_junction(
+                painter,
+                viewport,
+                junction.pos,
+                state.schematic.session.selection.has_junction(junction.pos),
+                state.dialogs.interaction.hover_wire_vertex
+                    == Some((junction.pos.x, junction.pos.y)),
+            );
         }
         for label in candidate
             .document()
@@ -263,7 +271,17 @@ fn draw_move_selection_preview(
                     != Some(*candidate_note)
             })
         {
-            draw_design_note(painter, viewport, note, state, true, false);
+            draw_design_note(
+                painter,
+                viewport,
+                note,
+                &DesignNoteRenderContext::for_document(
+                    state.schematic.document(),
+                    &state.workspace.content.active_view.display_path(),
+                ),
+                true,
+                false,
+            );
         }
         for shape in candidate
             .document()
@@ -505,13 +523,29 @@ fn draw_array_selection_preview(
         );
     }
     for junction in preview.junctions() {
-        draw_junction(painter, viewport, junction.pos, state);
+        draw_junction(
+            painter,
+            viewport,
+            junction.pos,
+            state.schematic.session.selection.has_junction(junction.pos),
+            state.dialogs.interaction.hover_wire_vertex == Some((junction.pos.x, junction.pos.y)),
+        );
     }
     for label in preview.net_labels() {
         draw_net_label(painter, viewport, label, true, false, true);
     }
     for note in preview.design_notes() {
-        draw_design_note(painter, viewport, note, state, true, false);
+        draw_design_note(
+            painter,
+            viewport,
+            note,
+            &DesignNoteRenderContext::for_document(
+                state.schematic.document(),
+                &state.workspace.content.active_view.display_path(),
+            ),
+            true,
+            false,
+        );
     }
     for shape in preview.documentation_shapes() {
         draw_documentation_shape(painter, viewport, shape, true, false);
@@ -664,7 +698,17 @@ fn draw_design_note_preview(
     let Ok(note) = DesignNote::new(0, position, pending.kind, pending.text.clone()) else {
         return;
     };
-    draw_design_note(painter, viewport, &note, state, false, false);
+    draw_design_note(
+        painter,
+        viewport,
+        &note,
+        &DesignNoteRenderContext::for_document(
+            state.schematic.document(),
+            &state.workspace.content.active_view.display_path(),
+        ),
+        false,
+        false,
+    );
 }
 
 fn draw_net_label_preview(
@@ -1397,6 +1441,7 @@ fn draw_selection_rect(painter: &Painter, state: &AppState, tool_viewport: &View
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schematic::view::schematic_symbol_context;
 
     #[test]
     fn component_preview_ghost_uses_design_alpha_and_hides_on_read_only() {
@@ -1426,7 +1471,7 @@ mod tests {
             )
             .with_library_cell(binding),
         );
-        let symbol_context = crate::schematic::view::SchematicSymbolContext::from_state(&state);
+        let symbol_context = crate::schematic::view::schematic_symbol_context(&state);
         let component = &state.schematic.document().components[0];
         let terminal =
             component.terminal_positions_resolved(symbol_context.resolved_symbol(component))[0].1;
@@ -1461,7 +1506,7 @@ mod tests {
                 Point::new(0, 10),
                 Point::new(20, 10),
             ));
-        let symbol_context = SchematicSymbolContext::from_state(&state);
+        let symbol_context = schematic_symbol_context(&state);
         let viewport = Viewport {
             offset: egui::Pos2::ZERO,
             zoom: 2.0,
@@ -1571,7 +1616,7 @@ mod tests {
         state.schematic.session.pending_library_cell = Some(binding);
         state.schematic.session.preview_rotation = crate::state::Rotation::R90;
         state.schematic.session.preview_mirror_h = true;
-        let context = SchematicSymbolContext::from_state(&state);
+        let context = schematic_symbol_context(&state);
 
         let (component, symbol) =
             pending_library_cell_preview(&state, &context, Point::new(100, 50))

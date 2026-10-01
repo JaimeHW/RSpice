@@ -259,6 +259,7 @@ fn reset_failed_candidate(state: &mut AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schematic::view::schematic_symbol_context;
     use crate::state::{Component, ComponentType, Tool};
 
     #[test]
@@ -288,7 +289,7 @@ mod tests {
         state.dialogs.array_selection.arm();
         state.dialogs.array_selection.preview_delta = Point::new(100, 0);
         state.schematic.arm_tool(Tool::ArraySelection);
-        let symbols = SchematicSymbolContext::from_state(&state);
+        let symbols = schematic_symbol_context(&state);
 
         commit_armed_array_selection(&mut state, &symbols);
 
@@ -316,7 +317,7 @@ mod tests {
         state.dialogs.array_selection.arm();
         state.dialogs.array_selection.preview_delta = Point::new(1, 0);
         state.schematic.arm_tool(Tool::ArraySelection);
-        let symbols = SchematicSymbolContext::from_state(&state);
+        let symbols = schematic_symbol_context(&state);
 
         commit_armed_array_selection(&mut state, &symbols);
 

@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use egui::{Align, Context, Frame, Label, Layout, Margin, Sense, Stroke, Ui, UiBuilder, vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::schematic::view::SchematicSymbolContext;
+use crate::schematic::view::schematic_symbol_context;
 use crate::state::{
     Cell, CellViewRef, HierarchyExtractionPlan, HierarchyExtractionTerminal,
     HierarchyNetConnectivity, NetLabel, PortDirection, PortDiscipline, PortSpec,
@@ -501,7 +501,7 @@ fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
 }
 
 fn source_plan(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
-    let symbols = SchematicSymbolContext::from_state(state);
+    let symbols = schematic_symbol_context(state);
     let component_bounds = state
         .schematic
         .document()
@@ -789,7 +789,7 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
 }
 
 fn source_schematic_with_canonical_connections(state: &AppState) -> crate::state::SchematicState {
-    let symbols = SchematicSymbolContext::from_state(state);
+    let symbols = schematic_symbol_context(state);
     let terminals = state
         .schematic
         .document()

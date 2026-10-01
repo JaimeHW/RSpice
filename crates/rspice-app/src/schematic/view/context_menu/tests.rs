@@ -5,6 +5,7 @@
 //! command contract and the evidence that it holds are separate concerns.
 
 use super::*;
+use crate::schematic::view::schematic_symbol_context;
 
 use crate::state::{
     Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType, DesignNote,
@@ -362,7 +363,7 @@ fn focused_keyboard_context_row_activates_with_enter_or_space() {
             .push(Component::new(7, ComponentType::Resistor, Point::origin()));
         state.schematic.session.selection.select_only_component(7);
         state.dialogs.interaction.context_target = Some((ContextTarget::Component(7), (0, 0)));
-        let symbol_context = SchematicSymbolContext::from_state(&state);
+        let symbol_context = schematic_symbol_context(&state);
 
         let _ = ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
@@ -499,7 +500,7 @@ fn pointer_target_prefers_a_junction_over_its_underlying_wire() {
     state.schematic.document_mut_for_test().wires =
         vec![Wire::new(17, vec![Point::new(0, 10), Point::new(20, 10)])];
     state.schematic.document_mut_for_test().junctions = vec![Junction::new(18, point)];
-    let symbol_context = SchematicSymbolContext::from_state(&state);
+    let symbol_context = schematic_symbol_context(&state);
     let ctx = Context::default();
     let viewport = pointer_viewport();
 
@@ -544,7 +545,7 @@ fn net_label_context_exposes_the_complete_object_lifecycle() {
 
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);
-    let symbol_context = SchematicSymbolContext::from_state(&state);
+    let symbol_context = schematic_symbol_context(&state);
     let _ = ctx.run_ui(Default::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             execute_context_action(
@@ -598,7 +599,7 @@ fn design_note_context_exposes_only_compatible_object_lifecycle_actions() {
 
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);
-    let symbol_context = SchematicSymbolContext::from_state(&state);
+    let symbol_context = schematic_symbol_context(&state);
     let _ = ctx.run_ui(Default::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             execute_context_action(
@@ -650,7 +651,7 @@ fn documentation_shape_context_exposes_the_complete_non_electrical_lifecycle() {
 
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);
-    let symbol_context = SchematicSymbolContext::from_state(&state);
+    let symbol_context = schematic_symbol_context(&state);
     let _ = ctx.run_ui(Default::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             execute_context_action(
@@ -779,7 +780,7 @@ fn the_interface_repair_row_is_offered_and_runs_only_for_a_stale_instance() {
 
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);
-    let symbol_context = SchematicSymbolContext::from_state(&state);
+    let symbol_context = schematic_symbol_context(&state);
     let _ = ctx.run_ui(Default::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             execute_context_action(
@@ -845,7 +846,7 @@ fn the_replace_instance_row_is_offered_and_runs_only_for_one_replaceable_instanc
         .select_only_component(first);
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);
-    let symbol_context = SchematicSymbolContext::from_state(&state);
+    let symbol_context = schematic_symbol_context(&state);
     let _ = ctx.run_ui(Default::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             execute_context_action(

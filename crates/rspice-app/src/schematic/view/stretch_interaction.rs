@@ -363,6 +363,7 @@ fn commit_armed_stretch_selection(state: &mut AppState, symbol_context: &Schemat
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schematic::view::schematic_symbol_context;
     use crate::state::{Junction, StretchOrthogonalPolicy, Wire};
 
     fn selected_stretch_wire() -> AppState {
@@ -483,7 +484,7 @@ mod tests {
         let mut state = selected_stretch_wire();
         arm_test_stretch(&mut state);
         state.dialogs.stretch_selection.preview_delta = Point::new(0, 10);
-        let symbols = SchematicSymbolContext::from_state(&state);
+        let symbols = schematic_symbol_context(&state);
 
         commit_armed_stretch_selection(&mut state, &symbols);
 
@@ -549,7 +550,7 @@ mod tests {
         let baseline = state.schematic.document().wires[0].clone();
         arm_test_stretch(&mut state);
         state.dialogs.stretch_selection.preview_delta = Point::new(0, 10);
-        let symbols = SchematicSymbolContext::from_state(&state);
+        let symbols = schematic_symbol_context(&state);
 
         commit_armed_stretch_selection(&mut state, &symbols);
 

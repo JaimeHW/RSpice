@@ -68,7 +68,6 @@ pub use array::{
     SchematicArrayCount, SchematicArrayError, SchematicArrayImpact, SchematicArrayKind,
     SchematicArrayNaming, SchematicArrayPlacement, SchematicArrayPlan, SchematicArrayPreview,
 };
-pub(crate) use bus::nearest_lattice_point_on_segment;
 pub use bus::{
     Bus, BusDeclaration, BusDirection, BusNotation, BusParseError, BusPropertyImpact, BusSlice,
     BusTap, BusTapOrientation, BusTargetKind, PendingBusTap, declared_vector, declared_width,
@@ -133,11 +132,7 @@ pub use state::{
     StretchTarget,
 };
 pub(crate) use state::{SchematicEditorMut, SchematicEditorRef, SchematicSession};
-/// Reachable only from the drawing tests; production callers inside the
-/// schematic state reach the constant through its defining module.
-#[cfg(test)]
-pub use symbol_gen::GENERATED_WIDTH;
-pub use symbol_gen::{GENERATED_PIN_LABEL_SIZE, fit_pin_name, inward_step, lead_inner};
+pub use symbol_gen::lead_inner;
 pub use tool::Tool;
 pub use undo_history::{SchematicSnapshot, UndoSequence, next_undo_sequence};
 pub use validated_revision::{

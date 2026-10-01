@@ -294,7 +294,8 @@ pub(super) fn select_in_rect_on_active_sheet(
     } else {
         0
     };
-    symbol_context.select_in_rect(&mut state.schematic, window, add_to_selection);
+    let (document, selection) = state.schematic.document_and_selection();
+    symbol_context.select_in_rect(document, selection, window, add_to_selection);
     retain_selection_on_active_sheet(state);
     state
         .ui

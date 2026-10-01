@@ -8,7 +8,7 @@
 mod symbol_document;
 
 use crate::diagnostics::{ConsoleMessage, LogAnchor, LogSeverity};
-use crate::schematic::view::SchematicSymbolContext;
+use crate::schematic::view::schematic_symbol_context;
 use crate::state::{
     CellViewRef, ComponentType, OpenCellView, Point, PortDirection, PortSpec, SchematicState,
     SymbolDocument, View, ViewType,
@@ -101,7 +101,7 @@ impl AppState {
         if self.schematic.session.selection.is_empty() {
             return false;
         }
-        let symbols = SchematicSymbolContext::from_state(self);
+        let symbols = schematic_symbol_context(self);
         self.schematic.session.clipboard =
             self.schematic
                 .capture_complete_selection_resolved(|component| {
@@ -116,7 +116,7 @@ impl AppState {
 
     pub(crate) fn rebuild_active_connections_from_symbols(&mut self) {
         let terminals = {
-            let symbols = SchematicSymbolContext::from_state(self);
+            let symbols = schematic_symbol_context(self);
             self.schematic
                 .document()
                 .components
