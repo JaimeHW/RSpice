@@ -41,7 +41,7 @@ async function digest(bytes) {
 
 function request(id, bins, resume = null, source = deck) {
   return {
-    protocolVersion: 34,
+    protocolVersion: 42,
     request: {
       request: {
         id, request: {Spec: {spec: {MonteCarlo: {variation_source: "parameter_tolerance", params: []}},
@@ -76,7 +76,7 @@ function run(worker, packet, stopAfterCheckpoint = false) {
             finish({terminated: true});
           }
         } else if (data.type === "result") {
-          assert(data.response.protocolVersion === 28, "Unexpected response protocol");
+          assert(data.response.protocolVersion === 36, "Unexpected response protocol");
           assert(Number(data.response.response.id) === id, "Nested response identity differs");
           finish({outcome: data.response.response.outcome});
         } else if (data.type === "error") {
@@ -103,7 +103,7 @@ async function qualify() {
   const first = await openWorker();
   const interrupted = await run(first, request(1, 3), true);
   assert(interrupted.terminated && interrupted.checkpoints.length === 1,
-    "Did not retain a checkpoint before hard termination");
+    `Did not retain a checkpoint before hard termination: ${json(interrupted)}`);
   const bytes = interrupted.checkpoints[0];
   const partial = {bytes, digest: await digest(bytes)};
   const worker = await openWorker();
