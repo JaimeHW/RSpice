@@ -58,7 +58,7 @@ ALLOWED: dict[str, set[str]] = {
 HEADLESS = set(ALLOWED) - {
     "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui",
 }
-GUI_PACKAGES = {"eframe", "winit", "rfd"}
+GUI_PACKAGES = {"eframe", "winit", "rfd", "wgpu"}
 ENGINE_PACKAGES = {
     "rspice-core", "rspice-matrix", "rspice-veriloga",
     "rspice-veriloga-runtime", "rspice-veriloga-models",
@@ -80,6 +80,8 @@ def violations(
         for dep in sorted(unexpected):
             issues.append(f"{name} has forbidden application dependency {dep}")
     for name, closure in sorted(closures.items()):
+        if name == "rspice-worker" and "rspice-app" in closure:
+            issues.append("rspice-worker reaches application package rspice-app")
         if name in HEADLESS:
             for dep in sorted(dep for dep in closure if dep.startswith("egui") or dep in GUI_PACKAGES):
                 issues.append(f"{name} reaches GUI package {dep}")

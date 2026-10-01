@@ -40,9 +40,10 @@ class DependencyPolicyTests(unittest.TestCase):
     def test_an_upward_edge_or_transitive_gui_and_engine_dependency_fails(self) -> None:
         issues = violations(
             {"rspice-app-types": {"rspice-results"}},
-            {"rspice-app-types": {"rspice-app-types", "egui", "rspice-core"}},
+            {"rspice-app-types": {"rspice-app-types", "egui", "rspice-core"},
+             "rspice-worker": {"rspice-worker", "wgpu", "rspice-app"}},
         )
-        self.assertEqual(len(issues), 3)
+        self.assertEqual(len(issues), 5)
         self.assertTrue(any("forbidden application dependency" in issue for issue in issues))
         self.assertTrue(any("GUI package" in issue for issue in issues))
         self.assertTrue(any("simulator package" in issue for issue in issues))
