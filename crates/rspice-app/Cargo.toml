@@ -116,7 +116,7 @@ csv.workspace = true
 rspice-project = { workspace = true, features = ["document-fingerprint-observation", "library-test-fixtures"] }
 rspice-model-library = { workspace = true, features = ["catalog-test-observation"] }
 rspice-design = { workspace = true, features = ["symbol-test-observation", "schematic-test-fixtures"] }
-zip = { version = "7.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 rustyhdf5 = { version = "1.93", default-features = false }
 arrow-array = "59"
 arrow-ipc = "59"
