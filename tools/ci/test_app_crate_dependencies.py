@@ -23,6 +23,7 @@ class DependencyPolicyTests(unittest.TestCase):
                     "rspice-project": {"rspice-formats"},
                     "rspice-hardcopy": {"rspice-project-contract"},
                     "rspice-ui-kit": {"egui", "rspice-results"},
+                    "rspice-schematic-editor": {"egui", "rspice-ui-kit", "rspice-design"},
                 },
                 {
                     "rspice-formats": {
@@ -31,6 +32,9 @@ class DependencyPolicyTests(unittest.TestCase):
                     "rspice-project": {"rspice-project", "rspice-formats", "rspice-results"},
                     "rspice-hardcopy": {"rspice-hardcopy", "rspice-project-contract", "rspice-design"},
                     "rspice-ui-kit": {"egui", "rspice-results", "rspice-app-types", "rspice-units"},
+                    "rspice-schematic-editor": {
+                        "egui", "rspice-ui-kit", "rspice-design", "rspice-core", "rspice-model-library",
+                    },
                 },
                 {"rspice-formats", "csv", "serde"},
                 {"rspice-formats", "serde_json", "sha2"},
@@ -67,6 +71,18 @@ class DependencyPolicyTests(unittest.TestCase):
                 "rspice-ui-kit reaches non-presentation package eframe",
                 "rspice-ui-kit reaches non-presentation package rspice-core",
                 "rspice-ui-kit reaches non-presentation package rspice-project",
+            ],
+        )
+
+        self.assertEqual(
+            violations({}, {"rspice-schematic-editor": {
+                "rspice-design", "rspice-app", "rspice-project", "rspice-simulation", "eframe",
+            }}),
+            [
+                "rspice-schematic-editor reaches application service or host package eframe",
+                "rspice-schematic-editor reaches application service or host package rspice-app",
+                "rspice-schematic-editor reaches application service or host package rspice-project",
+                "rspice-schematic-editor reaches application service or host package rspice-simulation",
             ],
         )
 

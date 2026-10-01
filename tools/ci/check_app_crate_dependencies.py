@@ -63,6 +63,7 @@ ENGINE_PACKAGES = {
     "rspice-core", "rspice-matrix", "rspice-veriloga",
     "rspice-veriloga-runtime", "rspice-veriloga-models",
 }
+INCLUDE_DEV = {"rspice-worker", "rspice-ui-kit", "rspice-schematic-editor"}
 PACKAGE_LINE = re.compile(r"^([A-Za-z0-9_-]+) v\d")
 
 
@@ -93,6 +94,13 @@ def violations(
                 if dep in ENGINE_PACKAGES or dep.startswith("rspice-veriloga-model-")
             ):
                 issues.append(f"{name} reaches simulator package {dep}")
+        if name == "rspice-schematic-editor":
+            forbidden = {
+                "rspice-app", "rspice-project", "rspice-project-contract",
+                "rspice-worker", "rspice-simulation",
+            } | GUI_PACKAGES
+            for dep in sorted(closure & forbidden):
+                issues.append(f"rspice-schematic-editor reaches application service or host package {dep}")
         if name == "rspice-ui-kit":
             forbidden = (
                 application_names - {name, "rspice-units"} - ALLOWED[name]
@@ -127,12 +135,12 @@ def main() -> int:
             continue
         direct[name] = {
             dep["name"] for dep in package["dependencies"]
-            if dep["kind"] != "dev" or name in {"rspice-worker", "rspice-ui-kit"}
+            if dep["kind"] != "dev" or name in INCLUDE_DEV
         }
         tree = run(
             "cargo", "tree", "--locked", "-p", name, "--all-features",
             "--target", "all", "--edges",
-            "normal,build,dev" if name in {"rspice-worker", "rspice-ui-kit"} else "normal,build",
+            "normal,build,dev" if name in INCLUDE_DEV else "normal,build",
             "--prefix", "none",
             "--format", "{p}",
         )
