@@ -1009,7 +1009,20 @@ fn the_sheet_the_export_and_the_print_state_the_bound_the_run_was_judged_against
         "and spells it the way the sheet does: {exported}"
     );
 
-    let printed = super::hardcopy_table(&run, &workspace_specs);
+    let document = rspice_hardcopy::sources::resolve_results_specs_source(
+        "specifications".to_owned(),
+        crate::product::ProjectId::new(),
+        crate::hardcopy::HardcopyScope::ActivePlotDocument,
+        run.as_ref(),
+        &workspace_specs,
+    )
+    .unwrap();
+    let rspice_hardcopy::sources::HardcopySemanticDocument::ResultSummary(summary) =
+        document.semantic_document()
+    else {
+        panic!("expected specifications summary");
+    };
+    let printed = &summary.tables[0];
     assert_eq!(
         printed.rows[0][3],
         format!("value >= {:.17e}", 10.0),

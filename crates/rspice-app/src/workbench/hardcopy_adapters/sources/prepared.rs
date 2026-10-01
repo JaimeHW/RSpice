@@ -1153,16 +1153,16 @@ fn prepared_payload_identity(
         } => {
             if presentation.viewer() == ResultViewer::Manifest {
                 return Ok((
-                    super::results::results_manifest_identity(source_key, *project_id, run)?,
+                    results_manifest_identity(source_key, *project_id, run.as_ref())?,
                     scope.clone(),
                 ));
             }
             if presentation.viewer() == ResultViewer::Specs {
                 return Ok((
-                    super::results::results_specs_identity(
+                    results_specs_identity(
                         source_key,
                         *project_id,
-                        run,
+                        run.as_ref(),
                         presentation.specs(),
                     )?,
                     scope.clone(),
@@ -1170,10 +1170,10 @@ fn prepared_payload_identity(
             }
             if run.analyses.len() > 1 {
                 return Ok((
-                    super::results::results_stack_identity(
+                    results_stack_identity(
                         source_key,
                         *project_id,
-                        run,
+                        run.as_ref(),
                         presentation.viewer(),
                     )?,
                     scope.clone(),
@@ -1407,41 +1407,30 @@ impl PreparedRetainedHardcopyResolution {
                 scope,
             } => {
                 if presentation.viewer() == ResultViewer::Manifest {
-                    if !run.lifecycle.is_terminal() {
-                        return Err(HardcopySourceError::UnretainedResult(
-                            "prepared manifest dataset is not terminal".to_owned(),
-                        ));
-                    }
-                    return super::results::resolve_results_manifest_source(
-                        source_key, project_id, scope, &run,
-                    );
-                }
-                if presentation.viewer() == ResultViewer::Specs {
-                    if !run.lifecycle.is_terminal() {
-                        return Err(HardcopySourceError::UnretainedResult(
-                            "prepared specifications dataset is not terminal".to_owned(),
-                        ));
-                    }
-                    return super::results::resolve_results_specs_source(
+                    return resolve_results_manifest_source(
                         source_key,
                         project_id,
                         scope,
-                        &run,
+                        run.as_ref(),
+                    );
+                }
+                if presentation.viewer() == ResultViewer::Specs {
+                    return resolve_results_specs_source(
+                        source_key,
+                        project_id,
+                        scope,
+                        run.as_ref(),
                         presentation.specs(),
                     );
                 }
                 if run.analyses.len() > 1 {
-                    if !run.lifecycle.is_terminal() {
-                        return Err(HardcopySourceError::UnretainedResult(
-                            "prepared stacked Results dataset is not terminal".to_owned(),
-                        ));
-                    }
-                    return super::results::resolve_results_quick_view_stack(
+                    return resolve_results_quick_view_stack(
                         source_key,
                         project_id,
                         scope,
-                        &run,
+                        run.as_ref(),
                         &presentation,
+                        |waveform: &WaveformData| waveform.visible,
                     );
                 }
                 let analysis = run.analyses.first().ok_or_else(|| {

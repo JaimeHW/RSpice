@@ -47,12 +47,6 @@ pub(crate) struct ResultSheetCsv {
     pub(crate) detail: String,
 }
 
-pub(crate) struct ResultSheetTable {
-    pub(crate) title: String,
-    pub(crate) columns: Vec<String>,
-    pub(crate) rows: Vec<Vec<String>>,
-}
-
 // The Events sheet's own model: which row a selection names, the merged
 // order it is an index into, and the buses declared over it. `ResultsState`
 // holds two of them, which is why they are named here.
@@ -64,7 +58,6 @@ pub(crate) use optimization::export_csv as export_optimization_csv;
 pub(crate) use rspice_results::events::projection::BusRadix;
 pub(crate) use specs::active_run_specifications as run_specifications;
 pub(crate) use specs::export_csv as export_specs_csv;
-pub(crate) use specs::hardcopy_table as specs_hardcopy_table;
 
 /// Route to the one surface that authors specification limits.
 ///
@@ -971,15 +964,7 @@ pub(crate) enum ViewGesture {
 /// Those sheets key their viewports by analysis; every other viewer is a
 /// single canvas keyed by plot ordinal. A gesture that does not ask this
 /// question first will write to a store the sheet never reads.
-pub(crate) const fn viewer_uses_wave_stack(viewer: ResultViewer) -> bool {
-    matches!(
-        viewer,
-        ResultViewer::Waves
-            | ResultViewer::DcSweep
-            | ResultViewer::Bode
-            | ResultViewer::NoiseContrib
-    )
-}
+pub(crate) use rspice_results::result_presentation::viewer_uses_wave_stack;
 
 /// Queue a viewport gesture for the active result sheet.
 pub(crate) fn request_view_gesture(state: &mut AppState, gesture: ViewGesture) {

@@ -21,6 +21,25 @@ fn quick_view_binding_requires_one_successful_terminal_analysis_and_valid_contro
         RetainedQuickViewSource::try_new(&run, 7, |_| true),
         Err(HardcopySourceError::UnretainedResult(_))
     ));
+    assert!(matches!(
+        resolve_results_manifest_source(
+            "manifest".to_owned(),
+            ProjectId::new(),
+            HardcopyScope::ActiveDocument,
+            &run
+        ),
+        Err(HardcopySourceError::UnretainedResult(_))
+    ));
+    assert!(matches!(
+        resolve_results_specs_source(
+            "specifications".to_owned(),
+            ProjectId::new(),
+            HardcopyScope::ActiveDocument,
+            &run,
+            &[]
+        ),
+        Err(HardcopySourceError::UnretainedResult(_))
+    ));
     run.lifecycle = SimulationRunLifecycle::Completed;
     assert!(matches!(
         RetainedQuickViewSource::try_new(&run, 8, |_| true),
@@ -40,6 +59,19 @@ fn quick_view_binding_requires_one_successful_terminal_analysis_and_valid_contro
         "histogram_custom_max": 1.0, "histogram_mode": "count"
     }"#;
     let presentation: ResultsQuickViewPresentation = serde_json::from_str(legacy).unwrap();
+    assert!(matches!(
+        resolve_results_quick_view_stack(
+            "stack".to_owned(),
+            ProjectId::new(),
+            HardcopyScope::Selection,
+            &run,
+            &presentation,
+            |_| true
+        ),
+        Err(HardcopySourceError::UnsupportedScope(
+            HardcopyScope::Selection
+        ))
+    ));
     let project = ProjectId::new();
     let resolved = resolve_results_quick_view_parts(
         "retained-wave".to_owned(),

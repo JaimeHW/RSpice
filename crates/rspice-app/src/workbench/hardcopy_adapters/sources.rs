@@ -41,9 +41,7 @@ use crate::product::{ContentDigest, DatasetId, ObjectRevision, ProjectId, RunId}
 use crate::results::report_document::{
     FigureSizing, ReportBlockKind, ReportReferenceCurrentness, ReportReferenceMode,
 };
-use crate::results::report_document::{
-    ReportDocument, ReportReferenceInventory, ReportReferenceSnapshot, ReportSourceId,
-};
+use crate::results::report_document::{ReportDocument, ReportReferenceInventory};
 use crate::results::visualization_document::{
     AxisScale, Page, PageId, Pane, PaneId, VisualizationDocument,
 };
@@ -1346,40 +1344,6 @@ fn visualization_document_pane_availability(
         return unavailable("the selected result pane has no visible retained trace");
     }
     RetainedHardcopySourceAvailability::Available
-}
-
-fn visualization_document_pane_source_key(
-    project_id: ProjectId,
-    document_id: crate::product::ResultDocumentId,
-    pane_id: PaneId,
-) -> String {
-    format!(
-        "project:{}:result-document:{}:pane:{}",
-        project_id.as_uuid(),
-        document_id,
-        pane_id.get()
-    )
-}
-
-fn visualization_document_reference(
-    document: &VisualizationDocument,
-) -> Result<ReportReferenceSnapshot, HardcopySourceError> {
-    let content_digest = document
-        .content_digest()
-        .map_err(|error| HardcopySourceError::InvalidVisualizationSource(error.to_string()))?;
-    ReportReferenceSnapshot::new(
-        ReportSourceId::VisualizationDocument {
-            document_id: document.id(),
-        },
-        Some(document.revision()),
-        content_digest,
-        document
-            .datasets()
-            .iter()
-            .map(|dataset| dataset.binding())
-            .collect(),
-    )
-    .map_err(|error| HardcopySourceError::InvalidVisualizationSource(error.to_string()))
 }
 
 /// Resolve the one application document that owns the current route.

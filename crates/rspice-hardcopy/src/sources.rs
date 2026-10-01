@@ -8,10 +8,12 @@ mod mapping;
 mod plots;
 mod quick_plot;
 mod reports;
+mod result_documents;
 mod result_summary;
 mod result_view;
 mod schematic;
 mod semantic;
+mod visualization;
 
 pub(crate) use geometry::authored_sheet_bounds;
 
@@ -35,6 +37,11 @@ pub use quick_plot::{
     stable_page_id, stable_quick_trace_id,
 };
 pub use reports::{ReportHardcopySource, resolve_report_source};
+pub use result_documents::{
+    resolve_results_manifest_source, resolve_results_quick_view_stack,
+    resolve_results_specs_source, results_manifest_identity, results_specs_identity,
+    results_stack_identity,
+};
 pub use result_summary::{is_curve_viewer, semantic_result_summary};
 pub use result_view::{
     QuickFftSettings, QuickHistogramSettings, ResultsQuickViewPresentation,
@@ -69,6 +76,9 @@ pub use schematic::{
 };
 pub use semantic::*;
 use sha2::{Digest as _, Sha256};
+pub use visualization::{
+    resolve_visualization_document_source, visualization_document_pane_source_key,
+};
 
 /// Natural physical scale for schematic coordinates.
 ///

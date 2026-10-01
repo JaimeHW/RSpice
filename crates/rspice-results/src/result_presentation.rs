@@ -11,6 +11,17 @@ use serde::{Deserialize, Serialize};
 use crate::{analysis_result::AnalysisResult, run::SimulationRun, waveform::RetainedWaveform};
 use rspice_app_types::product::{AnalysisInstanceId, DatasetId};
 
+/// Whether a result viewer renders one waveform pane stack per analysis.
+pub const fn viewer_uses_wave_stack(viewer: ResultViewer) -> bool {
+    matches!(
+        viewer,
+        ResultViewer::Waves
+            | ResultViewer::DcSweep
+            | ResultViewer::Bode
+            | ResultViewer::NoiseContrib
+    )
+}
+
 /// The result viewers, in tab order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum ResultViewer {

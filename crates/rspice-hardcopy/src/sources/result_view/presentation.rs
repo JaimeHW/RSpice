@@ -172,18 +172,7 @@ impl ResultsQuickViewPresentation {
                 ));
             }
         }
-        if self.specs.len() > 10_000 {
-            return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-                "prepared specification count exceeds the governed limit".to_owned(),
-            ));
-        }
-        for (index, spec) in self.specs.iter().enumerate() {
-            spec.validate().map_err(|error| {
-                HardcopySourceError::InvalidPreparedWorkerSnapshot(format!(
-                    "prepared specification {index} is invalid: {error}"
-                ))
-            })?;
-        }
+        super::super::result_documents::validate_result_specifications(&self.specs)?;
         validate_optional_label(
             "prepared FFT source",
             self.fft_selected_source.as_deref(),
