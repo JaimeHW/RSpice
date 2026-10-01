@@ -13,6 +13,7 @@ mod result_summary;
 mod result_view;
 mod schematic;
 mod semantic;
+mod studio;
 mod visualization;
 
 pub(crate) use geometry::authored_sheet_bounds;
@@ -76,6 +77,10 @@ pub use schematic::{
 };
 pub use semantic::*;
 use sha2::{Digest as _, Sha256};
+pub use studio::{
+    StudioHardcopyPresentation, StudioHardcopySource, StudioWaveformStyle, resolve_studio_document,
+    resolve_studio_pane, studio_curve_viewer_is_supported, studio_source_identity,
+};
 pub use visualization::{
     resolve_visualization_document_source, visualization_document_pane_source_key,
 };

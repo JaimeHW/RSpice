@@ -5,6 +5,9 @@
 //! background document when no source is active.
 
 use super::*;
+use rspice_results::studio_presentation::{
+    VisualizationAnnotation as StudioAnnotation, VisualizationMarker as StudioMarker,
+};
 
 mod quick_view;
 use crate::product::{DatasetBinding, DatasetId, ResultDocumentId, VerificationEvidenceId};
@@ -1754,15 +1757,17 @@ fn studio_adapter_reads_retained_dataset_and_places_markers_without_report_refer
         label: "M1".to_owned(),
     });
 
-    let resolved = resolve_active_studio_pane_source(ActiveStudioPaneHardcopySource {
-        source_key: "studio-active-pane".to_owned(),
-        project_id,
-        studio: &studio,
-        simulation: &simulation,
-        pane_id: studio.active_pane.unwrap(),
-        scope: HardcopyScope::ActivePlotDocument,
-    })
-    .unwrap();
+    let resolve = |studio: &VisualizationStudioState, simulation: &SimulationState| {
+        resolve_active_studio_pane_source(ActiveStudioPaneHardcopySource {
+            source_key: "studio-active-pane".to_owned(),
+            project_id,
+            studio,
+            simulation,
+            pane_id: studio.active_pane.unwrap(),
+            scope: HardcopyScope::ActivePlotDocument,
+        })
+    };
+    let resolved = resolve(&studio, &simulation).unwrap();
     let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
         panic!("expected studio plot")
     };
@@ -1777,15 +1782,7 @@ fn studio_adapter_reads_retained_dataset_and_places_markers_without_report_refer
 
     let initial_digest = resolved.authority().content_digest();
     studio.markers[0].label = "M1 changed".to_owned();
-    let marker_changed = resolve_active_studio_pane_source(ActiveStudioPaneHardcopySource {
-        source_key: "studio-active-pane".to_owned(),
-        project_id,
-        studio: &studio,
-        simulation: &simulation,
-        pane_id: studio.active_pane.unwrap(),
-        scope: HardcopyScope::ActivePlotDocument,
-    })
-    .unwrap();
+    let marker_changed = resolve(&studio, &simulation).unwrap();
     assert_ne!(
         initial_digest,
         marker_changed.authority().content_digest(),
@@ -1799,20 +1796,38 @@ fn studio_adapter_reads_retained_dataset_and_places_markers_without_report_refer
         x: 1.5,
         text: "review point".to_owned(),
     });
-    let annotation_changed = resolve_active_studio_pane_source(ActiveStudioPaneHardcopySource {
-        source_key: "studio-active-pane".to_owned(),
-        project_id,
-        studio: &studio,
-        simulation: &simulation,
-        pane_id: studio.active_pane.unwrap(),
-        scope: HardcopyScope::ActivePlotDocument,
-    })
-    .unwrap();
+    let annotation_changed = resolve(&studio, &simulation).unwrap();
     assert_ne!(
         marker_changed.authority().content_digest(),
         annotation_changed.authority().content_digest(),
         "annotation semantics must bind the resolved visualization digest"
     );
+
+    studio.panes[0].viewer = ResultViewer::Fft;
+    assert!(matches!(
+        resolve(&studio, &simulation),
+        Err(HardcopySourceError::UnsupportedVisualizationViewer(_))
+    ));
+    studio.panes[0].viewer = ResultViewer::Waves;
+    let duplicate = simulation.runs[0].clone();
+    simulation.runs.push(duplicate);
+    assert!(matches!(
+        resolve(&studio, &simulation),
+        Err(HardcopySourceError::AmbiguousRetainedDataset(_))
+    ));
+    simulation.runs.pop();
+    simulation.runs[0].lifecycle = SimulationRunLifecycle::Running;
+    assert!(matches!(
+        resolve(&studio, &simulation),
+        Err(HardcopySourceError::UnretainedResult(_))
+    ));
+    simulation.runs[0].lifecycle = SimulationRunLifecycle::Completed;
+    simulation.runs[0].analyses[0].waveforms[0] =
+        WaveformData::new("V(out)", vec![0.0, 1.0], vec![1.0], "#00ffff");
+    assert!(matches!(
+        resolve(&studio, &simulation),
+        Err(HardcopySourceError::InvalidVisualizationSource(_))
+    ));
 }
 
 #[test]

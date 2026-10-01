@@ -8,410 +8,46 @@
 
 use super::*;
 
+fn studio_source<'a>(
+    project_id: ProjectId,
+    studio: &'a VisualizationStudioState,
+    simulation: &'a SimulationState,
+) -> StudioHardcopySource<'a, SimulationRun, WaveformData> {
+    StudioHardcopySource {
+        project_id,
+        studio: StudioHardcopyPresentation {
+            revision: studio.revision,
+            panes: &studio.panes,
+            markers: &studio.markers,
+            annotations: &studio.annotations,
+            pane_x_ranges: &studio.pane_x_ranges,
+            family_policies: &studio.family_policies,
+            autoscale: studio.autoscale,
+        },
+        runs: &simulation.runs,
+        waveform_style: |waveform| StudioWaveformStyle {
+            color: &waveform.color,
+            visible: waveform.visible,
+        },
+    }
+}
+
 pub(crate) fn resolve_all_studio_panes(
     project_id: ProjectId,
     studio: &VisualizationStudioState,
     simulation: &SimulationState,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    if studio.panes.is_empty() {
-        return Err(HardcopySourceError::InvalidSourceSet(
-            "all-panes scope requires at least one retained pane".to_owned(),
-        ));
-    }
-    let mut resolved_panes = Vec::with_capacity(studio.panes.len());
-    for pane in &studio.panes {
-        resolved_panes.push(resolve_active_studio_pane_source(
-            ActiveStudioPaneHardcopySource {
-                source_key: format!(
-                    "project:{}:visualization-pane:{}",
-                    project_id.as_uuid(),
-                    pane.id
-                ),
-                project_id,
-                studio,
-                simulation,
-                pane_id: pane.id,
-                scope: HardcopyScope::ActivePlotDocument,
-            },
-        )?);
-    }
-    let members = resolved_panes
-        .iter()
-        .map(source_set_member_from_resolved)
-        .collect::<Result<Vec<_>, _>>()?;
-    let source_set = HardcopySourceSet::try_new(
-        HardcopyDocumentId::try_from_uuid(Uuid::new_v5(
-            &project_id.as_uuid(),
-            b"rspice-hardcopy-all-visualization-panes-v1",
-        ))
-        .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
-        ObjectRevision::new(studio.revision)
-            .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
-        "All visualization panes",
-        HardcopyDocumentKind::PlotOrWorksheet,
-        HardcopyScope::AllSheetsOrPanes,
-        members,
-    )?;
-    let mut resolved_panes = resolved_panes.into_iter();
-    resolve_hardcopy_source_set_with(&source_set, |expected| {
-        let actual = resolved_panes.next().ok_or_else(|| {
-            HardcopySourceError::SourceNotRetained(expected.source_key().to_owned())
-        })?;
-        if actual.source_key() != expected.source_key() {
-            return Err(HardcopySourceError::StaleSourceSetMember {
-                source_key: expected.source_key().to_owned(),
-            });
-        }
-        Ok(actual)
-    })
+    resolve_studio_document(&studio_source(project_id, studio, simulation))
 }
 
-/// Resolve the exact active Visualization Studio pane directly from its
-/// retained simulation dataset. This closes the application integration gap
-/// without manufacturing a report reference or consulting the currently
-/// rendered plot widget.
 pub(crate) fn resolve_active_studio_pane_source(
     source: ActiveStudioPaneHardcopySource<'_>,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    validate_label("source key", &source.source_key, SOURCE_KEY_LIMIT)?;
-    if !matches!(
-        &source.scope,
-        HardcopyScope::ActivePlotDocument | HardcopyScope::ActiveDocument
-    ) {
-        return Err(HardcopySourceError::UnsupportedScope(source.scope));
-    }
-    let pane_id = source.pane_id;
-    let panes = source
-        .studio
-        .panes
-        .iter()
-        .filter(|pane| pane.id == pane_id)
-        .collect::<Vec<_>>();
-    let [pane] = panes.as_slice() else {
-        return if panes.is_empty() {
-            Err(HardcopySourceError::UnretainedResult(format!(
-                "active pane {pane_id} is not retained"
-            )))
-        } else {
-            Err(HardcopySourceError::AmbiguousActiveSource(format!(
-                "visualization pane {pane_id}"
-            )))
-        };
-    };
-    if is_curve_viewer(pane.viewer) && source.studio.family_policies.contains_key(&pane.id) {
-        return Err(HardcopySourceError::InvalidVisualizationSource(
-            "active family presentation requires its exact resolved family slice".to_owned(),
-        ));
-    }
-    if is_curve_viewer(pane.viewer)
-        && source.studio.autoscale == VisualizationAutoscale::SpecificationBounds
-    {
-        return Err(HardcopySourceError::InvalidVisualizationSource(
-            "specification-bound autoscale requires the active project specification authority"
-                .to_owned(),
-        ));
-    }
-
-    let runs = source
-        .simulation
-        .runs
-        .iter()
-        .filter(|run| run.dataset_id == pane.dataset_id)
-        .collect::<Vec<_>>();
-    let [run] = runs.as_slice() else {
-        return if runs.is_empty() {
-            Err(HardcopySourceError::UnretainedResult(format!(
-                "dataset {} is not retained",
-                pane.dataset_id
-            )))
-        } else {
-            Err(HardcopySourceError::AmbiguousRetainedDataset(
-                pane.dataset_id.to_string(),
-            ))
-        };
-    };
-    if !run.lifecycle.is_terminal() {
-        return Err(HardcopySourceError::UnretainedResult(format!(
-            "dataset {} belongs to a non-terminal run",
-            pane.dataset_id
-        )));
-    }
-    let analyses = run
-        .analyses
-        .iter()
-        .filter(|analysis| analysis.id == pane.analysis_sequence)
-        .collect::<Vec<_>>();
-    let [analysis] = analyses.as_slice() else {
-        return if analyses.is_empty() {
-            Err(HardcopySourceError::UnretainedResult(format!(
-                "analysis {} is not retained in dataset {}",
-                pane.analysis_sequence, pane.dataset_id
-            )))
-        } else {
-            Err(HardcopySourceError::AmbiguousRetainedAnalysis(
-                pane.analysis_sequence,
-            ))
-        };
-    };
-    if !analysis.success {
-        return Err(HardcopySourceError::UnretainedResult(format!(
-            "analysis {} did not complete successfully",
-            analysis.id
-        )));
-    }
-    if !is_curve_viewer(pane.viewer) {
-        return resolve_studio_result_summary(source, pane, run.run_id, analysis);
-    }
-    let viewer_accepts_analysis = match pane.viewer {
-        ResultViewer::HarmonicBalance => {
-            crate::workbench::documents::result_document::harmonic_balance_analysis_is_renderable(
-                analysis,
-            )
-        }
-        ResultViewer::PhaseNoise => {
-            crate::workbench::documents::result_document::phase_noise_analysis_is_renderable(
-                analysis,
-            )
-        }
-        _ => true,
-    };
-    if !viewer_accepts_analysis {
-        return Err(HardcopySourceError::MissingViewerEvidence(
-            match pane.viewer {
-                ResultViewer::HarmonicBalance => "harmonic-balance spectrum",
-                ResultViewer::PhaseNoise => "phase-noise spectrum",
-                _ => unreachable!("only specialist curve viewers are validated here"),
-            },
-        ));
-    }
-    let visible = analysis
-        .waveforms
-        .iter()
-        .filter(|waveform| {
-            waveform.visible
-                && match pane.viewer {
-                    ResultViewer::HarmonicBalance => {
-                        crate::workbench::documents::result_document::harmonic_balance_waveform_is_renderable(
-                            waveform,
-                        )
-                    }
-                    ResultViewer::PhaseNoise => {
-                        crate::workbench::documents::result_document::phase_noise_waveform_is_renderable(
-                            waveform,
-                        )
-                    }
-                    _ => true,
-                }
-        })
-        .collect::<Vec<_>>();
-    if visible.is_empty() {
-        return Err(HardcopySourceError::UnretainedResult(
-            "the active pane has no visible retained waveform".to_owned(),
-        ));
-    }
-    for waveform in &visible {
-        if waveform.x.is_empty()
-            || waveform.x.len() != waveform.y.len()
-            || waveform
-                .x
-                .iter()
-                .chain(waveform.y.iter())
-                .any(|value| !value.is_finite())
-        {
-            return Err(HardcopySourceError::InvalidRetainedWaveform(
-                waveform.name.clone(),
-            ));
-        }
-    }
-
-    let source_x_minimum = visible
-        .iter()
-        .flat_map(|waveform| waveform.x.iter().copied())
-        .min_by(f64::total_cmp)
-        .ok_or_else(|| HardcopySourceError::UnretainedResult("no X samples".to_owned()))?;
-    let source_x_maximum = visible
-        .iter()
-        .flat_map(|waveform| waveform.x.iter().copied())
-        .max_by(f64::total_cmp)
-        .ok_or_else(|| HardcopySourceError::UnretainedResult("no X samples".to_owned()))?;
-    let (x_minimum, x_maximum) = source
-        .studio
-        .pane_x_ranges
-        .get(&pane.id)
-        .copied()
-        .filter(|(minimum, maximum)| {
-            minimum.is_finite() && maximum.is_finite() && minimum < maximum
-        })
-        .unwrap_or_else(|| nondegenerate_range(source_x_minimum, source_x_maximum));
-    let source_y_minimum = visible
-        .iter()
-        .flat_map(|waveform| waveform.y.iter().copied())
-        .min_by(f64::total_cmp)
-        .ok_or_else(|| HardcopySourceError::UnretainedResult("no Y samples".to_owned()))?;
-    let source_y_maximum = visible
-        .iter()
-        .flat_map(|waveform| waveform.y.iter().copied())
-        .max_by(f64::total_cmp)
-        .ok_or_else(|| HardcopySourceError::UnretainedResult("no Y samples".to_owned()))?;
-    let (mut y_minimum, mut y_maximum) = nondegenerate_range(source_y_minimum, source_y_maximum);
-    if source.studio.autoscale == VisualizationAutoscale::RobustVisible {
-        let padding = ((y_maximum - y_minimum) * 0.05).max(f64::EPSILON);
-        y_minimum -= padding;
-        y_maximum += padding;
-    }
-
-    let plot_width = PLOT_WIDTH_UM - 2 * PLOT_INSET_UM;
-    let plot_height = PLOT_HEIGHT_UM - 2 * PLOT_INSET_UM;
-    let mut traces = Vec::with_capacity(visible.len());
-    let mut trace_ids = std::collections::HashSet::new();
-    for waveform in &visible {
-        let trace_id = stable_trace_id(pane.dataset_id, analysis.id, &waveform.name);
-        if !trace_ids.insert(trace_id) {
-            return Err(HardcopySourceError::DuplicateStableTraceIdentity(trace_id));
-        }
-        let source_points = waveform
-            .x
-            .iter()
-            .copied()
-            .zip(waveform.y.iter().copied())
-            .collect::<Vec<_>>();
-        traces.push(SemanticPlotTrace {
-            trace_id,
-            label: waveform.name.clone(),
-            paths: clipped_plot_paths(
-                &source_points,
-                x_minimum,
-                x_maximum,
-                y_minimum,
-                y_maximum,
-                plot_width,
-                plot_height,
-            )?,
-            source_samples: source_points
-                .iter()
-                .map(|(x, y)| (x.to_bits(), y.to_bits()))
-                .collect(),
-        });
-    }
-    let markers = source
-        .studio
-        .markers
-        .iter()
-        .filter(|marker| {
-            marker.dataset_id == pane.dataset_id
-                && marker.analysis_sequence == pane.analysis_sequence
-                && visible
-                    .iter()
-                    .any(|waveform| waveform.name == marker.waveform_name)
-        })
-        .map(|marker| {
-            Ok(SemanticPlotMarker {
-                marker_id: marker.id,
-                label: marker.label.clone(),
-                trace_id: Some(stable_trace_id(
-                    marker.dataset_id,
-                    marker.analysis_sequence,
-                    &marker.waveform_name,
-                )),
-                source_x_bits: Some(marker.x.to_bits()),
-                source_y_bits: Some(marker.y.to_bits()),
-                position: Some(map_plot_point(
-                    (
-                        marker.x.clamp(x_minimum, x_maximum),
-                        marker.y.clamp(y_minimum, y_maximum),
-                    ),
-                    x_minimum,
-                    y_minimum,
-                    x_maximum - x_minimum,
-                    y_maximum - y_minimum,
-                    plot_width,
-                    plot_height,
-                )?),
-            })
-        })
-        .collect::<Result<Vec<_>, HardcopySourceError>>()?;
-    let annotations = source
-        .studio
-        .annotations
-        .iter()
-        .filter(|annotation| {
-            annotation.dataset_id == pane.dataset_id
-                && annotation.analysis_sequence == pane.analysis_sequence
-        })
-        .map(|annotation| {
-            Ok(SemanticPlotAnnotation {
-                annotation_id: annotation.id,
-                text: annotation.text.clone(),
-                trace_id: None,
-                source_x_bits: Some(annotation.x.to_bits()),
-                source_y_bits: None,
-                position: Some(map_plot_point(
-                    (annotation.x.clamp(x_minimum, x_maximum), y_maximum),
-                    x_minimum,
-                    y_minimum,
-                    x_maximum - x_minimum,
-                    y_maximum - y_minimum,
-                    plot_width,
-                    plot_height,
-                )?),
-            })
-        })
-        .collect::<Result<Vec<_>, HardcopySourceError>>()?;
-    let semantic = SemanticPlot {
-        viewer: pane.viewer,
-        page_id: stable_page_id(&pane.page),
-        pane_id: pane.id,
-        // The studio pane's own axis declarations are not projected into this
-        // adapter yet, and a scale it has not been told is linear.
-        x_scale: AxisScale::Linear,
-        y_scale: AxisScale::Linear,
-        axis_ticks: Vec::new(),
-        traces,
-        cursors: Vec::new(),
-        markers,
-        annotations,
-        captions: Vec::new(),
-    };
-    let digest = studio_pane_digest(
-        source.studio,
-        pane,
-        run.run_id,
-        analysis.id,
-        &visible,
-        &source
-            .studio
-            .markers
-            .iter()
-            .filter(|marker| {
-                marker.dataset_id == pane.dataset_id
-                    && marker.analysis_sequence == pane.analysis_sequence
-                    && visible
-                        .iter()
-                        .any(|waveform| waveform.name == marker.waveform_name)
-            })
-            .collect::<Vec<_>>(),
-        &source
-            .studio
-            .annotations
-            .iter()
-            .filter(|annotation| {
-                annotation.dataset_id == pane.dataset_id
-                    && annotation.analysis_sequence == pane.analysis_sequence
-            })
-            .collect::<Vec<_>>(),
-    )?;
-    let identity =
-        studio_source_identity(&source.source_key, source.project_id, source.studio, pane)?;
-    finish_resolved(
-        identity,
-        digest,
-        HardcopyDocumentKind::PlotOrWorksheet,
+    resolve_studio_pane(
+        &studio_source(source.project_id, source.studio, source.simulation),
+        source.source_key,
+        source.pane_id,
         source.scope,
-        HardcopySemanticDocument::Plot(semantic),
-        SemanticBounds::try_new(
-            SemanticPoint::new(0, 0),
-            SemanticPoint::new(PLOT_WIDTH_UM, PLOT_HEIGHT_UM),
-        )?,
     )
 }
 
@@ -476,50 +112,5 @@ pub(crate) fn resolve_results_quick_view_source(
         source.scope,
         &active,
         &presentation,
-    )
-}
-
-pub(super) fn resolve_studio_result_summary(
-    source: ActiveStudioPaneHardcopySource<'_>,
-    pane: &StudioPane,
-    run_id: RunId,
-    analysis: &AnalysisResult,
-) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    let summary = semantic_result_summary(pane.viewer, analysis)?;
-    let digest = canonical_digest(
-        b"rspice-hardcopy-studio-result-summary-v1",
-        &(source.studio.revision, pane, run_id, analysis.id, &summary),
-    )?;
-    let identity =
-        studio_source_identity(&source.source_key, source.project_id, source.studio, pane)?;
-    finish_resolved(
-        identity,
-        digest,
-        HardcopyDocumentKind::PlotOrWorksheet,
-        source.scope,
-        HardcopySemanticDocument::ResultSummary(Box::new(summary)),
-        SemanticBounds::try_new(
-            SemanticPoint::new(0, 0),
-            SemanticPoint::new(REPORT_PAGE_WIDTH_UM, REPORT_PAGE_HEIGHT_UM),
-        )?,
-    )
-}
-
-pub(super) fn studio_source_identity(
-    source_key: &str,
-    project_id: ProjectId,
-    studio: &VisualizationStudioState,
-    pane: &StudioPane,
-) -> Result<HardcopySourceIdentity, HardcopySourceError> {
-    let mut identity_name = Vec::with_capacity(24);
-    identity_name.extend_from_slice(pane.dataset_id.as_uuid().as_bytes());
-    identity_name.extend_from_slice(&pane.id.to_be_bytes());
-    HardcopySourceIdentity::try_new(
-        source_key,
-        HardcopyDocumentId::try_from_uuid(Uuid::new_v5(&project_id.as_uuid(), &identity_name))
-            .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
-        ObjectRevision::new(studio.revision)
-            .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
-        format!("{} · {}", pane.page, pane.viewer.label()),
     )
 }

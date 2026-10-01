@@ -1213,7 +1213,7 @@ fn prepared_payload_identity(
                     )
                 })?;
             Ok((
-                studio_source_identity(source_key, *project_id, studio, pane)?,
+                studio_source_identity(source_key, *project_id, studio.revision, pane)?,
                 scope.clone(),
             ))
         }

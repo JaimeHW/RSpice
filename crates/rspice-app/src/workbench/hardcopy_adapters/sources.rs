@@ -23,6 +23,7 @@ use noise::*;
 pub use prepared::*;
 use quick_view_overlay::*;
 pub(crate) use results::*;
+#[cfg(test)]
 use rspice_hardcopy::sources::resolve_semantic_source as finish_resolved;
 #[cfg(test)]
 pub const BLANK_SCHEMATIC_SHEET_WIDTH_UM: i64 = 279_400;
@@ -32,19 +33,16 @@ pub const BLANK_SCHEMATIC_SHEET_HEIGHT_UM: i64 = 215_900;
 pub(super) const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 8;
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
 use crate::io::ProjectSimulationResults;
-use crate::product::{ContentDigest, DatasetId, ObjectRevision, ProjectId, RunId};
+use crate::product::{ContentDigest, DatasetId, ObjectRevision, ProjectId};
 #[cfg(test)]
 use crate::results::report_document::{
     FigureSizing, ReportBlockKind, ReportReferenceCurrentness, ReportReferenceMode,
 };
 use crate::results::report_document::{ReportDocument, ReportReferenceInventory};
-use crate::results::visualization_document::{
-    AxisScale, Page, PageId, Pane, PaneId, VisualizationDocument,
-};
+use crate::results::visualization_document::{Page, PageId, Pane, PaneId, VisualizationDocument};
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType, Bus, BusTap,
     Component, DesignNote, DocumentationShape, DrawingSheetTitleFieldId, Junction, NetLabel,
@@ -64,8 +62,7 @@ use crate::hardcopy::sources::{
 };
 use crate::workbench::documents::result_document::ResultViewer;
 use crate::workbench::documents::visualization_studio::{
-    VisualizationAnnotation as StudioAnnotation, VisualizationAutoscale,
-    VisualizationMarker as StudioMarker, VisualizationPane as StudioPane, VisualizationStudioState,
+    VisualizationPane as StudioPane, VisualizationStudioState,
 };
 use crate::workbench::lifecycle::session::SymbolSelection;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
@@ -1221,16 +1218,7 @@ fn studio_pane_availability(
             pane.analysis_sequence
         ));
     }
-    if is_curve_viewer(pane.viewer)
-        && !matches!(
-            pane.viewer,
-            ResultViewer::Waves
-                | ResultViewer::DcSweep
-                | ResultViewer::NoiseContrib
-                | ResultViewer::HarmonicBalance
-                | ResultViewer::PhaseNoise
-        )
-    {
+    if is_curve_viewer(pane.viewer) && !studio_curve_viewer_is_supported(pane.viewer) {
         return unavailable(format!(
             "{} has no faithful semantic Studio figure writer",
             pane.viewer.label()
@@ -1616,71 +1604,6 @@ fn selected_symbol_document(
         return Err(HardcopySourceError::EmptySelection);
     }
     Ok(selected)
-}
-
-fn stable_trace_id(dataset_id: DatasetId, analysis_sequence: u64, name: &str) -> u64 {
-    let mut hasher = Sha256::new();
-    hasher.update(b"rspice-studio-trace-id-v1");
-    hasher.update(dataset_id.as_uuid().as_bytes());
-    hasher.update(analysis_sequence.to_be_bytes());
-    hasher.update(name.as_bytes());
-    let digest = hasher.finalize();
-    let mut bytes = [0_u8; 8];
-    bytes.copy_from_slice(&digest[..8]);
-    u64::from_be_bytes(bytes).max(1)
-}
-
-#[derive(Serialize)]
-struct StudioWaveformDigestMaterial<'a> {
-    name: &'a str,
-    color: &'a str,
-    visible: bool,
-    x_bits: Vec<u64>,
-    y_bits: Vec<u64>,
-}
-
-#[derive(Serialize)]
-struct StudioPaneDigestMaterial<'a> {
-    studio_revision: u64,
-    pane: &'a StudioPane,
-    run_id: RunId,
-    analysis_sequence: u64,
-    waveforms: Vec<StudioWaveformDigestMaterial<'a>>,
-    markers: &'a [&'a StudioMarker],
-    annotations: &'a [&'a StudioAnnotation],
-}
-
-fn studio_pane_digest(
-    studio: &VisualizationStudioState,
-    pane: &StudioPane,
-    run_id: RunId,
-    analysis_sequence: u64,
-    waveforms: &[&WaveformData],
-    markers: &[&StudioMarker],
-    annotations: &[&StudioAnnotation],
-) -> Result<ContentDigest, HardcopySourceError> {
-    let waveforms = waveforms
-        .iter()
-        .map(|waveform| StudioWaveformDigestMaterial {
-            name: &waveform.name,
-            color: &waveform.color,
-            visible: waveform.visible,
-            x_bits: waveform.x.iter().map(|value| value.to_bits()).collect(),
-            y_bits: waveform.y.iter().map(|value| value.to_bits()).collect(),
-        })
-        .collect();
-    canonical_digest(
-        b"rspice-hardcopy-studio-pane-v1",
-        &StudioPaneDigestMaterial {
-            studio_revision: studio.revision,
-            pane,
-            run_id,
-            analysis_sequence,
-            waveforms,
-            markers,
-            annotations,
-        },
-    )
 }
 
 #[cfg(test)]
