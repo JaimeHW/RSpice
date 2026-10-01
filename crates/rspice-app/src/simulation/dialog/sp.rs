@@ -13,7 +13,5 @@ pub use config::SpConfig;
 #[cfg(test)]
 pub use config::SpPortConfig;
 #[cfg(test)]
-pub use rspice_simulation_contract::sp_config::SpSweepType;
-#[cfg(test)]
 pub use state::TOUCHSTONE_VERSIONS;
 pub use state::{SpDialogState, SpPortSource, TOUCHSTONE_VERSION_LABELS, port_roster_error};

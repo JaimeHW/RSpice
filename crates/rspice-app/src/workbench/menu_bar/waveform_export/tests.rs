@@ -1113,23 +1113,12 @@ fn csv_export_preserves_single_analysis_axis_shape() {
 
 #[test]
 fn dc_export_uses_the_retained_swept_quantity_and_every_nested_curve() {
-    use crate::simulation::engine_bridge::nested_dc_tests::{nested_config, retain, solve};
+    use crate::simulation::controller::dc_history_tests::{nested_config, retain, solve};
     let nested = retain(solve(nested_config()));
     let current = retain(
-        crate::simulation::EngineBridge::new()
-            .run(
-                &crate::simulation::AnalysisConfig::DcSweep(
-                    crate::simulation::config::DcSweepConfig {
-                        source: "IBIAS".to_owned(),
-                        start: 0.0,
-                        stop: 1e-3,
-                        step: 0.5e-3,
-                        ..Default::default()
-                    },
-                ),
-                "Current sweep\nIBIAS 0 out 0\nR1 out 0 1k\n.end\n",
-            )
-            .unwrap(),
+        crate::simulation::controller::test_execution::run_manual_deck(
+            "Current sweep\nIBIAS 0 out 0\nR1 out 0 1k\n.dc IBIAS 0 1m 0.5m\n.end\n",
+        ),
     );
     for (analysis, source, unit, count) in [(nested, "V1", "V", 12), (current, "IBIAS", "A", 1)] {
         assert!(prepare_typed_result_csv(&analysis).is_none());

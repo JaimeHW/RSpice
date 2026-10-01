@@ -8,6 +8,10 @@ mod qpac;
 mod qpnoise;
 pub mod qpss;
 mod qpxf;
+#[cfg(test)]
+pub(crate) mod test_fixtures;
+#[cfg(test)]
+mod units_tests;
 mod yield_input;
 pub use yield_input::yield_provenance_from_monte_carlo_result;
 

@@ -130,18 +130,7 @@ fn authored_transient_and_ac_labels_cannot_invent_deferred_physical_sources() {
                     absent.save_policy = SavedOutputPolicy::OnDemandFromRetainedState;
                     let mut present = output(kind, "Valid physical source", "V(in)");
                     present.save_policy = SavedOutputPolicy::OnDemandFromRetainedState;
-                    let executed = run(
-                        deck,
-                        "Source identity",
-                        spec.clone(),
-                        if complex {
-                            ".ac lin 3 1 10"
-                        } else {
-                            ".tran 1u 10u"
-                        },
-                        &[alias, absent, present],
-                        mode,
-                    );
+                    let executed = run(deck, spec.clone(), &[alias, absent, present], mode);
                     for reload in [false, true] {
                         let persisted = stored(executed.clone());
                         let mut state = if reload {

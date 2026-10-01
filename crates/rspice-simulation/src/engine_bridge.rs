@@ -1,0 +1,556 @@
+//! Engine adapters for prepared numerical analyses.
+//!
+//! Parse execution source, resolve analysis configuration, call the numerical
+//! engine, and translate its results and errors into runtime contracts.
+
+use std::path::Path;
+
+use rspice_core::abort_signal::AbortSignal;
+#[cfg(test)]
+use rspice_core::abort_signal::NoAbort;
+
+use crate::error::SimulationError;
+use crate::results::SimulationResult;
+use rspice_simulation_contract::config::AnalysisConfig;
+
+#[cfg(test)]
+mod ac_grid_tests;
+mod ac_noise;
+mod dc;
+mod error;
+#[cfg(test)]
+pub(crate) mod nested_dc_tests;
+#[cfg(test)]
+mod numeric_override_tests;
+mod parsing;
+mod pole_zero;
+mod recorded_fft;
+mod sensitivity;
+mod transient;
+
+/// Bridge between UI and rspice-core engine
+///
+/// Handles parsing, execution, and result conversion for all analysis types.
+pub struct EngineBridge {
+    /// Core engine instance
+    engine: rspice_core::Engine,
+    measurement_references: crate::measurement_references::PreparedMeasurementReferences,
+}
+
+/// The supply corner one PVT point is solved at.
+///
+/// A supply corner scales the deck's existing independent DC supplies instead
+/// of restating them, so no card can express it and the point's deck cannot
+/// carry it. It is applied to the elaborated netlist between parsing and
+/// dispatch — the one seam every configuration-backed analysis passes through
+/// — so a corner point reaches transient, AC and DC exactly as it reaches the
+/// operating point.
+#[derive(Debug, Clone)]
+pub(crate) struct SupplyCornerScale {
+    pub(crate) corner_voltage: f64,
+    pub(crate) nominal_voltage: f64,
+    pub(crate) supply_source_names: Vec<String>,
+}
+
+struct SimulationInput<'a> {
+    config: &'a AnalysisConfig,
+    netlist_str: &'a str,
+    source_path: Option<&'a Path>,
+    supply_corner: Option<SupplyCornerScale>,
+    environment: Option<crate::runner::AnalysisExecutionEnvironment>,
+}
+
+impl Default for EngineBridge {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl EngineBridge {
+    pub(crate) fn with_measurement_references(
+        mut self,
+        references: crate::measurement_references::PreparedMeasurementReferences,
+    ) -> Self {
+        self.measurement_references = references;
+        self
+    }
+
+    /// Create a new engine bridge with default configuration
+    pub fn new() -> Self {
+        Self {
+            engine: rspice_core::Engine::default(),
+            measurement_references: Default::default(),
+        }
+    }
+
+    /// Create a new engine bridge only when the complete configuration is valid.
+    ///
+    /// Prefer this constructor at service and job-queue boundaries so invalid
+    /// configuration is rejected before parsing or simulation work begins.
+    #[cfg(test)]
+    pub fn try_with_config(
+        config: rspice_core::SimulationConfig,
+    ) -> Result<Self, rspice_core::SimulationConfigError> {
+        Ok(Self {
+            engine: rspice_core::Engine::try_new(config)?,
+            measurement_references: Default::default(),
+        })
+    }
+
+    /// Run simulation without cooperative cancellation.
+    ///
+    /// This compatibility convenience API is intended for direct synchronous
+    /// callers. Production queued execution must use [`Self::run_with_abort`]
+    /// or [`Self::run_with_abort_and_source_path`].
+    #[cfg(test)]
+    pub fn run(
+        &self,
+        config: &AnalysisConfig,
+        netlist_str: &str,
+    ) -> Result<SimulationResult, SimulationError> {
+        self.run_request(
+            SimulationInput {
+                config,
+                netlist_str,
+                source_path: None,
+                supply_corner: None,
+                environment: None,
+            },
+            &NoAbort,
+        )
+    }
+
+    /// Run simulation with abort signal for cooperative cancellation.
+    #[cfg(test)]
+    pub fn run_with_abort(
+        &self,
+        config: &AnalysisConfig,
+        netlist_str: &str,
+        abort_flag: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
+        self.run_request(
+            SimulationInput {
+                config,
+                netlist_str,
+                source_path: None,
+                supply_corner: None,
+                environment: None,
+            },
+            abort_flag,
+        )
+    }
+
+    /// Run simulation with cooperative cancellation and a source path for
+    /// relative include/model resolution.
+    ///
+    /// `supply_corner` is the one part of a PVT point a deck cannot state; a
+    /// request that is not point-scoped passes `None` and the deck's own
+    /// supplies stand.
+    pub(crate) fn run_with_abort_and_source_path(
+        &self,
+        config: &AnalysisConfig,
+        netlist_str: &str,
+        source_path: Option<&Path>,
+        supply_corner: Option<SupplyCornerScale>,
+        abort_flag: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
+        self.run_request(
+            SimulationInput {
+                config,
+                netlist_str,
+                source_path,
+                supply_corner,
+                environment: None,
+            },
+            abort_flag,
+        )
+    }
+
+    /// Run one prepared analysis under the exact temperature and supply point
+    /// selected by the Studio Run Set.
+    pub(crate) fn run_with_abort_and_source_path_and_environment(
+        &self,
+        config: &AnalysisConfig,
+        netlist_str: &str,
+        source_path: Option<&Path>,
+        environment: Option<crate::runner::AnalysisExecutionEnvironment>,
+        abort_flag: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
+        self.run_request(
+            SimulationInput {
+                config,
+                netlist_str,
+                source_path,
+                supply_corner: None,
+                environment,
+            },
+            abort_flag,
+        )
+    }
+
+    pub(crate) fn run_ac_data_with_source_path(
+        &self,
+        netlist_str: &str,
+        source_path: Option<&Path>,
+        table_name: &str,
+        frequencies: Vec<f64>,
+        table_options: &rspice_simulation_contract::config::AcDataTableOptions,
+        abort_flag: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
+        let netlist =
+            self.parse_netlist_with_abort_and_source_path(netlist_str, source_path, abort_flag)?;
+        self.run_ac_data(&netlist, table_name, frequencies, table_options, abort_flag)
+    }
+
+    fn run_request(
+        &self,
+        input: SimulationInput<'_>,
+        abort_flag: &dyn AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
+        ensure_not_aborted(abort_flag)?;
+        input.config.validate().map_err(|errors| {
+            SimulationError::InvalidConfig(format!(
+                "analysis configuration is invalid: {}",
+                errors.join("; ")
+            ))
+        })?;
+        ensure_not_aborted(abort_flag)?;
+        let temperature = match input.config {
+            AnalysisConfig::DcOp(config) => Some(config.temperature_celsius),
+            _ => input
+                .environment
+                .as_ref()
+                .map(|point| point.temperature_celsius),
+        };
+        let temperature_source = temperature
+            .map(|temperature| {
+                crate::netlist_preparation::source_with_run_temperature_with_abort(
+                    input.netlist_str,
+                    temperature,
+                    abort_flag,
+                )
+                .map_err(|error| {
+                    if error.is_aborted() {
+                        SimulationError::Aborted
+                    } else {
+                        SimulationError::InvalidConfig(error.to_string())
+                    }
+                })
+            })
+            .transpose()?;
+        let mut netlist = self.parse_netlist_with_abort_and_source_path(
+            temperature_source.as_deref().unwrap_or(input.netlist_str),
+            input.source_path,
+            abort_flag,
+        )?;
+        if let Some(temperature) = temperature {
+            // The explicit run point also wins over a parsed .TEMP card.
+            netlist.options.temp = Some(temperature);
+            // Previous-state provenance names the authorized deck, not the
+            // temporary temperature card used during parameter evaluation.
+            netlist.source_text = Some(input.netlist_str.to_owned());
+        }
+        if let Some(environment) = input.environment {
+            if !environment.temperature_celsius.is_finite()
+                || environment.temperature_celsius <= -273.15
+            {
+                return Err(SimulationError::InvalidConfig(
+                    "Run Set temperature must be finite and above absolute zero".to_owned(),
+                ));
+            }
+            netlist.options.temp = Some(environment.temperature_celsius);
+            match (
+                environment.supply_voltage,
+                environment.nominal_supply_voltage,
+            ) {
+                (Some(supply), Some(nominal)) => {
+                    crate::netlist_preparation::apply_voltage_corner(
+                        &mut netlist,
+                        supply,
+                        nominal,
+                        &environment.supply_source_names,
+                        abort_flag,
+                    )
+                    .map_err(|error| {
+                        if error.is_aborted() {
+                            SimulationError::Aborted
+                        } else {
+                            SimulationError::InvalidConfig(format!(
+                                "Run Set supply application failed: {error}"
+                            ))
+                        }
+                    })?;
+                }
+                (None, None) => {}
+                _ => {
+                    return Err(SimulationError::InvalidConfig(
+                        "Run Set supply and nominal voltage must be provided together".to_owned(),
+                    ));
+                }
+            }
+        } else if let Some(corner) = input.supply_corner {
+            crate::netlist_preparation::apply_voltage_corner(
+                &mut netlist,
+                corner.corner_voltage,
+                corner.nominal_voltage,
+                &corner.supply_source_names,
+                abort_flag,
+            )
+            .map_err(|error| {
+                if error.is_aborted() {
+                    SimulationError::Aborted
+                } else {
+                    SimulationError::InvalidConfig(format!(
+                        "PVT supply corner application failed: {error}"
+                    ))
+                }
+            })?;
+        }
+        Self::run_materialized_with_abort(&self.engine, input.config, &netlist, abort_flag)
+    }
+
+    /// Execute an analysis on an already materialized study circuit. The worker
+    /// engine supplies the resource policy; the circuit supplies its exact trial
+    /// parameters, statistical coordinate, source bindings, and environment.
+    /// No source reparse or second supply scaling is performed at this boundary.
+    pub(crate) fn run_materialized_with_abort(
+        engine: &rspice_core::Engine,
+        config: &AnalysisConfig,
+        netlist: &rspice_core::Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
+        ensure_not_aborted(abort)?;
+        config.validate().map_err(|errors| {
+            SimulationError::InvalidConfig(format!(
+                "analysis configuration is invalid: {}",
+                errors.join("; "),
+            ))
+        })?;
+        Self {
+            engine: engine.resolved_for_netlist(netlist),
+            measurement_references: Default::default(),
+        }
+        .dispatch_analysis(config, netlist, abort)
+    }
+
+    fn dispatch_analysis(
+        &self,
+        config: &AnalysisConfig,
+        netlist: &rspice_core::Netlist,
+        abort_flag: &dyn AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
+        ensure_not_aborted(abort_flag)?;
+        match config {
+            AnalysisConfig::DcOp(op_config) => self.run_dc_op(netlist, op_config, abort_flag),
+            AnalysisConfig::DcSweep(dc_config) => self.run_dc_sweep(netlist, dc_config, abort_flag),
+            AnalysisConfig::Transient(tran_config) => {
+                self.run_transient(netlist, tran_config, abort_flag)
+            }
+            AnalysisConfig::Ac(ac_config) => self.run_ac(netlist, ac_config, abort_flag),
+            AnalysisConfig::Noise(noise_config) => {
+                self.run_noise(netlist, noise_config, abort_flag)
+            }
+            AnalysisConfig::PoleZero(pz_config) => self.run_pz(netlist, pz_config, abort_flag),
+            AnalysisConfig::Sensitivity(sens_config) => {
+                self.run_sensitivity(netlist, sens_config, abort_flag)
+            }
+        }
+    }
+}
+
+#[inline]
+pub(super) fn ensure_not_aborted(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
+    if abort.is_aborted() {
+        Err(SimulationError::Aborted)
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+    use rspice_simulation_contract::config::{
+        AcAnalysisConfig, AnalysisConfig, DcSweepConfig, NoiseAnalysisConfig, PoleZeroConfig,
+        SensitivityConfig, TransientAnalysisConfig,
+    };
+
+    const TEST_NETLIST: &str = "cancellable bridge analyses\n\
+         .param rload=1k\n\
+         Vin in 0 DC 1 AC 1\n\
+         R1 in out {rload}\n\
+         C1 out 0 1n\n\
+         .end\n";
+
+    /// A noise request naming the two things about [`TEST_NETLIST`] that no
+    /// default can know: which node is the output and which source drives it.
+    fn test_noise_config() -> NoiseAnalysisConfig {
+        NoiseAnalysisConfig {
+            output_node: "out".to_owned(),
+            input_source: "Vin".to_owned(),
+            ..NoiseAnalysisConfig::default()
+        }
+    }
+
+    struct AbortOnPoll {
+        abort_on: usize,
+        polls: AtomicUsize,
+    }
+
+    impl AbortOnPoll {
+        fn new(abort_on: usize) -> Self {
+            Self {
+                abort_on,
+                polls: AtomicUsize::new(0),
+            }
+        }
+
+        fn poll_count(&self) -> usize {
+            self.polls.load(Ordering::Relaxed)
+        }
+    }
+
+    impl AbortSignal for AbortOnPoll {
+        fn is_aborted(&self) -> bool {
+            self.polls.fetch_add(1, Ordering::Relaxed) + 1 >= self.abort_on
+        }
+    }
+
+    fn test_netlist() -> rspice_core::Netlist {
+        rspice_core::Netlist::parse(TEST_NETLIST).expect("test netlist parses")
+    }
+
+    fn assert_typed_abort<T>(result: Result<T, SimulationError>, signal: &AbortOnPoll) {
+        match result {
+            Err(SimulationError::Aborted) => {}
+            Err(SimulationError::InvalidConfig(message)) => {
+                panic!("cancellation was incorrectly reported as InvalidConfig: {message}")
+            }
+            Err(other) => panic!("expected typed Aborted, got {other}"),
+            Ok(_) => panic!("expected cancellation, analysis completed"),
+        }
+        assert!(
+            signal.poll_count() >= signal.abort_on,
+            "analysis did not poll the supplied signal enough to reach cancellation"
+        );
+    }
+
+    #[test]
+    fn dc_op_observes_counter_based_cancellation() {
+        let signal = AbortOnPoll::new(2);
+        assert_typed_abort(
+            EngineBridge::new().run_dc_op(
+                &test_netlist(),
+                &rspice_simulation_contract::config::OpConfig::default(),
+                &signal,
+            ),
+            &signal,
+        );
+    }
+
+    #[test]
+    fn dc_sweep_observes_counter_based_cancellation() {
+        let signal = AbortOnPoll::new(2);
+        assert_typed_abort(
+            EngineBridge::new().run_dc_sweep(&test_netlist(), &DcSweepConfig::default(), &signal),
+            &signal,
+        );
+    }
+
+    #[test]
+    fn ac_observes_counter_based_cancellation() {
+        let signal = AbortOnPoll::new(2);
+        assert_typed_abort(
+            EngineBridge::new().run_ac(&test_netlist(), &AcAnalysisConfig::default(), &signal),
+            &signal,
+        );
+    }
+
+    #[test]
+    fn noise_observes_counter_based_cancellation() {
+        let signal = AbortOnPoll::new(2);
+        assert_typed_abort(
+            EngineBridge::new().run_noise(&test_netlist(), &test_noise_config(), &signal),
+            &signal,
+        );
+    }
+
+    #[test]
+    fn pole_zero_observes_counter_based_cancellation() {
+        let signal = AbortOnPoll::new(2);
+        assert_typed_abort(
+            EngineBridge::new().run_pz(&test_netlist(), &PoleZeroConfig::default(), &signal),
+            &signal,
+        );
+    }
+
+    #[test]
+    fn sensitivity_observes_counter_based_cancellation() {
+        let signal = AbortOnPoll::new(2);
+        assert_typed_abort(
+            EngineBridge::new().run_sensitivity(
+                &test_netlist(),
+                &SensitivityConfig::default(),
+                &signal,
+            ),
+            &signal,
+        );
+    }
+
+    #[test]
+    fn transient_observes_counter_based_cancellation() {
+        let signal = AbortOnPoll::new(2);
+        assert_typed_abort(
+            EngineBridge::new().run_transient(
+                &test_netlist(),
+                &TransientAnalysisConfig::default(),
+                &signal,
+            ),
+            &signal,
+        );
+    }
+
+    #[test]
+    fn production_dispatch_threads_the_signal_to_every_config_family() {
+        let cases = [
+            ("dc-op", AnalysisConfig::dc_op()),
+            (
+                "dc-sweep",
+                AnalysisConfig::DcSweep(DcSweepConfig::default()),
+            ),
+            (
+                "transient",
+                AnalysisConfig::Transient(TransientAnalysisConfig::default()),
+            ),
+            ("ac", AnalysisConfig::Ac(AcAnalysisConfig::default())),
+            ("noise", AnalysisConfig::Noise(test_noise_config())),
+            (
+                "pole-zero",
+                AnalysisConfig::PoleZero(PoleZeroConfig::default()),
+            ),
+            (
+                "sensitivity",
+                AnalysisConfig::Sensitivity(SensitivityConfig::default()),
+            ),
+        ];
+
+        for (family, config) in cases {
+            let signal = AbortOnPoll::new(4);
+            let result = EngineBridge::new().run_with_abort(&config, TEST_NETLIST, &signal);
+            match result {
+                Err(SimulationError::Aborted) => {}
+                Err(SimulationError::InvalidConfig(message)) => panic!(
+                    "{family} cancellation was incorrectly reported as InvalidConfig: {message}"
+                ),
+                Err(other) => panic!("{family} expected typed Aborted, got {other}"),
+                Ok(_) => panic!("{family} should have observed cancellation"),
+            }
+            assert!(signal.poll_count() >= 4);
+        }
+    }
+}
+
+#[cfg(test)]
+mod study_tests;

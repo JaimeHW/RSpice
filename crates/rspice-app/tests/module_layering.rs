@@ -65,10 +65,6 @@ const LAYERS: &[(&str, u32)] = &[
     // fixtures anywhere in the crate. It reads `std::env` and `std::fs` and
     // nothing of ours, so it sits at the bottom with the other contracts.
     ("fixture_root", 0),
-    // Output-specification parsing and the sensitivity math over a resolved
-    // spec. It names only `rspice_core` types, so it sits at the bottom
-    // beside the other contracts.
-    ("output_spec", 0),
     // Locating the production half of a source file that inspects itself.
     // It references nothing, and `automation_runtime`, `automation_workflow`,
     // `simulation` and `workbench` all reference it, so the bottom layer is
@@ -1333,7 +1329,7 @@ fn source_files_have_no_byte_order_mark() {
 /// `helpers::infer_primary_{source_name,output_node}_with_abort` went too:
 /// both took a first-or-last element off a solved deck, and the offer needs a
 /// *sole* source or it has nothing to offer.
-const MAX_LINT_SUPPRESSIONS: usize = 39;
+const MAX_LINT_SUPPRESSIONS: usize = 18;
 
 /// The crate does not accumulate lint suppressions.
 #[test]

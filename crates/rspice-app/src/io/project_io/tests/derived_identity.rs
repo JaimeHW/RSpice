@@ -287,9 +287,73 @@ fn a_declared_corner_space_round_trips_with_its_base_analysis_tag() {
     );
     attach_run(&mut project, plan_id, source_revision, &tasks, tasks.len());
 
+    // This is a persistence fixture; numerical corner reduction is tested by
+    // the runtime owner with real point solves.
+    let mut simulation =
+        crate::io::simulation_state_from_results(project.file.simulation_results.clone()).unwrap();
+    let family = &mut simulation.runs[0].analyses[2];
+    family.family_metadata = Some(AnalysisResultFamilyMetadata::Corner {
+        x_values: vec![0.0, 1.0],
+        x_label: "Corner Index".into(),
+        x_unit: String::new(),
+        temperatures_c: vec![27.0, 85.0],
+        corner_labels: vec!["TT_27C".into(), "TT_85C".into()],
+        failed_corners: 0,
+        member_measurements: Vec::new(),
+    });
+    family.waveforms =
+        vec![WaveformData::new("V(out)", vec![0.0, 1.0], vec![2.0, 2.0], "#00aaff").with_unit("V")];
+    let output = crate::state::SavedOutput::new(
+        crate::state::SavedOutputKind::RawVoltageOrCurrent,
+        "Chosen voltage",
+        "V(out)",
+        crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
+        crate::state::SavedOutputPolicy::EveryAcceptedPoint,
+        crate::state::SavedOutputPrecision::FullSourcePrecision,
+        crate::state::SavedOutputStreaming::StoreOnly,
+    )
+    .unwrap();
+    let contracts = rspice_simulation::output_contract::compile_saved_output_contracts(
+        &output,
+        [(
+            declaration,
+            &rspice_simulation_contract::analysis_spec::AnalysisSpec::Corner,
+        )],
+    )
+    .unwrap();
+    rspice_simulation::output_contract::materialization::apply_saved_output_policy(
+        &mut family.data,
+        rspice_simulation::execution::SavePolicy::PlanOwned {
+            output_selection_mode: crate::state::OutputSelectionMode::ExplicitOnly,
+            retained_dataset_limit: 10,
+            maximum_storage_bytes: u64::MAX,
+            live_streaming_enabled: false,
+            retain_failure_diagnostics: true,
+        },
+        &contracts,
+    );
+    family.validate_retained_evidence().unwrap();
+    assert_eq!(family.waveforms.len(), 1);
+    assert_eq!(family.waveforms[0].name, "Chosen voltage");
+    assert_eq!(family.waveforms[0].y.as_slice(), &[2.0, 2.0]);
+    assert_eq!(family.saved_output_receipts.len(), 1);
+    project.file.simulation_results = crate::io::capture_simulation_results(&simulation);
+
     let restored = round_trip_task_identities(&project);
     assert_eq!(restored.len(), 3);
     assert_eq!(restored[2], declaration);
+    let json = serialize_project_file(&project).unwrap();
+    let loaded = load_project_text(&json, None).unwrap();
+    assert!(loaded.file.simulation_results_warning.is_none());
+    let restored =
+        crate::io::simulation_state_from_results(loaded.file.simulation_results).unwrap();
+    restored.runs[0].validate_provenance().unwrap();
+    let before = &simulation.runs[0].analyses[2];
+    let after = &restored.runs[0].analyses[2];
+    after.validate_retained_evidence().unwrap();
+    assert_eq!(after.result_data_digest(), before.result_data_digest());
+    assert_eq!(after.family_metadata, before.family_metadata);
+    assert_eq!(after.saved_output_receipts, before.saved_output_receipts);
 }
 
 #[test]

@@ -1,0 +1,298 @@
+//! Real DC solves through exact coordinate and result retention.
+//! Nearby secondary coordinates must stay distinct, and terminal traversal and
+//! voltage/current identities must survive every consumer without label inference.
+
+use super::*;
+use rspice_simulation_contract::config::DcSweepConfig;
+
+const DECK: &str = "Nested independent sources\nV1 in 0 0\nV2 out 0 0\nR1 in out 1k\n.end\n";
+
+pub(crate) fn nested_config() -> DcSweepConfig {
+    DcSweepConfig {
+        source: "V1".to_owned(),
+        start: 0.0,
+        stop: 1.0,
+        step: 0.5,
+        source2: Some("V2".to_owned()),
+        start2: Some(1.0e-7),
+        stop2: Some(3.0e-7),
+        step2: Some(1.0e-7),
+        ..Default::default()
+    }
+}
+
+pub(crate) fn solve(config: DcSweepConfig) -> SimulationResult {
+    EngineBridge::new()
+        .run(&AnalysisConfig::DcSweep(config), DECK)
+        .unwrap()
+}
+
+pub(crate) fn retain(result: SimulationResult) -> rspice_results::analysis_result::AnalysisResult {
+    crate::result_conversion::convert(
+        result,
+        rspice_results::analysis_type::AnalysisType::DcSweep,
+        "DC family",
+        || 0.0,
+    )
+}
+
+pub(crate) fn evidence(
+    analysis: &rspice_results::analysis_result::AnalysisResult,
+) -> &std::sync::Arc<rspice_results::dc_sweep::DcSweepEvidence> {
+    let Some(rspice_results::analysis_payload::AnalysisResultPayload::DcSweep { evidence }) =
+        &analysis.result_payload
+    else {
+        panic!(
+            "successful DC result must retain its coordinates: {:?}",
+            analysis.error_message
+        );
+    };
+    evidence
+}
+
+#[test]
+fn close_secondary_values_retain_every_solved_voltage_and_current_curve() {
+    let result = solve(nested_config());
+    let SimulationResult::DcSweep { waveforms, .. } = result else {
+        panic!("the bridge must return the requested DC family");
+    };
+    assert_eq!(
+        waveforms.len(),
+        12,
+        "three secondary points each solve two node voltages and two branch currents"
+    );
+    let mut constants = waveforms
+        .values()
+        .filter(|trace| trace.y_unit == "V")
+        .filter(|trace| trace.y_values.first() == trace.y_values.last())
+        .map(|trace| trace.y_values[0])
+        .collect::<Vec<_>>();
+    constants.sort_by(f64::total_cmp);
+    assert_eq!(constants.len(), 3);
+    for (actual, expected) in constants.into_iter().zip([1.0e-7, 2.0e-7, 3.0e-7]) {
+        assert!(
+            (actual - expected).abs() < 1.0e-20,
+            "{actual} != {expected}"
+        );
+    }
+}
+
+#[test]
+fn dc_display_order_preserves_actual_terminal_coordinates_and_branch_units() {
+    use rspice_results::dc_sweep::DcSweepDirection;
+    use rspice_results::dc_sweep::DcSweepFamily;
+    use rspice_results::dc_sweep::DcSweepQuantity;
+    for descending in [false, true] {
+        for nested in [false, true] {
+            let config = DcSweepConfig {
+                start: if descending { 1.0 } else { 0.0 },
+                stop: if descending { 0.0 } else { 1.0 },
+                step: if descending { -0.3 } else { 0.3 },
+                source2: nested.then(|| "V2".to_owned()),
+                start2: nested.then_some(3.0e-7),
+                stop2: nested.then_some(0.0),
+                step2: nested.then_some(-1.1e-7),
+                ..nested_config()
+            };
+            let result = retain(solve(config));
+            assert!(result.success, "{:?}", result.error_message);
+            result.validate_retained_evidence().unwrap();
+            let metadata = evidence(&result);
+            assert_eq!(
+                metadata.direction == DcSweepDirection::Descending,
+                descending
+            );
+            let last_member = metadata.member_count() - 1;
+            let expected_secondary = if nested { 0.8e-7 } else { 0.0 };
+            if let DcSweepFamily::Nested { values, .. } = &metadata.family {
+                assert_eq!(values.len(), 3);
+                assert!((values[2] - expected_secondary).abs() < 1e-20);
+            }
+            let primary = if descending { 0.1 } else { 0.9 };
+            for quantity in &metadata.quantities {
+                let name = metadata.trace_name(quantity, last_member);
+                let trace = result.waveforms.iter().find(|w| w.name == name).unwrap();
+                assert_eq!(trace.unit.as_deref(), Some(quantity.unit()));
+                assert!(trace.x.windows(2).all(|pair| pair[0] < pair[1]));
+                let last = metadata
+                    .terminal_sample(last_member, trace.y.len())
+                    .unwrap();
+                assert!((trace.x[last] - primary).abs() < 1e-14);
+                let expected = match quantity {
+                    DcSweepQuantity::NodeVoltage(node) if node == "IN" => primary,
+                    DcSweepQuantity::NodeVoltage(_) => expected_secondary,
+                    DcSweepQuantity::BranchCurrent(branch) if branch == "V1" => {
+                        -(primary - expected_secondary) / 1000.0
+                    }
+                    DcSweepQuantity::BranchCurrent(_) => (primary - expected_secondary) / 1000.0,
+                };
+                assert!(
+                    (trace.y[last] - expected).abs() < 1e-12,
+                    "{name}: {} != {expected}",
+                    trace.y[last]
+                );
+                assert!(std::sync::Arc::ptr_eq(&result.waveforms[0].x, &trace.x));
+            }
+        }
+    }
+}
+
+#[test]
+fn single_point_and_retraced_dc_keep_member_traversal() {
+    for (start, stop, step, retrace) in [
+        (0.4, 0.4, 0.1, false),
+        (0.0, 1.0, 0.5, true),
+        (1.0, 0.0, -0.5, true),
+    ] {
+        let result = retain(solve(DcSweepConfig {
+            source: "V1".to_owned(),
+            start,
+            stop,
+            step,
+            hysteresis: retrace,
+            modes: Default::default(),
+            ..Default::default()
+        }));
+        assert!(result.success, "{:?}", result.error_message);
+        let metadata = evidence(&result);
+        for member in 0..metadata.member_count() {
+            let name = metadata.trace_name(
+                &rspice_results::dc_sweep::DcSweepQuantity::NodeVoltage("IN".to_owned()),
+                member,
+            );
+            let trace = result.waveforms.iter().find(|w| w.name == name).unwrap();
+            let last = metadata.terminal_sample(member, trace.y.len()).unwrap();
+            let expected = if member == 0 { stop } else { start };
+            assert!((trace.y[last] - expected).abs() < 1e-12);
+        }
+    }
+}
+
+#[test]
+fn nested_dc_accepts_one_secondary_coordinate() {
+    let result = retain(solve(DcSweepConfig {
+        stop2: Some(1e-7),
+        ..nested_config()
+    }));
+    assert!(result.success, "{:?}", result.error_message);
+    assert_eq!(evidence(&result).member_count(), 1);
+    assert_eq!(result.waveforms.len(), 4);
+    result.validate_retained_evidence().unwrap();
+}
+
+#[test]
+fn dc_conversion_rejects_a_curve_axis_that_disagrees_with_the_shared_axis() {
+    let mut result = solve(nested_config());
+    let SimulationResult::DcSweep { sweep_values, .. } = &mut result else {
+        unreachable!()
+    };
+    sweep_values[1] = 0.25;
+    let retained = retain(result);
+    assert!(!retained.success);
+    assert!(
+        retained
+            .error_message
+            .unwrap()
+            .contains("different primary axes")
+    );
+}
+
+#[test]
+fn ordered_dc_lists_preserve_repeats_on_both_axes_and_in_retained_results() {
+    use rspice_simulation_contract::config::{DcAxisMode, DcSweepModes};
+    let primary = vec![1.0, 0.25, 0.25, -0.5, 1.0];
+    let secondary = vec![2.0, -1.0, 2.0];
+    let config = DcSweepConfig {
+        modes: DcSweepModes {
+            primary: DcAxisMode::List {
+                values: primary.clone(),
+            },
+            secondary: DcAxisMode::List {
+                values: secondary.clone(),
+            },
+        },
+        ..nested_config()
+    };
+    config.validate().unwrap();
+    let retained = retain(solve(config));
+    assert!(retained.success, "{:?}", retained.error_message);
+    retained.validate_retained_evidence().unwrap();
+    let metadata = evidence(&retained);
+    assert_eq!(
+        metadata.direction,
+        rspice_results::dc_sweep::DcSweepDirection::AsAuthored
+    );
+    for (member, outer) in secondary.iter().enumerate() {
+        let name = metadata.trace_name(
+            &rspice_results::dc_sweep::DcSweepQuantity::BranchCurrent("V1".into()),
+            member,
+        );
+        let trace = retained
+            .waveforms
+            .iter()
+            .find(|trace| trace.name == name)
+            .unwrap();
+        assert_eq!(trace.x.as_slice(), primary);
+        for (x, current) in primary.iter().zip(trace.y.iter()) {
+            assert!((current + (x - outer) / 1000.0).abs() < 1e-12);
+        }
+        assert_eq!(
+            metadata.terminal_sample(member, primary.len()),
+            Some(primary.len() - 1)
+        );
+    }
+}
+
+#[test]
+fn logarithmic_dc_axes_and_a_current_source_outer_sweep_execute_exact_points() {
+    use rspice_simulation_contract::config::{DcAxisMode, DcSweepModes};
+    let config = DcSweepConfig {
+        source: "V1".into(),
+        start: 1.0,
+        stop: 100.0,
+        step: 0.0,
+        source2: Some("I2".into()),
+        start2: Some(0.001),
+        stop2: Some(0.004),
+        step2: Some(0.0),
+        modes: DcSweepModes {
+            primary: DcAxisMode::Decade {
+                points_per_decade: 1,
+            },
+            secondary: DcAxisMode::Octave {
+                points_per_octave: 1,
+            },
+        },
+        ..Default::default()
+    };
+    let result = EngineBridge::new()
+        .run(
+            &AnalysisConfig::DcSweep(config),
+            "Nested current\nV1 in 0 0\nI2 0 out DC 0 AC 1\nR1 in out 1k\n.end\n",
+        )
+        .unwrap();
+    let retained = retain(result);
+    assert!(retained.success, "{:?}", retained.error_message);
+    retained.validate_retained_evidence().unwrap();
+    let metadata = evidence(&retained);
+    assert_eq!(metadata.member_count(), 3);
+    for (member, offset) in [1.0, 2.0, 4.0].into_iter().enumerate() {
+        let name = metadata.trace_name(
+            &rspice_results::dc_sweep::DcSweepQuantity::NodeVoltage("OUT".into()),
+            member,
+        );
+        let trace = retained
+            .waveforms
+            .iter()
+            .find(|trace| trace.name == name)
+            .unwrap();
+        assert_eq!(trace.x.as_slice(), [1.0, 10.0, 100.0]);
+        for (x, y) in trace.x.iter().zip(trace.y.iter()) {
+            assert!(
+                (y - x - offset).abs() < 1e-11 * (x + offset).abs().max(1.0),
+                "outer={offset}, x={x}, y={y}, error={}",
+                y - x - offset
+            );
+        }
+    }
+}

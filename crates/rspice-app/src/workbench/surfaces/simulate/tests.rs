@@ -457,7 +457,7 @@ fn every_declared_prerequisite_kind_has_a_contextual_add_action() {
 /// Harmonic balance", not an offer of the other family.
 #[test]
 fn an_hb_carrier_with_no_harmonic_balance_instance_offers_to_add_one() {
-    use crate::services::simulation_runner::PeriodicCarrier;
+    use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
 
     for kind in [AnalysisKind::Pac, AnalysisKind::Pxf, AnalysisKind::Pnoise] {
         for (carrier, expected) in [
@@ -2099,49 +2099,67 @@ fn a_render_path_refusal_restated_every_frame_does_not_spin_the_sequence() {
     );
 }
 
-/// A supply-and-process corner declaration whose transient base analysis
+/// An authored PVT run set whose transient analysis
 /// measures the divider output. The supply axis is what makes the corners
 /// disagree: `V(out)` is half the supply the point was solved at.
 fn corner_evidence_run() -> SimulationRun {
-    use rspice_app_types::product::ProcessCorner;
-    use rspice_model_library::CornerModelBinding;
-    use rspice_simulation::sweeps::{CornerBaseMode, CornerRunConfig};
-
-    let deck = "corner evidence\n\
-         VDD vdd 0 DC 1.8\n\
-         R1 vdd out 1k\n\
-         R2 out 0 1k\n\
-         C1 out 0 1p\n\
-         .tran 1n 100n\n\
-         .meas tran vout FIND V(out) AT=100n\n\
-         .end\n";
-    let binding =
-        |process: ProcessCorner, label: &str, saturation_current: &str| CornerModelBinding {
-            process,
-            source_label: label.to_owned(),
-            section: Some(process.short_name().to_owned()),
-            materialized_model_cards: format!(".model DPROCESS D (IS={saturation_current})"),
-        };
-    let contract = CornerRunConfig {
-        process_corners: vec![ProcessCorner::TT, ProcessCorner::SS],
-        voltages: vec![1.8, 1.62],
-        supply_source_names: vec!["VDD".to_owned()],
-        temperatures_c: vec![27.0, 125.0],
-        full_matrix: false,
-        nominal_voltage: Some(1.8),
-        base_mode: CornerBaseMode::Transient {
-            stop_time: 100.0e-9,
-            step_time: 1.0e-9,
-        },
-        model_bindings: vec![
-            binding(ProcessCorner::TT, "tt.lib", "1e-12"),
-            binding(ProcessCorner::SS, "ss.lib", "1e-13"),
-        ],
-        points: Vec::new(),
+    use crate::simulation::controller::test_execution::{
+        pvt::run_set_divider, run_generated_batch,
     };
+    use crate::simulation::plan::AnalysisDraft;
+    use crate::simulation::run_set::{RunSetCompositionMode, RunSetDimension, RunSetDimensionKind};
+    use rspice_simulation_contract::drafts::TranSetup;
 
-    crate::simulation::runner::pvt_point_evidence::run_corner_declaration(deck, contract, 27.0)
-        .expect("the corner declaration prepares, authorizes and runs")
+    let mut state = run_set_divider(
+        AnalysisDraft::Transient(TranSetup {
+            stop: "100n".into(),
+            step: "1n".into(),
+            ..Default::default()
+        }),
+        &["125", "27"],
+    );
+    state.provision_test_project_technology_contract();
+    state.sim_setup.run_set.composition.mode = RunSetCompositionMode::Zipped;
+    state
+        .sim_setup
+        .run_set
+        .dimensions
+        .push(RunSetDimension::new(
+            "fixture-process",
+            RunSetDimensionKind::ProcessSection,
+            &["SS", "TT"],
+            1,
+        ));
+    let library = state.model_library_manager.load_library_bytes(
+        "corners.lib",
+        b".lib TT\n.model DPROCESS D (IS=1e-12)\n.endl TT\n.lib SS\n.model DPROCESS D (IS=1e-13)\n.endl SS\n".to_vec(),
+        Some("TT"),
+    ).unwrap();
+    state.sim_setup.model_bindings = vec![
+        state
+            .model_library_manager
+            .simulation_plan_binding(&library)
+            .unwrap(),
+    ];
+    let plan_id = state.sim_setup.analysis_plan.as_ref().unwrap().id();
+    let mut measurement =
+        crate::state::SpecificationDefinition::new_from_projection(&crate::state::SpecEntry {
+            measurement: "vout".into(),
+            expression: ".MEAS TRAN vout FIND V(out) AT=100n".into(),
+            min: None,
+            max: None,
+            unit: "V".into(),
+            scope: crate::state::SpecPointScope::AllPoints,
+        });
+    measurement.define_measurement = true;
+    state
+        .workspace
+        .content
+        .replace_active_specification_definitions(plan_id, vec![measurement]);
+    run_generated_batch(
+        state,
+        rspice_results::run::SimulationRunLifecycle::Completed,
+    )
 }
 
 /// The whole claim of the per-point expansion: a specification is answerable
@@ -2213,17 +2231,9 @@ fn a_corner_run_answers_a_specification_at_each_of_its_own_points() {
         "the derated corner does not, which is the verdict the run set had no way to report"
     );
 
-    // The per-point results are additional evidence, not a replacement for the
-    // corner family: the same run still carries the axis a corner plot draws.
-    let Some(crate::state::AnalysisResultFamilyMetadata::Corner { corner_labels, .. }) = run
-        .analyses
-        .iter()
-        .find(|analysis| analysis.analysis_type == AnalysisType::Corner)
-        .and_then(|analysis| analysis.family_metadata.as_ref())
-    else {
-        panic!("the corner declaration still produces its plotting family");
-    };
-    assert_eq!(corner_labels.len(), 2);
+    run.validate_provenance()
+        .expect("each point answers its authorized task");
+    assert_eq!(run.prepared_receipt().unwrap().tasks().len(), 2);
 }
 
 /// A corner that will not solve is a result about that corner, not an absence.
@@ -2231,44 +2241,39 @@ fn a_corner_run_answers_a_specification_at_each_of_its_own_points() {
 /// it was never given evidence for.
 #[test]
 fn a_corner_point_that_cannot_be_solved_is_retained_as_a_failure() {
-    use rspice_app_types::product::ProcessCorner;
-    use rspice_model_library::CornerModelBinding;
-    use rspice_simulation::sweeps::{CornerBaseMode, CornerRunConfig};
-
-    // The base analysis names a sweep source the deck does not define, so
-    // every point fails in the engine rather than in preparation.
-    let deck = "corner failure\n\
-         VDD vdd 0 DC 1.8\n\
-         R1 vdd out 1k\n\
-         R2 out 0 1k\n\
-         .op\n\
-         .end\n";
-    let contract = CornerRunConfig {
-        process_corners: vec![ProcessCorner::TT],
-        voltages: vec![1.8, 1.62],
-        supply_source_names: vec!["VDD".to_owned()],
-        temperatures_c: vec![27.0],
-        full_matrix: true,
-        nominal_voltage: Some(1.8),
-        base_mode: CornerBaseMode::DcSweep {
-            modes: Default::default(),
-            source_name: "VMISSING".to_owned(),
-            start: 0.0,
-            stop: 1.0,
-            step: 0.5,
-        },
-        model_bindings: vec![CornerModelBinding {
-            process: ProcessCorner::TT,
-            source_label: "tt.lib".to_owned(),
-            section: Some("TT".to_owned()),
-            materialized_model_cards: ".model DPROCESS D (IS=1e-12)".to_owned(),
-        }],
-        points: Vec::new(),
+    use crate::simulation::controller::test_execution::{
+        pvt::run_set_divider, run_generated_batch,
     };
+    use crate::simulation::plan::AnalysisDraft;
+    use rspice_simulation_contract::drafts::DcSetup;
 
-    let run =
-        crate::simulation::runner::pvt_point_evidence::run_corner_declaration(deck, contract, 27.0)
-            .expect("a run whose points fail still completes preparation");
+    // The authored sweep names a source the circuit does not define.
+    // Preparation must finish, then both PVT executions must retain failures.
+    let mut state = run_set_divider(
+        AnalysisDraft::DcSweep(DcSetup {
+            source: "VMISSING".into(),
+            start: "0".into(),
+            stop: "1".into(),
+            step: "0.5".into(),
+            ..Default::default()
+        }),
+        &["27"],
+    );
+    let library = state
+        .model_library_manager
+        .load_library_bytes(
+            "tt.lib",
+            b".lib TT\n.model DPROCESS D (IS=1e-12)\n.endl TT\n".to_vec(),
+            Some("TT"),
+        )
+        .unwrap();
+    state.sim_setup.model_bindings = vec![
+        state
+            .model_library_manager
+            .simulation_plan_binding(&library)
+            .unwrap(),
+    ];
+    let run = run_generated_batch(state, rspice_results::run::SimulationRunLifecycle::Failed);
 
     let failed: Vec<_> = run
         .analyses
@@ -2303,26 +2308,16 @@ fn a_corner_point_that_cannot_be_solved_is_retained_as_a_failure() {
 /// output. The upper leg carries a linear temperature coefficient, so the
 /// temperatures disagree by construction: `V(out)` falls as the deck heats up.
 fn temperature_evidence_run() -> SimulationRun {
-    use rspice_simulation::sweeps::{CornerBaseMode, TempRunConfig};
-
     let deck = "temperature evidence\n\
          VDD vdd 0 DC 1.8\n\
          R1 vdd out 1k TC1=0.01\n\
          R2 out 0 1k\n\
          C1 out 0 1p\n\
          .tran 1n 100n\n\
+         .step temp list 27 125\n\
          .meas tran vout FIND V(out) AT=100n\n\
          .end\n";
-    let contract = TempRunConfig {
-        temperatures_c: vec![27.0, 125.0],
-        base_mode: CornerBaseMode::Transient {
-            stop_time: 100.0e-9,
-            step_time: 1.0e-9,
-        },
-    };
-
-    crate::simulation::runner::pvt_point_evidence::run_temperature_declaration(deck, contract, 27.0)
-        .expect("the temperature declaration prepares, authorizes and runs")
+    crate::simulation::controller::test_execution::run_manual_batch(deck)
 }
 
 /// The whole claim of the per-temperature expansion: a specification is

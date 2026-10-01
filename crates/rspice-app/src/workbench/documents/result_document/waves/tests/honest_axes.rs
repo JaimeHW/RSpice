@@ -111,19 +111,10 @@ fn a_dc_sweep_names_the_source_the_run_actually_swept() {
 
 #[test]
 fn a_solved_current_source_sweep_keeps_amperes_without_an_executed_deck() {
-    let result = crate::simulation::EngineBridge::new()
-        .run(
-            &crate::simulation::AnalysisConfig::DcSweep(crate::simulation::config::DcSweepConfig {
-                source: "IBIAS".to_owned(),
-                start: 0.0,
-                stop: 1e-3,
-                step: 0.5e-3,
-                ..Default::default()
-            }),
-            "Current sweep\nIBIAS 0 out 0\nR1 out 0 1k\n.end\n",
-        )
-        .unwrap();
-    let analysis = crate::simulation::engine_bridge::nested_dc_tests::retain(result);
+    let result = crate::simulation::controller::test_execution::run_manual_deck(
+        "Current sweep\nIBIAS 0 out 0\nR1 out 0 1k\n.dc IBIAS 0 1m 0.5m\n.end\n",
+    );
+    let analysis = crate::simulation::controller::dc_history_tests::retain(result);
     assert!(analysis.success, "{:?}", analysis.error_message);
     assert_eq!(analysis.waveforms[0].unit.as_deref(), Some("V"));
     let voltage = analysis.waveforms[0].y[2];
@@ -132,7 +123,7 @@ fn a_solved_current_source_sweep_keeps_amperes_without_an_executed_deck() {
         "1 V within configured relative tolerance; got {voltage:.16e}"
     );
     let mut state = AppState::default();
-    state.simulation = crate::simulation::engine_bridge::nested_dc_tests::history(analysis);
+    state.simulation = crate::simulation::controller::dc_history_tests::history(analysis);
     state.ui.results.viewer = super::super::super::ResultViewer::DcSweep;
     assert_eq!(model_axis(&mut state), ("IBIAS".to_owned(), "A".to_owned()));
     let stored = crate::io::capture_simulation_results(&state.simulation);

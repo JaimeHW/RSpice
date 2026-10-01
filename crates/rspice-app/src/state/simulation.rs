@@ -8,18 +8,19 @@ use std::collections::HashMap;
 
 mod ac_bode;
 mod analysis_result;
-pub use rspice_results::dc_mismatch::{
-    DcMismatchContributorEvidence, DcMismatchEvidence, DcMismatchScopeEvidence,
-};
-pub(crate) use rspice_results::dc_sweep::DcTraceView;
-pub use rspice_results::dc_sweep::{
-    DcCurveSelection, DcSweepDirection, DcSweepEvidence, DcSweepFamily, DcSweepQuantity,
-};
+pub use rspice_results::dc_mismatch::DcMismatchEvidence;
+#[cfg(test)]
+pub use rspice_results::dc_mismatch::{DcMismatchContributorEvidence, DcMismatchScopeEvidence};
+#[cfg(test)]
+pub use rspice_results::dc_sweep::DcSweepEvidence;
+pub use rspice_results::dc_sweep::{DcCurveSelection, DcSweepFamily};
+#[cfg(test)]
+pub use rspice_results::dc_sweep::{DcSweepDirection, DcSweepQuantity};
 mod cross_probe;
 mod result_digest;
-pub use rspice_results::noise::{
-    NoiseContributorRow, NoiseFigureEvidence, NoiseSummary, PeriodicNoiseConversionEvidence,
-};
+#[cfg(test)]
+pub use rspice_results::noise::{NoiseContributorRow, PeriodicNoiseConversionEvidence};
+pub use rspice_results::noise::{NoiseFigureEvidence, NoiseSummary};
 mod run;
 #[cfg(test)]
 mod run_history;
@@ -60,7 +61,9 @@ pub use rspice_results::floquet::{
 pub use rspice_results::floquet::{
     FloquetSpectrumCertificateEvidence, PssFloquetMultiplierEvidence, PstbFloquetModeEvidence,
 };
-pub use rspice_results::pole_zero::{PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate};
+pub use rspice_results::pole_zero::PoleZeroRootSetEvidence;
+#[cfg(test)]
+pub use rspice_results::pole_zero::PoleZeroSpectrumCertificate;
 
 pub use ac_bode::{
     ac_bode_shape_for_analysis, ac_bode_shape_for_selection, ac_bode_summary_for_analysis,
@@ -72,10 +75,9 @@ pub use rspice_results::analysis_payload::AnalysisResultPayload;
 pub use rspice_results::analysis_tag::CanonicalAnalysisKind;
 pub use rspice_results::analysis_type::AnalysisType;
 pub use rspice_results::convergence_attribution::ConvergenceAttribution;
-pub use rspice_results::convergence_quality::{
-    ConvergenceReport, PeriodicConvergenceEvidence, PeriodicInitializationMethod,
-    TransientConvergenceEvidence,
-};
+#[cfg(test)]
+pub use rspice_results::convergence_quality::TransientConvergenceEvidence;
+pub use rspice_results::convergence_quality::{ConvergenceReport, PeriodicInitializationMethod};
 pub use rspice_results::events::{
     DigitalBusEvidence, DigitalBusSourceEvidence, DigitalEventPointEvidence,
     DigitalEventTraceEvidence, RealEventPointEvidence, RealEventTraceEvidence,
@@ -96,14 +98,15 @@ pub use rspice_results::operating_point::{
     OperatingPointProcessEvidence, OperatingPointSaveDeviceEvidence,
     OperatingPointTemperatureEvidence,
 };
-pub use rspice_results::provenance::{
-    AnalysisResultProvenance, AnalysisResultPvtPoint, AnalysisResultSourceDomain,
-};
+#[cfg(test)]
+pub use rspice_results::provenance::AnalysisResultPvtPoint;
+pub use rspice_results::provenance::{AnalysisResultProvenance, AnalysisResultSourceDomain};
 pub use rspice_results::soa_evidence::{
     SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
 };
 #[cfg(test)]
 pub use rspice_results::soa_evidence::{SoaViolationEvidence, SoaViolationSeverityEvidence};
+#[cfg(test)]
 pub use rspice_results::soa_source::{SoaSourceHistory, SoaSourceWaveform};
 pub use rspice_results::transfer_function::{
     TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
@@ -113,38 +116,46 @@ pub use rspice_results::transfer_function::{
 // named through the attribution's own fields.
 pub use cross_probe::{CrossProbeIndex, CrossProbeMapping};
 pub use rspice_app_types::hierarchy_path::OccurrenceProbeSpelling;
-#[cfg(test)]
-pub use rspice_results::convergence_attribution::ConvergenceFailureClass;
 pub use rspice_results::executed_deck::{
     ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, absent_deck_reason,
 };
+pub use rspice_results::family_measurements::FamilyMemberId;
+#[cfg(test)]
 pub use rspice_results::family_measurements::{
-    FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements,
+    FamilyMeasurementEvidence, FamilyMemberMeasurements,
 };
 pub use rspice_results::run::{
     EvidenceDomain, ExecutionTarget, RunRetention, SimulationCampaignMembership,
     SimulationExecutionIdentity, SimulationRunLifecycle,
 };
+#[cfg(test)]
 pub use rspice_results::run_receipt::{
-    HierarchyMapRow, PreparedModelSourceIdentity, PreparedRunReceipt, PreparedRunReceiptInput,
-    PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SignOffStanding, SimulationRunProvenance,
+    HierarchyMapRow, PreparedModelSourceIdentity, PreparedRunReceiptInput, PreparedRunTaskReceipt,
+    PreparedSourceCheckReceipt,
 };
+pub use rspice_results::run_receipt::{
+    PreparedRunReceipt, SignOffStanding, SimulationRunProvenance,
+};
+#[cfg(test)]
 pub use rspice_results::saved_output::{
-    SavedOutputAxis, SavedOutputBoundSource, SavedOutputDcMember, SavedOutputMaterializationStatus,
-    SavedOutputReceipt, SavedOutputSourceBindings,
+    SavedOutputAxis, SavedOutputBoundSource, SavedOutputDcMember, SavedOutputSourceBindings,
 };
-pub use rspice_results::specification::{PreparedSpecification, PreparedSpecificationPolicy};
+pub use rspice_results::saved_output::{SavedOutputMaterializationStatus, SavedOutputReceipt};
+pub use rspice_results::specification::PreparedSpecification;
+#[cfg(test)]
+pub use rspice_results::specification::PreparedSpecificationPolicy;
 pub use rspice_results::specification_verdict::SpecificationVerdictStatus;
 pub use rspice_results::waveform::SharedWaveformValues;
 pub use run::SimulationRun;
 pub type RunHistory = rspice_results::run_history::RunHistory<SimulationRun>;
 pub(crate) use rspice_results::run_history::RunHistoryRevision;
-pub use state_model::{SimulationRunIntent, SimulationState};
+pub use rspice_simulation::execution::SimulationRunIntent;
+pub use state_model::SimulationState;
 pub use waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, WaveformData};
 
-pub use rspice_results::monte_carlo::{
-    MonteCarloMeanConfidence, MonteCarloMeanInterval, MonteCarloMeanMethod,
-};
+pub use rspice_results::monte_carlo::MonteCarloMeanInterval;
+#[cfg(test)]
+pub use rspice_results::monte_carlo::{MonteCarloMeanConfidence, MonteCarloMeanMethod};
 pub use rspice_results::monte_carlo_checkpoint::{
     MonteCarloCheckpointEvidence, MonteCarloCheckpointLibrary,
 };

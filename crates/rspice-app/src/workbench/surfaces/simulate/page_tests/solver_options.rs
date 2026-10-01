@@ -183,7 +183,7 @@ fn simulation_compatibility_commits_through_the_solver_transaction() {
     );
     let parsed = rspice_core::Netlist::parse(&deck).unwrap();
     assert_eq!(
-        crate::services::simulation_runner::build_engine_config(&parsed, None).spice_dialect,
+        rspice_simulation::netlist_preparation::build_engine_config(&parsed, None).spice_dialect,
         rspice_core::SpiceDialect::Xyce
     );
     app.state.sim_setup.session.options_draft.itl1 = "81".into();

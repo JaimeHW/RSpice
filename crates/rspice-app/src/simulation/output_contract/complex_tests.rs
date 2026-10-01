@@ -3,6 +3,7 @@
 use super::binding_tests::{ac, check_value, close, execute};
 use super::fixtures::output;
 use super::*;
+use crate::analysis::calculator;
 use crate::io::project_io::{PersistedField, ProjectSimulationResults};
 use crate::state::{ComplexExpressionPolicy, SimulationState};
 

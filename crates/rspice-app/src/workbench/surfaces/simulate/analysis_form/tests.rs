@@ -328,7 +328,7 @@ fn pss_field_order_and_wording_match_the_canonical_mockup() {
 /// the analysis, so the runners took the carrier instead.
 #[test]
 fn the_periodic_carrier_row_offers_the_carriers_the_engine_has() {
-    use crate::services::simulation_runner::PeriodicCarrier;
+    use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
 
     assert_eq!(
         PERIODIC_CARRIER_CHOICES.len(),
@@ -351,7 +351,7 @@ fn the_periodic_carrier_row_offers_the_carriers_the_engine_has() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn every_periodic_carrier_position_preserves_form_geometry() {
-    use crate::services::simulation_runner::PeriodicCarrier;
+    use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
 
     for kind in [AnalysisKind::Pac, AnalysisKind::Pxf, AnalysisKind::Pnoise] {
         let mut heights = Vec::new();

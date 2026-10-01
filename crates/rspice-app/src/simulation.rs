@@ -10,20 +10,19 @@ pub(crate) mod controller;
 #[cfg(test)]
 pub(crate) use rspice_simulation_contract::cost_probe;
 pub(crate) mod dialog;
-pub(crate) mod engine_bridge;
-pub(crate) mod execution;
+pub(crate) use rspice_simulation::execution;
 pub(crate) mod multi_run;
 #[cfg(test)]
 pub(crate) mod netlist_gen;
 pub(crate) mod output_contract;
 pub(crate) mod placed_sources;
 pub(crate) mod plan;
-pub(crate) mod point_family;
+pub(crate) use rspice_simulation::point_family;
 #[cfg(test)]
 pub(crate) mod results;
 pub(crate) mod run_set;
-pub(crate) mod runner;
-pub(crate) mod status;
+pub(crate) use rspice_simulation::runner;
+pub(crate) use rspice_simulation::status;
 pub(crate) mod stimulus_realize;
 pub(crate) mod table_route;
 #[cfg(test)]
@@ -37,8 +36,6 @@ pub use controller::SimulationController;
 pub use rspice_simulation::results::{SimulationResult, WaveformData};
 // Test-only aliases for private modules: execution reaches the bridge and
 // these helpers through their module paths.
-#[cfg(test)]
-pub use engine_bridge::EngineBridge;
 pub use runner::SimulationRunner;
 pub use status::SimulationStatus;
 

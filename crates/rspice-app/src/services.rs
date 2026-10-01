@@ -12,7 +12,6 @@ pub(crate) mod license;
 pub(crate) mod live_protocol;
 pub(crate) mod model_hub;
 pub(crate) mod model_qualification;
-pub(crate) mod simulation_runner;
 
 // No flattening re-exports: every consumer of a service type names the module
 // that defines it, so the owner of a name is readable at the use site.

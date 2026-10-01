@@ -15,12 +15,11 @@ use rspice_simulation_contract::plan_dependency::PlanDependencySourceContext;
 use super::AnalysisKind;
 
 mod periodic_network;
-mod qpnoise;
-pub use qpnoise::{
-    QpnoiseLatticeSelection, QpnoiseOutputDraft, QpnoiseSourceSelection, QuasiPeriodicNoiseDraft,
-};
 #[cfg(test)]
 use rspice_simulation_contract::quasi_periodic_draft::validate_qpss;
+pub use rspice_simulation_contract::quasi_periodic_draft::{
+    QpnoiseLatticeSelection, QpnoiseOutputDraft, QpnoiseSourceSelection, QuasiPeriodicNoiseDraft,
+};
 pub use rspice_simulation_contract::quasi_periodic_draft::{
     QpssDraft, QpxfSidebandSelection, QpxfSourceSelection, QuasiPeriodicAcDraft,
     QuasiPeriodicTransferDraft,

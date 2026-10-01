@@ -56,7 +56,6 @@ use egui::{Align, Layout, Rect, Response, Ui, UiBuilder, vec2};
 use crate::quantity::{
     QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, parse_ui_quantity,
 };
-use crate::services::simulation_runner::TfRunConfig;
 use crate::simulation::plan::{AnalysisDraft, FrequencySweepDraft};
 use crate::state::format_engineering;
 use crate::ui::theme::{self, FontWeight};
@@ -66,6 +65,7 @@ use crate::ui::widgets::{
     select, select_mono_with_response, select_with_disabled, switch_row as inspector_switch_row,
 };
 use crate::workbench::design_system::property_row as inspector_property_row;
+use rspice_simulation::runner::TfRunConfig;
 
 const NOISE_OUTPUT_CUSTOM_CHOICE: &str = "Exact expression\u{2026}";
 const NOISE_INPUT_CUSTOM_CHOICE: &str = "Exact source name\u{2026}";

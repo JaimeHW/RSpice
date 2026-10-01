@@ -1,0 +1,896 @@
+//! Periodic AC analysis.
+//!
+//! Small-signal response about a periodic steady state, where a stimulus at
+//! one frequency produces a response at every sideband.
+
+use std::collections::HashSet;
+use std::path::Path;
+
+use num_complex::Complex64;
+use rspice_core::Value;
+use rspice_core::abort_signal::AbortSignal;
+
+use super::super::periodic_carrier::PeriodicCarrierState;
+use super::super::{
+    ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
+    parse_runner_netlist_with_abort,
+};
+use super::shared::resolve_pac_output_node_with_abort;
+use crate::error::{ensure_not_aborted, poll_periodically};
+use crate::periodic::PacRunConfig;
+// =============================================================================
+// PAC (Periodic AC) Analysis
+// =============================================================================
+
+/// PAC analysis data.
+#[derive(Debug, Clone)]
+pub struct PacData {
+    /// Frequency offsets from carrier in Hz.
+    pub frequencies: Vec<Value>,
+    /// Exact complex PAC traces aligned with `frequencies`.
+    pub traces: Vec<PacTrace>,
+}
+
+/// One exact complex-valued PAC trace.
+///
+/// The service keeps rectangular components rather than converting through
+/// magnitude and phase. That preserves the engine's complex values for worker
+/// transport, persistence, and export; presentation can derive polar views.
+#[derive(Debug, Clone)]
+pub struct PacTrace {
+    pub name: String,
+    pub unit: &'static str,
+    pub values: Vec<Complex64>,
+}
+
+pub(crate) struct PacInternalResult {
+    pub(crate) pac_result: rspice_core::analysis::pac::PacResult,
+    pub(super) output_node_name: String,
+}
+
+pub(super) fn run_pac_internal_with_abort(
+    netlist: &rspice_core::Netlist,
+    config: &PacRunConfig,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacInternalResult> {
+    run_pac_internal_impl(netlist, config, None, abort)
+}
+
+pub(crate) fn run_pac_internal_from_carrier_with_abort(
+    netlist: &rspice_core::Netlist,
+    config: &PacRunConfig,
+    carrier: PeriodicCarrierState<'_>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacInternalResult> {
+    run_pac_internal_impl(netlist, config, Some(carrier), abort)
+}
+
+fn run_pac_internal_impl(
+    netlist: &rspice_core::Netlist,
+    config: &PacRunConfig,
+    carrier: Option<PeriodicCarrierState<'_>>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacInternalResult> {
+    ensure_not_aborted(abort)?;
+    config.validate().map_err(ServiceRunError::Failure)?;
+    if let Some(carrier_state) = carrier {
+        carrier_state
+            .accepted_by(config.carrier, ".PAC")
+            .map_err(ServiceRunError::Failure)?;
+    }
+
+    let engine = build_resolved_periodic_engine(
+        netlist,
+        carrier.map_or(config.pss_tolerance, |carrier| {
+            carrier.engine_tolerance(config.pss_tolerance)
+        }),
+        "PAC resolved producer configuration is invalid",
+    )?;
+
+    let pac_config = config.to_core()?;
+
+    ensure_not_aborted(abort)?;
+
+    // The engine solves the sideband-coupled small-signal system about the
+    // retained periodic solution, whichever family produced it. Both entries
+    // consume the frozen state directly and never re-solve it.
+    let pac_result = match carrier {
+        Some(PeriodicCarrierState::Shooting(operating_point)) => {
+            engine.run_pac_from_pss_with_abort(netlist, pac_config, operating_point, abort)
+        }
+        Some(PeriodicCarrierState::HarmonicBalance(operating_point)) => {
+            engine.run_pac_from_hb_with_abort(netlist, pac_config, operating_point, abort)
+        }
+        None => engine.run_pac_with_abort(netlist, pac_config, abort),
+    }
+    .map_err(|error| ServiceRunError::from_core("PAC error", error))?
+    .result;
+
+    finish_pac_internal(
+        pac_result,
+        config,
+        carrier_fundamental(config, carrier),
+        abort,
+    )
+}
+
+/// The fundamental the engine builds this PAC's conversion basis on.
+///
+/// `Engine::run_pac_*_from_*` replaces the authored fundamental with the
+/// carrier's own before it solves anything
+/// (`rspice-core/src/engine/hb/pac.rs`), and the result is constructed from
+/// that value. So the result's fundamental is a property of the *carrier*, and
+/// the only honest check here is that the two are the same number.
+///
+/// For a driven carrier the drive sets the period, so the carrier's
+/// fundamental and the authored one are the same bits and the difference never
+/// showed. For an **autonomous** carrier the shooting solver holds the period
+/// as an unknown and moves it (`rspice-core/src/engine/pss.rs`), so the
+/// converged fundamental is not the authored guess -- and comparing the result
+/// against the guess refused every oscillator, which is the whole of
+/// oscillator conversion analysis.
+///
+/// Whether the *carrier itself* is the one the deck asked for is a different
+/// question, asked earlier and elsewhere: `PeriodicStateArtifact::
+/// validate_consumer_basis` compares the authored basis against the producer's
+/// authored basis before the run is dispatched.
+fn carrier_fundamental(config: &PacRunConfig, carrier: Option<PeriodicCarrierState<'_>>) -> Value {
+    // With no retained carrier the engine keeps the authored fundamental, so
+    // that is what its result is built on.
+    carrier.map_or(
+        config.pss_fundamental_freq,
+        PeriodicCarrierState::fundamental,
+    )
+}
+
+fn finish_pac_internal(
+    pac_result: rspice_core::analysis::pac::PacResult,
+    config: &PacRunConfig,
+    carrier_fundamental: Value,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacInternalResult> {
+    validate_pac_result(&pac_result, config, carrier_fundamental)?;
+    let output_node_idx =
+        resolve_pac_output_node_with_abort(&pac_result, &config.output_node, abort)?.ok_or_else(
+            || {
+                ServiceRunError::Failure(format!(
+                    "PAC output node '{}' was not found in PSS result nodes {:?}",
+                    config.output_node, pac_result.node_names
+                ))
+            },
+        )?;
+    ensure_not_aborted(abort)?;
+    let output_node_name = pac_result.node_names[output_node_idx].clone();
+
+    Ok(PacInternalResult {
+        pac_result,
+        output_node_name,
+    })
+}
+
+fn validate_pac_result(
+    result: &rspice_core::analysis::pac::PacResult,
+    config: &PacRunConfig,
+    carrier_fundamental: Value,
+) -> ServiceRunResult<()> {
+    if !result.fundamental_frequency.is_finite()
+        || result.fundamental_frequency <= 0.0
+        || !result.residual.is_finite()
+        || result.residual < 0.0
+    {
+        return Err(ServiceRunError::Failure(
+            "PAC engine returned an invalid solved basis or residual".to_owned(),
+        ));
+    }
+    // Identity, not approximation: the engine copies the carrier's fundamental
+    // into the result without arithmetic, so any difference at all means the
+    // conversion matrix was built on a periodic solution other than the one
+    // this run was handed, and every sideband frequency below is then a
+    // different measurement than the one reported.
+    if result.fundamental_frequency.to_bits() != carrier_fundamental.to_bits() {
+        return Err(ServiceRunError::Failure(format!(
+            "PAC conversion basis is at {:.17e} Hz but its periodic carrier is at {carrier_fundamental:.17e} Hz",
+            result.fundamental_frequency
+        )));
+    }
+    if result.sideband_min != config.sideband_min
+        || result.sideband_max != config.sideband_max
+        || result.conversion_matrix.sideband_indices() != result.sideband_indices()
+        || result.conversion_matrix.num_frequencies() != result.frequencies.len()
+        || result.conversion_matrix.fundamental().to_bits()
+            != result.fundamental_frequency.to_bits()
+        || result.conversion_matrix.frequencies().len() != result.frequencies.len()
+        || result
+            .conversion_matrix
+            .frequencies()
+            .iter()
+            .zip(&result.frequencies)
+            .any(|(matrix, result)| matrix.to_bits() != result.to_bits())
+    {
+        return Err(ServiceRunError::Failure(
+            "PAC engine returned an inconsistent conversion-matrix basis".to_owned(),
+        ));
+    }
+    if result.frequencies.is_empty()
+        || result
+            .frequencies
+            .iter()
+            .any(|frequency| !frequency.is_finite() || *frequency <= 0.0)
+        || result.frequencies.windows(2).any(|pair| pair[1] <= pair[0])
+    {
+        return Err(ServiceRunError::Failure(
+            "PAC engine returned an invalid frequency grid".to_owned(),
+        ));
+    }
+    let mut node_names = HashSet::with_capacity(result.node_names.len());
+    if result.node_names.is_empty()
+        || result.node_names.iter().any(|name| {
+            let normalized = name.trim().to_ascii_lowercase();
+            normalized.is_empty() || !node_names.insert(normalized)
+        })
+    {
+        return Err(ServiceRunError::Failure(
+            "PAC engine returned an empty or duplicate node identity".to_owned(),
+        ));
+    }
+    let mut branch_names = HashSet::with_capacity(result.branch_names.len());
+    if result.branch_names.iter().any(|name| {
+        let normalized = name.trim().to_ascii_lowercase();
+        normalized.is_empty() || !branch_names.insert(normalized)
+    }) {
+        return Err(ServiceRunError::Failure(
+            "PAC engine returned an empty or duplicate branch identity".to_owned(),
+        ));
+    }
+    for frequency_index in 0..result.frequencies.len() {
+        let frequency = result.frequencies[frequency_index];
+        for sideband in result.sideband_indices() {
+            let data = result
+                .get_sideband_data(frequency_index, sideband)
+                .ok_or_else(|| {
+                    ServiceRunError::Failure(format!(
+                        "PAC sideband result is unavailable at frequency point {}, sideband {}",
+                        frequency_index + 1,
+                        sideband
+                    ))
+                })?;
+            let expected_absolute =
+                (sideband as Value).mul_add(result.fundamental_frequency, frequency);
+            if data.sideband != sideband
+                || data.frequency_offset.to_bits() != frequency.to_bits()
+                || data.absolute_frequency.to_bits() != expected_absolute.to_bits()
+                || data.node_voltages.len() != result.node_names.len()
+                || data.branch_currents.len() != result.branch_names.len()
+            {
+                return Err(ServiceRunError::Failure(format!(
+                    "PAC sideband result has inconsistent metadata or cardinality at frequency point {}, sideband {}",
+                    frequency_index + 1,
+                    sideband
+                )));
+            }
+            if data
+                .node_voltages
+                .iter()
+                .chain(&data.branch_currents)
+                .any(|value| !value.re.is_finite() || !value.im.is_finite())
+            {
+                return Err(ServiceRunError::Failure(format!(
+                    "PAC sideband result contains a non-finite node voltage or branch current at frequency point {}, sideband {}",
+                    frequency_index + 1,
+                    sideband
+                )));
+            }
+        }
+        for output_sideband in result.sideband_indices() {
+            for input_sideband in result.sideband_indices() {
+                let value = result
+                    .conversion_matrix
+                    .get(frequency_index, output_sideband, input_sideband)
+                    .map_err(|error| {
+                        ServiceRunError::Failure(format!(
+                            "PAC conversion result is unavailable: {error}"
+                        ))
+                    })?;
+                if !value.re.is_finite() || !value.im.is_finite() {
+                    return Err(ServiceRunError::Failure(format!(
+                        "PAC conversion matrix contains a non-finite value at frequency point {}, output sideband {}, input sideband {}",
+                        frequency_index + 1,
+                        output_sideband,
+                        input_sideband
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn checked_scale_pac_value(
+    value: Complex64,
+    scale: Value,
+    trace: &str,
+    point_index: usize,
+) -> ServiceRunResult<Complex64> {
+    let scale_component = |component: Value, component_name: &str| {
+        let scaled = component * scale;
+        if !scaled.is_finite() || (component != 0.0 && scale != 0.0 && scaled == 0.0) {
+            return Err(ServiceRunError::Failure(format!(
+                "PAC trace '{trace}' {component_name} component at point {} cannot be represented after applying PAC magnitude {scale}",
+                point_index + 1
+            )));
+        }
+        Ok(scaled)
+    };
+    Ok(Complex64::new(
+        scale_component(value.re, "real")?,
+        scale_component(value.im, "imaginary")?,
+    ))
+}
+
+/// Run PAC standalone -- solving its own PSS and then linearizing around that
+/// periodic solution -- with cooperative cancellation.
+///
+/// Test-only. PAC ships as a dependent task through
+/// [`run_pac_analysis_from_pss_with_source_path_and_abort`].
+#[cfg(test)]
+pub fn run_pac_analysis_with_abort(
+    netlist_text: &str,
+    config: &PacRunConfig,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacData> {
+    run_pac_analysis_with_source_path_and_abort(netlist_text, config, None, abort)
+}
+
+/// Run PAC from an exact retained PSS state with direct-call source-relative
+/// include and model resolution.
+#[cfg(test)]
+pub fn run_pac_analysis_from_pss_with_source_path_and_abort(
+    netlist_text: &str,
+    config: &PacRunConfig,
+    operating_point: &rspice_core::engine::PssOperatingPoint,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacData> {
+    run_pac_analysis_from_carrier_with_source_path_and_abort(
+        netlist_text,
+        config,
+        PeriodicCarrierState::Shooting(operating_point),
+        source_path,
+        abort,
+    )
+}
+
+/// Run PAC from an exact retained harmonic-balance state.
+///
+/// The same conversion analysis about the other carrier the engine accepts.
+/// One result-conversion path serves both: the engine's `.PAC` result is the
+/// same object with the same axes whichever family froze the large-signal
+/// solution, so the sideband traces below are assembled once.
+#[allow(
+    dead_code,
+    reason = "retained HB carrier PAC adapter for callers and tests"
+)]
+pub fn run_pac_analysis_from_hb_with_source_path_and_abort(
+    netlist_text: &str,
+    config: &PacRunConfig,
+    operating_point: &rspice_core::engine::HbOperatingPoint,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacData> {
+    run_pac_analysis_from_carrier_with_source_path_and_abort(
+        netlist_text,
+        config,
+        PeriodicCarrierState::HarmonicBalance(operating_point),
+        source_path,
+        abort,
+    )
+}
+
+#[allow(dead_code, reason = "retained carrier PAC source-path adapter")]
+fn run_pac_analysis_from_carrier_with_source_path_and_abort(
+    netlist_text: &str,
+    config: &PacRunConfig,
+    carrier: PeriodicCarrierState<'_>,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacData> {
+    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    run_pac_analysis_on_materialized_with_abort(&netlist, config, Some(carrier), abort)
+}
+
+/// Run PAC analysis with source-path resolution and cooperative cancellation,
+/// solving its own PSS.
+///
+/// Test-only; see [`run_pac_analysis_with_abort`].
+#[cfg(test)]
+pub fn run_pac_analysis_with_source_path_and_abort(
+    netlist_text: &str,
+    config: &PacRunConfig,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacData> {
+    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    run_pac_analysis_on_materialized_with_abort(&netlist, config, None, abort)
+}
+
+pub(crate) fn run_pac_analysis_on_materialized_with_abort(
+    netlist: &rspice_core::Netlist,
+    config: &PacRunConfig,
+    carrier: Option<PeriodicCarrierState<'_>>,
+    abort: &dyn AbortSignal,
+) -> ServiceRunResult<PacData> {
+    let pac_internal = match carrier {
+        Some(carrier) => run_pac_internal_from_carrier_with_abort(netlist, config, carrier, abort)?,
+        None => run_pac_internal_with_abort(netlist, config, abort)?,
+    };
+    let pac_result = pac_internal.pac_result;
+
+    let mut sidebands = Vec::new();
+    for (index, sideband) in pac_result.sideband_indices().into_iter().enumerate() {
+        poll_periodically(abort, index)?;
+        if config.include_dc || sideband != 0 {
+            sidebands.push(sideband);
+        }
+    }
+    if sidebands.is_empty() {
+        return Err(ServiceRunError::Failure(
+            "PAC produced no sidebands with current configuration".to_string(),
+        ));
+    }
+
+    let frequencies = pac_result.frequencies.clone();
+    let output_node_name = pac_internal.output_node_name;
+
+    let traces_per_sideband = pac_result
+        .branch_names
+        .len()
+        .checked_add(1)
+        .ok_or_else(|| ServiceRunError::Failure("PAC trace count overflows usize".to_owned()))?;
+    let trace_count = sidebands
+        .len()
+        .checked_mul(traces_per_sideband)
+        .ok_or_else(|| ServiceRunError::Failure("PAC trace count overflows usize".to_owned()))?;
+    let mut traces = Vec::new();
+    traces.try_reserve_exact(trace_count).map_err(|error| {
+        ServiceRunError::Failure(format!("PAC trace allocation failed: {error}"))
+    })?;
+    for (sideband_index, sideband) in sidebands.iter().enumerate() {
+        poll_periodically(abort, sideband_index)?;
+        let voltage_name = format!("V({})[sb={:+}]", output_node_name, sideband);
+        let mut voltage_values = Vec::new();
+        voltage_values
+            .try_reserve_exact(frequencies.len())
+            .map_err(|error| {
+                ServiceRunError::Failure(format!(
+                    "PAC voltage-trace allocation failed for '{voltage_name}': {error}"
+                ))
+            })?;
+        for freq_idx in 0..frequencies.len() {
+            poll_periodically(abort, freq_idx)?;
+            // The configured conversion matrix is the authoritative output
+            // channel: unlike the per-node spectra, it includes output_ref
+            // for a differential PAC measurement.
+            let voltage = pac_result
+                .conversion_matrix
+                .get(freq_idx, *sideband, 0)
+                .map_err(|error| {
+                    ServiceRunError::Failure(format!(
+                        "PAC conversion result is unavailable: {error}"
+                    ))
+                })?;
+            voltage_values.push(checked_scale_pac_value(
+                voltage,
+                config.pac_magnitude,
+                &voltage_name,
+                freq_idx,
+            )?);
+        }
+        traces.push(PacTrace {
+            name: voltage_name,
+            unit: "V",
+            values: voltage_values,
+        });
+
+        for (branch_index, branch_name) in pac_result.branch_names.iter().enumerate() {
+            poll_periodically(abort, branch_index)?;
+            let trace_name = format!("I({branch_name})[sb={sideband:+}]");
+            let mut current_values = Vec::new();
+            current_values
+                .try_reserve_exact(frequencies.len())
+                .map_err(|error| {
+                    ServiceRunError::Failure(format!(
+                        "PAC current-trace allocation failed for '{trace_name}': {error}"
+                    ))
+                })?;
+            for freq_idx in 0..frequencies.len() {
+                poll_periodically(abort, freq_idx)?;
+                let current = pac_result
+                    .get_sideband_data(freq_idx, *sideband)
+                    .and_then(|data| data.branch_currents.get(branch_index))
+                    .copied()
+                    .ok_or_else(|| {
+                        ServiceRunError::Failure(format!(
+                            "PAC branch current '{branch_name}' is unavailable at frequency point {}, sideband {}",
+                            freq_idx + 1,
+                            sideband
+                        ))
+                    })?;
+                current_values.push(checked_scale_pac_value(
+                    current,
+                    config.pac_magnitude,
+                    &trace_name,
+                    freq_idx,
+                )?);
+            }
+            traces.push(PacTrace {
+                name: trace_name,
+                unit: "A",
+                values: current_values,
+            });
+        }
+    }
+
+    ensure_not_aborted(abort)?;
+    Ok(PacData {
+        frequencies,
+        traces,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::periodic::PacFrequencySweep;
+    use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
+    use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
+
+    #[test]
+    fn pac_service_preserves_typed_entry_abort() {
+        let result =
+            run_pac_analysis_with_abort("not a netlist", &PacRunConfig::default(), &ImmediateAbort);
+
+        assert!(matches!(result, Err(ServiceRunError::Aborted)));
+    }
+
+    fn one_point_config() -> PacRunConfig {
+        PacRunConfig {
+            pss_fundamental_freq: 1.0e6,
+            pss_num_harmonics: 3,
+            pss_tolerance: 1.0e-9,
+            start_freq: 1.0e4,
+            stop_freq: 1.0e4,
+            points_per_unit: 1,
+            sweep: PacFrequencySweep::Linear,
+            sideband_min: 0,
+            sideband_max: 0,
+            input_source: "V1".to_owned(),
+            output_node: "out".to_owned(),
+            output_ref: None,
+            pac_magnitude: 2.0,
+            include_dc: true,
+            reltol: 1.0e-9,
+            abstol: 1.0e-15,
+            carrier: PeriodicCarrier::Preceding,
+        }
+    }
+
+    /// Both carriers linearize the same circuit, so both must report the
+    /// circuit.
+    ///
+    /// The fixture is an RC low-pass driven by one tone. Its small-signal
+    /// linearization is the network itself — a resistor's conductance and a
+    /// capacitor's capacitance do not depend on the operating point — so the
+    /// periodically time-varying system is time *invariant*, its conversion
+    /// matrix is diagonal, and the sideband-zero channel is the ordinary AC
+    /// transfer `1/(1 + j2*pi*f*R*C)`. That closed form is the oracle for both
+    /// runs: pinning one solver's output as the other's would prove only that
+    /// the two agree, not that either is right.
+    ///
+    /// The bound is `1e-9` relative. It is not either solver's convergence
+    /// tolerance, because neither one's iteration enters this number: for a
+    /// linear network the shooting solve and the harmonic-balance solve both
+    /// reach the exact orbit, and the sampled linearization is a constant
+    /// either way. What is left is the two solvers' different floating-point
+    /// paths — a different collocation count, a different lifted system size,
+    /// a different elimination order — so the bound is a round-off budget with
+    /// room for the wider of the two, and a real disagreement between the
+    /// carriers is orders of magnitude larger than it.
+    #[test]
+    fn pac_around_hb_and_pac_around_pss_agree_on_a_linear_circuit() {
+        use crate::engine_services::hb::{
+            HbRunConfig, HbToneRunConfig, run_hb_analysis_with_abort,
+        };
+
+        // R = 1 kOhm, C = 159.154943091895 pF: the corner sits at 1 MHz, so
+        // the swept offsets below cover both sides of it.
+        const DECK: &str = "PAC carrier agreement fixture\n\
+             V1 in 0 SIN(0 0.001 1Meg) AC 1\n\
+             R1 in out 1k\n\
+             C1 out 0 159.154943091895p\n\
+             .end\n";
+        const FUNDAMENTAL: Value = 1.0e6;
+        const RESISTANCE: Value = 1.0e3;
+        const CAPACITANCE: Value = 159.154_943_091_895e-12;
+        const HARMONICS: usize = 8;
+        const BOUND: Value = 1.0e-9;
+
+        let mut config = one_point_config();
+        config.pss_fundamental_freq = FUNDAMENTAL;
+        config.pss_num_harmonics = HARMONICS;
+        config.start_freq = 1.0e5;
+        config.stop_freq = 1.0e7;
+        config.points_per_unit = 2;
+        config.sweep = PacFrequencySweep::Decade;
+        config.pac_magnitude = 1.0;
+        config.sideband_min = -1;
+        config.sideband_max = 1;
+
+        let netlist =
+            parse_runner_netlist_with_abort(DECK, None, &NoAbort).expect("the deck parses");
+        let engine = build_resolved_periodic_engine(&netlist, config.pss_tolerance, "fixture")
+            .expect("the fixture engine resolves");
+        let shooting = engine
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                rspice_core::analysis::PssConfig::new(FUNDAMENTAL)
+                    .with_harmonics(HARMONICS)
+                    .with_points_per_period(64)
+                    .with_tstab_periods(2)
+                    .with_tolerance(config.pss_tolerance),
+                &NoAbort,
+            )
+            .expect("the driven RC orbit converges");
+        let harmonic_balance = run_hb_analysis_with_abort(
+            DECK,
+            &HbRunConfig {
+                tones: vec![HbToneRunConfig::new(FUNDAMENTAL, HARMONICS)],
+                reltol: 1.0e-10,
+                ..HbRunConfig::default()
+            },
+            &NoAbort,
+        )
+        .expect("the harmonic-balance carrier converges")
+        .operating_point;
+
+        let from_pss = run_pac_analysis_from_pss_with_source_path_and_abort(
+            DECK, &config, &shooting, None, &NoAbort,
+        )
+        .expect("the shooting-carried run completes");
+        let from_hb = run_pac_analysis_from_hb_with_source_path_and_abort(
+            DECK,
+            &config,
+            harmonic_balance.as_ref(),
+            None,
+            &NoAbort,
+        )
+        .expect("the harmonic-balance-carried run completes");
+
+        assert_eq!(from_pss.frequencies, from_hb.frequencies);
+        assert!(!from_pss.frequencies.is_empty());
+
+        let channel = |data: &PacData| {
+            data.traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case("V(out)[sb=+0]"))
+                .expect("the sideband-zero output channel is retained")
+                .values
+                .clone()
+        };
+        let shooting_channel = channel(&from_pss);
+        let hb_channel = channel(&from_hb);
+
+        for (index, frequency) in from_pss.frequencies.iter().copied().enumerate() {
+            let closed_form = Complex64::new(1.0, 0.0)
+                / Complex64::new(
+                    1.0,
+                    std::f64::consts::TAU * frequency * RESISTANCE * CAPACITANCE,
+                );
+            for (label, value) in [
+                ("shooting", shooting_channel[index]),
+                ("harmonic balance", hb_channel[index]),
+            ] {
+                let error = (value - closed_form).norm() / closed_form.norm();
+                assert!(
+                    error <= BOUND,
+                    "the {label} carrier reports {value} at {frequency} Hz, and the network's own \
+                     transfer is {closed_form} (relative error {error:e})"
+                );
+            }
+            let between = (shooting_channel[index] - hb_channel[index]).norm() / closed_form.norm();
+            assert!(
+                between <= BOUND,
+                "the two carriers disagree by {between:e} at {frequency} Hz: {} versus {}",
+                shooting_channel[index],
+                hb_channel[index]
+            );
+        }
+    }
+
+    #[test]
+    fn pac_service_emits_exact_unit_bearing_voltage_and_branch_current_traces() {
+        let data = run_pac_analysis_with_abort(
+            "* exact PAC branch-current fixture\nV1 out 0 DC 0 AC 17 31\nR1 out 0 1k\n.end\n",
+            &one_point_config(),
+            &NoAbort,
+        )
+        .expect("PAC service completes");
+
+        assert_eq!(data.frequencies, vec![1.0e4]);
+        let voltage = data
+            .traces
+            .iter()
+            .find(|trace| trace.name.eq_ignore_ascii_case("V(out)[sb=+0]"))
+            .expect("output-voltage trace is retained");
+        assert_eq!(voltage.unit, "V");
+        assert!((voltage.values[0] - Complex64::new(2.0, 0.0)).norm() <= 1.0e-12);
+
+        let current = data
+            .traces
+            .iter()
+            .find(|trace| trace.name.eq_ignore_ascii_case("I(V1)[sb=+0]"))
+            .expect("voltage-source branch-current trace is retained");
+        assert_eq!(current.unit, "A");
+        assert!(
+            (current.values[0] - Complex64::new(-2.0e-3, 0.0)).norm() <= 1.0e-12,
+            "positive-to-negative source current is {}",
+            current.values[0]
+        );
+    }
+
+    #[test]
+    fn pac_result_validation_rejects_branch_cardinality_identity_and_finiteness_drift() {
+        let config = one_point_config();
+        let valid = || {
+            rspice_core::analysis::pac::PacResult::new(
+                config.pss_fundamental_freq,
+                vec![config.start_freq],
+                0,
+                0,
+                vec!["out".to_owned()],
+                vec!["V1".to_owned()],
+            )
+            .expect("fixture result is valid")
+        };
+
+        let basis = config.pss_fundamental_freq;
+
+        let mut truncated = valid();
+        truncated
+            .get_sideband_data_mut(0, 0)
+            .expect("sideband exists")
+            .branch_currents
+            .clear();
+        assert!(
+            validate_pac_result(&truncated, &config, basis)
+                .expect_err("truncated branch data must fail")
+                .to_string()
+                .contains("cardinality")
+        );
+
+        let mut duplicate = valid();
+        duplicate.branch_names.push("v1".to_owned());
+        duplicate
+            .get_sideband_data_mut(0, 0)
+            .expect("sideband exists")
+            .branch_currents
+            .push(Complex64::new(0.0, 0.0));
+        assert!(
+            validate_pac_result(&duplicate, &config, basis)
+                .expect_err("duplicate identity must fail")
+                .to_string()
+                .contains("duplicate branch identity")
+        );
+
+        let mut nonfinite = valid();
+        nonfinite
+            .get_sideband_data_mut(0, 0)
+            .expect("sideband exists")
+            .branch_currents[0] = Complex64::new(Value::NAN, 0.0);
+        assert!(
+            validate_pac_result(&nonfinite, &config, basis)
+                .expect_err("non-finite current must fail")
+                .to_string()
+                .contains("non-finite")
+        );
+    }
+
+    /// A result built on a periodic solution other than the carrier this run
+    /// was handed is still refused, and now says which two frequencies
+    /// disagree instead of naming a "basis or residual" that is neither.
+    #[test]
+    fn a_conversion_basis_that_is_not_its_carriers_is_refused_by_name() {
+        let config = one_point_config();
+        let result = rspice_core::analysis::pac::PacResult::new(
+            config.pss_fundamental_freq,
+            vec![config.start_freq],
+            0,
+            0,
+            vec!["out".to_owned()],
+            vec!["V1".to_owned()],
+        )
+        .expect("fixture result is valid");
+
+        let message = validate_pac_result(&result, &config, config.pss_fundamental_freq * 2.0)
+            .expect_err("a basis that is not the carrier's must be refused")
+            .to_string();
+        assert!(
+            message.contains("conversion basis") && message.contains("carrier"),
+            "the refusal must name both frequencies: {message}"
+        );
+
+        validate_pac_result(&result, &config, config.pss_fundamental_freq)
+            .expect("the carrier's own basis is admitted");
+    }
+
+    /// The carrier is what the conversion matrix is built on, so the run must
+    /// publish the carrier's fundamental even when it is not the number this
+    /// configuration authored.
+    ///
+    /// That gap is exactly an autonomous carrier: the shooting solver holds
+    /// the period as an unknown and moves it off the authored guess, so a
+    /// comparison against the guess refused every oscillator. It is reproduced
+    /// here on a driven carrier because the engine takes the same branch for
+    /// both, and because `.PAC`'s exact periodic MNA cannot yet linearize the
+    /// behavioural-source oscillator that the autonomous solver converges on.
+    #[test]
+    fn the_published_basis_is_the_carriers_fundamental_not_the_authored_one() {
+        const DECK: &str = "* PAC carrier basis fixture\n\
+             v1 in 0 dc 0 ac 1\n\
+             r1 in out 1k\n\
+             c1 out 0 1n\n\
+             .end\n";
+        const CARRIER_FUNDAMENTAL: Value = 1.0e6;
+
+        let netlist =
+            parse_runner_netlist_with_abort(DECK, None, &NoAbort).expect("the deck parses");
+        let engine = build_resolved_periodic_engine(&netlist, 1.0e-9, "fixture producer")
+            .expect("the fixture engine resolves");
+        let carrier = engine
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                rspice_core::analysis::PssConfig::new(CARRIER_FUNDAMENTAL)
+                    .with_harmonics(9)
+                    .with_points_per_period(64)
+                    .with_tstab_periods(2)
+                    .with_tolerance(1.0e-9),
+                &NoAbort,
+            )
+            .expect("the driven RC carrier converges");
+
+        let mut config = one_point_config();
+        config.pss_tolerance = 1.0e-9;
+        config.output_node = "out".to_owned();
+        // Authored one place away from the carrier, which is what an
+        // autonomous run produces once the solver has moved the period.
+        config.pss_fundamental_freq = CARRIER_FUNDAMENTAL * 1.000_001;
+        assert_ne!(
+            config.pss_fundamental_freq.to_bits(),
+            carrier.analysis().result.frequency.to_bits()
+        );
+
+        let internal = run_pac_internal_from_carrier_with_abort(
+            &netlist,
+            &config,
+            PeriodicCarrierState::Shooting(&carrier),
+            &NoAbort,
+        )
+        .expect("a run against its own carrier is admitted");
+
+        assert_eq!(
+            internal.pac_result.fundamental_frequency.to_bits(),
+            carrier.analysis().result.frequency.to_bits(),
+            "the published basis is the carrier's, by identity"
+        );
+    }
+
+    #[test]
+    fn pac_magnitude_scaling_rejects_overflow_and_nonzero_erasure() {
+        assert!(
+            checked_scale_pac_value(Complex64::new(Value::MAX, 0.0), 2.0, "V(out)", 0).is_err()
+        );
+        assert!(
+            checked_scale_pac_value(Complex64::new(Value::from_bits(1), 0.0), 0.5, "I(V1)", 0,)
+                .is_err()
+        );
+    }
+}

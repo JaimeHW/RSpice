@@ -313,7 +313,7 @@ fn convergence_inspector_exposes_unknown_and_forced_acceptance_status_accessibly
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn dc_inspector_exposes_exact_secondary_coordinates_and_primary_traversal() {
-    use crate::simulation::engine_bridge::nested_dc_tests::{nested_config, retain, solve};
+    use crate::simulation::controller::dc_history_tests::{nested_config, retain, solve};
     let mut config = nested_config();
     config.start = 1.0;
     config.stop = 0.0;

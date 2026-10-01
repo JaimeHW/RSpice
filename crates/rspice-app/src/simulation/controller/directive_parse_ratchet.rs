@@ -567,7 +567,7 @@ fn a_periodic_small_signal_card_names_the_carrier_it_linearizes_around() {
     use rspice_core::netlist::{AnalysisCommand, PeriodicSourceSelector};
 
     // The one position the Studio runs that is not the card's absent key.
-    let pss_carrier = crate::services::simulation_runner::PeriodicCarrier::Pss.index();
+    let pss_carrier = rspice_simulation_contract::periodic_carrier::PeriodicCarrier::Pss.index();
 
     let mut pac_draft = fixture_draft(AnalysisKind::Pac);
     let AnalysisDraft::Pac(pac) = &mut pac_draft else {

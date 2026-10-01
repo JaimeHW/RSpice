@@ -4,8 +4,7 @@ pub use rspice_simulation_contract::mc_statistics::McStatisticsConfig;
 
 #[cfg(test)]
 pub use rspice_simulation_contract::mc_statistics::{
-    McCorrelationDraft, McParameterBounds, McParameterCorrelation, McParameterVariation, McScope,
-    McShape, McVariationDraft,
+    McCorrelationDraft, McParameterBounds, McParameterVariation, McScope, McShape, McVariationDraft,
 };
 
 #[cfg(test)]

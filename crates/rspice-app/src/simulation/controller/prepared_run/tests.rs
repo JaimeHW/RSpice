@@ -1230,10 +1230,10 @@ fn unpolled_completion_reentry_does_not_consume_or_replace_authorization() {
         .run_authorization
         .retain(snapshot)
         .expect("authorize replacement request");
-    controller
-        .runner
-        .store_pending_result(Err(SimulationError::Aborted))
-        .expect("seed finished, unpolled worker result");
+    controller.runner = crate::simulation::controller::test_execution::start_manual_deck(
+        state.workspace.content.netlist_source.as_deref().unwrap(),
+    );
+    crate::simulation::controller::test_execution::wait_until_finished_unpolled(&controller.runner);
 
     controller.start_authorized_snapshot(&mut state);
 

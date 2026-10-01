@@ -5,6 +5,7 @@
 use super::fixtures::output;
 use super::*;
 use crate::state::{AnalysisResultPayload, DcSweepFamily, OutputSelectionMode, SimulationRun};
+use std::collections::HashSet;
 
 const DECK: &str = "Saved DC family\nV1 in 0 0\nV2 out 0 1e-7\nR1 in out 1k\n.end\n";
 
@@ -32,19 +33,7 @@ fn run_with_selection(
     outputs: &[SavedOutput],
     output_selection_mode: OutputSelectionMode,
 ) -> SimulationRun {
-    let line = if matches!(spec, AnalysisSpec::DcOp { .. }) {
-        ".op"
-    } else {
-        ".dc V1 1 0 -0.5"
-    };
-    super::fixtures::run(
-        DECK,
-        "Authored DC family",
-        spec,
-        line,
-        outputs,
-        output_selection_mode,
-    )
+    super::fixtures::run(DECK, spec, outputs, output_selection_mode)
 }
 
 fn assert_outputs(spec: AnalysisSpec, member_count: usize) {

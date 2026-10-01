@@ -1,46 +1,116 @@
-//! Saved-output materialization and application result adoption.
-//!
-//! Consumes immutable contracts prepared by the simulation runtime.
+//! Application presentation and adoption of exact runtime saved outputs.
 
-use std::collections::HashSet;
-use std::sync::Arc;
+use crate::state::{AnalysisResult, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, WaveformData};
+use rspice_results::waveform::RetainedWaveform;
+use rspice_simulation::output_contract::{PreparedSavedOutput, materialization};
 
-use crate::analysis::calculator::{self, CalcValue};
 #[cfg(test)]
 use crate::product::{AnalysisInstanceId, ContentDigest};
 #[cfg(test)]
 use crate::simulation::config::NoiseSweepType;
 #[cfg(test)]
 use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep};
+#[cfg(test)]
 use crate::state::{
-    AnalysisResult, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, SavedOutputKind,
-    SavedOutputMaterializationStatus, SavedOutputPolicy, SavedOutputPrecision,
-    SavedOutputStreaming, WaveformData,
-};
-#[cfg(test)]
-use crate::state::{SavedOutput, SavedOutputCompatibility};
-
-use rspice_simulation::output_contract::{
-    PreparedSavedOutput, TransientSelectionGrid, parse_probe, parse_rf_port, probe_identity,
-    validate_selection_grid,
+    SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputMaterializationStatus,
+    SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
 };
 #[cfg(test)]
 use rspice_simulation::output_contract::{
-    SavedOutputSemanticStatus, SavedOutputStorageEstimate, compile_saved_output_contracts,
-    preflight_saved_output, retained_engine_source_upper_bound_bytes,
+    SavedOutputSemanticStatus, SavedOutputStorageEstimate, TransientSelectionGrid,
+    compile_saved_output_contracts, preflight_saved_output,
+    retained_engine_source_upper_bound_bytes,
 };
-
-mod bindings;
-mod dc_family;
-mod materialize;
-mod probe;
-pub(crate) use materialize::materialize_deferred_saved_output;
 #[cfg(test)]
-use materialize::materialize_saved_outputs;
-pub(in crate::simulation) use materialize::{
-    apply_saved_output_policy, materialize_live_saved_outputs, retain_plan_saved_outputs,
-};
-use probe::resolve_raw_probe;
+use std::sync::Arc;
+
+impl materialization::OutputWaveform for WaveformData {
+    fn from_retained(data: RetainedWaveform) -> Self {
+        Self {
+            data,
+            color: "#f5b700".to_owned(),
+            visible: true,
+            display_cache: None,
+        }
+    }
+
+    fn reset_display_cache(&mut self) {
+        self.display_cache = None;
+    }
+
+    fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
+    }
+
+    fn rebuild_output_display_cache(&mut self) {
+        self.rebuild_display_cache(DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
+    }
+
+    fn adopt_presentation(&mut self, source: Self) {
+        self.display_cache = source.display_cache;
+        self.visible = source.visible;
+    }
+
+    fn into_output_preview(self, maximum_samples: usize) -> Result<Self, String> {
+        self.into_bounded_preview(maximum_samples)
+    }
+}
+
+pub(in crate::simulation) fn apply_saved_output_policy(
+    analysis: &mut AnalysisResult,
+    policy: crate::simulation::execution::SavePolicy,
+    contracts: &[PreparedSavedOutput],
+) {
+    materialization::apply_saved_output_policy(&mut analysis.data, policy, contracts);
+}
+
+pub(in crate::simulation) fn retain_plan_saved_outputs(
+    analysis: &mut AnalysisResult,
+    contracts: &[PreparedSavedOutput],
+) {
+    materialization::retain_plan_saved_outputs(&mut analysis.data, contracts);
+}
+
+pub(in crate::simulation) fn materialize_live_saved_outputs(
+    analysis: &AnalysisResult,
+    contracts: &[PreparedSavedOutput],
+) -> Vec<WaveformData> {
+    materialization::materialize_live_saved_outputs(
+        &analysis.data,
+        contracts,
+        DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
+    )
+}
+
+pub(crate) fn materialize_deferred_saved_output(
+    analysis: &mut AnalysisResult,
+    receipt_index: usize,
+) -> Result<(), String> {
+    materialization::materialize_deferred_saved_output(&mut analysis.data, receipt_index)
+}
+
+#[cfg(test)]
+fn materialize_saved_outputs(analysis: &mut AnalysisResult, contracts: &[PreparedSavedOutput]) {
+    materialization::materialize_saved_outputs(&mut analysis.data, contracts);
+}
+
+#[cfg(test)]
+fn resolve_raw_probe(
+    expression: &str,
+    waveforms: &[WaveformData],
+    output_name: &str,
+    complex_domain: bool,
+) -> Result<WaveformData, String> {
+    materialization::resolve_raw_probe(expression, waveforms, output_name, complex_domain)
+}
+
+#[cfg(test)]
+fn resample_selected_and_final(
+    waveform: &WaveformData,
+    grid: TransientSelectionGrid,
+) -> Result<WaveformData, String> {
+    materialization::resample_selected_and_final(waveform, grid)
+}
 
 #[cfg(test)]
 mod binding_tests;
@@ -56,252 +126,6 @@ mod fixtures;
 mod probe_tests;
 #[cfg(test)]
 mod quasi_periodic_tests;
-
-fn resolve_contract_waveform(
-    contract: &PreparedSavedOutput,
-    analysis: &AnalysisResult,
-    waveforms: &[WaveformData],
-) -> Result<WaveformData, String> {
-    match contract.kind() {
-        SavedOutputKind::RawVoltageOrCurrent => resolve_raw_probe(
-            contract.source_expression(),
-            waveforms,
-            contract.name(),
-            analysis.analysis_type.uses_complex_bode_projection(),
-        ),
-        SavedOutputKind::DerivedExpression => resolve_derived_expression(
-            contract.source_expression(),
-            waveforms,
-            contract.name(),
-            contract.complex_policy(),
-        ),
-        SavedOutputKind::DeviceOperatingPointQuantity => {
-            resolve_device_quantity(contract.source_expression(), analysis, contract.name())
-        }
-        SavedOutputKind::NoiseContributor => {
-            // Typed noise names include output tuples and mechanism labels. A
-            // quoted reference preserves that complete identity and its units.
-            if let Ok(calculator::ast::CalculatorExpr::WaveformRef {
-                signal,
-                dataset: None,
-            }) = calculator::parser::try_parse(contract.source_expression())
-                && contract.source_expression().trim_start().starts_with('"')
-            {
-                return clone_named_waveform(waveforms, &signal, contract.name());
-            }
-            let source = format!("noise({})", contract.source_expression().trim());
-            clone_named_waveform(waveforms, &source, contract.name()).or_else(|_| {
-                clone_named_waveform(waveforms, contract.source_expression(), contract.name())
-            })
-        }
-        SavedOutputKind::RfPortQuantity => {
-            let (output, input) = parse_rf_port(contract.source_expression())?;
-            let separated = format!("S{output}_{input}");
-            clone_named_waveform(waveforms, &separated, contract.name())
-                .or_else(|error| {
-                    if output <= 9 && input <= 9 {
-                        clone_named_waveform(
-                            waveforms,
-                            &format!("S{output}{input}"),
-                            contract.name(),
-                        )
-                    } else {
-                        Err(error)
-                    }
-                })
-                .or_else(|_| {
-                    clone_named_waveform(waveforms, contract.source_expression(), contract.name())
-                })
-        }
-    }
-}
-
-fn resolve_derived_expression(
-    expression: &str,
-    waveforms: &[WaveformData],
-    output_name: &str,
-    complex_policy: crate::state::ComplexExpressionPolicy,
-) -> Result<WaveformData, String> {
-    resolve_derived_with(
-        expression,
-        output_name,
-        &calculator::WaveformsContext::with_policy(waveforms, complex_policy),
-        waveforms.first(),
-    )
-}
-
-fn resolve_derived_with(
-    expression: &str,
-    output_name: &str,
-    context: &impl calculator::EvaluationContext,
-    axis_source: Option<&WaveformData>,
-) -> Result<WaveformData, String> {
-    let parsed = calculator::parser::Parser::new(expression)
-        .try_parse()
-        .map_err(|error| format!("expression parse failed: {error}"))?;
-    let value = calculator::evaluator::evaluate(&parsed, context)
-        .map_err(|error| format!("expression evaluation failed: {error}"))?;
-    calculator::evaluated_waveform(
-        value,
-        output_name,
-        axis_source.map(|source| source.x.as_slice()),
-    )
-}
-fn resolve_device_quantity(
-    expression: &str,
-    analysis: &AnalysisResult,
-    output_name: &str,
-) -> Result<WaveformData, String> {
-    let body = expression
-        .trim()
-        .strip_prefix('@')
-        .ok_or_else(|| "device quantity must begin with '@'".to_owned())?;
-    let open = body
-        .find('[')
-        .ok_or_else(|| "device quantity is missing '['".to_owned())?;
-    let device = &body[..open];
-    let quantity = body[open + 1..]
-        .strip_suffix(']')
-        .ok_or_else(|| "device quantity is missing ']'".to_owned())?;
-    let report = analysis
-        .device_op
-        .as_ref()
-        .ok_or_else(|| "analysis retained no device operating-point report".to_owned())?;
-    let entry = report
-        .entries
-        .iter()
-        .find(|entry| entry.name.eq_ignore_ascii_case(device))
-        .ok_or_else(|| format!("device '{device}' is absent from the operating-point report"))?;
-    let value = entry
-        .params
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case(quantity))
-        .map(|(_, value)| *value)
-        .ok_or_else(|| format!("device '{device}' has no '{quantity}' quantity"))?;
-    Ok(WaveformData::new(
-        output_name,
-        vec![0.0],
-        vec![value],
-        "#f5b700",
-    ))
-}
-
-fn clone_named_waveform(
-    waveforms: &[WaveformData],
-    source: &str,
-    output_name: &str,
-) -> Result<WaveformData, String> {
-    find_waveform(waveforms, source)
-        .map(|waveform| clone_with_name(waveform, output_name))
-        .ok_or_else(|| format!("source waveform '{source}' is absent"))
-}
-
-fn find_waveform<'a>(waveforms: &'a [WaveformData], requested: &str) -> Option<&'a WaveformData> {
-    let requested = requested.trim();
-    find_literal_waveform(waveforms, requested).or_else(|| {
-        if let Some((device, quantity)) = crate::state::device_current_probe(requested) {
-            let engine = crate::state::ProbeTarget::engine_alias(device)?;
-            return find_literal_waveform(waveforms, &format!("@{engine}[{quantity}]"));
-        }
-        let (current, node) = probe_identity(requested);
-        let engine = crate::state::ProbeTarget::engine_alias(node)?;
-        find_literal_waveform(
-            waveforms,
-            &format!("{}({engine})", if current { "I" } else { "V" }),
-        )
-    })
-}
-
-fn find_literal_waveform<'a>(
-    waveforms: &'a [WaveformData],
-    requested: &str,
-) -> Option<&'a WaveformData> {
-    // Exact authored names win before compatibility with bare engine nodes.
-    // A node named V1 and branch I(V1) are different physical quantities.
-    waveforms
-        .iter()
-        .find(|waveform| waveform.name.eq_ignore_ascii_case(requested))
-        .or_else(|| {
-            waveforms.iter().find(|waveform| {
-                let source = waveform
-                    .complex
-                    .as_ref()
-                    .map_or(waveform.name.as_str(), |complex| {
-                        complex.source_name.as_str()
-                    });
-                let (current, node) = probe_identity(source);
-                let (requested_current, requested_node) = probe_identity(requested);
-                current == requested_current && node.eq_ignore_ascii_case(requested_node)
-            })
-        })
-}
-
-fn waveform_matches_requested(waveform: &WaveformData, requested: &str) -> bool {
-    find_waveform(std::slice::from_ref(waveform), requested).is_some()
-}
-
-fn clone_with_name(source: &WaveformData, name: &str) -> WaveformData {
-    let mut waveform = source.clone();
-    waveform.name = name.to_owned();
-    waveform.display_cache = None;
-    waveform
-}
-
-fn resample_selected_and_final(
-    waveform: &WaveformData,
-    grid: TransientSelectionGrid,
-) -> Result<WaveformData, String> {
-    validate_selection_grid(grid)?;
-    if waveform.x.is_empty() || waveform.x.len() != waveform.y.len() {
-        return Err("source waveform has no aligned samples".to_owned());
-    }
-    if waveform
-        .x
-        .windows(2)
-        .any(|window| !window[0].is_finite() || window[1] <= window[0])
-    {
-        return Err("source waveform axis is not strictly increasing".to_owned());
-    }
-    let first = waveform.x[0];
-    let last = *waveform.x.last().expect("non-empty checked");
-    let start = grid.start.max(first);
-    let stop = grid.stop.min(last);
-    if stop < start {
-        return Err("selected-point grid does not overlap the source axis".to_owned());
-    }
-    let mut x = Vec::new();
-    let mut cursor = start;
-    while cursor < stop {
-        x.push(cursor);
-        cursor = start + grid.step * x.len() as f64;
-    }
-    if x.last()
-        .is_none_or(|value| value.to_bits() != stop.to_bits())
-    {
-        x.push(stop);
-    }
-    let resample = |values: &[f64]| {
-        calculator::interpolation::WaveformInterpolator::new(&waveform.x, values)
-            .and_then(|source| source.resample(&x))
-            .map_err(|error| error.to_string())
-    };
-    let y = resample(&waveform.y)?;
-    let mut result = WaveformData::new(&waveform.name, x.clone(), y, waveform.color.clone());
-    result.unit = waveform.unit.clone();
-    result.visible = waveform.visible;
-    if let Some(complex) = &waveform.complex {
-        let real = resample(&complex.real)?;
-        let imag = resample(&complex.imag)?;
-        result.y = real
-            .iter()
-            .zip(&imag)
-            .map(|(real, imag)| real.hypot(*imag))
-            .collect::<Vec<_>>()
-            .into();
-        result = result.with_complex_components(&complex.source_name, real, imag);
-    }
-    Ok(result)
-}
 
 #[cfg(test)]
 mod tests {

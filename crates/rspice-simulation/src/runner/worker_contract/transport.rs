@@ -1,0 +1,2055 @@
+//! Encoding the worker protocol on the wire, and refusing anything unsound.
+//!
+//! Every numeric array crosses the worker boundary as a transferable buffer
+//! rather than inside the JSON metadata, so the metadata carries only lengths
+//! and indices.  That split is why validation lives here: a payload is checked
+//! against the ingress limits *before* any copy, buffer indices and lengths are
+//! reconciled with the metadata that claims them, and a response that fails
+//! either check is rejected rather than partially reconstructed.
+
+// These result enums have one variant per analysis kind, and the analyses
+// genuinely differ in payload size — a transient result carries waveform
+// series where a DC operating point carries scalars. The value is built once
+// per run, serialized, and dropped; it is never stored in a collection, so
+// the size the lint measures is a transient stack cost on a path that is
+// already doing IO. Boxing each variant's fields would mean a payload struct
+// per analysis and, for the struct variants, a change to the JSON shape the
+// worker protocol is pinned to.
+#![allow(clippy::large_enum_variant)]
+
+use super::*;
+mod dc_sweep;
+mod monte_carlo;
+mod qpac;
+mod qpnoise;
+mod qpxf;
+use qpnoise::WorkerQpnoiseResultTransport;
+use qpxf::WorkerQpxfResultTransport;
+mod response;
+mod result;
+use qpac::WorkerQpacResultTransport;
+mod qpss;
+use qpss::WorkerQpssOperatingPointTransport;
+#[cfg(test)]
+mod tests;
+use dc_sweep::WorkerDcSweepEvidence;
+use rspice_simulation_contract::worker_recorded_fft::{
+    WorkerRecordedFftSpectrumTransport, validate_worker_spectra,
+};
+
+pub(super) fn validate_worker_response_before_transport(
+    response: &WorkerResponse,
+) -> Result<(), String> {
+    if let WorkerOutcome::Success(result) = &response.outcome
+        && let WorkerSimulationResult::Transient {
+            convergence: Some(quality),
+            ..
+        }
+        | WorkerSimulationResult::Ac {
+            convergence: Some(quality),
+            ..
+        }
+        | WorkerSimulationResult::Soa {
+            convergence: Some(quality),
+            ..
+        } = result.as_ref()
+    {
+        if quality.transfer_value_count() > MAX_WORKER_F64_VALUES {
+            return Err("Convergence evidence exceeds the worker numeric payload limit".to_owned());
+        }
+        quality.validate()?;
+    }
+    if let WorkerOutcome::Success(result) = &response.outcome {
+        validate_worker_qpss_result(result)?;
+        validate_worker_qpac_result(result)?;
+        validate_worker_qpxf_result(result)?;
+        validate_worker_qpnoise_result(result)?;
+        validate_transient_source_payload_size(result)?;
+        if let WorkerSimulationResult::Transient { events, .. } = result.as_ref()
+            && let Some(history) = &events.current_impulses
+        {
+            history.validate()?;
+        }
+        match result.as_ref() {
+            WorkerSimulationResult::Transient { spectra, .. } => {
+                validate_worker_spectra(spectra)?;
+            }
+            WorkerSimulationResult::Fft { spectrum, .. } => {
+                validate_worker_spectra(std::slice::from_ref(spectrum))?;
+            }
+            _ => {}
+        }
+        validate_worker_measurements(result)?;
+        monte_carlo::validate(result)?;
+
+        if let WorkerSimulationResult::DcSweep {
+            evidence,
+            waveforms,
+            sweep_values,
+            sweep_var,
+            ..
+        } = result.as_ref()
+        {
+            let evidence = evidence
+                .as_ref()
+                .ok_or_else(|| "Worker DC result is missing exact curve evidence".to_owned())?;
+            if !evidence.source.eq_ignore_ascii_case(sweep_var) {
+                return Err("Worker DC primary source disagrees with its curve evidence".to_owned());
+            }
+            evidence.validate_traces(
+                sweep_values,
+                waveforms
+                    .iter()
+                    .map(|trace| rspice_results::dc_sweep::DcTraceView {
+                        name: &trace.name,
+                        unit: Some(&trace.y_unit),
+                        x: &trace.x_values,
+                        sample_count: trace.y_values.len(),
+                        complex: trace.is_complex || trace.y_imag.is_some(),
+                    }),
+            )?;
+        }
+    }
+    if let WorkerOutcome::Success(result) = &response.outcome
+        && let WorkerSimulationResult::DcOp {
+            configuration,
+            mna_node_names,
+            mna_branch_names,
+            mna_solution,
+            ..
+        } = result.as_ref()
+    {
+        if let Some(previous_state) = configuration.previous_state.as_ref()
+            && previous_state.solution.len() > MAX_WORKER_F64_VALUES
+        {
+            return Err(format!(
+                "worker DC operating-point response contains {} previous-state MNA values, exceeding the {MAX_WORKER_F64_VALUES}-value limit",
+                previous_state.solution.len()
+            ));
+        }
+        if mna_solution.len() > MAX_WORKER_F64_VALUES {
+            return Err(format!(
+                "worker DC operating-point response contains {} MNA values, exceeding the {MAX_WORKER_F64_VALUES}-value limit",
+                mna_solution.len()
+            ));
+        }
+        return validate_worker_dc_op_state(
+            configuration,
+            mna_node_names,
+            mna_branch_names,
+            mna_solution,
+        );
+    }
+    let WorkerOutcome::Success(result) = &response.outcome else {
+        return Ok(());
+    };
+    if let WorkerSimulationResult::Ac {
+        reference_impedances_ohm,
+        noise_reference_temperature_kelvin: Some(temperature),
+        ..
+    } = result.as_ref()
+        && (!temperature.is_finite() || *temperature <= 0.0 || reference_impedances_ohm.is_none())
+    {
+        return Err(
+            "SP worker noise requires resolved ports and a finite positive temperature".to_owned(),
+        );
+    }
+    if let WorkerSimulationResult::Ac {
+        reference_impedances_ohm: Some(references),
+        ..
+    } = result.as_ref()
+    {
+        if references.is_empty()
+            || references
+                .iter()
+                .any(|value| !value.is_finite() || *value <= 0.0)
+        {
+            return Err(
+                "S-parameter worker references must be nonempty, finite and positive".to_owned(),
+            );
+        }
+        if references.len() > MAX_WORKER_F64_VALUES {
+            return Err("S-parameter worker reference count exceeds the payload limit".to_owned());
+        }
+    }
+    if let WorkerSimulationResult::Hb {
+        frequencies,
+        waveforms,
+        operating_point,
+        ..
+    } = result.as_ref()
+    {
+        operating_point
+            .validate()
+            .map_err(|error| error.to_string())?;
+        let waveform_buffer_count = waveforms.iter().try_fold(0usize, |count, waveform| {
+            count
+                .checked_add(2 + usize::from(waveform.y_imag.is_some()))
+                .ok_or_else(|| {
+                    "retained HB response buffer count overflows this platform".to_owned()
+                })
+        })?;
+        let transfer_buffer_count = operating_point
+            .spectral_state()
+            .len()
+            .checked_add(operating_point.mna_branch_spectral_state().len())
+            .and_then(|count| count.checked_add(operating_point.integral_spectra().len()))
+            .ok_or_else(|| "retained HB response buffer count overflows this platform".to_owned())?
+            .checked_mul(2)
+            .and_then(|count| count.checked_add(waveform_buffer_count))
+            .and_then(|count| count.checked_add(1))
+            .ok_or_else(|| {
+                "retained HB response buffer count overflows this platform".to_owned()
+            })?;
+        if transfer_buffer_count > MAX_WORKER_TRANSFER_BUFFERS {
+            return Err(format!(
+                "retained HB response requires {transfer_buffer_count} transfer buffers, exceeding the {MAX_WORKER_TRANSFER_BUFFERS}-buffer limit"
+            ));
+        }
+        let mut numeric_values = frequencies.len();
+        for waveform in waveforms {
+            numeric_values = numeric_values
+                .checked_add(waveform.x_values.len())
+                .and_then(|count| count.checked_add(waveform.y_values.len()))
+                .and_then(|count| count.checked_add(waveform.y_imag.as_ref().map_or(0, Vec::len)))
+                .ok_or_else(|| "retained HB response size overflows this platform".to_owned())?;
+        }
+        for spectrum in operating_point.spectral_state() {
+            numeric_values = numeric_values
+                .checked_add(spectrum.len().checked_mul(2).ok_or_else(|| {
+                    "retained HB response size overflows this platform".to_owned()
+                })?)
+                .ok_or_else(|| "retained HB response size overflows this platform".to_owned())?;
+        }
+        for spectrum in operating_point.mna_branch_spectral_state().iter().chain(
+            operating_point
+                .integral_spectra()
+                .iter()
+                .map(|spectrum| &spectrum.coefficients),
+        ) {
+            numeric_values = numeric_values
+                .checked_add(spectrum.len().checked_mul(2).ok_or_else(|| {
+                    "retained HB response size overflows this platform".to_owned()
+                })?)
+                .ok_or_else(|| "retained HB response size overflows this platform".to_owned())?;
+        }
+        if numeric_values > MAX_WORKER_F64_VALUES {
+            return Err(format!(
+                "retained HB response contains {numeric_values} numerical values, exceeding the {MAX_WORKER_F64_VALUES}-value limit"
+            ));
+        }
+        return Ok(());
+    }
+    if let WorkerSimulationResult::Pstb {
+        modes,
+        mode_indices,
+        waveforms,
+        ..
+    } = result.as_ref()
+    {
+        validate_worker_pstb_result(result)?;
+        let waveform_buffer_count = waveforms.iter().try_fold(0usize, |count, waveform| {
+            count
+                .checked_add(2 + usize::from(waveform.y_imag.is_some()))
+                .ok_or_else(|| {
+                    "PSTB worker response buffer count overflows this platform".to_owned()
+                })
+        })?;
+        let transfer_buffer_count = waveform_buffer_count.checked_add(6).ok_or_else(|| {
+            "PSTB worker response buffer count overflows this platform".to_owned()
+        })?;
+        if transfer_buffer_count > MAX_WORKER_TRANSFER_BUFFERS {
+            return Err(format!(
+                "PSTB worker response requires {transfer_buffer_count} transfer buffers, exceeding the {MAX_WORKER_TRANSFER_BUFFERS}-buffer limit"
+            ));
+        }
+        let mut numeric_values = modes
+            .len()
+            .checked_mul(5)
+            .and_then(|count| count.checked_add(mode_indices.len()))
+            .ok_or_else(|| "PSTB worker response size overflows this platform".to_owned())?;
+        for waveform in waveforms {
+            numeric_values = numeric_values
+                .checked_add(waveform.x_values.len())
+                .and_then(|count| count.checked_add(waveform.y_values.len()))
+                .and_then(|count| count.checked_add(waveform.y_imag.as_ref().map_or(0, Vec::len)))
+                .ok_or_else(|| "PSTB worker response size overflows this platform".to_owned())?;
+        }
+        if numeric_values > MAX_WORKER_F64_VALUES {
+            return Err(format!(
+                "PSTB worker response contains {numeric_values} numerical values, exceeding the {MAX_WORKER_F64_VALUES}-value limit"
+            ));
+        }
+        return Ok(());
+    }
+    let WorkerSimulationResult::Pss {
+        operating_point,
+        reporting_times,
+        ..
+    } = result.as_ref()
+    else {
+        return Ok(());
+    };
+    let analysis = operating_point.analysis();
+    let validation = if let Some(identity) = operating_point.producer_identity() {
+        rspice_core::engine::PssOperatingPoint::try_from_authenticated_parts(
+            identity.clone(),
+            operating_point.config().clone(),
+            analysis.clone(),
+            operating_point.shooting_state_basis().to_vec(),
+            operating_point.shooting_state().to_vec(),
+        )
+    } else {
+        rspice_core::engine::PssOperatingPoint::try_from_parts(
+            operating_point.config().clone(),
+            analysis.clone(),
+            operating_point.shooting_state().to_vec(),
+        )
+    };
+    validation.map_err(|error| format!("invalid retained PSS worker response: {error}"))?;
+    pss_display_projection(operating_point, reporting_times)?;
+    let transfer_buffer_count = analysis
+        .result
+        .waveforms
+        .len()
+        .checked_add(analysis.result.branch_waveforms.len())
+        .and_then(|count| count.checked_add(analysis.monodromy.len()))
+        .and_then(|count| count.checked_add(6 + usize::from(!reporting_times.is_empty())))
+        .ok_or_else(|| "retained PSS response buffer count overflows this platform".to_owned())?;
+    if transfer_buffer_count > MAX_WORKER_TRANSFER_BUFFERS {
+        return Err(format!(
+            "retained PSS response requires {transfer_buffer_count} transfer buffers, exceeding the {MAX_WORKER_TRANSFER_BUFFERS}-buffer limit"
+        ));
+    }
+    let mut numeric_values = analysis
+        .result
+        .time
+        .len()
+        .checked_add(reporting_times.len())
+        .ok_or_else(|| "retained PSS response size overflows this platform".to_owned())?;
+    for waveform in analysis
+        .result
+        .waveforms
+        .iter()
+        .chain(&analysis.result.branch_waveforms)
+    {
+        numeric_values = numeric_values
+            .checked_add(waveform.values.len())
+            .ok_or_else(|| "retained PSS response size overflows this platform".to_owned())?;
+    }
+    for row in &analysis.monodromy {
+        numeric_values = numeric_values
+            .checked_add(row.len())
+            .ok_or_else(|| "retained PSS response size overflows this platform".to_owned())?;
+    }
+    numeric_values = numeric_values
+        .checked_add(
+            analysis
+                .result
+                .floquet_multipliers
+                .len()
+                .checked_mul(2)
+                .ok_or_else(|| "retained PSS response size overflows this platform".to_owned())?,
+        )
+        .and_then(|count| {
+            analysis
+                .floquet_multipliers
+                .len()
+                .checked_mul(2)
+                .and_then(|values| count.checked_add(values))
+        })
+        .and_then(|count| count.checked_add(operating_point.shooting_state().len()))
+        .ok_or_else(|| "retained PSS response size overflows this platform".to_owned())?;
+    if numeric_values > MAX_WORKER_F64_VALUES {
+        return Err(format!(
+            "retained PSS response contains {numeric_values} unique numerical values, exceeding the {MAX_WORKER_F64_VALUES}-value limit"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_worker_measurements(result: &WorkerSimulationResult) -> Result<(), String> {
+    if let WorkerSimulationResult::Noise {
+        output_unit: Some(unit),
+        ..
+    } = result
+    {
+        unit.validate()?;
+    }
+    let measurements = match result {
+        WorkerSimulationResult::DcSweep { measurements, .. }
+        | WorkerSimulationResult::Transient { measurements, .. }
+        | WorkerSimulationResult::Pss { measurements, .. }
+        | WorkerSimulationResult::Hb { measurements, .. }
+        | WorkerSimulationResult::Ac { measurements, .. }
+        | WorkerSimulationResult::Noise { measurements, .. } => measurements,
+        _ => return Ok(()),
+    };
+    for (index, measurement) in measurements.iter().enumerate() {
+        measurement.validate_current_evidence(&format!("worker measurement[{index}]"))?;
+    }
+    Ok(())
+}
+
+pub(super) fn validate_worker_transfer_buffers(buffers: &[Vec<f64>]) -> Result<(), String> {
+    if buffers.len() > MAX_WORKER_TRANSFER_BUFFERS {
+        return Err(format!(
+            "worker response contains {} transfer buffers, exceeding the {MAX_WORKER_TRANSFER_BUFFERS}-buffer limit",
+            buffers.len()
+        ));
+    }
+    let numeric_values = buffers.iter().try_fold(0usize, |total, values| {
+        total
+            .checked_add(values.len())
+            .ok_or_else(|| "worker response numeric size overflows this platform".to_owned())
+    })?;
+    if numeric_values > MAX_WORKER_F64_VALUES {
+        return Err(format!(
+            "worker response contains {numeric_values} numerical values, exceeding the {MAX_WORKER_F64_VALUES}-value limit"
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerResponseTransportMetadata {
+    pub id: u64,
+    pub outcome: WorkerOutcomeTransport,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) enum WorkerOutcomeTransport {
+    Success(WorkerSimulationResultTransport),
+    Failure(WorkerSimulationError),
+}
+
+impl WorkerOutcomeTransport {
+    #[cfg(any(feature = "browser-worker", test))]
+    pub(super) fn from_outcome(
+        outcome: WorkerOutcome,
+        buffers: &mut Vec<Vec<f64>>,
+    ) -> Result<Self, String> {
+        Ok(match outcome {
+            WorkerOutcome::Success(result) => Self::Success(
+                WorkerSimulationResultTransport::from_result(*result, buffers)?,
+            ),
+            WorkerOutcome::Failure(error) => Self::Failure(error),
+        })
+    }
+
+    pub(super) fn into_outcome(self, buffers: &[Vec<f64>]) -> Result<WorkerOutcome, String> {
+        match self {
+            Self::Success(result) => Ok(WorkerOutcome::Success(Box::new(
+                result.into_result(buffers)?,
+            ))),
+            Self::Failure(error) => Ok(WorkerOutcome::Failure(error)),
+        }
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) use rspice_simulation_contract::worker_transport::validate_worker_request_transfer_buffer_lengths;
+pub(crate) use rspice_simulation_contract::worker_transport::{
+    MAX_WORKER_F64_VALUES, MAX_WORKER_TRANSFER_BUFFERS, WorkerF64Series,
+};
+#[cfg(any(feature = "browser-worker", test))]
+pub(crate) use rspice_simulation_contract::worker_transport::{
+    checked_worker_request_numeric_total, validate_worker_request_transfer_buffers,
+};
+
+impl WorkerOpPreviousStateTransport {
+    pub(super) fn from_previous_state(
+        previous_state: rspice_results::operating_point::OpPreviousState,
+        buffers: &mut Vec<Vec<f64>>,
+    ) -> Result<Self, String> {
+        validate_worker_op_previous_state(
+            &previous_state.node_names,
+            &previous_state.branch_names,
+            &previous_state.solution,
+        )?;
+        if previous_state.solution.len() > MAX_WORKER_F64_VALUES {
+            return Err(format!(
+                "OP previous-state solution contains {} values, exceeding the {MAX_WORKER_F64_VALUES}-value limit",
+                previous_state.solution.len()
+            ));
+        }
+        Ok(Self::from_validated_previous_state(previous_state, buffers))
+    }
+
+    pub(super) fn from_validated_previous_state(
+        previous_state: rspice_results::operating_point::OpPreviousState,
+        buffers: &mut Vec<Vec<f64>>,
+    ) -> Self {
+        let rspice_results::operating_point::OpPreviousState {
+            source_content_digest,
+            producer_snapshot_digest,
+            producer_result_digest,
+            node_names,
+            branch_names,
+            solution,
+        } = previous_state;
+        let solution_digest = crate::execution_identity::f64_sequence_digest(
+            "rspice.worker-op-previous-state/v1",
+            &solution,
+        );
+        Self {
+            source_content_digest,
+            producer_snapshot_digest,
+            producer_result_digest,
+            node_names,
+            branch_names,
+            solution: WorkerF64Series::from_vec(solution, buffers),
+            solution_digest,
+        }
+    }
+
+    pub(super) fn into_previous_state(
+        self,
+        buffers: &[Vec<f64>],
+    ) -> Result<rspice_results::operating_point::OpPreviousState, String> {
+        if !matches!(self.solution, WorkerF64Series::Buffer { .. }) {
+            return Err(
+                "worker OP previous-state solution must use a transferable Float64 buffer"
+                    .to_owned(),
+            );
+        }
+        let solution = self.solution.into_vec(buffers)?;
+        let actual_digest = crate::execution_identity::f64_sequence_digest(
+            "rspice.worker-op-previous-state/v1",
+            &solution,
+        );
+        if actual_digest != self.solution_digest {
+            return Err(format!(
+                "worker OP previous-state solution digest is {actual_digest}, expected {}",
+                self.solution_digest
+            ));
+        }
+        validate_worker_op_previous_state(&self.node_names, &self.branch_names, &solution)?;
+        Ok(rspice_results::operating_point::OpPreviousState {
+            source_content_digest: self.source_content_digest,
+            producer_snapshot_digest: self.producer_snapshot_digest,
+            producer_result_digest: self.producer_result_digest,
+            node_names: self.node_names,
+            branch_names: self.branch_names,
+            solution,
+        })
+    }
+}
+
+pub(super) fn validate_worker_op_previous_state(
+    node_names: &[String],
+    branch_names: &[String],
+    solution: &[f64],
+) -> Result<(), String> {
+    rspice_core::engine::PssDcOperatingPointSeed::try_new(
+        node_names.to_vec(),
+        branch_names.to_vec(),
+        solution.to_vec(),
+    )
+    .map(|_| ())
+    .map_err(|error| format!("invalid worker OP previous-state payload: {error}"))
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerPeriodicWaveformTransport {
+    node_name: String,
+    values: WorkerF64Series,
+}
+
+/// Scalar metadata plus transferable numerical arrays for a retained PSS
+/// operating point. No orbit, monodromy, Floquet, or shooting-state array is
+/// serialized into the browser worker's JSON response metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerPssOperatingPointTransport {
+    config: rspice_core::analysis::PssConfig,
+    #[serde(default)]
+    producer_identity: Option<rspice_core::engine::PssOperatingPointIdentity>,
+    result_period: f64,
+    result_frequency: f64,
+    result_iterations: usize,
+    result_residual_norm: f64,
+    result_time: WorkerF64Series,
+    result_waveforms: Vec<WorkerPeriodicWaveformTransport>,
+    #[serde(default)]
+    result_branch_waveforms: Vec<WorkerPeriodicWaveformTransport>,
+    result_period_detected: bool,
+    result_floquet_real: WorkerF64Series,
+    result_floquet_imag: WorkerF64Series,
+    #[serde(default)]
+    result_floquet_evidence: rspice_core::analysis::FloquetSpectrumEvidence,
+    #[serde(default)]
+    result_floquet_orbit_kind: rspice_core::analysis::FloquetOrbitKind,
+    #[serde(default)]
+    result_trivial_floquet_multiplier_index: Option<usize>,
+    analysis_iterations: usize,
+    analysis_final_residual: f64,
+    analysis_period: f64,
+    analysis_monodromy: Vec<WorkerF64Series>,
+    analysis_floquet_real: WorkerF64Series,
+    analysis_floquet_imag: WorkerF64Series,
+    analysis_is_stable: bool,
+    #[serde(default = "indeterminate_floquet_verdict")]
+    analysis_floquet_verdict: rspice_core::analysis::FloquetStabilityVerdict,
+    #[serde(default)]
+    analysis_floquet_authenticated: bool,
+    #[serde(default)]
+    shooting_state_basis: Vec<String>,
+    shooting_state: WorkerF64Series,
+}
+
+fn indeterminate_floquet_verdict() -> rspice_core::analysis::FloquetStabilityVerdict {
+    rspice_core::analysis::FloquetStabilityVerdict::Indeterminate
+}
+
+fn pss_floquet_contract_is_authenticated(
+    result: &rspice_core::analysis::pss::PssResult,
+    monodromy_order: usize,
+) -> bool {
+    if !result.has_consistent_floquet_contract() {
+        return false;
+    }
+    match &result.floquet_evidence {
+        rspice_core::analysis::FloquetSpectrumEvidence::Qualified { certificate } => {
+            certificate.is_valid()
+                && monodromy_order > 0
+                && certificate.problem_order == monodromy_order
+                && certificate.problem_order == result.floquet_multipliers.len()
+        }
+        rspice_core::analysis::FloquetSpectrumEvidence::NoDynamicModes => {
+            monodromy_order == 0
+                && result.floquet_multipliers.is_empty()
+                && result.floquet_orbit_kind == rspice_core::analysis::FloquetOrbitKind::Driven
+        }
+        _ => false,
+    }
+}
+
+impl WorkerPssOperatingPointTransport {
+    #[cfg(any(feature = "browser-worker", test))]
+    pub(super) fn from_operating_point(
+        operating_point: rspice_core::engine::PssOperatingPoint,
+        buffers: &mut Vec<Vec<f64>>,
+    ) -> Self {
+        let config = operating_point.config().clone();
+        let analysis = operating_point.analysis();
+        let result = &analysis.result;
+        let analysis_floquet_verdict = result.stability_verdict();
+        let analysis_floquet_authenticated =
+            pss_floquet_contract_is_authenticated(result, analysis.monodromy.len());
+        let result_waveforms = result
+            .node_names
+            .iter()
+            .cloned()
+            .zip(result.waveforms.iter())
+            .map(|(node_name, waveform)| WorkerPeriodicWaveformTransport {
+                node_name,
+                values: WorkerF64Series::from_vec(waveform.values.clone(), buffers),
+            })
+            .collect();
+        let result_branch_waveforms = result
+            .branch_names
+            .iter()
+            .cloned()
+            .zip(result.branch_waveforms.iter())
+            .map(|(node_name, waveform)| WorkerPeriodicWaveformTransport {
+                node_name,
+                values: WorkerF64Series::from_vec(waveform.values.clone(), buffers),
+            })
+            .collect();
+        let (result_floquet_real, result_floquet_imag): (Vec<_>, Vec<_>) = result
+            .floquet_multipliers
+            .iter()
+            .map(|value| (value.re, value.im))
+            .unzip();
+        let (analysis_floquet_real, analysis_floquet_imag): (Vec<_>, Vec<_>) = analysis
+            .floquet_multipliers
+            .iter()
+            .map(|value| (value.re, value.im))
+            .unzip();
+        Self {
+            config,
+            producer_identity: operating_point.producer_identity().cloned(),
+            result_period: result.period,
+            result_frequency: result.frequency,
+            result_iterations: result.iterations,
+            result_residual_norm: result.residual_norm,
+            result_time: WorkerF64Series::from_vec(result.time.clone(), buffers),
+            result_waveforms,
+            result_branch_waveforms,
+            result_period_detected: result.period_detected,
+            result_floquet_real: WorkerF64Series::from_vec(result_floquet_real, buffers),
+            result_floquet_imag: WorkerF64Series::from_vec(result_floquet_imag, buffers),
+            result_floquet_evidence: result.floquet_evidence.clone(),
+            result_floquet_orbit_kind: result.floquet_orbit_kind,
+            result_trivial_floquet_multiplier_index: result.trivial_floquet_multiplier_index,
+            analysis_iterations: analysis.iterations,
+            analysis_final_residual: analysis.final_residual,
+            analysis_period: analysis.period,
+            analysis_monodromy: analysis
+                .monodromy
+                .iter()
+                .cloned()
+                .map(|row| WorkerF64Series::from_vec(row, buffers))
+                .collect(),
+            analysis_floquet_real: WorkerF64Series::from_vec(analysis_floquet_real, buffers),
+            analysis_floquet_imag: WorkerF64Series::from_vec(analysis_floquet_imag, buffers),
+            analysis_is_stable: analysis.is_stable,
+            analysis_floquet_verdict,
+            analysis_floquet_authenticated,
+            shooting_state_basis: operating_point.shooting_state_basis().to_vec(),
+            shooting_state: WorkerF64Series::from_vec(
+                operating_point.shooting_state().to_vec(),
+                buffers,
+            ),
+        }
+    }
+
+    pub(super) fn into_operating_point(
+        self,
+        buffers: &[Vec<f64>],
+    ) -> Result<rspice_core::engine::PssOperatingPoint, String> {
+        if self.result_waveforms.len() > 65_536
+            || self.result_branch_waveforms.len() > 65_536
+            || self.analysis_monodromy.len() > 65_536
+        {
+            return Err("retained PSS worker metadata exceeds structural limits".to_owned());
+        }
+        let mut node_names = Vec::with_capacity(self.result_waveforms.len());
+        let mut waveforms = Vec::with_capacity(self.result_waveforms.len());
+        for waveform in self.result_waveforms {
+            node_names.push(waveform.node_name);
+            waveforms.push(rspice_core::analysis::pss::PeriodicWaveform::from_values(
+                waveform.values.into_vec(buffers)?,
+            ));
+        }
+        let mut branch_names = Vec::with_capacity(self.result_branch_waveforms.len());
+        let mut branch_waveforms = Vec::with_capacity(self.result_branch_waveforms.len());
+        for waveform in self.result_branch_waveforms {
+            branch_names.push(waveform.node_name);
+            branch_waveforms.push(rspice_core::analysis::pss::PeriodicWaveform::from_values(
+                waveform.values.into_vec(buffers)?,
+            ));
+        }
+        let result_floquet_multipliers = worker_join_complex(
+            "PSS result Floquet",
+            self.result_floquet_real.into_vec(buffers)?,
+            self.result_floquet_imag.into_vec(buffers)?,
+        )?;
+        let analysis_floquet_multipliers = worker_join_complex(
+            "PSS analysis Floquet",
+            self.analysis_floquet_real.into_vec(buffers)?,
+            self.analysis_floquet_imag.into_vec(buffers)?,
+        )?;
+        let monodromy = self
+            .analysis_monodromy
+            .into_iter()
+            .map(|row| row.into_vec(buffers))
+            .collect::<Result<Vec<_>, _>>()?;
+        let shooting_state = self.shooting_state.into_vec(buffers)?;
+        let result = rspice_core::analysis::pss::PssResult {
+            period: self.result_period,
+            frequency: self.result_frequency,
+            iterations: self.result_iterations,
+            residual_norm: self.result_residual_norm,
+            time: self.result_time.into_vec(buffers)?,
+            waveforms,
+            node_names,
+            branch_names,
+            branch_waveforms,
+            period_detected: self.result_period_detected,
+            floquet_multipliers: result_floquet_multipliers,
+            floquet_evidence: self.result_floquet_evidence,
+            floquet_orbit_kind: self.result_floquet_orbit_kind,
+            trivial_floquet_multiplier_index: self.result_trivial_floquet_multiplier_index,
+        };
+        let computed_verdict = result.stability_verdict();
+        let computed_authenticated =
+            pss_floquet_contract_is_authenticated(&result, monodromy.len());
+        if self.analysis_floquet_verdict != computed_verdict {
+            return Err(
+                "retained PSS worker compatibility verdict does not match its Floquet contract"
+                    .to_owned(),
+            );
+        }
+        if self.analysis_floquet_authenticated != computed_authenticated || !computed_authenticated
+        {
+            return Err(
+                "retained PSS worker payload lacks authenticated Floquet evidence".to_owned(),
+            );
+        }
+        let analysis = rspice_core::engine::PssAnalysisResult {
+            result,
+            iterations: self.analysis_iterations,
+            final_residual: self.analysis_final_residual,
+            period: self.analysis_period,
+            monodromy,
+            floquet_multipliers: analysis_floquet_multipliers,
+            is_stable: self.analysis_is_stable,
+        };
+        let operating_point = if let Some(producer_identity) = self.producer_identity {
+            rspice_core::engine::PssOperatingPoint::try_from_authenticated_parts(
+                producer_identity,
+                self.config,
+                analysis,
+                self.shooting_state_basis,
+                shooting_state,
+            )
+        } else {
+            rspice_core::engine::PssOperatingPoint::try_from_parts(
+                self.config,
+                analysis,
+                shooting_state,
+            )
+        };
+        operating_point.map_err(|error| format!("invalid retained PSS worker payload: {error}"))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerHbSpectrumTransport {
+    node_name: String,
+    real: WorkerF64Series,
+    imaginary: WorkerF64Series,
+    real_digest: rspice_app_types::product::ContentDigest,
+    imaginary_digest: rspice_app_types::product::ContentDigest,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerHbBranchSpectrumTransport {
+    branch_name: String,
+    real: WorkerF64Series,
+    imaginary: WorkerF64Series,
+    real_digest: rspice_app_types::product::ContentDigest,
+    imaginary_digest: rspice_app_types::product::ContentDigest,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerHbIntegralSpectrumTransport {
+    name: String,
+    real: WorkerF64Series,
+    imaginary: WorkerF64Series,
+    real_digest: rspice_app_types::product::ContentDigest,
+    imaginary_digest: rspice_app_types::product::ContentDigest,
+}
+
+/// Scalar HB basis metadata plus transferable complex spectral rows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerHbOperatingPointTransport {
+    config: rspice_core::analysis::HbConfig,
+    #[serde(default)]
+    producer_identity: Option<rspice_core::engine::HbOperatingPointIdentity>,
+    spectra: Vec<WorkerHbSpectrumTransport>,
+    mna_branch_spectra: Vec<WorkerHbBranchSpectrumTransport>,
+    #[serde(default)]
+    integral_spectra: Vec<WorkerHbIntegralSpectrumTransport>,
+    iterations: usize,
+    residual_norm: f64,
+    state_digest: rspice_app_types::product::ContentDigest,
+}
+
+impl WorkerHbOperatingPointTransport {
+    #[cfg(any(feature = "browser-worker", test))]
+    pub(super) fn from_operating_point(
+        operating_point: rspice_core::engine::HbOperatingPoint,
+        buffers: &mut Vec<Vec<f64>>,
+    ) -> Self {
+        let spectra = operating_point
+            .node_names()
+            .iter()
+            .cloned()
+            .zip(operating_point.spectral_state())
+            .map(|(node_name, coefficients)| {
+                let (real, imaginary): (Vec<_>, Vec<_>) = coefficients
+                    .iter()
+                    .map(|value| (value.re, value.im))
+                    .unzip();
+                WorkerHbSpectrumTransport {
+                    node_name,
+                    real_digest: crate::execution_identity::f64_sequence_digest(
+                        "rspice.worker-hb-spectrum-real/v1",
+                        &real,
+                    ),
+                    imaginary_digest: crate::execution_identity::f64_sequence_digest(
+                        "rspice.worker-hb-spectrum-imaginary/v1",
+                        &imaginary,
+                    ),
+                    real: WorkerF64Series::from_vec(real, buffers),
+                    imaginary: WorkerF64Series::from_vec(imaginary, buffers),
+                }
+            })
+            .collect();
+        let mna_branch_spectra = operating_point
+            .mna_branch_names()
+            .iter()
+            .cloned()
+            .zip(operating_point.mna_branch_spectral_state())
+            .map(|(branch_name, coefficients)| {
+                let (real, imaginary): (Vec<_>, Vec<_>) = coefficients
+                    .iter()
+                    .map(|value| (value.re, value.im))
+                    .unzip();
+                WorkerHbBranchSpectrumTransport {
+                    branch_name,
+                    real_digest: crate::execution_identity::f64_sequence_digest(
+                        "rspice.worker-hb-branch-spectrum-real/v1",
+                        &real,
+                    ),
+                    imaginary_digest: crate::execution_identity::f64_sequence_digest(
+                        "rspice.worker-hb-branch-spectrum-imaginary/v1",
+                        &imaginary,
+                    ),
+                    real: WorkerF64Series::from_vec(real, buffers),
+                    imaginary: WorkerF64Series::from_vec(imaginary, buffers),
+                }
+            })
+            .collect();
+        let integral_spectra = operating_point
+            .integral_spectra()
+            .iter()
+            .map(|spectrum| {
+                let coefficients = &spectrum.coefficients;
+                let (real, imaginary): (Vec<_>, Vec<_>) = coefficients
+                    .iter()
+                    .map(|value| (value.re, value.im))
+                    .unzip();
+                WorkerHbIntegralSpectrumTransport {
+                    name: spectrum.name.clone(),
+                    real_digest: crate::execution_identity::f64_sequence_digest(
+                        "rspice.worker-hb-integral-spectrum-real/v1",
+                        &real,
+                    ),
+                    imaginary_digest: crate::execution_identity::f64_sequence_digest(
+                        "rspice.worker-hb-integral-spectrum-imaginary/v1",
+                        &imaginary,
+                    ),
+                    real: WorkerF64Series::from_vec(real, buffers),
+                    imaginary: WorkerF64Series::from_vec(imaginary, buffers),
+                }
+            })
+            .collect();
+        Self {
+            config: operating_point.config().clone(),
+            producer_identity: operating_point.producer_identity().cloned(),
+            spectra,
+            mna_branch_spectra,
+            integral_spectra,
+            iterations: operating_point.iterations(),
+            residual_norm: operating_point.residual_norm(),
+            state_digest: crate::execution_identity::hb_operating_point_digest(&operating_point),
+        }
+    }
+
+    pub(super) fn into_operating_point(
+        self,
+        buffers: &[Vec<f64>],
+    ) -> Result<rspice_core::engine::HbOperatingPoint, String> {
+        if self
+            .spectra
+            .len()
+            .checked_add(self.mna_branch_spectra.len())
+            .and_then(|count| count.checked_add(self.integral_spectra.len()))
+            .is_none_or(|rows| rows > 65_536)
+        {
+            return Err("retained HB worker metadata exceeds structural limits".to_owned());
+        }
+        let mut node_names = Vec::with_capacity(self.spectra.len());
+        let mut spectral_state = Vec::with_capacity(self.spectra.len());
+        for spectrum in self.spectra {
+            node_names.push(spectrum.node_name);
+            let real = spectrum.real.into_vec(buffers)?;
+            let imaginary = spectrum.imaginary.into_vec(buffers)?;
+            let actual_real_digest = crate::execution_identity::f64_sequence_digest(
+                "rspice.worker-hb-spectrum-real/v1",
+                &real,
+            );
+            let actual_imaginary_digest = crate::execution_identity::f64_sequence_digest(
+                "rspice.worker-hb-spectrum-imaginary/v1",
+                &imaginary,
+            );
+            if actual_real_digest != spectrum.real_digest
+                || actual_imaginary_digest != spectrum.imaginary_digest
+            {
+                return Err("retained HB worker spectral payload digest mismatch".to_owned());
+            }
+            spectral_state.push(worker_join_complex("HB spectral row", real, imaginary)?);
+        }
+        let mut mna_branch_names = Vec::with_capacity(self.mna_branch_spectra.len());
+        let mut mna_branch_spectral_state = Vec::with_capacity(self.mna_branch_spectra.len());
+        for spectrum in self.mna_branch_spectra {
+            mna_branch_names.push(spectrum.branch_name);
+            let real = spectrum.real.into_vec(buffers)?;
+            let imaginary = spectrum.imaginary.into_vec(buffers)?;
+            let actual_real_digest = crate::execution_identity::f64_sequence_digest(
+                "rspice.worker-hb-branch-spectrum-real/v1",
+                &real,
+            );
+            let actual_imaginary_digest = crate::execution_identity::f64_sequence_digest(
+                "rspice.worker-hb-branch-spectrum-imaginary/v1",
+                &imaginary,
+            );
+            if actual_real_digest != spectrum.real_digest
+                || actual_imaginary_digest != spectrum.imaginary_digest
+            {
+                return Err(
+                    "retained HB worker MNA branch spectral payload digest mismatch".to_owned(),
+                );
+            }
+            mna_branch_spectral_state.push(worker_join_complex(
+                "HB MNA branch spectral row",
+                real,
+                imaginary,
+            )?);
+        }
+        let mut integral_spectra = Vec::with_capacity(self.integral_spectra.len());
+        for spectrum in self.integral_spectra {
+            let real = spectrum.real.into_vec(buffers)?;
+            let imaginary = spectrum.imaginary.into_vec(buffers)?;
+            let real_digest = crate::execution_identity::f64_sequence_digest(
+                "rspice.worker-hb-integral-spectrum-real/v1",
+                &real,
+            );
+            let imaginary_digest = crate::execution_identity::f64_sequence_digest(
+                "rspice.worker-hb-integral-spectrum-imaginary/v1",
+                &imaginary,
+            );
+            if real_digest != spectrum.real_digest || imaginary_digest != spectrum.imaginary_digest
+            {
+                return Err(
+                    "retained HB worker integral spectral payload digest mismatch".to_owned(),
+                );
+            }
+            integral_spectra.push(rspice_core::engine::HbIntegralSpectrum {
+                name: spectrum.name,
+                coefficients: worker_join_complex("HB integral spectral row", real, imaginary)?,
+            });
+        }
+        let operating_point = rspice_core::engine::HbOperatingPoint::try_from_complete_parts(
+            self.config,
+            node_names,
+            spectral_state,
+            mna_branch_names,
+            mna_branch_spectral_state,
+            integral_spectra,
+            self.iterations,
+            self.residual_norm,
+            self.producer_identity,
+        )
+        .map_err(|error| format!("invalid retained HB worker payload: {error}"))?;
+        let actual_state_digest =
+            crate::execution_identity::hb_operating_point_digest(&operating_point);
+        if actual_state_digest != self.state_digest {
+            return Err(
+                "retained HB worker state identity or configuration digest mismatch".to_owned(),
+            );
+        }
+        Ok(operating_point)
+    }
+}
+
+pub(super) fn worker_join_complex(
+    label: &str,
+    real: Vec<f64>,
+    imaginary: Vec<f64>,
+) -> Result<Vec<num_complex::Complex64>, String> {
+    if real.len() != imaginary.len() {
+        return Err(format!(
+            "{label} real/imaginary lengths differ ({} versus {})",
+            real.len(),
+            imaginary.len()
+        ));
+    }
+    Ok(real
+        .into_iter()
+        .zip(imaginary)
+        .map(|(re, im)| num_complex::Complex64::new(re, im))
+        .collect())
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerPstbModesTransport {
+    multiplier_real: WorkerF64Series,
+    multiplier_imaginary: WorkerF64Series,
+    exponent_real: WorkerF64Series,
+    exponent_imaginary: WorkerF64Series,
+    probe_participation: WorkerF64Series,
+    is_unstable: Vec<bool>,
+    is_trivial: Vec<bool>,
+    subharmonic_order: Vec<Option<usize>>,
+}
+
+impl WorkerPstbModesTransport {
+    #[cfg(any(feature = "browser-worker", test))]
+    fn from_modes(modes: Vec<WorkerPstbFloquetMode>, buffers: &mut Vec<Vec<f64>>) -> Self {
+        let mut multiplier_real = Vec::with_capacity(modes.len());
+        let mut multiplier_imaginary = Vec::with_capacity(modes.len());
+        let mut exponent_real = Vec::with_capacity(modes.len());
+        let mut exponent_imaginary = Vec::with_capacity(modes.len());
+        let mut probe_participation = Vec::with_capacity(modes.len());
+        let mut is_unstable = Vec::with_capacity(modes.len());
+        let mut is_trivial = Vec::with_capacity(modes.len());
+        let mut subharmonic_order = Vec::with_capacity(modes.len());
+        for mode in modes {
+            multiplier_real.push(mode.multiplier.0);
+            multiplier_imaginary.push(mode.multiplier.1);
+            exponent_real.push(mode.exponent.0);
+            exponent_imaginary.push(mode.exponent.1);
+            probe_participation.push(mode.probe_participation);
+            is_unstable.push(mode.is_unstable);
+            is_trivial.push(mode.is_trivial);
+            subharmonic_order.push(mode.subharmonic_order);
+        }
+        Self {
+            multiplier_real: WorkerF64Series::from_vec(multiplier_real, buffers),
+            multiplier_imaginary: WorkerF64Series::from_vec(multiplier_imaginary, buffers),
+            exponent_real: WorkerF64Series::from_vec(exponent_real, buffers),
+            exponent_imaginary: WorkerF64Series::from_vec(exponent_imaginary, buffers),
+            probe_participation: WorkerF64Series::from_vec(probe_participation, buffers),
+            is_unstable,
+            is_trivial,
+            subharmonic_order,
+        }
+    }
+
+    fn into_modes(self, buffers: &[Vec<f64>]) -> Result<Vec<WorkerPstbFloquetMode>, String> {
+        let len = self.multiplier_real.len();
+        if len > MAX_WORKER_F64_VALUES
+            || self.multiplier_imaginary.len() != len
+            || self.exponent_real.len() != len
+            || self.exponent_imaginary.len() != len
+            || self.probe_participation.len() != len
+            || self.is_unstable.len() != len
+            || self.is_trivial.len() != len
+            || self.subharmonic_order.len() != len
+        {
+            return Err("PSTB mode columns have inconsistent cardinality".to_owned());
+        }
+        let multiplier_real = self.multiplier_real.into_vec(buffers)?;
+        let multiplier_imaginary = self.multiplier_imaginary.into_vec(buffers)?;
+        let exponent_real = self.exponent_real.into_vec(buffers)?;
+        let exponent_imaginary = self.exponent_imaginary.into_vec(buffers)?;
+        let probe_participation = self.probe_participation.into_vec(buffers)?;
+        Ok((0..len)
+            .map(|index| WorkerPstbFloquetMode {
+                multiplier: (multiplier_real[index], multiplier_imaginary[index]),
+                exponent: (exponent_real[index], exponent_imaginary[index]),
+                probe_participation: probe_participation[index],
+                is_unstable: self.is_unstable[index],
+                is_trivial: self.is_trivial[index],
+                subharmonic_order: self.subharmonic_order[index],
+            })
+            .collect())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) enum WorkerSimulationResultTransport {
+    Inline(WorkerSimulationResult),
+    DcOp {
+        configuration: WorkerOpConfigTransport,
+        validated_startup_directives: usize,
+        mna_node_names: Vec<String>,
+        mna_branch_names: Vec<String>,
+        mna_solution: WorkerF64Series,
+        mna_solution_digest: rspice_app_types::product::ContentDigest,
+        node_voltages: HashMap<String, f64>,
+        branch_currents: HashMap<String, f64>,
+        device_report: Option<WorkerDeviceOpReport>,
+    },
+    DcSweep {
+        sweep_var: String,
+        sweep_values: WorkerF64Series,
+        waveforms: Vec<WorkerWaveformTransport>,
+        measurements: Vec<WorkerMeasurement>,
+        evidence: Option<WorkerDcSweepEvidence>,
+    },
+    Transient {
+        time: WorkerF64Series,
+        waveforms: Vec<WorkerWaveformTransport>,
+        measurements: Vec<WorkerMeasurement>,
+        convergence: Option<
+            rspice_simulation_contract::convergence_transport::ConvergenceTransport<
+                WorkerF64Series,
+            >,
+        >,
+        /// Event histories ride the JSON envelope rather than the binary
+        /// buffer channel: they are short, and their times are the datum, not
+        /// a resampling of `time`.
+        #[serde(default)]
+        events: WorkerEventHistory,
+        #[serde(default)]
+        spectra: Vec<WorkerRecordedFftSpectrumTransport>,
+    },
+    Fft {
+        spectrum: WorkerRecordedFftSpectrumTransport,
+        convergence: Option<
+            rspice_simulation_contract::convergence_transport::ConvergenceTransport<
+                WorkerF64Series,
+            >,
+        >,
+    },
+    Pss {
+        measurements: Vec<WorkerMeasurement>,
+        operating_point: WorkerPssOperatingPointTransport,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reporting_times: Option<WorkerF64Series>,
+    },
+    Pstb {
+        period: f64,
+        fundamental_frequency: f64,
+        stability_threshold: f64,
+        probe_instance: String,
+        detect_subharmonics: bool,
+        modes: WorkerPstbModesTransport,
+        floquet_evidence: rspice_core::analysis::FloquetSpectrumEvidence,
+        orbit_kind: rspice_core::analysis::FloquetOrbitKind,
+        trivial_multiplier_index: Option<usize>,
+        stability_verdict: rspice_core::analysis::FloquetStabilityVerdict,
+        stability_classification: WorkerPstbStabilityClassification,
+        min_stability_margin_db: Option<f64>,
+        max_multiplier_magnitude: f64,
+        num_unstable: usize,
+        subharmonics: Vec<usize>,
+        converged: bool,
+        iterations: usize,
+        mode_indices: WorkerF64Series,
+        waveforms: Vec<WorkerWaveformTransport>,
+    },
+    Qpac {
+        frequencies: WorkerF64Series,
+        waveforms: Vec<WorkerWaveformTransport>,
+        response: WorkerQpacResultTransport,
+    },
+    Qpnoise {
+        frequencies: WorkerF64Series,
+        waveforms: Vec<WorkerWaveformTransport>,
+        response: WorkerQpnoiseResultTransport,
+    },
+    Qpxf {
+        frequencies: WorkerF64Series,
+        waveforms: Vec<WorkerWaveformTransport>,
+        response: WorkerQpxfResultTransport,
+    },
+    Qpss {
+        frequencies: WorkerF64Series,
+        tuples: Vec<Vec<i32>>,
+        waveforms: Vec<WorkerWaveformTransport>,
+        operating_point: WorkerQpssOperatingPointTransport,
+    },
+    Hb {
+        frequencies: WorkerF64Series,
+        waveforms: Vec<WorkerWaveformTransport>,
+        measurements: Vec<WorkerMeasurement>,
+        operating_point: WorkerHbOperatingPointTransport,
+    },
+    Ac {
+        convergence: Option<
+            rspice_simulation_contract::convergence_transport::ConvergenceTransport<
+                WorkerF64Series,
+            >,
+        >,
+        frequencies: WorkerF64Series,
+        waveforms: Vec<WorkerWaveformTransport>,
+        measurements: Vec<WorkerMeasurement>,
+        reference_impedances_ohm: Option<WorkerF64Series>,
+        noise_reference_temperature_kelvin: Option<f64>,
+    },
+    Noise {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output_unit: Option<rspice_core::analysis::MeasurementUnit>,
+        frequencies: WorkerF64Series,
+        output_noise: WorkerF64Series,
+        input_noise: Option<WorkerF64Series>,
+        contributors: HashMap<String, WorkerF64Series>,
+        #[serde(default)]
+        summary: Option<WorkerNoiseSummary>,
+        #[serde(default)]
+        measurements: Vec<WorkerMeasurement>,
+    },
+    Parametric {
+        target: String,
+        sweep_values: WorkerF64Series,
+        waveforms: Vec<WorkerWaveformTransport>,
+        num_failures: usize,
+        #[serde(default)]
+        member_measurements: Vec<rspice_results::family_measurements::FamilyMemberMeasurements>,
+    },
+    Corner {
+        x_values: WorkerF64Series,
+        x_label: String,
+        x_unit: String,
+        temperatures_c: WorkerF64Series,
+        corner_labels: Vec<String>,
+        waveforms: Vec<WorkerWaveformTransport>,
+        num_failures: usize,
+        #[serde(default)]
+        member_measurements: Vec<rspice_results::family_measurements::FamilyMemberMeasurements>,
+    },
+    Optimization {
+        iterations: WorkerF64Series,
+        waveforms: Vec<WorkerWaveformTransport>,
+        best_cost: f64,
+        best_variables: HashMap<String, f64>,
+        #[serde(default)]
+        best_objectives: Vec<rspice_results::optimization::OptimizationObjectiveObservation>,
+        #[serde(default)]
+        best_constraints: Vec<rspice_results::optimization::OptimizationConstraintObservation>,
+        converged: bool,
+    },
+    Soa {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_history: Option<rspice_results::soa_source::SoaSourceHistory<WorkerF64Series>>,
+        convergence: Option<
+            rspice_simulation_contract::convergence_transport::ConvergenceTransport<
+                WorkerF64Series,
+            >,
+        >,
+        time: WorkerF64Series,
+        waveforms: Vec<WorkerWaveformTransport>,
+        violations: Vec<WorkerSoAViolation>,
+        evaluations: Vec<WorkerSoAEvaluation>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WorkerOpConfigTransport {
+    config: rspice_simulation_contract::config::OpConfig,
+    #[serde(default)]
+    previous_state: Option<WorkerOpPreviousStateTransport>,
+}
+
+impl WorkerOpConfigTransport {
+    #[cfg(any(feature = "browser-worker", test))]
+    pub(super) fn from_config(
+        mut config: rspice_simulation_contract::config::OpConfig,
+        buffers: &mut Vec<Vec<f64>>,
+    ) -> Self {
+        debug_assert!(config.validate_for_execution().is_ok());
+        let previous_state = config.previous_state.take().map(|state| {
+            WorkerOpPreviousStateTransport::from_validated_previous_state(state, buffers)
+        });
+        Self {
+            config,
+            previous_state,
+        }
+    }
+
+    pub(super) fn into_config(
+        mut self,
+        buffers: &[Vec<f64>],
+    ) -> Result<rspice_simulation_contract::config::OpConfig, String> {
+        if self.config.previous_state.is_some() {
+            return Err(
+                "worker DC operating-point response carries a duplicate inline previous-state solution"
+                    .to_owned(),
+            );
+        }
+        self.config.previous_state = self
+            .previous_state
+            .map(|state| state.into_previous_state(buffers))
+            .transpose()?;
+        self.config.validate_for_execution()?;
+        Ok(self.config)
+    }
+}
+
+fn validate_transient_source_payload_size(result: &WorkerSimulationResult) -> Result<(), String> {
+    let (axis, waveforms, quality, references) = match result {
+        WorkerSimulationResult::Transient {
+            time,
+            waveforms,
+            convergence,
+            ..
+        }
+        | WorkerSimulationResult::Soa {
+            time,
+            waveforms,
+            convergence,
+            ..
+        } => (time, waveforms, convergence, None),
+        WorkerSimulationResult::Ac {
+            frequencies,
+            waveforms,
+            convergence,
+            reference_impedances_ohm,
+            ..
+        } => (
+            frequencies,
+            waveforms,
+            convergence,
+            reference_impedances_ohm.as_ref(),
+        ),
+        _ => return Ok(()),
+    };
+    let mut values = axis
+        .len()
+        .saturating_add(references.map_or(0, Vec::len))
+        .saturating_add(quality.as_ref().map_or(
+            0,
+            rspice_results::convergence_quality::TransientConvergenceEvidence::transfer_value_count,
+        ));
+    let mut buffers = 1usize
+        .saturating_add(usize::from(references.is_some()))
+        .saturating_add(quality.as_ref().map_or(0, |quality| {
+            2 + usize::from(quality.initialization.is_some())
+        }));
+    if let WorkerSimulationResult::Soa {
+        source_history: Some(source),
+        ..
+    } = result
+    {
+        values = values.saturating_add(source.value_count());
+        buffers = buffers
+            .saturating_add(1)
+            .saturating_add(source.waveforms.len());
+        if values > MAX_WORKER_F64_VALUES || buffers > MAX_WORKER_TRANSFER_BUFFERS {
+            return Err("SOA observation history exceeds the worker transfer limit".into());
+        }
+    }
+    if let WorkerSimulationResult::Transient { events, .. } = result
+        && let Some(history) = &events.current_impulses
+    {
+        values = values.saturating_add(2);
+        for trace in &history.traces {
+            values = values.saturating_add(trace.points.len().saturating_mul(2));
+        }
+    }
+    if let WorkerSimulationResult::Transient { spectra, .. } = result {
+        for spectrum in spectra {
+            values = values.saturating_add(spectrum.numeric_value_count());
+            buffers = buffers.saturating_add(3);
+        }
+    }
+    for waveform in waveforms {
+        values = values
+            .saturating_add(waveform.x_values.len())
+            .saturating_add(waveform.y_values.len())
+            .saturating_add(waveform.y_imag.as_ref().map_or(0, Vec::len));
+        buffers = buffers.saturating_add(2 + usize::from(waveform.y_imag.is_some()));
+    }
+    if values > MAX_WORKER_F64_VALUES || buffers > MAX_WORKER_TRANSFER_BUFFERS {
+        return Err(
+            "Waveform and convergence evidence exceed the worker transfer limit".to_owned(),
+        );
+    }
+    if let WorkerSimulationResult::Soa {
+        source_history: Some(source),
+        time,
+        waveforms,
+        ..
+    } = result
+    {
+        source.validate_report_columns(
+            time,
+            waveforms.iter().map(|wave| {
+                (
+                    wave.name.as_str(),
+                    wave.x_values.as_slice(),
+                    wave.y_values.as_slice(),
+                    Some(wave.y_unit.as_str()),
+                    wave.is_complex || wave.y_imag.is_some(),
+                )
+            }),
+        )?;
+    }
+    Ok(())
+}
+
+pub(super) fn validate_worker_dc_op_state(
+    configuration: &rspice_simulation_contract::config::OpConfig,
+    node_names: &[String],
+    branch_names: &[String],
+    solution: &[f64],
+) -> Result<(), String> {
+    configuration.validate_for_execution()?;
+    rspice_core::engine::PssDcOperatingPointSeed::try_new(
+        node_names.to_vec(),
+        branch_names.to_vec(),
+        solution.to_vec(),
+    )
+    .map(|_| ())
+    .map_err(|error| format!("worker DC operating-point state is invalid: {error}"))
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerWaveformTransport {
+    pub name: String,
+    pub x_values: WorkerF64Series,
+    pub y_values: WorkerF64Series,
+    pub y_unit: String,
+    pub is_complex: bool,
+    pub y_imag: Option<WorkerF64Series>,
+}
+
+impl WorkerWaveformTransport {
+    #[cfg(any(feature = "browser-worker", test))]
+    pub(super) fn from_waveform(waveform: WorkerWaveform, buffers: &mut Vec<Vec<f64>>) -> Self {
+        Self {
+            name: waveform.name,
+            x_values: WorkerF64Series::from_vec(waveform.x_values, buffers),
+            y_values: WorkerF64Series::from_vec(waveform.y_values, buffers),
+            y_unit: waveform.y_unit,
+            is_complex: waveform.is_complex,
+            y_imag: waveform
+                .y_imag
+                .map(|values| WorkerF64Series::from_vec(values, buffers)),
+        }
+    }
+
+    pub(super) fn into_waveform(self, buffers: &[Vec<f64>]) -> Result<WorkerWaveform, String> {
+        let x_len = self.x_values.len();
+        let y_len = self.y_values.len();
+        let imag_len = self.y_imag.as_ref().map(WorkerF64Series::len);
+
+        if x_len != y_len {
+            return Err(format!(
+                "waveform {} x/y length mismatch: x length {x_len}, y length {y_len}",
+                self.name
+            ));
+        }
+        match (self.is_complex, imag_len) {
+            (true, Some(len)) if len == y_len => {}
+            (true, Some(len)) => {
+                return Err(format!(
+                    "complex waveform {} imaginary length {len} does not match y length {y_len}",
+                    self.name
+                ));
+            }
+            (true, None) => {
+                return Err(format!(
+                    "complex waveform {} is missing an imaginary buffer",
+                    self.name
+                ));
+            }
+            (false, Some(_)) => {
+                return Err(format!(
+                    "non-complex waveform {} must not include an imaginary buffer",
+                    self.name
+                ));
+            }
+            (false, None) => {}
+        }
+
+        Ok(WorkerWaveform {
+            name: self.name,
+            x_values: self.x_values.into_vec(buffers)?,
+            y_values: self.y_values.into_vec(buffers)?,
+            y_unit: self.y_unit,
+            is_complex: self.is_complex,
+            y_imag: self
+                .y_imag
+                .map(|values| values.into_vec(buffers))
+                .transpose()?,
+        })
+    }
+}
+
+#[cfg(any(feature = "browser-worker", test))]
+pub(super) fn transport_waveforms(
+    waveforms: Vec<WorkerWaveform>,
+    buffers: &mut Vec<Vec<f64>>,
+) -> Vec<WorkerWaveformTransport> {
+    waveforms
+        .into_iter()
+        .map(|waveform| WorkerWaveformTransport::from_waveform(waveform, buffers))
+        .collect()
+}
+
+pub(super) fn worker_waveforms_from_transport(
+    waveforms: Vec<WorkerWaveformTransport>,
+    buffers: &[Vec<f64>],
+) -> Result<Vec<WorkerWaveform>, String> {
+    waveforms
+        .into_iter()
+        .map(|waveform| waveform.into_waveform(buffers))
+        .collect()
+}
+
+#[cfg(test)]
+mod hb_state_contract_tests {
+    use super::*;
+
+    #[test]
+    fn hb_integral_transport_round_trips_and_rejects_missing_or_changed_state() {
+        let base = super::super::tests::retained_hb_operating_point();
+        let coefficients = vec![num_complex::Complex64::new(5.0e-4, 0.0); 5];
+        let point = rspice_core::engine::HbOperatingPoint::try_from_complete_parts(
+            base.config().clone(),
+            base.node_names().to_vec(),
+            base.spectral_state().to_vec(),
+            base.mna_branch_names().to_vec(),
+            base.mna_branch_spectral_state().to_vec(),
+            vec![rspice_core::engine::HbIntegralSpectrum {
+                name: "B:B1:sdt:0".to_owned(),
+                coefficients,
+            }],
+            base.iterations(),
+            base.residual_norm(),
+            None,
+        )
+        .unwrap();
+        let decoded: rspice_core::engine::HbOperatingPoint =
+            serde_json::from_value(serde_json::to_value(&point).unwrap()).unwrap();
+        decoded.validate().unwrap();
+        assert_eq!(decoded, point);
+        let result = |operating_point| WorkerSimulationResult::Hb {
+            frequencies: vec![0.0, 1.0, 2.0, 3.0, 4.0],
+            waveforms: Vec::new(),
+            measurements: Vec::new(),
+            operating_point,
+        };
+        assert_eq!(
+            result(point.clone()).estimated_numeric_payload_bytes()
+                - result(base).estimated_numeric_payload_bytes(),
+            5 * 2 * 8
+        );
+        let response = WorkerResponse {
+            id: 879,
+            outcome: WorkerOutcome::Success(Box::new(result(point.clone()))),
+        };
+        let native: WorkerResponse =
+            serde_json::from_value(serde_json::to_value(&response).unwrap()).unwrap();
+        assert!(native.into_result().is_ok());
+        let mut malformed = serde_json::to_value(&response).unwrap();
+        malformed["outcome"]["Success"]["Hb"]["operating_point"]["integral_spectra"][0]["name"] =
+            serde_json::json!("");
+        let malformed: WorkerResponse = serde_json::from_value(malformed).unwrap();
+        assert!(malformed.into_result().is_err());
+        let transfer = WorkerResponseTransport::from_response(response.clone()).unwrap();
+        assert_eq!(transfer.buffers.len(), 7);
+        assert_eq!(transfer.into_response().unwrap(), response);
+
+        let mut buffers = Vec::new();
+        let transport =
+            WorkerHbOperatingPointTransport::from_operating_point(point.clone(), &mut buffers);
+        assert_eq!(
+            transport.clone().into_operating_point(&buffers).unwrap(),
+            point
+        );
+        let mut changed = transport.clone();
+        changed.integral_spectra[0].name = "B:OTHER:sdt:0".to_owned();
+        assert!(
+            changed
+                .into_operating_point(&buffers)
+                .unwrap_err()
+                .contains("identity or configuration digest mismatch")
+        );
+        let mut missing = serde_json::to_value(&transport).unwrap();
+        missing.as_object_mut().unwrap().remove("integral_spectra");
+        let missing: WorkerHbOperatingPointTransport = serde_json::from_value(missing).unwrap();
+        assert!(
+            missing
+                .into_operating_point(&buffers)
+                .unwrap_err()
+                .contains("identity or configuration digest mismatch")
+        );
+        let WorkerF64Series::Buffer { buffer, .. } = transport.integral_spectra[0].real else {
+            panic!("integrals must use transfer buffers")
+        };
+        buffers[buffer][0] += 1.0e-9;
+        assert!(
+            transport
+                .into_operating_point(&buffers)
+                .unwrap_err()
+                .contains("integral spectral payload digest mismatch")
+        );
+
+        // An older branch-only payload still has its original digest.
+        let (legacy, buffers) = self::transport();
+        let mut legacy = serde_json::to_value(legacy).unwrap();
+        legacy.as_object_mut().unwrap().remove("integral_spectra");
+        let legacy: WorkerHbOperatingPointTransport = serde_json::from_value(legacy).unwrap();
+        assert!(
+            legacy
+                .into_operating_point(&buffers)
+                .unwrap()
+                .integral_spectra()
+                .is_empty()
+        );
+    }
+
+    fn transport() -> (WorkerHbOperatingPointTransport, Vec<Vec<f64>>) {
+        let mut buffers = Vec::new();
+        let transport = WorkerHbOperatingPointTransport::from_operating_point(
+            super::super::tests::retained_hb_operating_point(),
+            &mut buffers,
+        );
+        (transport, buffers)
+    }
+
+    #[test]
+    fn retained_hb_transport_authenticates_branch_identity_and_configuration() {
+        let (mut identity, buffers) = transport();
+        identity.mna_branch_spectra[0].branch_name = "VDRIFT".to_owned();
+        assert!(
+            identity
+                .into_operating_point(&buffers)
+                .unwrap_err()
+                .contains("identity or configuration digest mismatch")
+        );
+
+        let (mut config, buffers) = transport();
+        config.config.tolerance *= 10.0;
+        assert!(
+            config
+                .into_operating_point(&buffers)
+                .unwrap_err()
+                .contains("identity or configuration digest mismatch")
+        );
+    }
+
+    #[test]
+    fn current_zero_branch_state_still_round_trips_without_invented_branches() {
+        let config = rspice_core::analysis::HbConfig::new(1.0).with_harmonics(1);
+        let operating_point = rspice_core::engine::HbOperatingPoint::try_from_parts(
+            config,
+            vec!["out".to_owned()],
+            vec![vec![
+                num_complex::Complex64::new(0.5, 0.0),
+                num_complex::Complex64::new(0.1, -0.2),
+            ]],
+            2,
+            1.0e-9,
+        )
+        .unwrap();
+        let mut buffers = Vec::new();
+        let transport = WorkerHbOperatingPointTransport::from_operating_point(
+            operating_point.clone(),
+            &mut buffers,
+        );
+        assert!(transport.mna_branch_spectra.is_empty());
+        assert_eq!(
+            transport.into_operating_point(&buffers).unwrap(),
+            operating_point
+        );
+    }
+}
+
+#[cfg(test)]
+mod pss_floquet_contract_tests {
+    use super::*;
+
+    fn transport() -> (WorkerPssOperatingPointTransport, Vec<Vec<f64>>) {
+        let mut buffers = Vec::new();
+        let transport = WorkerPssOperatingPointTransport::from_operating_point(
+            super::super::tests::retained_pss_operating_point(),
+            &mut buffers,
+        );
+        (transport, buffers)
+    }
+
+    fn authenticated_transport() -> (
+        rspice_core::engine::PssOperatingPoint,
+        WorkerPssOperatingPointTransport,
+        Vec<Vec<f64>>,
+    ) {
+        let netlist = rspice_core::netlist::Netlist::parse(
+            "* authenticated worker PSS fixture\n\
+             V1 in 0 DC 1\n\
+             R1 in out 1k\n\
+             R2 out 0 1k\n\
+             C1 out 0 1p\n\
+             .end\n",
+        )
+        .unwrap();
+        let config = rspice_core::analysis::PssConfig::new(1.0e6)
+            .with_harmonics(4)
+            .with_points_per_period(32)
+            .with_tstab_periods(0);
+        let operating_point = rspice_core::engine::Engine::default()
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                config,
+                &rspice_core::abort_signal::NoAbort,
+            )
+            .unwrap();
+        let mut buffers = Vec::new();
+        let transport = WorkerPssOperatingPointTransport::from_operating_point(
+            operating_point.clone(),
+            &mut buffers,
+        );
+        (operating_point, transport, buffers)
+    }
+
+    #[test]
+    fn retained_pss_transport_round_trips_authenticated_floquet_contract() {
+        let (transport, buffers) = transport();
+        assert!(transport.analysis_floquet_authenticated);
+        assert_eq!(
+            transport.analysis_floquet_verdict,
+            rspice_core::analysis::FloquetStabilityVerdict::Stable
+        );
+
+        let restored = transport.into_operating_point(&buffers).unwrap();
+        assert_eq!(
+            restored,
+            super::super::tests::retained_pss_operating_point()
+        );
+    }
+
+    #[test]
+    fn retained_pss_worker_transport_preserves_identity_and_rejects_numeric_tamper() {
+        let (operating_point, transport, buffers) = authenticated_transport();
+        assert!(transport.producer_identity.is_some());
+        assert_eq!(transport.shooting_state_basis, ["C:C1"]);
+
+        let restored = transport.clone().into_operating_point(&buffers).unwrap();
+        assert_eq!(
+            restored.producer_identity(),
+            operating_point.producer_identity()
+        );
+        assert_eq!(restored.shooting_state_basis(), ["C:C1"]);
+
+        let mut tampered = buffers;
+        tampered.last_mut().unwrap()[0] += 0.25;
+        let error = transport.into_operating_point(&tampered).unwrap_err();
+        assert!(
+            error.contains("numerical payload does not match"),
+            "retained shooting-state tamper should fail core authentication: {error}"
+        );
+    }
+
+    #[test]
+    fn retained_pss_transport_missing_evidence_stays_legacy_and_is_rejected() {
+        let (transport, buffers) = transport();
+        let mut encoded = serde_json::to_value(transport).unwrap();
+        let object = encoded.as_object_mut().unwrap();
+        object.remove("result_floquet_evidence");
+        object.remove("result_floquet_orbit_kind");
+        object.remove("result_trivial_floquet_multiplier_index");
+        object.remove("analysis_floquet_verdict");
+        object.remove("analysis_floquet_authenticated");
+        let restored: WorkerPssOperatingPointTransport = serde_json::from_value(encoded).unwrap();
+        assert_eq!(
+            restored.result_floquet_evidence,
+            rspice_core::analysis::FloquetSpectrumEvidence::LegacyUnknown
+        );
+        assert!(!restored.analysis_floquet_authenticated);
+        assert_eq!(
+            restored.analysis_floquet_verdict,
+            rspice_core::analysis::FloquetStabilityVerdict::Indeterminate
+        );
+        assert!(restored.into_operating_point(&buffers).is_err());
+    }
+
+    #[test]
+    fn retained_pss_transport_parses_pre_identity_metadata_as_untrusted_legacy_state() {
+        let (transport, buffers) = transport();
+        let mut encoded = serde_json::to_value(transport).unwrap();
+        let object = encoded.as_object_mut().unwrap();
+        object.remove("producer_identity");
+        object.remove("shooting_state_basis");
+
+        let restored: WorkerPssOperatingPointTransport = serde_json::from_value(encoded).unwrap();
+        let operating_point = restored.into_operating_point(&buffers).unwrap();
+        assert!(operating_point.producer_identity().is_none());
+        assert!(operating_point.shooting_state_basis().is_empty());
+    }
+
+    #[test]
+    fn retained_pss_transport_rejects_noncanonical_certificate_and_compatibility_drift() {
+        let (mut inflated, buffers) = transport();
+        let rspice_core::analysis::FloquetSpectrumEvidence::Qualified { certificate } =
+            &mut inflated.result_floquet_evidence
+        else {
+            panic!("fixture must carry qualified evidence")
+        };
+        certificate.qualification_tolerance = 1.0;
+        assert!(inflated.into_operating_point(&buffers).is_err());
+
+        let (mut roots, buffers) = transport();
+        roots.analysis_floquet_real = WorkerF64Series::Inline(vec![0.8]);
+        assert!(roots.into_operating_point(&buffers).is_err());
+
+        let (mut stable, buffers) = transport();
+        stable.analysis_is_stable = false;
+        assert!(stable.into_operating_point(&buffers).is_err());
+
+        let (mut orbit, buffers) = transport();
+        orbit.result_floquet_orbit_kind = rspice_core::analysis::FloquetOrbitKind::Autonomous;
+        assert!(orbit.into_operating_point(&buffers).is_err());
+
+        let (mut trivial, buffers) = transport();
+        trivial.result_trivial_floquet_multiplier_index = Some(usize::MAX);
+        assert!(trivial.into_operating_point(&buffers).is_err());
+    }
+
+    #[test]
+    fn zero_order_autonomous_contract_is_not_authenticated() {
+        let mut result = rspice_core::analysis::pss::PssResult::new(1.0, 0, 0);
+        result.set_floquet_spectrum(
+            Vec::new(),
+            rspice_core::analysis::FloquetSpectrumEvidence::NoDynamicModes,
+            rspice_core::analysis::FloquetOrbitKind::Autonomous,
+        );
+        assert!(!pss_floquet_contract_is_authenticated(&result, 0));
+    }
+}
+
+#[cfg(test)]
+mod pstb_floquet_contract_tests {
+    use super::*;
+
+    fn response_and_worker() -> (WorkerResponse, WorkerSimulationResult) {
+        let worker =
+            WorkerSimulationResult::try_from(super::super::tests::authenticated_pstb_result())
+                .unwrap();
+        (
+            WorkerResponse {
+                id: 73,
+                outcome: WorkerOutcome::Success(Box::new(worker.clone())),
+            },
+            worker,
+        )
+    }
+
+    fn transport() -> WorkerResponseTransport {
+        let (response, _) = response_and_worker();
+        WorkerResponseTransport::from_response(response).unwrap()
+    }
+
+    fn pstb_payload_mut(
+        transport: &mut WorkerResponseTransport,
+    ) -> &mut WorkerSimulationResultTransport {
+        let WorkerOutcomeTransport::Success(payload) = &mut transport.response.outcome else {
+            panic!("fixture must be a successful PSTB response")
+        };
+        payload
+    }
+
+    #[test]
+    fn pstb_transport_round_trips_complete_spectrum_separately_from_display_projection() {
+        let (response, expected) = response_and_worker();
+        let transport = WorkerResponseTransport::from_response(response).unwrap();
+        let WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::Pstb {
+            modes,
+            mode_indices,
+            ..
+        }) = &transport.response.outcome
+        else {
+            panic!("PSTB must use its dedicated transport variant")
+        };
+        assert_eq!(modes.multiplier_real.len(), 2);
+        assert_eq!(modes.exponent_imaginary.len(), 2);
+        assert_eq!(mode_indices.len(), 1);
+        assert!(transport.buffers.len() >= 6);
+
+        let restored = transport.into_response().unwrap();
+        let WorkerOutcome::Success(restored) = restored.outcome else {
+            panic!("PSTB response must remain successful")
+        };
+        assert_eq!(*restored, expected);
+    }
+
+    #[test]
+    fn pstb_transport_rejects_truncated_mode_column() {
+        let mut transport = transport();
+        let WorkerSimulationResultTransport::Pstb { modes, .. } = pstb_payload_mut(&mut transport)
+        else {
+            panic!("fixture must be PSTB")
+        };
+        modes.multiplier_imaginary = WorkerF64Series::Inline(vec![0.0]);
+        assert!(transport.into_response().is_err());
+    }
+
+    #[test]
+    fn pstb_transport_rejects_inline_bypass_of_dedicated_numeric_buffers() {
+        let (_, worker) = response_and_worker();
+        let transport = WorkerResponseTransport {
+            protocol: WORKER_RESPONSE_TRANSPORT_PROTOCOL,
+            response: WorkerResponseTransportMetadata {
+                id: 73,
+                outcome: WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::Inline(
+                    worker,
+                )),
+            },
+            buffers: Vec::new(),
+        };
+        assert!(transport.into_response().is_err());
+    }
+
+    #[test]
+    fn pstb_transport_rejects_forged_or_mismatched_floquet_evidence() {
+        let mut inflated = transport();
+        let WorkerSimulationResultTransport::Pstb {
+            floquet_evidence, ..
+        } = pstb_payload_mut(&mut inflated)
+        else {
+            panic!("fixture must be PSTB")
+        };
+        let rspice_core::analysis::FloquetSpectrumEvidence::Qualified { certificate } =
+            floquet_evidence
+        else {
+            panic!("fixture must be qualified")
+        };
+        certificate.qualification_tolerance = 1.0;
+        assert!(inflated.into_response().is_err());
+
+        let mut mismatched = transport();
+        let WorkerSimulationResultTransport::Pstb {
+            floquet_evidence, ..
+        } = pstb_payload_mut(&mut mismatched)
+        else {
+            panic!("fixture must be PSTB")
+        };
+        *floquet_evidence = rspice_core::analysis::FloquetSpectrumEvidence::NoDynamicModes;
+        assert!(mismatched.into_response().is_err());
+    }
+
+    #[test]
+    fn pstb_transport_rejects_forged_provenance_and_aggregate_metadata() {
+        let mut blank_probe = transport();
+        let WorkerSimulationResultTransport::Pstb { probe_instance, .. } =
+            pstb_payload_mut(&mut blank_probe)
+        else {
+            panic!("fixture must be PSTB")
+        };
+        probe_instance.clear();
+        assert!(blank_probe.into_response().is_err());
+
+        let mut threshold = transport();
+        let WorkerSimulationResultTransport::Pstb {
+            stability_threshold,
+            ..
+        } = pstb_payload_mut(&mut threshold)
+        else {
+            panic!("fixture must be PSTB")
+        };
+        *stability_threshold = 0.5;
+        assert!(threshold.into_response().is_err());
+
+        let mut policy = transport();
+        let WorkerSimulationResultTransport::Pstb {
+            detect_subharmonics,
+            modes,
+            ..
+        } = pstb_payload_mut(&mut policy)
+        else {
+            panic!("fixture must be PSTB")
+        };
+        *detect_subharmonics = false;
+        modes.subharmonic_order[0] = Some(2);
+        assert!(policy.into_response().is_err());
+
+        let mut count = transport();
+        let WorkerSimulationResultTransport::Pstb { num_unstable, .. } =
+            pstb_payload_mut(&mut count)
+        else {
+            panic!("fixture must be PSTB")
+        };
+        *num_unstable = 1;
+        assert!(count.into_response().is_err());
+
+        let (response, _) = response_and_worker();
+        let WorkerOutcome::Success(worker) = response.outcome else {
+            panic!("fixture must be successful")
+        };
+        let mut encoded = serde_json::to_value(&*worker).unwrap();
+        encoded
+            .get_mut("Pstb")
+            .and_then(serde_json::Value::as_object_mut)
+            .unwrap()
+            .remove("floquet_evidence");
+        assert!(serde_json::from_value::<WorkerSimulationResult>(encoded).is_err());
+    }
+}

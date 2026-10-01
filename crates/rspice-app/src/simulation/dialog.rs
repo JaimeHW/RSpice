@@ -55,13 +55,9 @@ pub(crate) mod options;
 
 pub use op::OpDialogState;
 #[cfg(test)]
-pub use rspice_simulation_contract::config::{
-    OpAccuracy, OpAnnotation, OpDeviceDetail, OpHomotopy,
-};
-pub use rspice_simulation_contract::config::{
-    OpConfig, OpInitialGuess, OpNodeInitialization, OpPreviousState, OpRunPointContext,
-    OpSaveDevice, OpTemperatureMode,
-};
+pub use rspice_simulation_contract::config::OpHomotopy;
+#[cfg(test)]
+pub use rspice_simulation_contract::config::{OpConfig, OpInitialGuess, OpNodeInitialization};
 
 // Re-exports. Each analysis re-exports the dialog state its panel owns. The
 // matching `*Config` types are deliberately absent: a dialog's config is its
@@ -94,7 +90,9 @@ pub use sens::SensDialogState;
 pub use stb::{StbDialogState, StbProbeReference};
 
 // Re-exports - Statistical/Parametric
-pub use mc::{McDialogState, McVariationSource};
+pub use mc::McDialogState;
+#[cfg(test)]
+pub use mc::McVariationSource;
 
 // Re-exports - Temperature
 

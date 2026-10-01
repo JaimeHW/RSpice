@@ -33,20 +33,7 @@ pub(super) fn ac() -> AnalysisSpec {
 }
 
 pub(super) fn execute(deck: &str, spec: AnalysisSpec, outputs: &[SavedOutput]) -> SimulationRun {
-    let line = match spec {
-        AnalysisSpec::DcOp { .. } => ".op",
-        AnalysisSpec::Ac { .. } => ".ac lin 3 1 10",
-        AnalysisSpec::Transient { .. } => ".tran 1u 10u",
-        _ => ".dc V1 1 3 1 V2 0 1 1",
-    };
-    run(
-        deck,
-        "Probe bindings",
-        spec,
-        line,
-        outputs,
-        OutputSelectionMode::ExplicitOnly,
-    )
+    run(deck, spec, outputs, OutputSelectionMode::ExplicitOnly)
 }
 
 pub(super) fn close(actual: f64, expected: f64) {
@@ -464,14 +451,7 @@ fn deferred_op_outputs_use_physical_tables_after_renaming_and_project_reload() {
                 let alias = output(kind, alias, source);
                 let mut deferred = output(kind, "Deferred physical signal", query);
                 deferred.save_policy = SavedOutputPolicy::OnDemandFromRetainedState;
-                let run = run(
-                    deck,
-                    "OP identity",
-                    AnalysisSpec::dc_op(),
-                    ".op",
-                    &[alias, deferred],
-                    selection,
-                );
+                let run = run(deck, AnalysisSpec::dc_op(), &[alias, deferred], selection);
                 run.validate_provenance().unwrap();
                 check_value(&run, 0, if source.starts_with('I') { -0.004 } else { 4.0 });
                 for reload in [false, true] {

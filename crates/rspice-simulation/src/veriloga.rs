@@ -6,7 +6,7 @@ use sha2::{Digest as _, Sha256};
 mod connections;
 use connections::PreparedVerilogAConnectionLibrary;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// Why a prepared Verilog-A runtime could not be built.
 ///

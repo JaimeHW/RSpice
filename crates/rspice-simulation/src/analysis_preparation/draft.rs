@@ -335,3 +335,6 @@ fn parse_manifest_ports(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests;

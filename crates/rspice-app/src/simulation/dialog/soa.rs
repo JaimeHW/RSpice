@@ -1,10 +1,12 @@
 //! App-facing aliases for portable SOA analysis authoring.
 
 #[cfg(test)]
-use crate::services::simulation_runner::{SoaObservationConfig, SoaRuleConfig};
-#[cfg(test)]
 pub use rspice_simulation_contract::soa_draft::SoaConfig;
 pub use rspice_simulation_contract::soa_draft::{SoaDialogState, SoaEnvelopeDraft, SoaRuleDraft};
+#[cfg(test)]
+use rspice_simulation_contract::soa_observation::SoaObservationConfig;
+#[cfg(test)]
+use rspice_simulation_contract::soa_rule::SoaRuleConfig;
 
 #[cfg(test)]
 mod tests {

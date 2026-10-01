@@ -33,7 +33,6 @@ use std::collections::HashSet;
 use egui::{Align, Align2, Color32, Layout, Rect, ScrollArea, Sense, Stroke, Ui, Vec2, vec2};
 
 use crate::product::{AnalysisInstanceId, ContentDigest, SimulationPlanId};
-use crate::services::simulation_runner::{TfRunConfig, infer_tf_run_config};
 use crate::simulation::SimulationController;
 use crate::simulation::dialog::{NoiseReferenceType, PssDialogState};
 use crate::simulation::plan::{
@@ -55,6 +54,7 @@ use crate::workbench::state::{
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_simulation::output_contract::SavedOutputSemanticStatus;
 use rspice_simulation::output_contract::SavedOutputStorageEstimate;
+use rspice_simulation::runner::{TfRunConfig, infer_tf_run_config};
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{

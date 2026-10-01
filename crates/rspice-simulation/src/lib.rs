@@ -35,3 +35,12 @@ pub mod sealed_source;
 pub mod study;
 pub mod sweeps;
 pub mod veriloga;
+
+mod engine_bridge;
+mod engine_services;
+pub mod execution;
+mod output_spec;
+pub mod point_family;
+pub mod runner;
+pub mod soa_duration;
+pub mod status;

@@ -1,24 +1,9 @@
-//! Real QPNOISE fixtures shared by application integration tests.
-use rspice_simulation::results::SimulationResult;
-use std::sync::Arc;
+//! Checked QPNOISE fixtures shared by application integration tests.
+use rspice_core::engine::*;
 
 pub(crate) fn qpnoise_retained_test_fixture() -> crate::state::AnalysisResult {
-    crate::simulation::controller::SimulationController::new()
-        .convert_to_analysis_result_with_metadata_owned(
-            qpnoise_test_fixture(),
-            crate::state::AnalysisType::Qpnoise,
-            "QPNOISE",
-        )
-}
-pub(crate) fn qpnoise_test_fixture() -> SimulationResult {
-    let netlist=rspice_core::Netlist::parse("Noise outputs\nV1 in 0 DC 1\nRs in out 1k\nRl out 0 2k\nL1 out sense 1m\nR3 sense 0 100\nC1 out 0 100n\n.end\n").unwrap();
-    let engine = rspice_core::engine::Engine::default();
-    let point = engine
-        .run_qpss(
-            &netlist,
-            rspice_core::engine::QpssConfig::new(vec![1000.0, 1414.213562373095], vec![1, 1]),
-        )
-        .unwrap();
+    let deck = "Noise outputs\nV1 in 0 DC 1\nRs in out 1k\nRl out 0 2k\nL1 out sense 1m\nR3 sense 0 100\nC1 out 0 100n\n";
+    let carrier = QpssConfig::new(vec![1000.0, 1414.213562373095], vec![1, 1]);
     let request = rspice_core::engine::QpnoiseRequest::from_qpnoise_card(
         &crate::simulation::plan::QuasiPeriodicNoiseDraft {
             explicit_frequencies: "100,300,700".into(),
@@ -44,10 +29,12 @@ pub(crate) fn qpnoise_test_fixture() -> SimulationResult {
         .unwrap(),
     )
     .unwrap();
-    SimulationResult::from_qpnoise_response(Arc::new(
-        engine
-            .run_qpnoise_from_qpss(&netlist, request, &point)
-            .unwrap(),
-    ))
-    .unwrap()
+    let source = format!(
+        "{deck}{}\n{}\n.end\n",
+        carrier.to_spice().unwrap(),
+        request.to_spice().unwrap()
+    );
+    let mut retained = super::retained_manual_fixture(&source, crate::state::AnalysisType::Qpnoise);
+    retained.label = "QPNOISE".into();
+    retained
 }

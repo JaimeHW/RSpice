@@ -17,8 +17,6 @@ use crate::simulation::execution::PreparationStage;
 use crate::simulation::execution::PreparedRunMetadata;
 use crate::simulation::execution::PreparedRunSnapshot;
 #[cfg(test)]
-use crate::simulation::execution::SavePolicy;
-#[cfg(test)]
 use crate::simulation::execution::TouchstoneExportPolicy;
 #[cfg(test)]
 use crate::simulation::execution::preparation::reject_deferred_corner_model_sources;

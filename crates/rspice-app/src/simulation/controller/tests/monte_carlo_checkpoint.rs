@@ -2,15 +2,15 @@
 
 use super::*;
 use crate::product::{ContentDigest, ObjectRevision, SimulationPlanId};
-use crate::simulation::runner::{
-    SimulationRequest, monte_carlo_checkpoint_tests::completed_checkpoint_fixture,
+use crate::simulation::controller::test_execution::{
+    monte_carlo::{checkpoint_state, completed_checkpoint_fixture, start_checkpoint_run},
+    wait_until_finished_unpolled,
 };
 use crate::state::{CanonicalAnalysisKind, PreparedRunReceipt, PreparedRunTaskReceipt};
 
-fn controller_fixture(request: SimulationRequest) -> (SimulationController, AppState) {
-    let SimulationRequest::Spec { spec, options } = request else {
-        panic!("MC spec")
-    };
+fn controller_fixture(
+    (spec, options): (AnalysisSpec, SpecExecutionOptions),
+) -> (SimulationController, AppState) {
     let provenance = synthetic_result_provenance();
     let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
         source_domain: AnalysisResultSourceDomain::SimulationPlan,
@@ -47,17 +47,22 @@ fn controller_fixture(request: SimulationRequest) -> (SimulationController, AppS
     controller.total_analyses = 1;
     controller.current_analysis_label = Some("MC".into());
     controller.current_provenance = Some(provenance);
-    controller.current_spec = Some(*spec);
-    controller.current_spec_options = Some(*options);
+    controller.current_spec = Some(spec);
+    controller.current_spec_options = Some(options);
     (controller, state)
 }
 
 #[test]
 fn monte_carlo_checkpoint_retention_seals_abort_and_final_completion_drain() {
-    let (request, bytes, completed) = completed_checkpoint_fixture();
+    let source = checkpoint_state();
+    let (request, mut runner) = start_checkpoint_run(&source);
+    wait_until_finished_unpolled(&runner);
+    let bytes = runner.take_monte_carlo_checkpoint().unwrap();
+    runner.poll_result().unwrap().unwrap();
     let (mut controller, mut state) = controller_fixture(request.clone());
+    (_, controller.runner) = start_checkpoint_run(&source);
+    wait_until_finished_unpolled(&controller.runner);
     let before = state.simulation.data_version;
-    controller.runner.store_checkpoint_for_test(bytes.clone());
     controller.publish_monte_carlo_checkpoint(&mut state);
     let live = state.simulation.active_analysis().unwrap();
     assert!(live.is_live_partial());
@@ -73,10 +78,7 @@ fn monte_carlo_checkpoint_retention_seals_abort_and_final_completion_drain() {
     assert_ne!(live.result_data_digest(), without.result_data_digest());
     assert!(live.retained_storage_bytes() >= without.retained_storage_bytes() + bytes.len() as u64);
 
-    controller
-        .runner
-        .store_pending_result(Err(SimulationError::Aborted))
-        .unwrap();
+    controller.runner.abort();
     controller.poll_completion(&mut state, &MockExportWorkflowIo::default());
     let run = state.simulation.active_run().unwrap();
     assert_eq!(run.lifecycle, SimulationRunLifecycle::Aborted);
@@ -96,11 +98,8 @@ fn monte_carlo_checkpoint_retention_seals_abort_and_final_completion_drain() {
     // No frame-level drain: completion must take the last queued checkpoint
     // before the task metadata is consumed and the next task can start.
     let (mut controller, mut state) = controller_fixture(request);
-    controller.runner.store_checkpoint_for_test(bytes.clone());
-    controller
-        .runner
-        .store_pending_result(Ok(completed))
-        .unwrap();
+    (_, controller.runner) = start_checkpoint_run(&source);
+    wait_until_finished_unpolled(&controller.runner);
     controller.poll_completion(&mut state, &MockExportWorkflowIo::default());
     let run = state.simulation.active_run().unwrap();
     assert_eq!(run.lifecycle, SimulationRunLifecycle::Completed);
@@ -142,8 +141,7 @@ fn monte_carlo_checkpoint_retention_obeys_budget_and_rejects_unrequested_capture
         live_streaming_enabled: false,
         retain_failure_diagnostics: false,
     };
-    controller.runner.store_checkpoint_for_test(bytes.clone());
-    controller.publish_monte_carlo_checkpoint(&mut state);
+    controller.accept_monte_carlo_checkpoint(&mut state, bytes.clone());
     assert!(state.simulation.active_run().unwrap().analyses.is_empty());
     controller.current_save_policy =
         crate::simulation::execution::SavePolicy::RetainEngineProducedResults;
@@ -152,8 +150,7 @@ fn monte_carlo_checkpoint_retention_obeys_budget_and_rejects_unrequested_capture
         .as_mut()
         .unwrap()
         .mc_checkpoint = None;
-    controller.runner.store_checkpoint_for_test(bytes.clone());
-    controller.publish_monte_carlo_checkpoint(&mut state);
+    controller.accept_monte_carlo_checkpoint(&mut state, bytes.clone());
     assert!(state.simulation.active_run().unwrap().analyses.is_empty());
     controller
         .current_spec_options
@@ -181,8 +178,7 @@ fn monte_carlo_checkpoint_retention_obeys_budget_and_rejects_unrequested_capture
         .unwrap_err();
     assert!(error.contains("without its requested retained checkpoint"));
     assert!(state.simulation.active_run().unwrap().analyses.is_empty());
-    controller.runner.store_checkpoint_for_test(bytes);
-    controller.publish_monte_carlo_checkpoint(&mut state);
+    controller.accept_monte_carlo_checkpoint(&mut state, bytes);
     let retained = state.simulation.active_analysis().unwrap();
     assert!(retained.is_live_partial());
     assert_eq!(
@@ -204,8 +200,7 @@ fn monte_carlo_checkpoint_controls_resolve_evidence_before_preparation() {
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
     let (request, bytes, _) = completed_checkpoint_fixture();
     let (mut controller, mut state) = controller_fixture(request);
-    controller.runner.store_checkpoint_for_test(bytes.clone());
-    controller.publish_monte_carlo_checkpoint(&mut state);
+    controller.accept_monte_carlo_checkpoint(&mut state, bytes.clone());
     let digest = state
         .simulation
         .active_analysis()

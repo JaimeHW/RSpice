@@ -324,8 +324,9 @@ mod contour_name_tests {
     /// the Nyquist sheet quietly shows nothing at all.
     #[test]
     fn the_stability_contour_has_exactly_one_spelling_in_the_crate() {
-        let writer =
-            crate::source_guard::without_test_items(include_str!("../runner/spec/frequency.rs"));
+        let writer = crate::source_guard::without_test_items(include_str!(
+            "../../../../rspice-simulation/src/runner/spec/frequency.rs"
+        ));
         assert!(
             !writer.contains("\"Nyquist L(jw)\""),
             "the stability run writes the contour name as its own literal instead of the \

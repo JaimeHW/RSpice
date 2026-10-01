@@ -8,6 +8,14 @@ impl SimulationController {
         let Some(bytes) = self.runner.take_monte_carlo_checkpoint() else {
             return;
         };
+        self.accept_monte_carlo_checkpoint(state, bytes);
+    }
+
+    pub(super) fn accept_monte_carlo_checkpoint(
+        &mut self,
+        state: &mut AppState,
+        bytes: std::sync::Arc<[u8]>,
+    ) {
         if let Err(error) = self.retain_monte_carlo_checkpoint(state, bytes) {
             // A requested durable snapshot cannot silently become transient
             // data. Stop further work and preserve the last admitted journal.

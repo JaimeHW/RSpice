@@ -1,0 +1,1904 @@
+//! Dispatch for periodic steady-state analyses and the small-signal
+//! analyses that linearize about one.
+
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+
+use rspice_core::abort_signal::AbortSignal;
+
+use super::frequency::frequency_measurement;
+use crate::engine_services as svc_runner;
+use crate::error::SimulationError;
+use crate::execution_artifact::ResolvedExecutionDependencies;
+use crate::execution_artifact::TransientTrajectoryArtifact;
+use crate::results::{SimulationResult, WaveformData};
+use rspice_simulation_contract::analysis_spec::AnalysisSpec;
+use rspice_simulation_contract::analysis_spec::PssMethod;
+use rspice_simulation_contract::config::FrequencySweep;
+use rspice_simulation_contract::options::IntegrationMethod;
+
+pub(super) fn run_periodic_spec(
+    spec: AnalysisSpec,
+    netlist: &str,
+    source_path: Option<&Path>,
+    dependencies: &ResolvedExecutionDependencies,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    super::ensure_not_aborted(abort)?;
+    match spec {
+        spec @ AnalysisSpec::Qpnoise { .. } => {
+            let card = spec
+                .qpnoise_card()
+                .map_err(SimulationError::InvalidConfig)?;
+            let state = dependencies
+                .qpss_state()
+                .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
+            let response = super::run_abort_aware_service(abort, || {
+                let circuit =
+                    state.materialize_consumer(netlist, source_path, dependencies, abort)?;
+                svc_runner::run_qpnoise_analysis_from_qpss_on_materialized_with_abort(
+                    &circuit,
+                    &card,
+                    state.operating_point(),
+                    abort,
+                )
+            })?;
+            super::ensure_not_aborted(abort)?;
+            SimulationResult::from_qpnoise_response(std::sync::Arc::new(response))
+                .map_err(SimulationError::InvalidConfig)
+        }
+        spec @ AnalysisSpec::Qpxf { .. } => {
+            let card = spec.qpxf_card().map_err(SimulationError::InvalidConfig)?;
+            let state = dependencies
+                .qpss_state()
+                .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
+            let response = super::run_abort_aware_service(abort, || {
+                let circuit =
+                    state.materialize_consumer(netlist, source_path, dependencies, abort)?;
+                svc_runner::run_qpxf_analysis_from_qpss_on_materialized_with_abort(
+                    &circuit,
+                    &card,
+                    state.operating_point(),
+                    abort,
+                )
+            })?;
+            super::ensure_not_aborted(abort)?;
+            SimulationResult::from_qpxf_response(std::sync::Arc::new(response))
+                .map_err(SimulationError::InvalidConfig)
+        }
+        spec @ AnalysisSpec::Qpac { .. } => {
+            let card = spec.qpac_card().map_err(SimulationError::InvalidConfig)?;
+            let state = dependencies
+                .qpss_state()
+                .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
+            let response = super::run_abort_aware_service(abort, || {
+                let circuit =
+                    state.materialize_consumer(netlist, source_path, dependencies, abort)?;
+                svc_runner::run_qpac_analysis_from_qpss_on_materialized_with_abort(
+                    &circuit,
+                    &card,
+                    state.operating_point(),
+                    abort,
+                )
+            })?;
+            super::ensure_not_aborted(abort)?;
+            SimulationResult::from_qpac_response(std::sync::Arc::new(response))
+                .map_err(SimulationError::InvalidConfig)
+        }
+        spec @ AnalysisSpec::Qpss { .. } => {
+            let config = spec.qpss_config().map_err(SimulationError::InvalidConfig)?;
+            let artifact = dependencies.dc_operating_point_seed().map_err(|error| {
+                SimulationError::InvalidConfig(format!(
+                    "QPSS operating-point dependency is unavailable: {error}"
+                ))
+            })?;
+            let seed = if config.initial_state
+                == rspice_core::engine::QpssInitialState::DcOperatingPoint
+            {
+                Some(
+                    artifact
+                        .core_seed()
+                        .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?,
+                )
+            } else {
+                None
+            };
+            let data = super::run_abort_aware_service(abort, || {
+                let circuit = artifact.environment().materialize(
+                    netlist,
+                    source_path,
+                    dependencies,
+                    abort,
+                )?;
+                svc_runner::run_qpss_analysis_with_dc_seed_on_materialized_with_abort(
+                    &circuit,
+                    config,
+                    seed.as_ref(),
+                    abort,
+                )
+            })?;
+            super::ensure_not_aborted(abort)?;
+            SimulationResult::from_qpss_operating_point(data.operating_point)
+                .map_err(SimulationError::InvalidConfig)
+        }
+        spec @ AnalysisSpec::Pss { .. } => run_pss(
+            netlist,
+            pss_run_config(spec)?,
+            source_path,
+            dependencies,
+            abort,
+        ),
+        AnalysisSpec::PssSpectrum { num_harmonics } => {
+            run_pss_spectrum(num_harmonics, dependencies, abort)
+        }
+        spec @ AnalysisSpec::HarmonicBalance { .. } => {
+            let config = hb_run_config(spec, abort)?;
+            run_harmonic_balance(netlist, &config, true, source_path, dependencies, abort)
+        }
+        AnalysisSpec::Envelope {
+            multirate,
+            initialization,
+            fundamental_freq,
+            additional_carrier_tones,
+            stop_time,
+            num_harmonics,
+            envelope_step,
+            modulation_sources,
+            initial_periodic_solve,
+            adaptive_mode,
+            extraction_path,
+        } => run_envelope(
+            netlist,
+            svc_runner::EnvelopeRunConfig {
+                multirate,
+                initialization,
+                fundamental_freq,
+                additional_carrier_tones,
+                stop_time,
+                num_harmonics,
+                envelope_step,
+                modulation_sources,
+                initial_periodic_solve,
+                adaptive_mode,
+                extraction_path,
+            },
+            source_path,
+            abort,
+        ),
+        spec @ AnalysisSpec::Fourier { .. } => run_spectral_from_trajectory(
+            spec,
+            dependencies
+                .transient_trajectory()
+                .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?,
+            abort,
+        ),
+        AnalysisSpec::Disto {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            f2_over_f1,
+        } => run_disto(
+            netlist,
+            DistoRunRequest {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+                f2_over_f1,
+            },
+            source_path,
+            abort,
+        ),
+        AnalysisSpec::Psp {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            ports,
+            max_sideband,
+            reltol,
+            abstol,
+            mixed_mode,
+            noise_parameters,
+            noise_reference,
+        } => run_psp(
+            netlist,
+            PspRunRequest {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+                ports,
+                max_sideband,
+                reltol,
+                abstol,
+                mixed_mode,
+                noise_parameters,
+                noise_reference,
+            },
+            source_path,
+            dependencies,
+            abort,
+        ),
+        spec @ (AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. }) => {
+            let state = dependencies.hb_state().map_err(|error| {
+                SimulationError::InvalidConfig(format!(
+                    "Harmonic-balance dependency is unavailable: {error}"
+                ))
+            })?;
+            let circuit = super::run_abort_aware_service(abort, || {
+                state.materialize_consumer(netlist, source_path, dependencies, abort)
+            })?;
+            run_hb_consumer(spec, &circuit, state.operating_point(), abort)
+        }
+        other => Err(super::misrouted_spec_error("periodic", &other)),
+    }
+}
+
+struct HbnoiseRunRequest {
+    input_sideband: i32,
+    output_sideband: i32,
+    noise_reference: Option<svc_runner::HbNoiseReference>,
+    start_freq: f64,
+    stop_freq: f64,
+    points_per_unit: usize,
+    sweep: FrequencySweep,
+    output_node: String,
+    output_ref: String,
+    input_source: String,
+    max_sideband: usize,
+    integrated_noise: bool,
+    noise_figure: bool,
+    contributor_ranking: bool,
+}
+
+fn run_hbnoise(
+    circuit: &rspice_core::Netlist,
+    request: HbnoiseRunRequest,
+    operating_point: &rspice_core::engine::HbOperatingPoint,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let config = svc_runner::HbnoiseRunConfig {
+        input_sideband: request.input_sideband,
+        output_sideband: request.output_sideband,
+        noise_reference: request.noise_reference,
+        start_freq: request.start_freq,
+        stop_freq: request.stop_freq,
+        points_per_unit: request.points_per_unit,
+        sweep: match request.sweep {
+            FrequencySweep::Decade => svc_runner::HbnoiseFrequencySweep::Decade,
+            FrequencySweep::Octave => svc_runner::HbnoiseFrequencySweep::Octave,
+            FrequencySweep::Linear => svc_runner::HbnoiseFrequencySweep::Linear,
+        },
+        output_node: request.output_node,
+        output_ref: Some(request.output_ref),
+        input_source: request.input_source,
+        max_sideband: request.max_sideband,
+        integrated_noise: request.integrated_noise,
+        noise_figure: request.noise_figure,
+        contributor_ranking: request.contributor_ranking,
+    };
+    let data = super::run_abort_aware_service(abort, || {
+        svc_runner::run_hbnoise_analysis_from_hb_on_materialized_with_abort(
+            circuit,
+            &config,
+            operating_point,
+            abort,
+        )
+    })?;
+
+    let mut contributors = HashMap::with_capacity(data.contributors.len());
+    let output_power = if config.contributor_ranking {
+        Some(
+            svc_runner::integrate_psd(&data.frequencies, &data.output_noise, abort)
+                .map_err(|error| SimulationError::SolverError(error.to_string()))?,
+        )
+    } else {
+        None
+    };
+    let mut rows = Vec::with_capacity(data.contributors.len());
+    for (index, (name, values)) in data.contributors.into_iter().enumerate() {
+        poll_periodically(abort, index)?;
+        let power = svc_runner::integrate_psd(&data.frequencies, &values, abort)
+            .map_err(|error| SimulationError::SolverError(error.to_string()))?;
+        let (device, mechanism) = split_noise_contributor_name(&name);
+        rows.push(rspice_results::noise::NoiseContributorRow {
+            device,
+            mechanism,
+            power,
+            share_pct: output_power
+                .filter(|total| *total > 0.0)
+                .map_or(0.0, |total| 100.0 * power / total),
+        });
+        contributors.insert(name, values);
+    }
+    rows.sort_by(|left, right| {
+        right
+            .power
+            .total_cmp(&left.power)
+            .then_with(|| left.device.cmp(&right.device))
+            .then_with(|| left.mechanism.cmp(&right.mechanism))
+    });
+    let band_start = data.frequencies.first().copied().ok_or_else(|| {
+        SimulationError::SolverError("HBNOISE result has no frequency points".to_owned())
+    })?;
+    let band_stop = data.frequencies.last().copied().ok_or_else(|| {
+        SimulationError::SolverError("HBNOISE result has no frequency points".to_owned())
+    })?;
+    let band = (band_start, band_stop);
+    let conversion = rspice_results::noise::PeriodicNoiseConversionEvidence {
+        sampling: None,
+        input_source: config.input_source.clone(),
+        carrier_hz: operating_point.config().fundamental_freq,
+        input_sideband: config.input_sideband,
+        output_sideband: config.output_sideband,
+        max_sideband: config.max_sideband as i32,
+    };
+    conversion
+        .validate(band)
+        .map_err(SimulationError::SolverError)?;
+    let summary = Some(rspice_results::noise::NoiseSummary {
+        input_quantity: data.input_quantity,
+        conversion: Some(conversion),
+        noise_figure: data.noise_figure,
+        rows,
+        total_rms: data.output_rms,
+        input_rms: data.input_rms,
+        band,
+    });
+    Ok(SimulationResult::Noise {
+        output_unit: Some(rspice_core::analysis::MeasurementUnit::Known(
+            "V²/Hz".into(),
+        )),
+        frequencies: data.frequencies,
+        output_noise: data.output_noise,
+        input_noise: Some(data.input_noise),
+        contributors,
+        summary,
+        measurements: Vec::new(),
+    })
+}
+
+pub(super) fn split_noise_contributor_name(name: &str) -> (String, String) {
+    let trimmed = name.trim();
+    match trimmed.rsplit_once(' ') {
+        Some((device, mechanism)) if !device.trim().is_empty() && !mechanism.trim().is_empty() => {
+            (device.trim().to_owned(), mechanism.trim().to_owned())
+        }
+        _ => (trimmed.to_owned(), "periodic".to_owned()),
+    }
+}
+
+struct PspRunRequest {
+    start_freq: f64,
+    stop_freq: f64,
+    points_per_unit: usize,
+    sweep: FrequencySweep,
+    ports: Vec<rspice_simulation_contract::analysis_spec::SpPort>,
+    max_sideband: usize,
+    reltol: f64,
+    abstol: f64,
+    mixed_mode: bool,
+    noise_parameters: bool,
+    noise_reference: Option<rspice_core::analysis::s_param::PeriodicPortNoiseReference>,
+}
+
+fn run_psp(
+    netlist: &str,
+    request: PspRunRequest,
+    source_path: Option<&Path>,
+    dependencies: &ResolvedExecutionDependencies,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let periodic_state = dependencies.periodic_state().map_err(|error| {
+        SimulationError::InvalidConfig(format!(
+            "PSP periodic-state dependency is unavailable: {error}"
+        ))
+    })?;
+    run_periodic_sparameters(request, abort, |config| {
+        let circuit =
+            periodic_state.materialize_consumer(netlist, source_path, dependencies, abort)?;
+        svc_runner::run_psp_analysis_from_pss_on_materialized_with_abort(
+            &circuit,
+            config,
+            periodic_state.operating_point(),
+            abort,
+        )
+    })
+}
+
+fn run_hbsp(
+    circuit: &rspice_core::Netlist,
+    request: PspRunRequest,
+    operating_point: &rspice_core::engine::HbOperatingPoint,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    run_periodic_sparameters(request, abort, |config| {
+        svc_runner::run_hbsp_analysis_from_hb_on_materialized_with_abort(
+            circuit,
+            config,
+            operating_point,
+            abort,
+        )
+    })
+}
+
+fn run_periodic_sparameters(
+    request: PspRunRequest,
+    abort: &dyn AbortSignal,
+    run: impl FnOnce(&svc_runner::PspRunConfig) -> svc_runner::ServiceRunResult<svc_runner::PspData>,
+) -> Result<SimulationResult, SimulationError> {
+    let PspRunRequest {
+        start_freq,
+        stop_freq,
+        points_per_unit,
+        sweep,
+        ports,
+        max_sideband,
+        reltol,
+        abstol,
+        mixed_mode,
+        noise_parameters,
+        noise_reference,
+    } = request;
+    let mut configured_ports = Vec::with_capacity(ports.len());
+    for port in ports {
+        super::ensure_not_aborted(abort)?;
+        configured_ports.push(svc_runner::SParameterPort {
+            node_pos: port.node_pos,
+            node_neg: port.node_neg,
+            z0: port.z0,
+        });
+    }
+    let config = svc_runner::PspRunConfig {
+        start_freq,
+        stop_freq,
+        points_per_unit,
+        sweep: match sweep {
+            FrequencySweep::Decade => svc_runner::PspSweep::Decade,
+            FrequencySweep::Octave => svc_runner::PspSweep::Octave,
+            FrequencySweep::Linear => svc_runner::PspSweep::Linear,
+        },
+        ports: configured_ports,
+        max_sideband,
+        reltol,
+        abstol,
+        mixed_mode,
+        noise_parameters,
+        noise_reference,
+    };
+    let data = super::run_abort_aware_service(abort, || run(&config))?;
+    periodic_sparameter_result(data, &config, abort)
+}
+
+fn periodic_sparameter_result(
+    data: svc_runner::PspData,
+    config: &svc_runner::PspRunConfig,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let mut waveforms = HashMap::with_capacity(data.paths.len().saturating_add(config.ports.len()));
+    for path in data.paths {
+        super::ensure_not_aborted(abort)?;
+        let base_name = path.base_name;
+        let name = format!(
+            "{base_name}[k={:+},m={:+}]",
+            path.output_sideband, path.input_sideband
+        );
+        let mut real = Vec::with_capacity(path.values.len());
+        let mut imaginary = Vec::with_capacity(path.values.len());
+        for (value_index, value) in path.values.into_iter().enumerate() {
+            poll_periodically(abort, value_index)?;
+            real.push(value.re);
+            imaginary.push(value.im);
+        }
+        if path.output_sideband == 0 && path.input_sideband == 0 {
+            waveforms.insert(
+                base_name.clone(),
+                WaveformData::new_complex_in_unit(
+                    base_name,
+                    clone_values_with_abort(&data.frequencies, abort)?,
+                    clone_values_with_abort(&real, abort)?,
+                    clone_values_with_abort(&imaginary, abort)?,
+                    "1",
+                ),
+            );
+        }
+        waveforms.insert(
+            name.clone(),
+            WaveformData::new_complex_in_unit(
+                name,
+                clone_values_with_abort(&data.frequencies, abort)?,
+                real,
+                imaginary,
+                "1",
+            ),
+        );
+    }
+    let mut measurements = Vec::new();
+    if let Some(noise) = data.noise {
+        measurements.push(frequency_measurement(
+            "periodic_noise_carrier_hz",
+            noise.fundamental_hz,
+            "Hz",
+        ));
+        measurements.push(frequency_measurement(
+            "periodic_noise_max_sideband",
+            config.max_sideband as f64,
+            "count",
+        ));
+        measurements.push(frequency_measurement(
+            "periodic_noise_mixed_mode",
+            if config.mixed_mode { 1.0 } else { 0.0 },
+            "1",
+        ));
+        for path in noise.paths {
+            super::ensure_not_aborted(abort)?;
+            let name = format!(
+                "{}[k={:+},m={:+}]",
+                path.base_name, path.output_sideband, path.input_sideband
+            );
+            let mut real = Vec::with_capacity(path.values.len());
+            let mut imaginary = Vec::with_capacity(path.values.len());
+            for (index, value) in path.values.into_iter().enumerate() {
+                poll_periodically(abort, index)?;
+                real.push(value.re);
+                imaginary.push(value.im);
+            }
+            let mut waveform = WaveformData::new_complex(
+                name.clone(),
+                clone_values_with_abort(&data.frequencies, abort)?,
+                real,
+                imaginary,
+            );
+            waveform.y_unit = "W/Hz".into();
+            waveforms.insert(name, waveform);
+        }
+        if let Some(reference) = noise.reference {
+            for (name, value, unit) in [
+                (
+                    "periodic_noise_input_port",
+                    reference.input_port as f64,
+                    "count",
+                ),
+                (
+                    "periodic_noise_output_port",
+                    reference.output_port as f64,
+                    "count",
+                ),
+                (
+                    "periodic_noise_input_sideband",
+                    f64::from(reference.input_sideband),
+                    "count",
+                ),
+                (
+                    "periodic_noise_output_sideband",
+                    f64::from(reference.output_sideband),
+                    "count",
+                ),
+                (
+                    "periodic_noise_reference_temperature_kelvin",
+                    reference.reference_temperature_kelvin,
+                    "K",
+                ),
+                (
+                    "periodic_noise_termination_temperature_kelvin",
+                    reference.termination_temperature_kelvin,
+                    "K",
+                ),
+            ] {
+                measurements.push(frequency_measurement(name, value, unit));
+            }
+            if let Some(image) = reference.image_sideband {
+                measurements.push(frequency_measurement(
+                    "periodic_noise_image_sideband",
+                    f64::from(image),
+                    "count",
+                ));
+            }
+        }
+        if let Some(parameters) = noise.parameters {
+            let mut series = vec![
+                ("PN_Rn", "Ω", Vec::new()),
+                ("PN_F", "1", Vec::new()),
+                ("PN_Fmin", "1", Vec::new()),
+                ("PN_NF", "dB", Vec::new()),
+                ("PN_NFmin", "dB", Vec::new()),
+                ("PN_Fdsb", "1", Vec::new()),
+                ("PN_NFdsb", "dB", Vec::new()),
+            ];
+            let mut optimum_real = Vec::with_capacity(parameters.len());
+            let mut optimum_imag = Vec::with_capacity(parameters.len());
+            for (index, parameter) in parameters.into_iter().enumerate() {
+                poll_periodically(abort, index)?;
+                let p = parameter.single_sideband;
+                for (slot, value) in [
+                    p.noise_resistance,
+                    p.noise_factor,
+                    p.minimum_noise_factor,
+                    10.0 * p.noise_factor.log10(),
+                    10.0 * p.minimum_noise_factor.log10(),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    series[slot].2.push(value);
+                }
+                if let Some(dsb) = parameter.double_sideband_noise_factor {
+                    series[5].2.push(dsb);
+                    series[6].2.push(10.0 * dsb.log10());
+                }
+                optimum_real.push(p.optimum_source_reflection.re);
+                optimum_imag.push(p.optimum_source_reflection.im);
+            }
+            for (name, unit, values) in series {
+                if values.is_empty() {
+                    continue;
+                }
+                waveforms.insert(
+                    name.into(),
+                    WaveformData::new_time_domain_in_unit(
+                        name,
+                        clone_values_with_abort(&data.frequencies, abort)?,
+                        values,
+                        unit,
+                    ),
+                );
+            }
+            let mut optimum = WaveformData::new_complex(
+                "PN_Sopt",
+                clone_values_with_abort(&data.frequencies, abort)?,
+                optimum_real,
+                optimum_imag,
+            );
+            optimum.y_unit = "1".into();
+            waveforms.insert("PN_Sopt".into(), optimum);
+        }
+    }
+    Ok(SimulationResult::Ac {
+        convergence: None,
+        noise_reference_temperature_kelvin: None,
+        reference_impedances_ohm: data.reference_impedances_ohm,
+        frequencies: data.frequencies,
+        waveforms,
+        measurements,
+    })
+}
+
+fn run_pss(
+    netlist: &str,
+    config: svc_runner::PssRunConfig,
+    source_path: Option<&Path>,
+    dependencies: &ResolvedExecutionDependencies,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let artifact = dependencies.dc_operating_point_seed().map_err(|error| {
+        SimulationError::InvalidConfig(format!(
+            "shooting PSS operating-point dependency is unavailable: {error}"
+        ))
+    })?;
+    dependencies
+        .validate_source_basis(netlist, artifact.effective_source_content_digest())
+        .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
+    let dc_seed = artifact.core_seed().map_err(|error| {
+        SimulationError::InvalidConfig(format!(
+            "shooting PSS operating-point seed is invalid: {error}"
+        ))
+    })?;
+    let data = super::run_abort_aware_service(abort, || {
+        svc_runner::run_pss_analysis_with_dc_seed_and_source_path_and_abort(
+            netlist,
+            &config,
+            source_path,
+            svc_runner::PssSeedEnvironment {
+                dc_seed: &dc_seed,
+                temperature_celsius: artifact.temperature_celsius(),
+                supply_voltage: artifact.supply_voltage(),
+                nominal_supply_voltage: artifact.nominal_supply_voltage(),
+                supply_source_names: artifact.supply_source_names(),
+            },
+            abort,
+        )
+    })?;
+
+    project_pss_data(data, abort)
+}
+
+fn project_pss_data(
+    data: svc_runner::PssData,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let time = data.time;
+    let periodic_state = data.operating_point;
+    let mut waveforms = HashMap::with_capacity(data.waveforms.len());
+    for (name, values) in data.waveforms {
+        super::ensure_not_aborted(abort)?;
+        let waveform_time = clone_values_with_abort(&time, abort)?;
+        let unit = if name.starts_with("I(") { "A" } else { "V" };
+        waveforms.insert(
+            name.clone(),
+            WaveformData::new_time_domain_in_unit(name, waveform_time, values, unit),
+        );
+    }
+
+    Ok(SimulationResult::Transient {
+        spectra: Vec::new(),
+        time,
+        waveforms,
+        measurements: Vec::new(),
+        periodic_state: Some(periodic_state),
+        // A shooting-PSS result is not produced by the transient driver, so
+        // the driver's convergence metrics would not describe it.
+        convergence: Default::default(),
+        // The periodic solver reports a converged steady state, not the
+        // event schedule that reached it.
+        events: Default::default(),
+    })
+}
+
+/// The harmonic spectrum of a converged periodic steady state.
+///
+/// This reads the artifact the PSS task already produced rather than solving
+/// the period again, exactly as Fourier reads a transient trajectory. That is
+/// also why it is a task of its own: harmonics are indexed by frequency and
+/// the periodic waveform by time, and one analysis carries one abscissa.
+fn run_pss_spectrum(
+    num_harmonics: usize,
+    dependencies: &ResolvedExecutionDependencies,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let artifact = dependencies.periodic_state().map_err(|error| {
+        SimulationError::InvalidConfig(format!(
+            "PSS spectrum periodic-state dependency is unavailable: {error}"
+        ))
+    })?;
+    let periodic = artifact.operating_point().analysis();
+    let period = periodic.period;
+    if !period.is_finite() || period <= 0.0 {
+        return Err(SimulationError::InvalidConfig(
+            "PSS spectrum source state has no valid period".to_owned(),
+        ));
+    }
+    let fundamental = 1.0 / period;
+
+    let node_names = &periodic.result.node_names;
+    if node_names.is_empty() || node_names.len() != periodic.result.waveforms.len() {
+        return Err(SimulationError::SolverError(
+            "PSS spectrum source has an incomplete node-waveform basis".to_owned(),
+        ));
+    }
+    let mut waveforms = HashMap::new();
+    let mut frequencies = Vec::new();
+    let mut seen_nodes = HashSet::with_capacity(node_names.len());
+    for (index, (node_name, waveform)) in node_names
+        .iter()
+        .zip(&periodic.result.waveforms)
+        .enumerate()
+    {
+        super::ensure_not_aborted(abort)?;
+        let normalized = node_name.trim().to_ascii_lowercase();
+        if normalized.is_empty() || !seen_nodes.insert(normalized) {
+            return Err(SimulationError::SolverError(format!(
+                "PSS spectrum source has an invalid node identity at waveform {}",
+                index + 1
+            )));
+        }
+        if waveform.values.is_empty() || waveform.values.iter().any(|value| !value.is_finite()) {
+            return Err(SimulationError::SolverError(format!(
+                "PSS spectrum source node '{}' has an empty or non-finite waveform",
+                node_name
+            )));
+        }
+        if node_name == "0" || node_name.eq_ignore_ascii_case("gnd") {
+            continue;
+        }
+        let harmonics = waveform
+            .compute_harmonics_with_abort(&periodic.result.time, fundamental, num_harmonics, abort)
+            .map_err(|error| match error {
+                rspice_core::analysis::fourier::FourierError::Aborted => SimulationError::Aborted,
+                _ => SimulationError::SolverError(error.to_string()),
+            })?
+            .into_iter()
+            .map(|harmonic| (harmonic.frequency, harmonic.magnitude, harmonic.phase))
+            .collect::<Vec<_>>();
+        if harmonics.is_empty() {
+            return Err(SimulationError::SolverError(format!(
+                "PSS spectrum extraction returned no harmonics for node '{}'",
+                node_name
+            )));
+        }
+        if harmonics.iter().any(|(frequency, magnitude, phase)| {
+            !frequency.is_finite()
+                || *frequency < 0.0
+                || !magnitude.is_finite()
+                || (*frequency > 0.0 && *magnitude < 0.0)
+                || !phase.is_finite()
+        }) || harmonics.windows(2).any(|pair| pair[1].0 <= pair[0].0)
+        {
+            return Err(SimulationError::SolverError(format!(
+                "PSS spectrum extraction returned invalid data for node '{}'",
+                node_name
+            )));
+        }
+        let node_frequencies = harmonics
+            .iter()
+            .map(|(frequency, _, _)| *frequency)
+            .collect::<Vec<_>>();
+        if frequencies.is_empty() {
+            frequencies = node_frequencies.clone();
+        } else if node_frequencies.len() != frequencies.len()
+            || node_frequencies
+                .iter()
+                .zip(&frequencies)
+                .any(|(actual, expected)| actual.to_bits() != expected.to_bits())
+        {
+            return Err(SimulationError::SolverError(format!(
+                "PSS spectrum node '{}' changed the shared harmonic grid",
+                node_name
+            )));
+        }
+        let mut real = Vec::with_capacity(harmonics.len());
+        let mut imaginary = Vec::with_capacity(harmonics.len());
+        for (_, magnitude, phase_deg) in &harmonics {
+            let radians = phase_deg.to_radians();
+            real.push(magnitude * radians.cos());
+            imaginary.push(magnitude * radians.sin());
+        }
+        let name = format!("V({node_name})");
+        if waveforms
+            .insert(
+                name.clone(),
+                WaveformData::new_complex_in_unit(name, node_frequencies, real, imaginary, "V"),
+            )
+            .is_some()
+        {
+            return Err(SimulationError::SolverError(
+                "PSS spectrum contains duplicate signal names".to_owned(),
+            ));
+        }
+    }
+    if frequencies.is_empty() || waveforms.is_empty() {
+        return Err(SimulationError::SolverError(
+            "PSS spectrum source contains no non-ground node waveforms".to_owned(),
+        ));
+    }
+
+    Ok(SimulationResult::Ac {
+        convergence: None,
+        noise_reference_temperature_kelvin: None,
+        reference_impedances_ohm: None,
+        frequencies,
+        waveforms,
+        measurements: Vec::new(),
+    })
+}
+
+fn run_harmonic_balance(
+    netlist: &str,
+    hb_cfg: &svc_runner::HbRunConfig,
+    retain_harmonics: bool,
+    source_path: Option<&Path>,
+    dependencies: &ResolvedExecutionDependencies,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let artifact = dependencies.dc_operating_point_seed().map_err(|error| {
+        SimulationError::InvalidConfig(format!(
+            "HB operating-point dependency is unavailable: {error}"
+        ))
+    })?;
+    let seed = artifact
+        .core_seed()
+        .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
+    let data = super::run_abort_aware_service(abort, || {
+        let circuit =
+            artifact
+                .environment()
+                .materialize(netlist, source_path, dependencies, abort)?;
+        svc_runner::run_hb_analysis_with_dc_seed_on_materialized_with_abort(
+            &circuit,
+            hb_cfg,
+            Some(&seed),
+            abort,
+        )
+    })?;
+
+    project_hb_data(data, retain_harmonics, abort)
+}
+
+fn project_hb_data(
+    data: svc_runner::HbData,
+    retain_harmonics: bool,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let (frequencies, waveforms) = if retain_harmonics {
+        spectra_to_complex_waveforms(data.spectra, abort)?
+    } else {
+        if data.dc_voltages.is_empty() {
+            return Err(SimulationError::SolverError(
+                "HB result contains no solved node voltages".to_owned(),
+            ));
+        }
+        let mut waveforms = HashMap::with_capacity(data.dc_voltages.len());
+        for (index, (name, voltage)) in data.dc_voltages.into_iter().enumerate() {
+            poll_periodically(abort, index)?;
+            if name.trim().is_empty() || !voltage.is_finite() {
+                return Err(SimulationError::SolverError(format!(
+                    "HB DC result {} has an invalid name or value",
+                    index + 1
+                )));
+            }
+            if waveforms
+                .insert(
+                    name.clone(),
+                    WaveformData::new_complex_in_unit(
+                        name,
+                        vec![0.0],
+                        vec![voltage],
+                        vec![0.0],
+                        "V",
+                    ),
+                )
+                .is_some()
+            {
+                return Err(SimulationError::SolverError(
+                    "HB DC result contains duplicate node names".to_owned(),
+                ));
+            }
+        }
+        (vec![0.0], waveforms)
+    };
+    super::ensure_not_aborted(abort)?;
+
+    Ok(SimulationResult::HarmonicBalance {
+        frequencies,
+        waveforms,
+        measurements: Vec::new(),
+        operating_point: data.operating_point,
+    })
+}
+
+fn run_envelope(
+    netlist: &str,
+    cfg: svc_runner::EnvelopeRunConfig,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let data = super::run_abort_aware_service(abort, || {
+        svc_runner::run_envelope_analysis_with_source_path_and_abort(
+            netlist,
+            &cfg,
+            source_path,
+            abort,
+        )
+    })?;
+    let mut waveforms = HashMap::with_capacity(data.waveforms.len());
+    for waveform in data.waveforms {
+        let name = waveform.name;
+        let values = waveform.values;
+        super::ensure_not_aborted(abort)?;
+        let waveform_time = clone_values_with_abort(&data.time, abort)?;
+        let mut real = Vec::with_capacity(values.len());
+        let mut imaginary = Vec::with_capacity(values.len());
+        for (index, value) in values.into_iter().enumerate() {
+            poll_periodically(abort, index)?;
+            real.push(value.re);
+            imaginary.push(value.im);
+        }
+        waveforms.insert(
+            name.clone(),
+            if waveform.is_complex {
+                WaveformData::new_complex_in_unit(
+                    name,
+                    waveform_time,
+                    real,
+                    imaginary,
+                    waveform.unit,
+                )
+            } else {
+                WaveformData::new_time_domain_in_unit(name, waveform_time, real, waveform.unit)
+            },
+        );
+    }
+
+    Ok(SimulationResult::Transient {
+        spectra: Vec::new(),
+        time: data.time,
+        waveforms,
+        measurements: data.measurements,
+        periodic_state: None,
+        convergence: data.convergence,
+        events: Default::default(),
+    })
+}
+
+struct FourierRunRequest {
+    num_harmonics: usize,
+
+    num_periods: usize,
+    output_node: String,
+    output_ref: String,
+    additional_outputs: Vec<String>,
+    start_time: f64,
+    stop_time: f64,
+    compute_thd: bool,
+    normalize: bool,
+}
+
+/// Decompose every output the card named, from the one transient trajectory
+/// all of them read.
+///
+/// The card takes a list, and a list of outputs is a list of projections of
+/// one solve rather than a list of runs: the harmonic grid is shared, so the
+/// result carries one group per output in the waveform map it already keys by
+/// output label. A single output keeps the exact names it had before the list
+/// existed; a list qualifies its derived quantities by output, because two
+/// outputs cannot both own the name `THD(%)`.
+fn run_fourier(
+    fundamental_freq: f64,
+    request: FourierRunRequest,
+    trajectory: &TransientTrajectoryArtifact,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let FourierRunRequest {
+        num_harmonics,
+
+        num_periods,
+        output_node,
+        output_ref,
+        additional_outputs,
+        start_time,
+        stop_time,
+        compute_thd,
+        normalize,
+    } = request;
+    let mut projections = Vec::with_capacity(1 + additional_outputs.len());
+    projections.push((output_node, output_ref));
+    for (index, output) in additional_outputs.iter().enumerate() {
+        super::ensure_not_aborted(abort)?;
+        let projection = svc_runner::split_fourier_output(output).map_err(|error| {
+            SimulationError::InvalidConfig(format!("Fourier output {}: {error}", index + 2))
+        })?;
+        projections.push(projection);
+    }
+    let qualify = projections.len() > 1;
+
+    let mut waveforms = HashMap::new();
+    let mut harmonic_frequencies = Vec::new();
+    for (output_node, output_ref) in projections {
+        super::ensure_not_aborted(abort)?;
+        let output_unit = if normalize {
+            "ratio"
+        } else {
+            fourier_output_unit(&output_node)
+        };
+        let output_ref = (!output_ref.trim().is_empty()).then_some(output_ref);
+        let cfg = svc_runner::FourierRunConfig {
+            fundamental_freq,
+            num_harmonics,
+            num_periods,
+            output_node,
+            output_ref,
+            start_time,
+            stop_time,
+            compute_thd,
+            normalize,
+        };
+        cfg.validate().map_err(SimulationError::InvalidConfig)?;
+        let data = fourier_from_transient_artifact(trajectory, &cfg, abort)?;
+
+        let mut real = Vec::with_capacity(data.response.len());
+        let mut imaginary = Vec::with_capacity(data.response.len());
+        for (value_idx, value) in data.response.iter().enumerate() {
+            poll_periodically(abort, value_idx)?;
+            real.push(value.re);
+            imaginary.push(value.im);
+        }
+        let spectrum_name = format!("{} Spectrum", data.output_label);
+        if waveforms.contains_key(&spectrum_name) {
+            return Err(SimulationError::InvalidConfig(format!(
+                "Fourier output '{}' is decomposed twice by the same analysis",
+                data.output_label
+            )));
+        }
+        let mut spectrum = WaveformData::new_complex(
+            spectrum_name.clone(),
+            clone_values_with_abort(&data.frequencies, abort)?,
+            real,
+            imaginary,
+        );
+        spectrum.y_unit = output_unit.to_string();
+        waveforms.insert(spectrum_name, spectrum);
+        if let Some(thd_percent) = data.thd_percent {
+            insert_scalar_waveform(
+                &mut waveforms,
+                if qualify {
+                    format!("{} THD(%)", data.output_label)
+                } else {
+                    "THD(%)".to_string()
+                },
+                vec![fundamental_freq],
+                vec![thd_percent],
+                "%",
+                "Hz",
+            );
+        }
+        insert_scalar_waveform(
+            &mut waveforms,
+            if qualify {
+                format!("{} DC", data.output_label)
+            } else {
+                "DC".to_string()
+            },
+            vec![0.0],
+            vec![data.dc_component],
+            output_unit,
+            "Hz",
+        );
+        if harmonic_frequencies.is_empty() {
+            harmonic_frequencies = data.frequencies;
+        }
+    }
+
+    Ok(SimulationResult::Ac {
+        convergence: trajectory.convergence().cloned(),
+        noise_reference_temperature_kelvin: None,
+        reference_impedances_ohm: None,
+        frequencies: harmonic_frequencies,
+        waveforms,
+        measurements: Vec::new(),
+    })
+}
+
+fn fourier_from_transient_artifact(
+    trajectory: &TransientTrajectoryArtifact,
+    config: &svc_runner::FourierRunConfig,
+    abort: &dyn AbortSignal,
+) -> Result<svc_runner::FourierData, SimulationError> {
+    super::ensure_not_aborted(abort)?;
+    let node_values = trajectory.waveform(&config.output_node).ok_or_else(|| {
+        SimulationError::InvalidConfig(format!(
+            "Fourier output node '{}' is absent from bound transient artifact",
+            config.output_node.trim()
+        ))
+    })?;
+    let reference_values = config
+        .output_ref
+        .as_deref()
+        .filter(|reference| {
+            let reference = reference.trim();
+            !reference.is_empty() && !reference.eq_ignore_ascii_case("0")
+        })
+        .map(|reference| {
+            trajectory.waveform(reference).ok_or_else(|| {
+                SimulationError::InvalidConfig(format!(
+                    "Fourier reference node '{}' is absent from bound transient artifact",
+                    reference.trim()
+                ))
+            })
+        })
+        .transpose()?;
+
+    let mut signal = Vec::with_capacity(trajectory.time().len());
+    for (index, &value) in node_values.iter().enumerate() {
+        poll_periodically(abort, index)?;
+        signal.push(reference_values.map_or(value, |reference| value - reference[index]));
+    }
+
+    let current = if config
+        .output_node
+        .trim()
+        .to_ascii_uppercase()
+        .starts_with("I(")
+    {
+        trajectory
+            .current_impulse_trace(&config.output_node)
+            .map_err(SimulationError::InvalidConfig)?
+    } else {
+        None
+    };
+    super::run_abort_aware_service(abort, || {
+        svc_runner::run_fourier_from_observation_with_abort(
+            trajectory.time(),
+            &signal,
+            current,
+            config,
+            abort,
+        )
+    })
+}
+
+struct DistoRunRequest {
+    start_freq: f64,
+    stop_freq: f64,
+    points_per_unit: usize,
+    sweep: FrequencySweep,
+    f2_over_f1: Option<f64>,
+}
+
+fn run_disto(
+    netlist: &str,
+    request: DistoRunRequest,
+    source_path: Option<&Path>,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let DistoRunRequest {
+        start_freq,
+        stop_freq,
+        points_per_unit,
+        sweep,
+        f2_over_f1,
+    } = request;
+    let sweep = match sweep {
+        FrequencySweep::Decade => svc_runner::DistoFrequencySweep::Decade,
+        FrequencySweep::Octave => svc_runner::DistoFrequencySweep::Octave,
+        FrequencySweep::Linear => svc_runner::DistoFrequencySweep::Linear,
+    };
+    let cfg = svc_runner::DistoRunConfig {
+        start_freq,
+        stop_freq,
+        points_per_unit,
+        sweep,
+        f2_over_f1,
+    };
+    let data = super::run_abort_aware_service(abort, || {
+        svc_runner::run_disto_analysis_with_source_path_and_abort(netlist, &cfg, source_path, abort)
+    })?;
+    let frequencies = data.frequencies;
+
+    let mut waveforms = HashMap::new();
+    for trace in data.traces {
+        super::ensure_not_aborted(abort)?;
+        insert_complex_waveform(
+            &mut waveforms,
+            format!("{} F1", trace.name),
+            &frequencies,
+            trace.fundamental_f1,
+            trace.unit,
+            abort,
+        )?;
+        if let Some(fundamental_f2) = trace.fundamental_f2 {
+            insert_complex_waveform(
+                &mut waveforms,
+                format!("{} F2", trace.name),
+                &frequencies,
+                fundamental_f2,
+                trace.unit,
+                abort,
+            )?;
+        }
+        for product in trace.products {
+            insert_complex_waveform(
+                &mut waveforms,
+                format!("{} {}/F1", trace.name, product.product.label()),
+                &frequencies,
+                product.ratios,
+                "ratio",
+                abort,
+            )?;
+        }
+        if let Some(thd_percent) = trace.thd_percent {
+            insert_scalar_waveform_checked(
+                &mut waveforms,
+                format!("{} THD", trace.name),
+                &frequencies,
+                thd_percent,
+                "%",
+                abort,
+            )?;
+        }
+    }
+    if waveforms.is_empty() {
+        return Err(SimulationError::SolverError(
+            "DISTO produced no retained result quantities".to_owned(),
+        ));
+    }
+
+    Ok(SimulationResult::Ac {
+        convergence: None,
+        noise_reference_temperature_kelvin: None,
+        reference_impedances_ohm: None,
+        frequencies,
+        waveforms,
+        measurements: Vec::new(),
+    })
+}
+
+fn insert_complex_waveform(
+    waveforms: &mut HashMap<String, WaveformData>,
+    name: String,
+    frequencies: &[f64],
+    values: Vec<num_complex::Complex64>,
+    unit: &str,
+    abort: &dyn AbortSignal,
+) -> Result<(), SimulationError> {
+    if name.trim().is_empty()
+        || values.len() != frequencies.len()
+        || values
+            .iter()
+            .any(|value| !value.re.is_finite() || !value.im.is_finite())
+    {
+        return Err(SimulationError::SolverError(
+            "DISTO returned an invalid complex result series".to_owned(),
+        ));
+    }
+    let mut real = Vec::with_capacity(values.len());
+    let mut imaginary = Vec::with_capacity(values.len());
+    for (index, value) in values.into_iter().enumerate() {
+        poll_periodically(abort, index)?;
+        real.push(value.re);
+        imaginary.push(value.im);
+    }
+    let mut waveform = WaveformData::new_complex(
+        name.clone(),
+        clone_values_with_abort(frequencies, abort)?,
+        real,
+        imaginary,
+    );
+    waveform.y_unit = unit.to_owned();
+    if waveforms.insert(name.clone(), waveform).is_some() {
+        return Err(SimulationError::SolverError(format!(
+            "DISTO returned duplicate result identity '{name}'"
+        )));
+    }
+    Ok(())
+}
+
+fn insert_scalar_waveform_checked(
+    waveforms: &mut HashMap<String, WaveformData>,
+    name: String,
+    frequencies: &[f64],
+    values: Vec<f64>,
+    unit: &str,
+    abort: &dyn AbortSignal,
+) -> Result<(), SimulationError> {
+    if name.trim().is_empty()
+        || values.len() != frequencies.len()
+        || values.iter().any(|value| !value.is_finite())
+    {
+        return Err(SimulationError::SolverError(
+            "DISTO returned an invalid scalar result series".to_owned(),
+        ));
+    }
+    super::ensure_not_aborted(abort)?;
+    let waveform = WaveformData {
+        name: name.clone(),
+        x_values: clone_values_with_abort(frequencies, abort)?,
+        y_values: values,
+        y_unit: unit.to_owned(),
+        is_complex: false,
+        y_imag: None,
+    };
+    if waveforms.insert(name.clone(), waveform).is_some() {
+        return Err(SimulationError::SolverError(format!(
+            "DISTO returned duplicate result identity '{name}'"
+        )));
+    }
+    Ok(())
+}
+
+fn spectra_to_complex_waveforms(
+    spectra: impl IntoIterator<Item = svc_runner::HbSpectrum>,
+    abort: &dyn AbortSignal,
+) -> Result<(Vec<f64>, HashMap<String, WaveformData>), SimulationError> {
+    let mut waveforms = HashMap::new();
+    let mut shared_frequencies: Option<Vec<f64>> = None;
+    for (spectrum_index, spectrum) in spectra.into_iter().enumerate() {
+        super::ensure_not_aborted(abort)?;
+        let svc_runner::HbSpectrum {
+            name,
+            unit,
+            frequencies,
+            coefficients,
+        } = spectrum;
+        if name.trim().is_empty()
+            || frequencies.is_empty()
+            || frequencies.len() != coefficients.len()
+        {
+            return Err(SimulationError::SolverError(format!(
+                "periodic spectrum {} has an invalid name or coefficient grid",
+                spectrum_index + 1
+            )));
+        }
+        let mut real = Vec::with_capacity(coefficients.len());
+        let mut imaginary = Vec::with_capacity(coefficients.len());
+        for (component_idx, (frequency, coefficient)) in
+            frequencies.iter().zip(coefficients).enumerate()
+        {
+            poll_periodically(abort, component_idx)?;
+            if !frequency.is_finite()
+                || *frequency < 0.0
+                || !coefficient.re.is_finite()
+                || !coefficient.im.is_finite()
+            {
+                return Err(SimulationError::SolverError(format!(
+                    "periodic spectrum '{}' contains invalid data at component {}",
+                    name,
+                    component_idx + 1
+                )));
+            }
+            real.push(coefficient.re);
+            imaginary.push(coefficient.im);
+        }
+        if frequencies.windows(2).any(|pair| pair[1] <= pair[0]) {
+            return Err(SimulationError::SolverError(format!(
+                "periodic spectrum '{}' has a non-increasing frequency grid",
+                name
+            )));
+        }
+        if let Some(shared) = &shared_frequencies {
+            if frequencies.len() != shared.len()
+                || frequencies
+                    .iter()
+                    .zip(shared)
+                    .any(|(actual, expected)| actual.to_bits() != expected.to_bits())
+            {
+                return Err(SimulationError::SolverError(format!(
+                    "periodic spectrum '{}' changed the shared frequency grid",
+                    name
+                )));
+            }
+        } else {
+            shared_frequencies = Some(frequencies.clone());
+        }
+        let mut waveform = WaveformData::new_complex(name.clone(), frequencies, real, imaginary);
+        waveform.y_unit = unit.to_owned();
+        if waveforms.insert(name, waveform).is_some() {
+            return Err(SimulationError::SolverError(
+                "periodic spectra contain duplicate signal names".to_owned(),
+            ));
+        }
+    }
+    let frequencies = shared_frequencies.ok_or_else(|| {
+        SimulationError::SolverError("periodic result contains no solved spectra".to_owned())
+    })?;
+    Ok((frequencies, waveforms))
+}
+
+fn clone_values_with_abort(
+    values: &[f64],
+    abort: &dyn AbortSignal,
+) -> Result<Vec<f64>, SimulationError> {
+    super::ensure_not_aborted(abort)?;
+    let mut cloned = Vec::with_capacity(values.len());
+    for (value_idx, value) in values.iter().enumerate() {
+        poll_periodically(abort, value_idx)?;
+        cloned.push(*value);
+    }
+    super::ensure_not_aborted(abort)?;
+    Ok(cloned)
+}
+
+#[inline]
+fn poll_periodically(abort: &dyn AbortSignal, index: usize) -> Result<(), SimulationError> {
+    const POLL_STRIDE: usize = 64;
+    if index.is_multiple_of(POLL_STRIDE) {
+        super::ensure_not_aborted(abort)?;
+    }
+    Ok(())
+}
+
+fn insert_scalar_waveform(
+    waveforms: &mut HashMap<String, WaveformData>,
+    name: String,
+    x_values: Vec<f64>,
+    y_values: Vec<f64>,
+    y_unit: &str,
+    _x_unit: &str,
+) {
+    waveforms.insert(
+        name.clone(),
+        WaveformData {
+            name,
+            x_values,
+            y_values,
+            y_unit: y_unit.to_string(),
+            is_complex: false,
+            y_imag: None,
+        },
+    );
+}
+
+fn fourier_output_unit(output_expression: &str) -> &'static str {
+    if svc_runner::fourier_output_is_current(output_expression) {
+        "A"
+    } else {
+        "V"
+    }
+}
+
+/// Read an exclusively owned study trial's freshly solved trajectory.
+pub(in crate::runner) fn run_spectral_from_trajectory(
+    spec: AnalysisSpec,
+    trajectory: &TransientTrajectoryArtifact,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    super::ensure_not_aborted(abort)?;
+    match spec {
+        AnalysisSpec::Fourier {
+            fundamental_freq,
+            num_harmonics,
+            num_periods,
+            output_node,
+            output_ref,
+            additional_outputs,
+            start_time,
+            stop_time,
+            compute_thd,
+            normalize,
+        } => run_fourier(
+            fundamental_freq,
+            FourierRunRequest {
+                num_harmonics,
+
+                num_periods,
+                output_node,
+                output_ref,
+                additional_outputs,
+                start_time,
+                stop_time,
+                compute_thd,
+                normalize,
+            },
+            trajectory,
+            abort,
+        ),
+        AnalysisSpec::Fft { request } => {
+            super::recorded_fft::run_from_trajectory(&request, trajectory, abort)
+        }
+        _ => Err(SimulationError::InvalidConfig(
+            "A spectral study requires Fourier or FFT".into(),
+        )),
+    }
+}
+
+fn hb_run_config(
+    spec: AnalysisSpec,
+    abort: &dyn AbortSignal,
+) -> Result<svc_runner::HbRunConfig, SimulationError> {
+    let AnalysisSpec::HarmonicBalance {
+        tones,
+        reltol,
+        abstol,
+        max_iterations,
+        damping,
+        min_damping,
+        oversample,
+        collocation_points,
+        max_mixing_order,
+        use_krylov,
+        gmres_restart,
+        source_stepping,
+        use_exact_jacobian,
+        verbose,
+    } = spec
+    else {
+        return Err(SimulationError::InvalidConfig(
+            "Expected harmonic balance study configuration".into(),
+        ));
+    };
+    let mut hb_tones = Vec::with_capacity(tones.len());
+    for tone in tones {
+        super::ensure_not_aborted(abort)?;
+        hb_tones.push(svc_runner::HbToneRunConfig {
+            frequency: tone.frequency,
+            harmonics: tone.harmonics,
+            source: tone.source,
+            name: tone.name,
+        });
+    }
+    let hb_cfg = svc_runner::HbRunConfig {
+        tones: hb_tones,
+        reltol,
+        abstol,
+        max_iterations,
+        damping,
+        min_damping,
+        oversample,
+        collocation_points,
+        max_mixing_order,
+        use_krylov,
+        gmres_restart,
+        source_stepping,
+        use_exact_jacobian,
+        verbose,
+    };
+    Ok(hb_cfg)
+}
+
+pub(in crate::runner) fn run_native_study_on_materialized(
+    spec: AnalysisSpec,
+    circuit: &rspice_core::Netlist,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    if matches!(spec, AnalysisSpec::Qpss { .. }) {
+        let config = spec.qpss_config().map_err(SimulationError::InvalidConfig)?;
+        let data = super::run_abort_aware_service(abort, || {
+            svc_runner::run_qpss_analysis_on_materialized_with_abort(circuit, config, abort)
+        })?;
+        super::ensure_not_aborted(abort)?;
+        return SimulationResult::from_qpss_operating_point(data.operating_point)
+            .map_err(SimulationError::InvalidConfig);
+    }
+    let config = hb_run_config(spec, abort)?;
+    let data = super::run_abort_aware_service(abort, || {
+        svc_runner::run_hb_analysis_on_materialized_with_abort(circuit, &config, abort)
+    })?;
+    project_hb_data(data, true, abort)
+}
+
+pub(in crate::runner) fn run_hb_consumer(
+    spec: AnalysisSpec,
+    circuit: &rspice_core::Netlist,
+    operating_point: &rspice_core::engine::HbOperatingPoint,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    super::ensure_not_aborted(abort)?;
+    match spec {
+        AnalysisSpec::Hbsp {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            ports,
+            max_sideband,
+            reltol,
+            abstol,
+            mixed_mode,
+            noise_parameters,
+            noise_reference,
+        } => run_hbsp(
+            circuit,
+            PspRunRequest {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+                ports,
+                max_sideband,
+                reltol,
+                abstol,
+                mixed_mode,
+                noise_parameters,
+                noise_reference,
+            },
+            operating_point,
+            abort,
+        ),
+        AnalysisSpec::Hbnoise {
+            input_sideband,
+            output_sideband,
+            noise_reference,
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            output_node,
+            output_ref,
+            input_source,
+            max_sideband,
+            integrated_noise,
+            noise_figure,
+            contributor_ranking,
+        } => run_hbnoise(
+            circuit,
+            HbnoiseRunRequest {
+                input_sideband,
+                output_sideband,
+                noise_reference,
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+                output_node,
+                output_ref,
+                input_source,
+                max_sideband,
+                integrated_noise,
+                noise_figure,
+                contributor_ranking,
+            },
+            operating_point,
+            abort,
+        ),
+        _ => Err(SimulationError::InvalidConfig(
+            "Expected HBSP or HBNOISE consumer".into(),
+        )),
+    }
+}
+
+pub(in crate::runner) fn run_hb_seeded_study_on_materialized(
+    producer: AnalysisSpec,
+    circuit: &rspice_core::Netlist,
+    seed: Option<&rspice_core::engine::PeriodicDcOperatingPointSeed>,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let config = hb_run_config(producer, abort)?;
+    let data = super::run_abort_aware_service(abort, || {
+        svc_runner::run_hb_analysis_with_dc_seed_on_materialized_with_abort(
+            circuit, &config, seed, abort,
+        )
+    })?;
+    project_hb_data(data, true, abort)
+}
+
+pub(in crate::runner) fn run_hb_study_on_materialized(
+    producer: AnalysisSpec,
+    consumer: AnalysisSpec,
+    circuit: &rspice_core::Netlist,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let config = hb_run_config(producer, abort)?;
+    let data = super::run_abort_aware_service(abort, || {
+        svc_runner::run_hb_analysis_on_materialized_with_abort(circuit, &config, abort)
+    })?;
+    run_hb_consumer(consumer, circuit, &data.operating_point, abort)
+}
+
+pub(in crate::runner) fn run_pss_study_on_materialized(
+    spec: AnalysisSpec,
+    circuit: &rspice_core::Netlist,
+    seed: &rspice_core::engine::PssDcOperatingPointSeed,
+    temperature_kelvin: f64,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let config = pss_run_config(spec)?;
+    let data = super::run_abort_aware_service(abort, || {
+        svc_runner::run_pss_analysis_on_materialized_with_abort(
+            circuit,
+            &config,
+            Some(seed),
+            Some(temperature_kelvin),
+            abort,
+        )
+    })?;
+    project_pss_data(data, abort)
+}
+
+fn pss_run_config(spec: AnalysisSpec) -> Result<svc_runner::PssRunConfig, SimulationError> {
+    let AnalysisSpec::Pss {
+        method,
+        fundamental_freq,
+        tone_sources,
+        tstab_periods,
+        points_per_period,
+        tolerance,
+        oscillator_mode,
+        oscillator_node,
+        num_harmonics,
+        integration_method,
+        tstab,
+        max_iterations,
+        abstol,
+        damping,
+        max_period_change,
+        verbose,
+    } = spec
+    else {
+        return Err(SimulationError::InvalidConfig(
+            "Expected a shooting PSS request".into(),
+        ));
+    };
+    if method != PssMethod::Shooting {
+        return Err(SimulationError::InvalidConfig(
+            "legacy HB-PSS mode is not executable; use a Harmonic Balance analysis".into(),
+        ));
+    }
+    Ok(svc_runner::PssRunConfig {
+        fundamental_freq,
+        tone_sources,
+        tstab_periods,
+        points_per_period,
+        num_harmonics,
+        tolerance,
+        oscillator_mode,
+        oscillator_node,
+        // The service layer sits below the editors, so it takes
+        // the engine's own method rather than the chooser's.
+        integration_method: integration_method.map(IntegrationMethod::core),
+        tstab,
+        max_iterations,
+        abstol,
+        damping,
+        max_period_change,
+        verbose,
+    })
+}
+
+pub(super) fn run_psp_study_consumer(
+    spec: AnalysisSpec,
+    circuit: &rspice_core::Netlist,
+    point: &rspice_core::engine::PssOperatingPoint,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    let AnalysisSpec::Psp {
+        start_freq,
+        stop_freq,
+        points_per_unit,
+        sweep,
+        ports,
+        max_sideband,
+        reltol,
+        abstol,
+        mixed_mode,
+        noise_parameters,
+        noise_reference,
+    } = spec
+    else {
+        return Err(SimulationError::InvalidConfig(
+            "Expected PSP study consumer".into(),
+        ));
+    };
+    run_periodic_sparameters(
+        PspRunRequest {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            ports,
+            max_sideband,
+            reltol,
+            abstol,
+            mixed_mode,
+            noise_parameters,
+            noise_reference,
+        },
+        abort,
+        |config| {
+            svc_runner::run_psp_analysis_from_pss_on_materialized_with_abort(
+                circuit, config, point, abort,
+            )
+        },
+    )
+}
+
+pub(in crate::runner) fn run_qp_study_consumer(
+    spec: AnalysisSpec,
+    circuit: &rspice_core::Netlist,
+    point: &rspice_core::engine::QpssOperatingPoint,
+    abort: &dyn AbortSignal,
+) -> Result<SimulationResult, SimulationError> {
+    super::ensure_not_aborted(abort)?;
+    match spec {
+        spec @ AnalysisSpec::Qpac { .. } => {
+            let card = spec.qpac_card().map_err(SimulationError::InvalidConfig)?;
+            let response = super::run_abort_aware_service(abort, || {
+                svc_runner::run_qpac_analysis_from_qpss_on_materialized_with_abort(
+                    circuit, &card, point, abort,
+                )
+            })?;
+            super::ensure_not_aborted(abort)?;
+            SimulationResult::from_qpac_response(std::sync::Arc::new(response))
+                .map_err(SimulationError::InvalidConfig)
+        }
+        spec @ AnalysisSpec::Qpxf { .. } => {
+            let card = spec.qpxf_card().map_err(SimulationError::InvalidConfig)?;
+            let response = super::run_abort_aware_service(abort, || {
+                svc_runner::run_qpxf_analysis_from_qpss_on_materialized_with_abort(
+                    circuit, &card, point, abort,
+                )
+            })?;
+            super::ensure_not_aborted(abort)?;
+            SimulationResult::from_qpxf_response(std::sync::Arc::new(response))
+                .map_err(SimulationError::InvalidConfig)
+        }
+        spec @ AnalysisSpec::Qpnoise { .. } => {
+            let card = spec
+                .qpnoise_card()
+                .map_err(SimulationError::InvalidConfig)?;
+            let response = super::run_abort_aware_service(abort, || {
+                svc_runner::run_qpnoise_analysis_from_qpss_on_materialized_with_abort(
+                    circuit, &card, point, abort,
+                )
+            })?;
+            super::ensure_not_aborted(abort)?;
+            SimulationResult::from_qpnoise_response(std::sync::Arc::new(response))
+                .map_err(SimulationError::InvalidConfig)
+        }
+        _ => Err(SimulationError::InvalidConfig(
+            "Expected QPAC, QPXF or QPNOISE study consumer".into(),
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests;

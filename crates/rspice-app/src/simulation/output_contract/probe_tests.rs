@@ -15,9 +15,7 @@ fn automatic_outputs_retain_dc_sweeps_and_native_noise_results() {
         .with_origin(crate::state::SavedOutputOrigin::Automatic);
     let dc_run = run(
         DECK,
-        "DC automatic",
         dc(false, false),
-        ".dc V1 -1 1 1",
         std::slice::from_ref(&automatic),
         OutputSelectionMode::Automatic,
     );
@@ -58,13 +56,12 @@ fn automatic_outputs_retain_dc_sweeps_and_native_noise_results() {
     );
     let noise_run = run(
         "Noise automatic\nV1 in 0 AC 1\nR1 in out 1k\nR2 out 0 1k\n.end\n",
-        "Noise automatic",
         noise,
-        ".noise V(out) V1 lin 1 1k 1k",
         &[automatic],
         OutputSelectionMode::Automatic,
     );
-    let result = &noise_run.analyses[0];
+    let result = noise_run.analyses.last().unwrap();
+    assert_eq!(result.analysis_type, crate::state::AnalysisType::Noise);
     assert!(result.success, "{:?}", result.error_message);
     assert!(
         !result.waveforms.is_empty(),
@@ -116,22 +113,29 @@ fn hb_device_current_saved_terminal_probes_preserve_hierarchy_phase_and_receipts
     assert!(rspice_app_types::raw_probe::validate_raw_probe("@M1[gm]").is_err());
     assert!(rspice_app_types::raw_probe::validate_raw_probe("@M1[ig]garbage").is_err());
     let deck = "Terminal currents\nVG gate 0 SIN(-1 .001 8meg)\nX1 gate cell\n.subckt cell g\nM1 0 g 0 0 nm L=1u W=10u M=3\n.model nm NMOS LEVEL=1 VTO=.7 KP=2e-5 TOX=20n CGSO=1e-10 CGDO=1e-10 CGBO=1e-11\n.ends\n.options GMIN=0\n.end\n";
-    let spec = AnalysisSpec::HarmonicBalance {
-        tones: vec![crate::simulation::multi_run::HbToneSpec::new(8e6, 3).with_source("VG")],
+    let config = rspice_simulation_contract::hb_draft::HbConfig {
+        fundamental_freq: 8e6,
+        num_harmonics: 3,
+        fundamental_source: Some("VG".into()),
+        additional_tones: Vec::new(),
         reltol: 1e-9,
         abstol: 1e-12,
-        max_iterations: 40,
+        maxiter: 40,
         damping: 1.0,
         min_damping: 0.01,
         oversample: 2,
         collocation_points: None,
         max_mixing_order: 3,
-        use_krylov: false,
+        solver: rspice_simulation_contract::hb_draft::HbSolverType::Newton,
         gmres_restart: 12,
         source_stepping: false,
         use_exact_jacobian: true,
         verbose: false,
     };
+    let spec = rspice_simulation::analysis_preparation::build_harmonic_balance_spec(
+        &rspice_simulation_contract::hb_draft::HbDialogState::from_config(&config),
+    )
+    .unwrap();
     let instance = AnalysisInstanceId::new();
     let mut contracts = outputs
         .iter()
@@ -143,13 +147,14 @@ fn hb_device_current_saved_terminal_probes_preserve_hierarchy_phase_and_receipts
         .collect::<Vec<_>>();
     PreparedSavedOutput::bind_deck(&mut contracts, &rspice_core::Netlist::parse(deck).unwrap())
         .unwrap();
-    let result = crate::simulation::runner::pvt_point_evidence::run_hb_spec_with_op(deck, spec);
-    let mut analysis = crate::simulation::SimulationController::new()
-        .convert_to_analysis_result_with_metadata_owned(
-            result,
-            crate::state::AnalysisType::HarmonicBalance,
-            "HB terminal outputs",
-        );
+    let source = rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
+        deck,
+        &config.to_spice(),
+    );
+    let mut analysis = crate::simulation::results::retained_manual_fixture(
+        &source,
+        crate::state::AnalysisType::HarmonicBalance,
+    );
     apply_saved_output_policy(
         &mut analysis,
         crate::simulation::execution::SavePolicy::PlanOwned {
@@ -161,7 +166,7 @@ fn hb_device_current_saved_terminal_probes_preserve_hierarchy_phase_and_receipts
         },
         &contracts,
     );
-    let state = crate::simulation::engine_bridge::nested_dc_tests::history(analysis);
+    let state = crate::simulation::controller::dc_history_tests::history(analysis);
     let stored = crate::io::capture_simulation_results(&state);
     stored.validate().unwrap();
     let loaded: crate::io::project_io::ProjectSimulationResults =
@@ -287,20 +292,7 @@ fn ac() -> AnalysisSpec {
 }
 
 fn execute(spec: AnalysisSpec, outputs: &[SavedOutput]) -> SimulationRun {
-    let line = match &spec {
-        AnalysisSpec::DcOp { .. } => ".op",
-        AnalysisSpec::Ac { .. } => ".ac lin 3 1 10",
-        AnalysisSpec::Transient { .. } => ".tran 1u 10u",
-        _ => ".dc V1 -1 1 1",
-    };
-    run(
-        DECK,
-        "Physical probes",
-        spec,
-        line,
-        outputs,
-        OutputSelectionMode::ExplicitOnly,
-    )
+    run(DECK, spec, outputs, OutputSelectionMode::ExplicitOnly)
 }
 
 fn materialized<'a>(run: &'a SimulationRun, name: &str, count: usize) -> Vec<&'a WaveformData> {
@@ -488,9 +480,7 @@ fn numeric_looking_node_names_are_not_numeric_values() {
     ];
     let run = run(
         deck,
-        "Literal nodes",
         AnalysisSpec::dc_op(),
-        ".op",
         &outputs,
         OutputSelectionMode::ExplicitOnly,
     );

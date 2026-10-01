@@ -17,7 +17,7 @@ fn exact_periodic_context() -> AnalysisDependencyRepairContext {
 fn set_periodic_carrier(
     plan: &mut SimulationPlan,
     id: AnalysisInstanceId,
-    carrier: crate::services::simulation_runner::PeriodicCarrier,
+    carrier: rspice_simulation_contract::periodic_carrier::PeriodicCarrier,
 ) {
     plan.edit(id, |draft| match draft {
         AnalysisDraft::Pac(setup) => setup.carrier_idx = carrier.index(),
@@ -52,7 +52,7 @@ fn every_declared_prerequisite_kind_repairs_to_an_exact_frozen_closure() {
             CARRIER_DEPENDENT_KINDS
                 .into_iter()
                 .flat_map(|kind| {
-                    crate::services::simulation_runner::PeriodicCarrier::ALL
+                    rspice_simulation_contract::periodic_carrier::PeriodicCarrier::ALL
                         .iter()
                         .map(move |carrier| (kind, Some(*carrier)))
                 })
@@ -66,7 +66,7 @@ fn every_declared_prerequisite_kind_repairs_to_an_exact_frozen_closure() {
         if let Some(carrier) = carrier {
             set_periodic_carrier(&mut plan, dependent, carrier);
             let expected = match carrier {
-                crate::services::simulation_runner::PeriodicCarrier::Hb => {
+                rspice_simulation_contract::periodic_carrier::PeriodicCarrier::Hb => {
                     AnalysisKind::HarmonicBalance
                 }
                 _ => AnalysisKind::Pss,
@@ -136,7 +136,7 @@ fn every_declared_prerequisite_kind_repairs_to_an_exact_frozen_closure() {
 /// both families in the plan in both orders.
 #[test]
 fn a_preceding_carrier_binds_to_the_nearest_periodic_solve_of_either_family() {
-    use crate::services::simulation_runner::PeriodicCarrier;
+    use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
 
     for kind in CARRIER_DEPENDENT_KINDS {
         for (nearer, farther) in [
@@ -211,7 +211,7 @@ fn a_preceding_carrier_binds_to_the_nearest_periodic_solve_of_either_family() {
 /// measurement under this request's name.
 #[test]
 fn a_named_harmonic_balance_carrier_ignores_a_nearer_shooting_solve() {
-    use crate::services::simulation_runner::PeriodicCarrier;
+    use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
 
     for kind in CARRIER_DEPENDENT_KINDS {
         let mut plan = SimulationPlan::empty();
@@ -263,7 +263,7 @@ fn a_named_harmonic_balance_carrier_ignores_a_nearer_shooting_solve() {
 /// same pairing, so the refusal arrives before the run instead of after it.
 #[test]
 fn phase_noise_refuses_a_harmonic_balance_carrier() {
-    use crate::services::simulation_runner::PeriodicCarrier;
+    use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
 
     let mut plan = SimulationPlan::empty();
     plan.insert(AnalysisKind::OperatingPoint)

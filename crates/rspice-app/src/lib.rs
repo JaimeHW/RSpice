@@ -181,9 +181,6 @@ pub(crate) mod source_revision;
 /// at runtime on wasm32-unknown-unknown, so every layer uses these instead.
 pub(crate) mod time_compat;
 
-/// Shared output specification helpers for analysis/sensitivity paths
-pub(crate) mod output_spec;
-
 /// Locating the production half of a source file that inspects itself, for the
 /// guards that assert their own shipped code takes no panic shortcuts.
 #[cfg(test)]
@@ -717,14 +714,14 @@ pub fn rspice_ui_wasm_jit_run_solver_probe() -> Result<f64, String> {
 pub fn run_rspice_ui_worker_request(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    simulation::runner::worker_contract::run_worker_request_value(value)
+    rspice_simulation::runner::run_worker_request_value(value)
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub fn prepare_rspice_ui_wasm_jit_request(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    simulation::runner::worker_contract::prepare_wasm_jit_request_value(value)
+    rspice_simulation::runner::prepare_wasm_jit_request_value(value)
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
@@ -756,14 +753,14 @@ pub fn install_rspice_ui_wasm_jit_dispatcher(dispatcher: js_sys::Function) {
 pub fn run_prepared_rspice_ui_wasm_jit_request(
     dispatch_token: u32,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    simulation::runner::worker_contract::run_prepared_wasm_jit_request_value(dispatch_token)
+    rspice_simulation::runner::run_prepared_wasm_jit_request_value(dispatch_token)
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub fn cancel_prepared_rspice_ui_wasm_jit_request(
     dispatch_token: u32,
 ) -> Result<(), wasm_bindgen::JsValue> {
-    simulation::runner::worker_contract::cancel_prepared_wasm_jit_request_value(dispatch_token)
+    rspice_simulation::runner::cancel_prepared_wasm_jit_request_value(dispatch_token)
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]

@@ -1,7 +1,7 @@
 //! Saved selections and deferred calculations use the complete quasi-periodic payload.
 use super::fixtures::output;
 use super::*;
-use crate::simulation::{SimulationResult, execution::SavePolicy, plan::QpssDraft};
+use crate::simulation::{execution::SavePolicy, plan::QpssDraft};
 use crate::state::{AnalysisResultPayload, AnalysisType, OutputSelectionMode};
 
 fn prepared(
@@ -14,7 +14,24 @@ fn prepared(
         .expect("eligible quasi-periodic output")
 }
 fn reload(analysis: AnalysisResult) -> AnalysisResult {
-    let state = crate::simulation::engine_bridge::nested_dc_tests::history(analysis);
+    let saved = crate::io::project_io::ProjectAnalysisResult::from(&analysis);
+    let decoded: crate::io::project_io::ProjectAnalysisResult =
+        serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+    assert_eq!(decoded, saved);
+    let crate::io::project_io::PersistedField::Value(payload) = decoded.result_payload else {
+        panic!("missing quasi-periodic payload")
+    };
+    assert_eq!(Some(&payload), analysis.result_payload.as_ref());
+    if let AnalysisResultPayload::Qpss { operating_point } = &payload {
+        operating_point
+            .validate_retained_payload_with_abort(
+                &rspice_core::ResourceLimits::default(),
+                &rspice_core::NoAbort,
+            )
+            .unwrap();
+        assert_eq!(operating_point.integral_names(), ["B:BMEMORY:sdt:0"]);
+    }
+    let state = crate::simulation::controller::dc_history_tests::history(analysis);
     let persisted = crate::io::capture_simulation_results(&state);
     let loaded: crate::io::project_io::ProjectSimulationResults =
         serde_json::from_slice(&serde_json::to_vec(&persisted).unwrap()).unwrap();
@@ -35,26 +52,17 @@ fn policy(mode: OutputSelectionMode) -> SavePolicy {
 }
 fn qpss() -> (AnalysisResult, AnalysisSpec) {
     let draft = QpssDraft {
-        tones: "1000, 1414.2135623730951".into(),
+        tones: "1000, 1414.213562373095".into(),
         harmonics: "1,1".into(),
         ..Default::default()
     };
     let spec = draft.to_spec().unwrap();
-    let deck = "QPSS saved outputs\nV1 out 0 DC 2\nR1 out 0 1k\n.end\n";
-    let point = crate::services::simulation_runner::run_qpss_analysis_with_source_path_and_abort(
-        deck,
-        spec.driven_qpss_config().unwrap(),
-        None,
-        &rspice_core::NoAbort,
-    )
-    .unwrap()
-    .operating_point;
-    let analysis = crate::simulation::controller::SimulationController::new()
-        .convert_to_analysis_result_with_metadata_owned(
-            SimulationResult::from_qpss_operating_point(point).unwrap(),
-            AnalysisType::Qpss,
-            "QPSS",
-        );
+    let deck = "QPSS transfer\nV1 in 0 SIN(.1 .2 1k)\nR1 in out 1k\nC1 out 0 1u\nI1 0 out SIN(0 .001 1414.213562373095)\nBmemory memory 0 V=1k*sdt(v(out)-v(memory))\nRmemory memory 0 1k\n";
+    let source = format!(
+        "{deck}{}\n.end\n",
+        spec.driven_qpss_config().unwrap().to_spice().unwrap()
+    );
+    let analysis = crate::simulation::results::retained_manual_fixture(&source, AnalysisType::Qpss);
     (analysis, spec)
 }
 #[test]
@@ -64,10 +72,13 @@ fn quasi_periodic_saved_outputs_select_physical_qpss_and_qpac_sources_without_lo
         .to_spec()
         .unwrap();
     for (original, spec) in [qpss(), (qpac, spec)] {
-        let basis =
-            AnalysisResult::retained_display_basis(original.result_payload.as_ref().unwrap())
-                .unwrap()
-                .unwrap();
+        let basis = original
+            .result_payload
+            .as_ref()
+            .unwrap()
+            .retained_waveform_basis()
+            .unwrap()
+            .unwrap();
         let expected = basis
             .iter()
             .find(|w| {

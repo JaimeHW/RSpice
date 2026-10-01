@@ -5,8 +5,8 @@ use super::*;
 #[cfg(test)]
 mod pvt_base_tests {
     use super::*;
-    use crate::simulation::runner::worker_contract::WorkerCornerBaseMode;
     use rspice_simulation::sweeps::CornerBaseMode;
+    use rspice_simulation_contract::worker_run_config::WorkerCornerBaseMode;
 
     #[test]
     fn pvt_base_transient_window_survives_configuration_and_worker_transport() {

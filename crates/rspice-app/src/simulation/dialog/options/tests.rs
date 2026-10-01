@@ -51,7 +51,7 @@ fn simulation_compatibility_survives_draft_persistence_and_execution_routes() {
             source, &restored,
         );
         let parsed = rspice_core::Netlist::parse(&deck).unwrap();
-        let engine = crate::services::simulation_runner::build_engine_config(&parsed, None);
+        let engine = rspice_simulation::netlist_preparation::build_engine_config(&parsed, None);
         let expected = compatibility
             .core_override()
             .unwrap_or(rspice_core::SpiceDialect::Xyce);

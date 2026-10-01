@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn monte_carlo_checkpoint_retention_project_round_trip_integrity_and_legacy_absence() {
-    use crate::simulation::runner::monte_carlo_checkpoint_tests::completed_checkpoint_fixture;
+    use crate::simulation::controller::test_execution::monte_carlo::completed_checkpoint_fixture;
     use crate::state::MonteCarloCheckpointEvidence;
 
     let (_, bytes, _) = completed_checkpoint_fixture();
@@ -327,5 +327,79 @@ fn project_file_round_trips_exact_result_family_metadata_and_migrates_v6_absence
             .family_metadata
             .is_none(),
         "legacy absence must remain explicit instead of being inferred from waveforms"
+    );
+}
+
+#[test]
+fn monte_carlo_checkpoint_file_round_trip_rejects_corruption_and_bounds() {
+    use crate::simulation::controller::test_execution::monte_carlo::completed_checkpoint_fixture;
+    use rspice_app_types::product::ContentDigest;
+    use rspice_formats::monte_carlo_checkpoint::{self as checkpoint_file, CheckpointFileError};
+    use rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointEvidence;
+    use rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointLibrary;
+
+    let (_, bytes, _) = completed_checkpoint_fixture();
+    let checkpoint = MonteCarloCheckpointEvidence::from_bytes(bytes.clone()).unwrap();
+    let source = String::from_utf8(checkpoint_file::encode(&checkpoint).unwrap()).unwrap();
+    let restored = checkpoint_file::decode(&source).unwrap();
+    assert_eq!(restored.bytes(), &*bytes);
+    assert_eq!(restored, checkpoint);
+    for change in 0..4 {
+        let mut document: serde_json::Value = serde_json::from_str(&source).unwrap();
+        match change {
+            0 => document["version"] = serde_json::json!(2),
+            1 => document["checkpoint"]["data"] = serde_json::json!("AAAA"),
+            2 => {
+                document["checkpoint"]["digest"] =
+                    serde_json::to_value(ContentDigest::from_bytes([5; 32])).unwrap()
+            }
+            _ => document["unknown"] = serde_json::json!(true),
+        }
+        let error = checkpoint_file::decode(&document.to_string()).unwrap_err();
+        assert!(match change {
+            0 => matches!(error, CheckpointFileError::UnsupportedFormat),
+            _ => matches!(error, CheckpointFileError::InvalidDocument(_)),
+        });
+    }
+    let mut library = MonteCarloCheckpointLibrary::default();
+    assert!(
+        library
+            .insert_bounded("a".into(), checkpoint.clone(), bytes.len())
+            .is_err()
+    );
+    assert!(library.is_empty());
+    assert!(
+        library
+            .insert("import.rspice-mc".into(), checkpoint.clone())
+            .unwrap()
+    );
+    assert!(
+        !library
+            .insert("duplicate.rspice-mc".into(), checkpoint.clone())
+            .unwrap()
+    );
+    let mut entries = serde_json::to_value(&library).unwrap();
+    let duplicate = entries[0].clone();
+    entries.as_array_mut().unwrap().push(duplicate);
+    assert!(serde_json::from_value::<MonteCarloCheckpointLibrary>(entries).is_err());
+    let frozen = library.clone();
+    assert!(library.remove(checkpoint.digest()));
+    assert!(library.is_empty());
+    assert_eq!(frozen.get(checkpoint.digest()), Some(&checkpoint));
+
+    // Imported inputs survive project result persistence without native runs.
+    let mut simulation = crate::state::SimulationState::default();
+    simulation.imported_monte_carlo_checkpoints = frozen;
+    let results = crate::io::capture_simulation_results(&simulation);
+    assert!(!results.is_empty());
+    let restored: crate::io::ProjectSimulationResults =
+        serde_json::from_str(&serde_json::to_string(&results).unwrap()).unwrap();
+    let restored = crate::io::simulation_state_from_results(restored).unwrap();
+    assert!(restored.runs.is_empty());
+    assert_eq!(
+        restored
+            .imported_monte_carlo_checkpoints
+            .get(checkpoint.digest()),
+        Some(&checkpoint)
     );
 }

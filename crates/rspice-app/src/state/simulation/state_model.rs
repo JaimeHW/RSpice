@@ -11,13 +11,6 @@ use crate::product::DatasetId;
 // Simulation State
 //=============================================================================
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SimulationRunIntent {
-    #[default]
-    SimulateRunSet,
-    ManualDeck,
-}
-
 /// Simulation execution state
 #[derive(Debug, Clone, Default)]
 pub struct SimulationState {

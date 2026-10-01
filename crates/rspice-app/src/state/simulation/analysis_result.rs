@@ -164,21 +164,6 @@ impl AnalysisResult {
         self.data = self.data.with_provenance(provenance);
         self
     }
-    pub(crate) fn retained_display_basis(
-        payload: &AnalysisResultPayload,
-    ) -> Result<Option<Vec<WaveformData>>, String> {
-        Ok(payload.retained_waveform_basis()?.map(|waveforms| {
-            waveforms
-                .into_iter()
-                .map(|data| WaveformData {
-                    data,
-                    color: "#f5b700".to_owned(),
-                    visible: true,
-                    display_cache: None,
-                })
-                .collect()
-        }))
-    }
 }
 
 #[cfg(test)]

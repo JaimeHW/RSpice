@@ -5,456 +5,12 @@
 //! the run that produced them has actually completed.
 
 use super::*;
-mod multirate_envelope;
 use crate::simulation::plan::AnalysisKind;
 use crate::state::{ComponentType, Point, PreparedSourceCheckReceipt, SimulationRunProvenance};
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 use std::cell::RefCell;
 use std::path::Path;
-
-#[test]
-fn studio_ac_data_authored_columns_and_netlist_tables_reach_results() {
-    use crate::simulation::config::AcDataTableOptions;
-    use crate::simulation::plan::{AcDataDraft, AnalysisDraft};
-    use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
-    use rspice_simulation::results::SimulationResult;
-
-    let state = AppState::default();
-    let mut draft = AcDataDraft {
-        table_name: "points:1".into(),
-        frequencies: "1k, 0, 1k".into(),
-        ..Default::default()
-    };
-    for (name, values) in [("load", "1k, 2k, 500"), ("R1:R", "1k, 1k, 2k")] {
-        draft.parameter_columns.push(Default::default());
-        let column = draft.parameter_columns.last_mut().unwrap();
-        column.name = name.into();
-        column.values = values.into();
-    }
-    let spec_for = |draft: &AcDataDraft| {
-        let json = serde_json::to_value(draft).unwrap();
-        let restored: AcDataDraft = serde_json::from_value(json.clone()).unwrap();
-        assert_eq!(serde_json::to_value(&restored).unwrap(), json);
-        let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-            &analysis_inputs(&state),
-            &AnalysisDraft::AcData(restored),
-        )
-        .unwrap();
-        spec.validate().unwrap();
-        let worker = WorkerAnalysisSpec::try_from(&spec).unwrap();
-        let worker: WorkerAnalysisSpec =
-            serde_json::from_value(serde_json::to_value(worker).unwrap()).unwrap();
-        assert_eq!(AnalysisSpec::from(worker), spec);
-        spec
-    };
-    for name in ["2026-study", "bad name", "500", "pts+tail", "$pts"] {
-        let mut invalid = draft.clone();
-        invalid.table_name = name.into();
-        assert!(invalid.to_config().is_err(), "accepted table name {name}");
-    }
-    let authored = spec_for(&draft);
-    let cards = rspice_simulation::analysis_preparation::build_ac_data_command(&authored).unwrap();
-    let source = format!(
-        "AC row controls\n.param load=900\nV1 in 0 AC 1\nR1 in out 900\nR2 out 0 {{load}}\n{cards}\n.end\n"
-    );
-    for from_netlist in [false, true] {
-        let mut selected = draft.clone();
-        selected.from_netlist = from_netlist;
-        if from_netlist {
-            selected.frequencies = "unfinished frequency".into();
-            selected.parameter_columns[0].values = "unfinished value".into();
-        }
-        let spec = spec_for(&selected);
-        let command =
-            rspice_simulation::analysis_preparation::build_ac_data_command(&spec).unwrap();
-        if from_netlist {
-            assert_eq!(command, ".ac DATA=points:1");
-        }
-        let run = crate::simulation::runner::pvt_point_evidence::run_declaration(
-            &source,
-            "AC table",
-            QueuedAnalysis {
-                spec,
-                config: None,
-                spec_options: Default::default(),
-                analysis_line: command,
-                numeric_override: None,
-            },
-            27.0,
-            crate::simulation::execution::SavePolicy::RetainEngineProducedResults,
-            &[],
-        )
-        .unwrap();
-        assert_eq!(run.analyses.len(), 1);
-        let analysis = &run.analyses[0];
-        assert!(analysis.success, "{:?}", analysis.error_message);
-        let output = analysis
-            .waveforms
-            .iter()
-            .find(|waveform| waveform.name.eq_ignore_ascii_case("|V(out)|"))
-            .unwrap();
-        assert_eq!(
-            output.x.iter().copied().collect::<Vec<_>>(),
-            [1000.0, 0.0, 1000.0]
-        );
-        for (actual, expected) in output.y.iter().zip([0.5, 2.0 / 3.0, 0.2]) {
-            assert!((actual - expected).abs() < 1e-10, "{actual} != {expected}");
-        }
-    }
-
-    // Direct worker requests carry complete columns even without generated cards.
-    let AnalysisSpec::AcData {
-        table_name,
-        frequencies,
-        table_options,
-    } = authored
-    else {
-        unreachable!()
-    };
-    let bare = "AC direct\n.param load=900\nV1 in 0 AC 1\nR1 in out 900\nR2 out 0 {load}\n.end\n";
-    let bridge = crate::simulation::EngineBridge::new();
-    let run = |source: &str, frequencies: Vec<f64>, options: &AcDataTableOptions| {
-        bridge.run_ac_data_with_source_path(
-            source,
-            None,
-            &table_name,
-            frequencies,
-            options,
-            &rspice_core::NoAbort,
-        )
-    };
-    let SimulationResult::Ac {
-        waveforms,
-        frequencies: actual_axis,
-        ..
-    } = run(bare, frequencies.clone(), &table_options).unwrap()
-    else {
-        panic!("AC result")
-    };
-    assert_eq!(actual_axis, frequencies);
-    for (actual, expected) in waveforms["V(OUT)"]
-        .y_values
-        .iter()
-        .zip([0.5, 2.0 / 3.0, 0.2])
-    {
-        assert!((actual - expected).abs() < 1e-10);
-    }
-    let mut mismatch = table_options.clone();
-    mismatch.parameter_columns[0].values[0] = 2000.0;
-    assert!(
-        run(&source, frequencies.clone(), &mismatch)
-            .unwrap_err()
-            .to_string()
-            .contains("configured parameter values")
-    );
-    let reference = AcDataTableOptions {
-        from_netlist: true,
-        ..Default::default()
-    };
-    assert!(
-        run(bare, Vec::new(), &reference)
-            .unwrap_err()
-            .to_string()
-            .contains("unknown .DATA table")
-    );
-    for (name, values) in [
-        ("HERTZ", "1 2 3"),
-        ("LOAD", "1 2 3"),
-        ("bad name", "1 2 3"),
-        ("extra", "1 2"),
-    ] {
-        let mut invalid = draft.clone();
-        invalid.parameter_columns.push(Default::default());
-        let column = invalid.parameter_columns.last_mut().unwrap();
-        column.name = name.into();
-        column.values = values.into();
-        assert!(invalid.to_config().is_err(), "{name}: {values}");
-    }
-}
-
-#[test]
-fn transient_noise_seed_inheritance_and_zero_scale_reach_the_solver() {
-    use crate::simulation::plan::{AnalysisDraft, TransientNoiseDraft};
-    use crate::simulation::runner::worker_contract::WorkerAnalysisSpec;
-
-    let state = AppState::default();
-    let draft = |seed: &str, scale: &str| TransientNoiseDraft {
-        stop_time: "64n".into(),
-        step_time: "1n".into(),
-        start_time: "0".into(),
-        max_step: "1n".into(),
-        seed: seed.into(),
-        noise_fmax: "1G".into(),
-        noise_fmin: "1M".into(),
-        scale: scale.into(),
-        use_initial_conditions: false,
-    };
-    let run = |seed: &str, scale: &str| {
-        let json = serde_json::to_value(draft(seed, scale)).unwrap();
-        let restored: TransientNoiseDraft = serde_json::from_value(json.clone()).unwrap();
-        let mut restored = AnalysisDraft::TransientNoise(restored);
-        restored.prepare_after_restore();
-        assert!(restored.manifest_configuration_error().is_none());
-        let AnalysisDraft::TransientNoise(settings) = &restored else {
-            unreachable!()
-        };
-        assert_eq!(serde_json::to_value(settings).unwrap(), json);
-        let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-            &analysis_inputs(&state),
-            &restored,
-        )
-        .unwrap();
-        spec.validate().unwrap();
-        let wire = WorkerAnalysisSpec::try_from(&spec).unwrap();
-        let wire: WorkerAnalysisSpec =
-            serde_json::from_value(serde_json::to_value(wire).unwrap()).unwrap();
-        let restored = AnalysisSpec::from(wire);
-        assert_eq!(spec, restored);
-        let card =
-            rspice_simulation::analysis_preparation::build_transient_noise_command(&restored)
-                .unwrap();
-        assert_eq!(card.contains("NOISESEED="), !seed.trim().is_empty());
-        let source = format!(
-            "transient noise controls\n.options seed=0\nV1 in 0 1\nR1 in out 10k\nR2 out 0 10k\n{card}\n.end\n"
-        );
-        let parsed = rspice_core::Netlist::parse(&source).unwrap();
-        let noise = parsed.options.transient_noise.unwrap();
-        assert_eq!(noise.seed, settings.parsed_seed().unwrap());
-        assert_eq!(noise.scale, scale.parse::<f64>().unwrap());
-        let result = crate::simulation::runner::pvt_point_evidence::run_declaration(
-            &source,
-            "Transient noise",
-            QueuedAnalysis {
-                spec: restored,
-                config: None,
-                spec_options: Default::default(),
-                analysis_line: card,
-                numeric_override: None,
-            },
-            27.0,
-            crate::simulation::execution::SavePolicy::RetainEngineProducedResults,
-            &[],
-        )
-        .unwrap();
-        assert_eq!(result.analyses.len(), 1);
-        let analysis = &result.analyses[0];
-        assert!(analysis.success, "{:?}", analysis.error_message);
-        assert_eq!(analysis.analysis_type, AnalysisType::TransientNoise);
-        let output = analysis
-            .waveforms
-            .iter()
-            .find(|waveform| {
-                waveform.name.eq_ignore_ascii_case("out")
-                    || waveform.name.eq_ignore_ascii_case("V(out)")
-            })
-            .unwrap();
-        let time = output.x.iter().copied().collect::<Vec<_>>();
-        let values = output.y.iter().copied().collect::<Vec<_>>();
-        assert!(!time.is_empty());
-        assert_eq!(time.len(), values.len());
-        assert!(values.iter().all(|value| value.is_finite()));
-        (time, values)
-    };
-
-    let inherited = run("", "1");
-    let explicit_zero = run("0", "1");
-    let another_seed = run("1", "1");
-    let deterministic = run("0", "0");
-    let doubled = run("0", "2");
-    assert_eq!(
-        inherited, explicit_zero,
-        "blank seed inherits .OPTIONS SEED=0"
-    );
-    assert_ne!(
-        explicit_zero.1, another_seed.1,
-        "zero is a real random seed"
-    );
-    assert_eq!(explicit_zero.0, doubled.0);
-    assert_eq!(explicit_zero.0, deterministic.0);
-    assert!(
-        explicit_zero
-            .1
-            .iter()
-            .any(|value| (value - 0.5).abs() > 1e-8)
-    );
-    for ((single, double), silent) in explicit_zero.1.iter().zip(&doubled.1).zip(&deterministic.1) {
-        assert!(
-            (silent - 0.5).abs() < 1e-10,
-            "zero scale preserves the DC divider solution"
-        );
-        assert!(((double - silent) - 2.0 * (single - silent)).abs() < 1e-10);
-    }
-
-    for seed in ["", "0", "18446744073709551615"] {
-        assert!(
-            rspice_simulation::analysis_preparation::analysis_draft_spec(
-                &analysis_inputs(&state),
-                &AnalysisDraft::TransientNoise(draft(seed, "0"))
-            )
-            .is_ok()
-        );
-    }
-    for seed in ["-1", "1.5", "18446744073709551616", "unfinished"] {
-        assert!(
-            rspice_simulation::analysis_preparation::analysis_draft_spec(
-                &analysis_inputs(&state),
-                &AnalysisDraft::TransientNoise(draft(seed, "1"))
-            )
-            .is_err(),
-            "{seed}"
-        );
-    }
-    for scale in ["-1", "NaN", "inf"] {
-        assert!(
-            rspice_simulation::analysis_preparation::analysis_draft_spec(
-                &analysis_inputs(&state),
-                &AnalysisDraft::TransientNoise(draft("0", scale))
-            )
-            .is_err(),
-            "{scale}"
-        );
-    }
-}
-
-#[test]
-fn sensitivity_dc_limit_and_disabled_ac_fields_reach_the_solver_and_results() {
-    use crate::simulation::dialog::sens::{SensConfig, SensDialogState};
-    use crate::simulation::plan::AnalysisDraft;
-    use crate::simulation::runner::worker_contract::{WorkerAnalysisSpec, WorkerSimulationResult};
-    use crate::state::SensitivityBasisEvidence;
-    use rspice_simulation::results::SimulationResult;
-    let source = "DC-limit sensitivity\n.param rt=1k\nV1 in 0 DC 1 AC 1\nR1 in out {rt}\nR2 out 0 1k\n.end\n";
-    for (ac_mode, stop, expected_frequencies) in [
-        (true, "", vec![0.0]),
-        (true, "1000", vec![0.0, 500.0, 1000.0]),
-        (true, "0", vec![0.0]),
-        (false, "not-a-frequency", Vec::new()),
-    ] {
-        let mut draft = SensDialogState::from_config(&SensConfig::default());
-        draft.output_expr = "V(out)".into();
-        draft.filter = "PARAM:rt".into();
-        draft.sens_type_idx = usize::from(ac_mode);
-        draft.ac_freq = if ac_mode {
-            "0"
-        } else {
-            "invalid retained frequency"
-        }
-        .into();
-        draft.ac_stop = stop.into();
-        draft.ac_points = if ac_mode {
-            "3"
-        } else {
-            "invalid retained count"
-        }
-        .into();
-        draft.ac_sweep_idx = if ac_mode { 2 } else { 99 };
-        let json = serde_json::to_value(&draft).unwrap();
-        let restored: SensDialogState = serde_json::from_value(json.clone()).unwrap();
-        let mut restored = AnalysisDraft::Sensitivity(restored);
-        restored.prepare_after_restore();
-        let mut state = AppState::default();
-        state.sim_setup.apply_analysis_draft_projection(&restored);
-        let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
-            &analysis_inputs(&state),
-            &restored,
-        )
-        .unwrap();
-        spec.validate().unwrap();
-        assert_eq!(serde_json::to_value(&state.sim_setup.sens).unwrap(), json);
-        let wire = WorkerAnalysisSpec::try_from(&spec).unwrap();
-        let restored: WorkerAnalysisSpec =
-            serde_json::from_value(serde_json::to_value(&wire).unwrap()).unwrap();
-        let spec = AnalysisSpec::from(restored);
-        spec.validate().unwrap();
-        let config =
-            rspice_simulation::analysis_preparation::analysis_spec_to_config(&spec).unwrap();
-        let AnalysisConfig::Sensitivity(sensitivity) = &config else {
-            panic!("SENS config")
-        };
-        let card = sensitivity.to_spice();
-        if ac_mode {
-            assert!(card.contains(" AC LIN "), "{card}");
-        } else {
-            assert_eq!(card, ".sens V(out) PARAM:RT");
-        }
-        rspice_core::Netlist::parse(&source.replace(".end", &format!("{card}\n.end"))).unwrap();
-        let result = crate::simulation::EngineBridge::new()
-            .run(&config, source)
-            .unwrap();
-        let wire = WorkerSimulationResult::try_from(result).unwrap();
-        let restored: WorkerSimulationResult =
-            serde_json::from_value(serde_json::to_value(&wire).unwrap()).unwrap();
-        let SimulationResult::SensitivityStudy { evidence } = SimulationResult::from(restored)
-        else {
-            panic!("SENS evidence")
-        };
-        evidence.validate().unwrap();
-        if let SensitivityBasisEvidence::Ac { frequencies_hz, .. } = &evidence.basis {
-            assert_eq!(*frequencies_hz, expected_frequencies);
-        } else {
-            assert!(!ac_mode);
-        }
-        let row = evidence
-            .rows
-            .iter()
-            .find(|row| row.parameter == "PARAM:RT")
-            .unwrap();
-        for (raw, normalized) in row.raw.iter().zip(&row.normalized) {
-            assert!((raw.value().unwrap() + 0.00025).abs() < 1e-10);
-            assert!((normalized.value().unwrap() + 0.5).abs() < 1e-6);
-        }
-        let retained = SimulationController::new().convert_to_analysis_result_with_metadata_owned(
-            SimulationResult::SensitivityStudy {
-                evidence: evidence.clone(),
-            },
-            AnalysisType::Sensitivity,
-            "SENS",
-        );
-        assert!(retained.success);
-        let payload: crate::state::AnalysisResultPayload = serde_json::from_value(
-            serde_json::to_value(retained.result_payload.as_ref().unwrap()).unwrap(),
-        )
-        .unwrap();
-        payload.validate_for(AnalysisType::Sensitivity).unwrap();
-        if ac_mode {
-            let mut invalid = (*evidence).clone();
-            let SensitivityBasisEvidence::Ac { frequencies_hz, .. } = &mut invalid.basis else {
-                unreachable!()
-            };
-            frequencies_hz[0] = -1.0;
-            assert!(invalid.validate().is_err());
-        }
-    }
-
-    for frequency in [None, Some(f64::NAN), Some(f64::INFINITY), Some(-1.0)] {
-        let spec = AnalysisSpec::Sensitivity {
-            output_var: "V(out)".into(),
-            ac_mode: true,
-            frequency,
-            filter: String::new(),
-            sweep: None,
-        };
-        assert!(spec.validate().is_err(), "{spec:?}");
-    }
-    for variation in [
-        crate::simulation::multi_run::FrequencySweep::Decade,
-        crate::simulation::multi_run::FrequencySweep::Octave,
-    ] {
-        let spec = AnalysisSpec::Sensitivity {
-            output_var: "V(out)".into(),
-            ac_mode: true,
-            frequency: Some(0.0),
-            filter: String::new(),
-            sweep: Some(rspice_simulation_contract::config::SensitivitySweepSpec {
-                stop_frequency: 1000.0,
-                points: 3,
-                variation,
-            }),
-        };
-        assert!(spec.validate().is_err());
-    }
-}
 
 #[test]
 fn transient_specialized_views_never_outlive_their_retained_source() {
@@ -592,7 +148,7 @@ fn save_all_retains_engine_results_while_explicit_empty_retains_none() {
 }
 
 #[derive(Debug, Default)]
-struct MockExportWorkflowIo {
+pub(super) struct MockExportWorkflowIo {
     writes: RefCell<Vec<(PathBuf, String)>>,
     create_only_writes: RefCell<Vec<(PathBuf, String)>>,
 }
@@ -829,7 +385,12 @@ fn sealing_a_failure_declares_a_new_dataset_generation() {
 /// `run.success = false` at a call site fails a test by itself.
 #[test]
 fn no_shipped_path_fails_a_run_outside_the_sealing_helper() {
-    let offenders = crate::source_guard::production_half(include_str!("../controller.rs"))
+    let production = [
+        crate::source_guard::production_half(include_str!("../controller.rs")),
+        include_str!("completion.rs"),
+    ]
+    .join("\n");
+    let offenders = production
         .lines()
         .enumerate()
         .filter(|(_, line)| line.contains("run.success = false"))
@@ -859,7 +420,11 @@ fn no_shipped_path_fails_a_run_outside_the_sealing_helper() {
 /// the point of use says which run it came from.
 #[test]
 fn the_published_periodic_carrier_is_captured_at_dispatch_and_dies_with_its_task() {
-    let production = crate::source_guard::production_half(include_str!("../controller.rs"));
+    let production = [
+        crate::source_guard::production_half(include_str!("../controller.rs")),
+        include_str!("completion.rs"),
+    ]
+    .join("\n");
     // Split so this test's own source can neither satisfy nor trip the scan.
     let carrier = ["current_periodic", "_carrier_hz"].concat();
     let cleared_carrier = production
@@ -1157,10 +722,10 @@ fn design_context_reset_discards_pending_controller_result() {
     controller.current_spec = Some(AnalysisSpec::dc_op());
     controller.current_analysis_idx = 1;
     controller.total_analyses = 1;
-    controller
-        .runner
-        .store_pending_result(Ok(synthetic_dc_op_result()))
-        .expect("seed old pending result");
+    controller.runner = super::test_execution::start_manual_deck(
+        "Old design\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n",
+    );
+    super::test_execution::wait_until_finished_unpolled(&controller.runner);
 
     state.clear_design_execution_context();
     controller.update(&mut state, &export_io);
@@ -1237,10 +802,11 @@ fn abort_trigger_discards_worker_aborted_result_without_failed_analysis() {
     controller.current_spec = Some(AnalysisSpec::dc_op());
     controller.current_analysis_idx = 1;
     controller.total_analyses = 1;
-    controller
-        .runner
-        .store_pending_result(Err(rspice_simulation::error::SimulationError::Aborted))
-        .expect("seed worker abort result");
+    controller.runner = super::test_execution::start_manual_deck(
+        "Cancelled task\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n",
+    );
+    controller.runner.abort();
+    super::test_execution::wait_until_finished_unpolled(&controller.runner);
     bind_and_request_test_abort(&mut state, &mut controller);
 
     controller.update(&mut state, &export_io);
@@ -1266,10 +832,10 @@ fn abort_trigger_discards_unpolled_success_result() {
     controller.current_spec = Some(AnalysisSpec::dc_op());
     controller.current_analysis_idx = 1;
     controller.total_analyses = 1;
-    controller
-        .runner
-        .store_pending_result(Ok(synthetic_dc_op_result()))
-        .expect("seed unpolled success result");
+    controller.runner = super::test_execution::start_manual_deck(
+        "Completed task\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n",
+    );
+    super::test_execution::wait_until_finished_unpolled(&controller.runner);
     bind_and_request_test_abort(&mut state, &mut controller);
 
     controller.update(&mut state, &export_io);
@@ -1305,12 +871,7 @@ fn completed_result_attaches_to_started_run_when_active_selection_changes() {
     controller.current_provenance = Some(provenance);
     controller.current_analysis_idx = 1;
     controller.total_analyses = 1;
-    controller
-        .runner
-        .store_pending_result(Ok(synthetic_dc_op_result()))
-        .expect("seed completed run result");
-
-    controller.update(&mut state, &export_io);
+    controller.accept_completion(&mut state, &export_io, Ok(synthetic_dc_op_result()));
 
     let older_run = state
         .simulation
@@ -1379,9 +940,10 @@ fn completed_transient_result_reuses_owned_waveform_buffers_in_run_history() {
         },
     );
 
-    controller
-        .runner
-        .store_pending_result(Ok(crate::simulation::SimulationResult::Transient {
+    controller.accept_completion(
+        &mut state,
+        &export_io,
+        Ok(crate::simulation::SimulationResult::Transient {
             spectra: Vec::new(),
             time,
             waveforms,
@@ -1389,10 +951,8 @@ fn completed_transient_result_reuses_owned_waveform_buffers_in_run_history() {
             periodic_state: None,
             convergence: Default::default(),
             events: Default::default(),
-        }))
-        .expect("seed completed transient result");
-
-    controller.update(&mut state, &export_io);
+        }),
+    );
 
     let analysis = state
         .simulation
@@ -1456,18 +1016,17 @@ fn completed_dc_sweep_result_reuses_owned_shared_axis_buffers_in_run_history() {
         },
     );
 
-    controller
-        .runner
-        .store_pending_result(Ok(crate::simulation::SimulationResult::DcSweep {
+    controller.accept_completion(
+        &mut state,
+        &export_io,
+        Ok(crate::simulation::SimulationResult::DcSweep {
             evidence: None,
             sweep_var: "V1".to_string(),
             sweep_values,
             waveforms,
             measurements: Vec::new(),
-        }))
-        .expect("seed completed DC sweep result");
-
-    controller.update(&mut state, &export_io);
+        }),
+    );
 
     let analysis = state
         .simulation
@@ -1505,14 +1064,11 @@ fn failed_completion_retains_exact_prepared_task_provenance() {
     controller.current_provenance = Some(provenance);
     controller.current_analysis_idx = 1;
     controller.total_analyses = 1;
-    controller
-        .runner
-        .store_pending_result(Err(SimulationError::SolverError(
-            "singular matrix".to_owned(),
-        )))
-        .expect("seed failed result");
-
-    controller.update(&mut state, &export_io);
+    controller.accept_completion(
+        &mut state,
+        &export_io,
+        Err(SimulationError::SolverError("singular matrix".to_owned())),
+    );
 
     let analysis = &state.simulation.active_run().expect("run remains").analyses[0];
     let restored = analysis
@@ -1530,103 +1086,68 @@ fn failed_completion_retains_exact_prepared_task_provenance() {
 
 #[test]
 fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
-    use crate::product::ProcessCorner;
-    use crate::product::{ContentDigest, ObjectRevision};
-    use crate::simulation::execution::ExecutionTargetCapabilities;
-    use crate::simulation::execution::PreparedRunAuthorization;
-    use crate::simulation::execution::PreparedRunSnapshot;
-    use crate::simulation::execution::PreparedTask;
-    use crate::simulation::execution::RunSourceReceipt;
-    use crate::simulation::execution::SavePolicy;
-    use crate::simulation::execution::SnapshotParts;
-    use rspice_simulation::execution_artifact::PreparedDependencyBinding;
+    use crate::simulation::plan::AnalysisDraft;
+    use rspice_simulation_contract::fourier_draft::{FourierConfig, FourierDialogState};
 
-    let prerequisite_id = crate::product::AnalysisInstanceId::new();
-    let dependent_id = crate::product::AnalysisInstanceId::new();
-    let task = |spec, line: &str| QueuedAnalysis {
-        spec,
-        config: None,
-        spec_options: SpecExecutionOptions::default(),
-        analysis_line: line.to_owned(),
-        numeric_override: None,
-    };
-    let prerequisite = PreparedTask::new(
-        prerequisite_id,
-        ObjectRevision::INITIAL,
-        Vec::new(),
-        "Prerequisite",
-        task(
-            AnalysisSpec::Transient {
-                stop_time: 1.0,
-                step_time: 0.005,
-                start_time: 0.0,
-                max_timestep: None,
-                uic: false,
-            },
-            ".tran 0.005 1",
-        ),
-    );
-    let mut dependent = PreparedTask::new(
-        dependent_id,
-        ObjectRevision::INITIAL,
-        vec![prerequisite_id],
-        "Dependent",
-        task(
-            AnalysisSpec::Fourier {
-                fundamental_freq: 2.0,
-                num_harmonics: 4,
-                num_periods: 1,
-                output_node: "out".to_owned(),
-                output_ref: "0".to_owned(),
-                additional_outputs: Vec::new(),
-                start_time: 0.0,
-                stop_time: 1.0,
-                compute_thd: true,
-                normalize: false,
-            },
-            ".four 2 V(out)",
-        ),
-    );
-    dependent.set_dependency_bindings(vec![PreparedDependencyBinding::transient_trajectory(
-        prerequisite_id,
-        prerequisite.source_revision(),
-        prerequisite.config_digest(),
-    )]);
-    let snapshot = PreparedRunSnapshot::new(SnapshotParts {
-        measurement_references: Default::default(),
-        intent: SimulationRunIntent::SimulateRunSet,
-        simulation_plan_id: Some(crate::product::SimulationPlanId::new()),
-        project_revision: 3,
-        topology_revision: 4,
-        source_digest: ContentDigest::from_bytes([0x71; 32]),
-        reference_process: ProcessCorner::TT,
-        reference_temperature_celsius: 27.0,
-        run_set: None,
-        tasks: vec![prerequisite, dependent],
-        executable_netlist: "deck\n.op\n.end\n".to_owned(),
-        save_policy: SavePolicy::RetainEngineProducedResults,
-        model_identities: Vec::new(),
-        project_model_sources: Vec::new(),
-        specifications: Vec::new(),
-        specification_policy: crate::state::PreparedSpecificationPolicy::default(),
-        project_veriloga_runtimes: Default::default(),
-        target: ExecutionTargetCapabilities::current(),
-        receipt: RunSourceReceipt::SchematicDrc(ContentDigest::from_bytes([0x72; 32])),
-        advisories: Vec::new(),
-        manual_source: None,
-        cross_probe: None,
-        touchstone_export: TouchstoneExportPolicy::disabled(),
-        sealed_source_dependencies: Vec::new(),
+    let mut state = super::prepared_run::tests::runnable_state();
+    state.sim_setup.run_set = crate::simulation::run_set::RunSetState::reference_only();
+    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    for id in plan
+        .instances()
+        .iter()
+        .map(|instance| instance.id())
+        .collect::<Vec<_>>()
+    {
+        plan.set_enabled(id, false).unwrap();
+    }
+    let (prerequisite_id, _) = plan.insert(AnalysisKind::Transient).unwrap();
+    let (dependent_id, _) = plan.insert(AnalysisKind::Fourier).unwrap();
+    plan.edit(prerequisite_id, |draft| {
+        let AnalysisDraft::Transient(draft) = draft else {
+            unreachable!()
+        };
+        draft.stop = "1".into();
+        draft.step = ".005".into();
+        draft.start = "0".into();
     })
-    .expect("dependency-ordered snapshot validates");
-    let mut tasks = PreparedRunAuthorization::default()
-        .authorize_campaign_member(snapshot)
-        .expect("snapshot authorizes")
-        .into_tasks();
+    .unwrap();
+    plan.edit(dependent_id, |draft| {
+        *draft = AnalysisDraft::Fourier(FourierDialogState::from_config(&FourierConfig {
+            fundamental_freq: 2.0,
+            num_harmonics: 4,
+            num_periods: 1,
+            output_node: "out".into(),
+            output_ref: "0".into(),
+            additional_outputs: Vec::new(),
+            start_time: 0.0,
+            stop_time: 1.0,
+            compute_thd: true,
+            normalize: false,
+        }));
+    })
+    .unwrap();
+    plan.bind_dependency(dependent_id, AnalysisKind::Transient, prerequisite_id)
+        .unwrap();
+    state.sync_active_schematic_to_workspace();
+    assert!(!state.run_active_design_checks().unwrap().has_errors());
+    let mut preparer = SimulationController::new();
+    preparer
+        .prepare_run_set_for_preflight(&state)
+        .expect("prepare the authored dependency graph");
+    let dispatch = preparer
+        .consume_snapshot_for_dispatch(&state)
+        .expect("authorize the unchanged generated plan");
+    let receipt = dispatch
+        .prepared_run_receipt(AnalysisResultSourceDomain::SimulationPlan)
+        .unwrap();
+    let mut tasks = dispatch.into_tasks();
+    assert_eq!(tasks.len(), 2);
     let failed_task = tasks.pop_front().expect("prerequisite task");
 
-    let mut state = AppState::default();
-    let run_sequence = state.simulation.start_run().id;
+    let run = state.simulation.start_run();
+    run.restore_provenance(SimulationRunProvenance::Prepared(Box::new(receipt)))
+        .unwrap();
+    let run_sequence = run.id;
     let failed_provenance = AnalysisResultProvenance::new(
         failed_task.instance_id(),
         failed_task.source_revision(),
@@ -1679,3 +1200,79 @@ fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
 
 mod completion_paths;
 mod monte_carlo_checkpoint;
+
+#[test]
+fn production_runner_surface_exposes_only_the_opaque_prepared_start() {
+    let source = include_str!("../../../../rspice-simulation/src/runner.rs");
+    let controller_source = [
+        include_str!("../controller.rs"),
+        include_str!("completion.rs"),
+    ]
+    .join("\n");
+    // Split boundary-sensitive search strings so this test's own source
+    // cannot satisfy or invalidate the assertions.
+    let prepared_signature = ["pub fn ", "start_prepared"].concat();
+    assert_eq!(source.match_indices(&prepared_signature).count(), 1);
+    for forbidden in [
+        ["pub fn ", "start_request"].concat(),
+        ["pub(crate) fn ", "start_request"].concat(),
+    ] {
+        assert!(
+            !source.contains(&forbidden),
+            "raw start request must remain private: {forbidden}"
+        );
+    }
+
+    for signature in [
+        "\n    fn start(&mut self",
+        "\n    fn start_with_source_path(",
+    ] {
+        let index = source
+            .find(signature)
+            .unwrap_or_else(|| panic!("missing raw test helper {signature}"));
+        let prefix = &source[..index];
+        assert_eq!(
+            prefix.lines().next_back().map(str::trim),
+            Some("#[cfg(test)]"),
+            "raw start helper must remain test-only: {signature}",
+        );
+    }
+
+    assert_eq!(
+        controller_source.match_indices(".start_prepared(").count(),
+        1,
+        "the controller must have one opaque task dispatch point"
+    );
+    for forbidden in ["self.runner.start(", "self.runner.start_with_source_path("] {
+        assert!(
+            !controller_source.contains(forbidden),
+            "controller bypasses the authorized dispatch boundary: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn browser_worker_transfer_protocol_matches_rust_transport() {
+    use rspice_simulation_contract::worker_protocol::{
+        WORKER_REQUEST_TRANSPORT_PROTOCOL, WORKER_RESPONSE_TRANSPORT_PROTOCOL,
+    };
+    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 36);
+    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 42);
+    let source = include_str!("../../../web/simulation-worker.js");
+    assert!(source.contains(&format!(
+        "const WORKER_PROTOCOL_VERSION = {WORKER_RESPONSE_TRANSPORT_PROTOCOL};"
+    )));
+    assert!(source.contains(&format!(
+        "const WORKER_REQUEST_PROTOCOL_VERSION = {WORKER_REQUEST_TRANSPORT_PROTOCOL};"
+    )));
+    assert!(source.contains("response.protocolVersion !== expectedProtocolVersion"));
+    assert!(source.contains("protocolResponseTransferList(response, WORKER_PROTOCOL_VERSION)"));
+    assert!(source.contains("request.protocolVersion !== WORKER_REQUEST_PROTOCOL_VERSION"));
+    assert!(source.contains("rspice_ui_wasm_jit_eval_op_slice_v1"));
+    assert!(source.contains("eval_op_slice_v1: wasmExports.rspice_ui_wasm_jit_eval_op_slice_v1"));
+}
+
+mod autonomous_periodic;
+mod periodic_port_noise;
+
+mod pvt_family;

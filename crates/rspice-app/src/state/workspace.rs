@@ -35,19 +35,18 @@ pub use rspice_design::owned_netlist::{
     OwnedNetlistSaveRecord, RetainedOwnedNetlistDeck, validate_owned_netlist_artifact_path,
 };
 pub use rspice_project::*;
-pub(crate) use rspice_simulation_contract::saved_output::{
-    device_current_probe, saved_output_references,
-};
 // The glob is crate-private: `materialize` is `pub(super)` throughout except
 // the one binding lookup two workbench surfaces reach by path and the metadata lookup the
 // Models & PDKs symbol-contract table reads a declared family with.
 use materialize::*;
 pub(crate) use materialize::{metadata_value, project_veriloga_binding_for_view};
 
+#[cfg(test)]
+pub use rspice_simulation_contract::saved_output::SavedOutputDisplayIntent;
 pub use rspice_simulation_contract::saved_output::{
     ComplexExpressionPolicy, OutputSelectionMode, SavedOutput, SavedOutputCompatibility,
-    SavedOutputDisplayIntent, SavedOutputKind, SavedOutputOrigin, SavedOutputPolicy,
-    SavedOutputPrecision, SavedOutputStreaming,
+    SavedOutputKind, SavedOutputOrigin, SavedOutputPolicy, SavedOutputPrecision,
+    SavedOutputStreaming,
 };
 use serde::{Deserialize, Serialize};
 

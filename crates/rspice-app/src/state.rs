@@ -126,49 +126,52 @@ pub use schematic::*;
 // Test-only aliases: the submodule is private, so this path is the only way
 // the tests can name an attribution's vocabulary directly.
 #[cfg(test)]
-pub use simulation::{CanonicalAnalysisKind, ConvergenceFailureClass};
+pub use simulation::CanonicalAnalysisKind;
 
 pub use rspice_model_library::sealed_model_sources;
 pub use simulation::CurrentImpulseHistoryEvidence;
-pub(crate) use simulation::DcTraceView;
+pub use simulation::DcMismatchEvidence;
 pub(crate) use simulation::RunHistoryRevision;
+#[cfg(test)]
+pub use simulation::TransientConvergenceEvidence;
 #[cfg(test)]
 pub(crate) use simulation::current_impulse_history_fixture;
 pub use simulation::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
-    AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType, ComplexResultValue,
-    ConvergenceAttribution, CrossProbeIndex, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult,
-    DigitalBusEvidence, DigitalBusSourceEvidence, DigitalEventPointEvidence,
-    DigitalEventTraceEvidence, EvidenceDomain, ExecutedDeck, ExecutedDeckArchive,
-    ExecutedDeckPoint, ExecutionTarget, FamilyMeasurementEvidence, FamilyMemberId,
-    FamilyMemberMeasurements, FloquetOrbitKindEvidence, FloquetSpectrumEvidence,
-    FloquetStabilityVerdictEvidence, HierarchyMapRow, MonteCarloVariableMetadata,
-    NoiseContributorRow, NoiseFigureEvidence, NoiseSummary, OccurrenceProbeSpelling,
+    AnalysisResultSourceDomain, AnalysisType, ComplexResultValue, ConvergenceAttribution,
+    CrossProbeIndex, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult, DigitalBusEvidence,
+    DigitalBusSourceEvidence, DigitalEventPointEvidence, DigitalEventTraceEvidence, EvidenceDomain,
+    ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, ExecutionTarget, FamilyMemberId,
+    FloquetOrbitKindEvidence, FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence,
+    MonteCarloVariableMetadata, NoiseFigureEvidence, NoiseSummary, OccurrenceProbeSpelling,
     OperatingPointAnnotationEvidence, OperatingPointDeviceDetailEvidence,
-    OperatingPointInitialGuessEvidence, OperatingPointValue, PeriodicNoiseConversionEvidence,
-    PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate, PreparedModelSourceIdentity,
-    PreparedRunReceipt, PreparedRunReceiptInput, PreparedRunTaskReceipt,
-    PreparedSourceCheckReceipt, PreparedSpecification, PreparedSpecificationPolicy,
-    PstbStabilityClassificationEvidence, RealEventPointEvidence, RealEventTraceEvidence,
-    ResultImportFormat, ResultImportSource, RunHistory, RunRetention, SavedOutputDcMember,
-    SavedOutputMaterializationStatus, SavedOutputReceipt, SensitivityResultMode,
-    SensitivityResultRow, SharedWaveformValues, SignOffStanding, SimulationCampaignMembership,
-    SimulationRun, SimulationRunIntent, SimulationRunLifecycle, SimulationRunProvenance,
-    SimulationState, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
-    SoaSourceHistory, SoaSourceWaveform, SpecificationVerdictStatus,
-    TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
-    TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence, WaveformData,
-    absent_deck_reason, ac_bode_shape_for_analysis, ac_bode_shape_for_selection,
-    ac_bode_summary_for_analysis, ac_bode_summary_for_selection,
+    OperatingPointInitialGuessEvidence, OperatingPointValue, PoleZeroRootSetEvidence,
+    PreparedRunReceipt, PreparedSpecification, PstbStabilityClassificationEvidence,
+    RealEventPointEvidence, RealEventTraceEvidence, ResultImportFormat, ResultImportSource,
+    RunHistory, RunRetention, SavedOutputMaterializationStatus, SavedOutputReceipt,
+    SensitivityResultMode, SensitivityResultRow, SharedWaveformValues, SignOffStanding,
+    SimulationCampaignMembership, SimulationRun, SimulationRunIntent, SimulationRunLifecycle,
+    SimulationRunProvenance, SimulationState, SoaEvaluationEvidence, SoaParameterEvidence,
+    SoaRuleVerdictEvidence, SpecificationVerdictStatus, TransferFunctionAccuracyEvidence,
+    TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
+    TransferFunctionScalarEvidence, WaveformData, absent_deck_reason, ac_bode_shape_for_analysis,
+    ac_bode_shape_for_selection, ac_bode_summary_for_analysis, ac_bode_summary_for_selection,
 };
+#[cfg(test)]
 pub use simulation::{
-    ConvergenceReport, PeriodicConvergenceEvidence, PeriodicInitializationMethod,
-    TransientConvergenceEvidence,
+    AnalysisResultPvtPoint, FamilyMeasurementEvidence, FamilyMemberMeasurements, HierarchyMapRow,
+    NoiseContributorRow, PeriodicNoiseConversionEvidence, PoleZeroSpectrumCertificate,
+    PreparedModelSourceIdentity, PreparedRunReceiptInput, PreparedRunTaskReceipt,
+    PreparedSourceCheckReceipt, PreparedSpecificationPolicy, SoaSourceHistory, SoaSourceWaveform,
 };
-pub use simulation::{
-    DcCurveSelection, DcSweepDirection, DcSweepEvidence, DcSweepFamily, DcSweepQuantity,
-};
-pub use simulation::{DcMismatchContributorEvidence, DcMismatchEvidence, DcMismatchScopeEvidence};
+pub use simulation::{ConvergenceReport, PeriodicInitializationMethod};
+pub use simulation::{DcCurveSelection, DcSweepFamily};
+#[cfg(test)]
+pub use simulation::{DcMismatchContributorEvidence, DcMismatchScopeEvidence};
+#[cfg(test)]
+pub use simulation::{DcSweepDirection, DcSweepQuantity};
+#[cfg(test)]
+pub use simulation::{DcSweepEvidence, SavedOutputDcMember};
 pub use simulation::{FftSpectrumEvidence, FftSpectrumStatusEvidence};
 #[cfg(test)]
 pub use simulation::{
@@ -185,8 +188,8 @@ pub use simulation::{SensitivityBasisEvidence, SensitivityStudyEvidence, Sensiti
 // evidence's own field, never named as a type.
 #[cfg(test)]
 pub use simulation::FftSpectrumModeEvidence;
+#[cfg(test)]
 pub use simulation::{SavedOutputAxis, SavedOutputBoundSource, SavedOutputSourceBindings};
-pub(crate) use workspace::{device_current_probe, saved_output_references};
 // Only the two types the persisted model itself names are hoisted here. The
 // rest of the stimulus vocabulary — the definition record, the draft state
 // machine, the adoption verbs — is read through `state::stimulus_library::*`,
@@ -217,15 +220,19 @@ pub use workspace::{
     ProjectTechnologyChangeContext, ProjectWorkspace, RegressionComparisonMethod,
     RegressionComparisonWindow, RegressionSpecificationPolicy, RegressionTargetKind,
     RegressionTargetSelector, RegressionToleranceRule, ResolvedHierarchyBinding,
-    RetainedOwnedNetlistDeck, SavedOutput, SavedOutputCompatibility, SavedOutputDisplayIntent,
-    SavedOutputKind, SavedOutputOrigin, SavedOutputPolicy, SavedOutputPrecision,
-    SavedOutputStreaming, SimulationPlanPayload, SimulationPlanPayloadRecord, SpecEntry,
-    SpecPointScope, SpecificationComparison, SpecificationDefinition, SpecificationPolicy,
-    SpecificationRole, UNGROUPED_NAME, group_namer, validate_owned_netlist_artifact_path,
+    RetainedOwnedNetlistDeck, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
+    SavedOutputOrigin, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+    SimulationPlanPayload, SimulationPlanPayloadRecord, SpecEntry, SpecPointScope,
+    SpecificationComparison, SpecificationDefinition, SpecificationPolicy, SpecificationRole,
+    UNGROUPED_NAME, group_namer, validate_owned_netlist_artifact_path,
 };
 
+pub use simulation::MonteCarloMeanInterval;
 pub use simulation::{MonteCarloCheckpointEvidence, MonteCarloCheckpointLibrary};
-pub use simulation::{MonteCarloMeanConfidence, MonteCarloMeanInterval, MonteCarloMeanMethod};
+#[cfg(test)]
+pub use simulation::{MonteCarloMeanConfidence, MonteCarloMeanMethod};
+#[cfg(test)]
+pub use workspace::SavedOutputDisplayIntent;
 
 #[cfg(test)]
 mod symbol_document_tests {

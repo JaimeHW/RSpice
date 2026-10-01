@@ -1,0 +1,1044 @@
+//! Browser worker request sequencing.
+//!
+//! The browser runs simulation in a web worker, so results arrive
+//! asynchronously and out of order. Requests are numbered and results
+//! matched against the active id, which is what keeps a superseded run from
+//! overwriting a newer one.
+
+/// Worker IDs cross the JavaScript number boundary twice. Keeping them in the
+/// exact u32 integer range avoids precision loss while still leaving more than
+/// four billion collision-free requests between wraps.
+const MAX_BROWSER_REQUEST_ID: u64 = u32::MAX as u64;
+
+pub(crate) fn next_request_id(current: u64) -> u64 {
+    if current >= MAX_BROWSER_REQUEST_ID {
+        1
+    } else {
+        current + 1
+    }
+}
+
+pub(crate) fn stale_result(active: Option<u64>, incoming: u64) -> bool {
+    active != Some(incoming)
+}
+
+fn request_id_from_js_number(value: f64) -> Option<u64> {
+    (value.is_finite()
+        && value >= 1.0
+        && value <= MAX_BROWSER_REQUEST_ID as f64
+        && value.fract() == 0.0)
+        .then_some(value as u64)
+}
+
+fn stale_worker_epoch(current: Option<u64>, incoming: u64) -> bool {
+    current != Some(incoming)
+}
+
+#[cfg(target_arch = "wasm32")]
+mod browser {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    use js_sys::{Array, Object, Reflect};
+    use wasm_bindgen::JsCast as _;
+    use wasm_bindgen::prelude::*;
+
+    use super::{next_request_id, request_id_from_js_number, stale_result, stale_worker_epoch};
+    use crate::engine_log::{EngineLogLine, EngineLogQueue};
+    use crate::error::SimulationError;
+    use crate::live_transient::{
+        LiveTransientQueue, TransientSampleDelta, push_live_transient_sample,
+    };
+    use crate::results::SimulationResult;
+    use crate::runner::worker_contract::{
+        WORKER_REQUEST_TRANSPORT_PROTOCOL, WorkerProgressSnapshot, WorkerRequest,
+        WorkerRequestTransportMetadata, apply_worker_progress_snapshot,
+        take_worker_request_checkpoint, take_worker_request_op_previous_state,
+        validate_worker_request_transfer_buffer_lengths, validate_worker_response_id,
+        worker_response_from_value,
+    };
+    use crate::runner::{NetlistInput, SimulationRequest};
+    use crate::status::{
+        EngineAvailability, EngineJitObservation, SimulationProgress, SimulationStatus,
+    };
+
+    use crate::monte_carlo_checkpoint::{
+        CheckpointQueue, replace_checkpoint, validate_checkpoint_bytes_size,
+        validate_worker_request_checkpoint_lengths,
+    };
+
+    type CapabilityObserver = Arc<dyn Fn(Option<EngineJitObservation>) + Send + Sync>;
+
+    #[derive(Default)]
+    struct WorkerState {
+        capability_observer: Option<CapabilityObserver>,
+        current_worker_epoch: Option<u64>,
+        availability: EngineAvailability,
+        wakeup: Option<Arc<dyn Fn() + Send + Sync>>,
+        active_request_id: Option<u64>,
+        active_progress: Option<Arc<Mutex<SimulationProgress>>>,
+        active_transient_samples: Option<Arc<Mutex<LiveTransientQueue>>>,
+        /// The Console log of the run this worker is executing.
+        ///
+        /// Held here rather than sent to the worker: the queue lives in this
+        /// wasm instance, and the run — which is a separate instance with its
+        /// own memory — posts its lines back across the contract one at a time.
+        active_engine_log: Option<Arc<Mutex<EngineLogQueue>>>,
+        active_checkpoint: Option<CheckpointQueue>,
+        pending_result: Option<Result<SimulationResult, SimulationError>>,
+    }
+
+    pub(crate) struct WorkerHandle {
+        state: Rc<RefCell<WorkerState>>,
+        worker: Rc<RefCell<Option<web_sys::Worker>>>,
+        onmessage: Option<Closure<dyn FnMut(web_sys::MessageEvent)>>,
+        onerror: Option<Closure<dyn FnMut(web_sys::ErrorEvent)>>,
+        onmessageerror: Option<Closure<dyn FnMut(web_sys::MessageEvent)>>,
+        next_id: u64,
+        next_worker_epoch: u64,
+    }
+
+    impl WorkerHandle {
+        pub(crate) fn new() -> Self {
+            Self {
+                state: Rc::new(RefCell::new(WorkerState::default())),
+                worker: Rc::new(RefCell::new(None)),
+                onmessage: None,
+                onerror: None,
+                onmessageerror: None,
+                next_id: 0,
+                next_worker_epoch: 0,
+            }
+        }
+
+        pub(crate) fn is_running(&self) -> bool {
+            let state = self.state.borrow();
+            state.active_request_id.is_some() && state.pending_result.is_none()
+        }
+
+        pub(crate) fn availability(&self) -> EngineAvailability {
+            let state = self.state.borrow();
+            if state.current_worker_epoch.is_some()
+                || matches!(state.availability, EngineAvailability::Unavailable(_))
+            {
+                return state.availability.clone();
+            }
+            if let Some(error) = global_worker_error() {
+                return EngineAvailability::Unavailable(error);
+            }
+            if global_worker().is_some() {
+                return if global_worker_ready() {
+                    EngineAvailability::Ready
+                } else {
+                    EngineAvailability::Starting
+                };
+            }
+            if global_worker_url().is_some() {
+                EngineAvailability::Restartable
+            } else {
+                EngineAvailability::Unavailable(
+                    "The simulation worker URL is missing. Reload the application deployment."
+                        .into(),
+                )
+            }
+        }
+
+        pub(crate) fn set_capability_observer(&mut self, observer: CapabilityObserver) {
+            self.state.borrow_mut().capability_observer = Some(observer);
+        }
+
+        pub(crate) fn set_wakeup(&mut self, wakeup: Arc<dyn Fn() + Send + Sync>) {
+            self.state.borrow_mut().wakeup = Some(wakeup);
+            // Adopt the eager worker before the first run so startup and idle
+            // failures wake the UI too. A reported failure awaits explicit retry.
+            if global_worker().is_some() && global_worker_error().is_none() {
+                let _ = self.ensure_worker();
+            }
+        }
+
+        pub(crate) fn retry_startup(&mut self) -> Result<(), SimulationError> {
+            self.ensure_worker()?;
+            request_repaint(&self.state);
+            Ok(())
+        }
+
+        pub(crate) fn has_unpolled_result(&self) -> bool {
+            self.state.borrow().pending_result.is_some()
+        }
+
+        pub(crate) fn poll_result(&self) -> Option<Result<SimulationResult, SimulationError>> {
+            let mut state = self.state.borrow_mut();
+            let result = state.pending_result.take();
+            if result.is_some() {
+                state.active_request_id = None;
+                state.active_progress = None;
+                state.active_transient_samples = None;
+                state.active_engine_log = None;
+                state.active_checkpoint = None;
+            }
+            result
+        }
+
+        pub(crate) fn abort(&self) {
+            let active = self.state.borrow().active_request_id;
+            if active.is_none() {
+                return;
+            }
+
+            let mut state = self.state.borrow_mut();
+            state.current_worker_epoch = None;
+            state.availability = EngineAvailability::Restartable;
+            state.active_request_id = None;
+            state.active_progress = None;
+            state.active_transient_samples = None;
+            state.active_engine_log = None;
+            state.active_checkpoint = None;
+            state.pending_result = Some(Err(SimulationError::Aborted));
+            drop(state);
+            drop_cached_worker(&self.worker, &self.state);
+        }
+
+        fn allocate_request_id(&mut self) -> u64 {
+            self.next_id = next_request_id(self.next_id);
+            self.next_id
+        }
+
+        fn allocate_worker_epoch(&mut self) -> u64 {
+            self.next_worker_epoch = self.next_worker_epoch.wrapping_add(1);
+            if self.next_worker_epoch == 0 {
+                self.next_worker_epoch = 1;
+            }
+            self.next_worker_epoch
+        }
+
+        fn ensure_worker(&mut self) -> Result<web_sys::Worker, SimulationError> {
+            if let Some(worker) = self.worker.borrow().as_ref()
+                && self.state.borrow().current_worker_epoch.is_some()
+            {
+                return Ok(worker.clone());
+            }
+
+            if global_worker_error().is_some() {
+                if let Some(worker) = global_worker() {
+                    worker.terminate();
+                }
+                clear_global_worker_error();
+                clear_global_worker(&self.state);
+            }
+
+            let worker = match global_worker()
+                .map(Ok)
+                .unwrap_or_else(|| create_worker(&self.state))
+            {
+                Ok(worker) => worker,
+                Err(error) => {
+                    self.state.borrow_mut().availability =
+                        EngineAvailability::Unavailable(error.to_string());
+                    return Err(error);
+                }
+            };
+            let worker_epoch = self.allocate_worker_epoch();
+            *self.worker.borrow_mut() = Some(worker.clone());
+            {
+                let mut state = self.state.borrow_mut();
+                state.current_worker_epoch = Some(worker_epoch);
+                state.availability = if global_worker_ready() {
+                    EngineAvailability::Ready
+                } else {
+                    EngineAvailability::Starting
+                };
+            }
+            self.install_handlers(&worker, worker_epoch);
+            Ok(worker)
+        }
+
+        fn install_handlers(&mut self, worker: &web_sys::Worker, worker_epoch: u64) {
+            let state = Rc::clone(&self.state);
+            let worker_cell = Rc::clone(&self.worker);
+            let onmessage = Closure::<dyn FnMut(web_sys::MessageEvent)>::wrap(Box::new(
+                move |event: web_sys::MessageEvent| {
+                    if stale_worker_epoch(state.borrow().current_worker_epoch, worker_epoch) {
+                        return;
+                    }
+                    handle_worker_message(&state, &worker_cell, event.data());
+                    request_repaint(&state);
+                },
+            ));
+            worker.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
+            self.onmessage = Some(onmessage);
+
+            let state = Rc::clone(&self.state);
+            let worker_cell = Rc::clone(&self.worker);
+            let onerror = Closure::<dyn FnMut(web_sys::ErrorEvent)>::wrap(Box::new(
+                move |event: web_sys::ErrorEvent| {
+                    let message = if event.message().is_empty() {
+                        "browser simulation worker failed".to_string()
+                    } else {
+                        event.message()
+                    };
+                    if stale_worker_epoch(state.borrow().current_worker_epoch, worker_epoch) {
+                        return;
+                    }
+                    fail_worker(&state, &worker_cell, message);
+                    request_repaint(&state);
+                },
+            ));
+            worker.set_onerror(Some(onerror.as_ref().unchecked_ref()));
+            self.onerror = Some(onerror);
+
+            let state = Rc::clone(&self.state);
+            let worker_cell = Rc::clone(&self.worker);
+            let onmessageerror = Closure::<dyn FnMut(web_sys::MessageEvent)>::wrap(Box::new(
+                move |_event: web_sys::MessageEvent| {
+                    if stale_worker_epoch(state.borrow().current_worker_epoch, worker_epoch) {
+                        return;
+                    }
+                    fail_worker(
+                        &state,
+                        &worker_cell,
+                        "browser simulation worker returned an unreadable message".to_owned(),
+                    );
+                    request_repaint(&state);
+                },
+            ));
+            worker.set_onmessageerror(Some(onmessageerror.as_ref().unchecked_ref()));
+            self.onmessageerror = Some(onmessageerror);
+        }
+    }
+
+    impl Drop for WorkerHandle {
+        fn drop(&mut self) {
+            self.state.borrow_mut().current_worker_epoch = None;
+            drop_cached_worker(&self.worker, &self.state);
+            self.onmessage.take();
+            self.onerror.take();
+            self.onmessageerror.take();
+        }
+    }
+
+    pub(crate) fn start_worker_request(
+        handle: &mut WorkerHandle,
+        request: SimulationRequest,
+        input: NetlistInput,
+        progress: Arc<Mutex<SimulationProgress>>,
+        abort_flag: Arc<AtomicBool>,
+        transient_samples: Option<Arc<Mutex<LiveTransientQueue>>>,
+        engine_log: Arc<Mutex<EngineLogQueue>>,
+        checkpoint: CheckpointQueue,
+    ) -> Result<(), SimulationError> {
+        if handle.is_running() || handle.has_unpolled_result() {
+            return Err(SimulationError::AlreadyRunning);
+        }
+
+        abort_flag.store(false, Ordering::SeqCst);
+        mark_worker_started(&progress);
+
+        let id = handle.allocate_request_id();
+        let worker_request = WorkerRequest::from_runner_parts(id, &request, &input)?;
+        let message = worker_message(worker_request)?;
+        {
+            let mut state = handle.state.borrow_mut();
+            state.active_request_id = Some(id);
+            state.active_progress = Some(Arc::clone(&progress));
+            state.active_transient_samples = transient_samples;
+            state.active_engine_log = Some(engine_log);
+            state.active_checkpoint = Some(checkpoint);
+            state.pending_result = None;
+        }
+
+        let worker = match handle.ensure_worker() {
+            Ok(worker) => worker,
+            Err(error) => {
+                let mut state = handle.state.borrow_mut();
+                state.active_request_id = None;
+                state.active_progress = None;
+                state.active_transient_samples = None;
+                state.active_engine_log = None;
+                state.active_checkpoint = None;
+                return Err(error);
+            }
+        };
+
+        if let Err(error) = worker.post_message_with_transfer(&message.value, &message.transfer) {
+            let mut state = handle.state.borrow_mut();
+            state.active_request_id = None;
+            state.active_progress = None;
+            state.active_transient_samples = None;
+            state.active_engine_log = None;
+            state.active_checkpoint = None;
+            drop(state);
+            let message = format!(
+                "failed to post simulation request to worker: {}",
+                js_error_message(error)
+            );
+            fail_worker(&handle.state, &handle.worker, message.clone());
+            return Err(SimulationError::InvalidConfig(message));
+        }
+
+        Ok(())
+    }
+
+    fn handle_worker_message(
+        state: &Rc<RefCell<WorkerState>>,
+        worker: &Rc<RefCell<Option<web_sys::Worker>>>,
+        data: JsValue,
+    ) {
+        let message_type = string_property(&data, "type").unwrap_or_default();
+        match message_type.as_str() {
+            "ready" => {
+                state.borrow_mut().availability = EngineAvailability::Ready;
+                set_global_worker_ready(true, state);
+                handle_ready_message(state, &data);
+            }
+            "progress" => handle_progress_message(state, &data),
+            "transientSample" => handle_transient_sample_message(state, &data),
+            "engineLog" => handle_engine_log_message(state, &data),
+            "monteCarloCheckpoint" => handle_checkpoint_message(state, worker, &data),
+            "result" => handle_result_message(state, &data),
+            "error" => {
+                let startup_error = Reflect::get(&data, &JsValue::from_str("id"))
+                    .ok()
+                    .and_then(|id| id.as_f64())
+                    == Some(0.0);
+                if startup_error {
+                    fail_worker(state, worker, worker_error_message(&data));
+                } else {
+                    handle_error_message(state, &data);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_ready_message(state: &Rc<RefCell<WorkerState>>, data: &JsValue) {
+        let capability = Reflect::get(data, &JsValue::from_str("wasmJit")).unwrap_or(JsValue::NULL);
+        let available = Reflect::get(&capability, &JsValue::from_str("available"))
+            .ok()
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        // Replacement workers have no page bootstrap listeners. Publish their
+        // own capability evidence instead of leaving the retired worker's report.
+        let _ = Reflect::set(
+            &js_sys::global(),
+            &JsValue::from_str("__RSPICE_WASM_JIT_CAPABILITY"),
+            &capability,
+        );
+        let solver_result = Reflect::get(&capability, &JsValue::from_str("solverResult"))
+            .ok()
+            .and_then(|value| value.as_f64())
+            .filter(|value| value.is_finite());
+        observe_capability(
+            state,
+            Some(EngineJitObservation {
+                available,
+                solver_result,
+            }),
+        );
+
+        if available {
+            let abi = numeric_property(&capability, "abiVersion").unwrap_or(0);
+            let bytes = numeric_property(&capability, "moduleBytes").unwrap_or(0);
+            web_sys::console::log_1(&JsValue::from_str(&format!(
+                "RSpice simulation worker ready; WASM JIT ABI {abi} architecture probe qualified ({bytes} bytes)"
+            )));
+        } else {
+            let reason = string_property(&capability, "reason")
+                .unwrap_or_else(|| "browser capability qualification failed".to_owned());
+            web_sys::console::warn_1(&JsValue::from_str(&format!(
+                "RSpice simulation worker ready; WASM JIT unavailable: {reason}"
+            )));
+        }
+    }
+
+    fn handle_progress_message(state: &Rc<RefCell<WorkerState>>, data: &JsValue) {
+        let id = numeric_property(data, "id").unwrap_or(0);
+        let active_progress = {
+            let state = state.borrow();
+            if stale_result(state.active_request_id, id) {
+                web_sys::console::warn_1(&JsValue::from_str(&format!(
+                    "Ignoring stale simulation worker progress id {id}"
+                )));
+                return;
+            }
+            state.active_progress.as_ref().cloned()
+        };
+
+        let Some(active_progress) = active_progress else {
+            return;
+        };
+        let snapshot = Reflect::get(data, &JsValue::from_str("progress"))
+            .map_err(js_error_message)
+            .and_then(|value| {
+                serde_wasm_bindgen::from_value::<WorkerProgressSnapshot>(value)
+                    .map_err(|error| error.to_string())
+            });
+        let Ok(snapshot) = snapshot else {
+            web_sys::console::warn_1(&JsValue::from_str(
+                "Ignoring malformed simulation worker progress message",
+            ));
+            return;
+        };
+
+        let mut progress = match active_progress.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        apply_worker_progress_snapshot(snapshot, &mut progress);
+    }
+
+    fn handle_result_message(state: &Rc<RefCell<WorkerState>>, data: &JsValue) {
+        let id = numeric_property(data, "id").unwrap_or(0);
+        {
+            let state = state.borrow();
+            if stale_result(state.active_request_id, id) {
+                web_sys::console::warn_1(&JsValue::from_str(&format!(
+                    "Ignoring stale simulation worker result id {id}"
+                )));
+                return;
+            }
+        }
+
+        let response = Reflect::get(data, &JsValue::from_str("response"))
+            .or_else(|_| Reflect::get(data, &JsValue::from_str("result")));
+
+        let result = match response {
+            Ok(value) => worker_response_from_value(value).and_then(|response| {
+                validate_worker_response_id(id, &response)?;
+                response.into_result()
+            }),
+            Err(error) => Err(SimulationError::InvalidConfig(js_error_message(error))),
+        };
+
+        let mut state = state.borrow_mut();
+        state.active_request_id = None;
+        state.active_progress = None;
+        state.active_transient_samples = None;
+        state.active_engine_log = None;
+        state.active_checkpoint = None;
+        state.pending_result = Some(result);
+    }
+
+    fn handle_checkpoint_message(
+        state: &Rc<RefCell<WorkerState>>,
+        worker: &Rc<RefCell<Option<web_sys::Worker>>>,
+        data: &JsValue,
+    ) {
+        let id = numeric_property(data, "id").unwrap_or(0);
+        let queue = {
+            let state = state.borrow();
+            if stale_result(state.active_request_id, id) {
+                return;
+            }
+            state.active_checkpoint.clone()
+        };
+        let Some(queue) = queue else {
+            return;
+        };
+        let decoded = (|| -> Result<Vec<u8>, String> {
+            let view = Reflect::get(data, &JsValue::from_str("checkpoint"))
+                .map_err(js_error_message)?
+                .dyn_into::<js_sys::Uint8Array>()
+                .map_err(|_| "Monte Carlo checkpoint must be a Uint8Array".to_owned())?;
+            validate_checkpoint_bytes_size(view.length() as usize)?;
+            let mut bytes = vec![0; view.length() as usize];
+            view.copy_to(&mut bytes);
+            rspice_results::monte_carlo_checkpoint::StudyMonteCarloCheckpoint::from_bytes_with_limits(
+                &bytes, rspice_core::ResourceLimits::default(), &rspice_core::NoAbort).map_err(|error| error.to_string())?;
+            Ok(bytes)
+        })();
+        match decoded {
+            Ok(bytes) => replace_checkpoint(&queue, Arc::from(bytes)),
+            Err(error) => fail_worker(
+                state,
+                worker,
+                format!("Invalid Monte Carlo checkpoint stream: {error}"),
+            ),
+        }
+    }
+
+    fn handle_transient_sample_message(state: &Rc<RefCell<WorkerState>>, data: &JsValue) {
+        let id = numeric_property(data, "id").unwrap_or(0);
+        let samples = {
+            let state = state.borrow();
+            if stale_result(state.active_request_id, id) {
+                web_sys::console::warn_1(&JsValue::from_str(&format!(
+                    "Ignoring stale simulation worker transient sample id {id}"
+                )));
+                return;
+            }
+            state.active_transient_samples.as_ref().cloned()
+        };
+        let Some(samples) = samples else {
+            return;
+        };
+        let sample = Reflect::get(data, &JsValue::from_str("sample"))
+            .map_err(js_error_message)
+            .and_then(|value| {
+                serde_wasm_bindgen::from_value::<TransientSampleDelta>(value)
+                    .map_err(|error| error.to_string())
+            });
+        let Ok(sample) = sample else {
+            web_sys::console::warn_1(&JsValue::from_str(
+                "Ignoring malformed simulation worker transient sample message",
+            ));
+            return;
+        };
+        push_live_transient_sample(&samples, sample);
+    }
+
+    /// One line the worker's run logged, into this run's Console queue.
+    ///
+    /// Keyed by the active request like every other streamed message, so a
+    /// superseded run's lines are discarded rather than landing in the Console
+    /// of the run that replaced it. A malformed message is warned about and
+    /// dropped: the two sides are one build, so there is no version to
+    /// negotiate and nothing here should ever panic over an unexpected shape.
+    fn handle_engine_log_message(state: &Rc<RefCell<WorkerState>>, data: &JsValue) {
+        let id = numeric_property(data, "id").unwrap_or(0);
+        let engine_log = {
+            let state = state.borrow();
+            if stale_result(state.active_request_id, id) {
+                web_sys::console::warn_1(&JsValue::from_str(&format!(
+                    "Ignoring stale simulation worker engine log id {id}"
+                )));
+                return;
+            }
+            state.active_engine_log.as_ref().cloned()
+        };
+        let Some(engine_log) = engine_log else {
+            return;
+        };
+        let line = Reflect::get(data, &JsValue::from_str("line"))
+            .map_err(js_error_message)
+            .and_then(|value| {
+                serde_wasm_bindgen::from_value::<EngineLogLine>(value)
+                    .map_err(|error| error.to_string())
+            });
+        let Ok(line) = line else {
+            web_sys::console::warn_1(&JsValue::from_str(
+                "Ignoring malformed simulation worker engine log message",
+            ));
+            return;
+        };
+        crate::engine_log::lock_queue(&engine_log).push(line);
+    }
+
+    fn handle_error_message(state: &Rc<RefCell<WorkerState>>, data: &JsValue) {
+        let id = numeric_property(data, "id").unwrap_or(0);
+        let message = worker_error_message(data);
+
+        let mut state = state.borrow_mut();
+        if stale_result(state.active_request_id, id) {
+            web_sys::console::warn_1(&JsValue::from_str(&format!(
+                "Ignoring stale simulation worker error id {id}"
+            )));
+            return;
+        }
+
+        state.active_request_id = None;
+        state.active_progress = None;
+        state.active_transient_samples = None;
+        state.active_engine_log = None;
+        state.active_checkpoint = None;
+        state.pending_result = Some(Err(SimulationError::InvalidConfig(message)));
+    }
+
+    fn worker_error_message(data: &JsValue) -> String {
+        string_property(data, "error")
+            .or_else(|| string_property(data, "message"))
+            .unwrap_or_else(|| "browser simulation worker failed".to_owned())
+    }
+
+    fn fail_worker(
+        state_cell: &Rc<RefCell<WorkerState>>,
+        worker: &Rc<RefCell<Option<web_sys::Worker>>>,
+        message: String,
+    ) {
+        let mut state = state_cell.borrow_mut();
+        state.current_worker_epoch = None;
+        state.availability = EngineAvailability::Unavailable(message.clone());
+        if state.active_request_id.take().is_some() && state.pending_result.is_none() {
+            state.pending_result = Some(Err(SimulationError::InvalidConfig(message)));
+        }
+        state.active_progress = None;
+        state.active_transient_samples = None;
+        state.active_engine_log = None;
+        state.active_checkpoint = None;
+        drop(state);
+        drop_cached_worker(worker, state_cell);
+    }
+
+    fn observe_capability(
+        state: &Rc<RefCell<WorkerState>>,
+        observation: Option<EngineJitObservation>,
+    ) {
+        let observer = state.borrow().capability_observer.clone();
+        if let Some(observer) = observer {
+            observer(observation);
+        }
+    }
+
+    fn global_worker_ready() -> bool {
+        Reflect::get(
+            &js_sys::global(),
+            &JsValue::from_str("__RSPICE_SIM_WORKER_READY"),
+        )
+        .ok()
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    }
+
+    fn set_global_worker_ready(ready: bool, state: &Rc<RefCell<WorkerState>>) {
+        let _ = Reflect::set(
+            &js_sys::global(),
+            &JsValue::from_str("__RSPICE_SIM_WORKER_READY"),
+            &JsValue::from_bool(ready),
+        );
+        if !ready {
+            let _ = Reflect::set(
+                &js_sys::global(),
+                &JsValue::from_str("__RSPICE_WASM_JIT_CAPABILITY"),
+                &JsValue::NULL,
+            );
+            observe_capability(state, None);
+        }
+    }
+
+    fn global_worker() -> Option<web_sys::Worker> {
+        let global = js_sys::global();
+        Reflect::get(&global, &JsValue::from_str("__RSPICE_SIM_WORKER"))
+            .ok()
+            .and_then(|value| {
+                if value.is_undefined() || value.is_null() {
+                    None
+                } else {
+                    value.dyn_into::<web_sys::Worker>().ok()
+                }
+            })
+    }
+
+    fn clear_global_worker(state: &Rc<RefCell<WorkerState>>) {
+        set_global_worker_ready(false, state);
+        let _ = Reflect::set(
+            &js_sys::global(),
+            &JsValue::from_str("__RSPICE_SIM_WORKER"),
+            &JsValue::NULL,
+        );
+    }
+
+    fn drop_cached_worker(
+        worker: &Rc<RefCell<Option<web_sys::Worker>>>,
+        state: &Rc<RefCell<WorkerState>>,
+    ) {
+        if let Some(worker) = worker.borrow_mut().take() {
+            worker.set_onmessage(None);
+            worker.set_onerror(None);
+            worker.set_onmessageerror(None);
+            worker.terminate();
+        }
+        clear_global_worker(state);
+    }
+
+    fn global_worker_error() -> Option<String> {
+        Reflect::get(
+            &js_sys::global(),
+            &JsValue::from_str("__RSPICE_SIM_WORKER_ERROR"),
+        )
+        .ok()
+        .and_then(|value| {
+            if value.is_undefined() || value.is_null() {
+                None
+            } else {
+                value.as_string()
+            }
+        })
+    }
+
+    fn clear_global_worker_error() {
+        let _ = Reflect::set(
+            &js_sys::global(),
+            &JsValue::from_str("__RSPICE_SIM_WORKER_ERROR"),
+            &JsValue::NULL,
+        );
+    }
+
+    fn create_worker(state: &Rc<RefCell<WorkerState>>) -> Result<web_sys::Worker, SimulationError> {
+        let worker_url = global_worker_url().ok_or_else(|| {
+            SimulationError::InvalidConfig(
+                "The simulation worker URL is missing. Reload the application deployment.".into(),
+            )
+        })?;
+        let options = web_sys::WorkerOptions::new();
+        options.set_type(web_sys::WorkerType::Module);
+        let worker = web_sys::Worker::new_with_options(&worker_url, &options)
+            .map_err(|error| SimulationError::InvalidConfig(js_error_message(error)))?;
+        set_global_worker_ready(false, state);
+        match Reflect::set(
+            &js_sys::global(),
+            &JsValue::from_str("__RSPICE_SIM_WORKER"),
+            &worker,
+        ) {
+            Ok(true) => {}
+            result => {
+                worker.terminate();
+                return Err(result.err().map_or_else(
+                    || {
+                        SimulationError::InvalidConfig(
+                            "Could not publish the simulation worker handle.".into(),
+                        )
+                    },
+                    reflect_error,
+                ));
+            }
+        }
+        Ok(worker)
+    }
+
+    fn global_worker_url() -> Option<String> {
+        Reflect::get(
+            &js_sys::global(),
+            &JsValue::from_str("__RSPICE_SIM_WORKER_URL"),
+        )
+        .ok()
+        .and_then(|value| value.as_string())
+        .filter(|url| !url.trim().is_empty())
+    }
+
+    struct PreparedWorkerMessage {
+        value: JsValue,
+        transfer: Array,
+    }
+
+    fn worker_message(
+        mut request: WorkerRequest,
+    ) -> Result<PreparedWorkerMessage, SimulationError> {
+        let request_id = request.id;
+        let checkpoint_buffers =
+            take_worker_request_checkpoint(&mut request).map_err(SimulationError::InvalidConfig)?;
+        // Extract every owned numerical request payload before allocating any
+        // JavaScript typed array so the combined dependency + OP-state budget
+        // can fail closed without a large transient allocation.
+        let (op_previous_state, op_buffers) = take_worker_request_op_previous_state(&mut request)
+            .map_err(|error| {
+            SimulationError::InvalidConfig(format!(
+                "failed to prepare OP previous-state transfer: {error}"
+            ))
+        })?;
+        let (dependency_metadata, dependency_buffers) = request
+            .dependencies
+            .encode_transfer_borrowed()
+            .map_err(|error| {
+                SimulationError::InvalidConfig(format!(
+                    "failed to prepare simulation request transfer: {error}"
+                ))
+            })?;
+        let dependency_buffer_count = dependency_buffers.len();
+        validate_worker_request_transfer_buffer_lengths(
+            dependency_buffers
+                .iter()
+                .map(|values| values.len())
+                .chain(op_buffers.iter().map(Vec::len)),
+        )
+        .map_err(|error| {
+            SimulationError::InvalidConfig(format!(
+                "failed to prepare simulation request transfer: {error}"
+            ))
+        })?;
+
+        validate_worker_request_checkpoint_lengths(
+            dependency_buffers
+                .iter()
+                .map(|values| values.len())
+                .sum::<usize>()
+                + op_buffers.iter().map(Vec::len).sum::<usize>(),
+            &checkpoint_buffers.iter().map(Vec::len).collect::<Vec<_>>(),
+        )
+        .map_err(SimulationError::InvalidConfig)?;
+        let buffers = Array::new();
+        let byte_buffers = Array::new();
+        let transfer = Array::new();
+        for bytes in checkpoint_buffers {
+            let view = js_sys::Uint8Array::new_with_length(bytes.len() as u32);
+            view.copy_from(&bytes);
+            transfer.push(&view.buffer());
+            byte_buffers.push(&view);
+        }
+        for (index, values) in dependency_buffers.into_iter().enumerate() {
+            let length = u32::try_from(values.len()).map_err(|_| {
+                SimulationError::InvalidConfig(format!(
+                    "simulation request transfer buffer {index} exceeds browser typed-array limits"
+                ))
+            })?;
+            let view = js_sys::Float64Array::new_with_length(length);
+            view.copy_from(values.as_ref());
+            transfer.push(&view.buffer());
+            buffers.push(&view);
+        }
+
+        for (offset, values) in op_buffers.into_iter().enumerate() {
+            let index = dependency_buffer_count + offset;
+            let length = u32::try_from(values.len()).map_err(|_| {
+                SimulationError::InvalidConfig(format!(
+                    "simulation request transfer buffer {index} exceeds browser typed-array limits"
+                ))
+            })?;
+            let view = js_sys::Float64Array::new_with_length(length);
+            view.copy_from(&values);
+            transfer.push(&view.buffer());
+            buffers.push(&view);
+        }
+
+        // Numerical dependencies have already been copied once into detached,
+        // transferable browser buffers. Remove the authenticated Rust payload
+        // before serializing request metadata so samples cannot be duplicated
+        // as JavaScript objects or retained in an intermediate staging copy.
+        request.dependencies = Default::default();
+        let transport = WorkerRequestTransportMetadata {
+            request,
+            dependency_metadata,
+            dependency_buffer_count,
+            op_previous_state,
+        };
+
+        let message = Object::new();
+        Reflect::set(
+            &message,
+            &JsValue::from_str("type"),
+            &JsValue::from_str("run"),
+        )
+        .map_err(reflect_error)?;
+        Reflect::set(
+            &message,
+            &JsValue::from_str("id"),
+            &JsValue::from_f64(request_id as f64),
+        )
+        .map_err(reflect_error)?;
+
+        let request_value = Object::new();
+        Reflect::set(
+            &request_value,
+            &JsValue::from_str("protocolVersion"),
+            &JsValue::from_f64(f64::from(WORKER_REQUEST_TRANSPORT_PROTOCOL)),
+        )
+        .map_err(reflect_error)?;
+        let metadata = serde_wasm_bindgen::to_value(&transport).map_err(|error| {
+            SimulationError::InvalidConfig(format!(
+                "failed to serialize simulation request metadata for worker: {error}"
+            ))
+        })?;
+        Reflect::set(&request_value, &JsValue::from_str("request"), &metadata)
+            .map_err(reflect_error)?;
+
+        Reflect::set(
+            &request_value,
+            &JsValue::from_str("byteBuffers"),
+            &byte_buffers,
+        )
+        .map_err(reflect_error)?;
+        Reflect::set(&request_value, &JsValue::from_str("buffers"), &buffers)
+            .map_err(reflect_error)?;
+        Reflect::set(&message, &JsValue::from_str("request"), &request_value)
+            .map_err(reflect_error)?;
+
+        Ok(PreparedWorkerMessage {
+            value: JsValue::from(message),
+            transfer,
+        })
+    }
+
+    fn mark_worker_started(progress: &Arc<Mutex<SimulationProgress>>) {
+        let mut progress = match progress.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        progress.update_status(SimulationStatus::Parsing);
+    }
+
+    fn request_repaint(state: &Rc<RefCell<WorkerState>>) {
+        let wakeup = state.borrow().wakeup.clone();
+        if let Some(wakeup) = wakeup {
+            wakeup();
+        }
+    }
+
+    fn string_property(value: &JsValue, property: &str) -> Option<String> {
+        Reflect::get(value, &JsValue::from_str(property))
+            .ok()
+            .and_then(|value| value.as_string())
+    }
+
+    fn numeric_property(value: &JsValue, property: &str) -> Option<u64> {
+        Reflect::get(value, &JsValue::from_str(property))
+            .ok()
+            .and_then(|value| value.as_f64())
+            .and_then(request_id_from_js_number)
+    }
+
+    fn reflect_error(error: JsValue) -> SimulationError {
+        SimulationError::InvalidConfig(js_error_message(error))
+    }
+
+    fn js_error_message(error: JsValue) -> String {
+        error
+            .as_string()
+            .or_else(|| {
+                Reflect::get(&error, &JsValue::from_str("message"))
+                    .ok()
+                    .and_then(|message| message.as_string())
+            })
+            .unwrap_or_else(|| "unknown JavaScript error".to_string())
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) use browser::{WorkerHandle, start_worker_request};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn next_request_id_skips_zero_after_wraparound() {
+        assert_eq!(next_request_id(0), 1);
+        assert_eq!(
+            next_request_id(MAX_BROWSER_REQUEST_ID - 1),
+            MAX_BROWSER_REQUEST_ID
+        );
+        assert_eq!(next_request_id(MAX_BROWSER_REQUEST_ID), 1);
+        assert_eq!(next_request_id(u64::MAX), 1);
+    }
+
+    #[test]
+    fn stale_result_rejects_non_active_ids() {
+        assert!(!stale_result(Some(8), 8));
+        assert!(stale_result(Some(8), 7));
+        assert!(stale_result(None, 8));
+    }
+
+    #[test]
+    fn javascript_request_ids_are_exact_bounded_integers() {
+        assert_eq!(request_id_from_js_number(1.0), Some(1));
+        assert_eq!(
+            request_id_from_js_number(MAX_BROWSER_REQUEST_ID as f64),
+            Some(MAX_BROWSER_REQUEST_ID)
+        );
+        assert_eq!(request_id_from_js_number(0.0), None);
+        assert_eq!(request_id_from_js_number(1.5), None);
+        assert_eq!(
+            request_id_from_js_number(MAX_BROWSER_REQUEST_ID as f64 + 1.0),
+            None
+        );
+        assert_eq!(request_id_from_js_number(f64::NAN), None);
+    }
+
+    #[test]
+    fn stale_worker_callbacks_cannot_target_a_replacement_epoch() {
+        assert!(!stale_worker_epoch(Some(9), 9));
+        assert!(stale_worker_epoch(Some(10), 9));
+        assert!(stale_worker_epoch(None, 9));
+    }
+}

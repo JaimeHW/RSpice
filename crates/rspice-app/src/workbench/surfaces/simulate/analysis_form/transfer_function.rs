@@ -7,8 +7,8 @@
 
 use egui::Ui;
 
-use crate::services::simulation_runner::TfRunConfig;
 use crate::simulation::dialog::XfDialogState;
+use rspice_simulation::runner::TfRunConfig;
 
 use super::{
     NOISE_DOMAIN_PRESET_LIMIT, NOISE_INPUT_CUSTOM_CHOICE, NOISE_OUTPUT_CUSTOM_CHOICE, NoiseDomain,

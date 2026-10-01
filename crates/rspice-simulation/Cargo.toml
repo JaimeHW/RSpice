@@ -16,6 +16,7 @@ default = []
 pdk-test-fixtures = ["dep:ed25519-dalek", "dep:wat"]
 generated-veriloga-catalog = ["rspice-design/generated-veriloga-catalog"]
 wasm-jit = ["rspice-veriloga/wasm-jit"]
+browser-worker = ["wasm-jit", "rspice-core/veriloga-wasm-jit"]
 
 [dependencies]
 ed25519-dalek = { workspace = true, features = ["std"], optional = true }
@@ -46,7 +47,7 @@ wasmi.workspace = true
 js-sys.workspace = true
 serde-wasm-bindgen = "0.6"
 wasm-bindgen.workspace = true
-web-sys = { workspace = true, features = ["Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent"] }
+web-sys = { workspace = true, features = ["Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent", "console"] }
 
 [dev-dependencies]
 ed25519-dalek = { workspace = true, features = ["std"] }

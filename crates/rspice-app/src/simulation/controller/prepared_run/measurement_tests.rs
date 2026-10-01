@@ -1,9 +1,9 @@
 //! Measurement references must survive preparation, dispatch, retention, and project saves.
 
 use crate::product::AnalysisInstanceId;
-use crate::simulation::config::{AnalysisConfig, TransientAnalysisConfig};
+use crate::simulation::config::AnalysisConfig;
 use crate::simulation::controller::SimulationController;
-use crate::simulation::engine_bridge::EngineBridge;
+use crate::simulation::controller::test_execution::run_resolved_task;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::SpecificationDefinition;
 use crate::state::{SimulationRunIntent, SpecEntry, SpecPointScope};
@@ -105,21 +105,10 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
         .unwrap();
     let mut measured = false;
     for task in dispatch.into_tasks() {
-        let (queued, netlist, _, references, _, environment) = task
-            .resolve_dependency_artifacts(&HashMap::new())
-            .unwrap()
-            .into_runner_parts();
-        if let Some(config @ AnalysisConfig::Transient(_)) = queued.config {
-            let result = EngineBridge::new()
-                .with_measurement_references(references)
-                .run_with_abort_and_source_path_and_environment(
-                    &config,
-                    &netlist,
-                    None,
-                    environment,
-                    &rspice_core::NoAbort,
-                )
-                .unwrap();
+        if matches!(task.config(), Some(AnalysisConfig::Transient(_))) {
+            let result =
+                run_resolved_task(task.resolve_dependency_artifacts(&HashMap::new()).unwrap())
+                    .unwrap();
             assert!(result.measurement("fit").unwrap().abs() < 1e-8);
             measured = true;
         }
@@ -227,18 +216,17 @@ fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
         baseline.metadata().source_digest,
         snapshot.metadata().source_digest
     );
-    let result = EngineBridge::new()
-        .run_with_abort(
-            &AnalysisConfig::Transient(TransientAnalysisConfig {
-                stop_time: 1e-6,
-                step_time: 1e-7,
-                max_timestep: Some(1e-7),
-                ..Default::default()
-            }),
-            snapshot.executable_netlist(),
-            &rspice_core::NoAbort,
-        )
+    let snapshot_digest = snapshot.digest();
+    let dispatch = crate::simulation::execution::PreparedRunAuthorization::default()
+        .authorize_campaign_member(snapshot)
         .unwrap();
+    let task = dispatch
+        .into_tasks()
+        .into_iter()
+        .find(|task| matches!(task.config(), Some(AnalysisConfig::Transient(_))))
+        .expect("prepared transient task");
+    let result =
+        run_resolved_task(task.resolve_dependency_artifacts(&HashMap::new()).unwrap()).unwrap();
     for (name, expected) in [
         ("average", 2.5),
         ("rms", 2.5),
@@ -289,7 +277,7 @@ fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
         baseline.metadata().source_digest,
         reference.metadata().source_digest
     );
-    assert_ne!(snapshot.digest(), reference.digest());
+    assert_ne!(snapshot_digest, reference.digest());
 }
 
 #[test]
@@ -305,18 +293,17 @@ fn authored_plan_measurements_validate_context_ownership_and_duplicate_names() {
     let mut measurement = definition("gain", ".MEAS AC gain FIND VM(out) AT={freq}");
     measurement.producing_analysis = Some(study);
     let composed = materialize(source, &[measurement.clone()], &drafts).unwrap();
-    let result = EngineBridge::new()
-        .run_with_abort(
-            &AnalysisConfig::Ac(crate::simulation::config::AcAnalysisConfig {
-                start_freq: 1000.0,
-                stop_freq: 1000.0,
-                num_points: 1,
-                sweep_type: crate::simulation::config::AcSweepType::Linear,
-            }),
-            &composed,
-            &rspice_core::NoAbort,
-        )
-        .unwrap();
+    let config = AnalysisConfig::Ac(crate::simulation::config::AcAnalysisConfig {
+        start_freq: 1000.0,
+        stop_freq: 1000.0,
+        num_points: 1,
+        sweep_type: crate::simulation::config::AcSweepType::Linear,
+    });
+    let executable = rspice_simulation::netlist_preparation::splice_before_terminal_end_card(
+        &composed,
+        &config.to_spice(),
+    );
+    let result = crate::simulation::controller::test_execution::run_manual_deck(&executable);
     let expected = 1.0 / 1.0_f64.hypot(std::f64::consts::TAU);
     assert!((result.measurement("gain").unwrap() - expected).abs() < 1e-9);
     let duplicate = composed.replace(".MEAS AC gain", ".MEAS AC GAIN");

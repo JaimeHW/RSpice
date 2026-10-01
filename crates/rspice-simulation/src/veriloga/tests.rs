@@ -2,6 +2,62 @@
 
 use super::PreparedVerilogARuntime;
 
+pub(crate) fn standalone_connection_fixture() -> (super::PreparedVerilogARuntimeSet, String) {
+    use rspice_design::project_sources::{
+        MAX_PROJECT_CODE_SOURCE_BYTES, MAX_PROJECT_SOURCE_BUNDLE_BYTES,
+        MAX_PROJECT_SOURCE_DEPENDENCY_DEPTH, MAX_PROJECT_SOURCE_FILES,
+        MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES,
+    };
+    let mut rules = rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES
+        .iter()
+        .map(|(_, source)| *source)
+        .collect::<String>();
+    rules.push_str("\nconnectrules Low; connect d2a #(.vsup(1.0)); endconnectrules\nconnectrules High; connect d2a #(.vsup(5.0)); endconnectrules\n");
+    let (_, library) = crate::model_import::import_source_bundle(
+        "standalone-ui-connections.lib",
+        None,
+        vec![
+            ("root.lib".into(), b".va \"driver.vams\" UI_DRIVER\n.va \"rules.vams\" UI_CONNECTIONS\n".to_vec()),
+            ("driver.vams".into(), b"module ui_driver(p,q); inout p; electrical p; output q; reg q; initial q=1; analog I(p)<+0; endmodule\n".to_vec()),
+            ("rules.vams".into(), rules.into_bytes()),
+        ],
+        None,
+        rspice_model_library::source_bundle::ImportLimits {
+            max_files: MAX_PROJECT_SOURCE_FILES,
+            max_total_bytes: MAX_PROJECT_SOURCE_BUNDLE_BYTES,
+        },
+        rspice_veriloga::VirtualCompileLimits {
+            max_files: MAX_PROJECT_SOURCE_FILES,
+            max_path_bytes: MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES,
+            max_file_bytes: MAX_PROJECT_CODE_SOURCE_BYTES,
+            max_total_source_bytes: MAX_PROJECT_SOURCE_BUNDLE_BYTES,
+            max_include_depth: MAX_PROJECT_SOURCE_DEPENDENCY_DEPTH,
+            max_expanded_bytes: MAX_PROJECT_SOURCE_BUNDLE_BYTES.saturating_mul(2),
+            max_module_name_bytes: 128,
+        },
+    ).expect("checked model-source import");
+    let mut catalog = rspice_model_library::ModelCatalog::default();
+    catalog.add_library(library);
+    let sealed = crate::model_sources::seal_catalog_execution_sources(
+        &catalog,
+        &rspice_model_library::ModelResolutionRecords::default(),
+    )
+    .unwrap();
+    let authority = sealed.model_library_veriloga_authority().unwrap().unwrap();
+    let sources =
+        crate::project_veriloga::compile_model_library_source_runtimes(&authority).unwrap();
+    let mut deck = "standalone UI connections\nV1 p 0 1\nX1 p q UI_DRIVER\n.options connectrules=Low connectrules_source=ui_connections\n.tran 0.2n 2n\n.end\n".to_owned();
+    for source in sources.sources() {
+        assert!(!std::path::Path::new(source.source_key()).exists());
+        crate::netlist_preparation::append_project_veriloga_directive(
+            &mut deck,
+            source.source_key(),
+            source.netlist_alias(),
+        );
+    }
+    (sources, deck)
+}
+
 /// Constants whose shortest decimal form `serde_json` does *not* parse back
 /// exactly unless the `float_roundtrip` feature is on. `1.3806505e-23` is
 /// Boltzmann's constant verbatim from shipped Verilog-A models; without the

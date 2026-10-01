@@ -25,7 +25,6 @@ pub use rspice_simulation_contract::run_set::{
     RunSetCompositionMode, RunSetDimension, RunSetDimensionKind, RunSetForecast, RunSetPoint,
     RunSetReceiptStatus, RunSetState, RunSetStatus, RunSetValidation, forecast_point_count,
     format_bytes, format_duration_ms, modelled_cost_ms, nominal_point_key, parse_bytes,
-    parse_parameter_source_authority, parse_source_value_authority, parse_supply_source_authority,
     participating_point_keys, point_key_label, retained,
 };
 #[cfg(test)]

@@ -13,9 +13,11 @@ use rspice_simulation_contract::saved_output::{SavedOutput, SavedOutputCompatibi
 use std::sync::Arc;
 
 mod bindings;
+pub mod materialization;
 mod preflight;
 pub mod selection;
 pub use bindings::SourceCandidate;
+pub use materialization::apply_saved_output_policy;
 pub use preflight::{
     SavedOutputPreflightReport, SavedOutputSemanticStatus, SavedOutputStorageEstimate,
     preflight_saved_output, retained_engine_source_upper_bound_bytes,
