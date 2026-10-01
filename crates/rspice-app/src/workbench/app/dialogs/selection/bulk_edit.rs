@@ -166,7 +166,7 @@ impl SelectionBulkEditAuthority {
         {
             return Some(reopen("The schematic grid or editing policy changed"));
         }
-        if self.active.selection != state.schematic.session.selection {
+        if self.active.selection != state.schematic.session.editor.selection {
             return Some(reopen("The selected-object set changed"));
         }
         if self.design_management_revision != state.workspace.content.design_management.revision() {
@@ -1851,16 +1851,16 @@ mod tests {
     fn authority_rejects_active_selection_and_external_buffer_drift() {
         let mut state = AppState::default();
         state.schematic.document_mut_for_test().components = vec![component(1, "X1", Some("tt"))];
-        state.schematic.session.selection.select_component(1);
+        state.schematic.session.editor.selection.select_component(1);
         state
             .workspace
             .insert_schematic_editor("user/child/schematic".to_owned(), SchematicState::default());
         let authority = SelectionBulkEditAuthority::capture(&state);
         assert!(authority.stale_reason(&state).is_none());
 
-        state.schematic.session.selection.clear();
+        state.schematic.session.editor.selection.clear();
         assert!(authority.stale_reason(&state).is_some());
-        state.schematic.session.selection.select_component(1);
+        state.schematic.session.editor.selection.select_component(1);
         state
             .workspace
             .schematic_editor_mut("user/child/schematic")

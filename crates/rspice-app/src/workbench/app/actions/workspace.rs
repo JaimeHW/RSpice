@@ -65,11 +65,11 @@ fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> Sch
     // ID counter and name counters: without recalculation a freshly placed
     // component reuses an existing ID and selection matches both.
     schematic.recalculate_runtime_state();
-    schematic.session.snap_engine = state.ui.schematic_snap.clone();
+    schematic.session.editor.snap_engine = state.ui.schematic_snap.clone();
     schematic.reconcile_grid_pitch_runtime();
     state.ui.schematic_snap.grid_size = schematic.document().grid_size;
-    schematic.session.wire_drawing.routing_mode = state.ui.schematic_routing_mode;
-    schematic.session.bus_drawing.routing_mode = state.ui.schematic_routing_mode;
+    schematic.session.editor.wire_drawing.routing_mode = state.ui.schematic_routing_mode;
+    schematic.session.editor.bus_drawing.routing_mode = state.ui.schematic_routing_mode;
     // Views from read-only libraries open for inspection, never for edit —
     // the docbar banner explains and every edit path checks this flag.
     schematic.session.read_only = state.workbench.safe_mode.project_read_only()
@@ -98,19 +98,19 @@ impl AppState {
     /// joining two authored cell pins is captured with the selected
     /// instances instead of being silently omitted.
     pub(crate) fn copy_active_schematic_selection(&mut self) -> bool {
-        if self.schematic.session.selection.is_empty() {
+        if self.schematic.session.editor.selection.is_empty() {
             return false;
         }
         let symbols = schematic_symbol_context(self);
-        self.schematic.session.clipboard =
-            self.schematic
-                .capture_complete_selection_resolved(|component| {
-                    symbols
-                        .named_terminal_points(component)
-                        .into_iter()
-                        .map(|(_, point)| point)
-                        .collect()
-                });
+        self.schematic.session.editor.clipboard = self
+            .schematic
+            .capture_complete_selection_resolved(|component| {
+                symbols
+                    .named_terminal_points(component)
+                    .into_iter()
+                    .map(|(_, point)| point)
+                    .collect()
+            });
         true
     }
 
@@ -191,14 +191,15 @@ impl AppState {
             };
 
         let mut schematic = SchematicState::from_document(document);
-        schematic.session.snap_engine = self.ui.schematic_snap.clone();
+        schematic.session.editor.snap_engine = self.ui.schematic_snap.clone();
         schematic.reconcile_grid_pitch_runtime();
         let routing_mode = self.ui.schematic_routing_mode;
         schematic
             .session
+            .editor
             .wire_drawing
             .set_routing_mode(routing_mode);
-        schematic.session.bus_drawing.routing_mode = routing_mode;
+        schematic.session.editor.bus_drawing.routing_mode = routing_mode;
         schematic
     }
 }
@@ -304,14 +305,14 @@ impl AppState {
             } => {
                 self.workbench
                     .activate(crate::workbench::state::Workspace::Design);
-                self.schematic.session.center_request = Some(Point::new(x, y));
-                self.schematic.session.net_highlight.clear();
-                self.schematic.session.selection.clear();
+                self.schematic.session.editor.center_request = Some(Point::new(x, y));
+                self.schematic.session.editor.net_highlight.clear();
+                self.schematic.session.editor.selection.clear();
                 if let Some(id) = component {
-                    self.schematic.session.selection.select_component(id);
+                    self.schematic.session.editor.selection.select_component(id);
                 }
                 if let Some(id) = wire {
-                    self.schematic.session.selection.select_wire(id);
+                    self.schematic.session.editor.selection.select_wire(id);
                 }
             }
             LogAnchor::Symbol {
@@ -401,8 +402,8 @@ impl AppState {
     /// them back to wherever they were before would be a second surprise
     /// rather than an undo of the first.
     pub(crate) fn clear_failure_site_marking(&mut self) {
-        self.schematic.session.net_highlight.clear();
-        self.schematic.session.selection.clear();
+        self.schematic.session.editor.net_highlight.clear();
+        self.schematic.session.editor.selection.clear();
     }
 
     /// Mark the design objects a failed run named, or say why it cannot.
@@ -2015,6 +2016,7 @@ impl AppState {
     pub(crate) fn selected_hierarchy_master(&self) -> Option<(String, CellViewRef)> {
         self.schematic
             .session
+            .editor
             .selection
             .single_component()
             .and_then(|component_id| self.hierarchy_master_for_component(component_id))
@@ -2107,6 +2109,7 @@ fn selected_instance_generated_line(
     let component_id = state
         .schematic
         .session
+        .editor
         .selection
         .single_component()
         .ok_or("select one instance")?;

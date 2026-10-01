@@ -15,6 +15,7 @@ impl SchematicState {
         // A pending card applies only while its exact device tool is armed.
         let model_override = self
             .session
+            .editor
             .pending_part_model
             .as_ref()
             .filter(|armed| armed.tool == Tool::Place(kind))
@@ -26,8 +27,8 @@ impl SchematicState {
             kind,
             ComponentPlacement {
                 position: pos,
-                rotation: self.session.preview_rotation,
-                mirror_h: self.session.preview_mirror_h,
+                rotation: self.session.editor.preview_rotation,
+                mirror_h: self.session.editor.preview_mirror_h,
             },
             model_override,
         );
@@ -44,8 +45,8 @@ impl SchematicState {
         let id = self.design.add_library_cell_component(
             ComponentPlacement {
                 position: pos,
-                rotation: self.session.preview_rotation,
-                mirror_h: self.session.preview_mirror_h,
+                rotation: self.session.editor.preview_rotation,
+                mirror_h: self.session.editor.preview_mirror_h,
             },
             library_cell,
         );
@@ -122,10 +123,17 @@ impl SchematicState {
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
         transform: ComponentTransform,
     ) {
-        if self.session.selection.components.is_empty() {
+        if self.session.editor.selection.components.is_empty() {
             return;
         }
-        let mut ids: Vec<u64> = self.session.selection.components.iter().copied().collect();
+        let mut ids: Vec<u64> = self
+            .session
+            .editor
+            .selection
+            .components
+            .iter()
+            .copied()
+            .collect();
         ids.sort_unstable();
         ids.retain(|id| {
             self.design
@@ -217,11 +225,12 @@ mod tests {
                 if first == second {
                     continue;
                 }
-                schematic.session.selection.components.clear();
-                schematic.session.selection.select_component(first);
-                schematic.session.selection.select_component(second);
+                schematic.session.editor.selection.components.clear();
+                schematic.session.editor.selection.select_component(first);
+                schematic.session.editor.selection.select_component(second);
                 let order: Vec<u64> = schematic
                     .session
+                    .editor
                     .selection
                     .components
                     .iter()
@@ -254,7 +263,7 @@ mod tests {
             .document_mut_for_test()
             .wires
             .push(Wire::segment(2, Point::new(60, 40), Point::new(60, 0)));
-        schematic.session.selection.select_component(1);
+        schematic.session.editor.selection.select_component(1);
 
         schematic
             .rotate_selection_resolved(|component| resolved_terminal_points(component, &resolved));
@@ -312,7 +321,7 @@ mod tests {
     #[test]
     fn rotating_stale_component_selection_is_noop() {
         let mut schematic = SchematicState::default();
-        schematic.session.selection.select_component(404);
+        schematic.session.editor.selection.select_component(404);
         let topology_version = schematic.topology_version();
 
         schematic.rotate_selection();

@@ -1349,13 +1349,14 @@ mod tests {
         };
         state.schematic.arm_pack_part(*placement);
         assert_eq!(
-            state.schematic.session.tool,
+            state.schematic.session.editor.tool,
             crate::state::Tool::Place(crate::state::ComponentType::Diode)
         );
         assert_eq!(
             state
                 .schematic
                 .session
+                .editor
                 .pending_part_model
                 .as_ref()
                 .map(|armed| armed.model.as_str()),
@@ -1397,12 +1398,13 @@ mod tests {
         };
         state.schematic.arm_pack_part(*placement);
         assert_eq!(
-            state.schematic.session.tool,
+            state.schematic.session.editor.tool,
             crate::state::Tool::Place(crate::state::ComponentType::CellInstance)
         );
         let binding = state
             .schematic
             .session
+            .editor
             .pending_library_cell
             .as_ref()
             .expect("the armed cursor carries the cell it was chosen from");
@@ -1497,6 +1499,7 @@ mod tests {
             state
                 .schematic
                 .session
+                .editor
                 .pending_library_cell
                 .as_ref()
                 .map(|binding| binding.cell.as_str()),

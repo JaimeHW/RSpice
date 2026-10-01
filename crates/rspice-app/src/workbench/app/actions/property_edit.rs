@@ -414,7 +414,7 @@ pub(in crate::workbench::app) fn cell_instance_identity_sheet() -> PropertySheet
 /// Single authority for the schematic Object properties command. Availability
 /// requires a live target that the matching editor can actually open.
 pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
-    if let Some(id) = state.schematic.session.selection.single_probe() {
+    if let Some(id) = state.schematic.session.editor.selection.single_probe() {
         return state
             .schematic
             .document()
@@ -425,7 +425,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
     if state.schematic_edit_read_only() {
         return false;
     }
-    if let Some(id) = state.schematic.session.selection.single_component() {
+    if let Some(id) = state.schematic.session.editor.selection.single_component() {
         return state
             .schematic
             .document()
@@ -440,7 +440,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
                 }
             });
     }
-    if let Some(id) = state.schematic.session.selection.single_net_label() {
+    if let Some(id) = state.schematic.session.editor.selection.single_net_label() {
         return state
             .schematic
             .document()
@@ -448,7 +448,13 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
             .iter()
             .any(|label| label.id == id);
     }
-    if let Some(id) = state.schematic.session.selection.single_design_note() {
+    if let Some(id) = state
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_design_note()
+    {
         return state
             .schematic
             .document()
@@ -459,6 +465,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
     if let Some(id) = state
         .schematic
         .session
+        .editor
         .selection
         .single_documentation_shape()
     {
@@ -469,7 +476,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
             .iter()
             .any(|shape| shape.id == id);
     }
-    if let Some(id) = state.schematic.session.selection.single_bus_tap() {
+    if let Some(id) = state.schematic.session.editor.selection.single_bus_tap() {
         return state
             .schematic
             .document()
@@ -477,7 +484,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
             .iter()
             .any(|tap| tap.id == id);
     }
-    if let Some(id) = state.schematic.session.selection.single_bus() {
+    if let Some(id) = state.schematic.session.editor.selection.single_bus() {
         return state
             .schematic
             .document()
@@ -485,7 +492,13 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
             .iter()
             .any(|bus| bus.id == id);
     }
-    if state.schematic.session.selection.has_any_wire_selection() {
+    if state
+        .schematic
+        .session
+        .editor
+        .selection
+        .has_any_wire_selection()
+    {
         return crate::workbench::app::selected_named_net_target(state).is_some();
     }
     false
@@ -622,7 +635,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     {
         return false;
     }
-    if let Some(id) = state.schematic.session.selection.single_probe() {
+    if let Some(id) = state.schematic.session.editor.selection.single_probe() {
         if state
             .schematic
             .document()
@@ -639,11 +652,11 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     if state.deny_read_only_edit() || !selected_object_properties_available(state) {
         return false;
     }
-    if let Some(component_id) = state.schematic.session.selection.single_component() {
+    if let Some(component_id) = state.schematic.session.editor.selection.single_component() {
         open_property_editor(state, component_id);
         return state.tabbed_property_dialog.open;
     }
-    if let Some(label_id) = state.schematic.session.selection.single_net_label()
+    if let Some(label_id) = state.schematic.session.editor.selection.single_net_label()
         && let Some(label) = state
             .schematic
             .document()
@@ -660,7 +673,12 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
         );
         return true;
     }
-    if state.schematic.session.selection.has_any_wire_selection()
+    if state
+        .schematic
+        .session
+        .editor
+        .selection
+        .has_any_wire_selection()
         && let Some(target) = crate::workbench::app::selected_named_net_target(state)
     {
         state.dialogs.object_properties.open_named_net(
@@ -672,7 +690,12 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
         );
         return true;
     }
-    if let Some(note_id) = state.schematic.session.selection.single_design_note()
+    if let Some(note_id) = state
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_design_note()
         && let Some(note) = state
             .schematic
             .document()
@@ -692,6 +715,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     if let Some(shape_id) = state
         .schematic
         .session
+        .editor
         .selection
         .single_documentation_shape()
         && let Some(shape) = state
@@ -710,7 +734,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
         );
         return true;
     }
-    if let Some(tap_id) = state.schematic.session.selection.single_bus_tap()
+    if let Some(tap_id) = state.schematic.session.editor.selection.single_bus_tap()
         && let Some(tap) = state
             .schematic
             .document()
@@ -727,7 +751,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
         );
         return true;
     }
-    if let Some(bus_id) = state.schematic.session.selection.single_bus()
+    if let Some(bus_id) = state.schematic.session.editor.selection.single_bus()
         && let Some(bus) = state
             .schematic
             .document()
@@ -1027,7 +1051,7 @@ mod tests {
         state.schematic.document_mut_for_test().buses.push(bus);
         state.schematic.document_mut_for_test().bus_taps.push(tap);
 
-        state.schematic.session.selection.select_only_bus(41);
+        state.schematic.session.editor.selection.select_only_bus(41);
         assert!(open_selected_object_properties(&mut state));
         assert!(matches!(
             state.dialogs.object_properties.draft,
@@ -1035,7 +1059,12 @@ mod tests {
         ));
         state.dialogs.object_properties.close();
 
-        state.schematic.session.selection.select_only_bus_tap(42);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_bus_tap(42);
         assert!(open_selected_object_properties(&mut state));
         assert!(matches!(
             state.dialogs.object_properties.draft,
@@ -1055,6 +1084,7 @@ mod tests {
         state
             .schematic
             .session
+            .editor
             .selection
             .select_only_net_label(label.id);
 
@@ -1082,7 +1112,12 @@ mod tests {
             .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(72, Point::new(20, 0), "sense"));
-        state.schematic.session.selection.select_only_wire(71);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_wire(71);
 
         assert!(selected_object_properties_available(&state));
         assert!(open_selected_object_properties(&mut state));
@@ -1106,7 +1141,12 @@ mod tests {
         state.schematic.document_mut_for_test().components.push(
             Component::new(73, ComponentType::Port, Point::origin()).with_name_value("P73", "VIN"),
         );
-        state.schematic.session.selection.select_only_component(73);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(73);
 
         assert!(selected_object_properties_available(&state));
         assert!(open_selected_object_properties(&mut state));
@@ -1136,6 +1176,7 @@ mod tests {
         state
             .schematic
             .session
+            .editor
             .selection
             .select_only_design_note(note.id);
 
@@ -1157,7 +1198,7 @@ mod tests {
             .document_mut_for_test()
             .buses
             .push(Bus::segment(1, Point::new(0, 0), Point::new(10, 0), None).unwrap());
-        state.schematic.session.selection.select_only_bus(1);
+        state.schematic.session.editor.selection.select_only_bus(1);
         state.schematic.session.read_only = true;
 
         assert!(!open_selected_object_properties(&mut state));
@@ -1171,7 +1212,12 @@ mod tests {
             SchematicProbe::new(74, Point::new(10, 20), "V(out)", Some("V(out)".to_owned()))
                 .unwrap(),
         );
-        state.schematic.session.selection.select_only_probe(74);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_probe(74);
         state.schematic.session.read_only = true;
 
         assert!(selected_object_properties_available(&state));
@@ -1188,17 +1234,28 @@ mod tests {
     #[test]
     fn stale_selected_object_ids_fail_closed_without_opening_a_dialog() {
         let mut state = AppState::default();
-        state.schematic.session.selection.select_only_bus(9001);
-        assert!(!open_selected_object_properties(&mut state));
-        assert!(!state.dialogs.object_properties.open);
-
-        state.schematic.session.selection.select_only_bus_tap(9002);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_bus(9001);
         assert!(!open_selected_object_properties(&mut state));
         assert!(!state.dialogs.object_properties.open);
 
         state
             .schematic
             .session
+            .editor
+            .selection
+            .select_only_bus_tap(9002);
+        assert!(!open_selected_object_properties(&mut state));
+        assert!(!state.dialogs.object_properties.open);
+
+        state
+            .schematic
+            .session
+            .editor
             .selection
             .select_only_net_label(9003);
         assert!(!open_selected_object_properties(&mut state));
@@ -1207,6 +1264,7 @@ mod tests {
         state
             .schematic
             .session
+            .editor
             .selection
             .select_only_design_note(9004);
         assert!(!open_selected_object_properties(&mut state));
@@ -1224,10 +1282,15 @@ mod tests {
         )
         .unwrap();
         state.schematic.document_mut_for_test().buses.push(bus);
-        state.schematic.session.selection.select_only_bus(1);
+        state.schematic.session.editor.selection.select_only_bus(1);
         assert!(open_selected_object_properties(&mut state));
 
-        state.schematic.session.selection.select_only_bus(999);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_bus(999);
         assert!(!open_selected_object_properties(&mut state));
         assert!(matches!(
             state.dialogs.object_properties.draft,
@@ -1249,7 +1312,12 @@ mod tests {
             .document_mut_for_test()
             .components
             .push(instance);
-        state.schematic.session.selection.select_only_component(44);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(44);
 
         assert!(selected_object_properties_available(&state));
         open_property_editor(&mut state, 44);
@@ -1305,7 +1373,12 @@ mod tests {
                 .with_library_cell(LibraryCellInstance::new("work", "amp", "schematic"))
                 .with_name_value("X9", "amp"),
         );
-        state.schematic.session.selection.select_only_component(9);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(9);
 
         assert!(selected_object_properties_available(&state));
         open_property_editor(&mut state, 9);
@@ -1375,7 +1448,12 @@ mod tests {
                 .with_library_cell(binding)
                 .with_name_value("M1", "nmos_core"),
         );
-        state.schematic.session.selection.select_only_component(1);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(1);
         open_property_editor(&mut state, 1);
         assert!(state.tabbed_property_dialog.open);
         state.tabbed_property_dialog.close();
@@ -1394,7 +1472,12 @@ mod tests {
                 .with_library_cell(LibraryCellInstance::new("legacy", "opaque", "schematic"))
                 .with_name_value("X2", "opaque"),
         );
-        state.schematic.session.selection.select_only_component(2);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(2);
         assert!(selected_object_properties_available(&state));
         open_property_editor(&mut state, 2);
         assert!(state.tabbed_property_dialog.open);
@@ -1417,7 +1500,12 @@ mod tests {
                 .with_library_cell(review_binding)
                 .with_name_value("X3", "review_only"),
         );
-        state.schematic.session.selection.select_only_component(3);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(3);
         assert!(selected_object_properties_available(&state));
         open_property_editor(&mut state, 3);
         assert!(state.tabbed_property_dialog.open);

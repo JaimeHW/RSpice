@@ -1414,20 +1414,21 @@ mod failure_site_control_tests {
     #[test]
     fn clearing_removes_the_marking_without_moving_the_view() {
         let mut state = state_showing_failure(Some(attribution(FAILURE, 0)), FAILURE);
-        state.schematic.session.selection.select_wire(91);
+        state.schematic.session.editor.selection.select_wire(91);
         state
             .schematic
             .session
+            .editor
             .net_highlight
             .highlight_wires(std::iter::once(91).collect());
-        state.schematic.session.center_request = None;
+        state.schematic.session.editor.center_request = None;
 
         state.clear_failure_site_marking();
 
-        assert!(state.schematic.session.selection.wires.is_empty());
-        assert!(!state.schematic.session.net_highlight.active);
+        assert!(state.schematic.session.editor.selection.wires.is_empty());
+        assert!(!state.schematic.session.editor.net_highlight.active);
         assert!(
-            state.schematic.session.center_request.is_none(),
+            state.schematic.session.editor.center_request.is_none(),
             "clearing a marking must not scroll the drawing"
         );
     }

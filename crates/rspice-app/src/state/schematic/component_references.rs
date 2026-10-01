@@ -58,7 +58,7 @@ impl SchematicEditorRef<'_> {
     ) -> SchematicState {
         let mut candidate = self.with_design(self.design.reference_history_candidate(target));
         candidate.session.is_dirty = true;
-        candidate.session.selection.clear();
+        candidate.session.editor.selection.clear();
         candidate
     }
 }

@@ -480,7 +480,7 @@ impl Command {
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic_edit_read_only()
-                        && !state.schematic.session.clipboard.is_empty()
+                        && !state.schematic.session.editor.clipboard.is_empty()
                 }
             }
             Self::SelectAll => active_symbol_editor(app) || active_schematic_editor(app),
@@ -493,7 +493,7 @@ impl Command {
             | Self::MirrorSelectionVertical => {
                 active_schematic_editor(app)
                     && !state.schematic_edit_read_only()
-                    && state.schematic.session.selection.components.iter().any(|id| {
+                    && state.schematic.session.editor.selection.components.iter().any(|id| {
                         state
                             .schematic
                             .document().components
@@ -1250,8 +1250,8 @@ impl Command {
                     app.state.ui.symbol.zoom =
                         (app.state.ui.symbol.zoom * COMMAND_ZOOM_FACTOR as f32).min(16.0);
                 } else {
-                    app.state.schematic.session.zoom =
-                        (app.state.schematic.session.zoom * COMMAND_ZOOM_FACTOR).min(8.0);
+                    app.state.schematic.session.editor.zoom =
+                        (app.state.schematic.session.editor.zoom * COMMAND_ZOOM_FACTOR).min(8.0);
                 }
             }
             Self::ZoomOut => {
@@ -1264,8 +1264,8 @@ impl Command {
                     app.state.ui.symbol.zoom =
                         (app.state.ui.symbol.zoom / COMMAND_ZOOM_FACTOR as f32).max(0.1);
                 } else {
-                    app.state.schematic.session.zoom =
-                        (app.state.schematic.session.zoom / COMMAND_ZOOM_FACTOR).max(0.25);
+                    app.state.schematic.session.editor.zoom =
+                        (app.state.schematic.session.editor.zoom / COMMAND_ZOOM_FACTOR).max(0.25);
                 }
             }
             Self::ZoomFit => {
@@ -1279,19 +1279,19 @@ impl Command {
                 } else if active_symbol_editor(app) {
                     app.state.ui.symbol.needs_fit = true;
                 } else {
-                    app.state.schematic.session.needs_drawing_sheet_fit = true;
-                    app.state.schematic.session.needs_fit = false;
+                    app.state.schematic.session.editor.needs_drawing_sheet_fit = true;
+                    app.state.schematic.session.editor.needs_fit = false;
                 }
             }
             Self::FitSchematicContent => {
-                app.state.schematic.session.needs_fit = true;
-                app.state.schematic.session.needs_drawing_sheet_fit = false;
+                app.state.schematic.session.editor.needs_fit = true;
+                app.state.schematic.session.editor.needs_drawing_sheet_fit = false;
             }
             Self::ZoomOneToOne => {
                 if active_symbol_editor(app) {
                     app.state.ui.symbol.zoom = 1.0;
                 } else {
-                    app.state.schematic.session.zoom = 1.0;
+                    app.state.schematic.session.editor.zoom = 1.0;
                 }
             }
             Self::CycleGrid => cycle_canvas_grid(app),

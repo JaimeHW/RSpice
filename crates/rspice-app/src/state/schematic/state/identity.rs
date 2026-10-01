@@ -51,18 +51,22 @@ impl SchematicState {
 
     pub(in crate::state::schematic) fn repair_clipboard_after_load(&mut self) {
         self.session
+            .editor
             .clipboard
             .wires
             .retain(|wire| wire.points.len() >= 2);
         self.session
+            .editor
             .clipboard
             .buses
             .retain(|bus| bus.validate().is_ok());
         self.session
+            .editor
             .clipboard
             .documentation_shapes
             .retain(|shape| shape.validate().is_ok());
         self.session
+            .editor
             .clipboard
             .probes
             .retain(|probe| probe.validate().is_ok());
@@ -125,48 +129,67 @@ impl SchematicState {
             .collect();
 
         self.session
+            .editor
             .selection
             .components
             .retain(|id| component_ids.contains(id));
         self.session
+            .editor
             .selection
             .wires
             .retain(|id| wire_point_counts.contains_key(id));
-        self.session.selection.wire_segments.retain(|segment| {
-            wire_point_counts
-                .get(&segment.wire_id)
-                .is_some_and(|point_count| segment.segment_index < point_count.saturating_sub(1))
-        });
-        self.session.selection.wire_vertices.retain(|vertex| {
-            wire_point_counts
-                .get(&vertex.wire_id)
-                .is_some_and(|point_count| vertex.vertex_index < *point_count)
-        });
         self.session
+            .editor
+            .selection
+            .wire_segments
+            .retain(|segment| {
+                wire_point_counts
+                    .get(&segment.wire_id)
+                    .is_some_and(|point_count| {
+                        segment.segment_index < point_count.saturating_sub(1)
+                    })
+            });
+        self.session
+            .editor
+            .selection
+            .wire_vertices
+            .retain(|vertex| {
+                wire_point_counts
+                    .get(&vertex.wire_id)
+                    .is_some_and(|point_count| vertex.vertex_index < *point_count)
+            });
+        self.session
+            .editor
             .selection
             .junctions
             .retain(|junction| junction_positions.contains(&junction.pos));
         self.session
+            .editor
             .selection
             .net_labels
             .retain(|id| net_label_ids.contains(id));
         self.session
+            .editor
             .selection
             .buses
             .retain(|id| bus_ids.contains(id));
         self.session
+            .editor
             .selection
             .bus_taps
             .retain(|id| bus_tap_ids.contains(id));
         self.session
+            .editor
             .selection
             .design_notes
             .retain(|id| design_note_ids.contains(id));
         self.session
+            .editor
             .selection
             .documentation_shapes
             .retain(|id| documentation_shape_ids.contains(id));
         self.session
+            .editor
             .selection
             .probes
             .retain(|id| probe_ids.contains(id));
@@ -241,10 +264,12 @@ mod tests {
         ];
         schematic
             .session
+            .editor
             .selection
             .select_junction(Point::new(10, 10));
         schematic
             .session
+            .editor
             .selection
             .select_junction(Point::new(20, 20));
 
@@ -259,8 +284,20 @@ mod tests {
             schematic.design.document().junctions[0].id,
             schematic.design.document().junctions[1].id
         );
-        assert!(schematic.session.selection.has_junction(Point::new(10, 10)));
-        assert!(schematic.session.selection.has_junction(Point::new(20, 20)));
+        assert!(
+            schematic
+                .session
+                .editor
+                .selection
+                .has_junction(Point::new(10, 10))
+        );
+        assert!(
+            schematic
+                .session
+                .editor
+                .selection
+                .has_junction(Point::new(20, 20))
+        );
         let new_id = schematic.add_junction(Point::new(30, 30));
         assert_eq!(
             schematic
@@ -282,14 +319,17 @@ mod tests {
             .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(50, Point::new(1, 2), "live"));
-        schematic.session.selection.select_net_label(50);
-        schematic.session.selection.select_net_label(999);
+        schematic.session.editor.selection.select_net_label(50);
+        schematic.session.editor.selection.select_net_label(999);
 
         schematic.recalculate_runtime_state();
 
-        assert!(schematic.session.selection.has_net_label(50));
-        assert!(!schematic.session.selection.has_net_label(999));
-        assert_eq!(schematic.session.selection.single_net_label(), Some(50));
+        assert!(schematic.session.editor.selection.has_net_label(50));
+        assert!(!schematic.session.editor.selection.has_net_label(999));
+        assert_eq!(
+            schematic.session.editor.selection.single_net_label(),
+            Some(50)
+        );
     }
 
     #[test]
@@ -339,8 +379,8 @@ mod tests {
             )
             .unwrap(),
         );
-        schematic.session.selection.select_design_note(59);
-        schematic.session.selection.select_design_note(999);
+        schematic.session.editor.selection.select_design_note(59);
+        schematic.session.editor.selection.select_design_note(999);
         let topology = schematic.topology_version();
 
         schematic.recalculate_runtime_state();
@@ -351,8 +391,8 @@ mod tests {
             note.review.as_ref().unwrap().record_id,
             format!("NOTE-{:04}", note.id)
         );
-        assert!(!schematic.session.selection.has_design_note(59));
-        assert!(!schematic.session.selection.has_design_note(999));
+        assert!(!schematic.session.editor.selection.has_design_note(59));
+        assert!(!schematic.session.editor.selection.has_design_note(999));
         assert_eq!(schematic.topology_version(), topology);
     }
 
@@ -507,8 +547,16 @@ mod tests {
             )
             .unwrap(),
         ];
-        schematic.session.selection.select_documentation_shape(59);
-        schematic.session.selection.select_documentation_shape(999);
+        schematic
+            .session
+            .editor
+            .selection
+            .select_documentation_shape(59);
+        schematic
+            .session
+            .editor
+            .selection
+            .select_documentation_shape(999);
         let topology = schematic.topology_version();
 
         schematic.recalculate_runtime_state();
@@ -526,7 +574,14 @@ mod tests {
             "component identity retains namespace priority"
         );
         assert!(ids.iter().all(|id| *id != 0));
-        assert!(schematic.session.selection.documentation_shapes.is_empty());
+        assert!(
+            schematic
+                .session
+                .editor
+                .selection
+                .documentation_shapes
+                .is_empty()
+        );
         assert_eq!(schematic.topology_version(), topology);
         let fresh = schematic.next_id();
         assert_ne!(fresh, 59);
@@ -546,8 +601,8 @@ mod tests {
                 .unwrap(),
             SchematicProbe::new(59, Point::new(30, 40), "V(in)", Some("V(in)".to_owned())).unwrap(),
         ];
-        schematic.session.selection.select_probe(59);
-        schematic.session.selection.select_probe(999);
+        schematic.session.editor.selection.select_probe(59);
+        schematic.session.editor.selection.select_probe(999);
         let topology = schematic.topology_version();
 
         schematic.recalculate_runtime_state();
@@ -561,7 +616,7 @@ mod tests {
             .collect();
         assert_eq!(ids.len(), 2);
         assert!(!ids.contains(&59), "component identity retains priority");
-        assert!(schematic.session.selection.probes.is_empty());
+        assert!(schematic.session.editor.selection.probes.is_empty());
         assert_eq!(schematic.topology_version(), topology);
         let fresh = schematic.next_id();
         assert_ne!(fresh, 59);

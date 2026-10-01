@@ -102,7 +102,7 @@ fn selected_rename_target(state: &AppState) -> Option<RenameSelectionTarget> {
     if let Some(target) = crate::workbench::app::selected_named_net_target(state) {
         return Some(RenameSelectionTarget::NamedNet(target));
     }
-    if let Some(id) = schematic.session.selection.single_component() {
+    if let Some(id) = schematic.session.editor.selection.single_component() {
         return schematic
             .document()
             .components
@@ -112,7 +112,7 @@ fn selected_rename_target(state: &AppState) -> Option<RenameSelectionTarget> {
             .map(Box::new)
             .map(RenameSelectionTarget::Component);
     }
-    if let Some(id) = schematic.session.selection.single_net_label() {
+    if let Some(id) = schematic.session.editor.selection.single_net_label() {
         return schematic
             .document()
             .net_labels
@@ -121,7 +121,7 @@ fn selected_rename_target(state: &AppState) -> Option<RenameSelectionTarget> {
             .cloned()
             .map(RenameSelectionTarget::NetLabel);
     }
-    if let Some(id) = schematic.session.selection.single_bus() {
+    if let Some(id) = schematic.session.editor.selection.single_bus() {
         return schematic
             .document()
             .buses
@@ -636,6 +636,7 @@ mod tests {
         app.state
             .schematic
             .session
+            .editor
             .selection
             .select_only_component(id);
         (app, id)
@@ -661,12 +662,14 @@ mod tests {
         app.state
             .schematic
             .session
+            .editor
             .selection
             .select_component(id + 999);
         assert!(!rename_selection_available(&app.state));
         app.state
             .schematic
             .session
+            .editor
             .selection
             .select_only_component(id);
         app.state.schematic.session.read_only = true;
@@ -686,7 +689,12 @@ mod tests {
             .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(82, Point::new(20, 0), "sense"));
-        app.state.schematic.session.selection.select_only_wire(81);
+        app.state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_wire(81);
         assert!(open_selected_object_rename(&mut app.state));
         assert!(matches!(
             app.state.dialogs.rename_selection.target,
@@ -705,6 +713,7 @@ mod tests {
         app.state
             .schematic
             .session
+            .editor
             .selection
             .select_only_component(83);
         assert!(open_selected_object_rename(&mut app.state));
@@ -808,6 +817,7 @@ mod tests {
         app.state
             .schematic
             .session
+            .editor
             .selection
             .select_only_component(id);
         assert!(open_selected_object_rename(&mut app.state));
@@ -923,6 +933,7 @@ mod tests {
         app.state
             .schematic
             .session
+            .editor
             .selection
             .select_only_component(id);
         assert!(open_selected_object_rename(&mut app.state));
@@ -990,6 +1001,7 @@ mod tests {
         app.state
             .schematic
             .session
+            .editor
             .selection
             .select_only_component(id);
         assert!(open_selected_object_rename(&mut app.state));

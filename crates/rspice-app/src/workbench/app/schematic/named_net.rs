@@ -20,7 +20,7 @@ use crate::workbench::app_state::AppState;
 /// Resolve a wire/segment/vertex-only selection or one selected interface
 /// port to exactly one authored, non-ground net.
 pub(crate) fn selected_named_net_target(state: &AppState) -> Option<NamedNetTarget> {
-    let selection = &state.schematic.session.selection;
+    let selection = &state.schematic.session.editor.selection;
     let selected_port = selection.single_component().and_then(|id| {
         state
             .schematic
@@ -76,7 +76,7 @@ pub(crate) fn selected_named_net_target(state: &AppState) -> Option<NamedNetTarg
 }
 
 fn wire_geometry_only(state: &AppState) -> bool {
-    let selection = &state.schematic.session.selection;
+    let selection = &state.schematic.session.editor.selection;
     selection.has_any_wire_selection()
         && selection.components.is_empty()
         && selection.junctions.is_empty()
@@ -203,7 +203,12 @@ mod tests {
             .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(21, Point::new(20, 0), name));
-        state.schematic.session.selection.select_only_wire(11);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_wire(11);
         state
     }
 
@@ -262,7 +267,12 @@ mod tests {
             .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(22, Point::new(20, 100), "VDD"));
-        state.schematic.session.selection.select_only_wire(11);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_wire(11);
 
         let target = selected_named_net_target(&state).expect("named wire target");
         assert_eq!(target.name, "VDD");
@@ -309,7 +319,7 @@ mod tests {
             .document_mut_for_test()
             .wires
             .push(Wire::new(1, vec![Point::new(0, 0), Point::new(10, 0)]));
-        state.schematic.session.selection.select_only_wire(1);
+        state.schematic.session.editor.selection.select_only_wire(1);
         assert!(selected_named_net_target(&state).is_none());
 
         state
@@ -327,8 +337,8 @@ mod tests {
             .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(11, Point::new(5, 20), "b"));
-        state.schematic.session.selection.select_wire(1);
-        state.schematic.session.selection.select_wire(2);
+        state.schematic.session.editor.selection.select_wire(1);
+        state.schematic.session.editor.selection.select_wire(2);
         assert!(selected_named_net_target(&state).is_none());
     }
 
@@ -353,7 +363,12 @@ mod tests {
             .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(32, Point::new(10, 0), "VIN"));
-        state.schematic.session.selection.select_only_component(31);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(31);
 
         let target = selected_named_net_target(&state).expect("selected port net target");
         assert_eq!(

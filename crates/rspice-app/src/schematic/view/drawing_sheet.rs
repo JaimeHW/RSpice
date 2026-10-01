@@ -454,8 +454,8 @@ pub(super) fn draw_base(
             drawing_area.intersect(available),
             state.ui.grid,
             state.schematic.document().grid_size,
-            state.schematic.session.pan,
-            state.schematic.session.zoom,
+            state.schematic.session.editor.pan,
+            state.schematic.session.editor.zoom,
         );
     }
     if lod.show_margins && layers.margins && sheet.format.border != DrawingSheetBorderTemplate::None
@@ -709,16 +709,31 @@ pub(crate) fn show_drawing_sheet_overflow_target(
     };
     match target {
         DrawingSheetOverflowTarget::Component(id) => {
-            state.schematic.session.selection.select_only_component(id);
+            state
+                .schematic
+                .session
+                .editor
+                .selection
+                .select_only_component(id);
         }
         DrawingSheetOverflowTarget::Wire(id) => {
-            state.schematic.session.selection.select_only_wire(id);
+            state
+                .schematic
+                .session
+                .editor
+                .selection
+                .select_only_wire(id);
         }
         DrawingSheetOverflowTarget::Bus(id) => {
-            state.schematic.session.selection.select_only_bus(id);
+            state.schematic.session.editor.selection.select_only_bus(id);
         }
         DrawingSheetOverflowTarget::BusTap(id) => {
-            state.schematic.session.selection.select_only_bus_tap(id);
+            state
+                .schematic
+                .session
+                .editor
+                .selection
+                .select_only_bus_tap(id);
         }
         DrawingSheetOverflowTarget::Junction(id) => {
             let Some(position) = state
@@ -734,16 +749,23 @@ pub(crate) fn show_drawing_sheet_overflow_target(
             state
                 .schematic
                 .session
+                .editor
                 .selection
                 .select_only_junction(position);
         }
         DrawingSheetOverflowTarget::NetLabel(id) => {
-            state.schematic.session.selection.select_only_net_label(id);
+            state
+                .schematic
+                .session
+                .editor
+                .selection
+                .select_only_net_label(id);
         }
         DrawingSheetOverflowTarget::DesignNote(id) => {
             state
                 .schematic
                 .session
+                .editor
                 .selection
                 .select_only_design_note(id);
         }
@@ -751,11 +773,12 @@ pub(crate) fn show_drawing_sheet_overflow_target(
             state
                 .schematic
                 .session
+                .editor
                 .selection
                 .select_only_documentation_shape(id);
         }
     }
-    state.schematic.session.center_request = Some(center);
+    state.schematic.session.editor.center_request = Some(center);
     true
 }
 
@@ -2156,9 +2179,12 @@ mod tests {
         };
 
         assert!(show_first_drawing_sheet_overflow(&mut state));
-        assert_eq!(state.schematic.session.selection.single_wire(), Some(41));
         assert_eq!(
-            state.schematic.session.center_request,
+            state.schematic.session.editor.selection.single_wire(),
+            Some(41)
+        );
+        assert_eq!(
+            state.schematic.session.editor.center_request,
             Some(expected_center)
         );
         assert!(!show_drawing_sheet_overflow_target(

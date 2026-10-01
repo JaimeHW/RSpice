@@ -78,43 +78,44 @@ impl SchematicState {
         }
 
         log::info!("[Wire] start_wire at {:?}", pos);
-        self.session.wire_drawing.clear();
-        self.session.wire_drawing.points.push(pos);
-        self.session.wire_drawing.active = true;
+        self.session.editor.wire_drawing.clear();
+        self.session.editor.wire_drawing.points.push(pos);
+        self.session.editor.wire_drawing.active = true;
     }
 
     /// Update the wire preview position (called on mouse move)
     pub fn update_wire_preview(&mut self, pos: Point) {
-        if self.session.wire_drawing.active {
-            self.session.wire_drawing.preview_pos = Some(pos);
+        if self.session.editor.wire_drawing.active {
+            self.session.editor.wire_drawing.preview_pos = Some(pos);
         }
     }
 
     /// Toggle wire routing mode (horizontal-first vs vertical-first)
     pub fn toggle_wire_routing(&mut self) {
-        self.session.wire_drawing.routing_mode = self.session.wire_drawing.routing_mode.toggle();
+        self.session.editor.wire_drawing.routing_mode =
+            self.session.editor.wire_drawing.routing_mode.toggle();
     }
 
     /// Add a point to the current wire using orthogonal routing
     pub fn extend_wire(&mut self, pos: Point) {
-        if self.session.read_only || !self.session.wire_drawing.active {
+        if self.session.read_only || !self.session.editor.wire_drawing.active {
             return;
         }
 
-        if let Some(last) = self.session.wire_drawing.points.last().copied() {
+        if let Some(last) = self.session.editor.wire_drawing.points.last().copied() {
             if last == pos {
                 return; // Same point, skip
             }
 
             // Add corner point for orthogonal routing if needed
-            if let Some(corner) = self.session.wire_drawing.get_route_corner(pos)
+            if let Some(corner) = self.session.editor.wire_drawing.get_route_corner(pos)
                 && corner != last
                 && corner != pos
             {
-                self.session.wire_drawing.points.push(corner);
+                self.session.editor.wire_drawing.points.push(corner);
             }
 
-            self.session.wire_drawing.points.push(pos);
+            self.session.editor.wire_drawing.points.push(pos);
         }
     }
 
@@ -126,12 +127,12 @@ impl SchematicState {
     /// - This ensures correct rubber-banding: all wires at a T-junction share
     ///   a common endpoint vertex, so moving any wire keeps the junction intact
     pub fn finish_wire(&mut self) -> Option<u64> {
-        if !self.session.wire_drawing.active {
+        if !self.session.editor.wire_drawing.active {
             return None;
         }
 
-        let points = std::mem::take(&mut self.session.wire_drawing.points);
-        self.session.wire_drawing.clear();
+        let points = std::mem::take(&mut self.session.editor.wire_drawing.points);
+        self.session.editor.wire_drawing.clear();
 
         if self.session.read_only {
             return None;
@@ -192,7 +193,7 @@ impl SchematicState {
 
     /// Cancel wire drawing
     pub fn cancel_wire(&mut self) {
-        self.session.wire_drawing.clear();
+        self.session.editor.wire_drawing.clear();
     }
 }
 
@@ -218,7 +219,7 @@ mod tests {
         assert_eq!(schematic.history().undo_count(), 1);
         assert_eq!(schematic.undo_description(), Some("draw wire"));
         assert_eq!(schematic.design.document().wires.len(), 3);
-        assert!(!schematic.session.wire_drawing.active);
+        assert!(!schematic.session.editor.wire_drawing.active);
         assert!(schematic.session.is_dirty);
 
         assert!(schematic.undo());
@@ -242,7 +243,7 @@ mod tests {
         schematic.extend_wire(Point::new(10, 0));
         schematic.cancel_wire();
 
-        assert!(!schematic.session.wire_drawing.active);
+        assert!(!schematic.session.editor.wire_drawing.active);
         assert!(!schematic.has_pending_operation());
         assert!(!schematic.can_undo());
         assert!(schematic.session.is_dirty);
@@ -265,7 +266,7 @@ mod tests {
         schematic.start_wire(Point::new(0, 0));
         schematic.extend_wire(Point::new(10, 0));
 
-        assert!(!schematic.session.wire_drawing.active);
+        assert!(!schematic.session.editor.wire_drawing.active);
         assert_eq!(schematic.finish_wire(), None);
         assert!(!schematic.can_undo());
         assert!(schematic.design.document().wires.is_empty());

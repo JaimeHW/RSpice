@@ -59,7 +59,7 @@ pub fn load_example(name: &str, state: &mut SchematicState) {
     state.document_mut_for_test().wires.clear();
     state.document_mut_for_test().junctions.clear();
     state.document_mut_for_test().net_labels.clear();
-    state.session.selection.clear();
+    state.session.editor.selection.clear();
 
     match name {
         "RC Lowpass Filter" => build_rc_lowpass(state),
@@ -73,7 +73,7 @@ pub fn load_example(name: &str, state: &mut SchematicState) {
 
     // Junction dots where wires tee, frame the circuit, fresh history.
     state.update_wire_junctions();
-    state.session.needs_fit = true;
+    state.session.editor.needs_fit = true;
     state.session.needs_history_reset = true;
     state.session.is_dirty = true;
 }

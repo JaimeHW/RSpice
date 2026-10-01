@@ -32,7 +32,7 @@ impl OperationCancelState {
     }
 
     pub(super) fn restore(self, state: &mut super::state::SchematicState) {
-        state.session.selection = self.selection;
+        state.session.editor.selection = self.selection;
         state.session.is_dirty = self.was_dirty;
     }
 }
@@ -170,9 +170,10 @@ mod tests {
     #[test]
     fn undo_and_redo_preserve_exact_runtime_wire_and_bus_routing() {
         let mut state = SchematicState::default();
-        state.session.wire_drawing.routing_mode =
+        state.session.editor.wire_drawing.routing_mode =
             super::super::wire::WireRoutingMode::VerticalFirst;
-        state.session.bus_drawing.routing_mode = super::super::wire::WireRoutingMode::VerticalFirst;
+        state.session.editor.bus_drawing.routing_mode =
+            super::super::wire::WireRoutingMode::VerticalFirst;
         state.init_undo_history();
 
         assert!(state.with_undo("Add resistor", |schematic| {
@@ -180,21 +181,21 @@ mod tests {
         }));
         assert!(state.undo());
         assert_eq!(
-            state.session.wire_drawing.routing_mode,
+            state.session.editor.wire_drawing.routing_mode,
             super::super::wire::WireRoutingMode::VerticalFirst
         );
         assert_eq!(
-            state.session.bus_drawing.routing_mode,
+            state.session.editor.bus_drawing.routing_mode,
             super::super::wire::WireRoutingMode::VerticalFirst
         );
 
         assert!(state.redo());
         assert_eq!(
-            state.session.wire_drawing.routing_mode,
+            state.session.editor.wire_drawing.routing_mode,
             super::super::wire::WireRoutingMode::VerticalFirst
         );
         assert_eq!(
-            state.session.bus_drawing.routing_mode,
+            state.session.editor.bus_drawing.routing_mode,
             super::super::wire::WireRoutingMode::VerticalFirst
         );
     }
@@ -237,12 +238,12 @@ mod tests {
             id
         };
         state.session.is_dirty = false;
-        state.session.selection.select_component(id);
-        assert!(!state.session.selection.is_empty());
+        state.session.editor.selection.select_component(id);
+        assert!(!state.session.editor.selection.is_empty());
 
         assert!(state.undo());
         assert!(state.session.is_dirty);
-        assert!(state.session.selection.is_empty());
+        assert!(state.session.editor.selection.is_empty());
     }
 
     #[test]
@@ -300,23 +301,27 @@ mod tests {
                 state.add_component(ComponentType::Capacitor, Point::new(100, 20));
             });
             assert!(state.undo());
-            state.session.selection.select_only_component(resistor);
+            state
+                .session
+                .editor
+                .selection
+                .select_only_component(resistor);
             state.session.is_dirty = was_dirty;
             let before = SchematicSnapshot::capture(&state.design.document());
-            let selection = state.session.selection.clone();
+            let selection = state.session.editor.selection.clone();
             let content_version = state.content_version();
             state.begin_operation("drag selection");
             state.design.document_mut_for_test().components[0].pos = Point::new(80, 90);
             state.session.is_dirty = true;
             state.bump_topology_version();
             let dragged_topology = state.topology_version();
-            state.session.pan = (123.0, 0.0);
+            state.session.editor.pan = (123.0, 0.0);
 
             assert!(state.cancel_operation());
             assert!(before.is_equal_document(&state.design.document()));
-            assert_eq!(state.session.selection, selection);
+            assert_eq!(state.session.editor.selection, selection);
             assert_eq!(state.session.is_dirty, was_dirty);
-            assert_eq!(state.session.pan, (123.0, 0.0));
+            assert_eq!(state.session.editor.pan, (123.0, 0.0));
             assert_eq!(state.content_version(), content_version);
             assert_ne!(state.topology_version(), dragged_topology);
             assert_eq!(state.redo_description(), Some("add capacitor"));
@@ -353,13 +358,17 @@ mod tests {
     fn cancelled_no_op_preserves_selection_and_does_not_dirty_or_invalidate_the_document() {
         let mut state = SchematicState::default();
         let resistor = state.add_component(ComponentType::Resistor, Point::origin());
-        state.session.selection.select_only_component(resistor);
+        state
+            .session
+            .editor
+            .selection
+            .select_only_component(resistor);
         state.session.is_dirty = false;
-        let selection = state.session.selection.clone();
+        let selection = state.session.editor.selection.clone();
         let topology = state.topology_version();
         state.begin_operation("stationary drag");
         assert!(state.cancel_operation());
-        assert_eq!(state.session.selection, selection);
+        assert_eq!(state.session.editor.selection, selection);
         assert!(!state.session.is_dirty);
         assert_eq!(state.topology_version(), topology);
         assert!(!state.can_undo());

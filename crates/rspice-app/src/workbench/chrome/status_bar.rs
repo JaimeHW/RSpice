@@ -695,7 +695,7 @@ fn selection_summary(app: &RSpiceApp) -> String {
     if app.state.workbench.workspace != Workspace::Design {
         return app.state.workbench.workspace.label().to_owned();
     }
-    let selection = &app.state.schematic.session.selection;
+    let selection = &app.state.schematic.session.editor.selection;
     if let Some(id) = selection.single_component() {
         app.state
             .schematic
@@ -720,7 +720,7 @@ fn zoom_factor(app: &RSpiceApp) -> f64 {
     {
         f64::from(app.state.ui.symbol.zoom)
     } else {
-        app.state.schematic.session.zoom
+        app.state.schematic.session.editor.zoom
     }
 }
 

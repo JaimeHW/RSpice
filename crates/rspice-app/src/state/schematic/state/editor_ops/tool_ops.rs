@@ -19,11 +19,20 @@ impl SchematicState {
     /// captured canvas coordinates under the current policy and must finish
     /// or be cancelled first.
     pub fn canvas_settings_change_blocked(&self) -> bool {
-        self.session.wire_drawing.active
-            || self.session.bus_drawing.active
-            || !self.session.documentation_shape_drawing.points.is_empty()
-            || self.session.documentation_shape_drawing.keyboard_active
-            || self.session.selection_rect.is_active()
+        self.session.editor.wire_drawing.active
+            || self.session.editor.bus_drawing.active
+            || !self
+                .session
+                .editor
+                .documentation_shape_drawing
+                .points
+                .is_empty()
+            || self
+                .session
+                .editor
+                .documentation_shape_drawing
+                .keyboard_active
+            || self.session.editor.selection_rect.is_active()
             || self.has_pending_operation()
     }
 
@@ -33,21 +42,21 @@ impl SchematicState {
     /// leaving typed placement retires every incompatible runtime
     /// configuration.
     pub fn arm_tool(&mut self, tool: Tool) {
-        if self.session.tool != tool {
+        if self.session.editor.tool != tool {
             self.cancel_routing_gestures();
         }
         if tool != Tool::BusTap {
-            self.session.pending_bus_tap = None;
+            self.session.editor.pending_bus_tap = None;
         }
         if tool != Tool::Place(ComponentType::Port) {
-            self.session.pending_port_sequence = None;
+            self.session.editor.pending_port_sequence = None;
         }
         if tool != Tool::DesignNote {
-            self.session.pending_design_note = None;
+            self.session.editor.pending_design_note = None;
         }
         if tool != Tool::DocumentationShape {
-            self.session.pending_documentation_shape = None;
-            self.session.documentation_shape_drawing.clear();
+            self.session.editor.pending_documentation_shape = None;
+            self.session.editor.documentation_shape_drawing.clear();
         }
         // A model card and a stimulus definition are each armed for one exact
         // device kind, and arming *anything* retires them — including the
@@ -66,9 +75,9 @@ impl SchematicState {
         // or cancels. The two callers that do want a payload — `arm_pack_part`
         // and the stimulus library's own placement action — set it after this
         // returns, which is the only way to arm one.
-        self.session.pending_part_model = None;
-        self.session.pending_stimulus = None;
-        self.session.tool = tool;
+        self.session.editor.pending_part_model = None;
+        self.session.editor.pending_stimulus = None;
+        self.session.editor.tool = tool;
     }
 
     /// Arm one part published by a distributed model pack.
@@ -82,7 +91,7 @@ impl SchematicState {
         match placement {
             crate::state::model_hub::PartPlacement::CellInstance(binding) => {
                 let label = format!("{}/{}", binding.library, binding.cell);
-                self.session.pending_library_cell = Some(*binding);
+                self.session.editor.pending_library_cell = Some(*binding);
                 self.arm_tool(Tool::Place(ComponentType::CellInstance));
                 label
             }
@@ -91,9 +100,9 @@ impl SchematicState {
                 variant,
                 model,
             } => {
-                self.session.pending_library_cell = None;
+                self.session.editor.pending_library_cell = None;
                 self.arm_tool(Tool::Place(component_type));
-                self.session.pending_part_model = Some(PendingPartModel {
+                self.session.editor.pending_part_model = Some(PendingPartModel {
                     tool: Tool::Place(component_type),
                     model: model.clone(),
                     variant,
@@ -109,14 +118,14 @@ impl SchematicState {
     /// inconsistent hidden route restored from legacy or interrupted state.
     pub fn cancel_tool(&mut self) {
         self.cancel_routing_gestures();
-        self.session.pending_bus_tap = None;
-        self.session.pending_port_sequence = None;
-        self.session.pending_design_note = None;
-        self.session.pending_documentation_shape = None;
-        self.session.documentation_shape_drawing.clear();
-        self.session.pending_part_model = None;
-        self.session.pending_stimulus = None;
-        self.session.tool = Tool::Select;
+        self.session.editor.pending_bus_tap = None;
+        self.session.editor.pending_port_sequence = None;
+        self.session.editor.pending_design_note = None;
+        self.session.editor.pending_documentation_shape = None;
+        self.session.editor.documentation_shape_drawing.clear();
+        self.session.editor.pending_part_model = None;
+        self.session.editor.pending_stimulus = None;
+        self.session.editor.tool = Tool::Select;
     }
 
     /// Apply one level of the schematic Escape contract.
@@ -129,22 +138,27 @@ impl SchematicState {
         if self.cancel_operation() {
             return;
         }
-        if self.session.wire_drawing.active || self.session.bus_drawing.active {
+        if self.session.editor.wire_drawing.active || self.session.editor.bus_drawing.active {
             self.cancel_routing_gestures();
             return;
         }
-        if self.session.tool != Tool::Select
-            || self.session.pending_bus_tap.is_some()
-            || self.session.pending_port_sequence.is_some()
-            || self.session.pending_design_note.is_some()
-            || self.session.pending_documentation_shape.is_some()
-            || !self.session.documentation_shape_drawing.points.is_empty()
+        if self.session.editor.tool != Tool::Select
+            || self.session.editor.pending_bus_tap.is_some()
+            || self.session.editor.pending_port_sequence.is_some()
+            || self.session.editor.pending_design_note.is_some()
+            || self.session.editor.pending_documentation_shape.is_some()
+            || !self
+                .session
+                .editor
+                .documentation_shape_drawing
+                .points
+                .is_empty()
         {
             self.cancel_tool();
             return;
         }
-        self.session.selection.clear();
-        self.session.selection_rect.cancel();
+        self.session.editor.selection.clear();
+        self.session.editor.selection_rect.cancel();
     }
 }
 
@@ -161,20 +175,25 @@ mod tests {
             "an armed tool has not committed any coordinates yet"
         );
 
-        schematic.session.wire_drawing.active = true;
+        schematic.session.editor.wire_drawing.active = true;
         assert!(schematic.canvas_settings_change_blocked());
-        schematic.session.wire_drawing.clear();
+        schematic.session.editor.wire_drawing.clear();
 
         schematic
             .session
+            .editor
             .documentation_shape_drawing
             .keyboard_active = true;
         assert!(schematic.canvas_settings_change_blocked());
-        schematic.session.documentation_shape_drawing.clear();
+        schematic.session.editor.documentation_shape_drawing.clear();
 
-        schematic.session.selection_rect.start_at(Point::origin());
+        schematic
+            .session
+            .editor
+            .selection_rect
+            .start_at(Point::origin());
         assert!(schematic.canvas_settings_change_blocked());
-        schematic.session.selection_rect.cancel();
+        schematic.session.editor.selection_rect.cancel();
 
         schematic.begin_operation("drag selection");
         assert!(schematic.canvas_settings_change_blocked());
@@ -195,14 +214,14 @@ mod tests {
         use crate::state::stimulus_library::definition::StimulusDefinition;
 
         let mut schematic = SchematicState::default();
-        schematic.session.pending_part_model = Some(PendingPartModel {
+        schematic.session.editor.pending_part_model = Some(PendingPartModel {
             tool: Tool::Place(ComponentType::Diode),
             model: "RSPICE_ZENER".to_owned(),
             variant: None,
         });
         schematic.arm_tool(Tool::Place(ComponentType::Diode));
         assert!(
-            schematic.session.pending_part_model.is_none(),
+            schematic.session.editor.pending_part_model.is_none(),
             "the plain diode is not the zener"
         );
 
@@ -212,10 +231,10 @@ mod tests {
             crate::state::stimulus_library::now_unix_ms,
         )
         .expect("ok");
-        schematic.session.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
+        schematic.session.editor.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
         schematic.arm_tool(Tool::Place(ComponentType::VoltageSourceSin));
         assert!(
-            schematic.session.pending_stimulus.is_none(),
+            schematic.session.editor.pending_stimulus.is_none(),
             "the plain sine source is not the definition"
         );
         let placed =
@@ -243,7 +262,7 @@ mod tests {
         definition.params = "freq=1k".to_owned();
         let mut schematic = SchematicState::default();
         schematic.arm_tool(Tool::Place(ComponentType::VoltageSourceSin));
-        schematic.session.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
+        schematic.session.editor.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
 
         for at in [Point::new(4, 4), Point::new(40, 4)] {
             schematic.add_armed_component(ComponentType::VoltageSourceSin, at);

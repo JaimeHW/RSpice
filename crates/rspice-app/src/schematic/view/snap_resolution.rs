@@ -33,7 +33,7 @@ pub(super) fn target_acquisition_radius(viewport: &Viewport) -> i32 {
 /// along the conductor is quantized; the conductor's own position fixes the
 /// other one, so the attachment always stays on its body.
 pub(super) fn conductor_attachment_pitch(state: &AppState) -> Option<i32> {
-    let engine = &state.schematic.session.snap_engine;
+    let engine = &state.schematic.session.editor.snap_engine;
     (engine.enabled && engine.snap_to_grid).then_some(state.schematic.document().grid_size)
 }
 
@@ -49,8 +49,8 @@ pub(super) fn resolve_grid_pointer(
     screen_position: Pos2,
 ) -> SnapResult {
     let raw = screen_to_schematic(viewport, screen_position);
-    if !state.schematic.session.snap_engine.enabled
-        || !state.schematic.session.snap_engine.snap_to_grid
+    if !state.schematic.session.editor.snap_engine.enabled
+        || !state.schematic.session.editor.snap_engine.snap_to_grid
     {
         return SnapResult::no_snap(raw);
     }
@@ -74,7 +74,7 @@ pub(super) fn resolve_target_pointer(
     screen_position: Pos2,
 ) -> SnapResult {
     let raw = screen_to_schematic(viewport, screen_position);
-    if !state.schematic.session.snap_engine.enabled {
+    if !state.schematic.session.editor.snap_engine.enabled {
         return SnapResult::no_snap(raw);
     }
 
@@ -85,7 +85,7 @@ pub(super) fn resolve_target_pointer(
     let wires = objects_on_active_sheet(state, &state.schematic.document().wires, |item| item.id);
     let junctions =
         objects_on_active_sheet(state, &state.schematic.document().junctions, |item| item.id);
-    let mut target_engine = state.schematic.session.snap_engine.clone();
+    let mut target_engine = state.schematic.session.editor.snap_engine.clone();
     target_engine.snap_radius = target_acquisition_radius(viewport);
     // A non-electrical grid fallback is resolved from the original screen
     // coordinate below. This keeps its rounding contract identical to
@@ -127,18 +127,18 @@ mod tests {
         let mut state = AppState::default();
         state.schematic.document_mut_for_test().grid_size = 10;
 
-        state.schematic.session.snap_engine.enabled = false;
+        state.schematic.session.editor.snap_engine.enabled = false;
         let disabled = resolve_grid_pointer(&state, &viewport, pointer);
         assert_eq!(disabled.original_position, Point::new(17, 23));
         assert_eq!(disabled.snapped_position, Point::new(17, 23));
 
-        state.schematic.session.snap_engine.enabled = true;
-        state.schematic.session.snap_engine.snap_to_grid = false;
+        state.schematic.session.editor.snap_engine.enabled = true;
+        state.schematic.session.editor.snap_engine.snap_to_grid = false;
         let free = resolve_grid_pointer(&state, &viewport, pointer);
         assert_eq!(free.original_position, Point::new(17, 23));
         assert_eq!(free.snapped_position, Point::new(17, 23));
 
-        state.schematic.session.snap_engine.snap_to_grid = true;
+        state.schematic.session.editor.snap_engine.snap_to_grid = true;
         let grid = resolve_grid_pointer(&state, &viewport, pointer);
         assert_eq!(grid.snapped_position, Point::new(20, 20));
     }

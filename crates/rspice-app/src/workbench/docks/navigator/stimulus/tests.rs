@@ -629,13 +629,14 @@ fn place_arms_the_saved_revision_and_warns_about_an_unapplied_draft() {
     stimulus_verbs::place_selected_definition(&mut app.state);
 
     assert_eq!(
-        app.state.schematic.session.tool,
+        app.state.schematic.session.editor.tool,
         Tool::Place(ComponentType::VoltageSourceSin)
     );
     let armed = app
         .state
         .schematic
         .session
+        .editor
         .pending_stimulus
         .clone()
         .expect("a definition is armed");
@@ -671,6 +672,7 @@ fn place_arms_the_saved_revision_and_warns_about_an_unapplied_draft() {
         app.state
             .schematic
             .session
+            .editor
             .pending_stimulus
             .as_ref()
             .map(crate::state::PendingStimulusPlacement::revision),

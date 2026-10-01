@@ -13,7 +13,7 @@ impl SchematicState {
     pub fn apply_snapshot(&mut self, snapshot: &super::super::undo_history::SchematicSnapshot) {
         self.design.apply_snapshot(snapshot);
         self.session.is_dirty = true;
-        self.session.selection.clear();
+        self.session.editor.selection.clear();
     }
 
     // =========================================================================
@@ -50,7 +50,7 @@ impl SchematicState {
             self.session.operation_cancel =
                 Some(super::super::undo_history::OperationCancelState::capture(
                     operation_id,
-                    &self.session.selection,
+                    &self.session.editor.selection,
                     self.session.is_dirty,
                 ));
         }
@@ -115,8 +115,8 @@ impl SchematicState {
     ) {
         if let Some(repaired) = cancelled.repaired {
             self.session.is_dirty = true;
-            self.session.selection.clear();
-            self.session.snap_engine.grid_size = self.design.document().grid_size;
+            self.session.editor.selection.clear();
+            self.session.editor.snap_engine.grid_size = self.design.document().grid_size;
             self.repair_clipboard_after_load();
             self.remove_stale_runtime_references(&repaired);
         }
@@ -177,8 +177,8 @@ impl SchematicState {
             return false;
         };
         self.session.is_dirty = true;
-        self.session.selection.clear();
-        self.session.snap_engine.grid_size = self.design.document().grid_size;
+        self.session.editor.selection.clear();
+        self.session.editor.snap_engine.grid_size = self.design.document().grid_size;
         self.repair_clipboard_after_load();
         self.remove_stale_runtime_references(&repaired);
         true
@@ -192,8 +192,8 @@ impl SchematicState {
             return false;
         };
         self.session.is_dirty = true;
-        self.session.selection.clear();
-        self.session.snap_engine.grid_size = self.design.document().grid_size;
+        self.session.editor.selection.clear();
+        self.session.editor.snap_engine.grid_size = self.design.document().grid_size;
         self.repair_clipboard_after_load();
         self.remove_stale_runtime_references(&repaired);
         true
@@ -273,7 +273,7 @@ mod tests {
         let expected = pitch.canvas_grid_size();
         assert_eq!(state.design.document().document_policy.grid_pitch, pitch);
         assert_eq!(state.design.document().grid_size, expected);
-        assert_eq!(state.session.snap_engine.grid_size, expected);
+        assert_eq!(state.session.editor.snap_engine.grid_size, expected);
     }
 
     #[test]
@@ -290,7 +290,8 @@ mod tests {
                 .grid_pitch = SchematicGridPitch::Mil25;
             schematic.design.document_mut_for_test().grid_size =
                 SchematicGridPitch::Mil25.canvas_grid_size();
-            schematic.session.snap_engine.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
+            schematic.session.editor.snap_engine.grid_size =
+                SchematicGridPitch::Mil25.canvas_grid_size();
         }));
         assert_eq!(state.content_version(), baseline + 1);
 
@@ -318,7 +319,8 @@ mod tests {
                 .grid_pitch = SchematicGridPitch::Mil25;
             schematic.design.document_mut_for_test().grid_size =
                 SchematicGridPitch::Mil25.canvas_grid_size();
-            schematic.session.snap_engine.grid_size = SchematicGridPitch::Mil25.canvas_grid_size();
+            schematic.session.editor.snap_engine.grid_size =
+                SchematicGridPitch::Mil25.canvas_grid_size();
         }));
         assert_grid_pitch_contract(&state, SchematicGridPitch::Mil25);
 

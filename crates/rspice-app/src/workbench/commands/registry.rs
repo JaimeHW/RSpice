@@ -1632,12 +1632,15 @@ mod tests {
 
         Command::PlaceOffSheetConnector.execute(&mut app);
         assert_eq!(
-            app.state.schematic.session.tool,
+            app.state.schematic.session.editor.tool,
             crate::state::Tool::OffSheetConnector
         );
 
         Command::PlaceLabel.execute(&mut app);
-        assert_eq!(app.state.schematic.session.tool, crate::state::Tool::Label);
+        assert_eq!(
+            app.state.schematic.session.editor.tool,
+            crate::state::Tool::Label
+        );
     }
 
     const SHOW_IN_NETLIST_DECK: &str =
@@ -1759,6 +1762,7 @@ mod tests {
         app.state
             .schematic
             .session
+            .editor
             .selection
             .select_only_component(load_id);
         assert_eq!(
@@ -1769,6 +1773,7 @@ mod tests {
         app.state
             .schematic
             .session
+            .editor
             .selection
             .select_only_component(unmapped_id);
         assert_eq!(
@@ -1779,6 +1784,7 @@ mod tests {
         app.state
             .schematic
             .session
+            .editor
             .selection
             .select_only_component(load_id);
         app.state.ui.netlist.generated_document = None;
@@ -1796,6 +1802,7 @@ mod tests {
         app.state
             .schematic
             .session
+            .editor
             .selection
             .select_only_component(load_id);
         app.state.workbench.workspace = Workspace::Results;
@@ -1814,6 +1821,7 @@ mod tests {
         app.state
             .schematic
             .session
+            .editor
             .selection
             .select_only_component(load_id);
 
@@ -1827,7 +1835,12 @@ mod tests {
         assert_eq!(app.state.ui.netlist.requested_line, Some(3));
         assert_eq!(app.state.ui.netlist.cursor_line, 2);
         assert_eq!(
-            app.state.schematic.session.selection.single_component(),
+            app.state
+                .schematic
+                .session
+                .editor
+                .selection
+                .single_component(),
             Some(load_id)
         );
     }

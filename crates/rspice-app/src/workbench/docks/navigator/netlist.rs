@@ -2161,10 +2161,11 @@ pub(super) fn netlist_source_mapping(ui: &mut Ui, app: &mut RSpiceApp, active_li
                     .button(messages.text(MessageId::NetlistNavigatorCrossProbe))
                     .clicked()
             {
-                app.state.schematic.session.selection.clear();
+                app.state.schematic.session.editor.selection.clear();
                 app.state
                     .schematic
                     .session
+                    .editor
                     .selection
                     .select_component(component_id);
                 let announced = messages.format(

@@ -85,10 +85,15 @@ impl RSpiceApp {
         match response.choice {
             DialogChoice::Primary => {
                 if let DraftValidation::Valid(pending) = validate_draft(&self.state) {
-                    self.state.schematic.session.pending_documentation_shape = Some(pending);
                     self.state
                         .schematic
                         .session
+                        .editor
+                        .pending_documentation_shape = Some(pending);
+                    self.state
+                        .schematic
+                        .session
+                        .editor
                         .documentation_shape_drawing
                         .clear();
                     self.state.schematic.arm_tool(Tool::DocumentationShape);

@@ -7,7 +7,7 @@ pub use rspice_design::schematic::bus::{
 
 #[cfg(test)]
 use super::Point;
-pub use rspice_schematic_editor::session::bus::{BusDrawing, PendingBusTap};
+pub use rspice_schematic_editor::session::bus::PendingBusTap;
 
 #[cfg(test)]
 mod tests {

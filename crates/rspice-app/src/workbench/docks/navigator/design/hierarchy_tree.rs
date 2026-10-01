@@ -944,7 +944,14 @@ fn occurrence_context_menu(response: &Response, app: &mut RSpiceApp, row: &Occur
 /// One direction only: the canvas names an occurrence and the tree reveals it.
 /// The other direction is the row click, which descends.
 fn reveal_canvas_selection(app: &RSpiceApp, tree: &mut NavigatorTreeState) {
-    let Some(component) = app.state.schematic.session.selection.single_component() else {
+    let Some(component) = app
+        .state
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_component()
+    else {
         return;
     };
     let Some((instance, _)) = app.state.hierarchy_master_for_component(component) else {

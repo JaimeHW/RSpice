@@ -467,7 +467,12 @@ mod tests {
             .document_mut_for_test()
             .components
             .push(instance);
-        state.schematic.session.selection.select_only_component(91);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(91);
         (state, parent, child)
     }
 
@@ -516,7 +521,7 @@ mod tests {
         assert!(state.dialogs.descend_hierarchy.open);
         assert_eq!(state.workspace.content.active_view, parent);
 
-        state.schematic.session.selection.clear();
+        state.schematic.session.editor.selection.clear();
         let error = commit_descend_context(&mut state).expect_err("selection drift must block");
         assert!(error.contains("selected-object set changed"));
         assert_eq!(state.workspace.content.active_view, parent);

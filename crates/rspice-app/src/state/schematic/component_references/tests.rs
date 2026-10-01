@@ -20,7 +20,7 @@ fn coupled_selection() -> SchematicState {
     .enumerate()
     {
         let id = state.add_component(kind, Point::new(index as i32 * 100, 0));
-        state.session.selection.select_component(id);
+        state.session.editor.selection.select_component(id);
     }
     state.design.document_mut_for_test().components[0].params =
         "coupled_to=l2 coupling_factor=0.9".to_owned();
@@ -311,7 +311,10 @@ fn rejected_copy_and_array_leave_the_document_history_and_allocators_unchanged()
             state.design.document().components,
             before.design.document().components
         );
-        assert_eq!(state.session.selection, before.session.selection);
+        assert_eq!(
+            state.session.editor.selection,
+            before.session.editor.selection
+        );
         assert_eq!(state.topology_version(), before.topology_version());
         assert_eq!(state.session.is_dirty, before.session.is_dirty);
         assert!(!state.can_undo());

@@ -89,7 +89,7 @@ fn selected_amp_with_wire(resolved_pin: Point) -> SchematicState {
             resolved_pin,
             Point::new(resolved_pin.x, 0),
         ));
-    schematic.session.selection.select_component(1);
+    schematic.session.editor.selection.select_component(1);
     schematic
 }
 
@@ -142,7 +142,7 @@ fn moving_selected_cell_uses_resolved_symbol_terminals_for_wire_updates() {
 #[test]
 fn source_only_target_only_and_joint_moves_preserve_tap_attachments() {
     let mut source_only = bus_tap_and_scalar_target();
-    source_only.session.selection.select_only_bus(1);
+    source_only.session.editor.selection.select_only_bus(1);
     source_only.move_selection(Point::new(10, 0));
     assert_eq!(
         source_only.design.document().bus_taps[0].bus_point,
@@ -154,7 +154,7 @@ fn source_only_target_only_and_joint_moves_preserve_tap_attachments() {
     );
 
     let mut target_only = bus_tap_and_scalar_target();
-    target_only.session.selection.select_only_wire(3);
+    target_only.session.editor.selection.select_only_wire(3);
     target_only.move_selection(Point::new(0, 10));
     assert_eq!(
         target_only.design.document().bus_taps[0].bus_point,
@@ -166,8 +166,8 @@ fn source_only_target_only_and_joint_moves_preserve_tap_attachments() {
     );
 
     let mut joint = bus_tap_and_scalar_target();
-    joint.session.selection.select_bus(1);
-    joint.session.selection.select_wire(3);
+    joint.session.editor.selection.select_bus(1);
+    joint.session.editor.selection.select_wire(3);
     joint.move_selection(Point::new(4, 6));
     assert_eq!(
         joint.design.document().bus_taps[0].bus_point,
@@ -200,7 +200,7 @@ fn component_rubber_band_and_junction_moves_keep_scalar_tap_attached() {
         .document_mut_for_test()
         .components
         .push(Component::new(4, ComponentType::Resistor, Point::origin()));
-    selected.session.selection.select_only_component(4);
+    selected.session.editor.selection.select_only_component(4);
     selected.move_selection_resolved(delta, |_| vec![Point::new(0, 10)]);
     assert_eq!(
         selected.design.document().bus_taps[0].connection_point,
@@ -236,8 +236,8 @@ fn move_wire_rejects_missing_and_zero_delta_without_document_side_effects() {
 #[test]
 fn extreme_selection_moves_saturate_every_attached_geometry() {
     let mut schematic = bus_tap_and_scalar_target();
-    schematic.session.selection.select_bus(1);
-    schematic.session.selection.select_wire(3);
+    schematic.session.editor.selection.select_bus(1);
+    schematic.session.editor.selection.select_wire(3);
 
     schematic.move_selection(Point::new(i32::MAX, i32::MAX));
 
@@ -258,7 +258,7 @@ fn extreme_selection_moves_saturate_every_attached_geometry() {
 #[test]
 fn bus_and_tap_move_is_one_undoable_redoable_drag_transaction() {
     let mut schematic = bus_tap_and_scalar_target();
-    schematic.session.selection.select_only_bus(1);
+    schematic.session.editor.selection.select_only_bus(1);
     let original_bus = schematic.design.document().buses[0].clone();
     let original_tap = schematic.design.document().bus_taps[0].clone();
 
@@ -288,6 +288,7 @@ fn selected_label_moves_with_saturation_and_one_drag_undo_transaction() {
         .push(original.clone());
     schematic
         .session
+        .editor
         .selection
         .select_only_net_label(original.id);
     schematic.init_undo_history();
@@ -329,6 +330,7 @@ fn selected_design_note_moves_as_one_non_electrical_drag_transaction() {
         .push(original.clone());
     schematic
         .session
+        .editor
         .selection
         .select_only_design_note(original.id);
     schematic.init_undo_history();
@@ -359,7 +361,11 @@ fn selected_probe_moves_as_one_non_electrical_drag_transaction() {
         .document_mut_for_test()
         .probes
         .push(original.clone());
-    schematic.session.selection.select_only_probe(original.id);
+    schematic
+        .session
+        .editor
+        .selection
+        .select_only_probe(original.id);
     schematic.init_undo_history();
     let topology = schematic.topology_version();
 
@@ -406,10 +412,12 @@ fn documentation_shape_move_clamps_one_rigid_delta_for_the_entire_selection() {
         .documentation_shapes = original.clone();
     schematic
         .session
+        .editor
         .selection
         .select_documentation_shape(boundary_shape.id);
     schematic
         .session
+        .editor
         .selection
         .select_documentation_shape(companion_shape.id);
     schematic.init_undo_history();
@@ -454,7 +462,11 @@ fn unselected_and_read_only_labels_do_not_move() {
     schematic.move_selection(Point::new(1, 2));
     assert_eq!(schematic.design.document().net_labels, vec![label.clone()]);
 
-    schematic.session.selection.select_only_net_label(label.id);
+    schematic
+        .session
+        .editor
+        .selection
+        .select_only_net_label(label.id);
     schematic.session.read_only = true;
     schematic.move_selection(Point::new(1, 2));
     assert_eq!(schematic.design.document().net_labels, vec![label]);
@@ -463,7 +475,11 @@ fn unselected_and_read_only_labels_do_not_move() {
 #[test]
 fn stale_label_selection_is_a_clean_move_noop() {
     let mut schematic = SchematicState::default();
-    schematic.session.selection.select_only_net_label(999);
+    schematic
+        .session
+        .editor
+        .selection
+        .select_only_net_label(999);
     schematic.session.is_dirty = false;
     let topology_before = schematic.topology_version();
 
@@ -505,7 +521,7 @@ fn connected_mode_builds_a_deterministic_orthogonal_rubber_band() {
         .document_mut_for_test()
         .wires
         .push(Wire::segment(2, Point::origin(), Point::new(10, 0)));
-    schematic.session.selection.select_only_component(1);
+    schematic.session.editor.selection.select_only_component(1);
 
     assert_eq!(
         schematic.move_selection_with_mode_resolved(
@@ -540,7 +556,7 @@ fn connected_mode_rejects_an_attached_non_orthogonal_wire_atomically() {
         .document_mut_for_test()
         .wires
         .push(Wire::segment(2, Point::origin(), Point::new(10, 10)));
-    schematic.session.selection.select_only_component(1);
+    schematic.session.editor.selection.select_only_component(1);
     schematic.session.is_dirty = false;
     let original = schematic.clone();
 
@@ -582,7 +598,7 @@ fn break_mode_moves_selected_objects_without_attached_conductors() {
         .document_mut_for_test()
         .connections
         .push(WireConnection::new(2, 0, 1, "1"));
-    schematic.session.selection.select_only_component(1);
+    schematic.session.editor.selection.select_only_component(1);
 
     assert_eq!(
         schematic.move_selection_with_mode_resolved(
@@ -607,7 +623,7 @@ fn break_mode_moves_selected_objects_without_attached_conductors() {
 #[test]
 fn break_mode_translates_both_endpoints_of_an_explicitly_selected_tap() {
     let mut schematic = bus_tap_and_scalar_target();
-    schematic.session.selection.select_only_bus_tap(2);
+    schematic.session.editor.selection.select_only_bus_tap(2);
 
     assert_eq!(
         schematic.move_selection_with_mode(Point::new(1, 0), MoveSelectionMode::BreakConnections,),
@@ -635,7 +651,7 @@ fn break_mode_translates_both_endpoints_of_an_explicitly_selected_tap() {
 #[test]
 fn break_mode_rejects_a_selected_tap_that_would_leave_its_source_bus() {
     let mut schematic = bus_tap_and_scalar_target();
-    schematic.session.selection.select_only_bus_tap(2);
+    schematic.session.editor.selection.select_only_bus_tap(2);
     schematic.session.is_dirty = false;
     let taps = schematic.design.document().bus_taps.clone();
     let topology = schematic.topology_version();
@@ -673,7 +689,7 @@ fn shove_mode_chooses_a_deterministic_clear_orthogonal_route() {
         .document_mut_for_test()
         .connections
         .push(WireConnection::new(2, 0, 1, "1"));
-    schematic.session.selection.select_only_component(1);
+    schematic.session.editor.selection.select_only_component(1);
 
     assert_eq!(
         schematic.move_selection_with_mode_resolved(
@@ -714,7 +730,7 @@ fn shove_keeps_a_selected_wire_attached_to_an_unselected_component() {
         .document_mut_for_test()
         .connections
         .push(WireConnection::new(2, 0, 1, "-"));
-    schematic.session.selection.select_only_wire(2);
+    schematic.session.editor.selection.select_only_wire(2);
 
     assert_eq!(
         schematic.move_selection_with_mode_resolved(
@@ -767,7 +783,7 @@ fn shove_search_lanes_remain_aligned_to_the_active_grid() {
         .document_mut_for_test()
         .wires
         .push(Wire::segment(4, Point::new(50, -5), Point::new(50, 5)));
-    schematic.session.selection.select_only_component(1);
+    schematic.session.editor.selection.select_only_component(1);
 
     assert_eq!(
         schematic.move_selection_with_mode_resolved(
@@ -807,7 +823,7 @@ fn shove_mode_keeps_a_scalar_tap_on_the_rerouted_wire_endpoint() {
             ComponentType::Resistor,
             Point::new(-20, 10),
         ));
-    schematic.session.selection.select_only_component(4);
+    schematic.session.editor.selection.select_only_component(4);
 
     assert_eq!(
         schematic.move_selection_with_mode_resolved(
@@ -843,7 +859,7 @@ fn shove_failure_is_atomic_when_the_bounded_search_is_blocked() {
         .document_mut_for_test()
         .wires
         .push(Wire::segment(3, Point::new(40, -100), Point::new(40, 100)));
-    schematic.session.selection.select_only_component(1);
+    schematic.session.editor.selection.select_only_component(1);
     schematic.session.is_dirty = false;
     let components = schematic.design.document().components.clone();
     let wires = schematic.design.document().wires.clone();
@@ -882,7 +898,7 @@ fn shove_rejects_an_unrelated_conductor_at_a_moved_endpoint_atomically() {
         .document_mut_for_test()
         .wires
         .push(Wire::segment(3, Point::new(20, 15), Point::new(20, 25)));
-    schematic.session.selection.select_only_component(1);
+    schematic.session.editor.selection.select_only_component(1);
     schematic.session.is_dirty = false;
     let original = schematic.clone();
 
@@ -933,7 +949,7 @@ fn shove_rejects_an_unrelated_component_terminal_at_a_moved_endpoint_atomically(
         .document_mut_for_test()
         .wires
         .push(Wire::segment(3, Point::new(20, 0), Point::new(100, 0)));
-    schematic.session.selection.select_only_component(1);
+    schematic.session.editor.selection.select_only_component(1);
     schematic.session.is_dirty = false;
     let original = schematic.clone();
 
@@ -975,7 +991,7 @@ fn guarded_modes_reject_coordinate_overflow_without_mutation() {
                 ComponentType::Resistor,
                 Point::new(i32::MAX, 0),
             ));
-        schematic.session.selection.select_only_component(1);
+        schematic.session.editor.selection.select_only_component(1);
         schematic.session.is_dirty = false;
         let topology = schematic.topology_version();
 
@@ -999,7 +1015,7 @@ fn mode_aware_move_has_clean_zero_stale_and_read_only_noops() {
         .document_mut_for_test()
         .components
         .push(Component::new(1, ComponentType::Resistor, Point::origin()));
-    zero.session.selection.select_only_component(1);
+    zero.session.editor.selection.select_only_component(1);
     assert_eq!(
         zero.move_selection_with_mode(Point::origin(), MoveSelectionMode::Shove),
         Ok(false)
@@ -1007,7 +1023,7 @@ fn mode_aware_move_has_clean_zero_stale_and_read_only_noops() {
     assert!(!zero.session.is_dirty);
 
     let mut stale = SchematicState::default();
-    stale.session.selection.select_only_component(999);
+    stale.session.editor.selection.select_only_component(999);
     assert_eq!(
         stale.move_selection_with_mode(Point::new(1, 1), MoveSelectionMode::BreakConnections,),
         Ok(false)

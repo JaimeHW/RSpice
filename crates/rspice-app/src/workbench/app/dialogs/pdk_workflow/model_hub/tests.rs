@@ -171,7 +171,7 @@ fn installing_a_release_retains_its_part_pins_it_and_arms_the_placement() {
         rspice_pack::sha256_hex(&archive)
     );
     assert_eq!(
-        browser_state.schematic.session.tool,
+        browser_state.schematic.session.editor.tool,
         Tool::Place(ComponentType::CellInstance),
         "the browser arms the same placement the desktop does"
     );
@@ -228,13 +228,14 @@ fn installing_a_release_retains_its_part_pins_it_and_arms_the_placement() {
     assert_eq!(pin.archive_sha256, rspice_pack::sha256_hex(&archive));
 
     assert_eq!(
-        state.schematic.session.tool,
+        state.schematic.session.editor.tool,
         Tool::Place(ComponentType::CellInstance),
         "the placement is armed on the cursor"
     );
     let armed = state
         .schematic
         .session
+        .editor
         .pending_library_cell
         .as_ref()
         .expect("an armed cell binding");
@@ -373,7 +374,14 @@ fn updating_installs_the_newer_release_and_removes_the_older() {
         state.workbench.models_view.operational_state,
         ModelsOperationalState::Ready
     );
-    assert!(state.schematic.session.pending_library_cell.is_none());
+    assert!(
+        state
+            .schematic
+            .session
+            .editor
+            .pending_library_cell
+            .is_none()
+    );
 
     // The project pinned to 1.0.0 reopens and solves the 1.0.0 circuit, with
     // only 1.1.0 installed anywhere on this machine.
@@ -463,7 +471,14 @@ fn a_refused_update_never_removes_what_it_could_not_replace() {
             part: None,
         },
     );
-    assert!(state.schematic.session.pending_library_cell.is_none());
+    assert!(
+        state
+            .schematic
+            .session
+            .editor
+            .pending_library_cell
+            .is_none()
+    );
 }
 
 #[test]
@@ -567,8 +582,15 @@ fn a_failed_transfer_leaves_no_partial_state_and_reports_the_failure() {
         state.workspace.content.project.revision().get(),
         revision_before
     );
-    assert!(state.schematic.session.pending_library_cell.is_none());
-    assert!(state.schematic.session.pending_part_model.is_none());
+    assert!(
+        state
+            .schematic
+            .session
+            .editor
+            .pending_library_cell
+            .is_none()
+    );
+    assert!(state.schematic.session.editor.pending_part_model.is_none());
     assert!(
         state
             .model_library_manager
@@ -678,12 +700,13 @@ fn acceptance_sequence(
 
     // 3. Place what it armed.
     assert_eq!(
-        state.schematic.session.tool,
+        state.schematic.session.editor.tool,
         Tool::Place(ComponentType::CellInstance)
     );
     let binding = state
         .schematic
         .session
+        .editor
         .pending_library_cell
         .clone()
         .expect("an armed binding");
@@ -756,10 +779,17 @@ fn a_model_card_part_arms_its_native_device_and_symbol_skin() {
     });
     assert_eq!(armed, "1N4728A");
     assert_eq!(
-        state.schematic.session.tool,
+        state.schematic.session.editor.tool,
         Tool::Place(ComponentType::Diode)
     );
-    assert!(state.schematic.session.pending_library_cell.is_none());
+    assert!(
+        state
+            .schematic
+            .session
+            .editor
+            .pending_library_cell
+            .is_none()
+    );
 
     let id = state
         .schematic
@@ -779,7 +809,7 @@ fn a_model_card_part_arms_its_native_device_and_symbol_skin() {
     state
         .schematic
         .arm_tool(Tool::Place(ComponentType::Resistor));
-    assert!(state.schematic.session.pending_part_model.is_none());
+    assert!(state.schematic.session.editor.pending_part_model.is_none());
     let id = state
         .schematic
         .add_component(ComponentType::Resistor, crate::state::Point::new(200, 200));
@@ -951,7 +981,12 @@ fn adopting_one_part_moves_its_pin_and_leaves_every_other_pin_where_it_was() {
         state.workbench.models_view.action_receipt
     );
     assert!(
-        state.schematic.session.pending_library_cell.is_none(),
+        state
+            .schematic
+            .session
+            .editor
+            .pending_library_cell
+            .is_none(),
         "adoption places nothing"
     );
     assert_eq!(

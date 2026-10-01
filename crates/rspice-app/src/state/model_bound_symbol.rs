@@ -17,6 +17,6 @@ pub fn build_symbol_test_fixture(
         rspice_design::model_bound_symbol::build_symbol_test_fixture_document(definition)?;
     let mut schematic = SchematicState::from_document(document);
     schematic.session.is_dirty = true;
-    schematic.session.needs_fit = true;
+    schematic.session.editor.needs_fit = true;
     Ok(schematic)
 }

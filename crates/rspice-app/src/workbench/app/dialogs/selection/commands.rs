@@ -35,7 +35,7 @@ impl AppState {
             return false;
         }
         let mut target =
-            selection_filtered_to_active_sheet(state, &state.schematic.session.selection);
+            selection_filtered_to_active_sheet(state, &state.schematic.session.editor.selection);
         promote_wire_handles_to_complete_wires(&state.schematic, &mut target);
         let count = complete_selection_count(&state.schematic, &target);
         if count == 0 {
@@ -44,9 +44,10 @@ impl AppState {
         }
 
         let impact = delete_dependency_impact(state, &target);
-        let previous_selection = std::mem::replace(&mut state.schematic.session.selection, target);
+        let previous_selection =
+            std::mem::replace(&mut state.schematic.session.editor.selection, target);
         if !with_hidden_wire_topology_preserved(state, SchematicState::delete_selection) {
-            state.schematic.session.selection = previous_selection;
+            state.schematic.session.editor.selection = previous_selection;
             state.push_user_message(ConsoleMessage::warning("Nothing was deleted."));
             return false;
         }
@@ -66,7 +67,8 @@ impl AppState {
         if refuse_read_only(state) {
             return false;
         }
-        let target = selection_filtered_to_active_sheet(state, &state.schematic.session.selection);
+        let target =
+            selection_filtered_to_active_sheet(state, &state.schematic.session.editor.selection);
         let count = complete_selection_count(&state.schematic, &target);
         if count == 0 {
             refuse_empty(state);
@@ -74,18 +76,20 @@ impl AppState {
         }
 
         let open_nets = cut_open_net_count(state, &target);
-        let previous_clipboard = state.schematic.session.clipboard.clone();
-        let previous_selection = std::mem::replace(&mut state.schematic.session.selection, target);
-        if !state.copy_active_schematic_selection() || state.schematic.session.clipboard.is_empty()
+        let previous_clipboard = state.schematic.session.editor.clipboard.clone();
+        let previous_selection =
+            std::mem::replace(&mut state.schematic.session.editor.selection, target);
+        if !state.copy_active_schematic_selection()
+            || state.schematic.session.editor.clipboard.is_empty()
         {
-            state.schematic.session.clipboard = previous_clipboard;
-            state.schematic.session.selection = previous_selection;
+            state.schematic.session.editor.clipboard = previous_clipboard;
+            state.schematic.session.editor.selection = previous_selection;
             refuse_empty(state);
             return false;
         }
         if !with_hidden_wire_topology_preserved(state, SchematicState::delete_selection) {
-            state.schematic.session.clipboard = previous_clipboard;
-            state.schematic.session.selection = previous_selection;
+            state.schematic.session.editor.clipboard = previous_clipboard;
+            state.schematic.session.editor.selection = previous_selection;
             state.push_user_message(ConsoleMessage::warning("Nothing was cut."));
             return false;
         }
@@ -119,19 +123,22 @@ impl AppState {
         if refuse_read_only(state) {
             return false;
         }
-        let target = selection_filtered_to_active_sheet(state, &state.schematic.session.selection);
+        let target =
+            selection_filtered_to_active_sheet(state, &state.schematic.session.editor.selection);
         let count = complete_selection_count(&state.schematic, &target);
         if count == 0 {
             refuse_empty(state);
             return false;
         }
 
-        let previous_clipboard = state.schematic.session.clipboard.clone();
-        let previous_selection = std::mem::replace(&mut state.schematic.session.selection, target);
-        if !state.copy_active_schematic_selection() || state.schematic.session.clipboard.is_empty()
+        let previous_clipboard = state.schematic.session.editor.clipboard.clone();
+        let previous_selection =
+            std::mem::replace(&mut state.schematic.session.editor.selection, target);
+        if !state.copy_active_schematic_selection()
+            || state.schematic.session.editor.clipboard.is_empty()
         {
-            state.schematic.session.clipboard = previous_clipboard;
-            state.schematic.session.selection = previous_selection;
+            state.schematic.session.editor.clipboard = previous_clipboard;
+            state.schematic.session.editor.selection = previous_selection;
             refuse_empty(state);
             return false;
         }
@@ -148,6 +155,7 @@ impl AppState {
                 Ok(attachments) => state
                     .schematic
                     .session
+                    .editor
                     .clipboard
                     .preserve_named_net_attachments(attachments),
                 Err(_) => {
@@ -160,9 +168,9 @@ impl AppState {
         };
 
         let pasted = state.schematic.paste_at_checked(anchor);
-        state.schematic.session.clipboard = previous_clipboard;
+        state.schematic.session.editor.clipboard = previous_clipboard;
         if !matches!(pasted, Ok(true)) {
-            state.schematic.session.selection = previous_selection;
+            state.schematic.session.editor.selection = previous_selection;
             state.push_user_message(ConsoleMessage::warning(
                 pasted
                     .err()
@@ -201,13 +209,14 @@ impl AppState {
             ));
             return false;
         }
-        state.schematic.session.selection = selection;
+        state.schematic.session.editor.selection = selection;
         // Selecting changes no document, so the buffer's selection is written on
         // its own rather than through the whole save-and-revalidate path an edit
         // takes.
         let active_key = state.workspace.content.active_schematic_reference().key();
         if let Some(mut buffer) = state.workspace.schematic_editor_mut(&active_key) {
-            buffer.editor.session.selection = state.schematic.session.selection.clone();
+            buffer.editor.session.editor.selection =
+                state.schematic.session.editor.selection.clone();
         }
         state.push_user_message(ConsoleMessage::info(format!(
             "Selected {}.",
@@ -666,7 +675,7 @@ fn cut_open_net_count(state: &AppState, selection: &Selection) -> Result<usize, 
         &state.workspace.content.active_view.key(),
     );
     let mut after_schematic = state.schematic.clone();
-    after_schematic.session.selection = selection.clone();
+    after_schematic.session.editor.selection = selection.clone();
     let _ = after_schematic.delete_selection();
     let hierarchy =
         HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
@@ -732,10 +741,11 @@ fn terminal_identity(
 /// the one the design gives the conductor. A duplicate stamped with an
 /// editor-buffer name would attach to a net the run does not have.
 fn named_external_attachments(state: &AppState) -> Result<Vec<(Point, String)>, String> {
-    let selected_components = &state.schematic.session.selection.components;
+    let selected_components = &state.schematic.session.editor.selection.components;
     let captured_wires = state
         .schematic
         .session
+        .editor
         .clipboard
         .wires
         .iter()
@@ -744,6 +754,7 @@ fn named_external_attachments(state: &AppState) -> Result<Vec<(Point, String)>, 
     let captured_names = state
         .schematic
         .session
+        .editor
         .clipboard
         .net_labels
         .iter()

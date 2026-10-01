@@ -106,11 +106,11 @@ fn new_document_preserves_the_exact_runtime_wire_and_bus_routing_mode() {
     let created = state.new_schematic_document();
 
     assert_eq!(
-        created.session.wire_drawing.routing_mode,
+        created.session.editor.wire_drawing.routing_mode,
         crate::state::WireRoutingMode::VerticalFirst
     );
     assert_eq!(
-        created.session.bus_drawing.routing_mode,
+        created.session.editor.bus_drawing.routing_mode,
         crate::state::WireRoutingMode::VerticalFirst
     );
 }
@@ -137,7 +137,7 @@ fn new_document_inherits_snap_targets_and_reconciles_the_preferred_pitch() {
         crate::state::SchematicGridPitch::Mil25
     );
     assert_eq!(created.document().grid_size, expected_snap.grid_size);
-    assert_eq!(created.session.snap_engine, expected_snap);
+    assert_eq!(created.session.editor.snap_engine, expected_snap);
 }
 
 #[test]
@@ -229,13 +229,13 @@ fn production_copy_uses_authored_symbol_terminal_geometry() {
         .document_mut_for_test()
         .wires
         .push(Wire::segment(3, Point::new(50, 0), Point::new(150, 0)));
-    state.schematic.session.selection.select_component(1);
-    state.schematic.session.selection.select_component(2);
+    state.schematic.session.editor.selection.select_component(1);
+    state.schematic.session.editor.selection.select_component(2);
 
     assert!(state.copy_active_schematic_selection());
-    assert_eq!(state.schematic.session.clipboard.components.len(), 2);
+    assert_eq!(state.schematic.session.editor.clipboard.components.len(), 2);
     assert_eq!(
-        state.schematic.session.clipboard.wires.len(),
+        state.schematic.session.editor.clipboard.wires.len(),
         1,
         "the conductor between authored pins must travel with both selected instances"
     );
@@ -2428,14 +2428,14 @@ fn a_simulation_anchor_marks_every_node_the_run_named() {
     });
 
     assert_eq!(
-        state.schematic.session.selection.wires.len(),
+        state.schematic.session.editor.selection.wires.len(),
         2,
         "a failure that named two nodes must mark both, not the first"
     );
-    assert!(state.schematic.session.selection.wires.contains(&91));
-    assert!(state.schematic.session.selection.wires.contains(&92));
-    assert!(state.schematic.session.net_highlight.active);
-    assert!(state.schematic.session.center_request.is_some());
+    assert!(state.schematic.session.editor.selection.wires.contains(&91));
+    assert!(state.schematic.session.editor.selection.wires.contains(&92));
+    assert!(state.schematic.session.editor.net_highlight.active);
+    assert!(state.schematic.session.editor.center_request.is_some());
     assert_eq!(state.workbench.workspace, Workspace::Design);
 }
 
@@ -2454,7 +2454,7 @@ fn a_simulation_anchor_refuses_a_schematic_that_moved() {
     });
 
     assert!(
-        state.schematic.session.selection.wires.is_empty(),
+        state.schematic.session.editor.selection.wires.is_empty(),
         "a map that no longer describes this drawing must mark nothing"
     );
     assert_eq!(
@@ -2479,7 +2479,7 @@ fn a_simulation_anchor_says_which_named_objects_this_sheet_does_not_draw() {
     });
 
     assert_eq!(
-        state.schematic.session.selection.wires,
+        state.schematic.session.editor.selection.wires,
         [91].into_iter().collect()
     );
     let console = console_text(&state);
@@ -2501,5 +2501,5 @@ fn a_run_that_named_nothing_offers_no_highlight() {
         !state.highlight_active_failure_sites(),
         "and nothing to mark"
     );
-    assert!(state.schematic.session.selection.wires.is_empty());
+    assert!(state.schematic.session.editor.selection.wires.is_empty());
 }

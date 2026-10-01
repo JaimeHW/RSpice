@@ -52,11 +52,12 @@ mod tests {
         state
             .schematic
             .session
+            .editor
             .selection
             .select_component(component);
         state.schematic.copy_selection();
-        state.schematic.session.pan = (125.0, -40.0);
-        state.schematic.session.zoom = 2.25;
+        state.schematic.session.editor.pan = (125.0, -40.0);
+        state.schematic.session.editor.zoom = 2.25;
         state.schematic.session.current_file = Some(std::path::PathBuf::from("presentation.rsch"));
         state.workspace.content.open_views[0].dirty = true;
         state.library_manager.filter_text = "presentation filter".to_owned();

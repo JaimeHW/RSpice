@@ -78,7 +78,7 @@ fn probe_ids_participate_in_sheet_governance_and_selected_authority() {
         )
         .unwrap(),
     );
-    schematic.session.selection.select_only_probe(81);
+    schematic.session.editor.selection.select_only_probe(81);
 
     assert_eq!(all_stable_object_ids(&schematic), vec![81]);
     assert_eq!(selected_stable_object_ids(&schematic), vec![81]);

@@ -2098,10 +2098,11 @@ fn apply_schematic_map(
     let active_key = state.workspace.content.active_schematic_reference().key();
     for (key, snapshot) in snapshots {
         if key.eq_ignore_ascii_case(&active_key) {
-            let selection = preserve_selection.then(|| state.schematic.session.selection.clone());
+            let selection =
+                preserve_selection.then(|| state.schematic.session.editor.selection.clone());
             state.schematic.apply_snapshot(snapshot);
             if let Some(selection) = selection {
-                state.schematic.session.selection = selection;
+                state.schematic.session.editor.selection = selection;
             }
             state
                 .workspace
@@ -2125,10 +2126,10 @@ fn apply_schematic_map(
             .schematic_editor_mut(&existing_key)
             .expect("the retained schematic key remains present");
         let schematic = &mut stored.editor;
-        let selection = preserve_selection.then(|| schematic.session.selection.clone());
+        let selection = preserve_selection.then(|| schematic.session.editor.selection.clone());
         schematic.apply_snapshot(snapshot);
         if let Some(selection) = selection {
-            schematic.session.selection = selection;
+            schematic.session.editor.selection = selection;
         }
     }
     for open in &mut state.workspace.content.open_views {

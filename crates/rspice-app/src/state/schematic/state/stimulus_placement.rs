@@ -11,61 +11,13 @@
 //! receipt records, so carrying the receipt is what keeps a placed adopter and
 //! a dialog adopter provably identical: both stamp the same value.
 
-use serde::{Deserialize, Serialize};
-
 use super::super::component::Component;
 use super::super::component_type::ComponentType;
 use super::super::point::Point;
 use super::SchematicState;
 use crate::state::stimulus_library::definition::StimulusDefinition;
-use crate::state::stimulus_library::provenance::StimulusProvenance;
 
-/// One stimulus definition armed on the placement cursor.
-///
-/// Runtime interaction state, like every other `pending_*` payload: it is
-/// retired when another tool is armed and it is never written to a document.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PendingStimulusPlacement {
-    /// The exact placement tool this definition belongs to, so re-arming any
-    /// other tool retires it — the rule [`super::PendingPartModel`] keeps for
-    /// the same reason.
-    pub component_type: ComponentType,
-    /// The copy the placed instance is born holding: the definition's name,
-    /// the revision, and the two card fields as they were read.
-    pub receipt: StimulusProvenance,
-}
-
-impl PendingStimulusPlacement {
-    /// Arm this definition's saved revision.
-    #[must_use]
-    pub fn of(definition: &StimulusDefinition) -> Self {
-        Self {
-            component_type: definition.component_type(),
-            receipt: definition.provenance(),
-        }
-    }
-
-    /// The definition's name, as the console line and the shelf row spell it.
-    #[must_use]
-    pub fn definition(&self) -> &str {
-        &self.receipt.definition
-    }
-
-    /// The revision that will be stamped.
-    #[must_use]
-    pub const fn revision(&self) -> u32 {
-        self.receipt.revision
-    }
-
-    /// Write the copy and its receipt onto a freshly placed instance.
-    ///
-    /// The same two fields adoption writes, from the same record, so an
-    /// instance placed from a definition and one adopted onto afterwards carry
-    /// byte-identical cards.
-    pub fn stamp_onto(&self, component: &mut Component) {
-        self.receipt.stamp_onto(component);
-    }
-}
+pub use rspice_schematic_editor::session::stimulus_placement::PendingStimulusPlacement;
 
 impl SchematicState {
     /// Place one `kind` at `pos` the way the armed tool means it: as an adopter
@@ -78,6 +30,7 @@ impl SchematicState {
     pub fn add_armed_component(&mut self, kind: ComponentType, pos: Point) -> u64 {
         match self
             .session
+            .editor
             .pending_stimulus
             .clone()
             .filter(|armed| armed.component_type == kind)
@@ -156,7 +109,7 @@ mod tests {
         let (_, definition) = library_with_sin();
         let mut schematic = SchematicState::default();
         schematic.init_undo_history();
-        schematic.session.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
+        schematic.session.editor.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
 
         schematic.with_undo("place a sine source", |schematic| {
             schematic.add_armed_component(ComponentType::VoltageSourceSin, Point::new(4, 4));
@@ -178,7 +131,7 @@ mod tests {
     fn an_armed_definition_applies_only_to_its_own_type() {
         let (_, definition) = library_with_sin();
         let mut schematic = SchematicState::default();
-        schematic.session.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
+        schematic.session.editor.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
 
         let id = schematic.add_armed_component(ComponentType::VoltageSourcePulse, Point::new(4, 4));
         let placed = schematic
@@ -200,11 +153,11 @@ mod tests {
         let (_, definition) = library_with_sin();
         let mut schematic = SchematicState::default();
         schematic.arm_tool(Tool::Place(ComponentType::VoltageSourceSin));
-        schematic.session.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
-        assert!(schematic.session.pending_stimulus.is_some());
+        schematic.session.editor.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
+        assert!(schematic.session.editor.pending_stimulus.is_some());
 
         schematic.arm_tool(Tool::Place(ComponentType::Resistor));
-        assert!(schematic.session.pending_stimulus.is_none());
+        assert!(schematic.session.editor.pending_stimulus.is_none());
     }
 
     #[test]
@@ -212,11 +165,11 @@ mod tests {
         let (_, definition) = library_with_sin();
         let mut schematic = SchematicState::default();
         schematic.arm_tool(Tool::Place(ComponentType::VoltageSourceSin));
-        schematic.session.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
+        schematic.session.editor.pending_stimulus = Some(PendingStimulusPlacement::of(&definition));
 
         schematic.cancel_tool();
-        assert!(schematic.session.pending_stimulus.is_none());
-        assert_eq!(schematic.session.tool, Tool::Select);
+        assert!(schematic.session.editor.pending_stimulus.is_none());
+        assert_eq!(schematic.session.editor.tool, Tool::Select);
     }
 }
 

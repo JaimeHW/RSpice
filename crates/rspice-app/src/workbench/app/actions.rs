@@ -278,19 +278,24 @@ impl RSpiceApp {
                     .arm_tool(Tool::Place(ComponentType::Resistor));
             }
             ShortcutCommand::RotateSelection => {
-                self.state.schematic.session.preview_rotation =
-                    self.state.schematic.session.preview_rotation.rotate_cw();
-                if !self.state.schematic.session.selection.is_empty() {
+                self.state.schematic.session.editor.preview_rotation = self
+                    .state
+                    .schematic
+                    .session
+                    .editor
+                    .preview_rotation
+                    .rotate_cw();
+                if !self.state.schematic.session.editor.selection.is_empty() {
                     self.rotate_schematic_selection_with_symbols();
                 }
             }
             ShortcutCommand::MirrorSelectionHorizontal => {
-                if !self.state.schematic.session.selection.is_empty() {
+                if !self.state.schematic.session.editor.selection.is_empty() {
                     self.mirror_schematic_selection_h_with_symbols();
                 }
             }
             ShortcutCommand::MirrorSelectionVertical => {
-                if !self.state.schematic.session.selection.is_empty() {
+                if !self.state.schematic.session.editor.selection.is_empty() {
                     self.mirror_schematic_selection_v_with_symbols();
                 }
             }
@@ -360,7 +365,7 @@ impl RSpiceApp {
             | ShortcutCommand::FitSchematicContent
             | ShortcutCommand::DrawingSheetLayers => command.execute(self),
             ShortcutCommand::ZoomOneToOne => {
-                self.state.schematic.session.zoom = 1.0;
+                self.state.schematic.session.editor.zoom = 1.0;
             }
             ShortcutCommand::PlaceLabel => {
                 self.state.schematic.arm_tool(Tool::Label);
@@ -970,7 +975,7 @@ impl RSpiceApp {
             .unwrap_or("schematic edit")
             .to_owned();
         if self.state.schematic.undo() {
-            self.state.ui.schematic_snap = self.state.schematic.session.snap_engine.clone();
+            self.state.ui.schematic_snap = self.state.schematic.session.editor.snap_engine.clone();
             self.state.sync_active_schematic_to_workspace();
             self.state
                 .push_user_message(ConsoleMessage::info(format!("Undo: {description}")));
@@ -1004,7 +1009,7 @@ impl RSpiceApp {
             .unwrap_or("schematic edit")
             .to_owned();
         if self.state.schematic.redo() {
-            self.state.ui.schematic_snap = self.state.schematic.session.snap_engine.clone();
+            self.state.ui.schematic_snap = self.state.schematic.session.editor.snap_engine.clone();
             self.state.sync_active_schematic_to_workspace();
             self.state
                 .push_user_message(ConsoleMessage::info(format!("Redo: {description}")));
@@ -1167,7 +1172,10 @@ mod shortcut_ownership_tests {
             pitch
         );
         assert_eq!(app.state.schematic.document().grid_size, expected);
-        assert_eq!(app.state.schematic.session.snap_engine.grid_size, expected);
+        assert_eq!(
+            app.state.schematic.session.editor.snap_engine.grid_size,
+            expected
+        );
         assert_eq!(app.state.ui.schematic_snap.grid_size, expected);
     }
 
@@ -1186,11 +1194,11 @@ mod shortcut_ownership_tests {
                         SchematicGridPitch::Mil25;
                     schematic.document_mut_for_test().grid_size =
                         SchematicGridPitch::Mil25.canvas_grid_size();
-                    schematic.session.snap_engine.grid_size =
+                    schematic.session.editor.snap_engine.grid_size =
                         SchematicGridPitch::Mil25.canvas_grid_size();
                 })
         );
-        app.state.ui.schematic_snap = app.state.schematic.session.snap_engine.clone();
+        app.state.ui.schematic_snap = app.state.schematic.session.editor.snap_engine.clone();
         assert_grid_pitch_contract(&app, SchematicGridPitch::Mil25);
 
         app.action_edit_undo();
@@ -1417,7 +1425,12 @@ mod shortcut_ownership_tests {
             )
             .unwrap(),
         );
-        app.state.schematic.session.selection.select_only_bus(87);
+        app.state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_bus(87);
 
         app.execute_shortcut_command(ShortcutCommand::ObjectProperties);
         assert!(matches!(

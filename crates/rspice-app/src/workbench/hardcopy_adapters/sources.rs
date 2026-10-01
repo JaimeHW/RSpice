@@ -737,7 +737,7 @@ fn prepare_schematic_resolution(
         project_id: state.workspace.content.project.id(),
         identity,
         schematic: state.schematic.editor_ref().design.clone(),
-        selection: state.schematic.session.selection.clone(),
+        selection: state.schematic.session.editor.selection.clone(),
         library_manager: state.library_manager.clone(),
         schematic_buffers: state.workspace.content.schematic_buffers.clone(),
         sheet_catalog,

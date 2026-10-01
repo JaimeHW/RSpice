@@ -85,7 +85,10 @@ impl SchematicState {
                 .update_instance_interface(component_id, &master_ports, |binding| {
                     resolver.resolve_binding(binding)
                 })?;
-        self.session.selection.select_only_component(component_id);
+        self.session
+            .editor
+            .selection
+            .select_only_component(component_id);
         self.finish_document_edit(edit.committed);
         if !edit.committed {
             return Err(SchematicReplacementError::CommitFailed);
@@ -101,7 +104,7 @@ fn selected_master_interface<S: AsRef<SchematicDocument>>(
     schematic: &SchematicState,
     masters: &HashMap<String, S>,
 ) -> Option<(u64, Vec<PortSpec>)> {
-    let component_id = schematic.session.selection.single_component()?;
+    let component_id = schematic.session.editor.selection.single_component()?;
     let component = schematic
         .design
         .document()

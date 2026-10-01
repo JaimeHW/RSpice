@@ -1649,7 +1649,7 @@ mod tests {
             fixture.frame(click(target(&output, "Resistor")));
             assert_eq!(fixture.app.state.workbench.drawer, None);
             assert_eq!(
-                fixture.app.state.schematic.session.tool,
+                fixture.app.state.schematic.session.editor.tool,
                 Tool::Place(ComponentType::Resistor)
             );
             fixture.frame(Vec::new());

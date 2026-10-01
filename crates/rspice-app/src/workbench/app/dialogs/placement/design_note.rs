@@ -90,7 +90,7 @@ impl RSpiceApp {
         match response.choice {
             DialogChoice::Primary => {
                 if let DraftValidation::Valid(pending) = validate_draft(&self.state) {
-                    self.state.schematic.session.pending_design_note = Some(pending);
+                    self.state.schematic.session.editor.pending_design_note = Some(pending);
                     self.state.schematic.arm_tool(Tool::DesignNote);
                     self.state.dialogs.design_note.close();
                 }

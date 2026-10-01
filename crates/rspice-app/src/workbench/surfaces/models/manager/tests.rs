@@ -639,6 +639,7 @@ fn one_model_project() -> RSpiceApp {
     app.state
         .schematic
         .session
+        .editor
         .selection
         .select_only_component(1);
     app
@@ -662,7 +663,7 @@ fn the_bind_primary_names_the_instance_it_would_bind() {
     // With nothing selected there is nothing to name, and the base spelling —
     // the one the control ratchet reads — is what comes back.
     let mut app = one_model_project();
-    app.state.schematic.session.selection.clear();
+    app.state.schematic.session.editor.selection.clear();
     let unselected = ModelsStudio::open(app);
     assert!(
         unselected.announces(|label| label == "Bind to selection…"),

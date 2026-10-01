@@ -106,10 +106,10 @@ fn replace_active_schematic_document(state: &mut AppState, mut schematic: Schema
     // Loaded document data owns the grid pitch; the active device session owns
     // snap targets and radius. Install both authorities before publishing the
     // new active buffer, then mirror the derived pitch back into the session.
-    schematic.session.snap_engine = state.ui.schematic_snap.clone();
+    schematic.session.editor.snap_engine = state.ui.schematic_snap.clone();
     schematic.reconcile_grid_pitch_runtime();
     state.schematic = schematic;
-    state.ui.schematic_snap = state.schematic.session.snap_engine.clone();
+    state.ui.schematic_snap = state.schematic.session.editor.snap_engine.clone();
     state.bump_active_schematic_epoch();
     match state.workspace.content.active_view_type() {
         ViewType::Schematic | ViewType::Testbench => {
@@ -496,7 +496,7 @@ mod tests {
         loaded.document_mut_for_test().document_policy.grid_pitch =
             crate::state::SchematicGridPitch::Metric;
         loaded.document_mut_for_test().grid_size = 123;
-        loaded.session.snap_engine = crate::state::SnapEngine::default();
+        loaded.session.editor.snap_engine = crate::state::SnapEngine::default();
 
         replace_active_schematic_document(&mut state, loaded);
 
@@ -506,11 +506,24 @@ mod tests {
             crate::state::SchematicGridPitch::Metric
         );
         assert_eq!(state.schematic.document().grid_size, expected);
-        assert_eq!(state.schematic.session.snap_engine.grid_size, expected);
-        assert_eq!(state.schematic.session.snap_engine.snap_radius, 8);
-        assert!(!state.schematic.session.snap_engine.snap_to_grid);
-        assert!(!state.schematic.session.snap_engine.snap_to_wire_segments);
-        assert_eq!(state.ui.schematic_snap, state.schematic.session.snap_engine);
+        assert_eq!(
+            state.schematic.session.editor.snap_engine.grid_size,
+            expected
+        );
+        assert_eq!(state.schematic.session.editor.snap_engine.snap_radius, 8);
+        assert!(!state.schematic.session.editor.snap_engine.snap_to_grid);
+        assert!(
+            !state
+                .schematic
+                .session
+                .editor
+                .snap_engine
+                .snap_to_wire_segments
+        );
+        assert_eq!(
+            state.ui.schematic_snap,
+            state.schematic.session.editor.snap_engine
+        );
     }
 
     #[test]

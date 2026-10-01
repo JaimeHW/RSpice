@@ -241,13 +241,14 @@ fn enter_arms_the_whole_sequence_without_touching_the_document() {
 
     assert!(!app.state.dialogs.pin_port.open);
     assert_eq!(
-        app.state.schematic.session.tool,
+        app.state.schematic.session.editor.tool,
         Tool::Place(crate::state::ComponentType::Port)
     );
     let sequence = app
         .state
         .schematic
         .session
+        .editor
         .pending_port_sequence
         .as_ref()
         .expect("the batch is armed");
@@ -291,6 +292,7 @@ fn reopening_while_armed_offers_the_remaining_names() {
     app.state
         .schematic
         .session
+        .editor
         .pending_port_sequence
         .as_mut()
         .expect("armed")
@@ -365,8 +367,15 @@ fn a_blocked_form_never_arms_on_enter() {
         });
 
         assert!(app.state.dialogs.pin_port.open);
-        assert_eq!(app.state.schematic.session.tool, Tool::Select);
-        assert!(app.state.schematic.session.pending_port_sequence.is_none());
+        assert_eq!(app.state.schematic.session.editor.tool, Tool::Select);
+        assert!(
+            app.state
+                .schematic
+                .session
+                .editor
+                .pending_port_sequence
+                .is_none()
+        );
         assert!(app.state.schematic.document().components.is_empty());
     }
 }
@@ -388,7 +397,14 @@ fn escape_closes_the_form_at_once() {
     });
 
     assert!(!app.state.dialogs.pin_port.open);
-    assert!(app.state.schematic.session.pending_port_sequence.is_none());
+    assert!(
+        app.state
+            .schematic
+            .session
+            .editor
+            .pending_port_sequence
+            .is_none()
+    );
     assert!(app.state.schematic.document().components.is_empty());
 }
 

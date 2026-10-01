@@ -293,6 +293,7 @@ impl RSpiceApp {
         self.state
             .schematic
             .session
+            .editor
             .selection
             .select_only_component(component_id);
         let outcome = self.state.schematic.update_selected_instance_interface(

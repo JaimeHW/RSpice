@@ -1148,24 +1148,25 @@ impl RSpiceApp {
             self.state.open_workspace_view(reference);
         }
         let schematic = &mut self.state.schematic;
-        schematic.session.selection.clear();
-        schematic.session.net_highlight.clear();
+        schematic.session.editor.selection.clear();
+        schematic.session.editor.net_highlight.clear();
         match target {
             RevealTarget::Net {
                 wire_ids,
                 component_ids,
             } => {
                 for id in &wire_ids {
-                    schematic.session.selection.select_wire(*id);
+                    schematic.session.editor.selection.select_wire(*id);
                 }
                 for id in component_ids {
-                    schematic.session.selection.select_component(id);
+                    schematic.session.editor.selection.select_component(id);
                 }
                 schematic
                     .session
+                    .editor
                     .net_highlight
                     .highlight_wires(wire_ids.iter().copied().collect::<HashSet<_>>());
-                schematic.session.center_request = wire_ids
+                schematic.session.editor.center_request = wire_ids
                     .first()
                     .and_then(|id| {
                         schematic
@@ -1177,16 +1178,16 @@ impl RSpiceApp {
                     .and_then(|wire| wire.points.first().copied());
             }
             RevealTarget::Bus { id, point } => {
-                schematic.session.selection.select_only_bus(id);
-                schematic.session.center_request = Some(point);
+                schematic.session.editor.selection.select_only_bus(id);
+                schematic.session.editor.center_request = Some(point);
             }
             RevealTarget::BusTap { id, point } => {
-                schematic.session.selection.select_only_bus_tap(id);
-                schematic.session.center_request = Some(point);
+                schematic.session.editor.selection.select_only_bus_tap(id);
+                schematic.session.editor.center_request = Some(point);
             }
             RevealTarget::Label { view_key: _, id } => {
-                schematic.session.selection.select_only_net_label(id);
-                schematic.session.center_request = schematic
+                schematic.session.editor.selection.select_only_net_label(id);
+                schematic.session.editor.center_request = schematic
                     .document()
                     .net_labels
                     .iter()
@@ -1293,9 +1294,9 @@ impl RSpiceApp {
         contract.validate()?;
         self.state.workspace.content.connectivity = contract;
         self.state.workspace.content.project_metadata_dirty = true;
-        self.state.schematic.session.bus_drawing.cancel();
-        self.state.schematic.session.bus_drawing.declaration = Some(declaration);
-        self.state.schematic.session.tool = Tool::Bus;
+        self.state.schematic.session.editor.bus_drawing.cancel();
+        self.state.schematic.session.editor.bus_drawing.declaration = Some(declaration);
+        self.state.schematic.session.editor.tool = Tool::Bus;
         self.state.dialogs.connectivity_manager.close();
         self.state.push_user_message(ConsoleMessage::info(
             "Typed bus placement armed. Click the first point, route the vector, then finish the bus.",
@@ -1335,9 +1336,9 @@ impl RSpiceApp {
         }
         self.state.dialogs.connectivity_manager.close();
         self.state.workbench.workspace = crate::workbench::state::Workspace::Design;
-        self.state.schematic.session.tool = Tool::Wire;
+        self.state.schematic.session.editor.tool = Tool::Wire;
         self.state.schematic.start_wire(choice.start);
-        self.state.schematic.session.center_request = Some(choice.destination);
+        self.state.schematic.session.editor.center_request = Some(choice.destination);
         self.state.push_user_message(ConsoleMessage::info(format!(
             "Wire routing armed from {}, {} to {}. The destination is centered; route deliberately and finish on that exact endpoint.",
             choice.start.x, choice.start.y, choice.label
@@ -1457,11 +1458,15 @@ fn severe_drc_counts(result: &DrcResult) -> HashMap<DrcViolationType, usize> {
 fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
     match location {
         DrcLocation::Point { x, y } => {
-            schematic.session.center_request = Some(Point::new(*x as i32, *y as i32));
+            schematic.session.editor.center_request = Some(Point::new(*x as i32, *y as i32));
         }
         DrcLocation::Component { id, .. } => {
-            schematic.session.selection.select_only_component(*id);
-            schematic.session.center_request = schematic
+            schematic
+                .session
+                .editor
+                .selection
+                .select_only_component(*id);
+            schematic.session.editor.center_request = schematic
                 .document()
                 .components
                 .iter()
@@ -1469,8 +1474,8 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
                 .map(|component| component.pos);
         }
         DrcLocation::Wire { id } => {
-            schematic.session.selection.select_only_wire(*id);
-            schematic.session.center_request = schematic
+            schematic.session.editor.selection.select_only_wire(*id);
+            schematic.session.editor.center_request = schematic
                 .document()
                 .wires
                 .iter()
@@ -1478,8 +1483,8 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
                 .and_then(|wire| wire.points.first().copied());
         }
         DrcLocation::Bus { id } => {
-            schematic.session.selection.select_only_bus(*id);
-            schematic.session.center_request = schematic
+            schematic.session.editor.selection.select_only_bus(*id);
+            schematic.session.editor.center_request = schematic
                 .document()
                 .buses
                 .iter()
@@ -1487,8 +1492,8 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
                 .and_then(|bus| bus.points.first().copied());
         }
         DrcLocation::BusTap { id } => {
-            schematic.session.selection.select_only_bus_tap(*id);
-            schematic.session.center_request = schematic
+            schematic.session.editor.selection.select_only_bus_tap(*id);
+            schematic.session.editor.center_request = schematic
                 .document()
                 .bus_taps
                 .iter()
@@ -1504,8 +1509,8 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
             {
                 let id = label.id;
                 let point = label.pos;
-                schematic.session.selection.select_only_net_label(id);
-                schematic.session.center_request = Some(point);
+                schematic.session.editor.selection.select_only_net_label(id);
+                schematic.session.editor.center_request = Some(point);
             }
         }
         DrcLocation::Node { net_name } => {
@@ -1517,8 +1522,8 @@ fn reveal_drc_location(schematic: &mut SchematicState, location: &DrcLocation) {
             {
                 let id = label.id;
                 let point = label.pos;
-                schematic.session.selection.select_only_net_label(id);
-                schematic.session.center_request = Some(point);
+                schematic.session.editor.selection.select_only_net_label(id);
+                schematic.session.editor.center_request = Some(point);
             }
         }
         DrcLocation::Global | DrcLocation::SymbolPin { .. } => {}

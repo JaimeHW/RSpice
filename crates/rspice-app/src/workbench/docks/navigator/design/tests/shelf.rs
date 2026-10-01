@@ -64,11 +64,11 @@ fn palette_placement_cancels_every_unfinished_conductor_route() {
     arm_primitive(&mut app, ComponentType::Resistor, &egui::Context::default());
 
     assert_eq!(
-        app.state.schematic.session.tool,
+        app.state.schematic.session.editor.tool,
         Tool::Place(ComponentType::Resistor)
     );
-    assert!(!app.state.schematic.session.wire_drawing.active);
-    assert!(!app.state.schematic.session.bus_drawing.active);
+    assert!(!app.state.schematic.session.editor.wire_drawing.active);
+    assert!(!app.state.schematic.session.editor.bus_drawing.active);
 }
 
 #[test]
@@ -78,8 +78,15 @@ fn port_shelf_entry_uses_the_typed_place_pin_transaction() {
     arm_primitive(&mut app, ComponentType::Port, &egui::Context::default());
 
     assert!(app.state.dialogs.pin_port.open);
-    assert_eq!(app.state.schematic.session.tool, Tool::Select);
-    assert!(app.state.schematic.session.pending_port_sequence.is_none());
+    assert_eq!(app.state.schematic.session.editor.tool, Tool::Select);
+    assert!(
+        app.state
+            .schematic
+            .session
+            .editor
+            .pending_port_sequence
+            .is_none()
+    );
     assert!(app.state.schematic.document().components.is_empty());
 }
 
@@ -703,7 +710,10 @@ fn shelf_selection_returns_to_canvas_without_hiding_desktop_dock() {
             let (_, runs) = shelf.frame(Vec::new());
             let row = run_rect(&runs, label).expect("the pinned part is rendered");
             let _ = shelf.frame(click_events(row.center()));
-            assert_eq!(shelf.app.state.schematic.session.tool, tool, "{label}");
+            assert_eq!(
+                shelf.app.state.schematic.session.editor.tool, tool,
+                "{label}"
+            );
             assert_eq!(
                 shelf.app.state.workbench.drawer, None,
                 "{label}: the canvas must be reachable after selection"
@@ -1342,14 +1352,14 @@ fn a_band_row_arms_the_part_it_names_and_says_so() {
     let row = run_rect(&runs, "NMOS").expect("the pinned NMOS row is painted");
     let resting = tone(&runs, "NMOS");
     assert_ne!(
-        shelf.app.state.schematic.session.tool,
+        shelf.app.state.schematic.session.editor.tool,
         Tool::Place(ComponentType::Nmos),
         "nothing is armed before the click"
     );
 
     let _ = shelf.frame(click_events(row.center()));
     assert_eq!(
-        shelf.app.state.schematic.session.tool,
+        shelf.app.state.schematic.session.editor.tool,
         Tool::Place(ComponentType::Nmos),
         "the click armed the part the row names"
     );
@@ -1677,7 +1687,7 @@ fn a_stimulus_definition_is_listed_as_a_part_and_arms_the_cursor() {
         .expect("the definition is rendered as a row");
     let _ = shelf.frame(click_events(row.center()));
     assert_eq!(
-        shelf.app.state.schematic.session.tool,
+        shelf.app.state.schematic.session.editor.tool,
         Tool::Place(ComponentType::VoltageSourceSin),
         "the row's click must reach the arming action"
     );
@@ -1686,6 +1696,7 @@ fn a_stimulus_definition_is_listed_as_a_part_and_arms_the_cursor() {
         .state
         .schematic
         .session
+        .editor
         .pending_stimulus
         .as_ref()
         .expect("the click armed the definition");

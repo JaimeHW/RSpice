@@ -110,6 +110,7 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
     state
         .schematic
         .session
+        .editor
         .selection
         .select_only_component(source_id);
     assert_eq!(state.selected_instance_netlist_block(), None);
@@ -119,6 +120,7 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
     state
         .schematic
         .session
+        .editor
         .selection
         .select_only_component(load_id);
     state.show_selected_instance_in_netlist();
@@ -127,6 +129,7 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
     state
         .schematic
         .session
+        .editor
         .selection
         .select_only_component(unmapped_id);
     assert_eq!(
@@ -134,7 +137,12 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
         Some("no netlist line for this instance")
     );
 
-    state.schematic.session.selection.select_component(load_id);
+    state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_component(load_id);
     assert_eq!(
         state.selected_instance_netlist_block(),
         Some("select one instance")
@@ -143,6 +151,7 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
     state
         .schematic
         .session
+        .editor
         .selection
         .select_only_component(source_id);
     state.ui.netlist.generated_document = None;
@@ -162,6 +171,7 @@ fn showing_an_instance_opens_the_generated_primary_at_its_card() {
     state
         .schematic
         .session
+        .editor
         .selection
         .select_only_component(load_id);
 
@@ -193,6 +203,7 @@ fn showing_an_instance_from_a_stale_deck_says_so_without_blocking_the_jump() {
     state
         .schematic
         .session
+        .editor
         .selection
         .select_only_component(source_id);
     state.ui.netlist.current_generation_input_digest =
@@ -217,12 +228,13 @@ fn the_round_trip_through_the_generated_deck_selects_the_same_instance() {
     state
         .schematic
         .session
+        .editor
         .selection
         .select_only_component(load_id);
 
     state.show_selected_instance_in_netlist();
     assert_eq!(
-        state.schematic.session.selection.single_component(),
+        state.schematic.session.editor.selection.single_component(),
         Some(load_id)
     );
 
@@ -240,10 +252,15 @@ fn the_round_trip_through_the_generated_deck_selects_the_same_instance() {
         .expect("the active line names a component");
     assert_eq!(revealed, load_id);
 
-    state.schematic.session.selection.clear();
-    state.schematic.session.selection.select_component(revealed);
+    state.schematic.session.editor.selection.clear();
+    state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_component(revealed);
     assert_eq!(
-        state.schematic.session.selection.single_component(),
+        state.schematic.session.editor.selection.single_component(),
         Some(load_id)
     );
     assert_eq!(state.selected_instance_netlist_block(), None);

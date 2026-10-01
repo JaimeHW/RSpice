@@ -149,7 +149,7 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
                         crate::state::ComponentType::VoltageSource,
                         crate::state::Point::origin(),
                     ));
-                schematic.session.selection.select_only_component(1);
+                schematic.session.editor.selection.select_only_component(1);
                 schematic
                     .replacement_authority()
                     .expect("valid replacement review fixture")

@@ -393,10 +393,10 @@ fn activate(state: &mut AppState, id: SheetId, name: String) -> Result<String, S
 
 /// Retire everything that named the sheet just left and frame the new one.
 fn enter_active_sheet(state: &mut AppState) {
-    state.schematic.session.selection.clear();
-    state.schematic.session.net_highlight.clear();
-    state.schematic.session.needs_drawing_sheet_fit = true;
-    state.schematic.session.needs_fit = false;
+    state.schematic.session.editor.selection.clear();
+    state.schematic.session.editor.net_highlight.clear();
+    state.schematic.session.editor.needs_drawing_sheet_fit = true;
+    state.schematic.session.editor.needs_fit = false;
 }
 
 fn create(

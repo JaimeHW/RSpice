@@ -11,28 +11,43 @@ impl SchematicState {
     /// Whether the current selection contains at least one live stretch handle.
     pub fn has_live_stretch_selection(&self) -> bool {
         self.design.document().wires.iter().any(|wire| {
-            self.session.selection.has_wire(wire.id) && wire.segment_count() != 0
-                || self.session.selection.wire_segments.iter().any(|selected| {
-                    selected.wire_id == wire.id && selected.segment_index < wire.segment_count()
-                })
-                || self.session.selection.wire_vertices.iter().any(|selected| {
-                    selected.wire_id == wire.id
-                        && selected.vertex_index < wire.vertex_count()
-                        && wire.segment_count() != 0
-                })
+            self.session.editor.selection.has_wire(wire.id) && wire.segment_count() != 0
+                || self
+                    .session
+                    .editor
+                    .selection
+                    .wire_segments
+                    .iter()
+                    .any(|selected| {
+                        selected.wire_id == wire.id && selected.segment_index < wire.segment_count()
+                    })
+                || self
+                    .session
+                    .editor
+                    .selection
+                    .wire_vertices
+                    .iter()
+                    .any(|selected| {
+                        selected.wire_id == wire.id
+                            && selected.vertex_index < wire.vertex_count()
+                            && wire.segment_count() != 0
+                    })
         }) || self
             .design
             .document()
             .buses
             .iter()
-            .any(|bus| self.session.selection.has_bus(bus.id) && bus.points.len() >= 2)
+            .any(|bus| self.session.editor.selection.has_bus(bus.id) && bus.points.len() >= 2)
             || self
                 .design
                 .document()
                 .documentation_shapes
                 .iter()
                 .any(|shape| {
-                    self.session.selection.has_documentation_shape(shape.id)
+                    self.session
+                        .editor
+                        .selection
+                        .has_documentation_shape(shape.id)
                         && stretch::documentation_shape_point_count(&shape.geometry) != 0
                 })
     }
@@ -42,7 +57,7 @@ impl SchematicState {
     /// it with [`Self::is_stretch_target_eligible`].
     pub fn default_stretch_target(&self) -> Option<StretchTarget> {
         let mut targets = Vec::new();
-        for selected in &self.session.selection.wire_segments {
+        for selected in &self.session.editor.selection.wire_segments {
             push_unique_target(
                 &mut targets,
                 StretchTarget::WireSegment {
@@ -52,7 +67,7 @@ impl SchematicState {
                 self,
             );
         }
-        for selected in &self.session.selection.wire_vertices {
+        for selected in &self.session.editor.selection.wire_vertices {
             let Some(wire) = self
                 .design
                 .document()
@@ -79,7 +94,7 @@ impl SchematicState {
                 self,
             );
         }
-        for &wire_id in &self.session.selection.wires {
+        for &wire_id in &self.session.editor.selection.wires {
             push_unique_target(
                 &mut targets,
                 StretchTarget::WireSegment {
@@ -89,7 +104,7 @@ impl SchematicState {
                 self,
             );
         }
-        for &bus_id in &self.session.selection.buses {
+        for &bus_id in &self.session.editor.selection.buses {
             push_unique_target(
                 &mut targets,
                 StretchTarget::BusSegment {
@@ -99,7 +114,7 @@ impl SchematicState {
                 self,
             );
         }
-        for &shape_id in &self.session.selection.documentation_shapes {
+        for &shape_id in &self.session.editor.selection.documentation_shapes {
             push_unique_target(
                 &mut targets,
                 StretchTarget::DocumentationShapePoint {
@@ -176,7 +191,7 @@ impl SchematicState {
         if self.session.read_only || delta == Point::origin() {
             return Ok(false);
         }
-        if !self.session.selection.probes.is_empty() {
+        if !self.session.editor.selection.probes.is_empty() {
             return Err(StretchSelectionError::ProbeSelectionUnsupported);
         }
         if !stretch::target_is_live(&self.design.document(), target) {
@@ -249,24 +264,29 @@ fn selection_authorizes_target(state: &SchematicState, target: StretchTarget) ->
             wire_id,
             segment_index,
         } => {
-            state.session.selection.has_wire(wire_id)
+            state.session.editor.selection.has_wire(wire_id)
                 || state
                     .session
+                    .editor
                     .selection
                     .has_wire_segment(wire_id, segment_index)
                 || state
                     .session
+                    .editor
                     .selection
                     .has_wire_vertex(wire_id, segment_index)
                 || state
                     .session
+                    .editor
                     .selection
                     .has_wire_vertex(wire_id, segment_index + 1)
         }
-        StretchTarget::BusSegment { bus_id, .. } => state.session.selection.has_bus(bus_id),
-        StretchTarget::DocumentationShapePoint { shape_id, .. } => {
-            state.session.selection.has_documentation_shape(shape_id)
-        }
+        StretchTarget::BusSegment { bus_id, .. } => state.session.editor.selection.has_bus(bus_id),
+        StretchTarget::DocumentationShapePoint { shape_id, .. } => state
+            .session
+            .editor
+            .selection
+            .has_documentation_shape(shape_id),
     }
 }
 
@@ -308,7 +328,11 @@ mod tests {
     fn selected_u_wire() -> SchematicState {
         let mut state = SchematicState::default();
         state.design.document_mut_for_test().wires.push(u_wire(1));
-        state.session.selection.select_only_wire_segment(1, 1);
+        state
+            .session
+            .editor
+            .selection
+            .select_only_wire_segment(1, 1);
         state
     }
 
@@ -333,7 +357,7 @@ mod tests {
     fn exact_vertex_selection_resolves_an_incident_segment() {
         let mut state = SchematicState::default();
         state.design.document_mut_for_test().wires.push(u_wire(1));
-        state.session.selection.select_only_wire_vertex(1, 2);
+        state.session.editor.selection.select_only_wire_vertex(1, 2);
         assert_eq!(state.default_stretch_target(), Some(wire_target(1, 2)));
         assert!(state.is_stretch_target_eligible(wire_target(1, 1)));
         assert!(state.is_stretch_target_eligible(wire_target(1, 2)));
@@ -374,7 +398,11 @@ mod tests {
                 Point::new(0, 20),
             ],
         ));
-        state.session.selection.select_only_wire_segment(1, 1);
+        state
+            .session
+            .editor
+            .selection
+            .select_only_wire_segment(1, 1);
         state
             .stretch_target(
                 Point::new(5, 0),
@@ -444,6 +472,7 @@ mod tests {
                 .push(Wire::new(1, points));
             state
                 .session
+                .editor
                 .selection
                 .select_only_wire_segment(1, segment_index);
             assert_eq!(
@@ -475,7 +504,7 @@ mod tests {
             .document_mut_for_test()
             .wires
             .push(Wire::new(2, vec![Point::new(0, 0), Point::new(10, 10)]));
-        diagonal.session.selection.select_only_wire(2);
+        diagonal.session.editor.selection.select_only_wire(2);
         assert_eq!(
             diagonal.stretch_target(
                 Point::new(0, 5),
@@ -586,7 +615,7 @@ mod tests {
                 terminal,
                 Point::new(terminal.x, terminal.y + 20),
             ));
-        state.session.selection.select_only_wire(1);
+        state.session.editor.selection.select_only_wire(1);
         assert!(matches!(
             state.stretch_target(
                 Point::new(5, 0),
@@ -769,7 +798,7 @@ mod tests {
             .push(Wire::segment(9, Point::new(0, 30), Point::new(20, 30)));
         state.design.document_mut_for_test().buses.push(bus);
         state.design.document_mut_for_test().bus_taps.push(tap);
-        state.session.selection.select_bus(5);
+        state.session.editor.selection.select_bus(5);
         state
             .stretch_target(
                 Point::new(0, 5),
@@ -850,7 +879,7 @@ mod tests {
                 .document_mut_for_test()
                 .documentation_shapes
                 .push(DocumentationShape::new(7, geometry).unwrap());
-            state.session.selection.select_documentation_shape(7);
+            state.session.editor.selection.select_documentation_shape(7);
             let before_topology = state.topology_version();
             state
                 .stretch_target(
@@ -890,7 +919,7 @@ mod tests {
                 )
                 .unwrap(),
             );
-        state.session.selection.select_documentation_shape(7);
+        state.session.editor.selection.select_documentation_shape(7);
         let before = SchematicSnapshot::capture(&state.design.document());
         assert_eq!(
             state.stretch_target(
@@ -956,7 +985,7 @@ mod tests {
             ),
             Ok(false)
         );
-        state.session.selection.clear();
+        state.session.editor.selection.clear();
         assert_eq!(
             state.stretch_target(
                 Point::new(0, 5),
@@ -1020,7 +1049,11 @@ mod tests {
                 Point::new(terminal.x + 5, terminal.y - 10),
             ],
         ));
-        state.session.selection.select_only_wire_segment(1, 1);
+        state
+            .session
+            .editor
+            .selection
+            .select_only_wire_segment(1, 1);
         assert!(matches!(
             state.stretch_target(
                 Point::new(0, 5),

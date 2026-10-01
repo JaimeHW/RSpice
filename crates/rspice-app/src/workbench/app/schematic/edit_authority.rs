@@ -30,7 +30,7 @@ impl SchematicEditAuthority {
             grid_size: state.schematic.document().grid_size,
             document_policy: state.schematic.document().document_policy,
             snapshot: SchematicSnapshot::capture(&state.schematic.document()),
-            selection: state.schematic.session.selection.clone(),
+            selection: state.schematic.session.editor.selection.clone(),
         }
     }
 
@@ -69,7 +69,7 @@ impl SchematicEditAuthority {
         {
             return Err(reopen("The schematic grid or editing policy changed"));
         }
-        if self.selection != state.schematic.session.selection {
+        if self.selection != state.schematic.session.editor.selection {
             return Err(reopen("The selected-object set changed"));
         }
         if !self.snapshot.is_equal_document(&state.schematic.document()) {
@@ -91,14 +91,19 @@ mod tests {
         let id = state
             .schematic
             .add_component(ComponentType::Resistor, Point::origin());
-        state.schematic.session.selection.select_only_component(id);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(id);
         let authority = SchematicEditAuthority::capture(&state);
         assert!(authority.validate(&state, "Move selection").is_ok());
 
         state.schematic.document_mut_for_test().components[0].value = "2k".to_owned();
         assert!(authority.validate(&state, "Move selection").is_err());
         state.schematic.document_mut_for_test().components[0].value = "1k".to_owned();
-        state.schematic.session.selection.clear();
+        state.schematic.session.editor.selection.clear();
         assert!(authority.validate(&state, "Move selection").is_err());
     }
 

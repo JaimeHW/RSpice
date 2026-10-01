@@ -293,9 +293,10 @@ impl RSpiceApp {
                 self.state
                     .schematic
                     .session
+                    .editor
                     .selection
                     .select_only_design_note(id);
-                self.state.schematic.session.center_request = Some(point);
+                self.state.schematic.session.editor.center_request = Some(point);
             }
             ReviewAction::ApplyAssignment(assignee) => {
                 self.apply_review_mutation(DesignReviewMutation::Assign { assignee });

@@ -621,7 +621,10 @@ fn equivalent_probe_marker_placement_reuses_identity_without_an_undo_step() {
 
     assert_eq!(repeated, id);
     assert_eq!(state.schematic.document().probes.len(), 1);
-    assert_eq!(state.schematic.session.selection.single_probe(), Some(id));
+    assert_eq!(
+        state.schematic.session.editor.selection.single_probe(),
+        Some(id)
+    );
     assert!(!state.schematic.can_undo());
 }
 
@@ -648,7 +651,7 @@ fn route_finish_helper_commits_wire_and_bus_without_secondary_click() {
     state.schematic.start_wire(Point::origin());
     state.schematic.extend_wire(Point::new(20, 0));
     with_test_ui(|ui| assert!(finish_active_route(ui, &mut state)));
-    assert!(!state.schematic.session.wire_drawing.active);
+    assert!(!state.schematic.session.editor.wire_drawing.active);
     assert_eq!(state.schematic.document().wires.len(), 1);
 
     state
@@ -660,7 +663,7 @@ fn route_finish_helper_commits_wire_and_bus_without_secondary_click() {
         .unwrap();
     state.schematic.extend_bus(Point::new(20, 20));
     with_test_ui(|ui| assert!(finish_active_route(ui, &mut state)));
-    assert!(!state.schematic.session.bus_drawing.active);
+    assert!(!state.schematic.session.editor.bus_drawing.active);
     assert_eq!(state.schematic.document().buses.len(), 1);
 }
 
@@ -814,7 +817,12 @@ fn armed_move_commits_once_syncs_workspace_and_retains_selection() {
         .document_mut_for_test()
         .wires
         .push(Wire::segment(2, terminal, Point::new(20, 0)));
-    state.schematic.session.selection.select_only_component(1);
+    state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(1);
     state.schematic.init_undo_history();
     arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
     state.dialogs.move_selection.preview_delta = Point::new(0, 10);
@@ -831,8 +839,8 @@ fn armed_move_commits_once_syncs_workspace_and_retains_selection() {
         Point::new(terminal.x, terminal.y + 10)
     );
     assert_eq!(state.schematic.undo_description(), Some("move selection"));
-    assert!(state.schematic.session.selection.has_component(1));
-    assert_eq!(state.schematic.session.tool, Tool::Select);
+    assert!(state.schematic.session.editor.selection.has_component(1));
+    assert_eq!(state.schematic.session.editor.tool, Tool::Select);
     assert!(!state.dialogs.move_selection.armed);
     assert_eq!(
         state
@@ -863,7 +871,12 @@ fn cancelling_armed_move_preserves_geometry_selection_and_history() {
         .document_mut_for_test()
         .components
         .push(Component::new(1, ComponentType::Resistor, Point::origin()));
-    state.schematic.session.selection.select_only_component(1);
+    state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(1);
     state.schematic.init_undo_history();
     arm_test_move(&mut state, crate::state::MoveSelectionMode::Shove);
     state.dialogs.move_selection.preview_delta = Point::new(40, 10);
@@ -874,8 +887,8 @@ fn cancelling_armed_move_preserves_geometry_selection_and_history() {
         state.schematic.document().components[0].pos,
         Point::origin()
     );
-    assert!(state.schematic.session.selection.has_component(1));
-    assert_eq!(state.schematic.session.tool, Tool::Select);
+    assert!(state.schematic.session.editor.selection.has_component(1));
+    assert_eq!(state.schematic.session.editor.tool, Tool::Select);
     assert!(!state.schematic.can_undo());
 }
 
@@ -886,7 +899,7 @@ fn arm_pins(state: &mut AppState, names: &[&str], direction: PortDirection) {
         state.active_schematic_epoch,
         state.workspace.content.active_view.display_path(),
     );
-    state.schematic.session.pending_port_sequence = Some(
+    state.schematic.session.editor.pending_port_sequence = Some(
         PendingPortSequence::new(
             names.iter().map(|name| (*name).to_owned()),
             direction,
@@ -895,7 +908,7 @@ fn arm_pins(state: &mut AppState, names: &[&str], direction: PortDirection) {
         )
         .with_authority(authority),
     );
-    state.schematic.session.tool = Tool::Place(ComponentType::Port);
+    state.schematic.session.editor.tool = Tool::Place(ComponentType::Port);
 }
 
 #[test]
@@ -915,8 +928,15 @@ fn validated_port_contract_places_once_and_undo_redo_is_exact() {
     assert_eq!(contract.discipline, PortDiscipline::Logic);
     assert!(!contract.documentation.is_empty());
     // One name, so the batch is finished and the tool returns to Select.
-    assert_eq!(state.schematic.session.tool, Tool::Select);
-    assert!(state.schematic.session.pending_port_sequence.is_none());
+    assert_eq!(state.schematic.session.editor.tool, Tool::Select);
+    assert!(
+        state
+            .schematic
+            .session
+            .editor
+            .pending_port_sequence
+            .is_none()
+    );
     assert_eq!(
         state.schematic.undo_description(),
         Some("place interface port")
@@ -953,7 +973,7 @@ fn each_click_places_the_next_name_with_the_next_interface_order() {
         );
         if index < 2 {
             assert_eq!(
-                state.schematic.session.tool,
+                state.schematic.session.editor.tool,
                 Tool::Place(ComponentType::Port),
                 "the tool stays armed while names remain"
             );
@@ -961,6 +981,7 @@ fn each_click_places_the_next_name_with_the_next_interface_order() {
                 state
                     .schematic
                     .session
+                    .editor
                     .pending_port_sequence
                     .as_ref()
                     .and_then(PendingPortSequence::next_name),
@@ -969,8 +990,15 @@ fn each_click_places_the_next_name_with_the_next_interface_order() {
         }
     }
 
-    assert_eq!(state.schematic.session.tool, Tool::Select);
-    assert!(state.schematic.session.pending_port_sequence.is_none());
+    assert_eq!(state.schematic.session.editor.tool, Tool::Select);
+    assert!(
+        state
+            .schematic
+            .session
+            .editor
+            .pending_port_sequence
+            .is_none()
+    );
     for expected in [2, 1, 0] {
         assert!(state.schematic.undo());
         assert_eq!(state.schematic.document().components.len(), expected);
@@ -983,8 +1011,8 @@ fn each_click_places_the_next_name_with_the_next_interface_order() {
 fn rotation_and_mirror_of_the_ghost_land_on_the_placed_pin() {
     let mut state = AppState::default();
     arm_pins(&mut state, &["OUT"], PortDirection::Out);
-    state.schematic.session.preview_rotation = crate::state::Rotation::R90;
-    state.schematic.session.preview_mirror_h = true;
+    state.schematic.session.editor.preview_rotation = crate::state::Rotation::R90;
+    state.schematic.session.editor.preview_mirror_h = true;
 
     place_component(&mut state, ComponentType::Port, Point::new(20, 30));
 
@@ -1019,13 +1047,14 @@ fn a_name_taken_after_arming_is_refused_at_the_click_and_the_sequence_survives()
         "nothing was placed"
     );
     assert_eq!(
-        state.schematic.session.tool,
+        state.schematic.session.editor.tool,
         Tool::Place(ComponentType::Port)
     );
     assert_eq!(
         state
             .schematic
             .session
+            .editor
             .pending_port_sequence
             .as_ref()
             .and_then(PendingPortSequence::next_name),
@@ -1049,8 +1078,8 @@ fn validated_design_note_contract_places_once_without_changing_topology() {
         state.workspace.content.active_view.display_path(),
     );
     let topology = state.schematic.topology_version();
-    state.schematic.session.pending_design_note = Some(pending);
-    state.schematic.session.tool = Tool::DesignNote;
+    state.schematic.session.editor.pending_design_note = Some(pending);
+    state.schematic.session.editor.tool = Tool::DesignNote;
 
     place_pending_design_note(&mut state, Point::new(20, 30));
 
@@ -1060,8 +1089,8 @@ fn validated_design_note_contract_places_once_without_changing_topology() {
         Point::new(20, 30)
     );
     assert_eq!(state.schematic.topology_version(), topology);
-    assert!(state.schematic.session.pending_design_note.is_none());
-    assert_eq!(state.schematic.session.tool, Tool::Select);
+    assert!(state.schematic.session.editor.pending_design_note.is_none());
+    assert_eq!(state.schematic.session.editor.tool, Tool::Select);
     assert!(state.schematic.undo());
     assert!(state.schematic.document().design_notes.is_empty());
 }
@@ -1099,7 +1128,7 @@ fn every_documentation_shape_gesture_commits_once_and_remains_non_electrical() {
     for (kind, points, finish_on_last_click) in cases {
         let mut state = AppState::default();
         let topology = state.schematic.topology_version();
-        state.schematic.session.pending_documentation_shape = Some(
+        state.schematic.session.editor.pending_documentation_shape = Some(
             PendingDocumentationShapePlacement::new(
                 kind,
                 topology,
@@ -1111,7 +1140,7 @@ fn every_documentation_shape_gesture_commits_once_and_remains_non_electrical() {
                 state.workspace.content.active_view.display_path(),
             ),
         );
-        state.schematic.session.tool = Tool::DocumentationShape;
+        state.schematic.session.editor.tool = Tool::DocumentationShape;
 
         for (index, point) in points.iter().copied().enumerate() {
             let finish = finish_on_last_click && index + 1 == points.len();
@@ -1130,11 +1159,12 @@ fn every_documentation_shape_gesture_commits_once_and_remains_non_electrical() {
         assert_eq!(state.schematic.topology_version(), topology);
         assert!(state.schematic.document().components.is_empty());
         assert!(state.schematic.document().wires.is_empty());
-        assert_eq!(state.schematic.session.tool, Tool::Select);
+        assert_eq!(state.schematic.session.editor.tool, Tool::Select);
         assert!(
             state
                 .schematic
                 .session
+                .editor
                 .pending_documentation_shape
                 .is_none()
         );
@@ -1142,6 +1172,7 @@ fn every_documentation_shape_gesture_commits_once_and_remains_non_electrical() {
             state
                 .schematic
                 .session
+                .editor
                 .documentation_shape_drawing
                 .points
                 .is_empty()
@@ -1162,7 +1193,7 @@ fn every_documentation_shape_gesture_commits_once_and_remains_non_electrical() {
 #[test]
 fn stale_documentation_shape_authority_is_consumed_without_document_mutation() {
     let mut state = AppState::default();
-    state.schematic.session.pending_documentation_shape = Some(
+    state.schematic.session.editor.pending_documentation_shape = Some(
         PendingDocumentationShapePlacement::new(
             DocumentationShapeKind::Line,
             state.schematic.topology_version(),
@@ -1174,7 +1205,7 @@ fn stale_documentation_shape_authority_is_consumed_without_document_mutation() {
             state.workspace.content.active_view.display_path(),
         ),
     );
-    state.schematic.session.tool = Tool::DocumentationShape;
+    state.schematic.session.editor.tool = Tool::DocumentationShape;
     state.active_schematic_epoch = state.active_schematic_epoch.wrapping_add(1);
 
     with_test_ui(|ui| handle_documentation_shape_click(ui, &mut state, Point::new(0, 0), false));
@@ -1184,6 +1215,7 @@ fn stale_documentation_shape_authority_is_consumed_without_document_mutation() {
         state
             .schematic
             .session
+            .editor
             .pending_documentation_shape
             .is_none()
     );
@@ -1191,11 +1223,12 @@ fn stale_documentation_shape_authority_is_consumed_without_document_mutation() {
         state
             .schematic
             .session
+            .editor
             .documentation_shape_drawing
             .points
             .is_empty()
     );
-    assert_eq!(state.schematic.session.tool, Tool::Select);
+    assert_eq!(state.schematic.session.editor.tool, Tool::Select);
     assert!(!state.schematic.can_undo());
 }
 
@@ -1203,7 +1236,7 @@ fn stale_documentation_shape_authority_is_consumed_without_document_mutation() {
 fn focused_keyboard_cursor_places_exact_grid_resolved_shape_points() {
     let mut state = AppState::default();
     let grid = state.schematic.document().grid_size;
-    state.schematic.session.pending_documentation_shape = Some(
+    state.schematic.session.editor.pending_documentation_shape = Some(
         PendingDocumentationShapePlacement::new(
             DocumentationShapeKind::Line,
             state.schematic.topology_version(),
@@ -1215,7 +1248,7 @@ fn focused_keyboard_cursor_places_exact_grid_resolved_shape_points() {
             state.workspace.content.active_view.display_path(),
         ),
     );
-    state.schematic.session.tool = Tool::DocumentationShape;
+    state.schematic.session.editor.tool = Tool::DocumentationShape;
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let keyboard_frame = |keys: &[egui::Key], state: &mut AppState| {
@@ -1249,7 +1282,12 @@ fn focused_keyboard_cursor_places_exact_grid_resolved_shape_points() {
 
     keyboard_frame(&[egui::Key::ArrowRight, egui::Key::Space], &mut state);
     assert_eq!(
-        state.schematic.session.documentation_shape_drawing.points,
+        state
+            .schematic
+            .session
+            .editor
+            .documentation_shape_drawing
+            .points,
         vec![Point::new(grid, 0)]
     );
     keyboard_frame(&[egui::Key::ArrowDown, egui::Key::Enter], &mut state);
@@ -1262,11 +1300,12 @@ fn focused_keyboard_cursor_places_exact_grid_resolved_shape_points() {
             end: Point::new(grid, grid),
         }
     );
-    assert_eq!(state.schematic.session.tool, Tool::Select);
+    assert_eq!(state.schematic.session.editor.tool, Tool::Select);
     assert!(
         state
             .schematic
             .session
+            .editor
             .documentation_shape_drawing
             .points
             .is_empty()
@@ -1275,6 +1314,7 @@ fn focused_keyboard_cursor_places_exact_grid_resolved_shape_points() {
         state
             .schematic
             .session
+            .editor
             .documentation_shape_drawing
             .keyboard_cursor
             .is_none()
@@ -1296,29 +1336,36 @@ fn stale_design_note_authority_is_consumed_without_document_mutation() {
         state.active_schematic_epoch,
         state.workspace.content.active_view.display_path(),
     );
-    state.schematic.session.pending_design_note = Some(pending);
-    state.schematic.session.tool = Tool::DesignNote;
+    state.schematic.session.editor.pending_design_note = Some(pending);
+    state.schematic.session.editor.tool = Tool::DesignNote;
     state.active_schematic_epoch = state.active_schematic_epoch.wrapping_add(1);
 
     place_pending_design_note(&mut state, Point::new(20, 30));
 
     assert!(state.schematic.document().design_notes.is_empty());
-    assert!(state.schematic.session.pending_design_note.is_none());
-    assert_eq!(state.schematic.session.tool, Tool::Select);
+    assert!(state.schematic.session.editor.pending_design_note.is_none());
+    assert_eq!(state.schematic.session.editor.tool, Tool::Select);
     assert!(!state.schematic.can_undo());
 }
 
 #[test]
 fn port_placement_without_a_current_validated_contract_fails_closed() {
     let mut state = AppState::default();
-    state.schematic.session.tool = Tool::Place(ComponentType::Port);
+    state.schematic.session.editor.tool = Tool::Place(ComponentType::Port);
 
     place_component(&mut state, ComponentType::Port, Point::new(20, 30));
 
     assert!(state.schematic.document().components.is_empty());
     assert!(!state.schematic.can_undo());
-    assert_eq!(state.schematic.session.tool, Tool::Select);
-    assert!(state.schematic.session.pending_port_sequence.is_none());
+    assert_eq!(state.schematic.session.editor.tool, Tool::Select);
+    assert!(
+        state
+            .schematic
+            .session
+            .editor
+            .pending_port_sequence
+            .is_none()
+    );
 }
 
 /// A topology change no longer ends a batch. It cannot: the first pin placed
@@ -1335,7 +1382,7 @@ fn a_topology_change_alone_does_not_end_the_sequence() {
     assert_eq!(state.schematic.document().components.len(), 1);
     assert_eq!(state.schematic.document().components[0].value, "OUT");
     assert_eq!(
-        state.schematic.session.tool,
+        state.schematic.session.editor.tool,
         Tool::Place(ComponentType::Port)
     );
 }
@@ -1352,8 +1399,15 @@ fn a_changed_document_ends_the_sequence_without_placing() {
 
     assert!(state.schematic.document().components.is_empty());
     assert!(!state.schematic.can_undo());
-    assert_eq!(state.schematic.session.tool, Tool::Select);
-    assert!(state.schematic.session.pending_port_sequence.is_none());
+    assert_eq!(state.schematic.session.editor.tool, Tool::Select);
+    assert!(
+        state
+            .schematic
+            .session
+            .editor
+            .pending_port_sequence
+            .is_none()
+    );
 }
 
 #[test]
@@ -1629,7 +1683,10 @@ fn double_click_property_dispatch_selects_taps_before_their_source_bus() {
         screen_point,
     );
 
-    assert_eq!(state.schematic.session.selection.single_bus_tap(), Some(21));
+    assert_eq!(
+        state.schematic.session.editor.selection.single_bus_tap(),
+        Some(21)
+    );
     assert!(matches!(
         state.dialogs.object_properties.draft,
         Some(crate::workbench::app::ObjectPropertiesDraft::BusTap(_))
@@ -1770,6 +1827,7 @@ fn explicit_junction_placement_requires_two_wires_and_is_one_undo_step() {
     state
         .schematic
         .session
+        .editor
         .net_highlight
         .highlight_wires([1].into_iter().collect());
 
@@ -1778,11 +1836,12 @@ fn explicit_junction_placement_requires_two_wires_and_is_one_undo_step() {
         JunctionPlacementOutcome::Placed(Point::new(20, 20))
     );
     assert!(state.schematic.has_junction(Point::new(20, 20)));
-    assert!(!state.schematic.session.net_highlight.active);
+    assert!(!state.schematic.session.editor.net_highlight.active);
     assert!(
         state
             .schematic
             .session
+            .editor
             .net_highlight
             .highlighted_wires
             .is_empty()
@@ -1809,6 +1868,7 @@ fn clicking_an_existing_junction_removes_it_as_one_undo_step() {
     state
         .schematic
         .session
+        .editor
         .net_highlight
         .highlight_wires([1, 2].into_iter().collect());
 
@@ -1817,11 +1877,12 @@ fn clicking_an_existing_junction_removes_it_as_one_undo_step() {
         JunctionPlacementOutcome::Removed(Point::new(20, 20))
     );
     assert!(!state.schematic.has_junction(Point::new(20, 20)));
-    assert!(!state.schematic.session.net_highlight.active);
+    assert!(!state.schematic.session.editor.net_highlight.active);
     assert!(
         state
             .schematic
             .session
+            .editor
             .net_highlight
             .highlighted_wires
             .is_empty()
@@ -1910,7 +1971,7 @@ fn canvas_net_corpus() -> Vec<(&'static str, AppState)> {
 /// The conductors one alt-click lights, and the name it lit them under.
 fn lit_net(state: &mut AppState, wire_id: u64) -> (Option<String>, HashSet<u64>) {
     highlight_canvas_net(state, |net| net.wire_ids.contains(&wire_id));
-    let highlight = &state.schematic.session.net_highlight;
+    let highlight = &state.schematic.session.editor.net_highlight;
     (
         highlight.selected_net_name.clone(),
         highlight.highlighted_wires.clone(),

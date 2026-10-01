@@ -20,8 +20,8 @@ impl Fixture {
         app.state.project_lifecycle.authority.open_session();
         app.state.workbench.activate(Workspace::Design);
         app.state.schematic = SchematicState::default();
-        app.state.schematic.session.needs_fit = false;
-        app.state.schematic.session.needs_drawing_sheet_fit = false;
+        app.state.schematic.session.editor.needs_fit = false;
+        app.state.schematic.session.editor.needs_drawing_sheet_fit = false;
         if wires {
             app.state.schematic.document_mut_for_test().wires = vec![
                 Wire::new(1, vec![Point::new(100, 100), Point::new(200, 100)]),
@@ -172,7 +172,7 @@ fn gesture_release_commits_selection_and_wire_vertex_moves_once() {
 fn gesture_escape_restores_geometry_and_release_cannot_recommit_it() {
     let mut fixture = Fixture::new(false);
     fixture.drag(DragType::MoveSelection);
-    let selection = fixture.app.state.schematic.session.selection.clone();
+    let selection = fixture.app.state.schematic.session.editor.selection.clone();
     fixture.frame(
         vec![egui::Event::Key {
             key: egui::Key::Escape,
@@ -187,7 +187,10 @@ fn gesture_escape_restores_geometry_and_release_cannot_recommit_it() {
         fixture.app.state.schematic.document().components[0].pos,
         Point::new(100, 100)
     );
-    assert_eq!(fixture.app.state.schematic.session.selection, selection);
+    assert_eq!(
+        fixture.app.state.schematic.session.editor.selection,
+        selection
+    );
     fixture.frame(vec![fixture.button(170.0, false)], true);
     assert!(!fixture.app.state.schematic.can_undo());
     assert!(!fixture.app.state.schematic.session.is_dirty);
@@ -264,7 +267,16 @@ fn gesture_tool_and_workspace_changes_cancel_without_starting_a_new_edit() {
             Point::new(100, 100)
         );
         assert!(!fixture.app.state.schematic.has_pending_operation());
-        assert!(!fixture.app.state.schematic.session.wire_drawing.active);
+        assert!(
+            !fixture
+                .app
+                .state
+                .schematic
+                .session
+                .editor
+                .wire_drawing
+                .active
+        );
     }
 }
 

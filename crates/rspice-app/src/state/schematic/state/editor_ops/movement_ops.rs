@@ -21,7 +21,7 @@ impl SchematicState {
     pub fn has_live_movable_selection(&self) -> bool {
         movement::has_live_movable_selection(
             &self.design.document(),
-            movement_selection(&self.session.selection),
+            movement_selection(&self.session.editor.selection),
         )
     }
 
@@ -29,7 +29,7 @@ impl SchematicState {
     pub fn live_movable_selection_count(&self) -> usize {
         movement::live_movable_selection_count(
             &self.design.document(),
-            movement_selection(&self.session.selection),
+            movement_selection(&self.session.editor.selection),
         )
     }
 
@@ -74,7 +74,7 @@ impl SchematicState {
             return;
         }
         let impact = self.design.move_selection_with_rubber_band_resolved(
-            movement_selection(&self.session.selection),
+            movement_selection(&self.session.editor.selection),
             delta,
             terminal_points_for,
         );
@@ -106,7 +106,7 @@ impl SchematicState {
             return Ok(false);
         }
         let impact = self.design.move_selection_with_mode_resolved(
-            movement_selection(&self.session.selection),
+            movement_selection(&self.session.editor.selection),
             delta,
             mode,
             terminal_points_for,
@@ -140,7 +140,7 @@ impl SchematicState {
             return;
         }
         let impact = self.design.move_selection_resolved(
-            movement_selection(&self.session.selection),
+            movement_selection(&self.session.editor.selection),
             delta,
             terminal_points_for,
         );

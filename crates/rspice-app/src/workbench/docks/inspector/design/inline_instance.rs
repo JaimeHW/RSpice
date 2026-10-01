@@ -1256,10 +1256,15 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
                     .show(ui)
                     .clicked()
             {
-                app.state.schematic.session.selection.clear();
-                app.state.schematic.session.net_highlight.clear();
+                app.state.schematic.session.editor.selection.clear();
+                app.state.schematic.session.editor.net_highlight.clear();
                 for id in &connected {
-                    app.state.schematic.session.selection.select_component(*id);
+                    app.state
+                        .schematic
+                        .session
+                        .editor
+                        .selection
+                        .select_component(*id);
                 }
             }
         });
@@ -1428,24 +1433,31 @@ pub(super) fn select_component(app: &mut RSpiceApp, id: u64) {
     app.state
         .schematic
         .session
+        .editor
         .selection
         .select_only_component(id);
-    app.state.schematic.session.net_highlight.clear();
-    app.state.schematic.session.center_request = position;
+    app.state.schematic.session.editor.net_highlight.clear();
+    app.state.schematic.session.editor.center_request = position;
 }
 
 /// Select every conductor of a net and highlight it — the same transaction
 /// the navigator's net rows commit.
 pub(super) fn select_net(app: &mut RSpiceApp, net: &DesignNet) {
-    app.state.schematic.session.selection.clear();
+    app.state.schematic.session.editor.selection.clear();
     for wire in &net.wire_ids {
-        app.state.schematic.session.selection.select_wire(*wire);
+        app.state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_wire(*wire);
     }
     if net.wire_ids.is_empty() {
         for component_id in net.terminals.iter().map(|terminal| terminal.component_id) {
             app.state
                 .schematic
                 .session
+                .editor
                 .selection
                 .select_component(component_id);
         }
@@ -1453,6 +1465,7 @@ pub(super) fn select_net(app: &mut RSpiceApp, net: &DesignNet) {
     app.state
         .schematic
         .session
+        .editor
         .net_highlight
         .highlight_named_wires(&net.name, net.wire_ids.iter().copied().collect());
 }

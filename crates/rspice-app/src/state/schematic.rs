@@ -44,7 +44,7 @@ use rspice_design::schematic::hierarchy as hierarchy_edit;
 pub(crate) mod named_net;
 use rspice_design::schematic::net_label;
 use rspice_schematic_editor::session::net_highlight;
-mod placement_authority;
+use rspice_schematic_editor::session::placement_authority;
 mod point;
 mod port;
 use rspice_design::schematic::probe;

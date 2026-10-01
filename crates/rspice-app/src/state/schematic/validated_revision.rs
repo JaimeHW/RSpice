@@ -55,7 +55,7 @@ impl SchematicState {
         }
         let changed = self.design.restore_validated_revision(id)?;
         self.session.is_dirty = true;
-        self.session.selection.clear();
+        self.session.editor.selection.clear();
         self.finish_document_edit(changed);
         if changed {
             Ok(())

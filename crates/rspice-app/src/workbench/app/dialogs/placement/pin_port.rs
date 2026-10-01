@@ -73,6 +73,7 @@ pub(crate) fn open_create_pins(state: &mut AppState) {
     let armed = state
         .schematic
         .session
+        .editor
         .pending_port_sequence
         .clone()
         .filter(|sequence| !sequence.names.is_empty());
@@ -372,7 +373,7 @@ impl RSpiceApp {
         self.state
             .schematic
             .arm_tool(Tool::Place(ComponentType::Port));
-        self.state.schematic.session.pending_port_sequence = Some(sequence);
+        self.state.schematic.session.editor.pending_port_sequence = Some(sequence);
         crate::schematic::view::request_schematic_canvas_focus(ctx);
         let form = &mut self.state.dialogs.pin_port;
         form.last_name = last_name;

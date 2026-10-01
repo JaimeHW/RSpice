@@ -21,8 +21,8 @@ impl SchematicState {
             return Err(BusParseError::ReadOnly);
         }
         let edit = self.design.add_bus(points, declaration)?;
-        self.session.selection.clear();
-        self.session.selection.select_bus(edit.value);
+        self.session.editor.selection.clear();
+        self.session.editor.selection.select_bus(edit.value);
         self.finish_document_edit(edit.committed);
         Ok(edit.value)
     }
@@ -39,22 +39,23 @@ impl SchematicState {
         if let Some(declaration) = &declaration {
             declaration.validate()?;
         }
-        self.session.bus_drawing.start(position, declaration);
+        self.session.editor.bus_drawing.start(position, declaration);
         Ok(())
     }
 
     pub fn update_bus_preview(&mut self, position: Point) {
-        self.session.bus_drawing.update_preview(position);
+        self.session.editor.bus_drawing.update_preview(position);
     }
 
     pub fn extend_bus(&mut self, position: Point) {
         if !self.session.read_only {
-            self.session.bus_drawing.add_point(position);
+            self.session.editor.bus_drawing.add_point(position);
         }
     }
 
     pub fn toggle_bus_routing(&mut self) {
-        self.session.bus_drawing.routing_mode = self.session.bus_drawing.routing_mode.toggle();
+        self.session.editor.bus_drawing.routing_mode =
+            self.session.editor.bus_drawing.routing_mode.toggle();
     }
 
     /// Finish the active route and commit the complete polyline atomically.
@@ -62,12 +63,12 @@ impl SchematicState {
         if self.session.read_only {
             return Err(BusParseError::ReadOnly);
         }
-        if !self.session.bus_drawing.active {
+        if !self.session.editor.bus_drawing.active {
             return Ok(None);
         }
-        let points = std::mem::take(&mut self.session.bus_drawing.points);
-        let declaration = self.session.bus_drawing.declaration.take();
-        self.session.bus_drawing.cancel();
+        let points = std::mem::take(&mut self.session.editor.bus_drawing.points);
+        let declaration = self.session.editor.bus_drawing.declaration.take();
+        self.session.editor.bus_drawing.cancel();
         let points = bus_edit::simplify_polyline(points);
         if points.len() < 2 {
             return Ok(None);
@@ -76,14 +77,14 @@ impl SchematicState {
     }
 
     pub fn cancel_bus(&mut self) {
-        self.session.bus_drawing.cancel();
+        self.session.editor.bus_drawing.cancel();
     }
 
     /// Cancel every unfinished conductor-routing gesture. Escape and tool
     /// switches use this to guarantee an invisible route can never commit.
     pub fn cancel_routing_gestures(&mut self) {
         self.cancel_wire();
-        self.session.bus_drawing.cancel();
+        self.session.editor.bus_drawing.cancel();
     }
 
     /// Place a validated tap as one atomic, undoable topology mutation.
@@ -107,8 +108,8 @@ impl SchematicState {
             },
             slice,
         )?;
-        self.session.selection.clear();
-        self.session.selection.select_bus_tap(edit.value);
+        self.session.editor.selection.clear();
+        self.session.editor.selection.select_bus_tap(edit.value);
         self.finish_document_edit(edit.committed);
         Ok(edit.value)
     }
@@ -136,8 +137,8 @@ impl SchematicState {
             &pending.bus_declaration,
             &pending.slice,
         )?;
-        self.session.selection.clear();
-        self.session.selection.select_bus_tap(edit.value);
+        self.session.editor.selection.clear();
+        self.session.editor.selection.select_bus_tap(edit.value);
         self.finish_document_edit(edit.committed);
         Ok(edit.value)
     }

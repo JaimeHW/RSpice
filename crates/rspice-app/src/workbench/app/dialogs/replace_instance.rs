@@ -181,7 +181,7 @@ pub(crate) fn replace_instance_available(state: &AppState) -> bool {
     if state.schematic_edit_read_only() {
         return false;
     }
-    let Some(component_id) = state.schematic.session.selection.single_component() else {
+    let Some(component_id) = state.schematic.session.editor.selection.single_component() else {
         return false;
     };
     let Some(source) = state
@@ -678,7 +678,7 @@ fn validation_for_repaint(ctx: &Context, state: &AppState) -> ReplacementValidat
     let draft = &state.dialogs.replace_instance;
     let key = ValidationCacheKey {
         source_component_id: draft.source_component_id,
-        selected_component_id: state.schematic.session.selection.single_component(),
+        selected_component_id: state.schematic.session.editor.selection.single_component(),
         query: draft.replacement.trim().to_ascii_lowercase(),
         dirty: draft.dirty,
         preview_error: draft.preview_error.clone(),
@@ -750,6 +750,7 @@ fn replacement_authority(state: &AppState) -> Result<SchematicReplacementAuthori
     let component_id = state
         .schematic
         .session
+        .editor
         .selection
         .single_component()
         .ok_or_else(|| "Select exactly one complete component instance to replace.".to_owned())?;
@@ -1037,7 +1038,12 @@ mod tests {
         let id = state
             .schematic
             .add_component(ComponentType::VoltageSource, Point::origin());
-        state.schematic.session.selection.select_only_component(id);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(id);
 
         assert!(replace_instance_available(&state));
         open_replace_instance_dialog(&mut state);
@@ -1054,7 +1060,12 @@ mod tests {
         let id = state
             .schematic
             .add_component(ComponentType::VoltageSource, Point::origin());
-        state.schematic.session.selection.select_only_component(id);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(id);
         open_replace_instance_dialog(&mut state);
         assert!(state.dialogs.replace_instance.open);
 
@@ -1075,7 +1086,12 @@ mod tests {
         let id = state
             .schematic
             .add_component(ComponentType::VoltageSource, Point::origin());
-        state.schematic.session.selection.select_only_component(id);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(id);
         open_replace_instance_dialog(&mut state);
         assert!(validate_draft(&state).can_commit());
 
@@ -1108,7 +1124,12 @@ mod tests {
             .find(|component| component.id == id)
             .expect("the placed source is retained")
             .params = "legacy_tail=3n".to_owned();
-        state.schematic.session.selection.select_only_component(id);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(id);
         open_replace_instance_dialog(&mut state);
         assert!(state.dialogs.replace_instance.open);
 
@@ -1148,7 +1169,12 @@ mod tests {
         let id = state
             .schematic
             .add_component(ComponentType::VoltageSource, Point::origin());
-        state.schematic.session.selection.select_only_component(id);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(id);
         open_replace_instance_dialog(&mut state);
         let context = Context::default();
         assert!(validation_for_repaint(&context, &state).can_commit());

@@ -56,7 +56,7 @@ impl SchematicState {
         ArraySource {
             document: &self.design.document(),
             identity_cursor: self.identity_cursor(),
-            selection: array_selection_input(&self.session.selection),
+            selection: array_selection_input(&self.session.editor.selection),
         }
     }
 
@@ -131,13 +131,13 @@ impl SchematicState {
             return Err(SchematicArrayError::ReadOnly);
         }
         let edit = self.design.array_selection_resolved(
-            array_selection_input(&self.session.selection),
+            array_selection_input(&self.session.editor.selection),
             plan,
             terminal_points_for,
             component_bounds_for,
         )?;
         let (impact, objects) = edit.value;
-        self.session.selection = array_result_selection(objects);
+        self.session.editor.selection = array_result_selection(objects);
         self.finish_document_edit(edit.committed);
         if !edit.committed {
             return Err(SchematicArrayError::CommitFailed);

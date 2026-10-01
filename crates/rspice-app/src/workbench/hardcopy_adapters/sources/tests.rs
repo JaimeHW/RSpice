@@ -175,8 +175,8 @@ fn schematic_digest_ignores_viewport_state_but_changes_with_authored_content() {
     })
     .unwrap();
 
-    schematic.session.zoom = 7.5;
-    schematic.session.pan = (123.0, -44.0);
+    schematic.session.editor.zoom = 7.5;
+    schematic.session.editor.pan = (123.0, -44.0);
     let second = resolve_schematic_source(SchematicHardcopySource {
         identity: HardcopySourceIdentity {
             document_id: first.authority().document_id(),
@@ -298,12 +298,12 @@ fn schematic_selection_exports_only_selected_durable_objects() {
     let mut vertex = Selection::default();
     vertex.select_wire_vertex(2, 1);
     for selection in [whole_wire, segment, vertex] {
-        schematic.session.selection = selection;
+        schematic.session.editor.selection = selection;
         let resolved = resolve_schematic_source(SchematicHardcopySource {
             identity: identity("schematic"),
             schematic: schematic.editor_ref().design,
             selection: SchematicHardcopySelection::capture(
-                &schematic.session.selection,
+                &schematic.session.editor.selection,
                 &HardcopyScope::Selection,
             ),
             expected_topology_version: schematic.topology_version(),
@@ -337,9 +337,9 @@ fn selected_probe_is_rejected_explicitly_without_mutating_the_schematic() {
         )
         .unwrap(),
     );
-    schematic.session.selection.select_only_probe(91);
+    schematic.session.editor.selection.select_only_probe(91);
     let probes_before = schematic.document().probes.clone();
-    let selection_before = schematic.session.selection.clone();
+    let selection_before = schematic.session.editor.selection.clone();
     let topology_before = schematic.topology_version();
     let dirty_before = schematic.session.is_dirty;
     let undo_before = schematic.can_undo();
@@ -348,7 +348,7 @@ fn selected_probe_is_rejected_explicitly_without_mutating_the_schematic() {
         identity: identity("schematic"),
         schematic: schematic.editor_ref().design,
         selection: SchematicHardcopySelection::capture(
-            &schematic.session.selection,
+            &schematic.session.editor.selection,
             &HardcopyScope::Selection,
         ),
         expected_topology_version: schematic.topology_version(),
@@ -367,7 +367,7 @@ fn selected_probe_is_rejected_explicitly_without_mutating_the_schematic() {
         "probe markers are not publishable hardcopy objects; deselect every probe or publish the owning waveform instead"
     );
     assert_eq!(schematic.document().probes, probes_before);
-    assert_eq!(schematic.session.selection, selection_before);
+    assert_eq!(schematic.session.editor.selection, selection_before);
     assert_eq!(schematic.topology_version(), topology_before);
     assert_eq!(schematic.session.is_dirty, dirty_before);
     assert_eq!(schematic.can_undo(), undo_before);

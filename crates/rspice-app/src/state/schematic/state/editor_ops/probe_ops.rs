@@ -32,7 +32,7 @@ impl SchematicState {
             .design
             .place_schematic_probe(position, label, source_expression, binding);
         if let Some(id) = edit.value {
-            self.session.selection.select_only_probe(id);
+            self.session.editor.selection.select_only_probe(id);
         }
         if edit.value.is_some() || edit.committed {
             self.finish_document_edit(edit.committed);

@@ -57,12 +57,19 @@ const TABLE_ROW_HEIGHT: f32 = 28.0;
 
 pub(crate) fn create_hierarchy_available(state: &AppState) -> bool {
     !state.schematic_edit_read_only()
-        && !state.schematic.session.selection.components.is_empty()
-        && state.schematic.session.selection.count()
-            == state.schematic.session.selection.components.len()
+        && !state
+            .schematic
+            .session
+            .editor
+            .selection
+            .components
+            .is_empty()
+        && state.schematic.session.editor.selection.count()
+            == state.schematic.session.editor.selection.components.len()
         && state
             .schematic
             .session
+            .editor
             .selection
             .components
             .iter()
@@ -980,8 +987,13 @@ mod tests {
             .schematic
             .add_wire(vec![Point::origin(), Point::new(20, 0)])
             .expect("wire");
-        state.schematic.session.selection.select_component(id);
-        state.schematic.session.selection.select_wire(wire);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(id);
+        state.schematic.session.editor.selection.select_wire(wire);
         assert!(!create_hierarchy_available(&state));
     }
 
@@ -1017,8 +1029,18 @@ mod tests {
         state
             .schematic
             .add_wire(vec![Point::new(100, 0), Point::new(140, 0)]);
-        state.schematic.session.selection.select_component(r1);
-        state.schematic.session.selection.select_component(r2);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(r1);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(r2);
         let parent_ref = state.workspace.content.active_view.clone();
         let library_name = parent_ref.library.clone();
 
@@ -1101,7 +1123,12 @@ mod tests {
             .expect("selected")
             .name
             .clone();
-        state.schematic.session.selection.select_component(selected);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(selected);
         let plan_id = state
             .sim_setup
             .analysis_plan

@@ -100,7 +100,7 @@ pub(super) fn active_schematic_editor(app: &RSpiceApp) -> bool {
 pub(super) fn schematic_selection_has_live_object(
     schematic: &crate::state::SchematicState,
 ) -> bool {
-    let selection = &schematic.session.selection;
+    let selection = &schematic.session.editor.selection;
     schematic
         .document()
         .components
@@ -159,6 +159,7 @@ pub(super) fn schematic_selection_has_deletable_object(
         || schematic.document().wires.iter().any(|wire| {
             schematic
                 .session
+                .editor
                 .selection
                 .wire_segments
                 .iter()
@@ -167,6 +168,7 @@ pub(super) fn schematic_selection_has_deletable_object(
                 })
                 || schematic
                     .session
+                    .editor
                     .selection
                     .wire_vertices
                     .iter()
@@ -179,7 +181,7 @@ pub(super) fn schematic_selection_has_deletable_object(
 pub(super) fn schematic_selection_has_duplicable_object(
     schematic: &crate::state::SchematicState,
 ) -> bool {
-    let selection = &schematic.session.selection;
+    let selection = &schematic.session.editor.selection;
     selection.wire_segments.is_empty()
         && selection.wire_vertices.is_empty()
         && (schematic
@@ -262,13 +264,13 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
                 app.state.ui.symbol.marquee_start = None;
                 app.state.ui.symbol.marquee_current = None;
             } else {
-                app.state.schematic.session.zoom = 1.0;
-                app.state.schematic.session.pan = (0.0, 0.0);
-                app.state.schematic.session.needs_fit = true;
-                app.state.schematic.session.center_request = None;
-                app.state.schematic.session.selection.clear();
-                app.state.schematic.session.selection_rect.cancel();
-                app.state.schematic.session.net_highlight.clear();
+                app.state.schematic.session.editor.zoom = 1.0;
+                app.state.schematic.session.editor.pan = (0.0, 0.0);
+                app.state.schematic.session.editor.needs_fit = true;
+                app.state.schematic.session.editor.center_request = None;
+                app.state.schematic.session.editor.selection.clear();
+                app.state.schematic.session.editor.selection_rect.cancel();
+                app.state.schematic.session.editor.net_highlight.clear();
             }
         }
         Workspace::Simulate => {

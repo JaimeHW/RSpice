@@ -549,7 +549,8 @@ fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         if index == 1 {
             context_separator(ui, layout);
         }
-        let selected = design_toolbar_command_selected(app.state.schematic.session.tool, command);
+        let selected =
+            design_toolbar_command_selected(app.state.schematic.session.editor.tool, command);
         toolbar_icon_command_selected_as(ui, app, command, icon, selected, label, layout);
     }
     context_separator(ui, layout);

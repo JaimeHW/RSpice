@@ -170,11 +170,11 @@ impl rspice_project::SnapshotSessions for SnapshotSessionCapture<'_> {
             .schematic_sessions
             .entry(key.to_owned())
             .or_default();
-        session.selection = Default::default();
-        session.wire_drawing = Default::default();
-        session.clipboard = Default::default();
-        session.preview_rotation = Default::default();
-        session.preview_mirror_h = false;
+        session.editor.selection = Default::default();
+        session.editor.wire_drawing = Default::default();
+        session.editor.clipboard = Default::default();
+        session.editor.preview_rotation = Default::default();
+        session.editor.preview_mirror_h = false;
         session.is_dirty = false;
     }
 }

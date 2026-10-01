@@ -54,7 +54,7 @@ pub(super) fn handle_tool_interactions(
         return;
     }
     let grid_size = state.schematic.document().grid_size;
-    let current_tool = state.schematic.session.tool;
+    let current_tool = state.schematic.session.editor.tool;
     if state.dialogs.move_selection.armed && current_tool != Tool::MoveSelection {
         state.dialogs.move_selection.close();
         // The pointer event that exposed an inconsistent tool/draft pair belongs
@@ -82,11 +82,11 @@ pub(super) fn handle_tool_interactions(
         && response.double_clicked_by(egui::PointerButton::Primary);
     let route_double_click = matches!(current_tool, Tool::Wire | Tool::Bus)
         && response.double_clicked_by(egui::PointerButton::Primary)
-        && (state.schematic.session.wire_drawing.active
-            || state.schematic.session.bus_drawing.active);
+        && (state.schematic.session.editor.wire_drawing.active
+            || state.schematic.session.editor.bus_drawing.active);
     let route_enter = response.has_focus()
-        && (state.schematic.session.wire_drawing.active
-            || state.schematic.session.bus_drawing.active)
+        && (state.schematic.session.editor.wire_drawing.active
+            || state.schematic.session.editor.bus_drawing.active)
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     if route_double_click || route_enter {
         finish_active_route(ui, state);
@@ -98,7 +98,7 @@ pub(super) fn handle_tool_interactions(
         && let Some(pos) = response.hover_pos()
     {
         let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
-        let drawing = &mut state.schematic.session.documentation_shape_drawing;
+        let drawing = &mut state.schematic.session.editor.documentation_shape_drawing;
         drawing.keyboard_cursor = Some(position);
         drawing.keyboard_active = false;
     }
@@ -148,7 +148,7 @@ pub(super) fn handle_tool_interactions(
                 let fallback =
                     resolve_target_pointer(state, symbol_context, viewport, pos).snapped_position;
                 match resolved_wire_attachment(conductor_hit, fallback) {
-                    Some(wire_pos) if state.schematic.session.wire_drawing.active => {
+                    Some(wire_pos) if state.schematic.session.editor.wire_drawing.active => {
                         state.schematic.extend_wire(wire_pos);
                         if conductor_hit.is_some() {
                             let _ = state.schematic.finish_wire();
@@ -160,10 +160,16 @@ pub(super) fn handle_tool_interactions(
             }
             Tool::Bus => {
                 let bus_pos = resolve_grid_pointer(state, viewport, pos).snapped_position;
-                if state.schematic.session.bus_drawing.active {
+                if state.schematic.session.editor.bus_drawing.active {
                     state.schematic.extend_bus(bus_pos);
                 } else {
-                    let declaration = state.schematic.session.bus_drawing.declaration.clone();
+                    let declaration = state
+                        .schematic
+                        .session
+                        .editor
+                        .bus_drawing
+                        .declaration
+                        .clone();
                     if let Err(error) = state.schematic.start_bus(bus_pos, declaration) {
                         report_bus_error(ui, state, "Bus could not be started", error.to_string());
                     }
@@ -247,11 +253,21 @@ pub(super) fn handle_tool_interactions(
             .is_none();
         match select_double_click_action(state, target, canvas_is_empty_at_pointer) {
             SelectDoubleClickAction::Descend(id) => {
-                state.schematic.session.selection.select_only_component(id);
+                state
+                    .schematic
+                    .session
+                    .editor
+                    .selection
+                    .select_only_component(id);
                 state.open_selected_instance_master();
             }
             SelectDoubleClickAction::OpenVerilogA(id) => {
-                state.schematic.session.selection.select_only_component(id);
+                state
+                    .schematic
+                    .session
+                    .editor
+                    .selection
+                    .select_only_component(id);
                 let _ = state.open_veriloga_source_for_component(id);
             }
             SelectDoubleClickAction::ActivateRequirement(id) => {
@@ -259,6 +275,7 @@ pub(super) fn handle_tool_interactions(
                     state
                         .schematic
                         .session
+                        .editor
                         .selection
                         .select_only_design_note(id);
                 } else {
@@ -289,16 +306,16 @@ pub(super) fn handle_tool_interactions(
         }
     }
 
-    if state.schematic.session.tool == Tool::DocumentationShape && response.has_focus() {
+    if state.schematic.session.editor.tool == Tool::DocumentationShape && response.has_focus() {
         handle_documentation_shape_keyboard(ui, response, state, viewport, grid_size);
     }
 }
 
 fn finish_active_route(ui: &Ui, state: &mut AppState) -> bool {
-    if state.schematic.session.wire_drawing.active {
+    if state.schematic.session.editor.wire_drawing.active {
         return state.schematic.finish_wire().is_some();
     }
-    if state.schematic.session.bus_drawing.active {
+    if state.schematic.session.editor.bus_drawing.active {
         return match state.schematic.finish_bus() {
             Ok(bus) => bus.is_some(),
             Err(error) => {
@@ -517,7 +534,7 @@ fn pointer_is_in_frozen_move_selection(
     ) else {
         return false;
     };
-    let selection = &state.schematic.session.selection;
+    let selection = &state.schematic.session.editor.selection;
     match target {
         PointerTarget::Component(id) => selection.has_component(id),
         PointerTarget::Wire(id) => selection.has_wire(id),
@@ -639,7 +656,7 @@ fn handle_bus_tap_click(ui: &Ui, state: &mut AppState, requested: Point, hit_rad
             return;
         }
     };
-    let Some(pending) = state.schematic.session.pending_bus_tap.clone() else {
+    let Some(pending) = state.schematic.session.editor.pending_bus_tap.clone() else {
         report_bus_candidate_error(ui, state, BusTapCandidateError::MissingConfiguration);
         return;
     };
@@ -728,7 +745,7 @@ fn handle_select_dragging(
     symbol_context: &SchematicSymbolContext,
 ) {
     if !select_drag_is_authorized(
-        state.schematic.session.tool,
+        state.schematic.session.editor.tool,
         state.dialogs.move_selection.armed,
     ) {
         return;
@@ -771,21 +788,32 @@ fn handle_select_dragging(
             return;
         } else if state.schematic_edit_read_only() {
             // No moves on read-only views — every drag is a marquee.
-            state.schematic.session.selection_rect.start_at(grid_pos);
+            state
+                .schematic
+                .session
+                .editor
+                .selection_rect
+                .start_at(grid_pos);
         } else {
             match target {
                 Some(PointerTarget::Component(id)) => {
-                    if !state.schematic.session.selection.has_component(id) {
-                        state.schematic.session.selection.clear();
-                        state.schematic.session.selection.select_component(id);
+                    if !state.schematic.session.editor.selection.has_component(id) {
+                        state.schematic.session.editor.selection.clear();
+                        state
+                            .schematic
+                            .session
+                            .editor
+                            .selection
+                            .select_component(id);
                     }
                     start_selection_drag(state, grid_pos, ui.ctx());
                 }
                 Some(PointerTarget::DesignNote(id)) => {
-                    if !state.schematic.session.selection.has_design_note(id) {
+                    if !state.schematic.session.editor.selection.has_design_note(id) {
                         state
                             .schematic
                             .session
+                            .editor
                             .selection
                             .select_only_design_note(id);
                     }
@@ -795,32 +823,49 @@ fn handle_select_dragging(
                     if !state
                         .schematic
                         .session
+                        .editor
                         .selection
                         .has_documentation_shape(id)
                     {
                         state
                             .schematic
                             .session
+                            .editor
                             .selection
                             .select_only_documentation_shape(id);
                     }
                     start_selection_drag(state, grid_pos, ui.ctx());
                 }
                 Some(PointerTarget::Probe(id)) => {
-                    if !state.schematic.session.selection.has_probe(id) {
-                        state.schematic.session.selection.select_only_probe(id);
+                    if !state.schematic.session.editor.selection.has_probe(id) {
+                        state
+                            .schematic
+                            .session
+                            .editor
+                            .selection
+                            .select_only_probe(id);
                     }
                     start_selection_drag(state, grid_pos, ui.ctx());
                 }
                 Some(PointerTarget::NetLabel(id)) => {
-                    if !state.schematic.session.selection.has_net_label(id) {
-                        state.schematic.session.selection.select_only_net_label(id);
+                    if !state.schematic.session.editor.selection.has_net_label(id) {
+                        state
+                            .schematic
+                            .session
+                            .editor
+                            .selection
+                            .select_only_net_label(id);
                     }
                     start_selection_drag(state, grid_pos, ui.ctx());
                 }
                 Some(PointerTarget::BusTap(id)) => {
-                    if !state.schematic.session.selection.has_bus_tap(id) {
-                        state.schematic.session.selection.select_only_bus_tap(id);
+                    if !state.schematic.session.editor.selection.has_bus_tap(id) {
+                        state
+                            .schematic
+                            .session
+                            .editor
+                            .selection
+                            .select_only_bus_tap(id);
                     }
                     start_selection_drag(state, grid_pos, ui.ctx());
                 }
@@ -830,8 +875,8 @@ fn handle_select_dragging(
                     start_wire_vertex_drag(state, wire_position, ui.ctx());
                 }
                 Some(PointerTarget::Bus(id)) => {
-                    if !state.schematic.session.selection.has_bus(id) {
-                        state.schematic.session.selection.select_only_bus(id);
+                    if !state.schematic.session.editor.selection.has_bus(id) {
+                        state.schematic.session.editor.selection.select_only_bus(id);
                     }
                     start_selection_drag(state, grid_pos, ui.ctx());
                 }
@@ -840,7 +885,12 @@ fn handle_select_dragging(
                 {
                     start_wire_vertex_drag(state, wire_position, ui.ctx());
                 }
-                _ => state.schematic.session.selection_rect.start_at(grid_pos),
+                _ => state
+                    .schematic
+                    .session
+                    .editor
+                    .selection_rect
+                    .start_at(grid_pos),
             }
         }
     }
@@ -885,8 +935,13 @@ fn handle_select_dragging(
                     .drag
                     .update((grid_pos.x, grid_pos.y));
             }
-        } else if state.schematic.session.selection_rect.is_active() {
-            state.schematic.session.selection_rect.update(grid_pos);
+        } else if state.schematic.session.editor.selection_rect.is_active() {
+            state
+                .schematic
+                .session
+                .editor
+                .selection_rect
+                .update(grid_pos);
         }
     }
 
@@ -907,10 +962,10 @@ fn handle_select_dragging(
             }
             state.dialogs.interaction.drag.cancel();
         } else {
-            let left_to_right = state.schematic.session.selection_rect.current.x
-                >= state.schematic.session.selection_rect.start.x;
+            let left_to_right = state.schematic.session.editor.selection_rect.current.x
+                >= state.schematic.session.editor.selection_rect.start.x;
             let Some((min_x, min_y, max_x, max_y)) =
-                state.schematic.session.selection_rect.finish()
+                state.schematic.session.editor.selection_rect.finish()
             else {
                 return;
             };
@@ -951,7 +1006,8 @@ fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos
     match component_type {
         ComponentType::Port => place_pending_port(state, grid_pos),
         ComponentType::CellInstance => {
-            let Some(library_cell) = state.schematic.session.pending_library_cell.clone() else {
+            let Some(library_cell) = state.schematic.session.editor.pending_library_cell.clone()
+            else {
                 state.push_user_message(ConsoleMessage::warning(
                     "No library cell selected for placement".to_string(),
                 ));
@@ -983,7 +1039,7 @@ fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos
 }
 
 fn place_pending_design_note(state: &mut AppState, grid_pos: Point) {
-    let Some(pending) = state.schematic.session.pending_design_note.clone() else {
+    let Some(pending) = state.schematic.session.editor.pending_design_note.clone() else {
         state.push_user_message(ConsoleMessage::warning(
             "Design-note placement requires a validated documentation contract; reopen Place text or note."
                 .to_owned(),
@@ -1034,14 +1090,22 @@ fn handle_documentation_shape_click(
     state
         .schematic
         .session
+        .editor
         .documentation_shape_drawing
         .keyboard_cursor = Some(grid_pos);
     state
         .schematic
         .session
+        .editor
         .documentation_shape_drawing
         .keyboard_active = false;
-    let Some(pending) = state.schematic.session.pending_documentation_shape.as_ref() else {
+    let Some(pending) = state
+        .schematic
+        .session
+        .editor
+        .pending_documentation_shape
+        .as_ref()
+    else {
         state.push_user_message(ConsoleMessage::warning(
             "Documentation-shape placement requires a validated graphics contract; reopen Draw documentation shape."
                 .to_owned(),
@@ -1069,6 +1133,7 @@ fn handle_documentation_shape_click(
     match state
         .schematic
         .session
+        .editor
         .documentation_shape_drawing
         .add_point(kind, grid_pos)
     {
@@ -1107,20 +1172,21 @@ fn handle_documentation_shape_keyboard(
                 state
                     .schematic
                     .session
+                    .editor
                     .documentation_shape_drawing
                     .points
                     .last()
                     .copied()
             })
             .unwrap_or_else(Point::origin);
-        let step = if state.schematic.session.snap_engine.enabled
-            && state.schematic.session.snap_engine.snap_to_grid
+        let step = if state.schematic.session.editor.snap_engine.enabled
+            && state.schematic.session.editor.snap_engine.snap_to_grid
         {
             grid_size.max(1)
         } else {
             1
         };
-        let drawing = &mut state.schematic.session.documentation_shape_drawing;
+        let drawing = &mut state.schematic.session.editor.documentation_shape_drawing;
         let mut cursor = drawing.keyboard_cursor.unwrap_or(fallback);
         if left {
             cursor.x = cursor.x.saturating_sub(step);
@@ -1141,6 +1207,7 @@ fn handle_documentation_shape_keyboard(
         state
             .schematic
             .session
+            .editor
             .documentation_shape_drawing
             .points
             .pop();
@@ -1149,6 +1216,7 @@ fn handle_documentation_shape_keyboard(
     let Some(cursor) = state
         .schematic
         .session
+        .editor
         .documentation_shape_drawing
         .keyboard_cursor
         .or_else(|| {
@@ -1163,13 +1231,15 @@ fn handle_documentation_shape_keyboard(
         state
             .schematic
             .session
+            .editor
             .documentation_shape_drawing
             .keyboard_active = true;
         handle_documentation_shape_click(ui, state, cursor, false);
-        if state.schematic.session.tool == Tool::DocumentationShape {
+        if state.schematic.session.editor.tool == Tool::DocumentationShape {
             state
                 .schematic
                 .session
+                .editor
                 .documentation_shape_drawing
                 .keyboard_active = true;
         }
@@ -1177,6 +1247,7 @@ fn handle_documentation_shape_keyboard(
         let can_finish_polygon = state
             .schematic
             .session
+            .editor
             .pending_documentation_shape
             .as_ref()
             .is_some_and(|pending| {
@@ -1184,6 +1255,7 @@ fn handle_documentation_shape_keyboard(
                     && state
                         .schematic
                         .session
+                        .editor
                         .documentation_shape_drawing
                         .points
                         .len()
@@ -1195,13 +1267,15 @@ fn handle_documentation_shape_keyboard(
             state
                 .schematic
                 .session
+                .editor
                 .documentation_shape_drawing
                 .keyboard_active = true;
             handle_documentation_shape_click(ui, state, cursor, false);
-            if state.schematic.session.tool == Tool::DocumentationShape {
+            if state.schematic.session.editor.tool == Tool::DocumentationShape {
                 state
                     .schematic
                     .session
+                    .editor
                     .documentation_shape_drawing
                     .keyboard_active = true;
             }
@@ -1213,6 +1287,7 @@ fn finish_documentation_polygon(ui: &Ui, state: &mut AppState) {
     let Some(kind) = state
         .schematic
         .session
+        .editor
         .pending_documentation_shape
         .as_ref()
         .map(|pending| pending.kind)
@@ -1232,6 +1307,7 @@ fn finish_documentation_shape(
     let geometry = match state
         .schematic
         .session
+        .editor
         .documentation_shape_drawing
         .geometry(kind)
     {
@@ -1241,7 +1317,13 @@ fn finish_documentation_shape(
             return;
         }
     };
-    let Some(pending) = state.schematic.session.pending_documentation_shape.clone() else {
+    let Some(pending) = state
+        .schematic
+        .session
+        .editor
+        .pending_documentation_shape
+        .clone()
+    else {
         return;
     };
     match state
@@ -1319,14 +1401,14 @@ fn commit_explicit_junction(state: &mut AppState, requested: Point) -> JunctionP
         state.schematic.with_undo("remove junction", |schematic| {
             schematic.remove_junction(junction_id);
         });
-        state.schematic.session.net_highlight.clear();
+        state.schematic.session.editor.net_highlight.clear();
         return JunctionPlacementOutcome::Removed(target);
     }
 
     state.schematic.with_undo("place junction", |schematic| {
         schematic.add_junction(target);
     });
-    state.schematic.session.net_highlight.clear();
+    state.schematic.session.editor.net_highlight.clear();
     JunctionPlacementOutcome::Placed(target)
 }
 
@@ -1396,90 +1478,90 @@ fn handle_select_click(
     let session = &mut state.schematic.session;
     match target {
         Some(PointerTarget::Component(id)) => {
-            session.net_highlight.clear();
+            session.editor.net_highlight.clear();
             if additive {
-                session.selection.toggle_component(id);
+                session.editor.selection.toggle_component(id);
             } else {
-                session.selection.clear();
-                session.selection.select_component(id);
+                session.editor.selection.clear();
+                session.editor.selection.select_component(id);
             }
         }
         Some(PointerTarget::DesignNote(id)) => {
-            session.net_highlight.clear();
+            session.editor.net_highlight.clear();
             if additive {
-                session.selection.toggle_design_note(id);
+                session.editor.selection.toggle_design_note(id);
             } else {
-                session.selection.select_only_design_note(id);
+                session.editor.selection.select_only_design_note(id);
             }
         }
         Some(PointerTarget::DocumentationShape(id)) => {
-            session.net_highlight.clear();
+            session.editor.net_highlight.clear();
             if additive {
-                session.selection.toggle_documentation_shape(id);
+                session.editor.selection.toggle_documentation_shape(id);
             } else {
-                session.selection.select_only_documentation_shape(id);
+                session.editor.selection.select_only_documentation_shape(id);
             }
         }
         Some(PointerTarget::Probe(id)) => {
-            session.net_highlight.clear();
+            session.editor.net_highlight.clear();
             if additive {
-                session.selection.toggle_probe(id);
+                session.editor.selection.toggle_probe(id);
             } else {
-                session.selection.select_only_probe(id);
+                session.editor.selection.select_only_probe(id);
             }
         }
         Some(PointerTarget::NetLabel(id)) => {
-            session.net_highlight.clear();
+            session.editor.net_highlight.clear();
             if additive {
-                session.selection.toggle_net_label(id);
+                session.editor.selection.toggle_net_label(id);
             } else {
-                session.selection.select_only_net_label(id);
+                session.editor.selection.select_only_net_label(id);
             }
         }
         Some(PointerTarget::BusTap(id)) => {
-            session.net_highlight.clear();
+            session.editor.net_highlight.clear();
             if additive {
-                session.selection.toggle_bus_tap(id);
+                session.editor.selection.toggle_bus_tap(id);
             } else {
-                session.selection.select_only_bus_tap(id);
+                session.editor.selection.select_only_bus_tap(id);
             }
         }
         Some(PointerTarget::Junction(pos)) => {
-            session.net_highlight.clear();
+            session.editor.net_highlight.clear();
             if additive {
-                if session.selection.has_junction(pos) {
-                    session.selection.deselect_junction(pos);
+                if session.editor.selection.has_junction(pos) {
+                    session.editor.selection.deselect_junction(pos);
                 } else {
-                    session.selection.select_junction(pos);
+                    session.editor.selection.select_junction(pos);
                 }
             } else {
-                session.selection.select_only_junction(pos);
+                session.editor.selection.select_only_junction(pos);
             }
         }
         Some(PointerTarget::Bus(id)) => {
-            session.net_highlight.clear();
+            session.editor.net_highlight.clear();
             if additive {
-                session.selection.toggle_bus(id);
+                session.editor.selection.toggle_bus(id);
             } else {
-                session.selection.select_only_bus(id);
+                session.editor.selection.select_only_bus(id);
             }
         }
         Some(PointerTarget::Wire(id)) => {
             if alt_held {
-                session.selection.clear();
+                session.editor.selection.clear();
                 highlight_canvas_net(state, |net| net.wire_ids.contains(&id));
             } else if additive {
-                session.net_highlight.clear();
-                session.selection.toggle_wire(id);
+                session.editor.net_highlight.clear();
+                session.editor.selection.toggle_wire(id);
             } else {
-                session.net_highlight.clear();
-                session.selection.clear();
-                session.selection.select_wire(id);
+                session.editor.net_highlight.clear();
+                session.editor.selection.clear();
+                session.editor.selection.select_wire(id);
             }
         }
         None if !additive => {
-            session.selection.clear();
-            session.net_highlight.clear();
+            session.editor.selection.clear();
+            session.editor.net_highlight.clear();
         }
         None => {}
     }
@@ -2019,7 +2101,12 @@ fn retain_probe_flag(
             state.sync_active_schematic_to_workspace();
         }
         let id = existing_id;
-        state.schematic.session.selection.select_only_probe(id);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_probe(id);
         state.dialogs.interaction.schematic_keyboard_focus = Some(
             crate::workbench::app_state::SchematicKeyboardFocus::Probe(id),
         );
@@ -2082,10 +2169,11 @@ fn highlight_canvas_net(state: &mut AppState, select: impl Fn(&DesignNet) -> boo
             state
                 .schematic
                 .session
+                .editor
                 .net_highlight
                 .highlight_named_wires(name, wire_ids);
         }
-        None => state.schematic.session.net_highlight.clear(),
+        None => state.schematic.session.editor.net_highlight.clear(),
     }
 }
 
@@ -2267,7 +2355,7 @@ fn handle_probe_click(
         let Some(comp_id) =
             symbol_context.component_at_resolved_symbol(components.as_ref(), grid_pos)
         else {
-            state.schematic.session.net_highlight.clear();
+            state.schematic.session.editor.net_highlight.clear();
             match retain_probe_flag(state, grid_pos, None, None) {
                 Ok(id) => {
                     let message = format!(
@@ -2370,7 +2458,7 @@ fn open_object_properties(
         viewport,
         pointer_pos,
     );
-    let selection = &mut state.schematic.session.selection;
+    let selection = &mut state.schematic.session.editor.selection;
     match target {
         Some(PointerTarget::Component(id)) => selection.select_only_component(id),
         Some(PointerTarget::DesignNote(id)) => selection.select_only_design_note(id),

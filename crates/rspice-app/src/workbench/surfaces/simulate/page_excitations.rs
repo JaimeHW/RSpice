@@ -512,6 +512,7 @@ fn reveals(state: &AppState, occurrence: Option<&InstancePath>, component_id: u6
         && state
             .schematic
             .session
+            .editor
             .selection
             .has_component(component_id)
 }

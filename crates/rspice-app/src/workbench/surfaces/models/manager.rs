@@ -1704,7 +1704,7 @@ const fn pin_source_block_reason(external: bool, importing: bool) -> Option<&'st
 }
 
 fn exactly_one_selected_component(app: &ManagerRenderContext<'_>) -> Option<u64> {
-    let selection = &app.state.schematic.session.selection.components;
+    let selection = &app.state.schematic.session.editor.selection.components;
     (selection.len() == 1).then(|| *selection.iter().next().expect("one selected component"))
 }
 

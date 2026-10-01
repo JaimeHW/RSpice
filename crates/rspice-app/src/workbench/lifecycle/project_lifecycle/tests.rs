@@ -956,7 +956,7 @@ fn design_checks_on_save_are_off_by_default_and_never_refuse_the_save() {
 fn save_active_overlays_only_active_document_on_accepted_baseline() {
     let path = unique_path("active-overlay");
     let mut state = AppState::default();
-    state.schematic.session.zoom = 1.25;
+    state.schematic.session.editor.zoom = 1.25;
     save_native(
         &mut state,
         SaveScope::AllDocuments,
@@ -969,7 +969,7 @@ fn save_active_overlays_only_active_document_on_accepted_baseline() {
         .schematic
         .add_component(ComponentType::Resistor, Point::new(4, 8));
     let ac_id = insert_ac_analysis(&mut state);
-    state.schematic.session.zoom = 1.75;
+    state.schematic.session.editor.zoom = 1.75;
     assert!(
         save_native(
             &mut state,
@@ -984,6 +984,7 @@ fn save_active_overlays_only_active_document_on_accepted_baseline() {
         accepted_active_schematic(&state)
             .expect("accepted active design")
             .session
+            .editor
             .zoom,
         1.75,
         "an active-design save retains the editor session paired with that design"

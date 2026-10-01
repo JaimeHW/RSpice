@@ -601,15 +601,16 @@ fn wireless_navigator_net_selection_is_exact_and_self_invalidating() {
         wire_ids: Vec::new(),
     };
     let session = &mut app.state.schematic.session;
-    session.selection.select_only_component(9);
+    session.editor.selection.select_only_component(9);
     session
+        .editor
         .net_highlight
         .highlight_named_wires(&net.name, HashSet::new());
     assert!(navigator_net_selection_matches(&app.state, &net));
 
     let session = &mut app.state.schematic.session;
-    session.selection.select_only_component(10);
-    session.net_highlight.clear();
+    session.editor.selection.select_only_component(10);
+    session.editor.net_highlight.clear();
     assert!(!navigator_net_selection_matches(&app.state, &net));
 }
 
@@ -2328,7 +2329,7 @@ fn an_excitation_of_another_occurrence_opens_it_rather_than_selecting_here() {
         CellViewRef::new("work", "afe", "schematic")
     );
     assert!(
-        state.schematic.session.selection.has_component(711),
+        state.schematic.session.editor.selection.has_component(711),
         "and selects the instance there, once the session is standing on it"
     );
 }

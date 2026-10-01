@@ -66,7 +66,7 @@ pub(super) fn run(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
         .schematic
         .add_component(ComponentType::Ground, Point::new(-100, 100));
     connect(&mut state.schematic, ground, &["0".into()]);
-    state.schematic.session.selection.components.clear();
+    state.schematic.session.editor.selection.components.clear();
     let draft = match spec {
         AnalysisSpec::DcSweep {
             source_name,

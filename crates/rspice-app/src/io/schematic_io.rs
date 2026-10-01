@@ -428,7 +428,7 @@ fn prepare_loaded_schematic(
     schematic.session.current_file = source_path.map(Path::to_path_buf);
 
     // Mark for fit-to-view and history reset.
-    schematic.session.needs_fit = true;
+    schematic.session.editor.needs_fit = true;
     schematic.session.needs_history_reset = true;
 
     // Clear dirty flag since we just loaded.
@@ -626,21 +626,28 @@ mod tests {
         let component_id = schematic.add_component(ComponentType::Resistor, Point::new(10, 20));
         schematic
             .session
+            .editor
             .selection
             .select_only_component(component_id);
         schematic.copy_selection();
-        schematic.session.wire_drawing.start(Point::new(30, 40));
         schematic
             .session
+            .editor
+            .wire_drawing
+            .start(Point::new(30, 40));
+        schematic
+            .session
+            .editor
             .wire_drawing
             .update_preview(Point::new(50, 60));
-        schematic.session.preview_rotation = Rotation::R90;
-        schematic.session.preview_mirror_h = true;
+        schematic.session.editor.preview_rotation = Rotation::R90;
+        schematic.session.editor.preview_mirror_h = true;
 
-        let selection = serde_json::to_value(&schematic.session.selection).unwrap();
-        let wire_drawing = serde_json::to_value(&schematic.session.wire_drawing).unwrap();
-        let clipboard = serde_json::to_value(&schematic.session.clipboard).unwrap();
-        let preview_rotation = serde_json::to_value(schematic.session.preview_rotation).unwrap();
+        let selection = serde_json::to_value(&schematic.session.editor.selection).unwrap();
+        let wire_drawing = serde_json::to_value(&schematic.session.editor.wire_drawing).unwrap();
+        let clipboard = serde_json::to_value(&schematic.session.editor.clipboard).unwrap();
+        let preview_rotation =
+            serde_json::to_value(schematic.session.editor.preview_rotation).unwrap();
         let json = serialize_schematic_file(&SchematicFile::new(schematic)).unwrap();
         let serialized: serde_json::Value = serde_json::from_str(&json).unwrap();
         let document = serialized["schematic"]
@@ -672,13 +679,13 @@ mod tests {
         document.insert("preview_mirror_h".to_owned(), serde_json::Value::Bool(true));
 
         let loaded = load_schematic_text(&legacy.to_string(), None).unwrap();
-        assert!(loaded.session.selection.is_empty());
-        assert!(loaded.session.clipboard.is_empty());
-        assert!(!loaded.session.wire_drawing.active);
-        assert!(loaded.session.wire_drawing.points.is_empty());
-        assert_eq!(loaded.session.wire_drawing.preview_pos, None);
-        assert_eq!(loaded.session.preview_rotation, Rotation::R0);
-        assert!(!loaded.session.preview_mirror_h);
+        assert!(loaded.session.editor.selection.is_empty());
+        assert!(loaded.session.editor.clipboard.is_empty());
+        assert!(!loaded.session.editor.wire_drawing.active);
+        assert!(loaded.session.editor.wire_drawing.points.is_empty());
+        assert_eq!(loaded.session.editor.wire_drawing.preview_pos, None);
+        assert_eq!(loaded.session.editor.preview_rotation, Rotation::R0);
+        assert!(!loaded.session.editor.preview_mirror_h);
     }
 
     #[test]
@@ -742,13 +749,17 @@ mod tests {
             review,
         ];
         schematic.document_mut_for_test().design_notes = notes.clone();
-        schematic.session.selection.select_only_design_note(93);
+        schematic
+            .session
+            .editor
+            .selection
+            .select_only_design_note(93);
         schematic.copy_selection();
-        assert_eq!(schematic.session.clipboard.design_notes.len(), 1);
+        assert_eq!(schematic.session.editor.clipboard.design_notes.len(), 1);
         let json = serialize_schematic_file(&SchematicFile::new(schematic)).unwrap();
         let loaded = load_schematic_text(&json, None).unwrap();
         assert_eq!(loaded.document().design_notes, notes);
-        assert!(loaded.session.clipboard.design_notes.is_empty());
+        assert!(loaded.session.editor.clipboard.design_notes.is_empty());
 
         let mut legacy: serde_json::Value = serde_json::from_str(&json).unwrap();
         legacy["schematic"]
@@ -834,7 +845,7 @@ mod tests {
         let mut original = SchematicState::default();
         original.session.current_file = Some(PathBuf::from("stale-native-path.rsch"));
         original.session.is_dirty = true;
-        original.session.needs_fit = false;
+        original.session.editor.needs_fit = false;
         original.session.needs_history_reset = false;
         let file = SchematicFile::new(original);
         let json = serialize_schematic_file(&file).expect("schematic serializes");
@@ -846,7 +857,7 @@ mod tests {
             loaded.session.current_file.as_deref(),
             Some(Path::new("browser-filter.rsch"))
         );
-        assert!(loaded.session.needs_fit);
+        assert!(loaded.session.editor.needs_fit);
         assert!(loaded.session.needs_history_reset);
         assert!(!loaded.session.is_dirty);
     }
@@ -892,26 +903,33 @@ mod tests {
             .push(Wire::new(100, vec![Point::new(0, 0), Point::new(20, 0)]));
         original
             .session
+            .editor
             .clipboard
             .wires
             .push(Wire::new(101, vec![Point::new(7, 7)]));
         original
             .session
+            .editor
             .clipboard
             .wires
             .push(Wire::new(102, vec![Point::new(10, 10), Point::new(20, 10)]));
 
         original
             .session
+            .editor
             .selection
             .select_component(live_component_id);
-        original.session.selection.select_component(404);
-        original.session.selection.select_wire(98);
-        original.session.selection.select_wire(100);
-        original.session.selection.select_wire_segment(99, 0);
-        original.session.selection.select_wire_segment(100, 0);
-        original.session.selection.select_wire_vertex(99, 0);
-        original.session.selection.select_wire_vertex(100, 1);
+        original.session.editor.selection.select_component(404);
+        original.session.editor.selection.select_wire(98);
+        original.session.editor.selection.select_wire(100);
+        original.session.editor.selection.select_wire_segment(99, 0);
+        original
+            .session
+            .editor
+            .selection
+            .select_wire_segment(100, 0);
+        original.session.editor.selection.select_wire_vertex(99, 0);
+        original.session.editor.selection.select_wire_vertex(100, 1);
 
         let json =
             serialize_schematic_file(&SchematicFile::new(original)).expect("schematic serializes");
@@ -921,8 +939,8 @@ mod tests {
 
         assert_eq!(loaded.document().wires.len(), 1);
         assert_eq!(loaded.document().wires[0].id, 100);
-        assert!(loaded.session.clipboard.is_empty());
-        assert!(loaded.session.selection.is_empty());
+        assert!(loaded.session.editor.clipboard.is_empty());
+        assert!(loaded.session.editor.selection.is_empty());
         assert!(
             loaded
                 .document()
@@ -953,7 +971,7 @@ mod tests {
             Point::new(0, 10),
             Point::new(20, 10),
         ));
-        original.session.selection.select_wire(40);
+        original.session.editor.selection.select_wire(40);
 
         let json =
             serialize_schematic_file(&SchematicFile::new(original)).expect("schematic serializes");
@@ -975,7 +993,7 @@ mod tests {
             "the original duplicate id must stay with exactly one wire"
         );
         assert!(
-            loaded.session.selection.is_empty(),
+            loaded.session.editor.selection.is_empty(),
             "selection is session-local and never reopens with the document"
         );
 

@@ -1658,12 +1658,12 @@ fn install_schematic_buffer(
     mut prepared: SchematicState,
     remote_is_unsaved: bool,
 ) {
-    prepared.session.needs_fit = false;
+    prepared.session.editor.needs_fit = false;
     prepared.session.is_dirty = remote_is_unsaved;
     prepared.session.needs_history_reset = true;
     if state.workspace.content.active_key() == cell_key {
-        prepared.session.zoom = state.schematic.session.zoom;
-        prepared.session.pan = state.schematic.session.pan;
+        prepared.session.editor.zoom = state.schematic.session.editor.zoom;
+        prepared.session.editor.pan = state.schematic.session.editor.pan;
         prepared.session.read_only = state.schematic.session.read_only;
         state.schematic = prepared.clone();
     }

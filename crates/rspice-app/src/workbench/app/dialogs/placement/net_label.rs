@@ -89,7 +89,7 @@ pub(crate) fn open_net_label_placement(state: &mut AppState, anchor: Point) -> b
         return false;
     }
 
-    let kind = if state.schematic.session.tool == Tool::OffSheetConnector {
+    let kind = if state.schematic.session.editor.tool == Tool::OffSheetConnector {
         NetLabelKind::OffSheet {
             direction: CrossSheetPortDirection::default(),
         }
@@ -480,12 +480,12 @@ mod tests {
     }
 
     fn open_at(app: &mut RSpiceApp, anchor: Point) {
-        app.state.schematic.session.tool = Tool::Label;
+        app.state.schematic.session.editor.tool = Tool::Label;
         assert!(open_net_label_placement(&mut app.state, anchor));
     }
 
     fn open_connector_at(app: &mut RSpiceApp, anchor: Point) {
-        app.state.schematic.session.tool = Tool::OffSheetConnector;
+        app.state.schematic.session.editor.tool = Tool::OffSheetConnector;
         assert!(open_net_label_placement(&mut app.state, anchor));
     }
 
@@ -531,7 +531,7 @@ mod tests {
             vec![NetLabel::new(id, Point::new(40, -20), "DATA[7]")]
         );
         assert!(app.state.schematic.can_undo());
-        assert_eq!(app.state.schematic.session.tool, Tool::Label);
+        assert_eq!(app.state.schematic.session.editor.tool, Tool::Label);
         assert!(app.state.schematic.undo());
         assert!(app.state.schematic.document().net_labels.is_empty());
         assert!(!app.state.schematic.can_undo());
@@ -570,7 +570,7 @@ mod tests {
         assert!(!app.state.dialogs.net_label_placement.open);
         assert!(app.state.schematic.document().net_labels.is_empty());
         assert!(!app.state.schematic.can_undo());
-        assert_eq!(app.state.schematic.session.tool, Tool::Label);
+        assert_eq!(app.state.schematic.session.editor.tool, Tool::Label);
     }
 
     #[test]

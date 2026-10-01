@@ -33,7 +33,7 @@ impl SchematicState {
         add_to_selection: bool,
     ) -> usize {
         if !add_to_selection {
-            self.session.selection.clear();
+            self.session.editor.selection.clear();
         }
 
         let mut count = 0;
@@ -44,9 +44,9 @@ impl SchematicState {
                 && comp.pos.x <= max_x
                 && comp.pos.y >= min_y
                 && comp.pos.y <= max_y
-                && !self.session.selection.has_component(comp.id)
+                && !self.session.editor.selection.has_component(comp.id)
             {
-                self.session.selection.select_component(comp.id);
+                self.session.editor.selection.select_component(comp.id);
                 count += 1;
             }
         }
@@ -54,8 +54,8 @@ impl SchematicState {
         // Select wires whose routed polyline intersects the rectangle.
         for wire in &self.design.document().wires {
             let wire_in_rect = polyline_intersects_rect(&wire.points, min_x, min_y, max_x, max_y);
-            if wire_in_rect && !self.session.selection.has_wire(wire.id) {
-                self.session.selection.select_wire(wire.id);
+            if wire_in_rect && !self.session.editor.selection.has_wire(wire.id) {
+                self.session.editor.selection.select_wire(wire.id);
                 count += 1;
             }
         }
@@ -66,9 +66,9 @@ impl SchematicState {
                 && junction.pos.x <= max_x
                 && junction.pos.y >= min_y
                 && junction.pos.y <= max_y
-                && !self.session.selection.has_junction(junction.pos)
+                && !self.session.editor.selection.has_junction(junction.pos)
             {
-                self.session.selection.select_junction(junction.pos);
+                self.session.editor.selection.select_junction(junction.pos);
                 count += 1;
             }
         }
@@ -80,9 +80,9 @@ impl SchematicState {
                 && label.pos.x <= max_x
                 && label.pos.y >= min_y
                 && label.pos.y <= max_y
-                && !self.session.selection.has_net_label(label.id)
+                && !self.session.editor.selection.has_net_label(label.id)
             {
-                self.session.selection.select_net_label(label.id);
+                self.session.editor.selection.select_net_label(label.id);
                 count += 1;
             }
         }
@@ -92,9 +92,9 @@ impl SchematicState {
                 && note.pos.x <= max_x
                 && note.pos.y >= min_y
                 && note.pos.y <= max_y
-                && !self.session.selection.has_design_note(note.id)
+                && !self.session.editor.selection.has_design_note(note.id)
             {
-                self.session.selection.select_design_note(note.id);
+                self.session.editor.selection.select_design_note(note.id);
                 count += 1;
             }
         }
@@ -104,9 +104,9 @@ impl SchematicState {
                 && probe.position.x <= max_x
                 && probe.position.y >= min_y
                 && probe.position.y <= max_y
-                && !self.session.selection.has_probe(probe.id)
+                && !self.session.editor.selection.has_probe(probe.id)
             {
-                self.session.selection.select_probe(probe.id);
+                self.session.editor.selection.select_probe(probe.id);
                 count += 1;
             }
         }
@@ -115,8 +115,8 @@ impl SchematicState {
         // when both segment endpoints are outside it.
         for bus in &self.design.document().buses {
             let in_rect = polyline_intersects_rect(&bus.points, min_x, min_y, max_x, max_y);
-            if in_rect && !self.session.selection.has_bus(bus.id) {
-                self.session.selection.select_bus(bus.id);
+            if in_rect && !self.session.editor.selection.has_bus(bus.id) {
+                self.session.editor.selection.select_bus(bus.id);
                 count += 1;
             }
         }
@@ -131,8 +131,8 @@ impl SchematicState {
                 max_x,
                 max_y,
             );
-            if in_rect && !self.session.selection.has_bus_tap(tap.id) {
-                self.session.selection.select_bus_tap(tap.id);
+            if in_rect && !self.session.editor.selection.has_bus_tap(tap.id) {
+                self.session.editor.selection.select_bus_tap(tap.id);
                 count += 1;
             }
         }
@@ -146,7 +146,7 @@ impl SchematicState {
     /// is released. It replaces the current selection with items in the rect.
     pub fn preview_selection_in_rect(&mut self, min_x: i32, min_y: i32, max_x: i32, max_y: i32) {
         // Clear and rebuild selection based on current rect
-        self.session.selection.clear();
+        self.session.editor.selection.clear();
 
         // Select components whose center is within the rectangle
         for comp in &self.design.document().components {
@@ -155,7 +155,7 @@ impl SchematicState {
                 && comp.pos.y >= min_y
                 && comp.pos.y <= max_y
             {
-                self.session.selection.select_component(comp.id);
+                self.session.editor.selection.select_component(comp.id);
             }
         }
 
@@ -163,7 +163,7 @@ impl SchematicState {
         for wire in &self.design.document().wires {
             let wire_in_rect = polyline_intersects_rect(&wire.points, min_x, min_y, max_x, max_y);
             if wire_in_rect {
-                self.session.selection.select_wire(wire.id);
+                self.session.editor.selection.select_wire(wire.id);
             }
         }
 
@@ -174,7 +174,7 @@ impl SchematicState {
                 && junction.pos.y >= min_y
                 && junction.pos.y <= max_y
             {
-                self.session.selection.select_junction(junction.pos);
+                self.session.editor.selection.select_junction(junction.pos);
             }
         }
 
@@ -184,7 +184,7 @@ impl SchematicState {
                 && label.pos.y >= min_y
                 && label.pos.y <= max_y
             {
-                self.session.selection.select_net_label(label.id);
+                self.session.editor.selection.select_net_label(label.id);
             }
         }
 
@@ -194,7 +194,7 @@ impl SchematicState {
                 && note.pos.y >= min_y
                 && note.pos.y <= max_y
             {
-                self.session.selection.select_design_note(note.id);
+                self.session.editor.selection.select_design_note(note.id);
             }
         }
 
@@ -204,13 +204,13 @@ impl SchematicState {
                 && probe.position.y >= min_y
                 && probe.position.y <= max_y
             {
-                self.session.selection.select_probe(probe.id);
+                self.session.editor.selection.select_probe(probe.id);
             }
         }
 
         for bus in &self.design.document().buses {
             if polyline_intersects_rect(&bus.points, min_x, min_y, max_x, max_y) {
-                self.session.selection.select_bus(bus.id);
+                self.session.editor.selection.select_bus(bus.id);
             }
         }
 
@@ -223,7 +223,7 @@ impl SchematicState {
                 max_x,
                 max_y,
             ) {
-                self.session.selection.select_bus_tap(tap.id);
+                self.session.editor.selection.select_bus_tap(tap.id);
             }
         }
     }
@@ -240,81 +240,82 @@ impl SchematicState {
         }
 
         let Some(edit) = self.design.delete_objects(DeletionSelection {
-            components: &self.session.selection.components,
-            wires: &self.session.selection.wires,
+            components: &self.session.editor.selection.components,
+            wires: &self.session.editor.selection.wires,
             junctions: self
                 .session
+                .editor
                 .selection
                 .junctions
                 .iter()
                 .map(|junction| junction.pos),
-            net_labels: &self.session.selection.net_labels,
-            buses: &self.session.selection.buses,
-            bus_taps: &self.session.selection.bus_taps,
-            design_notes: &self.session.selection.design_notes,
-            documentation_shapes: &self.session.selection.documentation_shapes,
-            probes: &self.session.selection.probes,
+            net_labels: &self.session.editor.selection.net_labels,
+            buses: &self.session.editor.selection.buses,
+            bus_taps: &self.session.editor.selection.bus_taps,
+            design_notes: &self.session.editor.selection.design_notes,
+            documentation_shapes: &self.session.editor.selection.documentation_shapes,
+            probes: &self.session.editor.selection.probes,
         }) else {
             return false;
         };
-        self.session.selection.clear();
+        self.session.editor.selection.clear();
         self.finish_document_edit(edit.committed);
         edit.committed
     }
 
     /// Select every complete design object in the schematic.
     pub fn select_all_objects(&mut self) {
-        self.session.selection.clear();
-        self.session.selection.components = self
+        self.session.editor.selection.clear();
+        self.session.editor.selection.components = self
             .design
             .document()
             .components
             .iter()
             .map(|item| item.id)
             .collect();
-        self.session.selection.wires = self
+        self.session.editor.selection.wires = self
             .design
             .document()
             .wires
             .iter()
             .map(|item| item.id)
             .collect();
-        self.session.selection.buses = self
+        self.session.editor.selection.buses = self
             .design
             .document()
             .buses
             .iter()
             .map(|item| item.id)
             .collect();
-        self.session.selection.bus_taps = self
+        self.session.editor.selection.bus_taps = self
             .design
             .document()
             .bus_taps
             .iter()
             .map(|item| item.id)
             .collect();
-        self.session.selection.net_labels = self
+        self.session.editor.selection.net_labels = self
             .design
             .document()
             .net_labels
             .iter()
             .map(|item| item.id)
             .collect();
-        self.session.selection.design_notes = self
+        self.session.editor.selection.design_notes = self
             .design
             .document()
             .design_notes
             .iter()
             .map(|item| item.id)
             .collect();
-        self.session.selection.documentation_shapes = self
+        self.session.editor.selection.documentation_shapes = self
             .design
             .document()
             .documentation_shapes
             .iter()
             .map(|item| item.id)
             .collect();
-        self.session.selection.probes = self
+        self.session.editor.selection.probes = self
             .design
             .document()
             .probes
@@ -322,7 +323,7 @@ impl SchematicState {
             .map(|item| item.id)
             .collect();
         for position in self.design.document().junctions.iter().map(|item| item.pos) {
-            self.session.selection.select_junction(position);
+            self.session.editor.selection.select_junction(position);
         }
     }
 }
@@ -398,11 +399,15 @@ mod tests {
             .junctions
             .push(Junction::new(7, point));
         schematic.init_undo_history();
-        schematic.session.selection.select_only_junction(point);
+        schematic
+            .session
+            .editor
+            .selection
+            .select_only_junction(point);
 
         assert!(schematic.delete_selection());
         assert!(schematic.design.document().junctions.is_empty());
-        assert!(schematic.session.selection.is_empty());
+        assert!(schematic.session.editor.selection.is_empty());
         assert_eq!(schematic.undo_description(), Some("delete selection"));
 
         assert!(schematic.undo());
@@ -422,6 +427,7 @@ mod tests {
         schematic.init_undo_history();
         schematic
             .session
+            .editor
             .selection
             .select_only_junction(Point::new(9, 9));
 
@@ -438,17 +444,21 @@ mod tests {
             .document_mut_for_test()
             .net_labels
             .push(label.clone());
-        schematic.session.selection.select_only_net_label(label.id);
+        schematic
+            .session
+            .editor
+            .selection
+            .select_only_net_label(label.id);
         schematic.session.is_dirty = false;
         schematic.init_undo_history();
-        let selection = schematic.session.selection.clone();
+        let selection = schematic.session.editor.selection.clone();
         let topology = schematic.topology_version();
         let content = schematic.content_version();
 
         schematic.session.read_only = true;
         assert!(!schematic.delete_selection());
         assert_eq!(schematic.design.document().net_labels, vec![label.clone()]);
-        assert_eq!(schematic.session.selection, selection);
+        assert_eq!(schematic.session.editor.selection, selection);
         assert_eq!(schematic.topology_version(), topology);
         assert_eq!(schematic.content_version(), content);
         assert!(!schematic.session.is_dirty);
@@ -459,7 +469,7 @@ mod tests {
         schematic.begin_operation("outer edit");
         assert!(!schematic.delete_selection(), "the outer scope owns commit");
         assert!(schematic.design.document().net_labels.is_empty());
-        assert!(schematic.session.selection.is_empty());
+        assert!(schematic.session.editor.selection.is_empty());
         assert_eq!(schematic.topology_version(), topology + 1);
         assert_eq!(schematic.content_version(), content);
         assert!(schematic.session.is_dirty);
@@ -467,7 +477,7 @@ mod tests {
         assert!(!schematic.can_undo());
         assert!(schematic.cancel_operation());
         assert_eq!(schematic.design.document().net_labels, vec![label]);
-        assert_eq!(schematic.session.selection, selection);
+        assert_eq!(schematic.session.editor.selection, selection);
         assert!(!schematic.session.is_dirty);
         assert!(!schematic.can_undo());
         assert!(!schematic.has_pending_operation());
@@ -483,7 +493,7 @@ mod tests {
         ];
         schematic.design.document_mut_for_test().junctions = vec![Junction::new(3, point)];
         schematic.init_undo_history();
-        schematic.session.selection.select_only_wire(1);
+        schematic.session.editor.selection.select_only_wire(1);
 
         assert!(schematic.delete_selection());
         assert_eq!(schematic.design.document().wires.len(), 1);
@@ -521,9 +531,9 @@ mod tests {
         schematic.design.document_mut_for_test().buses.push(bus);
         schematic.design.document_mut_for_test().bus_taps.push(tap);
         assert_eq!(schematic.select_in_rect(-1, -1, 1, 1, false), 3);
-        assert!(schematic.session.selection.has_wire(13));
-        assert!(schematic.session.selection.has_bus(11));
-        assert!(schematic.session.selection.has_bus_tap(12));
+        assert!(schematic.session.editor.selection.has_wire(13));
+        assert!(schematic.session.editor.selection.has_bus(11));
+        assert!(schematic.session.editor.selection.has_bus_tap(12));
         assert!(segment_intersects_rect(
             Point::new(i32::MIN, i32::MIN),
             Point::new(i32::MAX, i32::MAX),
@@ -550,7 +560,7 @@ mod tests {
         let mut schematic = SchematicState::default();
         schematic.design.document_mut_for_test().buses.push(bus);
         schematic.design.document_mut_for_test().bus_taps.push(tap);
-        schematic.session.selection.select_only_bus(21);
+        schematic.session.editor.selection.select_only_bus(21);
         assert!(schematic.delete_selection());
         assert!(
             schematic.design.document().buses.is_empty()
@@ -585,18 +595,18 @@ mod tests {
         );
 
         schematic.preview_selection_in_rect(0, 0, 10, 10);
-        assert!(schematic.session.selection.has_net_label(31));
-        assert!(!schematic.session.selection.has_net_label(32));
+        assert!(schematic.session.editor.selection.has_net_label(31));
+        assert!(!schematic.session.editor.selection.has_net_label(32));
 
         assert_eq!(schematic.select_in_rect(45, 55, 55, 65, false), 1);
-        assert!(!schematic.session.selection.has_net_label(31));
-        assert!(schematic.session.selection.has_net_label(32));
+        assert!(!schematic.session.editor.selection.has_net_label(31));
+        assert!(schematic.session.editor.selection.has_net_label(32));
 
         schematic.select_all_objects();
-        assert!(schematic.session.selection.has_net_label(31));
-        assert!(schematic.session.selection.has_net_label(32));
-        assert!(schematic.session.selection.has_design_note(33));
-        assert_eq!(schematic.session.selection.count(), 3);
+        assert!(schematic.session.editor.selection.has_net_label(31));
+        assert!(schematic.session.editor.selection.has_net_label(32));
+        assert!(schematic.session.editor.selection.has_design_note(33));
+        assert_eq!(schematic.session.editor.selection.count(), 3);
     }
 
     #[test]
@@ -609,6 +619,7 @@ mod tests {
         schematic.init_undo_history();
         schematic
             .session
+            .editor
             .selection
             .select_only_net_label(removed.id);
 
@@ -650,7 +661,11 @@ mod tests {
             .design_notes
             .push(note.clone());
         schematic.init_undo_history();
-        schematic.session.selection.select_only_design_note(note.id);
+        schematic
+            .session
+            .editor
+            .selection
+            .select_only_design_note(note.id);
         let topology = schematic.topology_version();
 
         assert!(schematic.delete_selection());
@@ -704,19 +719,22 @@ mod tests {
         assert!(
             schematic
                 .session
+                .editor
                 .selection
                 .has_documentation_shape(retained.id)
         );
         assert!(
             schematic
                 .session
+                .editor
                 .selection
                 .has_documentation_shape(removed.id)
         );
-        assert_eq!(schematic.session.selection.count(), 3);
+        assert_eq!(schematic.session.editor.selection.count(), 3);
 
         schematic
             .session
+            .editor
             .selection
             .select_only_documentation_shape(removed.id);
         schematic.init_undo_history();
@@ -765,10 +783,14 @@ mod tests {
             .push(Junction::new(7, marker));
 
         schematic.select_all_objects();
-        assert!(schematic.session.selection.has_probe(probe.id));
-        assert_eq!(schematic.session.selection.count(), 2);
+        assert!(schematic.session.editor.selection.has_probe(probe.id));
+        assert_eq!(schematic.session.editor.selection.count(), 2);
 
-        schematic.session.selection.select_only_probe(probe.id);
+        schematic
+            .session
+            .editor
+            .selection
+            .select_only_probe(probe.id);
         schematic.init_undo_history();
         let topology = schematic.topology_version();
         assert!(schematic.delete_selection());

@@ -114,6 +114,7 @@ fn undo_revalidates_instance_bindings() {
     state
         .schematic
         .session
+        .editor
         .selection
         .select_component(placement);
     assert!(

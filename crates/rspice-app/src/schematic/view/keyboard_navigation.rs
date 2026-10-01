@@ -33,7 +33,7 @@ pub(super) fn handle_keyboard_object_navigation(
     symbol_context: &SchematicSymbolContext,
 ) -> bool {
     if !response.has_focus()
-        || state.schematic.session.tool != crate::state::Tool::Select
+        || state.schematic.session.editor.tool != crate::state::Tool::Select
         || state.application_modal_open()
         || Popup::is_any_open(&response.ctx)
     {
@@ -88,7 +88,7 @@ pub(super) fn handle_keyboard_object_navigation(
         return true;
     };
     focus_keyboard_object(state, object);
-    state.schematic.session.net_highlight.clear();
+    state.schematic.session.editor.net_highlight.clear();
     true
 }
 
@@ -234,7 +234,7 @@ fn traversal_candidates(
 }
 
 fn selected_keyboard_object(state: &AppState) -> Option<SchematicKeyboardFocus> {
-    let selection = &state.schematic.session.selection;
+    let selection = &state.schematic.session.editor.selection;
     if let Some(id) = selection.single_component() {
         return Some(SchematicKeyboardFocus::Component(id));
     }
@@ -279,16 +279,31 @@ fn selected_keyboard_object(state: &AppState) -> Option<SchematicKeyboardFocus> 
 }
 
 fn focus_keyboard_object(state: &mut AppState, object: SchematicKeyboardFocus) {
-    state.schematic.session.selection.clear();
+    state.schematic.session.editor.selection.clear();
     match object {
         SchematicKeyboardFocus::Component(id) => {
-            state.schematic.session.selection.select_only_component(id);
+            state
+                .schematic
+                .session
+                .editor
+                .selection
+                .select_only_component(id);
         }
-        SchematicKeyboardFocus::Wire(id) => state.schematic.session.selection.select_only_wire(id),
-        SchematicKeyboardFocus::Bus(id) => state.schematic.session.selection.select_only_bus(id),
-        SchematicKeyboardFocus::BusTap(id) => {
-            state.schematic.session.selection.select_only_bus_tap(id)
+        SchematicKeyboardFocus::Wire(id) => state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_wire(id),
+        SchematicKeyboardFocus::Bus(id) => {
+            state.schematic.session.editor.selection.select_only_bus(id)
         }
+        SchematicKeyboardFocus::BusTap(id) => state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_bus_tap(id),
         SchematicKeyboardFocus::Junction(id) => {
             if let Some(junction) = state
                 .schematic
@@ -300,18 +315,25 @@ fn focus_keyboard_object(state: &mut AppState, object: SchematicKeyboardFocus) {
                 state
                     .schematic
                     .session
+                    .editor
                     .selection
                     .select_only_junction(junction.pos);
             }
         }
         SchematicKeyboardFocus::NetLabel(id) => {
-            state.schematic.session.selection.select_only_net_label(id);
+            state
+                .schematic
+                .session
+                .editor
+                .selection
+                .select_only_net_label(id);
         }
         SchematicKeyboardFocus::Probe(_) => {}
         SchematicKeyboardFocus::DesignNote(id) => {
             state
                 .schematic
                 .session
+                .editor
                 .selection
                 .select_only_design_note(id);
         }
@@ -319,6 +341,7 @@ fn focus_keyboard_object(state: &mut AppState, object: SchematicKeyboardFocus) {
             state
                 .schematic
                 .session
+                .editor
                 .selection
                 .select_only_documentation_shape(id);
         }
@@ -622,13 +645,18 @@ mod tests {
             )
             .unwrap(),
         );
-        state.schematic.session.selection.select_only_component(1);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(1);
 
         let (handled, available) =
             run_navigation_frame(&ctx, Key::ArrowRight, Modifiers::NONE, &mut state, true);
         assert!(handled);
         assert!(!available);
-        assert!(state.schematic.session.selection.is_empty());
+        assert!(state.schematic.session.editor.selection.is_empty());
         assert_eq!(
             state.dialogs.interaction.schematic_keyboard_focus,
             Some(SchematicKeyboardFocus::Probe(2))
@@ -639,7 +667,12 @@ mod tests {
         assert!(handled);
         assert!(!available);
         assert_eq!(
-            state.schematic.session.selection.single_design_note(),
+            state
+                .schematic
+                .session
+                .editor
+                .selection
+                .single_design_note(),
             Some(3)
         );
         assert_eq!(
@@ -659,13 +692,18 @@ mod tests {
             let ctx = Context::default();
             let mut state = AppState::default();
             state.schematic.document_mut_for_test().components = components();
-            state.schematic.session.selection.select_only_component(22);
+            state
+                .schematic
+                .session
+                .editor
+                .selection
+                .select_only_component(22);
 
             let (handled, _) = run_navigation_frame(&ctx, key, Modifiers::NONE, &mut state, true);
 
             assert!(handled, "{key:?} should traverse the focused canvas");
             assert_eq!(
-                state.schematic.session.selection.single_component(),
+                state.schematic.session.editor.selection.single_component(),
                 Some(expected)
             );
         }
@@ -722,11 +760,17 @@ mod tests {
         let ctx = Context::default();
         let mut state = AppState::default();
         state.schematic.document_mut_for_test().components = components();
-        state.schematic.session.selection.select_only_component(11);
-        state.schematic.session.net_highlight.active = true;
         state
             .schematic
             .session
+            .editor
+            .selection
+            .select_only_component(11);
+        state.schematic.session.editor.net_highlight.active = true;
+        state
+            .schematic
+            .session
+            .editor
             .net_highlight
             .highlighted_wires
             .insert(777);
@@ -739,18 +783,19 @@ mod tests {
         assert!(handled);
         assert!(!key_still_available);
         assert_eq!(
-            state.schematic.session.selection.single_component(),
+            state.schematic.session.editor.selection.single_component(),
             Some(22)
         );
-        assert_eq!(state.schematic.session.center_request, None);
+        assert_eq!(state.schematic.session.editor.center_request, None);
         assert_eq!(state.schematic.topology_version(), topology);
         assert_eq!(state.schematic.can_undo(), could_undo);
         assert!(!state.schematic.session.is_dirty);
-        assert!(!state.schematic.session.net_highlight.active);
+        assert!(!state.schematic.session.editor.net_highlight.active);
         assert!(
             state
                 .schematic
                 .session
+                .editor
                 .net_highlight
                 .highlighted_wires
                 .is_empty()
@@ -762,14 +807,19 @@ mod tests {
         let ctx = Context::default();
         let mut state = AppState::default();
         state.schematic.document_mut_for_test().components = components();
-        state.schematic.session.selection.select_only_component(11);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(11);
 
         let (handled, key_still_available) =
             run_navigation_frame(&ctx, Key::ArrowRight, Modifiers::NONE, &mut state, false);
         assert!(!handled);
         assert!(key_still_available);
         assert_eq!(
-            state.schematic.session.selection.single_component(),
+            state.schematic.session.editor.selection.single_component(),
             Some(11)
         );
 
@@ -785,7 +835,7 @@ mod tests {
         );
         assert!(!handled);
         assert_eq!(
-            state.schematic.session.selection.single_component(),
+            state.schematic.session.editor.selection.single_component(),
             Some(11)
         );
     }
@@ -801,7 +851,12 @@ mod tests {
         assert!(key_still_available);
 
         state.schematic.document_mut_for_test().components = components();
-        state.schematic.session.selection.select_only_component(11);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(11);
         state
             .ui
             .preferences
@@ -811,7 +866,7 @@ mod tests {
         assert!(!handled);
         assert!(key_still_available);
         assert_eq!(
-            state.schematic.session.selection.single_component(),
+            state.schematic.session.editor.selection.single_component(),
             Some(11)
         );
     }
@@ -821,7 +876,12 @@ mod tests {
         let ctx = Context::default();
         let mut state = AppState::default();
         state.schematic.document_mut_for_test().components = components();
-        state.schematic.session.selection.select_only_component(11);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(11);
         state.dialogs.about = true;
 
         let (handled, key_still_available) =
@@ -829,7 +889,7 @@ mod tests {
         assert!(!handled);
         assert!(key_still_available);
         assert_eq!(
-            state.schematic.session.selection.single_component(),
+            state.schematic.session.editor.selection.single_component(),
             Some(11)
         );
 
@@ -840,7 +900,7 @@ mod tests {
         assert!(!handled);
         assert!(key_still_available);
         assert_eq!(
-            state.schematic.session.selection.single_component(),
+            state.schematic.session.editor.selection.single_component(),
             Some(11)
         );
         Popup::close_all(&ctx);
@@ -852,7 +912,12 @@ mod tests {
         let mut state = AppState::default();
         state.schematic.document_mut_for_test().components = components();
         state.sync_active_schematic_to_workspace();
-        state.schematic.session.selection.select_only_component(22);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(22);
         state.schematic.init_undo_history();
 
         let (handled, key_still_available) =
@@ -873,7 +938,12 @@ mod tests {
         let ctx = Context::default();
         let mut state = AppState::default();
         state.schematic.document_mut_for_test().components = components();
-        state.schematic.session.selection.select_only_component(22);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(22);
         state.schematic.session.read_only = true;
 
         let (handled, key_still_available) =

@@ -104,6 +104,7 @@ fn rename_undo_redo_carries_live_bindings_and_advances_revisions() {
     app.state
         .schematic
         .session
+        .editor
         .selection
         .select_only_component(expected.id);
     let output_id = app
@@ -124,6 +125,7 @@ fn rename_undo_redo_carries_live_bindings_and_advances_revisions() {
         app.state
             .schematic
             .session
+            .editor
             .selection
             .components
             .contains(&expected.id)

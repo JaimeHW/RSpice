@@ -943,9 +943,10 @@ fn apply_action(ui: &Ui, state: &mut AppState, action: OpAction) {
             state
                 .schematic
                 .session
+                .editor
                 .selection
                 .select_only_component(component_id);
-            state.schematic.session.center_request = Some(position);
+            state.schematic.session.editor.center_request = Some(position);
             state.ui.schematic_visibility.annotations =
                 SchematicAnnotationVisibility::OperatingPoint;
             state

@@ -33,7 +33,8 @@ pub(crate) mod violations;
 
 use rspice_schematic_editor::view::geometry::segment_intersects_rect;
 use rspice_schematic_editor::view::{
-    coordinates, design_notes, documentation_shapes, drawing, grid, navigation, net_labels, viewport,
+    coordinates, design_notes, documentation_shapes, drawing, grid, navigation, net_labels,
+    viewport,
 };
 
 use self::coordinates::viewport_from_camera;
@@ -135,7 +136,7 @@ pub(crate) fn schematic_symbol_context(state: &AppState) -> SchematicSymbolConte
     );
     SchematicSymbolContext::new(
         state.schematic.document(),
-        state.schematic.session.pending_library_cell.as_ref(),
+        state.schematic.session.editor.pending_library_cell.as_ref(),
         &resolver,
         symbol_context_revision(state),
     )
@@ -189,10 +190,10 @@ fn schematic_accessibility_description(
     use crate::ui::accessibility::counted;
     use crate::workbench::commands::vocabulary::Command;
     let schematic = &state.schematic;
-    let tool = if schematic.session.tool.is_place_tool() {
-        format!("Place {}", schematic.session.tool.display_name())
+    let tool = if schematic.session.editor.tool.is_place_tool() {
+        format!("Place {}", schematic.session.editor.tool.display_name())
     } else {
-        schematic.session.tool.display_name().to_owned()
+        schematic.session.editor.tool.display_name().to_owned()
     };
     let shortcuts = crate::workbench::app_state::accessibility_shortcut_summary(
         state.ui.preferences.shortcuts(),
@@ -215,7 +216,8 @@ fn schematic_accessibility_description(
             Command::Cancel,
         ],
     );
-    let traversal_instruction = if schematic.session.tool == crate::state::Tool::DocumentationShape
+    let traversal_instruction = if schematic.session.editor.tool
+        == crate::state::Tool::DocumentationShape
     {
         " Arrow keys move the exact shape cursor. Space places a point. Enter completes a legal polygon or places the current point. Backspace removes the last point. Escape cancels."
     } else if !state
@@ -271,6 +273,7 @@ fn schematic_selection_accessibility_status(state: &AppState) -> String {
     if let Some(component) = state
         .schematic
         .session
+        .editor
         .selection
         .single_component()
         .and_then(|id| {
@@ -310,7 +313,7 @@ fn schematic_selection_accessibility_status(state: &AppState) -> String {
         return format!("Selected {}.", schematic_keyboard_focus_label(state, focus));
     }
 
-    match state.schematic.session.selection.count() {
+    match state.schematic.session.editor.selection.count() {
         0 => "No schematic object selected.".to_owned(),
         1 => "One schematic object selected.".to_owned(),
         count => format!("{count} schematic objects selected."),
@@ -438,16 +441,17 @@ pub(crate) fn select_signal_conductor(
     let (net, points) = locate_signal_conductor(state, signal)?;
 
     let wires: Vec<u64> = wires_touching(state, &points);
-    state.schematic.session.selection.clear();
+    state.schematic.session.editor.selection.clear();
     for wire in &wires {
-        state.schematic.session.selection.select_wire(*wire);
+        state.schematic.session.editor.selection.select_wire(*wire);
     }
     state
         .schematic
         .session
+        .editor
         .net_highlight
         .highlight_wires(wires.into_iter().collect());
-    state.schematic.session.center_request = points
+    state.schematic.session.editor.center_request = points
         .iter()
         .copied()
         .min_by_key(|point| (point.y, point.x));
@@ -623,21 +627,27 @@ pub(crate) fn select_failure_sites(
         })
         .collect();
 
-    state.schematic.session.selection.clear();
+    state.schematic.session.editor.selection.clear();
     for wire in &wires {
-        state.schematic.session.selection.select_wire(*wire);
+        state.schematic.session.editor.selection.select_wire(*wire);
     }
     for (id, name, position) in components {
-        state.schematic.session.selection.select_component(id);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(id);
         selection.devices.push(name);
         points.push(position);
     }
     state
         .schematic
         .session
+        .editor
         .net_highlight
         .highlight_wires(wires.into_iter().collect());
-    state.schematic.session.center_request = points
+    state.schematic.session.editor.center_request = points
         .iter()
         .copied()
         .min_by_key(|point| (point.y, point.x));
@@ -654,16 +664,16 @@ pub fn render_schematic_view(
     let mut symbol_context = schematic_symbol_context(state);
     let drawing_sheet = ActiveDrawingSheet::resolve(state);
 
-    if state.schematic.session.needs_drawing_sheet_fit {
-        state.schematic.session.needs_drawing_sheet_fit = false;
-        state.schematic.session.needs_fit = false;
+    if state.schematic.session.editor.needs_drawing_sheet_fit {
+        state.schematic.session.editor.needs_drawing_sheet_fit = false;
+        state.schematic.session.editor.needs_fit = false;
         drawing_sheet.geometry.fit_view(
             &mut state.schematic,
             available.width() as f64,
             available.height() as f64,
         );
-    } else if state.schematic.session.needs_fit {
-        state.schematic.session.needs_fit = false;
+    } else if state.schematic.session.editor.needs_fit {
+        state.schematic.session.editor.needs_fit = false;
         let bounds = symbol_context.content_bounds(state.schematic.document());
         state.schematic.zoom_to_fit_bounds(
             bounds,
@@ -671,7 +681,7 @@ pub fn render_schematic_view(
             available.height() as f64,
         );
     }
-    if let Some(target) = state.schematic.session.center_request.take() {
+    if let Some(target) = state.schematic.session.editor.center_request.take() {
         state
             .schematic
             .center_view_on(target, available.width() as f64, available.height() as f64);
@@ -697,12 +707,12 @@ pub fn render_schematic_view(
         ui,
         &response,
         available,
-        &mut state.schematic.session.zoom,
-        &mut state.schematic.session.pan,
+        &mut state.schematic.session.editor.zoom,
+        &mut state.schematic.session.editor.pan,
     );
     let viewport = viewport_from_camera(
-        state.schematic.session.pan,
-        state.schematic.session.zoom,
+        state.schematic.session.editor.pan,
+        state.schematic.session.editor.zoom,
         available,
         ui.ctx().pixels_per_point(),
     );
@@ -725,11 +735,12 @@ pub fn render_schematic_view(
     // Keep the pre-interaction route state available to the context-menu
     // layer for diagnostics. Secondary click is exclusively a context-menu
     // gesture; routes commit with Enter or primary double-click.
-    let routing_was_active = state.schematic.session.wire_drawing.active
-        || state.schematic.session.bus_drawing.active
+    let routing_was_active = state.schematic.session.editor.wire_drawing.active
+        || state.schematic.session.editor.bus_drawing.active
         || !state
             .schematic
             .session
+            .editor
             .documentation_shape_drawing
             .points
             .is_empty();
@@ -824,11 +835,11 @@ pub fn render_schematic_view(
     // Report the cursor position in grid units; the workbench status bar shows it.
     let to_grid_units = |pos: egui::Pos2, state: &AppState| {
         let grid = f64::from(state.schematic.document().grid_size.max(1));
-        let x = ((f64::from(pos.x - available.min.x)) - state.schematic.session.pan.0)
-            / state.schematic.session.zoom
+        let x = ((f64::from(pos.x - available.min.x)) - state.schematic.session.editor.pan.0)
+            / state.schematic.session.editor.zoom
             / grid;
-        let y = ((f64::from(pos.y - available.min.y)) - state.schematic.session.pan.1)
-            / state.schematic.session.zoom
+        let y = ((f64::from(pos.y - available.min.y)) - state.schematic.session.editor.pan.1)
+            / state.schematic.session.editor.zoom
             / grid;
         (x, y)
     };
@@ -1039,10 +1050,17 @@ mod tests {
         let net = select_signal_conductor(&mut state, "V(out)").expect("net resolves");
 
         assert_eq!(net, "OUT");
-        assert!(state.schematic.session.selection.wires.contains(&1));
-        assert!(state.schematic.session.net_highlight.is_wire_highlighted(1));
+        assert!(state.schematic.session.editor.selection.wires.contains(&1));
+        assert!(
+            state
+                .schematic
+                .session
+                .editor
+                .net_highlight
+                .is_wire_highlighted(1)
+        );
         assert_eq!(
-            state.schematic.session.center_request,
+            state.schematic.session.editor.center_request,
             Some(Point::new(0, 0))
         );
     }
@@ -1056,7 +1074,7 @@ mod tests {
 
         assert_eq!(error, LocateSignalError::NotANet);
         assert!(error.message("V(out)-V(in)").contains("derived"));
-        assert!(state.schematic.session.selection.is_empty());
+        assert!(state.schematic.session.editor.selection.is_empty());
     }
 
     #[test]
@@ -1069,7 +1087,7 @@ mod tests {
             .expect_err("the map is no longer current");
 
         assert_eq!(error, LocateSignalError::NoCurrentMap);
-        assert!(state.schematic.session.selection.is_empty());
+        assert!(state.schematic.session.editor.selection.is_empty());
     }
 
     #[test]
@@ -1099,7 +1117,7 @@ mod tests {
             select_signal_conductor(&mut state, "V(x1.out)").expect("the leaf is on this sheet");
 
         assert_eq!(net, "OUT");
-        assert!(state.schematic.session.selection.wires.contains(&1));
+        assert!(state.schematic.session.editor.selection.wires.contains(&1));
     }
 
     #[test]
@@ -1111,7 +1129,7 @@ mod tests {
 
         assert_eq!(error, LocateSignalError::OtherOccurrence("/x1".to_owned()));
         assert!(error.message("V(x1.out)").contains("/x1"));
-        assert!(state.schematic.session.selection.is_empty());
+        assert!(state.schematic.session.editor.selection.is_empty());
     }
 
     #[test]
@@ -1266,8 +1284,8 @@ mod tests {
             )
             .unwrap(),
         );
-        state.schematic.session.selection.select_component(1);
-        state.schematic.session.tool = crate::state::Tool::Wire;
+        state.schematic.session.editor.selection.select_component(1);
+        state.schematic.session.editor.tool = crate::state::Tool::Wire;
 
         let description = schematic_accessibility_description(
             &state,
@@ -1291,7 +1309,7 @@ mod tests {
             schematic_selection_accessibility_status(&state),
             "Selected instance unnamed, Resistor."
         );
-        state.schematic.session.selection.clear();
+        state.schematic.session.editor.selection.clear();
         assert_eq!(
             schematic_accessibility_description(
                 &state,
@@ -1321,7 +1339,12 @@ mod tests {
             .document_mut_for_test()
             .components
             .push(component);
-        state.schematic.session.selection.select_only_component(17);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(17);
 
         let output = ctx.run_ui(
             egui::RawInput {

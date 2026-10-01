@@ -268,6 +268,7 @@ fn unresolved_row(
                 app.state
                     .schematic
                     .session
+                    .editor
                     .selection
                     .select_only_component(diagnostic.component_id);
                 navigate_specialist(app, crate::workbench::SurfaceId::Design);

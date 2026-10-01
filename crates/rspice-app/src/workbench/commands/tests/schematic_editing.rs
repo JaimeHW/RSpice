@@ -22,6 +22,7 @@ fn descend_requires_a_resolved_schematic_master() {
     app.state
         .schematic
         .session
+        .editor
         .selection
         .select_only_component(1);
     assert!(
@@ -48,6 +49,7 @@ fn descend_requires_a_resolved_schematic_master() {
     app.state
         .schematic
         .session
+        .editor
         .selection
         .select_only_component(2);
     assert!(
@@ -184,13 +186,31 @@ fn edit_command_enablement_covers_every_complete_schematic_object_class() {
         ("bus tap", 6),
     ];
     for (kind, id) in selectable {
-        app.state.schematic.session.selection.clear();
+        app.state.schematic.session.editor.selection.clear();
         match kind {
-            "component" => app.state.schematic.session.selection.select_component(id),
-            "wire" => app.state.schematic.session.selection.select_wire(id),
-            "net label" => app.state.schematic.session.selection.select_net_label(id),
-            "bus" => app.state.schematic.session.selection.select_bus(id),
-            "bus tap" => app.state.schematic.session.selection.select_bus_tap(id),
+            "component" => app
+                .state
+                .schematic
+                .session
+                .editor
+                .selection
+                .select_component(id),
+            "wire" => app.state.schematic.session.editor.selection.select_wire(id),
+            "net label" => app
+                .state
+                .schematic
+                .session
+                .editor
+                .selection
+                .select_net_label(id),
+            "bus" => app.state.schematic.session.editor.selection.select_bus(id),
+            "bus tap" => app
+                .state
+                .schematic
+                .session
+                .editor
+                .selection
+                .select_bus_tap(id),
             _ => unreachable!(),
         }
         assert!(Command::Copy.is_enabled(&app), "copy disabled for {kind}");
@@ -208,6 +228,7 @@ fn edit_command_enablement_covers_every_complete_schematic_object_class() {
     app.state
         .schematic
         .session
+        .editor
         .selection
         .select_only_junction(crate::state::Point::new(10, 0));
     assert!(Command::Copy.is_enabled(&app));
@@ -239,6 +260,7 @@ fn delete_promotes_live_wire_handles_without_enabling_partial_copy_or_cut() {
     app.state
         .schematic
         .session
+        .editor
         .selection
         .select_only_wire_segment(17, 1);
     assert!(Command::Delete.is_enabled(&app));
@@ -249,6 +271,7 @@ fn delete_promotes_live_wire_handles_without_enabling_partial_copy_or_cut() {
     app.state
         .schematic
         .session
+        .editor
         .selection
         .select_only_wire_vertex(17, 1);
     assert!(Command::Delete.is_enabled(&app));
@@ -259,6 +282,7 @@ fn delete_promotes_live_wire_handles_without_enabling_partial_copy_or_cut() {
     app.state
         .schematic
         .session
+        .editor
         .selection
         .select_only_wire_segment(17, 2);
     assert!(
@@ -277,15 +301,27 @@ fn select_all_command_selects_the_active_sheet_without_a_dialog() {
     assert!(!app.state.dialogs.application_modal_open());
     for id in [1_u64, 2, 5, 6] {
         assert!(
-            app.state.schematic.session.selection.has_component(id)
-                || app.state.schematic.session.selection.has_wire(id)
-                || app.state.schematic.session.selection.has_bus(id)
-                || app.state.schematic.session.selection.has_bus_tap(id),
+            app.state
+                .schematic
+                .session
+                .editor
+                .selection
+                .has_component(id)
+                || app.state.schematic.session.editor.selection.has_wire(id)
+                || app.state.schematic.session.editor.selection.has_bus(id)
+                || app.state.schematic.session.editor.selection.has_bus_tap(id),
             "object {id} is on the active sheet and passes the filter"
         );
     }
-    assert!(app.state.schematic.session.selection.has_net_label(4));
-    assert_eq!(app.state.schematic.session.selection.count(), 6);
+    assert!(
+        app.state
+            .schematic
+            .session
+            .editor
+            .selection
+            .has_net_label(4)
+    );
+    assert_eq!(app.state.schematic.session.editor.selection.count(), 6);
 }
 
 #[test]
@@ -296,6 +332,7 @@ fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
     app.state
         .schematic
         .session
+        .editor
         .selection
         .select_only_component(1);
 
@@ -306,11 +343,21 @@ fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
     Command::Cut.execute(&mut app);
     assert!(!app.state.dialogs.application_modal_open());
     assert_eq!(app.state.schematic.document().components.len(), 1);
-    assert_eq!(app.state.schematic.session.clipboard.components.len(), 1);
+    assert_eq!(
+        app.state
+            .schematic
+            .session
+            .editor
+            .clipboard
+            .components
+            .len(),
+        1
+    );
 
     app.state
         .schematic
         .session
+        .editor
         .selection
         .select_only_component(1);
     Command::Delete.execute(&mut app);
@@ -434,7 +481,12 @@ fn move_selection_requires_one_live_object_in_an_editable_active_schematic() {
     app.state.workbench.workspace = Workspace::Design;
     assert!(!Command::MoveSelection.is_enabled(&app));
 
-    app.state.schematic.session.selection.select_component(404);
+    app.state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_component(404);
     assert!(
         !Command::MoveSelection.is_enabled(&app),
         "a stale selection identity is not a movable object"
@@ -476,6 +528,7 @@ fn stretch_selection_requires_one_live_eligible_geometry_target() {
     app.state
         .schematic
         .session
+        .editor
         .selection
         .select_wire_segment(17, 0);
     assert!(
@@ -512,7 +565,12 @@ fn array_selection_requires_a_live_eligible_editable_selection() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
-    app.state.schematic.session.selection.select_component(404);
+    app.state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_component(404);
     assert!(
         !Command::ArraySelection.is_enabled(&app),
         "a stale selection identity cannot open the workflow"
@@ -549,12 +607,12 @@ fn array_selection_requires_a_live_eligible_editable_selection() {
 fn cancel_retires_an_armed_array_transaction_and_restores_select() {
     let mut app = RSpiceApp::test_instance();
     app.state.dialogs.array_selection.armed = true;
-    app.state.schematic.session.tool = Tool::ArraySelection;
+    app.state.schematic.session.editor.tool = Tool::ArraySelection;
 
     Command::Cancel.execute(&mut app);
 
     assert!(!app.state.dialogs.array_selection.armed);
-    assert_eq!(app.state.schematic.session.tool, Tool::Select);
+    assert_eq!(app.state.schematic.session.editor.tool, Tool::Select);
 }
 
 #[test]
@@ -580,6 +638,7 @@ fn rename_command_has_mockup_identity_and_opens_the_stable_target_dialog() {
     app.state
         .schematic
         .session
+        .editor
         .selection
         .select_only_component(id);
     assert!(Command::RenameSelection.is_enabled(&app));
@@ -621,7 +680,12 @@ fn object_properties_dispatches_selected_buses_and_taps_and_refuses_read_only() 
         .bus_taps
         .push(tap);
 
-    app.state.schematic.session.selection.select_only_bus(80);
+    app.state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_bus(80);
     assert!(Command::ObjectProperties.is_enabled(&app));
     Command::ObjectProperties.execute(&mut app);
     assert!(matches!(
@@ -633,6 +697,7 @@ fn object_properties_dispatches_selected_buses_and_taps_and_refuses_read_only() 
     app.state
         .schematic
         .session
+        .editor
         .selection
         .select_only_bus_tap(81);
     Command::ObjectProperties.execute(&mut app);
@@ -661,6 +726,7 @@ fn object_properties_availability_includes_one_selected_net_label() {
     app.state
         .schematic
         .session
+        .editor
         .selection
         .select_only_net_label(id);
 
@@ -684,6 +750,7 @@ fn object_properties_availability_includes_one_selected_net_label() {
         app.state
             .schematic
             .session
+            .editor
             .selection
             .single_net_label()
             .is_some()
@@ -849,7 +916,11 @@ fn app_with_a_placed_cell_instance() -> (RSpiceApp, String) {
         .wires
         .push(Wire::new(2, vec![Point::new(130, 0), Point::new(130, 10)]));
     schematic.recalculate_runtime_state();
-    schematic.session.selection.select_only_component(instance);
+    schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(instance);
     (app, master_key)
 }
 

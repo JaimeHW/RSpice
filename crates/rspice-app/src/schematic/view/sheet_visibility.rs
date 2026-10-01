@@ -136,7 +136,7 @@ pub(super) fn objects_on_active_sheet<'a, T: Clone>(
 /// This is also the sheet-switch boundary: stale IDs from a previously active
 /// sheet can never flow into keyboard commands or context-menu actions.
 pub(super) fn selection_on_active_sheet(state: &AppState) -> Selection {
-    selection_filtered_to_active_sheet(state, &state.schematic.session.selection)
+    selection_filtered_to_active_sheet(state, &state.schematic.session.editor.selection)
 }
 
 pub(crate) fn selection_filtered_to_active_sheet(
@@ -212,7 +212,7 @@ pub(crate) fn selection_filtered_to_active_sheet(
 
 pub(crate) fn retain_selection_on_active_sheet(state: &mut AppState) {
     let selection = selection_on_active_sheet(state);
-    state.schematic.session.selection = selection;
+    state.schematic.session.editor.selection = selection;
 }
 
 /// Every complete object on the active sheet the session's selection filter
@@ -290,7 +290,7 @@ pub(super) fn select_in_rect_on_active_sheet(
         retain_selection_on_active_sheet(state);
     }
     let selected_before = if add_to_selection {
-        state.schematic.session.selection.count()
+        state.schematic.session.editor.selection.count()
     } else {
         0
     };
@@ -300,10 +300,11 @@ pub(super) fn select_in_rect_on_active_sheet(
     state
         .ui
         .schematic_selection_filter
-        .retain_matching(&mut state.schematic.session.selection);
+        .retain_matching(&mut state.schematic.session.editor.selection);
     state
         .schematic
         .session
+        .editor
         .selection
         .count()
         .saturating_sub(selected_before)
@@ -526,8 +527,8 @@ mod tests {
             false,
         );
 
-        assert!(state.schematic.session.selection.has_component(10));
-        assert!(!state.schematic.session.selection.has_component(20));
+        assert!(state.schematic.session.editor.selection.has_component(10));
+        assert!(!state.schematic.session.editor.selection.has_component(20));
     }
 
     #[test]
@@ -537,14 +538,19 @@ mod tests {
             Component::new(10, ComponentType::Resistor, Point::origin()),
             Component::new(20, ComponentType::Capacitor, Point::origin()),
         ];
-        state.schematic.session.selection.select_component(20);
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(20);
 
         retain_selection_on_active_sheet(&mut state);
-        assert!(state.schematic.session.selection.is_empty());
+        assert!(state.schematic.session.editor.selection.is_empty());
 
-        state.schematic.session.selection = selectable_objects_on_active_sheet(&state);
-        assert!(state.schematic.session.selection.has_component(10));
-        assert!(!state.schematic.session.selection.has_component(20));
+        state.schematic.session.editor.selection = selectable_objects_on_active_sheet(&state);
+        assert!(state.schematic.session.editor.selection.has_component(10));
+        assert!(!state.schematic.session.editor.selection.has_component(20));
     }
 
     #[test]
@@ -556,10 +562,10 @@ mod tests {
             vec![Wire::segment(11, Point::origin(), Point::new(20, 0))];
         state.ui.schematic_selection_filter.instances = false;
 
-        state.schematic.session.selection = selectable_objects_on_active_sheet(&state);
+        state.schematic.session.editor.selection = selectable_objects_on_active_sheet(&state);
 
-        assert!(!state.schematic.session.selection.has_component(10));
-        assert!(state.schematic.session.selection.has_wire(11));
+        assert!(!state.schematic.session.editor.selection.has_component(10));
+        assert!(state.schematic.session.editor.selection.has_wire(11));
     }
 
     #[test]
@@ -625,7 +631,7 @@ mod tests {
             vec![Wire::segment(10, Point::origin(), Point::new(20, 0))];
         state.schematic.document_mut_for_test().junctions =
             vec![Junction::new(21, Point::new(200, 200))];
-        state.schematic.session.selection.select_wire(10);
+        state.schematic.session.editor.selection.select_wire(10);
         state.schematic.init_undo_history();
 
         assert!(with_hidden_wire_topology_preserved(

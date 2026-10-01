@@ -12,8 +12,8 @@ use std::collections::HashMap;
 impl SchematicState {
     fn hierarchy_source(&self) -> HierarchySource<'_> {
         self.design.hierarchy_source(
-            &self.session.selection.components,
-            self.session.selection.count(),
+            &self.session.editor.selection.components,
+            self.session.editor.selection.count(),
         )
     }
 
@@ -46,14 +46,15 @@ impl SchematicState {
             library,
             cell,
             view,
-            self.session.preview_rotation,
-            self.session.preview_mirror_h,
+            self.session.editor.preview_rotation,
+            self.session.editor.preview_mirror_h,
         )?;
         let mut parent =
             self.clone_with_design(self.design.clone_with_hierarchy_document(candidate.parent));
         parent.session.is_dirty = true;
         parent
             .session
+            .editor
             .selection
             .select_only_component(candidate.instance_id);
         parent.repair_clipboard_after_load();

@@ -231,7 +231,7 @@ mod tests {
         click_console_row(&mut state, "no DC path at OUT");
 
         assert!(
-            state.schematic.session.selection.wires.contains(&91),
+            state.schematic.session.editor.selection.wires.contains(&91),
             "the row's anchor must mark the conductor the run named"
         );
         assert_eq!(
@@ -272,7 +272,7 @@ mod tests {
         click_console_row(&mut state, "no DC path at DELETED");
 
         assert!(
-            state.schematic.session.selection.wires.is_empty(),
+            state.schematic.session.editor.selection.wires.is_empty(),
             "an inert row must mark nothing"
         );
         assert_eq!(
