@@ -18,13 +18,13 @@ use crate::product::ContentDigest;
 /// can therefore be consumed exactly once, including across accidental owner
 /// clones that share this authority.
 #[derive(Debug, Clone, Default)]
-pub(in crate::simulation) struct ExecutionPermitIssuer {
+pub(super) struct ExecutionPermitIssuer {
     generation: Arc<AtomicU64>,
 }
 
 /// A non-cloneable authorization for exactly one prepared snapshot digest.
 #[derive(Debug)]
-pub(in crate::simulation) struct ExecutionPermit {
+pub(super) struct ExecutionPermit {
     generation: Arc<AtomicU64>,
     expected_generation: u64,
     snapshot_digest: ContentDigest,
@@ -32,7 +32,7 @@ pub(in crate::simulation) struct ExecutionPermit {
 
 /// Opaque proof emitted only after the generation CAS succeeds.
 #[derive(Debug, PartialEq, Eq)]
-pub(in crate::simulation) struct ConsumedExecutionPermit {
+pub(super) struct ConsumedExecutionPermit {
     snapshot_digest: ContentDigest,
 }
 
@@ -43,7 +43,7 @@ impl ConsumedExecutionPermit {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::simulation) enum PermitError {
+pub(super) enum PermitError {
     GenerationExhausted,
     SnapshotMismatch,
     AlreadyConsumedOrInvalidated,
@@ -66,7 +66,7 @@ impl std::fmt::Display for PermitError {
 }
 
 impl ExecutionPermitIssuer {
-    pub(in crate::simulation) fn issue(
+    pub(super) fn issue(
         &self,
         snapshot_digest: ContentDigest,
     ) -> Result<ExecutionPermit, PermitError> {
@@ -96,7 +96,7 @@ impl ExecutionPermitIssuer {
         }
     }
 
-    pub(in crate::simulation) fn invalidate(&self) -> Result<(), PermitError> {
+    pub(super) fn invalidate(&self) -> Result<(), PermitError> {
         loop {
             let observed = self.generation.load(Ordering::Acquire);
             if observed & 1 == 0 {
@@ -119,7 +119,7 @@ impl ExecutionPermitIssuer {
 impl ExecutionPermit {
     /// Consume this permit only when both the retained and freshly prepared
     /// snapshots have the exact digest authorized at issuance.
-    pub(in crate::simulation) fn consume(
+    pub(super) fn consume(
         self,
         retained_digest: ContentDigest,
         current_digest: ContentDigest,

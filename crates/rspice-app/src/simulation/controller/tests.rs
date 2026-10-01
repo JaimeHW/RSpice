@@ -1532,8 +1532,8 @@ fn failed_completion_retains_exact_prepared_task_provenance() {
 fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
     use crate::product::ProcessCorner;
     use crate::product::{ContentDigest, ObjectRevision};
-    use crate::simulation::execution::ExecutionPermitIssuer;
     use crate::simulation::execution::ExecutionTargetCapabilities;
+    use crate::simulation::execution::PreparedRunAuthorization;
     use crate::simulation::execution::PreparedRunSnapshot;
     use crate::simulation::execution::PreparedTask;
     use crate::simulation::execution::RunSourceReceipt;
@@ -1619,15 +1619,8 @@ fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
         sealed_source_dependencies: Vec::new(),
     })
     .expect("dependency-ordered snapshot validates");
-    let digest = snapshot.digest();
-    let issuer = ExecutionPermitIssuer::default();
-    let proof = issuer
-        .issue(digest)
-        .expect("permit issues")
-        .consume(digest, digest)
-        .expect("permit consumes");
-    let mut tasks = snapshot
-        .authorize_dispatch(proof)
+    let mut tasks = PreparedRunAuthorization::default()
+        .authorize_campaign_member(snapshot)
         .expect("snapshot authorizes")
         .into_tasks();
     let failed_task = tasks.pop_front().expect("prerequisite task");

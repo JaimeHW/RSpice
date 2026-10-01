@@ -1487,7 +1487,7 @@ fn ui_progress_fraction_uses_runner_fraction_or_running_floor() {
 fn a_corner_declarations_turn_assembles_its_family_without_reaching_the_runner() {
     use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
     use crate::simulation::execution::{
-        ExecutionPermitIssuer, ExecutionTargetCapabilities, PreparedRunSnapshot, PreparedTask,
+        ExecutionTargetCapabilities, PreparedRunAuthorization, PreparedRunSnapshot, PreparedTask,
         RunSourceReceipt, SavePolicy, SnapshotParts,
     };
     use rspice_app_types::product::ProcessCorner;
@@ -1547,14 +1547,8 @@ fn a_corner_declarations_turn_assembles_its_family_without_reaching_the_runner()
         sealed_source_dependencies: Vec::new(),
     })
     .expect("corner snapshot validates");
-    let digest = snapshot.digest();
-    let proof = ExecutionPermitIssuer::default()
-        .issue(digest)
-        .expect("permit issues")
-        .consume(digest, digest)
-        .expect("permit consumes");
-    let dispatch = snapshot
-        .authorize_dispatch(proof)
+    let dispatch = PreparedRunAuthorization::default()
+        .authorize_campaign_member(snapshot)
         .expect("snapshot authorizes");
 
     let mut controller = SimulationController::new();

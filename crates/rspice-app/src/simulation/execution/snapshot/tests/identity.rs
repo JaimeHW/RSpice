@@ -210,7 +210,7 @@ fn periodic_op_handoff_snapshot_preserves_source_basis_and_distinct_numerics() {
         inputs.tasks = vec![op, qp, ac];
         let snapshot = PreparedRunSnapshot::new(inputs).unwrap();
         let digest = snapshot.digest();
-        let issuer = crate::simulation::execution::ExecutionPermitIssuer::default();
+        let issuer = crate::simulation::execution::permit::ExecutionPermitIssuer::default();
         let proof = issuer
             .issue(digest)
             .unwrap()

@@ -13,8 +13,6 @@ mod snapshot;
 mod task_preparation;
 
 pub(in crate::simulation) use authorization::PreparedRunAuthorization;
-#[cfg(test)]
-pub(in crate::simulation) use permit::ExecutionPermitIssuer;
 pub(crate) use rspice_simulation::preparation::{PreparationError, PreparationStage};
 pub(in crate::simulation) use snapshot::{
     AuthorizedRunDispatch, AuthorizedTaskDispatch, ExecutionTargetCapabilities,

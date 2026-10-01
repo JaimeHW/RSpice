@@ -14,7 +14,7 @@ use rspice_core::NoAbort;
 use crate::product::ProcessCorner;
 use crate::product::{ContentDigest, ObjectRevision, SimulationPlanId};
 use crate::simulation::execution::{
-    ExecutionPermitIssuer, ExecutionTargetCapabilities, PreparedRunSnapshot, PreparedTask,
+    ExecutionTargetCapabilities, PreparedRunAuthorization, PreparedRunSnapshot, PreparedTask,
     RunSourceReceipt, SavePolicy, SnapshotParts, TouchstoneExportPolicy,
 };
 use crate::simulation::multi_run::AnalysisSpec;
@@ -219,16 +219,7 @@ pub(in crate::simulation) fn run_declaration(
     };
 
     let snapshot = PreparedRunSnapshot::new(parts).map_err(|error| error.to_string())?;
-    let digest = snapshot.digest();
-    let permit = ExecutionPermitIssuer::default()
-        .issue(digest)
-        .map_err(|error| error.to_string())?;
-    let proof = permit
-        .consume(digest, digest)
-        .map_err(|error| error.to_string())?;
-    let dispatch = snapshot
-        .authorize_dispatch(proof)
-        .map_err(|error| error.to_string())?;
+    let dispatch = PreparedRunAuthorization::default().authorize_campaign_member(snapshot)?;
 
     // Points are retained through the controller's own conversion. A hand-built
     // result would decide for itself what evidence a point keeps, and the

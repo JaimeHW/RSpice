@@ -1538,7 +1538,7 @@ fn process_and_voltage_axes_change_the_authorized_op_execution_contract() {
     );
 
     let digest = snapshot.digest();
-    let permit = crate::simulation::execution::ExecutionPermitIssuer::default()
+    let permit = crate::simulation::execution::permit::ExecutionPermitIssuer::default()
         .issue(digest)
         .expect("permit");
     let proof = permit.consume(digest, digest).expect("consume permit");
@@ -1691,7 +1691,7 @@ fn frozen_specification_changes_snapshot_identity_and_reaches_run_receipt() {
     assert_ne!(reference.digest(), specified.digest());
 
     let digest = specified.digest();
-    let issuer = crate::simulation::execution::ExecutionPermitIssuer::default();
+    let issuer = crate::simulation::execution::permit::ExecutionPermitIssuer::default();
     let proof = issuer
         .issue(digest)
         .expect("issue permit")
@@ -1756,7 +1756,7 @@ fn governed_specification_metadata_and_policy_are_authenticated() {
     assert_ne!(review.digest(), governed.digest());
 
     let digest = governed.digest();
-    let proof = crate::simulation::execution::ExecutionPermitIssuer::default()
+    let proof = crate::simulation::execution::permit::ExecutionPermitIssuer::default()
         .issue(digest)
         .expect("issue permit")
         .consume(digest, digest)
@@ -1784,7 +1784,7 @@ fn governed_specification_metadata_and_policy_are_authenticated() {
 fn authorized_tasks_own_the_exact_snapshot_netlist_after_permit_consumption() {
     let snapshot = PreparedRunSnapshot::new(parts()).expect("prepared snapshot");
     let digest = snapshot.digest();
-    let issuer = crate::simulation::execution::ExecutionPermitIssuer::default();
+    let issuer = crate::simulation::execution::permit::ExecutionPermitIssuer::default();
     let permit = issuer.issue(digest).expect("issue permit");
     let proof = permit
         .consume(digest, digest)
@@ -1829,7 +1829,7 @@ fn authorization_preserves_exact_task_graph_and_source_revision() {
     ));
     let snapshot = PreparedRunSnapshot::new(frozen).expect("prepared graph");
     let digest = snapshot.digest();
-    let issuer = crate::simulation::execution::ExecutionPermitIssuer::default();
+    let issuer = crate::simulation::execution::permit::ExecutionPermitIssuer::default();
     let proof = issuer
         .issue(digest)
         .expect("issue permit")

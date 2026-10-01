@@ -25,7 +25,7 @@ fn definition(name: &str, card: &str) -> SpecificationDefinition {
 
 #[test]
 fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
-    use crate::simulation::execution::ExecutionPermitIssuer;
+    use crate::simulation::execution::PreparedRunAuthorization;
     use crate::state::workspace::MeasurementReferenceSource;
     let mut state = super::tests::runnable_state();
     let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
@@ -100,13 +100,11 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
     );
 
     // The original snapshot still executes its captured table after editing.
-    let proof = ExecutionPermitIssuer::default()
-        .issue(digest)
-        .unwrap()
-        .consume(digest, digest)
+    let dispatch = PreparedRunAuthorization::default()
+        .authorize_campaign_member(snapshot)
         .unwrap();
     let mut measured = false;
-    for task in snapshot.authorize_dispatch(proof).unwrap().into_tasks() {
+    for task in dispatch.into_tasks() {
         let (queued, netlist, _, references, _, environment) = task
             .resolve_dependency_artifacts(&HashMap::new())
             .unwrap()

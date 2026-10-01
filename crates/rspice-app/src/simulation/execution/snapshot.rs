@@ -1453,7 +1453,7 @@ impl PreparedRunSnapshot {
 
     /// Convert canonical inputs into runner-visible task objects only after a
     /// successful one-use permit CAS for this exact snapshot digest.
-    pub(in crate::simulation) fn authorize_dispatch(
+    pub(super) fn authorize_dispatch(
         self,
         proof: ConsumedExecutionPermit,
     ) -> Result<AuthorizedRunDispatch, PreparationError> {

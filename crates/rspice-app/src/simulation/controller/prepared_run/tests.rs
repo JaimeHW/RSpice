@@ -1869,14 +1869,8 @@ fn the_authorized_run_receipt_seals_the_decks_hierarchy_map() {
         .collect::<Vec<_>>();
     assert_eq!(emitted.len(), 2, "{emitted:?}");
 
-    let digest = snapshot.digest();
-    let proof = crate::simulation::execution::ExecutionPermitIssuer::default()
-        .issue(digest)
-        .expect("a prepared snapshot may be permitted")
-        .consume(digest, digest)
-        .expect("the permit is consumed once");
-    let receipt = snapshot
-        .authorize_dispatch(proof)
+    let receipt = crate::simulation::execution::PreparedRunAuthorization::default()
+        .authorize_campaign_member(snapshot)
         .expect("the permitted snapshot authorizes")
         .prepared_run_receipt(crate::state::AnalysisResultSourceDomain::SimulationPlan)
         .expect("an authorized run states what it ran against");
