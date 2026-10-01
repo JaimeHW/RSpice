@@ -8,7 +8,7 @@ use std::sync::Arc;
 use egui::Ui;
 use rspice_results::network_matrix::{NetworkLayout, channel_label, channel_reference, resolve};
 
-use super::{AnalysisPresentationKey, AppState, ResultSheetTable, SheetContext, well_hint};
+use super::{AnalysisPresentationKey, AppState, SheetContext, well_hint};
 use crate::state::{AnalysisResult, AnalysisType};
 
 #[derive(Debug, Clone)]
@@ -407,57 +407,6 @@ fn matrix_csv(
     rspice_formats::result_csv::encode_network_matrix_csv(&table)
 }
 
-fn exact_table(
-    matrix: &NetworkLayout,
-    analysis: &AnalysisResult,
-    block_index: usize,
-    sample: usize,
-) -> ResultSheetTable {
-    let table = matrix
-        .exact_table(analysis, block_index, sample)
-        .expect("resolved complex coefficient sample");
-    ResultSheetTable {
-        title: table.title,
-        columns: table.columns,
-        rows: table.rows,
-    }
-}
-
-pub(crate) fn hardcopy_tables(
-    analysis: &AnalysisResult,
-) -> Result<Vec<ResultSheetTable>, &'static str> {
-    if !structure_is_renderable(analysis) {
-        return Err("requires a complete finite network matrix");
-    }
-    let matrix = resolve(analysis).ok_or("requires a complete finite network matrix")?;
-    // Check before allocating formatted strings. The hardcopy worker transports
-    // at most 64 MiB, and report tables themselves permit at most 100,000 rows.
-    let rows = matrix.blocks().iter().try_fold(0usize, |total, block| {
-        total.checked_add(
-            block
-                .cells()
-                .len()
-                .checked_mul(analysis.waveforms[block.cells()[0]].x.len())?,
-        )
-    });
-    if rows.is_none_or(|rows| rows > 100_000) {
-        return Err(
-            "network matrix report exceeds 100,000 coefficient rows; export the result waveforms or copy an individual matrix instead",
-        );
-    }
-    let mut tables = Vec::new();
-    for (index, block) in matrix.blocks().iter().enumerate() {
-        let mut table = exact_table(&matrix, analysis, index, 0);
-        for sample in 1..analysis.waveforms[block.cells()[0]].x.len() {
-            table
-                .rows
-                .extend(exact_table(&matrix, analysis, index, sample).rows);
-        }
-        tables.push(table);
-    }
-    Ok(tables)
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -511,7 +460,7 @@ pub(crate) mod tests {
             let matrix = resolve(&analysis).unwrap();
             let csv = matrix_csv(&matrix, &analysis, 0, 1);
             assert!(csv.contains("2.00000000000000000e6"));
-            let tables = hardcopy_tables(&analysis).unwrap();
+            let tables = rspice_results::network_matrix::report_tables(&analysis).unwrap();
             assert_eq!(tables.len(), 1);
             assert_eq!(tables[0].rows.len(), 2 * matrix.references().len().pow(2));
             assert_eq!(
@@ -595,7 +544,7 @@ pub(crate) mod tests {
     fn exact_export_round_trips_complex_components() {
         let analysis = fixture(false);
         let matrix = resolve(&analysis).unwrap();
-        let table = exact_table(&matrix, &analysis, 0, 1);
+        let table = matrix.exact_table(&analysis, 0, 1).unwrap();
         for (index, row) in table.rows.iter().enumerate() {
             let complex = analysis.waveforms[matrix.blocks()[0].cells()[index]]
                 .complex

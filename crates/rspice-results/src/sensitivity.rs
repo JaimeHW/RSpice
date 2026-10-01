@@ -20,7 +20,7 @@
 //! parameter, no design parameter — is spelled by the empty string rather than
 //! guessed from the row names.
 
-use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
+pub use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
 
 use crate::simulation_values::ComplexResultValue;
 

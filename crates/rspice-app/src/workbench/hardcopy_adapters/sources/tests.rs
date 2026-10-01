@@ -19,7 +19,7 @@ use crate::results::visualization_document::{
     ValueType, VisualizationDocument,
 };
 use crate::state::{
-    AnalysisResultFamilyMetadata, AnalysisType, ComplexResultValue, MonteCarloVariableMetadata,
+    AnalysisResultFamilyMetadata, AnalysisType, MonteCarloVariableMetadata,
     PeriodicNoiseOutputQuantity, SheetDefinition, SheetPortPolicy, SheetTemplate,
     SimulationRunLifecycle,
 };
@@ -1014,36 +1014,6 @@ fn retained_plot_scene_maps_to_platform_independent_integer_geometry() {
         first.authority().content_digest(),
         digest,
         "the publication digest also binds the resolved physical semantics"
-    );
-}
-
-#[test]
-fn viewer_partition_covers_every_results_family() {
-    let curve_viewers = [
-        ResultViewer::Waves,
-        ResultViewer::DcSweep,
-        ResultViewer::Bode,
-        ResultViewer::NoiseContrib,
-        ResultViewer::Fft,
-        ResultViewer::HarmonicBalance,
-        ResultViewer::PhaseNoise,
-        ResultViewer::Eye,
-        ResultViewer::Hist,
-        ResultViewer::Nyquist,
-        ResultViewer::Smith,
-    ];
-    let summary_viewers = [
-        ResultViewer::Op,
-        ResultViewer::Contribution,
-        ResultViewer::TransferFunction,
-        ResultViewer::Specs,
-        ResultViewer::PoleZero,
-    ];
-    assert!(curve_viewers.into_iter().all(is_curve_viewer));
-    assert!(
-        summary_viewers
-            .into_iter()
-            .all(|viewer| !is_curve_viewer(viewer))
     );
 }
 
@@ -2049,120 +2019,7 @@ fn project_visualization_hardcopy_uses_the_selected_pane_not_the_first_pane() {
     assert_eq!(selected.title, "Selected second pane");
 }
 
-#[test]
-fn typed_sensitivity_summary_preserves_unavailable_quantities_and_exact_zero() {
-    use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
-    let payload = AnalysisResultPayload::Sensitivity {
-        output: "V(out)".to_owned(),
-        result_mode: crate::state::SensitivityResultMode::Dc,
-        rows: vec![crate::state::SensitivityResultRow {
-            parameter: "gain".to_owned(),
-            raw: 0.0.into(),
-            normalized: SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput),
-        }],
-    };
-    let analysis = AnalysisResult::new(1, AnalysisType::Sensitivity, "SENS")
-        .with_result_payload(payload.clone());
-    let summary = semantic_result_summary(ResultViewer::Contribution, &analysis).unwrap();
-    assert_eq!(summary.payload, Some(payload));
-    assert_eq!(
-        summary.tables[0].rows,
-        vec![vec![
-            "gain".to_owned(),
-            exact_number(0.0),
-            "Unavailable (zero-output)".to_owned()
-        ]]
-    );
-}
-
-#[test]
-fn typed_pole_zero_summary_preserves_native_payload_and_exact_values() {
-    let payload = AnalysisResultPayload::PoleZero {
-        poles: vec![ComplexResultValue {
-            real: -1.0,
-            imaginary: 2.0,
-        }],
-        zeros: vec![ComplexResultValue {
-            real: -3.0,
-            imaginary: 0.0,
-        }],
-        pole_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
-        zero_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
-        gain: Some(4.0),
-    };
-    let analysis =
-        AnalysisResult::new(3, AnalysisType::PoleZero, "PZ").with_result_payload(payload.clone());
-    let summary = semantic_result_summary(ResultViewer::PoleZero, &analysis).unwrap();
-    assert_eq!(summary.viewer, ResultViewer::PoleZero);
-    assert_eq!(summary.payload, Some(payload));
-    assert_eq!(summary.tables[0].rows.len(), 2);
-    assert_eq!(summary.tables[0].rows[0][1], exact_number(-1.0));
-    assert_eq!(summary.tables[0].rows[0][2], exact_number(2.0));
-}
-
-#[test]
-fn typed_pstb_table_summary_preserves_complete_modes_and_global_evidence() {
-    let certificate = crate::state::FloquetSpectrumCertificateEvidence {
-        problem_order: 1,
-        max_backward_error: 0.0,
-        qualification_tolerance:
-            crate::state::FloquetSpectrumCertificateEvidence::canonical_qualification_tolerance(1)
-                .unwrap(),
-    };
-    let payload = AnalysisResultPayload::Pstb {
-        period_s: Some(1.0),
-        fundamental_frequency_hz: Some(1.0),
-        stability_threshold: Some(1.0),
-        probe_instance: Some("LPROBE".to_owned()),
-        detect_subharmonics: Some(false),
-        modes: vec![crate::state::PstbFloquetModeEvidence {
-            multiplier: ComplexResultValue {
-                real: 0.5,
-                imaginary: 0.0,
-            },
-            exponent: ComplexResultValue {
-                real: 0.5_f64.ln(),
-                imaginary: 0.0,
-            },
-            probe_participation: 0.25,
-            is_unstable: false,
-            is_trivial: false,
-            subharmonic_order: None,
-        }],
-        floquet_evidence: crate::state::FloquetSpectrumEvidence::Qualified { certificate },
-        orbit_kind: crate::state::FloquetOrbitKindEvidence::Driven,
-        trivial_multiplier_index: None,
-        stability_verdict: crate::state::FloquetStabilityVerdictEvidence::Stable,
-        stability_classification: crate::state::PstbStabilityClassificationEvidence::Stable,
-        min_stability_margin_db: Some(-20.0 * 0.5_f64.log10()),
-        max_multiplier_magnitude: Some(0.5),
-        num_unstable: Some(0),
-        subharmonics: Vec::new(),
-        converged: Some(true),
-        iterations: Some(0),
-    };
-    let analysis =
-        AnalysisResult::new(4, AnalysisType::Pstb, "PSTB").with_result_payload(payload.clone());
-
-    let summary = semantic_result_summary(ResultViewer::Table, &analysis).unwrap();
-
-    assert_eq!(summary.viewer, ResultViewer::Table);
-    assert_eq!(summary.payload, Some(payload));
-    assert_eq!(summary.tables.len(), 2);
-    assert!(summary.tables[0].title.contains("global metrics"));
-    assert!(
-        summary.tables[0]
-            .rows
-            .iter()
-            .any(|row| { row[0] == "Certificate problem order" && row[1] == "1" })
-    );
-    assert_eq!(summary.tables[1].rows.len(), 1);
-    assert_eq!(summary.tables[1].rows[0][1], exact_number(0.5));
-    assert_eq!(summary.tables[1].rows[0][5], exact_number(0.25));
-}
-
 mod app_resolution;
-mod contribution;
 
 #[test]
 fn qpnoise_result_noise_figure_export_preserves_signed_output_frequencies() {

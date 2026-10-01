@@ -1059,21 +1059,3 @@ pub(super) fn stable_quick_trace_id(viewer: ResultViewer, index: usize, identity
         .expect("SHA-256 prefix has fixed length");
     u64::from_be_bytes(bytes)
 }
-
-pub(super) const fn is_curve_viewer(viewer: ResultViewer) -> bool {
-    matches!(
-        viewer,
-        ResultViewer::Waves
-            | ResultViewer::DcSweep
-            | ResultViewer::Bode
-            | ResultViewer::NoiseContrib
-            | ResultViewer::Fft
-            | ResultViewer::HarmonicBalance
-            | ResultViewer::PhaseNoise
-            | ResultViewer::Eye
-            | ResultViewer::Hist
-            | ResultViewer::Nyquist
-            | ResultViewer::Smith
-            | ResultViewer::Polar
-    )
-}

@@ -7,6 +7,7 @@ mod geometry;
 mod mapping;
 mod plots;
 mod reports;
+mod result_summary;
 mod schematic;
 mod semantic;
 
@@ -26,6 +27,7 @@ pub use geometry::{
 use mapping::default_print_mapping;
 pub use plots::{resolve_plot_source, resolve_visualization_pane_source};
 pub use reports::{ReportHardcopySource, resolve_report_source};
+pub use result_summary::{is_curve_viewer, semantic_result_summary};
 use rspice_app_types::product::ContentDigest;
 use rspice_design::schematic::component::Component;
 use rspice_design::symbol::{SymbolDocument, SymbolShape};

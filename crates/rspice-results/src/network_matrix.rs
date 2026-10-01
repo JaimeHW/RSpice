@@ -358,6 +358,47 @@ impl NetworkLayout {
         })
     }
 }
+/// Format every retained matrix sample after validation and a bounded row-count check.
+pub fn report_tables<W: AsRef<RetainedWaveform>>(
+    analysis: &AnalysisResult<W>,
+) -> Result<Vec<NetworkMatrixTable>, &'static str> {
+    let matrix = resolve(analysis).ok_or("requires a complete finite network matrix")?;
+    if !matrix.samples_are_finite_and_aligned(analysis) {
+        return Err("requires a complete finite network matrix");
+    }
+    // Check before allocating formatted strings. The hardcopy worker transports
+    // at most 64 MiB, and report tables themselves permit at most 100,000 rows.
+    let rows = matrix.blocks().iter().try_fold(0usize, |total, block| {
+        total.checked_add(
+            block
+                .cells()
+                .len()
+                .checked_mul(analysis.waveforms[block.cells()[0]].as_ref().x.len())?,
+        )
+    });
+    if rows.is_none_or(|rows| rows > 100_000) {
+        return Err(
+            "network matrix report exceeds 100,000 coefficient rows; export the result waveforms or copy an individual matrix instead",
+        );
+    }
+    let mut tables = Vec::new();
+    for (index, block) in matrix.blocks().iter().enumerate() {
+        let mut table = matrix
+            .exact_table(analysis, index, 0)
+            .expect("resolved complex coefficient sample");
+        for sample in 1..analysis.waveforms[block.cells()[0]].as_ref().x.len() {
+            table.rows.extend(
+                matrix
+                    .exact_table(analysis, index, sample)
+                    .expect("resolved complex coefficient sample")
+                    .rows,
+            );
+        }
+        tables.push(table);
+    }
+    Ok(tables)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
