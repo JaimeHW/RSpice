@@ -23,6 +23,25 @@ pub struct ProjectWaveformData {
 }
 
 impl ProjectWaveformData {
+    pub fn from_waveform(waveform: &RetainedWaveform, color: String, visible: bool) -> Self {
+        Self {
+            name: waveform.name.clone(),
+            x: waveform.x.clone(),
+            y: waveform.y.clone(),
+            color,
+            visible,
+            unit: waveform.unit.clone(),
+            complex: waveform
+                .complex
+                .as_ref()
+                .map(|complex| ProjectComplexWaveformComponents {
+                    source_name: complex.source_name.clone(),
+                    real: complex.real.clone(),
+                    imag: complex.imag.clone(),
+                }),
+        }
+    }
+
     pub fn into_waveform(self) -> RetainedWaveform {
         let mut waveform = RetainedWaveform::new(self.name, self.x, self.y);
         waveform.unit = self.unit;

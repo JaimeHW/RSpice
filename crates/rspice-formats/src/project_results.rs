@@ -52,7 +52,7 @@ pub use codec::*;
 
 mod executed_deck;
 mod snapshot;
-pub use snapshot::ProjectSimulationResults;
+pub use snapshot::{ProjectSimulationResults, RestoredProjectSimulationResults};
 mod legacy_digests;
 mod legacy_evidence;
 pub use legacy_evidence::validate_result_fields_for_source_schema;

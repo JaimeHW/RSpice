@@ -16,6 +16,22 @@ pub struct ProjectSimulationResults {
     content: Arc<SnapshotContent>,
 }
 
+/// Portable retained values restored from a validated project result document.
+/// Host selection repair and disposable display caches remain with the caller.
+#[non_exhaustive]
+pub struct RestoredProjectSimulationResults<A> {
+    pub runs: Vec<SimulationRun<A>>,
+    pub next_run_id: u64,
+    pub retained_dataset_limit: Option<usize>,
+    pub active_run_stable_id: Option<RunId>,
+    pub active_dataset_id: Option<DatasetId>,
+    pub active_analysis_sequence: Option<u64>,
+    pub overlay_dataset_ids: Vec<DatasetId>,
+    pub executed_decks: rspice_results::executed_deck::ExecutedDeckArchive,
+    pub imported_monte_carlo_checkpoints:
+        rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointLibrary,
+}
+
 #[derive(Debug, Clone, Default)]
 struct SnapshotContent {
     data: ProjectSimulationResultsData,
@@ -89,6 +105,35 @@ impl ProjectSimulationResults {
     pub fn into_validated_data(self) -> Result<ProjectSimulationResultsData, String> {
         self.validate()?;
         Ok(Arc::unwrap_or_clone(self.content).data)
+    }
+
+    /// Validate and restore portable history before any host state is replaced.
+    /// The caller decorates analyses without changing the persisted source checks.
+    pub fn restore_with<A, W: AsRef<RetainedWaveform>>(
+        self,
+        mut restore_analysis: impl FnMut(ProjectAnalysisResult) -> Result<A, String>,
+    ) -> Result<RestoredProjectSimulationResults<A>, String>
+    where
+        A: AsRef<AnalysisResult<W>> + AsMut<AnalysisResult<W>>,
+    {
+        let data = self.into_validated_data()?;
+        let executed_decks = data.executed_decks.into_archive()?;
+        let runs = data
+            .runs
+            .into_iter()
+            .map(|run| run.into_run_with(&mut restore_analysis))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(RestoredProjectSimulationResults {
+            runs,
+            next_run_id: data.next_run_id,
+            retained_dataset_limit: data.retained_dataset_limit,
+            active_run_stable_id: data.active_run_stable_id,
+            active_dataset_id: data.active_dataset_id,
+            active_analysis_sequence: data.active_analysis_sequence,
+            overlay_dataset_ids: data.overlay_dataset_ids,
+            executed_decks,
+            imported_monte_carlo_checkpoints: data.imported_monte_carlo_checkpoints,
+        })
     }
 
     /// Upgrade historical result schemas without fabricating analysis-source
