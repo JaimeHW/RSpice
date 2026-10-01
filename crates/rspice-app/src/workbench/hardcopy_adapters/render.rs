@@ -54,14 +54,13 @@ use crate::product::ContentDigest;
 #[cfg(any(test, target_arch = "wasm32"))]
 use crate::product::ObjectRevision;
 use crate::results::report_document::{FigureSizing, ReportBlockId, ReportBlockKind, TableCell};
-use crate::schematic::SymbolLibrary;
-use crate::schematic::symbols::PathCommand;
 use crate::state::{
     Component, DocumentationShapeGeometry, DrawingSheetBorderTemplate, DrawingSheetRect,
     DrawingSheetTitleBlockRotation, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId,
     DrawingSheetZoneEdges, DrawingSheetZoneGrid, DrawingSheetZoneLabels, Point as SchematicPoint,
     SchematicSheetFormat, SymbolDocument, SymbolShape, SymbolTextPlacement,
 };
+use rspice_design::symbol_artwork::{PathCommand, SymbolLibrary};
 
 const MICROMETRES_PER_INCH: u64 = 25_400;
 const POINTS_PER_INCH: f64 = 72.0;

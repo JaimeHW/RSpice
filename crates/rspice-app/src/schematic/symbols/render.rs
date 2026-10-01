@@ -7,7 +7,7 @@
 use egui::{Painter, Pos2, Shape, Stroke, Vec2};
 use std::f32::consts::PI;
 
-use super::types::{PathCommand, Symbol};
+use rspice_design::symbol_artwork::{PathCommand, Symbol};
 
 // =============================================================================
 // Baked symbols — flattened once, painted with one multiply-add per point

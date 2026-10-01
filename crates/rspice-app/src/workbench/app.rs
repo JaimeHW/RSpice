@@ -472,7 +472,7 @@ impl RSpiceApp {
             Ok(lib) => {
                 log::info!(
                     "Loaded {} default SVG component mappings from {} embedded SVG assets",
-                    lib.len(),
+                    lib.component_count(),
                     lib.asset_count()
                 );
                 Some(lib)

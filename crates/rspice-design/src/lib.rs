@@ -20,6 +20,8 @@ pub mod resolved_symbol;
 pub mod rf_ports;
 pub mod schematic;
 pub mod symbol;
+#[cfg(feature = "symbol-artwork")]
+pub mod symbol_artwork;
 pub mod symbol_generation;
 pub mod symbol_resolver;
 

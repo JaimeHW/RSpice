@@ -1,14 +1,10 @@
 //! Symbol Library - Commercial-grade SVG symbol management for schematic components
 //!
-//! This module provides SVG path parsing, symbol lookup, rendering, rotation
-//! transforms, and pin position definitions for wire attachment.
+//! Interactive painting and caches over the canonical design artwork.
 
-mod error;
 mod library;
-mod parser;
 mod render;
-mod types;
 
 pub use self::library::SymbolLibrary;
 pub use self::render::{draw_baked, draw_symbol, draw_symbol_with_dimensions};
-pub use self::types::{PathCommand, Symbol};
+pub use rspice_design::symbol_artwork::Symbol;

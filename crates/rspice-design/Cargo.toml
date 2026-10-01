@@ -12,6 +12,7 @@ rust-version.workspace = true
 workspace = true
 
 [features]
+symbol-artwork = ["dep:usvg"]
 generated-veriloga-catalog = ["rspice-core/veriloga-builtins"]
 # Enabled by the app dev-dependency to retain parser/cache regression coverage.
 symbol-test-observation = []
@@ -31,6 +32,7 @@ serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 unicode-normalization.workspace = true
+usvg = { workspace = true, optional = true }
 web-time.workspace = true
 uuid = { workspace = true, features = ["v5"] }
 

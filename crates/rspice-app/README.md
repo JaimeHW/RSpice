@@ -21,7 +21,7 @@ and the central engineering surface. Its seven canonical workspaces are:
   orthogonal wire routing with grid and magnetic snap, net labels and
   junctions, selection with net highlighting, rotation/mirroring, copy/
   paste, and an undo/redo history. Symbols are SVG, embedded into the
-  binary at build time from `assets/component_symbols/`.
+  binary through `rspice-design` from `../rspice-design/assets/component_symbols/`.
 - **Simulate**: analysis setup forms.
 - **Results**: immutable run/dataset selection and precision result viewers.
 - **Verify**: checks, specifications, measurements, yield, and SOA

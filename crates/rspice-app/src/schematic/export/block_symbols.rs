@@ -2,8 +2,8 @@
 
 use std::fmt::Write;
 
-use crate::schematic::symbols::{PathCommand, Symbol};
 use crate::state::Component;
+use rspice_design::symbol_artwork::{PathCommand, Symbol};
 
 use super::SvgExportConfig;
 
