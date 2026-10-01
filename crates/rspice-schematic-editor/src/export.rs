@@ -3,29 +3,27 @@
 //! Export schematic diagrams to SVG format for documentation and printing.
 //! Produces clean, scalable vector graphics suitable for professional
 //! circuit documentation.
-//!
-//! Matches Cadence Virtuoso export quality for commercial-grade output.
 
 use std::fmt::Write;
 
-use crate::state::{
-    Component, ComponentType, ResolvedCellSymbol, ResolvedSymbolSource, SchematicState,
-    SymbolResolver,
+use rspice_design::{
+    resolved_symbol::{ResolvedCellSymbol, ResolvedSymbolSource},
+    schematic::{
+        component::Component, component_display::SchematicParameterLabelVisibility,
+        component_type::ComponentType, document::SchematicDocument,
+    },
+    symbol_resolver::SymbolResolver,
 };
 
 mod block_symbols;
 mod config;
 mod geometry;
 
-#[cfg(test)]
-pub use self::config::SvgColor;
-pub use self::config::SvgExportConfig;
+pub use self::config::{SvgColor, SvgColorParseError, SvgExportConfig};
 
 use self::block_symbols::{
     catalog_asset_world_bounds, write_artwork_lead_extensions, write_catalog_asset_symbol,
 };
-#[cfg(test)]
-use self::geometry::calculate_bounds;
 use self::geometry::{
     estimated_text_width, include_bus_bounds, include_design_note_bounds,
     include_documentation_shape_bounds, include_junction_bounds, write_bus, write_bus_tap,
@@ -67,44 +65,34 @@ impl Default for SvgDesignContext<'static> {
 /// because a test that exercises a convenience wrapper production never takes
 /// is still exercising the same renderer underneath.
 #[cfg(test)]
-pub fn export_to_svg(state: &SchematicState, config: &SvgExportConfig) -> String {
-    export_to_svg_with_resolved_symbol_entries(state, config, &[], SvgDesignContext::default())
+pub fn export_to_svg(document: &SchematicDocument, config: &SvgExportConfig) -> String {
+    export_to_svg_with_resolved_symbol_entries(document, config, &[], SvgDesignContext::default())
 }
 
 /// Export with a resolver but a default design context. Test-only; see
 /// [`export_to_svg`].
 #[cfg(test)]
-pub fn export_to_svg_with_symbol_resolver(
-    state: &SchematicState,
+fn export_to_svg_with_symbol_resolver<S: AsRef<SchematicDocument>>(
+    document: &SchematicDocument,
     config: &SvgExportConfig,
-    resolver: &SymbolResolver<'_>,
+    resolver: &SymbolResolver<'_, S>,
 ) -> String {
-    let entries: Vec<ResolvedSymbolExportEntry> = state
-        .document()
-        .components
-        .iter()
-        .filter_map(|component| {
-            let binding = component.library_cell.as_ref()?;
-            let resolved = resolver
-                .resolve_binding(binding)
-                .filter(|symbol| symbol.source() == ResolvedSymbolSource::Authored)?;
-            Some(ResolvedSymbolExportEntry {
-                component_id: component.id,
-                symbol: resolved,
-            })
-        })
-        .collect();
-    export_to_svg_with_resolved_symbol_entries(state, config, &entries, SvgDesignContext::default())
+    export_to_svg_with_symbol_resolver_and_context(
+        document,
+        config,
+        resolver,
+        SvgDesignContext::default(),
+    )
 }
 
-pub fn export_to_svg_with_symbol_resolver_and_context(
-    state: &SchematicState,
+/// Render an immutable schematic with its authored symbol bindings and view path.
+pub fn export_to_svg_with_symbol_resolver_and_context<S: AsRef<SchematicDocument>>(
+    document: &SchematicDocument,
     config: &SvgExportConfig,
-    resolver: &SymbolResolver<'_>,
+    resolver: &SymbolResolver<'_, S>,
     context: SvgDesignContext<'_>,
 ) -> String {
-    let entries: Vec<ResolvedSymbolExportEntry> = state
-        .document()
+    let entries: Vec<ResolvedSymbolExportEntry> = document
         .components
         .iter()
         .filter_map(|component| {
@@ -118,14 +106,14 @@ pub fn export_to_svg_with_symbol_resolver_and_context(
             })
         })
         .collect();
-    export_to_svg_with_resolved_symbol_entries(state, config, &entries, context)
+    export_to_svg_with_resolved_symbol_entries(document, config, &entries, context)
 }
 
 /// Export from pre-resolved symbols with a default design context. Test-only;
 /// see [`export_to_svg`].
 #[cfg(test)]
 pub fn export_to_svg_with_resolved_symbols(
-    state: &SchematicState,
+    document: &SchematicDocument,
     config: &SvgExportConfig,
     resolved_symbols: &[(u64, ResolvedCellSymbol)],
 ) -> String {
@@ -136,23 +124,28 @@ pub fn export_to_svg_with_resolved_symbols(
             symbol: symbol.clone(),
         })
         .collect();
-    export_to_svg_with_resolved_symbol_entries(state, config, &entries, SvgDesignContext::default())
+    export_to_svg_with_resolved_symbol_entries(
+        document,
+        config,
+        &entries,
+        SvgDesignContext::default(),
+    )
 }
 
 fn export_to_svg_with_resolved_symbol_entries(
-    state: &SchematicState,
+    document: &SchematicDocument,
     config: &SvgExportConfig,
     resolved_symbols: &[ResolvedSymbolExportEntry],
     context: SvgDesignContext<'_>,
 ) -> String {
     let mut svg = String::new();
-    let symbol_library = crate::schematic::SymbolLibrary::load_embedded()
+    let symbol_library = crate::SymbolLibrary::load_embedded()
         .map_err(|error| log::error!("Cannot load embedded symbols for SVG export: {error}"))
         .ok();
 
     // Calculate bounds
     let (min_x, min_y, max_x, max_y) = calculate_bounds_with_resolved_symbols(
-        state,
+        document,
         config,
         resolved_symbols,
         symbol_library.as_ref(),
@@ -199,26 +192,26 @@ fn export_to_svg_with_resolved_symbol_entries(
     }
 
     // Export wires
-    for wire in &state.document().wires {
+    for wire in &document.wires {
         write_wire(&mut svg, wire, config);
     }
 
-    for bus in &state.document().buses {
+    for bus in &document.buses {
         write_bus(&mut svg, bus, config);
     }
 
-    for tap in &state.document().bus_taps {
+    for tap in &document.bus_taps {
         write_bus_tap(&mut svg, tap, config);
     }
 
     // Junction dots encode explicit connectivity and are document content,
     // not a transient canvas decoration.
-    for junction in &state.document().junctions {
+    for junction in &document.junctions {
         write_junction(&mut svg, junction, config);
     }
 
     // Export components
-    for component in &state.document().components {
+    for component in &document.components {
         write_component(
             &mut svg,
             component,
@@ -228,11 +221,11 @@ fn export_to_svg_with_resolved_symbol_entries(
         );
     }
 
-    for note in &state.document().design_notes {
-        write_design_note(&mut svg, state, note, config, context.view_path);
+    for note in &document.design_notes {
+        write_design_note(&mut svg, document, note, config, context.view_path);
     }
 
-    for shape in &state.document().documentation_shapes {
+    for shape in &document.documentation_shapes {
         write_documentation_shape(&mut svg, shape, config);
     }
 
@@ -243,10 +236,10 @@ fn export_to_svg_with_resolved_symbol_entries(
 }
 
 fn calculate_bounds_with_resolved_symbols(
-    state: &SchematicState,
+    document: &SchematicDocument,
     config: &SvgExportConfig,
     resolved_symbols: &[ResolvedSymbolExportEntry],
-    symbol_library: Option<&crate::schematic::SymbolLibrary>,
+    symbol_library: Option<&crate::SymbolLibrary>,
     context: SvgDesignContext<'_>,
 ) -> (f64, f64, f64, f64) {
     let mut min_x = f64::MAX;
@@ -254,7 +247,7 @@ fn calculate_bounds_with_resolved_symbols(
     let mut max_x = f64::MIN;
     let mut max_y = f64::MIN;
 
-    for component in &state.document().components {
+    for component in &document.components {
         let (comp_min_x, comp_min_y, comp_max_x, comp_max_y) = component_export_world_bounds(
             component,
             find_resolved_symbol(component, resolved_symbols),
@@ -267,7 +260,7 @@ fn calculate_bounds_with_resolved_symbols(
         max_y = max_y.max(comp_max_y * config.grid_size);
     }
 
-    for wire in &state.document().wires {
+    for wire in &document.wires {
         for point in &wire.points {
             let x = point.x as f64 * config.grid_size;
             let y = point.y as f64 * config.grid_size;
@@ -279,15 +272,15 @@ fn calculate_bounds_with_resolved_symbols(
     }
 
     include_bus_bounds(
-        state, config, &mut min_x, &mut min_y, &mut max_x, &mut max_y,
+        document, config, &mut min_x, &mut min_y, &mut max_x, &mut max_y,
     );
 
     include_junction_bounds(
-        state, config, &mut min_x, &mut min_y, &mut max_x, &mut max_y,
+        document, config, &mut min_x, &mut min_y, &mut max_x, &mut max_y,
     );
 
     include_design_note_bounds(
-        state,
+        document,
         config,
         context.view_path,
         &mut min_x,
@@ -297,7 +290,7 @@ fn calculate_bounds_with_resolved_symbols(
     );
 
     include_documentation_shape_bounds(
-        state, config, &mut min_x, &mut min_y, &mut max_x, &mut max_y,
+        document, config, &mut min_x, &mut min_y, &mut max_x, &mut max_y,
     );
 
     if min_x == f64::MAX {
@@ -310,7 +303,7 @@ fn calculate_bounds_with_resolved_symbols(
 fn component_export_world_bounds(
     component: &Component,
     resolved_symbol: Option<&ResolvedCellSymbol>,
-    symbol_library: Option<&crate::schematic::SymbolLibrary>,
+    symbol_library: Option<&crate::SymbolLibrary>,
     config: &SvgExportConfig,
 ) -> (f64, f64, f64, f64) {
     if component.kind == ComponentType::CellInstance {
@@ -378,9 +371,9 @@ fn component_export_world_bounds(
             .port_spec()
             .map(|port| port.direction)
             .unwrap_or_default();
-        for segment in crate::schematic::port_overlay::direction_segments(direction) {
+        for segment in crate::port_overlay::direction_segments(direction) {
             for point in [segment.start, segment.end] {
-                let point = crate::schematic::port_overlay::transform_point(
+                let point = crate::port_overlay::transform_point(
                     point,
                     adjusted_rotation,
                     component.mirror_h,
@@ -424,8 +417,8 @@ fn symbol_resolution_error_world_bounds(
 
 fn compatible_builtin_xspice_symbol<'a>(
     component: &Component,
-    library: &'a crate::schematic::SymbolLibrary,
-) -> Option<(&'a crate::schematic::symbols::Symbol, f32, f32)> {
+    library: &'a crate::SymbolLibrary,
+) -> Option<(&'a crate::symbols::Symbol, f32, f32)> {
     let contract = component.library_cell.as_ref()?.builtin_xspice.as_ref()?;
     let (width, height) = component.artwork_dimensions();
     let offsets = component.artwork_pin_offsets();
@@ -447,7 +440,7 @@ fn write_component(
     component: &Component,
     config: &SvgExportConfig,
     resolved_symbol: Option<&ResolvedCellSymbol>,
-    symbol_library: Option<&crate::schematic::SymbolLibrary>,
+    symbol_library: Option<&crate::SymbolLibrary>,
 ) {
     let cx = component.pos.x as f64 * config.grid_size;
     let cy = component.pos.y as f64 * config.grid_size;
@@ -525,7 +518,7 @@ fn write_component(
         // Component label
         if component
             .display_mode
-            .show_name(crate::state::SchematicParameterLabelVisibility::NamesAndValues)
+            .show_name(SchematicParameterLabelVisibility::NamesAndValues)
         {
             writeln!(
                 svg,
@@ -539,7 +532,7 @@ fn write_component(
 
         if component
             .display_mode
-            .show_value(crate::state::SchematicParameterLabelVisibility::NamesAndValues)
+            .show_value(SchematicParameterLabelVisibility::NamesAndValues)
             && !component.value.is_empty()
         {
             writeln!(
@@ -560,13 +553,13 @@ fn write_port_direction_overlay(
     svg: &mut String,
     component: &Component,
     rotation_degrees: i32,
-    direction: crate::state::PortDirection,
+    direction: rspice_design_model::port::PortDirection,
     config: &SvgExportConfig,
 ) {
     let cx = f64::from(component.pos.x) * config.grid_size;
     let cy = f64::from(component.pos.y) * config.grid_size;
     let point = |point| {
-        let point = crate::schematic::port_overlay::transform_point(
+        let point = crate::port_overlay::transform_point(
             point,
             rotation_degrees,
             component.mirror_h,
@@ -589,7 +582,7 @@ fn write_port_direction_overlay(
         .map_or_else(String::new, |_| {
             format!(" style=\"stroke-width:{}\"", config.wire_stroke_width * 0.6)
         });
-    for segment in crate::schematic::port_overlay::direction_segments(direction) {
+    for segment in crate::port_overlay::direction_segments(direction) {
         let start = point(segment.start);
         let end = point(segment.end);
         writeln!(
@@ -667,21 +660,22 @@ mod tests {
 
     #[test]
     fn note_only_svg_is_bounded_escaped_multiline_and_semantic() {
-        let mut schematic = SchematicState::default();
+        let mut schematic = Schematic::default();
         schematic.document_mut_for_test().design_notes.push(
-            crate::state::DesignNote::new(
+            rspice_design::schematic::design_note::DesignNote::new(
                 19,
-                crate::state::Point::new(30, 40),
-                crate::state::DesignNoteKind::ReviewNote,
+                rspice_design_model::Point::new(30, 40),
+                rspice_design::schematic::design_note::DesignNoteKind::ReviewNote,
                 "Check A < B & C\nSecond line",
             )
             .unwrap(),
         );
 
-        let svg = export_to_svg(&schematic, &SvgExportConfig::default());
+        let svg = export_to_svg(schematic.document(), &SvgExportConfig::default());
         assert!(svg.contains("design-note-review-note"));
         assert!(svg.contains("data-object-id=\"19\""));
         assert!(svg.contains("data-review-id=\"NOTE-0019\""));
+        assert!(svg.contains("data-review-state=\"open\""));
         assert!(svg.contains("Check A &lt; B &amp; C"));
         assert!(svg.contains("<tspan"));
         assert!(svg.contains("Second line"));
@@ -691,19 +685,19 @@ mod tests {
 
     #[test]
     fn property_display_export_uses_the_explicit_active_view_context() {
-        let mut schematic = SchematicState::default();
+        let mut schematic = Schematic::default();
         schematic.document_mut_for_test().design_notes.push(
-            crate::state::DesignNote::new(
+            rspice_design::schematic::design_note::DesignNote::new(
                 20,
-                crate::state::Point::new(5, 6),
-                crate::state::DesignNoteKind::PropertyDisplay,
+                rspice_design_model::Point::new(5, 6),
+                rspice_design::schematic::design_note::DesignNoteKind::PropertyDisplay,
                 "${view} / ${component_count} components",
             )
             .unwrap(),
         );
 
         let svg = export_to_svg_with_resolved_symbol_entries(
-            &schematic,
+            schematic.document(),
             &SvgExportConfig::default(),
             &[],
             SvgDesignContext {
@@ -714,18 +708,37 @@ mod tests {
         assert!(svg.contains("user/top/schematic / 0 components"));
         assert!(!svg.contains(">schematic / 0 components"));
     }
-    use crate::state::{
-        Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Cell, DocumentationShape,
-        DocumentationShapeGeometry, Junction, Library, LibraryCellInstance, LibraryManager, Point,
-        PortDirection, PortSpec, SymbolDocument, SymbolPin, SymbolResolver, SymbolShape, View,
-        ViewType,
+    use rspice_design::{
+        library::{Cell, Library, LibraryCatalog, View, ViewType},
+        schematic::{
+            bus::{Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation},
+            component::LibraryCellInstance,
+            component_edit::ComponentPlacement,
+            documentation_shape::{DocumentationShape, DocumentationShapeGeometry},
+            net_label::Junction,
+            owned::Schematic,
+            rotation::Rotation,
+        },
+        symbol::{SymbolDocument, SymbolPin, SymbolShape},
     };
+    use rspice_design_model::{
+        Point,
+        port::{PortDirection, PortSpec},
+    };
+
+    fn placement(position: Point) -> ComponentPlacement {
+        ComponentPlacement {
+            position,
+            rotation: Rotation::R0,
+            mirror_h: false,
+        }
+    }
     use std::collections::HashMap;
 
     #[test]
     fn svg_export_uses_canonical_assets_for_every_standard_component() {
-        let library = crate::schematic::SymbolLibrary::load_embedded().expect("canonical symbols");
-        let mut schematic = SchematicState::default();
+        let library = crate::SymbolLibrary::load_embedded().expect("canonical symbols");
+        let mut schematic = Schematic::default();
         let mut expected_paths = 0;
         for (index, kind) in ComponentType::ALL.into_iter().enumerate() {
             if kind == ComponentType::CellInstance {
@@ -746,7 +759,7 @@ mod tests {
                 ));
         }
 
-        let svg = export_to_svg(&schematic, &SvgExportConfig::default());
+        let svg = export_to_svg(schematic.document(), &SvgExportConfig::default());
 
         assert!(!svg.contains("symbol-resolution-error"));
         assert_eq!(
@@ -770,22 +783,22 @@ mod tests {
         assert!(missing_library.contains("missing canonical SVG"));
         assert!(!missing_library.contains(r#"<path class="component""#));
 
-        let mut unknown_variant = SchematicState::default();
+        let mut unknown_variant = Schematic::default();
         let mut diode = Component::new(2, ComponentType::Diode, Point::origin());
         diode.symbol_variant = Some("missing-variant".to_owned());
         unknown_variant
             .document_mut_for_test()
             .components
             .push(diode);
-        let svg = export_to_svg(&unknown_variant, &SvgExportConfig::default());
+        let svg = export_to_svg(unknown_variant.document(), &SvgExportConfig::default());
         assert!(svg.contains("symbol-resolution-error"));
     }
 
     #[test]
     fn export_bounds_follow_rotated_mirrored_canonical_variant_target() {
-        let library = crate::schematic::SymbolLibrary::load_embedded().expect("canonical symbols");
+        let library = crate::SymbolLibrary::load_embedded().expect("canonical symbols");
         let mut component = Component::new(1, ComponentType::VoltageSource, Point::new(140, -35))
-            .with_rotation(crate::state::Rotation::R90)
+            .with_rotation(rspice_design::schematic::rotation::Rotation::R90)
             .with_mirror_h(true);
         component.symbol_variant = Some("battery_multi_cell".to_owned());
         let (symbol, adjusted_rotation) = library
@@ -797,7 +810,7 @@ mod tests {
             .expect("authored variant resolves");
         assert_eq!(adjusted_rotation, 90);
 
-        let mut schematic = SchematicState::default();
+        let mut schematic = Schematic::default();
         schematic.document_mut_for_test().components.push(component);
         let config = SvgExportConfig {
             grid_size: 1.0,
@@ -805,7 +818,7 @@ mod tests {
             ..SvgExportConfig::default()
         };
         let bounds = calculate_bounds_with_resolved_symbols(
-            &schematic,
+            schematic.document(),
             &config,
             &[],
             Some(&library),
@@ -832,8 +845,8 @@ mod tests {
 
     #[test]
     fn export_bounds_use_the_explicit_unresolved_cell_marker_and_diagnostic() {
-        let library = crate::schematic::SymbolLibrary::load_embedded().expect("canonical symbols");
-        let mut schematic = SchematicState::default();
+        let library = crate::SymbolLibrary::load_embedded().expect("canonical symbols");
+        let mut schematic = Schematic::default();
         schematic
             .document_mut_for_test()
             .components
@@ -855,7 +868,7 @@ mod tests {
             .expect("unresolved cell");
         let expected = symbol_resolution_error_world_bounds(component, &config, "unresolved cell");
         let bounds = calculate_bounds_with_resolved_symbols(
-            &schematic,
+            schematic.document(),
             &config,
             &[],
             Some(&library),
@@ -872,7 +885,7 @@ mod tests {
         let mut component =
             Component::new(1, ComponentType::BehavioralSource, Point::new(-400, -300));
         component.symbol_variant = Some("missing-authored-variant".to_owned());
-        let mut schematic = SchematicState::default();
+        let mut schematic = Schematic::default();
         schematic.document_mut_for_test().components.push(component);
         let config = SvgExportConfig {
             grid_size: 1.0,
@@ -885,7 +898,7 @@ mod tests {
             "missing canonical SVG",
         );
         let diagnostic = "Behavioral Source: missing canonical SVG";
-        let svg = export_to_svg(&schematic, &config);
+        let svg = export_to_svg(schematic.document(), &config);
         let width = expected.2 - expected.0;
         let height = expected.3 - expected.1;
 
@@ -911,14 +924,17 @@ mod tests {
                 direction: PortDirection::Out,
             },
         ]);
-        let mut schematic = SchematicState::default();
-        schematic.add_library_cell_component(Point::origin(), binding);
-        let libraries = LibraryManager::new();
-        let buffers = HashMap::new();
+        let mut schematic = Schematic::default();
+        schematic.add_library_cell_component(placement(Point::origin()), binding);
+        let libraries = LibraryCatalog::default();
+        let buffers: HashMap<String, Schematic> = HashMap::new();
         let resolver = SymbolResolver::new(&libraries, &buffers);
 
-        let svg =
-            export_to_svg_with_symbol_resolver(&schematic, &SvgExportConfig::default(), &resolver);
+        let svg = export_to_svg_with_symbol_resolver(
+            schematic.document(),
+            &SvgExportConfig::default(),
+            &resolver,
+        );
 
         assert!(svg.contains("symbol-resolution-error"));
         assert!(svg.contains("unresolved cell"));
@@ -932,7 +948,7 @@ mod tests {
             ..SvgExportConfig::default()
         };
         let component = Component::new(1, ComponentType::Port, Point::new(100, 80))
-            .with_rotation(crate::state::Rotation::R90)
+            .with_rotation(rspice_design::schematic::rotation::Rotation::R90)
             .with_mirror_h(true);
 
         for (direction, segment_count) in [
@@ -950,7 +966,7 @@ mod tests {
             );
         }
 
-        let library = crate::schematic::SymbolLibrary::load_embedded().expect("canonical symbols");
+        let library = crate::SymbolLibrary::load_embedded().expect("canonical symbols");
         let body = library
             .get_with_rotation_variant(ComponentType::Port, 90, None)
             .expect("canonical port body")
@@ -959,19 +975,19 @@ mod tests {
         assert!(!body.paths[0].filled);
         assert!(!body.paths[0].commands.is_empty());
 
-        let mut scalar_schematic = SchematicState::default();
+        let mut scalar_schematic = Schematic::default();
         scalar_schematic
             .document_mut_for_test()
             .components
             .push(component.clone());
-        let scalar_svg = export_to_svg(&scalar_schematic, &config);
+        let scalar_svg = export_to_svg(scalar_schematic.document(), &config);
         assert!(!scalar_svg.contains(r#"style="stroke-width:1.2""#));
 
         let mut vector = component;
         vector.value = "DATA[7:0]".to_owned();
-        let mut schematic = SchematicState::default();
+        let mut schematic = Schematic::default();
         schematic.document_mut_for_test().components.push(vector);
-        let svg = export_to_svg(&schematic, &config);
+        let svg = export_to_svg(schematic.document(), &config);
         assert!(svg.contains(r#"style="stroke-width:1.2""#));
     }
 
@@ -989,8 +1005,9 @@ mod tests {
             },
         ]);
 
-        let mut schematic = SchematicState::default();
-        let id = schematic.add_library_cell_component(Point::new(100, 100), binding.clone());
+        let mut schematic = Schematic::default();
+        let id =
+            schematic.add_library_cell_component(placement(Point::new(100, 100)), binding.clone());
         let component = schematic
             .document_mut_for_test()
             .components
@@ -1018,7 +1035,7 @@ mod tests {
             ..SymbolDocument::default()
         };
 
-        let mut libraries = LibraryManager::new();
+        let mut libraries = LibraryCatalog::default();
         let mut library = Library::new("work");
         let mut cell = Cell::new("amp");
         let mut symbol_view = View::new("symbol", ViewType::Symbol);
@@ -1036,7 +1053,7 @@ mod tests {
         .expect("authored symbol resolves");
 
         let svg = export_to_svg_with_resolved_symbols(
-            &schematic,
+            schematic.document(),
             &SvgExportConfig::default(),
             &[(id, resolved)],
         );
@@ -1072,9 +1089,9 @@ mod tests {
             direction: PortDirection::Out,
         }]);
 
-        let mut schematic = SchematicState::default();
-        let first_id =
-            schematic.add_library_cell_component(Point::new(100, 100), first_binding.clone());
+        let mut schematic = Schematic::default();
+        let first_id = schematic
+            .add_library_cell_component(placement(Point::new(100, 100)), first_binding.clone());
         schematic
             .document_mut_for_test()
             .components
@@ -1082,8 +1099,8 @@ mod tests {
             .find(|component| component.id == first_id)
             .expect("first component exists")
             .name = "XIN".to_owned();
-        let second_id =
-            schematic.add_library_cell_component(Point::new(200, 100), second_binding.clone());
+        let second_id = schematic
+            .add_library_cell_component(placement(Point::new(200, 100)), second_binding.clone());
         schematic
             .document_mut_for_test()
             .components
@@ -1103,7 +1120,7 @@ mod tests {
             }],
             ..SymbolDocument::default()
         };
-        let mut libraries = LibraryManager::new();
+        let mut libraries = LibraryCatalog::default();
         let mut library = Library::new("work");
         let mut cell = Cell::new("amp");
         let mut symbol_view = View::new("symbol", ViewType::Symbol);
@@ -1113,11 +1130,14 @@ mod tests {
         cell.add_view(symbol_view);
         library.add_cell(cell);
         libraries.add_library(library);
-        let buffers = HashMap::new();
+        let buffers: HashMap<String, Schematic> = HashMap::new();
         let resolver = SymbolResolver::new(&libraries, &buffers);
 
-        let svg =
-            export_to_svg_with_symbol_resolver(&schematic, &SvgExportConfig::default(), &resolver);
+        let svg = export_to_svg_with_symbol_resolver(
+            schematic.document(),
+            &SvgExportConfig::default(),
+            &resolver,
+        );
 
         // Each lead runs from the saved terminal all the way to the body it
         // belongs to, so neither instance exports a pin left floating.
@@ -1133,8 +1153,9 @@ mod tests {
 
     #[test]
     fn svg_export_escapes_canonical_component_labels() {
-        let mut schematic = SchematicState::default();
-        let id = schematic.add_component(ComponentType::Resistor, Point::new(10, 10));
+        let mut schematic = Schematic::default();
+        let id =
+            schematic.add_component(ComponentType::Resistor, placement(Point::new(10, 10)), None);
         let component = schematic
             .document_mut_for_test()
             .components
@@ -1144,7 +1165,7 @@ mod tests {
         component.name = "R<&>".to_owned();
         component.value = "1k & 2k".to_owned();
 
-        let svg = export_to_svg(&schematic, &SvgExportConfig::default());
+        let svg = export_to_svg(schematic.document(), &SvgExportConfig::default());
 
         assert!(svg.contains("R&lt;&amp;&gt;"));
         assert!(svg.contains("1k &amp; 2k"));
@@ -1154,12 +1175,12 @@ mod tests {
 
     #[test]
     fn svg_export_background_is_explicit_and_can_be_transparent() {
-        let schematic = SchematicState::default();
-        let dark = export_to_svg(&schematic, &SvgExportConfig::default());
+        let schematic = Schematic::default();
+        let dark = export_to_svg(schematic.document(), &SvgExportConfig::default());
         assert!(dark.contains("fill=\"#1A1A1A\""));
 
         let transparent = export_to_svg(
-            &schematic,
+            schematic.document(),
             &SvgExportConfig {
                 background_color: None,
                 ..SvgExportConfig::default()
@@ -1168,7 +1189,7 @@ mod tests {
         assert!(!transparent.contains("<rect"));
 
         let print_safe = export_to_svg(
-            &schematic,
+            schematic.document(),
             &SvgExportConfig {
                 background_color: Some(SvgColor::rgb(0xFF, 0xFF, 0xFF)),
                 ..SvgExportConfig::default()
@@ -1179,7 +1200,7 @@ mod tests {
 
     #[test]
     fn svg_export_emits_explicit_junction_and_includes_marker_extents() {
-        let mut schematic = SchematicState::default();
+        let mut schematic = Schematic::default();
         schematic
             .document_mut_for_test()
             .junctions
@@ -1189,7 +1210,7 @@ mod tests {
             ..SvgExportConfig::default()
         };
 
-        let svg = export_to_svg(&schematic, &config);
+        let svg = export_to_svg(schematic.document(), &config);
 
         assert!(svg.contains(r#".junction { fill: #00FF00; stroke: none; }"#));
         assert!(svg.contains(r#"<circle class="junction" cx="70" cy="110" r="3"/>"#));
@@ -1209,7 +1230,7 @@ mod tests {
             BusTapOrientation::Down,
         )
         .unwrap();
-        let mut schematic = SchematicState::default();
+        let mut schematic = Schematic::default();
         schematic.document_mut_for_test().buses.push(bus);
         schematic.document_mut_for_test().bus_taps.push(tap);
         let config = SvgExportConfig {
@@ -1217,8 +1238,14 @@ mod tests {
             ..SvgExportConfig::default()
         };
 
-        let svg = export_to_svg(&schematic, &config);
-        let (min_x, min_y, max_x, max_y) = calculate_bounds(&schematic, &config);
+        let svg = export_to_svg(schematic.document(), &config);
+        let (min_x, min_y, max_x, max_y) = calculate_bounds_with_resolved_symbols(
+            schematic.document(),
+            &config,
+            &[],
+            None,
+            SvgDesignContext::default(),
+        );
 
         assert_eq!(svg.matches(r#"<path class="bus""#).count(), 3);
         assert!(svg.contains(r#"<path class="bus-tap" d="M 100 0 L 100 100"/>"#));
@@ -1230,7 +1257,7 @@ mod tests {
 
     #[test]
     fn svg_export_preserves_documentation_shape_identity_layer_and_kind() {
-        let mut schematic = SchematicState::default();
+        let mut schematic = Schematic::default();
         schematic.document_mut_for_test().documentation_shapes = vec![
             DocumentationShape::new(
                 101,
@@ -1275,8 +1302,8 @@ mod tests {
             .unwrap(),
         ];
 
-        let first = export_to_svg(&schematic, &SvgExportConfig::default());
-        let second = export_to_svg(&schematic, &SvgExportConfig::default());
+        let first = export_to_svg(schematic.document(), &SvgExportConfig::default());
+        let second = export_to_svg(schematic.document(), &SvgExportConfig::default());
 
         assert_eq!(
             first, second,

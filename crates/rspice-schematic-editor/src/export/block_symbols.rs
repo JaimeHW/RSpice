@@ -2,7 +2,7 @@
 
 use std::fmt::Write;
 
-use crate::state::Component;
+use rspice_design::schematic::component::Component;
 use rspice_design::symbol_artwork::{PathCommand, Symbol};
 
 use super::SvgExportConfig;
@@ -94,7 +94,7 @@ pub(super) fn write_artwork_lead_extensions(
 fn instance_projection<'a>(
     component: &'a Component,
     config: &'a SvgExportConfig,
-) -> impl Fn(crate::state::Point) -> (f64, f64) + 'a {
+) -> impl Fn(rspice_design_model::Point) -> (f64, f64) + 'a {
     let cx = component.pos.x as f64 * config.grid_size;
     let cy = component.pos.y as f64 * config.grid_size;
     move |point| {
@@ -106,6 +106,10 @@ fn instance_projection<'a>(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "independent asset dimensions, placement and export settings"
+)]
 pub(super) fn write_catalog_asset_symbol(
     svg: &mut String,
     component: &Component,

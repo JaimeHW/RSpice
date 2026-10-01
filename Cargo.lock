@@ -5751,6 +5751,7 @@ name = "rspice-schematic-editor"
 version = "0.1.0"
 dependencies = [
  "egui",
+ "log",
  "rspice-app-types",
  "rspice-design",
  "rspice-design-model",

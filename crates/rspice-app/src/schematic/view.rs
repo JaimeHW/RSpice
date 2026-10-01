@@ -27,7 +27,7 @@ mod keyboard_navigation;
 mod mobile_controls;
 mod navigation;
 mod preview;
-pub(crate) mod resolved_symbol_render;
+pub(crate) use rspice_schematic_editor::view::resolved_symbol_render;
 mod scene;
 pub(crate) mod selection_layout;
 pub(crate) mod sheet_visibility;

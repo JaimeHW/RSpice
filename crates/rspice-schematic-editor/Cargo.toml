@@ -16,6 +16,7 @@ workspace = true
 test-support = []
 
 [dependencies]
+log.workspace = true
 egui = { version = "0.35.0", default-features = false }
 rspice-app-types.workspace = true
 rspice-design = { workspace = true, features = ["symbol-artwork"] }
@@ -24,4 +25,5 @@ rspice-ui-kit.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
+rspice-design = { workspace = true, features = ["schematic-test-fixtures"] }
 rspice-ui-kit = { workspace = true, features = ["test-support"] }

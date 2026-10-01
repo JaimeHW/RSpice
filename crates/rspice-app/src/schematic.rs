@@ -15,9 +15,8 @@
 //! - User interactions are translated to state mutations
 
 pub use rspice_schematic_editor::{ComponentPaletteEntry, SymbolLibrary, component_palette};
-pub(crate) use rspice_schematic_editor::{bus_geometry, symbols};
+pub(crate) use rspice_schematic_editor::{bus_geometry, export, symbols};
 use rspice_schematic_editor::{port_overlay, source_labels};
-pub(crate) mod export;
 pub(crate) mod symbol_editor;
 mod vector_display;
 pub(crate) mod view;

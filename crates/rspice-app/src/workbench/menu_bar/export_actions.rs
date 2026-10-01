@@ -14,13 +14,13 @@ pub(super) fn action_export_svg_with_io(
     };
 
     let config = SvgExportConfig::default();
-    let resolver = crate::state::SymbolResolver::new(
-        &state.library_manager,
+    let resolver = rspice_design::symbol_resolver::SymbolResolver::new(
+        state.library_manager.catalog(),
         &state.workspace.content.schematic_buffers,
     );
     let view_path = state.workspace.content.active_view.display_path();
     let svg_content = export_to_svg_with_symbol_resolver_and_context(
-        &state.schematic,
+        state.schematic.document(),
         &config,
         &resolver,
         SvgDesignContext {

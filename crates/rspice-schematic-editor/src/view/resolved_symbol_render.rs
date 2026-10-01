@@ -13,13 +13,16 @@ use std::fmt::Write;
 
 use egui::{Align, Align2, Color32, Painter, Pos2, Shape, Stroke, vec2};
 
-use crate::schematic::export::SvgExportConfig;
-use crate::state::{
-    Component, GENERATED_PIN_LABEL_SIZE, Point, PortDirection, ResolvedCellSymbol, SymbolShape,
-    SymbolTextAlign, SymbolTextPlacement, fit_pin_name, symbol_text_bounds,
+use crate::export::SvgExportConfig;
+use rspice_design::{
+    resolved_symbol::ResolvedCellSymbol,
+    schematic::{component::Component, component_display::SchematicParameterLabelVisibility},
+    symbol::{SymbolShape, SymbolTextAlign, SymbolTextPlacement, symbol_text_bounds},
+    symbol_generation::{GENERATED_PIN_LABEL_SIZE, fit_pin_name, inward_step},
 };
+use rspice_design_model::{Point, port::PortDirection, symbol_pin::SymbolPinSide};
 
-pub(crate) fn draw_resolved_symbol(
+pub fn draw_resolved_symbol(
     painter: &Painter,
     origin: Pos2,
     scale: f32,
@@ -34,18 +37,18 @@ pub(crate) fn draw_resolved_symbol(
         component,
         symbol,
         stroke,
-        crate::state::SchematicParameterLabelVisibility::NamesAndValues,
+        SchematicParameterLabelVisibility::NamesAndValues,
     );
 }
 
-pub(crate) fn draw_resolved_symbol_with_visibility(
+pub fn draw_resolved_symbol_with_visibility(
     painter: &Painter,
     origin: Pos2,
     scale: f32,
     component: &Component,
     symbol: &ResolvedCellSymbol,
     stroke: Stroke,
-    parameter_labels: crate::state::SchematicParameterLabelVisibility,
+    parameter_labels: SchematicParameterLabelVisibility,
 ) {
     draw_symbol_body(painter, origin, scale, component, symbol, stroke);
     draw_symbol_pins(painter, origin, scale, component, symbol, stroke.color);
@@ -71,7 +74,7 @@ pub(crate) fn write_resolved_symbol_svg(
     write_symbol_labels_svg(svg, component, symbol, config);
 }
 
-pub(crate) fn resolved_symbol_world_bounds(
+pub fn resolved_symbol_world_bounds(
     component: &Component,
     symbol: &ResolvedCellSymbol,
 ) -> Option<(Point, Point)> {
@@ -158,7 +161,10 @@ fn draw_symbol_body(
                     to_screen_symbol(origin, scale, component, symbol, *anchor),
                     symbol_text_align(component, *align),
                     text,
-                    crate::ui::theme::mono(font_size, crate::ui::theme::FontWeight::Regular),
+                    rspice_ui_kit::theme::mono(
+                        font_size,
+                        rspice_ui_kit::theme::FontWeight::Regular,
+                    ),
                     stroke.color,
                 );
             }
@@ -205,7 +211,7 @@ fn draw_symbol_pins(
                 anchor,
                 pin_label_align(component, pin.side),
                 fit_pin_name(&pin.name),
-                crate::ui::theme::mono(font_size, crate::ui::theme::FontWeight::Regular),
+                rspice_ui_kit::theme::mono(font_size, rspice_ui_kit::theme::FontWeight::Regular),
                 color.gamma_multiply(0.75),
             );
         }
@@ -214,8 +220,8 @@ fn draw_symbol_pins(
 
 /// Align a pin name so it reads from its own edge into the body, whatever
 /// orientation the instance is placed in.
-pub(super) fn pin_label_align(component: &Component, side: crate::state::SymbolPinSide) -> Align2 {
-    let inward = component.transform_point(crate::state::inward_step(side));
+fn pin_label_align(component: &Component, side: SymbolPinSide) -> Align2 {
+    let inward = component.transform_point(inward_step(side));
     if inward.x.abs() >= inward.y.abs() {
         if inward.x >= 0 {
             Align2::LEFT_CENTER
@@ -236,13 +242,13 @@ fn draw_symbol_labels(
     component: &Component,
     symbol: &ResolvedCellSymbol,
     color: Color32,
-    visibility: crate::state::SchematicParameterLabelVisibility,
+    visibility: SchematicParameterLabelVisibility,
 ) {
     let font_size = (9.0 * scale).max(1.0);
     if font_size < LEGIBLE_TYPE_PX {
         return;
     }
-    let font = crate::ui::theme::mono(font_size, crate::ui::theme::FontWeight::Medium);
+    let font = rspice_ui_kit::theme::mono(font_size, rspice_ui_kit::theme::FontWeight::Medium);
     if component.display_mode.show_name(visibility) && !component.name.is_empty() {
         painter.text(
             to_screen_symbol(
@@ -473,7 +479,7 @@ fn write_symbol_labels_svg(
 ) {
     if component
         .display_mode
-        .show_name(crate::state::SchematicParameterLabelVisibility::NamesAndValues)
+        .show_name(SchematicParameterLabelVisibility::NamesAndValues)
         && !component.name.is_empty()
     {
         let (x, y) = to_svg_symbol(component, symbol, symbol.document().name_anchor, config);
@@ -490,7 +496,7 @@ fn write_symbol_labels_svg(
     };
     if component
         .display_mode
-        .show_value(crate::state::SchematicParameterLabelVisibility::NamesAndValues)
+        .show_value(SchematicParameterLabelVisibility::NamesAndValues)
         && !value.is_empty()
     {
         let (x, y) = to_svg_symbol(component, symbol, symbol.document().value_anchor, config);
@@ -782,11 +788,13 @@ mod tests {
     use super::*;
     use egui::pos2;
 
-    use crate::schematic::export::SvgExportConfig;
-    use crate::state::{
-        ComponentType, PortSpec, Rotation, SymbolDocument, SymbolPin, SymbolTextSize,
+    use crate::export::SvgExportConfig;
+    use rspice_design::{
+        schematic::{component_type::ComponentType, rotation::Rotation},
+        symbol::{SymbolDocument, SymbolPin, SymbolTextSize},
     };
-    use crate::ui::raster::Canvas;
+    use rspice_design_model::port::PortSpec;
+    use rspice_ui_kit::raster::Canvas;
 
     fn port(name: &str, direction: PortDirection) -> PortSpec {
         PortSpec {
@@ -815,7 +823,7 @@ mod tests {
     /// Render one instance of `symbol` on a canvas whose symbol origin is at
     /// `origin`, four screen pixels to the symbol unit.
     fn raster_instance(component: &Component, symbol: &ResolvedCellSymbol, origin: Pos2) -> Canvas {
-        crate::ui::raster::render(egui::vec2(320.0, 320.0), |ui, _| {
+        rspice_ui_kit::raster::render(egui::vec2(320.0, 320.0), |ui, _| {
             draw_symbol_body(
                 &ui.painter().clone(),
                 origin,
