@@ -276,6 +276,44 @@ impl<A> AsMut<SimulationRun<A>> for SimulationRun<A> {
 }
 
 impl<A> SimulationRun<A> {
+    /// Change analysis storage while retaining all run identity and evidence.
+    pub fn map_analyses<B>(self, map: impl FnMut(A) -> B) -> SimulationRun<B> {
+        let Self {
+            job_id,
+            run_id,
+            dataset_id,
+            execution_target,
+            lifecycle,
+            id,
+            label,
+            timestamp,
+            analyses,
+            provenance,
+            retention,
+            elapsed_time,
+            success,
+            specification_verdicts,
+            campaign_membership,
+        } = self;
+        SimulationRun {
+            job_id,
+            run_id,
+            dataset_id,
+            execution_target,
+            lifecycle,
+            id,
+            label,
+            timestamp,
+            analyses: analyses.into_iter().map(map).collect(),
+            provenance,
+            retention,
+            elapsed_time,
+            success,
+            specification_verdicts,
+            campaign_membership,
+        }
+    }
+
     /// Create an unsealed run from persisted identity without a host clock or target.
     pub fn from_persisted_identity(
         run_number: u64,
