@@ -411,9 +411,7 @@ pub(crate) struct BuiltinXspicePlacementDialogState {
     pub(crate) display_name: String,
     pub(crate) vector_ports: Vec<crate::state::CatalogXspiceVectorPort>,
     pub(crate) widths: std::collections::BTreeMap<String, usize>,
-    pub(crate) design_execution_epoch: u64,
-    pub(crate) active_schematic_epoch: u64,
-    pub(crate) view_path: String,
+    pub(crate) source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
     pub(crate) dirty: bool,
     pub(crate) discard_confirm: bool,
     pub(crate) validation_error: Option<String>,
@@ -425,9 +423,7 @@ impl BuiltinXspicePlacementDialogState {
         stable_id: impl Into<String>,
         display_name: impl Into<String>,
         vector_ports: Vec<crate::state::CatalogXspiceVectorPort>,
-        design_execution_epoch: u64,
-        active_schematic_epoch: u64,
-        view_path: impl Into<String>,
+        source: rspice_schematic_editor::requests::EditorRequestSource,
     ) {
         let widths = vector_ports
             .iter()
@@ -439,9 +435,7 @@ impl BuiltinXspicePlacementDialogState {
             display_name: display_name.into(),
             vector_ports,
             widths,
-            design_execution_epoch,
-            active_schematic_epoch,
-            view_path: view_path.into(),
+            source: Some(source),
             dirty: false,
             discard_confirm: false,
             validation_error: None,

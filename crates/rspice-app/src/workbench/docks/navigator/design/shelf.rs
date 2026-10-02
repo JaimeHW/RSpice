@@ -1647,9 +1647,7 @@ pub(super) fn place_builtin_xspice(
                 descriptor.stable_id,
                 descriptor.display_name,
                 vector_ports,
-                state.design_execution_epoch,
-                state.active_schematic_epoch,
-                state.workspace.content.active_view.display_path(),
+                crate::workbench::app::schematic_editor_request_source(state),
             );
             None
         }

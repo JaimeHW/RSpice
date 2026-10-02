@@ -10,7 +10,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
-use crate::workbench::app::RSpiceApp;
+use crate::workbench::app::{RSpiceApp, schematic_editor_request_source};
 
 const EYEBROW: &str = "SCHEMATIC · BUILT-IN XSPICE";
 const PRIMARY: &str = "Arm placement";
@@ -56,7 +56,7 @@ impl RSpiceApp {
             )
         });
         match response.choice {
-            DialogChoice::Primary => match materialize_draft(self) {
+            DialogChoice::Primary => match validate_draft(self) {
                 Ok(binding) => {
                     let label = format!("{}/{}", binding.library, binding.cell);
                     self.state.schematic.session.editor.pending_library_cell = Some(binding);
@@ -86,21 +86,22 @@ impl RSpiceApp {
     }
 }
 
-fn validate_draft(app: &RSpiceApp) -> Result<(), String> {
+fn validate_draft(app: &RSpiceApp) -> Result<crate::state::LibraryCellInstance, String> {
     let draft = &app.state.dialogs.builtin_xspice_placement;
     if app.state.schematic_edit_read_only() {
         return Err("The active schematic is read-only.".to_owned());
     }
-    if draft.design_execution_epoch != app.state.design_execution_epoch
-        || draft.active_schematic_epoch != app.state.active_schematic_epoch
-        || draft.view_path != app.state.workspace.content.active_view.display_path()
+    if draft
+        .source
+        .as_ref()
+        .is_none_or(|source| *source != schematic_editor_request_source(&app.state))
     {
         return Err(
             "The active design or cell view changed. Close and reopen the device configuration."
                 .to_owned(),
         );
     }
-    materialize_draft(app).map(|_| ())
+    materialize_draft(app)
 }
 
 fn materialize_draft(app: &RSpiceApp) -> Result<crate::state::LibraryCellInstance, String> {
@@ -206,9 +207,7 @@ mod tests {
             descriptor.stable_id,
             descriptor.display_name,
             ports,
-            app.state.design_execution_epoch,
-            app.state.active_schematic_epoch,
-            app.state.workspace.content.active_view.display_path(),
+            schematic_editor_request_source(&app.state),
         );
         app.state
             .dialogs
@@ -216,8 +215,132 @@ mod tests {
             .widths
             .insert("in".to_owned(), 6);
 
-        let binding = materialize_draft(&app).expect("binding");
+        let binding = validate_draft(&app).expect("validated binding");
         assert_eq!(binding.terminal_order.len(), 7);
         assert_eq!(binding.builtin_xspice.unwrap().ports[0].vector_width, 6);
+    }
+
+    #[test]
+    fn retained_configuration_rejects_changed_context_before_arming() {
+        use crate::state::{
+            CellViewRef, ComponentType, Point, SheetDefinition, SheetPortPolicy, SheetTemplate,
+            ViewType,
+        };
+        for change in [
+            "design",
+            "buffer",
+            "occurrence",
+            "sheet",
+            "content",
+            "read-only",
+            "safe-mode",
+            "missing",
+        ] {
+            let mut app = RSpiceApp::test_instance();
+            let state = &mut app.state;
+            let master = CellViewRef::new("work", "xspice_child", "schematic");
+            state
+                .workspace
+                .descend_into("X1".to_owned(), master.clone(), ViewType::Schematic);
+            let first = state
+                .workspace
+                .content
+                .design_management
+                .bootstrap_for_cell_view(&master.key(), "Sheet 1", [])
+                .unwrap();
+            let descriptor = engine_only_xspice_devices()
+                .iter()
+                .find(|descriptor| descriptor.model_type == "d_lut")
+                .unwrap();
+            let ports = crate::state::builtin_xspice_vector_ports(descriptor).unwrap();
+            let source = schematic_editor_request_source(state);
+            state.dialogs.builtin_xspice_placement.open(
+                descriptor.stable_id,
+                descriptor.display_name,
+                ports.clone(),
+                source.clone(),
+            );
+            assert!(validate_draft(&app).is_ok());
+            let state = &mut app.state;
+            match change {
+                "design" => state.design_execution_epoch += 1,
+                "buffer" => state.active_schematic_epoch += 1,
+                "occurrence" => {
+                    state.workspace.ascend_one().unwrap();
+                    state
+                        .workspace
+                        .descend_into("X2".to_owned(), master, ViewType::Schematic);
+                }
+                "sheet" => {
+                    let catalog = state
+                        .workspace
+                        .content
+                        .design_management
+                        .sheet_catalog_mut(&master.key())
+                        .unwrap();
+                    let second = catalog
+                        .create_sheet(
+                            SheetDefinition {
+                                name: "Sheet 2".to_owned(),
+                                template: SheetTemplate::AnalogSchematic,
+                                port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                                explicit_page_number: Some(2),
+                            },
+                            Some(first),
+                        )
+                        .unwrap();
+                    catalog.set_active(second).unwrap();
+                }
+                "content" => {
+                    state
+                        .schematic
+                        .add_component(ComponentType::Resistor, Point::origin());
+                    state.schematic.init_undo_history();
+                }
+                "read-only" => state.schematic.session.read_only = true,
+                "safe-mode" => state.workbench.safe_mode.activate(
+                    crate::workbench::state::LocalSafeModeOptions {
+                        open_project_read_only: true,
+                        ..Default::default()
+                    },
+                    "XSPICE context test".to_owned(),
+                ),
+                "missing" => state.dialogs.builtin_xspice_placement.source = None,
+                _ => unreachable!(),
+            }
+            assert!(
+                materialize_draft(&app).is_ok(),
+                "contract remains valid: {change}"
+            );
+            assert!(
+                validate_draft(&app).is_err(),
+                "stale or read-only: {change}"
+            );
+            let state = &mut app.state;
+            assert!(
+                state
+                    .schematic
+                    .session
+                    .editor
+                    .pending_library_cell
+                    .is_none()
+            );
+            assert_eq!(state.schematic.session.editor.tool, Tool::Select);
+            assert!(!state.schematic.can_undo());
+            if change != "missing" {
+                assert_eq!(state.dialogs.builtin_xspice_placement.source, Some(source));
+            }
+            state.dialogs.builtin_xspice_placement.close();
+            assert!(state.dialogs.builtin_xspice_placement.source.is_none());
+            if !state.schematic_edit_read_only() {
+                state.dialogs.builtin_xspice_placement.open(
+                    descriptor.stable_id,
+                    descriptor.display_name,
+                    ports,
+                    schematic_editor_request_source(state),
+                );
+                assert!(validate_draft(&app).is_ok(), "reopened: {change}");
+            }
+        }
     }
 }
