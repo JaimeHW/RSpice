@@ -690,7 +690,7 @@ fn object_properties_dispatches_selected_buses_and_taps_and_refuses_read_only() 
     Command::ObjectProperties.execute(&mut app);
     assert!(matches!(
         app.state.dialogs.object_properties.draft,
-        Some(crate::workbench::app::ObjectPropertiesDraft::Bus(_))
+        Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::Bus(_))
     ));
     app.state.dialogs.object_properties.close();
 
@@ -703,7 +703,7 @@ fn object_properties_dispatches_selected_buses_and_taps_and_refuses_read_only() 
     Command::ObjectProperties.execute(&mut app);
     assert!(matches!(
         app.state.dialogs.object_properties.draft,
-        Some(crate::workbench::app::ObjectPropertiesDraft::BusTap(_))
+        Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::BusTap(_))
     ));
     app.state.dialogs.object_properties.close();
 
@@ -734,7 +734,7 @@ fn object_properties_availability_includes_one_selected_net_label() {
     Command::ObjectProperties.execute(&mut app);
     assert!(matches!(
         app.state.dialogs.object_properties.draft,
-        Some(crate::workbench::app::ObjectPropertiesDraft::NetLabel(ref draft))
+        Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::NetLabel(ref draft))
             if draft.original.id == id
     ));
     app.state.dialogs.object_properties.close();

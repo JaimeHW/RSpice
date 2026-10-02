@@ -2051,7 +2051,7 @@ fn double_click_property_dispatch_selects_taps_before_their_source_bus() {
     );
     assert!(matches!(
         state.dialogs.object_properties.draft,
-        Some(crate::workbench::app::ObjectPropertiesDraft::BusTap(_))
+        Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::BusTap(_))
     ));
 }
 
@@ -2108,7 +2108,7 @@ fn net_label_text_bounds_are_a_first_class_pointer_target() {
     assert!(state.dialogs.object_properties.open);
     assert!(matches!(
         state.dialogs.object_properties.draft.as_ref(),
-        Some(crate::workbench::app::ObjectPropertiesDraft::NetLabel(draft))
+        Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::NetLabel(draft))
             if draft.original.id == label.id
     ));
 

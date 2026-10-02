@@ -3,6 +3,12 @@
 //! Modal/dialog payload used by `AppState`. Analysis configuration lives
 //! in `SimSetupState`, not here.
 
+use rspice_schematic_editor::object_properties::{
+    BusObjectPropertiesDraft, BusTapObjectPropertiesDraft, DesignNoteObjectPropertiesDraft,
+    DocumentationShapeObjectPropertiesDraft, NamedNetObjectPropertiesDraft,
+    NetLabelObjectPropertiesDraft, ObjectPropertiesDraft,
+};
+
 use crate::workbench::app::{
     ConfigurationSetsDialogState, ConfirmationDialogState, ConnectivityManagerDialogState,
     CreateModelBoundSymbolDialogState, DesignManagementDialogState,
@@ -1329,68 +1335,6 @@ impl ReplaceInstanceDialogState {
     }
 }
 
-/// Exact, isolated draft for a selected bus. The durable baseline is retained
-/// to guard the eventual commit against stale-object overwrite.
-#[derive(Debug, Clone)]
-pub(crate) struct BusObjectPropertiesDraft {
-    pub(crate) original: crate::state::Bus,
-    pub(crate) declaration: String,
-}
-
-/// Exact, isolated draft for a selected typed bus tap.
-#[derive(Debug, Clone)]
-pub(crate) struct BusTapObjectPropertiesDraft {
-    pub(crate) original: crate::state::BusTap,
-    pub(crate) source_bus_id: u64,
-    pub(crate) slice: String,
-    pub(crate) orientation: crate::state::BusTapOrientation,
-}
-
-/// Exact, isolated draft for a selected net label. Coordinates are retained as
-/// text until Primary so incomplete or out-of-range edits never partially move
-/// the electrical attachment point.
-#[derive(Debug, Clone)]
-pub(crate) struct NetLabelObjectPropertiesDraft {
-    pub(crate) original: crate::state::NetLabel,
-    pub(crate) name: String,
-    pub(crate) x: String,
-    pub(crate) y: String,
-}
-
-/// Exact naming authority for a logical net selected through conductor
-/// geometry. Unlike a label draft, this has no glyph position to edit: the
-/// transaction updates every captured label/port name while retaining IDs.
-#[derive(Debug, Clone)]
-pub(crate) struct NamedNetObjectPropertiesDraft {
-    pub(crate) original: crate::workbench::app::NamedNetTarget,
-    pub(crate) name: String,
-}
-
-/// Exact isolated draft for one non-electrical schematic documentation object.
-#[derive(Debug, Clone)]
-pub(crate) struct DesignNoteObjectPropertiesDraft {
-    pub(crate) original: crate::state::DesignNote,
-    pub(crate) kind: crate::state::DesignNoteKind,
-    pub(crate) text: String,
-    pub(crate) review_state: Option<crate::state::DesignReviewState>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct DocumentationShapeObjectPropertiesDraft {
-    pub(crate) original: crate::state::DocumentationShape,
-    pub(crate) points: Vec<(String, String)>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum ObjectPropertiesDraft {
-    Bus(BusObjectPropertiesDraft),
-    BusTap(BusTapObjectPropertiesDraft),
-    NetLabel(NetLabelObjectPropertiesDraft),
-    NamedNet(NamedNetObjectPropertiesDraft),
-    DesignNote(DesignNoteObjectPropertiesDraft),
-    DocumentationShape(DocumentationShapeObjectPropertiesDraft),
-}
-
 /// Retained owner for the mockup's generic Object properties transaction.
 /// Components continue to use their schema-driven tabbed editor; geometric
 /// connectivity objects and logical named nets use this draft because their
@@ -1644,100 +1588,6 @@ impl ObjectPropertiesDialogState {
         } else {
             self.close();
             true
-        }
-    }
-}
-
-impl ObjectPropertiesDraft {
-    pub(crate) fn is_modified(&self) -> bool {
-        match self {
-            Self::Bus(draft) => {
-                let text = draft.declaration.trim();
-                let candidate = if text.is_empty() {
-                    Some(None)
-                } else {
-                    crate::state::BusDeclaration::parse(text).ok().map(Some)
-                };
-                candidate.map_or_else(
-                    || {
-                        draft.declaration
-                            != draft
-                                .original
-                                .declaration
-                                .as_ref()
-                                .map_or_else(String::new, ToString::to_string)
-                    },
-                    |candidate| candidate != draft.original.declaration,
-                )
-            }
-            Self::BusTap(draft) => {
-                let selector_changed = crate::state::BusSlice::parse(draft.slice.trim())
-                    .map_or_else(
-                        |_| draft.slice != draft.original.slice.to_string(),
-                        |slice| slice != draft.original.slice,
-                    );
-                draft.source_bus_id != draft.original.bus_id
-                    || selector_changed
-                    || draft.orientation != draft.original.orientation
-            }
-            Self::NetLabel(draft) => {
-                let candidate = draft
-                    .x
-                    .trim()
-                    .parse::<i32>()
-                    .ok()
-                    .zip(draft.y.trim().parse::<i32>().ok())
-                    .map(|(x, y)| {
-                        crate::state::NetLabel::new(
-                            draft.original.id,
-                            crate::state::Point::new(x, y),
-                            draft.name.trim(),
-                        )
-                    });
-                candidate.map_or_else(
-                    || {
-                        draft.name != draft.original.name
-                            || draft.x != draft.original.pos.x.to_string()
-                            || draft.y != draft.original.pos.y.to_string()
-                    },
-                    |candidate| candidate != draft.original,
-                )
-            }
-            Self::NamedNet(draft) => draft.name.trim() != draft.original.name,
-            Self::DesignNote(draft) => {
-                let mut candidate = draft.original.clone();
-                candidate
-                    .update(draft.kind, draft.text.clone())
-                    .map_or_else(
-                        |_| true,
-                        |_| {
-                            if let Some(review_state) = draft.review_state
-                                && candidate.set_review_state(review_state).is_err()
-                            {
-                                return true;
-                            }
-                            candidate != draft.original
-                        },
-                    )
-            }
-            Self::DocumentationShape(draft) => {
-                let points: Option<Vec<_>> = draft
-                    .points
-                    .iter()
-                    .map(|(x, y)| {
-                        x.trim()
-                            .parse::<i32>()
-                            .ok()
-                            .zip(y.trim().parse::<i32>().ok())
-                            .map(|(x, y)| crate::state::Point::new(x, y))
-                    })
-                    .collect();
-                points
-                    .and_then(|points| {
-                        crate::state::geometry_from_points(draft.original.kind(), &points).ok()
-                    })
-                    .is_none_or(|geometry| geometry != draft.original.geometry)
-            }
         }
     }
 }

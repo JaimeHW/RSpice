@@ -76,8 +76,8 @@ pub use component::{
 };
 pub use component_type::ComponentType;
 pub use design_note::{
-    DesignNote, DesignNoteKind, DesignNoteLayer, DesignNoteRenderContext, DesignReviewMutation,
-    DesignReviewState, PendingDesignNotePlacement, RequirementTarget,
+    DesignNote, DesignNoteKind, DesignNoteRenderContext, DesignReviewMutation, DesignReviewState,
+    PendingDesignNotePlacement, RequirementTarget,
 };
 pub use device_catalog::{
     CatalogXspiceVectorPort, builtin_xspice_library_binding,
@@ -91,8 +91,7 @@ pub use document_policy::{
 };
 pub use documentation_shape::{
     DocumentationShape, DocumentationShapeError, DocumentationShapeGeometry,
-    DocumentationShapeKind, DocumentationShapeLayer, PendingDocumentationShapePlacement,
-    arc_parameters, geometry_from_points,
+    DocumentationShapeKind, PendingDocumentationShapePlacement, geometry_from_points,
 };
 pub use generated_veriloga_catalog::{
     generated_veriloga_devices, generated_veriloga_library_binding,

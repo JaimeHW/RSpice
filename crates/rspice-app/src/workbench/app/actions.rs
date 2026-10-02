@@ -1107,9 +1107,9 @@ mod shortcut_ownership_tests {
         app.execute_shortcut_command(ShortcutCommand::ObjectProperties);
         assert!(matches!(
             app.state.dialogs.object_properties.draft,
-            Some(crate::workbench::app::ObjectPropertiesDraft::Bus(_))
+            Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::Bus(_))
         ));
-        let Some(crate::workbench::app::ObjectPropertiesDraft::Bus(draft)) =
+        let Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::Bus(draft)) =
             app.state.dialogs.object_properties.draft.as_mut()
         else {
             unreachable!()

@@ -174,15 +174,12 @@ pub(crate) use dialogs::symbol_definition::{
 pub(crate) use dialogs::hardcopy::{HardcopyDialogState, HardcopyWorkflow, open_hardcopy_workflow};
 
 pub(crate) use dialogs::state::{
-    ArraySelectionDialogState, ArraySelectionPreviewCache, BusObjectPropertiesDraft,
-    BusTapObjectPropertiesDraft, DescendHierarchyDialogState, DesignNoteObjectPropertiesDraft,
-    DocumentationShapeObjectPropertiesDraft, EngineeringTableDialogPage,
-    EngineeringTableDialogState, EngineeringTableExportFormat, EngineeringTableExportScope,
-    GridSnapRoutingDialogState, GridSnapRoutingDraft, GridSnapRoutingFocusTarget,
-    GridSnapSpacingChoice, HelpCenterPage, HierarchyDescendEditMode, HierarchyParentContext,
-    NamedNetObjectPropertiesDraft, NetLabelObjectPropertiesDraft, NewWindowInitialContent,
-    ObjectPropertiesDraft, PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone,
-    RenameSelectionTarget, ReplaceInstanceOpen, TechnologyAttachmentDialogState,
+    ArraySelectionDialogState, ArraySelectionPreviewCache, DescendHierarchyDialogState,
+    EngineeringTableDialogPage, EngineeringTableDialogState, EngineeringTableExportFormat,
+    EngineeringTableExportScope, GridSnapRoutingDialogState, GridSnapRoutingDraft,
+    GridSnapRoutingFocusTarget, GridSnapSpacingChoice, HelpCenterPage, HierarchyDescendEditMode,
+    HierarchyParentContext, NewWindowInitialContent, PlanRemovalConsequence, PlanRemovalTarget,
+    PlanRemovalTone, RenameSelectionTarget, ReplaceInstanceOpen, TechnologyAttachmentDialogState,
     WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
 };
 pub use dialogs::state::{DialogState, LicensePhase};

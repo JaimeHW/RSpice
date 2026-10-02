@@ -6,6 +6,7 @@ pub mod bus_tap_placement;
 mod component_palette;
 pub mod export;
 pub mod net_label_placement;
+pub mod object_properties;
 pub mod pin_placement;
 pub mod port_overlay;
 pub mod selection_forms;

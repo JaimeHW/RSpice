@@ -463,7 +463,7 @@ fn net_label_context_exposes_the_complete_object_lifecycle() {
     assert!(!state.dialogs.rename_selection.open);
     assert!(matches!(
         state.dialogs.object_properties.draft,
-        Some(crate::workbench::app::ObjectPropertiesDraft::NetLabel(ref draft))
+        Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::NetLabel(ref draft))
             if draft.original == label
     ));
 }
@@ -509,7 +509,7 @@ fn design_note_context_exposes_only_compatible_object_lifecycle_actions() {
     );
     assert!(matches!(
         state.dialogs.object_properties.draft,
-        Some(crate::workbench::app::ObjectPropertiesDraft::DesignNote(ref draft))
+        Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::DesignNote(ref draft))
             if draft.original == note
     ));
 }
@@ -555,7 +555,7 @@ fn documentation_shape_context_exposes_the_complete_non_electrical_lifecycle() {
     );
     assert!(matches!(
         state.dialogs.object_properties.draft,
-        Some(crate::workbench::app::ObjectPropertiesDraft::DocumentationShape(ref draft))
+        Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::DocumentationShape(ref draft))
             if draft.original == shape
     ));
 }

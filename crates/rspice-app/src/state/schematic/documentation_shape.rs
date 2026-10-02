@@ -5,7 +5,7 @@ use super::Point;
 use super::SchematicState;
 pub use rspice_design::schematic::documentation_shape::{
     DocumentationShape, DocumentationShapeError, DocumentationShapeGeometry,
-    DocumentationShapeKind, DocumentationShapeLayer, arc_parameters, geometry_from_points,
+    DocumentationShapeKind, DocumentationShapeLayer, geometry_from_points,
 };
 
 pub use rspice_schematic_editor::session::documentation_shape::PendingDocumentationShapePlacement;

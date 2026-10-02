@@ -1050,7 +1050,7 @@ mod tests {
         );
         assert!(matches!(
             state.dialogs.object_properties.draft,
-            Some(crate::workbench::app::ObjectPropertiesDraft::Bus(_))
+            Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::Bus(_))
         ));
         state.dialogs.object_properties.close();
 
@@ -1069,7 +1069,7 @@ mod tests {
         );
         assert!(matches!(
             state.dialogs.object_properties.draft,
-            Some(crate::workbench::app::ObjectPropertiesDraft::BusTap(_))
+            Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::BusTap(_))
         ));
     }
 
@@ -1098,7 +1098,7 @@ mod tests {
         );
         assert!(matches!(
             state.dialogs.object_properties.draft,
-            Some(crate::workbench::app::ObjectPropertiesDraft::NetLabel(ref draft))
+            Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::NetLabel(ref draft))
                 if draft.original == label
                     && draft.name == "afe.out"
                     && draft.x == "-12"
@@ -1136,7 +1136,7 @@ mod tests {
         );
         assert!(matches!(
             state.dialogs.object_properties.draft,
-            Some(crate::workbench::app::ObjectPropertiesDraft::NamedNet(ref draft))
+            Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::NamedNet(ref draft))
                 if draft.original.name == "sense"
                     && draft.original.labels.iter().map(|label| label.id).collect::<Vec<_>>() == [72]
                     && draft.name == "sense"
@@ -1202,7 +1202,7 @@ mod tests {
         );
         assert!(matches!(
             state.dialogs.object_properties.draft,
-            Some(crate::workbench::app::ObjectPropertiesDraft::DesignNote(ref draft))
+            Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::DesignNote(ref draft))
                 if draft.original == note
                     && draft.kind == DesignNoteKind::ReviewNote
                     && draft.text == "Review bias path"
@@ -1313,7 +1313,7 @@ mod tests {
         assert!(!open_selected_object_properties(&mut state));
         assert!(matches!(
             state.dialogs.object_properties.draft,
-            Some(crate::workbench::app::ObjectPropertiesDraft::Bus(ref draft)) if draft.original.id == 1
+            Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::Bus(ref draft)) if draft.original.id == 1
         ));
     }
 
