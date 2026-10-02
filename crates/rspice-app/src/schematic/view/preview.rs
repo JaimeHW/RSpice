@@ -357,7 +357,12 @@ fn draw_bus_preview(
     }
     if let Some(hover) = response.hover_pos() {
         let position = resolve_grid_pointer(state, viewport, hover).snapped_position;
-        state.schematic.update_bus_preview(position);
+        state
+            .schematic
+            .session
+            .editor
+            .bus_drawing
+            .update_preview(position);
     }
 
     preview::draw_bus_preview(painter, &preview_view(state), viewport);
@@ -384,7 +389,12 @@ fn draw_wire_preview(
                 hover_pos,
             );
             if let Some(result) = result.as_ref() {
-                state.schematic.update_wire_preview(result.snapped_position);
+                state
+                    .schematic
+                    .session
+                    .editor
+                    .wire_drawing
+                    .update_preview(result.snapped_position);
             } else {
                 state.schematic.session.editor.wire_drawing.preview_pos = None;
             }

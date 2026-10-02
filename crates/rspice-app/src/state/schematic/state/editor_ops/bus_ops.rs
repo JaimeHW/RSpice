@@ -43,19 +43,10 @@ impl SchematicState {
         Ok(())
     }
 
-    pub fn update_bus_preview(&mut self, position: Point) {
-        self.session.editor.bus_drawing.update_preview(position);
-    }
-
     pub fn extend_bus(&mut self, position: Point) {
         if !self.session.read_only {
             self.session.editor.bus_drawing.add_point(position);
         }
-    }
-
-    pub fn toggle_bus_routing(&mut self) {
-        self.session.editor.bus_drawing.routing_mode =
-            self.session.editor.bus_drawing.routing_mode.toggle();
     }
 
     /// Finish the active route and commit the complete polyline atomically.
@@ -74,10 +65,6 @@ impl SchematicState {
             return Ok(None);
         }
         self.add_bus(points, declaration).map(Some)
-    }
-
-    pub fn cancel_bus(&mut self) {
-        self.session.editor.bus_drawing.cancel();
     }
 
     /// Place a validated tap as one atomic, undoable topology mutation.

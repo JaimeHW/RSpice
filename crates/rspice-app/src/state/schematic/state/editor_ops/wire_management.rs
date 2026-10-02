@@ -78,44 +78,13 @@ impl SchematicState {
         }
 
         log::info!("[Wire] start_wire at {:?}", pos);
-        self.session.editor.wire_drawing.clear();
-        self.session.editor.wire_drawing.points.push(pos);
-        self.session.editor.wire_drawing.active = true;
+        self.session.editor.wire_drawing.start(pos);
     }
 
-    /// Update the wire preview position (called on mouse move)
-    pub fn update_wire_preview(&mut self, pos: Point) {
-        if self.session.editor.wire_drawing.active {
-            self.session.editor.wire_drawing.preview_pos = Some(pos);
-        }
-    }
-
-    /// Toggle wire routing mode (horizontal-first vs vertical-first)
-    pub fn toggle_wire_routing(&mut self) {
-        self.session.editor.wire_drawing.routing_mode =
-            self.session.editor.wire_drawing.routing_mode.toggle();
-    }
-
-    /// Add a point to the current wire using orthogonal routing
+    /// Extend the editor draft while the document remains editable.
     pub fn extend_wire(&mut self, pos: Point) {
-        if self.session.read_only || !self.session.editor.wire_drawing.active {
-            return;
-        }
-
-        if let Some(last) = self.session.editor.wire_drawing.points.last().copied() {
-            if last == pos {
-                return; // Same point, skip
-            }
-
-            // Add corner point for orthogonal routing if needed
-            if let Some(corner) = self.session.editor.wire_drawing.get_route_corner(pos)
-                && corner != last
-                && corner != pos
-            {
-                self.session.editor.wire_drawing.points.push(corner);
-            }
-
-            self.session.editor.wire_drawing.points.push(pos);
+        if !self.session.read_only {
+            self.session.editor.wire_drawing.add_point(pos);
         }
     }
 
@@ -190,11 +159,6 @@ impl SchematicState {
             let _ = self.split_wire(wire_id, point);
         }
     }
-
-    /// Cancel wire drawing
-    pub fn cancel_wire(&mut self) {
-        self.session.editor.wire_drawing.clear();
-    }
 }
 
 #[cfg(test)]
@@ -241,7 +205,7 @@ mod tests {
 
         schematic.start_wire(Point::new(0, 0));
         schematic.extend_wire(Point::new(10, 0));
-        schematic.cancel_wire();
+        schematic.session.editor.wire_drawing.clear();
 
         assert!(!schematic.session.editor.wire_drawing.active);
         assert!(!schematic.has_pending_operation());
