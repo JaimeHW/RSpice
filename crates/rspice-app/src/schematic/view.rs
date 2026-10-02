@@ -33,9 +33,7 @@ mod snap_resolution;
 mod stretch_interaction;
 pub(crate) mod violations;
 
-use rspice_schematic_editor::view::{
-    coordinates, design_notes, documentation_shapes, drawing, navigation, viewport,
-};
+use rspice_schematic_editor::view::{coordinates, drawing, navigation, viewport};
 
 use self::coordinates::viewport_from_camera;
 use self::drawing_sheet::resolve_active_drawing_sheet;

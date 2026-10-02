@@ -34,3 +34,5 @@ pub mod stretch_interaction;
 pub mod preview;
 
 pub mod scene;
+
+pub mod selection_layout;
