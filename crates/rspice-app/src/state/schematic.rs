@@ -111,10 +111,8 @@ pub use net_label::{NetLabel, NetLabelKind};
 pub use placement_authority::PlacementAuthority;
 pub use point::Point;
 #[cfg(test)]
-pub use port::{PendingPortPlacement, PortDirectionType};
-pub use port::{
-    PendingPortSequence, PortContract, PortDirection, PortDiscipline, PortSignalType, PortSpec,
-};
+pub use port::{PendingPortPlacement, PortDirectionType, PortSignalType};
+pub use port::{PendingPortSequence, PortContract, PortDirection, PortDiscipline, PortSpec};
 pub use probe::SchematicProbe;
 pub(crate) use replacement::parse_replacement_parameters_strict;
 pub use replacement::{

@@ -123,13 +123,13 @@ fn place_pin_opens_the_isolated_mockup_transaction_without_mutating_the_document
 
     assert!(app.state.dialogs.pin_port.open);
     // Empty on first use: the form used to open holding a sample name.
-    assert_eq!(app.state.dialogs.pin_port.names, "");
+    assert_eq!(app.state.dialogs.pin_port.fields.names, "");
     assert_eq!(
-        app.state.dialogs.pin_port.direction,
+        app.state.dialogs.pin_port.fields.direction,
         crate::state::PortDirection::In
     );
     assert_eq!(
-        app.state.dialogs.pin_port.signal_type,
+        app.state.dialogs.pin_port.fields.signal_type,
         crate::state::PortSignalType::Analog
     );
     assert_eq!(app.state.schematic.document().components, components);

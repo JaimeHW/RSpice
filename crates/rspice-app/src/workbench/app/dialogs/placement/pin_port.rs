@@ -13,8 +13,7 @@
 use egui::Context;
 
 use crate::state::{
-    ComponentType, PendingPortSequence, PlacementAuthority, PortDirection, PortDiscipline,
-    PortSignalType, Tool, declared_vector, declared_width,
+    ComponentType, PendingPortSequence, PlacementAuthority, Tool, declared_vector, declared_width,
 };
 use crate::ui::widgets::{CommandForm, DialogChoice};
 
@@ -25,39 +24,13 @@ use crate::workbench::app_state::AppState;
 const TITLE: &str = "Create pins";
 const PRIMARY: &str = "Place";
 const DESCRIPTION: &str = "Name the pins of this cell, then click to place each one.";
-const NAMES_LABEL: &str = "Names";
-const NAMES_HINT: &str = "IN OUT VDD  or  DATA[7:0]";
-const DIRECTION_LABEL: &str = "Direction";
-const SIGNAL_LABEL: &str = "Signal";
-const DISCIPLINE_LABEL: &str = "Discipline";
 const READ_ONLY: &str = "This schematic is read-only.";
 const DOCUMENT_CHANGED: &str = "The active schematic changed. Close this form and open it again.";
 const TOO_MANY: &str = "A batch holds at most 256 pins.";
 
-/// Directions in the order the segmented control offers them.
-const DIRECTIONS: [PortDirection; 4] = [
-    PortDirection::In,
-    PortDirection::Out,
-    PortDirection::InOut,
-    PortDirection::Supply,
-];
-const DIRECTION_SEGMENTS: [&str; 4] = ["Input", "Output", "Inout", "Supply"];
-
-/// Signal types in the order the segmented control offers them.
-const SIGNALS: [PortSignalType; 3] = [
-    PortSignalType::Analog,
-    PortSignalType::Logic,
-    PortSignalType::Power,
-];
-const SIGNAL_SEGMENTS: [&str; 3] = ["Analog", "Logic", "Power"];
-
 /// One batch's ceiling. A cell with more than this many new pins is a cell
 /// being generated, not drawn.
 const MAX_NAMES: usize = 256;
-
-fn names_field_id() -> egui::Id {
-    egui::Id::new("rspice.create-pins.names")
-}
 
 /// Open Create pins for the active schematic.
 ///
@@ -90,10 +63,10 @@ pub(crate) fn open_create_pins(state: &mut AppState) {
     };
     let draft = &mut state.dialogs.pin_port;
     if let Some(sequence) = armed {
-        draft.direction = sequence.direction;
-        draft.signal_type = sequence.signal_type;
-        draft.discipline = sequence.discipline;
-        draft.discipline_touched = true;
+        draft.fields.direction = sequence.direction;
+        draft.fields.signal_type = sequence.signal_type;
+        draft.fields.discipline = sequence.discipline;
+        draft.fields.discipline_touched = true;
     }
     draft.open(names, authority);
 }
@@ -145,6 +118,7 @@ fn draft(state: &AppState) -> Draft {
     // A pin name can never contain whitespace under either naming policy, so
     // splitting on it is unambiguous and needs no separator to be chosen.
     let names: Vec<String> = form
+        .fields
         .names
         .split_whitespace()
         .map(str::to_owned)
@@ -215,44 +189,6 @@ fn plural(count: usize, one: &'static str, many: &'static str) -> &'static str {
     if count == 1 { one } else { many }
 }
 
-/// Keep direction and signal type coherent by moving the *other* field.
-///
-/// The matrix the model accepts pairs power with inout and supply only, so a
-/// reader who picks Supply has already said Power, and one who picks Power has
-/// said the pin is a rail. Refusing either would be telling the reader that the
-/// thing they just asked for is not allowed, when what they meant is plain.
-fn coerce_from_direction(direction: PortDirection, signal: &mut PortSignalType) {
-    match direction {
-        PortDirection::Supply => *signal = PortSignalType::Power,
-        // Leaving Supply for a one-way direction leaves Power behind with it:
-        // only a bidirectional pin can carry power without being a rail.
-        PortDirection::In | PortDirection::Out if *signal == PortSignalType::Power => {
-            *signal = PortSignalType::Analog;
-        }
-        _ => {}
-    }
-}
-
-fn coerce_from_signal(signal: PortSignalType, direction: &mut PortDirection) {
-    match signal {
-        PortSignalType::Power if *direction != PortDirection::Supply => {
-            *direction = PortDirection::InOut;
-        }
-        PortSignalType::Analog | PortSignalType::Logic if *direction == PortDirection::Supply => {
-            *direction = PortDirection::InOut;
-        }
-        _ => {}
-    }
-}
-
-/// The discipline a signal type implies, until the reader picks one.
-fn discipline_for(signal: PortSignalType) -> PortDiscipline {
-    match signal {
-        PortSignalType::Logic => PortDiscipline::Logic,
-        PortSignalType::Analog | PortSignalType::Power => PortDiscipline::Electrical,
-    }
-}
-
 impl RSpiceApp {
     pub(in crate::workbench) fn render_pin_port_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.pin_port.open {
@@ -264,7 +200,6 @@ impl RSpiceApp {
         let usable = !matches!(current, Draft::Blocked(_));
         let ready = matches!(current, Draft::Ready(_));
         let refusal = current.refusal();
-        let disciplines = PortDiscipline::ALL.map(|entry| entry.keyword().to_owned());
         // The cell whose interface this batch will change. It is the one thing
         // about the form that is not in the form, and the reason the
         // document-changed refusal exists at all.
@@ -282,55 +217,8 @@ impl RSpiceApp {
             })
             .status_lines(2)
             .show(ctx, |rows| {
-                let names = rows.text(NAMES_LABEL, names_field_id(), &mut form.names, NAMES_HINT);
-                if let Some(declaration) = declaration.as_deref() {
-                    rows.derived(declaration);
-                }
-                if let Some(bits) = bits.as_deref() {
-                    rows.derived(bits);
-                }
-                let mut direction = DIRECTIONS
-                    .iter()
-                    .position(|entry| *entry == form.direction)
-                    .unwrap_or(0);
-                if rows.segmented(
-                    DIRECTION_LABEL,
-                    "rspice.create-pins.direction",
-                    &DIRECTION_SEGMENTS,
-                    &mut direction,
-                ) {
-                    form.direction = DIRECTIONS[direction];
-                    coerce_from_direction(form.direction, &mut form.signal_type);
-                    if !form.discipline_touched {
-                        form.discipline = discipline_for(form.signal_type);
-                    }
-                }
-                let mut signal = SIGNALS
-                    .iter()
-                    .position(|entry| *entry == form.signal_type)
-                    .unwrap_or(0);
-                if rows.segmented(
-                    SIGNAL_LABEL,
-                    "rspice.create-pins.signal",
-                    &SIGNAL_SEGMENTS,
-                    &mut signal,
-                ) {
-                    form.signal_type = SIGNALS[signal];
-                    coerce_from_signal(form.signal_type, &mut form.direction);
-                    if !form.discipline_touched {
-                        form.discipline = discipline_for(form.signal_type);
-                    }
-                }
-                if let Some(picked) = rows.select(
-                    DISCIPLINE_LABEL,
-                    "rspice.create-pins.discipline",
-                    form.discipline.keyword(),
-                    &disciplines,
-                ) {
-                    form.discipline = PortDiscipline::ALL[picked];
-                    form.discipline_touched = true;
-                }
-                Some(names.id)
+                form.fields
+                    .show(rows, declaration.as_deref(), bits.as_deref())
             });
 
         match choice {
@@ -357,9 +245,9 @@ impl RSpiceApp {
         };
         let sequence = PendingPortSequence::new(
             names.iter().cloned(),
-            form.direction,
-            form.signal_type,
-            form.discipline,
+            form.fields.direction,
+            form.fields.signal_type,
+            form.fields.discipline,
         )
         .with_authority(authority);
         let last_name = names.last().cloned().unwrap_or_default();

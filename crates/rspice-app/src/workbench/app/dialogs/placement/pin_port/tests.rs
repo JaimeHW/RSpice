@@ -35,7 +35,7 @@ fn key_event(key: egui::Key) -> egui::Event {
 
 fn open_with(state: &mut AppState, names: &str) {
     open_create_pins(state);
-    state.dialogs.pin_port.names = names.to_owned();
+    state.dialogs.pin_port.fields.names = names.to_owned();
 }
 
 /// One port already on the sheet, so duplicate refusals have something to
@@ -65,7 +65,7 @@ fn names_split_on_whitespace_and_each_is_validated_in_the_models_words() {
 
     // A refusal is the model's sentence, prefixed with the name it is about
     // only when there is more than one name to be about.
-    app.state.dialogs.pin_port.names = "DATA[3]".to_owned();
+    app.state.dialogs.pin_port.fields.names = "DATA[3]".to_owned();
     let expected = app
         .state
         .schematic
@@ -74,7 +74,7 @@ fn names_split_on_whitespace_and_each_is_validated_in_the_models_words() {
         .to_string();
     assert_eq!(draft(&app.state), Draft::Refused(expected.clone()));
 
-    app.state.dialogs.pin_port.names = "OK DATA[3]".to_owned();
+    app.state.dialogs.pin_port.fields.names = "OK DATA[3]".to_owned();
     assert_eq!(
         draft(&app.state),
         Draft::Refused(format!("DATA[3]: {expected}"))
@@ -94,33 +94,14 @@ fn a_name_listed_twice_is_refused_before_arming() {
         .map(|index| format!("P{index}"))
         .collect::<Vec<_>>()
         .join(" ");
-    app.state.dialogs.pin_port.names = names;
+    app.state.dialogs.pin_port.fields.names = names;
     assert_eq!(draft(&app.state), Draft::Refused(TOO_MANY.to_owned()));
 }
 
 #[test]
 fn supply_coerces_signal_to_power_and_power_coerces_direction() {
-    let mut signal = PortSignalType::Analog;
-    coerce_from_direction(PortDirection::Supply, &mut signal);
-    assert_eq!(signal, PortSignalType::Power);
-    // Leaving Supply for a one-way direction leaves Power behind: (In, Power)
-    // is not a contract the model accepts, and the reader asked for In.
-    coerce_from_direction(PortDirection::In, &mut signal);
-    assert_eq!(signal, PortSignalType::Analog);
-    // Inout carries power without being a rail, so nothing moves.
-    let mut power = PortSignalType::Power;
-    coerce_from_direction(PortDirection::InOut, &mut power);
-    assert_eq!(power, PortSignalType::Power);
+    use rspice_schematic_editor::pin_placement::PinPlacementFields;
 
-    let mut direction = PortDirection::In;
-    coerce_from_signal(PortSignalType::Power, &mut direction);
-    assert_eq!(direction, PortDirection::InOut);
-    let mut supply = PortDirection::Supply;
-    coerce_from_signal(PortSignalType::Logic, &mut supply);
-    assert_eq!(supply, PortDirection::InOut);
-    // Coercion is total: from every pair the form can be in, picking any
-    // direction or any signal type lands on a pair the model accepts. This is
-    // the whole claim — a coerced field is never a refused one.
     let directions = [
         PortDirection::In,
         PortDirection::Out,
@@ -151,43 +132,25 @@ fn supply_coerces_signal_to_power_and_power_coerces_direction() {
     for was_direction in directions {
         for was_signal in signals {
             for picked in directions {
-                let mut signal = was_signal;
-                coerce_from_direction(picked, &mut signal);
-                placeable(picked, signal, &format!("{picked:?}"));
+                let mut fields = PinPlacementFields {
+                    direction: was_direction,
+                    signal_type: was_signal,
+                    ..Default::default()
+                };
+                fields.set_direction(picked);
+                placeable(fields.direction, fields.signal_type, &format!("{picked:?}"));
             }
             for picked in signals {
-                let mut direction = was_direction;
-                coerce_from_signal(picked, &mut direction);
-                placeable(direction, picked, &format!("{picked:?}"));
+                let mut fields = PinPlacementFields {
+                    direction: was_direction,
+                    signal_type: was_signal,
+                    ..Default::default()
+                };
+                fields.set_signal_type(picked);
+                placeable(fields.direction, fields.signal_type, &format!("{picked:?}"));
             }
         }
     }
-}
-
-#[test]
-fn discipline_follows_signal_until_touched() {
-    assert_eq!(discipline_for(PortSignalType::Logic), PortDiscipline::Logic);
-    assert_eq!(
-        discipline_for(PortSignalType::Analog),
-        PortDiscipline::Electrical
-    );
-    assert_eq!(
-        discipline_for(PortSignalType::Power),
-        PortDiscipline::Electrical
-    );
-
-    let mut app = RSpiceApp::test_instance();
-    open_with(&mut app.state, "EN");
-    assert!(!app.state.dialogs.pin_port.discipline_touched);
-    app.state.dialogs.pin_port.signal_type = PortSignalType::Logic;
-    app.state.dialogs.pin_port.discipline = discipline_for(PortSignalType::Logic);
-    assert_eq!(app.state.dialogs.pin_port.discipline, PortDiscipline::Logic);
-
-    // Once picked, the discipline is the reader's and nothing moves it.
-    app.state.dialogs.pin_port.discipline = PortDiscipline::Wreal;
-    app.state.dialogs.pin_port.discipline_touched = true;
-    app.state.dialogs.pin_port.signal_type = PortSignalType::Analog;
-    assert_eq!(app.state.dialogs.pin_port.discipline, PortDiscipline::Wreal);
 }
 
 #[test]
@@ -200,7 +163,7 @@ fn the_derived_line_states_pins_conductors_and_port_list_positions() {
     );
     assert_eq!(deck_bits_line(draft(&app.state).names()), None);
 
-    app.state.dialogs.pin_port.names = "EN DATA[7:0] OUT".to_owned();
+    app.state.dialogs.pin_port.fields.names = "EN DATA[7:0] OUT".to_owned();
     assert_eq!(
         declaration_line(&app.state, draft(&app.state).names()).as_deref(),
         Some("3 pins \u{00b7} 10 conductors \u{00b7} port-list positions 1 to 3")
@@ -209,14 +172,14 @@ fn the_derived_line_states_pins_conductors_and_port_list_positions() {
     // single name that declares a range.
     assert_eq!(deck_bits_line(draft(&app.state).names()), None);
 
-    app.state.dialogs.pin_port.names = "DATA[7:0]".to_owned();
+    app.state.dialogs.pin_port.fields.names = "DATA[7:0]".to_owned();
     assert_eq!(
         deck_bits_line(draft(&app.state).names()).as_deref(),
         Some("DATA#7 DATA#6 DATA#5 DATA#4 DATA#3 DATA#2 DATA#1 DATA#0")
     );
 
     // An empty draft states nothing rather than stating zero.
-    app.state.dialogs.pin_port.names.clear();
+    app.state.dialogs.pin_port.fields.names.clear();
     assert_eq!(
         declaration_line(&app.state, draft(&app.state).names()),
         None
@@ -230,8 +193,8 @@ fn enter_arms_the_whole_sequence_without_touching_the_document() {
     let mut app = RSpiceApp::test_instance();
     open_with(&mut app.state, "INP INN OUT VDD");
     let authority = app.state.dialogs.pin_port.authority.clone();
-    app.state.dialogs.pin_port.signal_type = PortSignalType::Logic;
-    app.state.dialogs.pin_port.discipline = PortDiscipline::Logic;
+    app.state.dialogs.pin_port.fields.signal_type = PortSignalType::Logic;
+    app.state.dialogs.pin_port.fields.discipline = PortDiscipline::Logic;
 
     let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
         app.render_pin_port_dialog(ctx)
@@ -281,9 +244,9 @@ fn reopening_while_armed_offers_the_remaining_names() {
     crate::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     open_with(&mut app.state, "INP INN OUT");
-    app.state.dialogs.pin_port.signal_type = PortSignalType::Logic;
-    app.state.dialogs.pin_port.discipline_touched = true;
-    app.state.dialogs.pin_port.discipline = PortDiscipline::Wreal;
+    app.state.dialogs.pin_port.fields.signal_type = PortSignalType::Logic;
+    app.state.dialogs.pin_port.fields.discipline_touched = true;
+    app.state.dialogs.pin_port.fields.discipline = PortDiscipline::Wreal;
 
     let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
         app.render_pin_port_dialog(ctx)
@@ -302,12 +265,15 @@ fn reopening_while_armed_offers_the_remaining_names() {
 
     open_create_pins(&mut app.state);
     assert!(app.state.dialogs.pin_port.open);
-    assert_eq!(app.state.dialogs.pin_port.names, "INN OUT");
+    assert_eq!(app.state.dialogs.pin_port.fields.names, "INN OUT");
     assert_eq!(
-        app.state.dialogs.pin_port.signal_type,
+        app.state.dialogs.pin_port.fields.signal_type,
         PortSignalType::Logic
     );
-    assert_eq!(app.state.dialogs.pin_port.discipline, PortDiscipline::Wreal);
+    assert_eq!(
+        app.state.dialogs.pin_port.fields.discipline,
+        PortDiscipline::Wreal
+    );
 }
 
 /// The prefill suggests from the last batch and nothing else. It is empty the
@@ -319,9 +285,9 @@ fn the_prefill_is_empty_until_a_batch_has_been_armed() {
     crate::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     open_create_pins(&mut app.state);
-    assert_eq!(app.state.dialogs.pin_port.names, "");
+    assert_eq!(app.state.dialogs.pin_port.fields.names, "");
 
-    app.state.dialogs.pin_port.names = "BIAS".to_owned();
+    app.state.dialogs.pin_port.fields.names = "BIAS".to_owned();
     let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
         app.render_pin_port_dialog(ctx)
     });
@@ -332,7 +298,7 @@ fn the_prefill_is_empty_until_a_batch_has_been_armed() {
     place_port(&mut app.state, "BIAS");
 
     open_create_pins(&mut app.state);
-    assert_eq!(app.state.dialogs.pin_port.names, "BIAS_2");
+    assert_eq!(app.state.dialogs.pin_port.fields.names, "BIAS_2");
 }
 
 #[test]
@@ -499,33 +465,6 @@ fn a_name_already_on_the_sheet_is_refused_before_arming() {
     assert_eq!(draft(&app.state), Draft::Refused(expected));
 }
 
-#[test]
-fn every_rendered_string_is_free_of_mojibake_markers() {
-    let mut strings = vec![
-        TITLE,
-        PRIMARY,
-        DESCRIPTION,
-        NAMES_LABEL,
-        NAMES_HINT,
-        DIRECTION_LABEL,
-        SIGNAL_LABEL,
-        DISCIPLINE_LABEL,
-        READ_ONLY,
-        DOCUMENT_CHANGED,
-        TOO_MANY,
-    ];
-    strings.extend(DIRECTION_SEGMENTS);
-    strings.extend(SIGNAL_SEGMENTS);
-    for value in strings {
-        for forbidden in ['\u{00c2}', '\u{00e2}', '\u{fffd}'] {
-            assert!(
-                !value.contains(forbidden),
-                "mojibake in a rendered string: {value:?}"
-            );
-        }
-    }
-}
-
 // ============================================================================
 // Fit
 // ============================================================================
@@ -549,12 +488,12 @@ fn worst_cases() -> [PinPortCase; 2] {
     [
         ("valid", |state: &mut AppState| {
             open_create_pins(state);
-            state.dialogs.pin_port.names = two_dozen_names();
+            state.dialogs.pin_port.fields.names = two_dozen_names();
         }),
         ("refused", |state: &mut AppState| {
             place_port(state, "VERY_LONG_INTERFACE_NAME_7");
             open_create_pins(state);
-            state.dialogs.pin_port.names = two_dozen_names();
+            state.dialogs.pin_port.fields.names = two_dozen_names();
         }),
     ]
 }
@@ -574,7 +513,7 @@ fn create_pins_fits_every_viewport() {
             for (draft_stem, prepare) in worst_cases() {
                 let mut app = RSpiceApp::test_instance();
                 prepare(&mut app.state);
-                let names = app.state.dialogs.pin_port.names.clone();
+                let names = app.state.dialogs.pin_port.fields.names.clone();
                 let painted =
                     crate::ui::widgets::painted_runs::painted_runs(screen, mode, 3, |ctx| {
                         app.render_pin_port_dialog(ctx);
@@ -628,14 +567,14 @@ fn render_create_pins() {
     for (stem, prepare) in [
         ("empty", (|_: &mut AppState| {}) as fn(&mut AppState)),
         ("four-names", |state: &mut AppState| {
-            state.dialogs.pin_port.names = "INP INN OUT VDD".to_owned();
+            state.dialogs.pin_port.fields.names = "INP INN OUT VDD".to_owned();
         }),
         ("refusal", |state: &mut AppState| {
             place_port(state, "OUT");
-            state.dialogs.pin_port.names = "INP INN OUT VDD".to_owned();
+            state.dialogs.pin_port.fields.names = "INP INN OUT VDD".to_owned();
         }),
         ("read-only", |state: &mut AppState| {
-            state.dialogs.pin_port.names = "INP INN".to_owned();
+            state.dialogs.pin_port.fields.names = "INP INN".to_owned();
             state.schematic.session.read_only = true;
         }),
     ] {

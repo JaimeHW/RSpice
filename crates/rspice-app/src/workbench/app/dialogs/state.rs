@@ -743,48 +743,26 @@ impl DescendHierarchyDialogState {
 /// has just placed four logic inputs is far more likely to place a fifth than
 /// to want the form's defaults back. The names and the document authority do
 /// not — those belong to one batch, in one document.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct PinPortDialogState {
     pub(crate) open: bool,
-    /// Whitespace-separated pin names, exactly as typed.
-    pub(crate) names: String,
-    pub(crate) direction: crate::state::PortDirection,
-    pub(crate) signal_type: crate::state::PortSignalType,
-    pub(crate) discipline: crate::state::PortDiscipline,
-    /// Whether the reader has picked a discipline. Until they do, it follows
-    /// the signal type.
-    pub(crate) discipline_touched: bool,
+    pub(crate) fields: rspice_schematic_editor::pin_placement::PinPlacementFields,
     /// The document this batch was named for.
     pub(crate) authority: Option<crate::state::PlacementAuthority>,
     /// The last name armed this session, which the next open suggests from.
     pub(crate) last_name: String,
 }
 
-impl Default for PinPortDialogState {
-    fn default() -> Self {
-        Self {
-            open: false,
-            names: String::new(),
-            direction: crate::state::PortDirection::In,
-            signal_type: crate::state::PortSignalType::Analog,
-            discipline: crate::state::PortDiscipline::Electrical,
-            discipline_touched: false,
-            authority: None,
-            last_name: String::new(),
-        }
-    }
-}
-
 impl PinPortDialogState {
     pub(crate) fn open(&mut self, names: String, authority: crate::state::PlacementAuthority) {
         self.open = true;
-        self.names = names;
+        self.fields.names = names;
         self.authority = Some(authority);
     }
 
     pub(crate) fn close(&mut self) {
         self.open = false;
-        self.names.clear();
+        self.fields.names.clear();
         self.authority = None;
     }
 }
