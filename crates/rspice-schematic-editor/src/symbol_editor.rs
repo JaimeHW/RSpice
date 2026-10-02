@@ -4,6 +4,7 @@ pub mod commands;
 pub mod inspector;
 pub mod interaction;
 pub mod session;
+pub mod surface;
 
 use crate::view::resolved_symbol_render::draw_resolved_symbol;
 use egui::{Align2, Color32, Pos2, Rect, Shape, Stroke, Ui, Vec2, pos2, vec2};
