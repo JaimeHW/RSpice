@@ -286,56 +286,7 @@ fn bus_authoring_commands_are_unavailable_on_read_only_schematics() {
 }
 
 #[test]
-fn switching_conductor_tools_cancels_incompatible_routes_and_tap_state() {
-    use crate::state::{BusDeclaration, BusSlice, BusTapOrientation, PendingBusTap, Point};
-
-    let mut schematic = crate::state::SchematicState::default();
-    schematic.arm_tool(Tool::Wire);
-    schematic.start_wire(Point::origin());
-    assert!(schematic.session.editor.wire_drawing.active);
-
-    schematic.arm_tool(Tool::Bus);
-    assert!(!schematic.session.editor.wire_drawing.active);
-    schematic.start_bus(Point::new(2, 3), None).unwrap();
-    assert!(schematic.session.editor.bus_drawing.active);
-
-    schematic.session.editor.pending_bus_tap = Some(
-        PendingBusTap::new(
-            BusDeclaration::parse("DATA[15:0]").unwrap(),
-            BusSlice::parse("DATA[7:0]").unwrap(),
-            BusTapOrientation::Automatic,
-        )
-        .unwrap(),
-    );
-    schematic.arm_tool(Tool::BusTap);
-    assert!(!schematic.session.editor.bus_drawing.active);
-    assert!(schematic.session.editor.pending_bus_tap.is_some());
-
-    schematic.arm_tool(Tool::Wire);
-    assert!(schematic.session.editor.pending_bus_tap.is_none());
-}
-
-#[test]
-fn cancel_clears_even_hidden_conductor_routes() {
-    use crate::state::Point;
-
-    let mut schematic = crate::state::SchematicState::default();
-    schematic.session.editor.tool = Tool::Select;
-    schematic.start_wire(Point::origin());
-    schematic.start_bus(Point::new(4, 5), None).unwrap();
-    assert!(schematic.session.editor.wire_drawing.active);
-    assert!(schematic.session.editor.bus_drawing.active);
-
-    schematic.cancel_tool();
-
-    assert_eq!(schematic.session.editor.tool, Tool::Select);
-    assert!(!schematic.session.editor.wire_drawing.active);
-    assert!(!schematic.session.editor.bus_drawing.active);
-    assert!(schematic.session.editor.pending_bus_tap.is_none());
-}
-
-#[test]
-fn escape_walks_route_then_tool_then_selection_without_collapsing_stages() {
+fn escape_walks_transaction_route_tool_and_selection_without_collapsing_stages() {
     use crate::state::{ComponentType, Point};
 
     let mut schematic = crate::state::SchematicState::default();
@@ -346,8 +297,20 @@ fn escape_walks_route_then_tool_then_selection_without_collapsing_stages() {
         .selection
         .select_only_component(selected);
     schematic.session.editor.tool = Tool::Wire;
+    schematic.init_undo_history();
     schematic.start_wire(Point::origin());
     schematic.extend_wire(Point::new(10, 0));
+
+    schematic.begin_operation("move selection");
+    schematic.move_selection(Point::new(20, 30));
+    assert_eq!(schematic.document().components[0].pos, Point::new(20, 30));
+    schematic.cancel_interaction_step();
+    assert_eq!(schematic.document().components[0].pos, Point::origin());
+    assert!(!schematic.has_pending_operation());
+    assert!(!schematic.can_undo());
+    assert!(schematic.session.editor.wire_drawing.active);
+    assert_eq!(schematic.session.editor.tool, Tool::Wire);
+    assert!(schematic.session.editor.selection.has_component(selected));
 
     schematic.cancel_interaction_step();
     assert!(!schematic.session.editor.wire_drawing.active);

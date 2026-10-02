@@ -1,5 +1,7 @@
 //! Interaction state and geometry for per-document schematic editor sessions.
 
+mod lifecycle;
+
 pub mod bus;
 pub mod drag;
 pub mod net_highlight;

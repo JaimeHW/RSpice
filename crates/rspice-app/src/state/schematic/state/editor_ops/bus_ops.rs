@@ -80,13 +80,6 @@ impl SchematicState {
         self.session.editor.bus_drawing.cancel();
     }
 
-    /// Cancel every unfinished conductor-routing gesture. Escape and tool
-    /// switches use this to guarantee an invisible route can never commit.
-    pub fn cancel_routing_gestures(&mut self) {
-        self.cancel_wire();
-        self.session.editor.bus_drawing.cancel();
-    }
-
     /// Place a validated tap as one atomic, undoable topology mutation.
     pub fn place_bus_tap(
         &mut self,
