@@ -19,8 +19,8 @@ use rspice_results_ui::eye_diagram::{
 };
 
 use super::frame_work::{self, DatasetWalk};
-use super::strip::{self, LegendChip};
-use super::well_hint;
+use rspice_results_ui::presentation::well_hint;
+use rspice_results_ui::strip::{self, LegendChip};
 
 // ---------------------------------------------------------------------------
 // timebase control
@@ -535,7 +535,7 @@ fn accumulate_line(
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     if state.analysis.eye_diagram_state.data.traces.is_empty() {
         section_header(ui, "Eye", None);
-        super::panel_note(
+        rspice_results_ui::presentation::panel_note(
             ui,
             &unavailable_hint(state).unwrap_or_else(|| {
                 "Metrics appear once the eye is built from the transient.".to_owned()
@@ -585,8 +585,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             false,
         ),
     ];
-    super::stat_table(ui, &rows);
-    super::panel_note(ui, &format!("Folded at {summary}."));
+    rspice_results_ui::presentation::stat_table(ui, &rows);
+    rspice_results_ui::presentation::panel_note(ui, &format!("Folded at {summary}."));
 
     if eye.mask.enabled {
         section_header(ui, "Mask", None);
@@ -609,14 +609,14 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                 false,
             ),
         ];
-        super::stat_table(ui, &rows);
+        rspice_results_ui::presentation::stat_table(ui, &rows);
         // The mask is stored in absolute units at its authoring rate; when
         // the on-screen eye runs at a different rate, the mask time is
         // scaled by the UI ratio (see `EyeMask::inner_in_ui_volts`) — say so.
         let reference = mask.reference_data_rate;
         let current = eye.data.data_rate;
         if reference > 0.0 && (reference - current).abs() > reference * 1e-6 {
-            super::panel_note(
+            rspice_results_ui::presentation::panel_note(
                 ui,
                 &format!(
                     "Mask authored at {} — time scaled to the current UI.",
@@ -625,7 +625,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             );
         }
     }
-    super::panel_note(
+    rspice_results_ui::presentation::panel_note(
         ui,
         "Acquisitions folded at the configured bit period; thresholds 20/50/80 %.",
     );

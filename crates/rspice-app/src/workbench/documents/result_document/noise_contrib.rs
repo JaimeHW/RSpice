@@ -62,7 +62,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let Some((summary, label)) = selected_summary(state) else {
         ui.add_space(8.0);
         section_header(ui, "Contributors", Some("not retained"));
-        super::panel_note(ui, contributor_absence_reason(state));
+        rspice_results_ui::presentation::panel_note(ui, contributor_absence_reason(state));
         return;
     };
     let summary = summary.clone();
@@ -195,7 +195,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                 .map(|(label, value)| (*label, value.as_str()))
                 .collect::<Vec<_>>(),
         );
-        super::panel_note(
+        rspice_results_ui::presentation::panel_note(
             ui,
             "The plot axis is offset Hz. Physical channel frequency = offset + sideband × fundamental. Negative frequencies denote conjugate channels.",
         );
@@ -211,7 +211,10 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         Some(&format!("integrated {}", summary.power_unit())),
     );
     if summary.rows.is_empty() {
-        super::panel_note(ui, "No per-device contributor rows were retained.");
+        rspice_results_ui::presentation::panel_note(
+            ui,
+            "No per-device contributor rows were retained.",
+        );
         return;
     }
     contributor_table(ui, &summary);

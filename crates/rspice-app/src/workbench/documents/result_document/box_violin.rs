@@ -22,8 +22,8 @@ use super::population::{
     self, BoxStatistics, ColumnKind, PopulationColumn, PopulationLimit, PopulationPlan,
     TrialStatus, Whiskers,
 };
-use super::strip::{self, LegendChip};
-use super::well_hint;
+use rspice_results_ui::presentation::well_hint;
+use rspice_results_ui::strip::{self, LegendChip};
 
 /// What the reader is told when the run carries no sampled population.
 const ABSENT_STATE: &str = "No family distribution in this run — run a Monte Carlo analysis";
@@ -401,7 +401,7 @@ pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
         well_hint(ui, ABSENT_STATE);
         return;
     };
-    super::panel_note(ui, &plan.requirement_note);
+    rspice_results_ui::presentation::panel_note(ui, &plan.requirement_note);
     let sheet = context.results.box_violin.clone();
     let columns = match drawn_columns(&plan, &sheet) {
         Ok(columns) => columns,
@@ -830,18 +830,18 @@ impl PaintedColumns {
 pub fn right_panel(ui: &mut Ui, context: &mut SheetContext<'_>) {
     section_header(ui, "Distribution", None);
     let Some(plan) = population::plan(context) else {
-        super::panel_note(
+        rspice_results_ui::presentation::panel_note(
             ui,
             "Statistics appear once a Monte Carlo population is loaded.",
         );
         return;
     };
-    super::panel_note(ui, &plan.requirement_note);
+    rspice_results_ui::presentation::panel_note(ui, &plan.requirement_note);
     let sheet = context.results.box_violin.clone();
     let columns = match drawn_columns(&plan, &sheet) {
         Ok(columns) => columns,
         Err(reason) => {
-            super::panel_note(ui, reason);
+            rspice_results_ui::presentation::panel_note(ui, reason);
             return;
         }
     };
@@ -884,8 +884,8 @@ pub fn right_panel(ui: &mut Ui, context: &mut SheetContext<'_>) {
 
     let column = &columns[chosen.min(columns.len() - 1)];
     let rows = statistics_rows(column, &plan);
-    super::stat_table(ui, &rows);
-    super::panel_note(
+    rspice_results_ui::presentation::stat_table(ui, &rows);
+    rspice_results_ui::presentation::panel_note(
         ui,
         match sheet.grouping {
             BoxGrouping::AllMeasurements => {

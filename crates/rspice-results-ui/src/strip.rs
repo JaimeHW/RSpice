@@ -3,10 +3,10 @@
 
 use egui::{Label, Rect, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
-use crate::ui::icons::Icon;
-use crate::ui::theme::{self, FontWeight, mix};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::IconButton;
+use rspice_ui_kit::icons::Icon;
+use rspice_ui_kit::theme::{self, FontWeight, mix};
+use rspice_ui_kit::tokens::{self, Tokens};
+use rspice_ui_kit::widgets::IconButton;
 
 /// Height of a strip header.
 pub const HEADER_HEIGHT: f32 = 28.0;

@@ -12,6 +12,7 @@
 //! be mistaken for "there are 200".
 
 use egui::Ui;
+use rspice_results_ui::presentation::well_hint;
 
 use crate::schematic::bus_notations;
 use crate::state::{AnalysisResult, AnalysisResultPayload, AnalysisType, RunHistoryRevision};
@@ -24,7 +25,6 @@ use super::frame_work::{self, DatasetWalk};
 use super::waves::{StripModel, cached_models};
 use super::{
     AnalysisPresentationKey, ResultsState, TracePresentationKey, exact_result_artifact_text,
-    well_hint,
 };
 
 /// Width of the leading row-index column.

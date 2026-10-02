@@ -1512,7 +1512,7 @@ fn selected_result_trace(
     }
 
     let t = Tokens::get(ui.ctx());
-    let mut color = crate::workbench::documents::result_document::trace_color(
+    let mut color = rspice_results_ui::presentation::trace_color(
         &waveform_color,
         t.color.traces[waveform_index % t.color.traces.len()],
     );

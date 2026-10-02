@@ -23,8 +23,8 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{SegmentedWidth, chip, section_header, segmented, select};
 
 use super::SheetContext;
-use super::strip::{self, LegendChip};
-use super::well_hint;
+use rspice_results_ui::presentation::well_hint;
+use rspice_results_ui::strip::{self, LegendChip};
 
 /// How the radius axis is ruled.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -825,7 +825,7 @@ fn paint_canvas(
         && let Some(point) = place(index)
     {
         painter.circle_stroke(point, 5.0, egui::Stroke::new(1.5, c.accent));
-        super::point_card(
+        rspice_results_ui::presentation::point_card(
             ui,
             rect,
             point,
@@ -842,7 +842,7 @@ fn sample_card_rows(
     locus: &PolarLocus,
     index: usize,
     policy: &crate::quantity::QuantityPresentationPolicy,
-) -> Vec<super::CardRow> {
+) -> Vec<rspice_results_ui::presentation::CardRow> {
     let magnitude = locus.magnitude(index);
     vec![
         ("f".to_owned(), policy.format_frequency(locus.x[index], 2)),
@@ -1026,7 +1026,7 @@ type RegisterRow = (&'static str, String, String, String);
 pub fn right_panel(ui: &mut Ui, context: &mut SheetContext<'_>) {
     section_header(ui, "Cursors", None);
     let Some(locus) = active_locus(context) else {
-        super::panel_note(
+        rspice_results_ui::presentation::panel_note(
             ui,
             "Cursor values appear once a complex response is loaded.",
         );
@@ -1035,7 +1035,7 @@ pub fn right_panel(ui: &mut Ui, context: &mut SheetContext<'_>) {
     let samples = cursor_samples(context, &locus);
     let rows = register_rows(&locus, samples, &context.policy);
     register_table(ui, &rows);
-    super::panel_note(
+    rspice_results_ui::presentation::panel_note(
         ui,
         "Phase is the principal value; the Δ column unwraps it before differencing. \
          Group delay is the A\u{2192}B secant −Δφ/2πΔf, not an instantaneous derivative.",

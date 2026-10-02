@@ -7,6 +7,7 @@
 //! expressions persist with the workspace ([`SpecEntry`]), while the docbar
 //! opens their inline editor.
 
+use rspice_results_ui::presentation::well_hint;
 mod measurement_builder;
 mod reference_import;
 
@@ -31,7 +32,7 @@ use crate::ui::widgets::{measurement_table, section_header};
 use crate::workbench::AppState;
 use crate::workbench::design_system::{StatusMark, WorkbenchIcon, icon_button, paint_status_mark};
 
-use super::{ResultViewer, well_hint};
+use super::ResultViewer;
 
 /// The width each column wants, and the floor it may not be squeezed below.
 ///

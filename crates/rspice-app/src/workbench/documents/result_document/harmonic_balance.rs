@@ -18,8 +18,8 @@ use crate::workbench::AppState;
 
 mod recorded_fft;
 
-use super::strip::{self, LegendChip};
-use super::well_hint;
+use rspice_results_ui::presentation::well_hint;
+use rspice_results_ui::strip::{self, LegendChip};
 
 /// One retained complex coefficient sequence.  `magnitude` is the exact
 /// result-conversion magnitude, not a display-derived dB or RMS estimate.
@@ -428,11 +428,14 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let tokens = Tokens::get(ui.ctx());
     let Some(model) = build_model(state, &tokens) else {
         if let Some(error) = active_hb_failure(state) {
-            super::panel_note(ui, &format!("Spectrum execution failed: {error}"));
+            rspice_results_ui::presentation::panel_note(
+                ui,
+                &format!("Spectrum execution failed: {error}"),
+            );
         } else if let Some(sentence) = active_incomplete_fft(state) {
-            super::panel_note(ui, &sentence);
+            rspice_results_ui::presentation::panel_note(ui, &sentence);
         } else {
-            super::panel_note(
+            rspice_results_ui::presentation::panel_note(
                 ui,
                 "Select a completed HB, QPSS or Fourier result with retained complex coefficients.",
             );
@@ -464,7 +467,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     // A recorded FFT states the transform the engine performed, so the
     // "Not retained" rows below would be false of it.
     if let Some(spectrum) = &model.fft {
-        super::stat_table(ui, &recorded_fft::inspector_rows(spectrum));
+        rspice_results_ui::presentation::stat_table(ui, &recorded_fft::inspector_rows(spectrum));
     } else if let Some(point) = &model.qpss {
         let config = point.config();
         let rows = [
@@ -506,8 +509,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             ),
             ("Amplitude", "Peak; signed DC unchanged".into(), false),
         ];
-        super::stat_table(ui, &rows);
-        super::panel_note(
+        rspice_results_ui::presentation::stat_table(ui, &rows);
+        rspice_results_ui::presentation::panel_note(
             ui,
             "Each component has a signed tone tuple. Export CSV for the complete signed Fourier coefficients and their tuples.",
         );
@@ -523,7 +526,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             ("Fundamental", "Not retained".to_owned(), false),
             ("THD", "Not retained".to_owned(), true),
         ];
-        super::stat_table(ui, &rows);
+        rspice_results_ui::presentation::stat_table(ui, &rows);
     }
 
     section_header(ui, "Retained spectrum", None);
@@ -554,7 +557,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             false,
         ),
     ];
-    super::stat_table(ui, &rows);
+    rspice_results_ui::presentation::stat_table(ui, &rows);
 }
 
 #[cfg(test)]

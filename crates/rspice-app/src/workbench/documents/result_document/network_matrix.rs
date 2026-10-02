@@ -3,12 +3,13 @@
 //! A periodic sideband block is kept separate from every other block. Missing
 //! cells, ambiguous names, and differing grids cannot become zero coefficients.
 
+use rspice_results_ui::presentation::well_hint;
 use std::sync::Arc;
 
 use egui::Ui;
 use rspice_results::network_matrix::{NetworkLayout, channel_label, channel_reference, resolve};
 
-use super::{AnalysisPresentationKey, AppState, SheetContext, well_hint};
+use super::{AnalysisPresentationKey, AppState, SheetContext};
 use crate::state::{AnalysisResult, AnalysisType};
 
 #[derive(Debug, Clone)]
@@ -94,7 +95,7 @@ pub(super) fn availability(state: &AppState) -> super::ViewerAvailability {
 }
 
 pub(super) fn right_panel(ui: &mut Ui) {
-    super::panel_note(
+    rspice_results_ui::presentation::panel_note(
         ui,
         "Exact retained power-wave coefficients. Select a frequency and sideband block in the matrix. Hover or copy for full numerical precision.",
     );

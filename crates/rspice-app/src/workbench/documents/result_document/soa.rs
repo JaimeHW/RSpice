@@ -3,6 +3,7 @@
 use egui::{RichText, Ui};
 use egui_extras::{Column, TableBuilder};
 use rspice_results::safety::dynamic_active_interval_indices;
+use rspice_results_ui::presentation::{panel_note, stat_table, well_hint};
 
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType,
@@ -15,10 +16,8 @@ use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
 
 use super::frame_work::{self, DatasetWalk};
-use super::strip::StripHeader;
-use super::{
-    AnalysisPresentationKey, SoaRuleFilter, SoaRuleSelection, panel_note, stat_table, well_hint,
-};
+use super::{AnalysisPresentationKey, SoaRuleFilter, SoaRuleSelection};
+use rspice_results_ui::strip::StripHeader;
 
 const ROW_HEIGHT: f32 = 29.0;
 

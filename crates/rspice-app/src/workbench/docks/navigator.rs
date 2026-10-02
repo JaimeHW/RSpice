@@ -4023,7 +4023,7 @@ fn show_virtualized_result_signals(
                             let analysis = &runs[run].analyses[analysis];
                             let signal = &analysis.signals[signal];
                             let t = Tokens::get(ui.ctx());
-                            let color = crate::workbench::documents::result_document::trace_color(
+                            let color = rspice_results_ui::presentation::trace_color(
                                 &signal.color,
                                 t.color.traces[signal.waveform_index % t.color.traces.len()],
                             );

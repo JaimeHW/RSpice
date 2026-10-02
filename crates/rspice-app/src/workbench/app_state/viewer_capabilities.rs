@@ -782,7 +782,7 @@ mod tests {
     #[test]
     fn clearing_design_execution_context_clears_project_scoped_results_state() {
         use crate::workbench::documents::result_document::{
-            AnalysisPresentationKey, ExprEditor, ExprSeries, ExprTrace, PlotView, ResultViewer,
+            AnalysisPresentationKey, ExprEditor, ExprSeries, ExprTrace, ResultViewer,
         };
 
         let mut state = AppState::default();
@@ -801,10 +801,11 @@ mod tests {
         results.cursor_strip = Some(0);
         results.hidden_strips.insert(analysis_key);
         results.maximized_strip = Some(analysis_key);
-        *results.plot_view_mut(ResultViewer::Waves, 0) = PlotView {
-            x: Some((0.0, 1.0)),
-            y: Some((-1.0, 1.0)),
-        };
+        *results.plot_view_mut(ResultViewer::Waves, 0) =
+            rspice_results_ui::presentation::PlotView {
+                x: Some((0.0, 1.0)),
+                y: Some((-1.0, 1.0)),
+            };
         results.analysis_exprs.insert(
             analysis_key,
             vec![ExprTrace {

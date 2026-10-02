@@ -11,8 +11,8 @@ use crate::ui::tokens::Tokens;
 use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
 
-use super::strip::{self, LegendChip};
-use super::well_hint;
+use rspice_results_ui::presentation::well_hint;
+use rspice_results_ui::strip::{self, LegendChip};
 
 /// Spectrum arrays + the analysis summary, with the arrays cached on the
 /// FFT state's spectrum revision.
@@ -377,11 +377,17 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "Spectrum", None);
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let Some(model) = build_model(state) else {
-        super::panel_note(ui, "Spectrum metrics appear once the FFT is computed.");
+        rspice_results_ui::presentation::panel_note(
+            ui,
+            "Spectrum metrics appear once the FFT is computed.",
+        );
         return;
     };
     let Some(analysis) = state.analysis.fft_state.analysis.as_ref() else {
-        super::panel_note(ui, "Spectrum metrics appear once the FFT is computed.");
+        rspice_results_ui::presentation::panel_note(
+            ui,
+            "Spectrum metrics appear once the FFT is computed.",
+        );
         return;
     };
     let level_unit = spectrum_level_unit(&model.source, model.normalization);
@@ -446,7 +452,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ("ENOB", enob.unwrap_or_else(|| "—".to_owned()), false),
         ("Noise floor", noise_floor, false),
     ];
-    super::stat_table(ui, &rows);
+    rspice_results_ui::presentation::stat_table(ui, &rows);
 
     if analysis.fundamental_frequency.is_some() {
         let db0 = analysis.fundamental_db.unwrap_or(0.0);
@@ -471,7 +477,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                 .iter()
                 .map(|(k, v)| (k.as_str(), v.clone(), false))
                 .collect();
-            super::stat_table(ui, &rows);
+            rspice_results_ui::presentation::stat_table(ui, &rows);
         }
     }
 }

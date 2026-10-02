@@ -38,7 +38,7 @@ pub(super) fn show(ui: &mut Ui, figure: &Arc<NoiseFigureEvidence>, cache: &mut D
         .map(|(name, value)| (*name, value.as_str()))
         .collect::<Vec<_>>(),
     );
-    super::super::panel_note(
+    rspice_results_ui::presentation::panel_note(
         ui,
         "Signal uses the retained conversion channels (sideband zero for legacy results). Folded source thermal noise is evaluated at the reference temperature; all other device noise retains its circuit temperature.",
     );

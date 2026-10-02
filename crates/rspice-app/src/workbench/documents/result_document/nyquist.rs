@@ -15,8 +15,8 @@ use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
 use rspice_results_ui::nyquist::{EncirclementCount, NyquistData, NyquistMargin};
 
-use super::strip::{self, LegendChip};
-use super::well_hint;
+use rspice_results_ui::presentation::well_hint;
+use rspice_results_ui::strip::{self, LegendChip};
 
 /// What the tab needs, spelled the way the reader can act on it.
 ///
@@ -269,7 +269,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         &response,
     );
     if response.view.any() {
-        let change = super::square_xy_view_change((x0, x1), (y0, y1), response.view);
+        let change = rspice_results_ui::presentation::square_xy_view_change(
+            (x0, x1),
+            (y0, y1),
+            response.view,
+        );
         state
             .ui
             .results
@@ -286,7 +290,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     {
         let mut best = 14.0f32 * 14.0;
         for i in 0..re.len() {
-            let pos = super::xy_screen_pos(response.plot_rect, (re[i], im[i]), ranges.0, ranges.1);
+            let pos = rspice_results_ui::presentation::xy_screen_pos(
+                response.plot_rect,
+                (re[i], im[i]),
+                ranges.0,
+                ranges.1,
+            );
             let d2 = pos.distance_sq(pointer);
             if d2 < best {
                 best = d2;
@@ -320,7 +329,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let target = hovered.or(pinned);
 
     if let Some((_, i)) = target {
-        let pos = super::xy_screen_pos(response.plot_rect, (re[i], im[i]), ranges.0, ranges.1);
+        let pos = rspice_results_ui::presentation::xy_screen_pos(
+            response.plot_rect,
+            (re[i], im[i]),
+            ranges.0,
+            ranges.1,
+        );
         let painter = plot_ui.painter();
         if pinned == target {
             painter.circle_stroke(pos, 6.0, egui::Stroke::new(1.8, c.traces[0]));
@@ -347,7 +361,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 ),
             ),
         ];
-        super::point_card(&plot_ui, response.plot_rect, pos, &name, c.traces[0], &rows);
+        rspice_results_ui::presentation::point_card(
+            &plot_ui,
+            response.plot_rect,
+            pos,
+            &name,
+            c.traces[0],
+            &rows,
+        );
     }
 }
 
@@ -360,7 +381,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "Stability", None);
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let Some(s) = derived(state) else {
-        super::panel_note(ui, NEEDS_LOOP_GAIN);
+        rspice_results_ui::presentation::panel_note(ui, NEEDS_LOOP_GAIN);
         return;
     };
 
@@ -403,7 +424,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             false,
         ),
     ];
-    super::stat_table(ui, &rows);
+    rspice_results_ui::presentation::stat_table(ui, &rows);
 
     // The fold, before the criterion. This sheet is the one that carries the
     // encirclement count the note points at, so the reader is being sent one
@@ -411,13 +432,13 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     if let Some(margin) = s.phase_margin
         && crate::results::stability::phase_margin_is_folded(margin.phase_deg)
     {
-        super::panel_note(
+        rspice_results_ui::presentation::panel_note(
             ui,
             &crate::results::stability::folded_phase_margin_note(margin.phase_deg),
         );
     }
 
-    super::panel_note(ui, &criterion_note(s.encirclements));
+    rspice_results_ui::presentation::panel_note(ui, &criterion_note(s.encirclements));
 }
 
 #[cfg(test)]

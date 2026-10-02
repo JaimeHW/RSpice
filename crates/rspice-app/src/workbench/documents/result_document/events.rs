@@ -4,6 +4,7 @@ use rspice_results::events::projection::{
     BusRadix, BusTimeline, EventOrder, EventRow, EventSelectionSource, EventValue, bus_notes,
     bus_subtitle, event_row_at_name, event_row_from_entry,
 };
+use rspice_results_ui::presentation::{panel_note, stat_table, well_hint};
 use std::sync::Arc;
 
 use egui::{RichText, Ui};
@@ -17,8 +18,8 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{SegmentedWidth, chip, section_header, segmented};
 use crate::workbench::AppState;
 
-use super::strip::StripHeader;
-use super::{AnalysisPresentationKey, SheetContext, panel_note, stat_table, well_hint};
+use super::{AnalysisPresentationKey, SheetContext};
+use rspice_results_ui::strip::StripHeader;
 
 const ROW_HEIGHT: f32 = 28.0;
 const HEADER_HEIGHT: f32 = 31.0;

@@ -5,6 +5,7 @@
 //! and never falls back to console text or the legacy mutable analysis cache.
 
 use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
+use rspice_results_ui::presentation::{panel_note, well_hint};
 use std::cmp::Ordering;
 
 use egui::{Sense, Ui};
@@ -37,9 +38,8 @@ pub(super) use study::{StudyPlan, domain_bar};
 
 use super::AnalysisPresentationKey;
 use super::frame_work::{self, DatasetWalk};
-use super::strip::StripHeader;
 use super::virtual_rows::RowOffsets;
-use super::{panel_note, well_hint};
+use rspice_results_ui::strip::StripHeader;
 
 const RANK_WIDTH: f32 = 44.0;
 const PARAMETER_WIDTH: f32 = 230.0;

@@ -1544,15 +1544,6 @@ fn every_sheet_draws_at_a_touch_composition() {
     }
 }
 
-#[test]
-fn stat_columns_are_disjoint_at_phone_panel_width() {
-    let width = 240.0;
-    let (name, value) = stat_column_widths(width);
-    assert!(name > 0.0);
-    assert!(value > name);
-    assert!((name + value + 24.0 + 8.0 - width).abs() < f32::EPSILON * width);
-}
-
 fn transient_state() -> AppState {
     state_with_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![

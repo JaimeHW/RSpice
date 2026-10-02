@@ -1,6 +1,7 @@
 //! XF - retained scalar DC transfer-function evidence.
 
 use egui::Ui;
+use rspice_results_ui::presentation::{panel_note, well_hint};
 
 use crate::product::DatasetId;
 use crate::state::{
@@ -13,8 +14,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{measurement_table, section_header};
 use crate::workbench::AppState;
 
-use super::strip::StripHeader;
-use super::{panel_note, well_hint};
+use rspice_results_ui::strip::StripHeader;
 
 struct TransferFunctionView<'a> {
     analysis_label: &'a str,

@@ -6,6 +6,7 @@
 //! cursors live on one strip at a time; their values, deltas and windowed
 //! measurements render in the right panel.
 
+use rspice_results_ui::presentation::well_hint;
 mod expression_evaluation;
 mod expressions;
 mod extent;
@@ -53,14 +54,14 @@ use crate::workbench::{
 };
 
 use super::frame_work::{self, FrameSampleRead};
-use super::strip::{LegendChip, StripHeader};
 use super::{
     AnalysisPresentationKey, DerivedSeries, ExprEditor, ExprSeries, ExprTrace,
     ExpressionSeriesResult, ExpressionSource, ExpressionWaveform, HorizontalWaveCursor,
     MarkerEditDraft, MarkerKind, MarkerSelector, MarkerView, ResultsState, SelectedResultTrace,
     SourceWaveformPresentationKey, TracePresentationKey, WavePanePresentationKey,
-    WaveformPresentationKey, waveform_color, well_hint,
+    WaveformPresentationKey, waveform_color,
 };
+use rspice_results_ui::strip::{LegendChip, StripHeader};
 
 const WAVE_SHARED_X_HEIGHT: f32 = 57.0;
 

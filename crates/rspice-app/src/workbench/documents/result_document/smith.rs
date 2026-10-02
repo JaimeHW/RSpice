@@ -16,8 +16,8 @@ use crate::workbench::app_state::{
 };
 
 use super::frame_work::{self, DatasetWalk};
-use super::strip::{self, LegendChip};
-use super::well_hint;
+use rspice_results_ui::presentation::well_hint;
+use rspice_results_ui::strip::{self, LegendChip};
 
 fn trace_is_well_formed(waveform: &crate::state::WaveformData) -> bool {
     let Some(complex) = waveform.complex.as_ref() else {
@@ -393,7 +393,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let response = plot::show(&mut plot_ui, &spec, &mut state.ui.results.cache, None, None);
     super::record_drawn_axes(&mut state.ui.results, super::ResultViewer::Smith, &response);
     if response.view.any() {
-        let change = super::square_xy_view_change((x0, x1), (y0, y1), response.view);
+        let change = rspice_results_ui::presentation::square_xy_view_change(
+            (x0, x1),
+            (y0, y1),
+            response.view,
+        );
         state
             .ui
             .results
@@ -412,8 +416,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         let mut best = 14.0f32 * 14.0;
         for (slot, (_, re, im)) in arrays.iter().enumerate() {
             for i in 0..re.len() {
-                let pos =
-                    super::xy_screen_pos(response.plot_rect, (re[i], im[i]), ranges.0, ranges.1);
+                let pos = rspice_results_ui::presentation::xy_screen_pos(
+                    response.plot_rect,
+                    (re[i], im[i]),
+                    ranges.0,
+                    ranges.1,
+                );
                 let d2 = pos.distance_sq(pointer);
                 if d2 < best {
                     best = d2;
@@ -451,8 +459,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         let (trace_index, re, im) = &arrays[slot];
         let gamma_re = re[i];
         let gamma_im = im[i];
-        let pos =
-            super::xy_screen_pos(response.plot_rect, (gamma_re, gamma_im), ranges.0, ranges.1);
+        let pos = rspice_results_ui::presentation::xy_screen_pos(
+            response.plot_rect,
+            (gamma_re, gamma_im),
+            ranges.0,
+            ranges.1,
+        );
         let color = c.traces[slot % c.traces.len()];
         let painter = plot_ui.painter();
         if pinned == Some((slot, i)) {
@@ -503,7 +515,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         } else {
             rows.push(("Readout".to_owned(), "complex coefficient only".to_owned()));
         }
-        super::point_card(&plot_ui, response.plot_rect, pos, &trace.name, color, &rows);
+        rspice_results_ui::presentation::point_card(
+            &plot_ui,
+            response.plot_rect,
+            pos,
+            &trace.name,
+            color,
+            &rows,
+        );
     }
 }
 
@@ -522,7 +541,10 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         .filter(|tr| tr.visible && !tr.points.is_empty())
         .collect::<Vec<_>>();
     let Some(trace) = visible_traces.first().copied() else {
-        super::panel_note(ui, "Trace metrics appear once S-parameter data is loaded.");
+        rspice_results_ui::presentation::panel_note(
+            ui,
+            "Trace metrics appear once S-parameter data is loaded.",
+        );
         return;
     };
 
@@ -616,8 +638,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ),
         ("Reference plane", "Not retained".to_owned(), false),
     ];
-    super::stat_table(ui, &rows);
-    super::panel_note(
+    rspice_results_ui::presentation::stat_table(ui, &rows);
+    rspice_results_ui::presentation::panel_note(
         ui,
         "Loci are plotted on the reflection-coefficient plane. De-embedding is not asserted without retained reference-plane provenance.",
     );
@@ -633,57 +655,6 @@ mod tests {
             impedance_from_gamma(0.2, 0.0, 75.0).expect("finite impedance");
         assert!((resistance - 112.5).abs() < 1.0e-12);
         assert_eq!(reactance, 0.0);
-    }
-
-    #[test]
-    fn wheel_zoom_keeps_smith_axes_at_equal_scale() {
-        let change = super::super::square_xy_view_change(
-            (-1.12, 1.12),
-            (-1.12, 1.12),
-            crate::ui::plot::ViewChange {
-                x: Some((-0.5, 0.5)),
-                ..Default::default()
-            },
-        );
-        let x = change.x.expect("coupled x range");
-        let y = change.y.expect("coupled y range");
-
-        assert!(((x.1 - x.0) - (y.1 - y.0)).abs() < 1.0e-12);
-        assert!((x.1 - x.0 - 1.0).abs() < 1.0e-12);
-    }
-
-    #[test]
-    fn box_zoom_expands_shorter_axis_instead_of_distorting_chart() {
-        let change = super::super::square_xy_view_change(
-            (-1.12, 1.12),
-            (-1.12, 1.12),
-            crate::ui::plot::ViewChange {
-                x: Some((-0.75, 0.75)),
-                y: Some((-0.25, 0.25)),
-                ..Default::default()
-            },
-        );
-        let x = change.x.expect("square x range");
-        let y = change.y.expect("square y range");
-
-        assert!(((x.1 - x.0) - (y.1 - y.0)).abs() < 1.0e-12);
-        assert!((y.1 - y.0 - 1.5).abs() < 1.0e-12);
-    }
-
-    #[test]
-    fn fit_request_remains_a_reset() {
-        let change = super::super::square_xy_view_change(
-            (-0.5, 0.5),
-            (-0.5, 0.5),
-            crate::ui::plot::ViewChange {
-                reset: true,
-                ..Default::default()
-            },
-        );
-
-        assert!(change.reset);
-        assert!(change.x.is_none());
-        assert!(change.y.is_none());
     }
 
     /// A retained S-parameter analysis whose S11 locus is `values`.

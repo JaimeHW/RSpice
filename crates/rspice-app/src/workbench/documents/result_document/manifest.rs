@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use super::frame_work::{self, DatasetWalk};
 use super::virtual_rows::RowOffsets;
-use super::well_hint;
+use rspice_results_ui::presentation::well_hint;
 
 const MIN_TABLE_WIDTH: f32 = 1_030.0;
 const TABLE_HEAD_HEIGHT: f32 = 27.0;

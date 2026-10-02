@@ -25,8 +25,8 @@ use crate::ui::tokens::Tokens;
 use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
 
-use super::strip::{self, LegendChip};
-use super::well_hint;
+use rspice_results_ui::presentation::well_hint;
+use rspice_results_ui::strip::{self, LegendChip};
 
 /// Exactly one phase-noise waveform selected from the active immutable run.
 struct PhaseNoiseModel {
@@ -267,7 +267,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "Phase noise", None);
     let quantities = state.ui.preferences.quantity_presentation_policy();
     let Some(model) = build_model(state) else {
-        super::panel_note(
+        rspice_results_ui::presentation::panel_note(
             ui,
             "A PNOISE/QPNOISE result needs an explicitly labelled phase-noise trace before L(f) can be shown.",
         );
@@ -304,11 +304,14 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             false,
         ),
     ];
-    super::stat_table(ui, &rows);
+    rspice_results_ui::presentation::stat_table(ui, &rows);
     ui.collapsing("Device noise shares", |ui| {
         let shares: Vec<_> = retained_device_noise_shares(&analysis.measurements).collect();
         if shares.is_empty() {
-            super::panel_note(ui, "No per-device noise shares were retained.");
+            rspice_results_ui::presentation::panel_note(
+                ui,
+                "No per-device noise shares were retained.",
+            );
         } else {
             egui::ScrollArea::vertical().max_height(240.0).show_rows(
                 ui,
@@ -316,7 +319,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                 shares.len(),
                 |ui, range| {
                     for index in range {
-                        super::stat_table(
+                        rspice_results_ui::presentation::stat_table(
                             ui,
                             &[(shares[index].0, format!("{:.6} %", shares[index].1), false)],
                         );
@@ -325,7 +328,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             );
         }
     });
-    super::panel_note(
+    rspice_results_ui::presentation::panel_note(
         ui,
         "Only an explicitly labelled retained phase-noise trace is rendered; ordinary periodic-noise traces are not reinterpreted as L(f).",
     );

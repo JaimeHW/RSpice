@@ -1,5 +1,6 @@
 //! Optimization convergence and candidate history viewer.
 
+use rspice_results_ui::presentation::{panel_note, stat_table, well_hint};
 use std::collections::BTreeMap;
 
 use egui::{RichText, Ui};
@@ -17,8 +18,8 @@ use crate::workbench::AppState;
 use std::sync::Arc;
 
 use super::frame_work::{self, DatasetWalk};
-use super::strip::StripHeader;
-use super::{AnalysisPresentationKey, OptimizationSelection, panel_note, stat_table, well_hint};
+use super::{AnalysisPresentationKey, OptimizationSelection};
+use rspice_results_ui::strip::StripHeader;
 
 use rspice_results::optimization::history::{OptimizationIndices, OptimizationView};
 

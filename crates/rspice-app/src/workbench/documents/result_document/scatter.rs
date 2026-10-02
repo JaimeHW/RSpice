@@ -20,8 +20,8 @@ use super::SheetContext;
 use super::population::{
     self, ColumnKind, PopulationColumn, PopulationPlan, TrialStatus, UNPAIRED_REASON,
 };
-use super::strip::{self, LegendChip};
-use super::well_hint;
+use rspice_results_ui::presentation::well_hint;
+use rspice_results_ui::strip::{self, LegendChip};
 
 /// What the reader is told when the run carries no sampled population.
 const ABSENT_STATE: &str = "No Monte Carlo population in this run — run a Monte Carlo analysis";
@@ -272,7 +272,7 @@ pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
         well_hint(ui, ABSENT_STATE);
         return;
     };
-    super::panel_note(ui, &plan.requirement_note);
+    rspice_results_ui::presentation::panel_note(ui, &plan.requirement_note);
     let Some(pair) = active_pair(&plan, &context.results.scatter) else {
         well_hint(
             ui,
@@ -588,7 +588,7 @@ fn point_position(
     x: f64,
     y: f64,
 ) -> egui::Pos2 {
-    super::xy_screen_pos(response.plot_rect, (x, y), ranges.0, ranges.1)
+    rspice_results_ui::presentation::xy_screen_pos(response.plot_rect, (x, y), ranges.0, ranges.1)
 }
 
 /// Data-space coordinates of a screen position.
@@ -718,7 +718,7 @@ fn paint_hover_card(
         .get(row)
         .map_or_else(|| format!("Trial {row}"), |trial| trial.label.clone());
     let color = Tokens::get(ui.ctx()).color.traces[1];
-    super::point_card(
+    rspice_results_ui::presentation::point_card(
         ui,
         response.plot_rect,
         position,
@@ -740,29 +740,32 @@ fn paint_hover_card(
 pub fn right_panel(ui: &mut Ui, context: &mut SheetContext<'_>) {
     section_header(ui, "Correlation", None);
     let Some(plan) = population::plan(context) else {
-        super::panel_note(
+        rspice_results_ui::presentation::panel_note(
             ui,
             "Correlation appears once a Monte Carlo population is loaded.",
         );
         return;
     };
-    super::panel_note(ui, &plan.requirement_note);
+    rspice_results_ui::presentation::panel_note(ui, &plan.requirement_note);
     let Some(pair) = active_pair(&plan, &context.results.scatter) else {
-        super::panel_note(ui, "A correlation needs two retained columns.");
+        rspice_results_ui::presentation::panel_note(
+            ui,
+            "A correlation needs two retained columns.",
+        );
         return;
     };
     let (x_column, y_column) = (&plan.columns[pair.x], &plan.columns[pair.y]);
     if !plan.columns_are_paired(x_column, y_column) {
-        super::panel_note(ui, UNPAIRED_REASON);
+        rspice_results_ui::presentation::panel_note(ui, UNPAIRED_REASON);
         return;
     }
     let points = paired_points(&plan, &pair);
     let rows = register_rows(&plan, &points, x_column, y_column);
-    super::stat_table(ui, &rows);
+    rspice_results_ui::presentation::stat_table(ui, &rows);
 
     let selection = context.results.scatter.selection.clone();
     if selection.is_empty() {
-        super::panel_note(
+        rspice_results_ui::presentation::panel_note(
             ui,
             "Drag on the plot to brush a rectangle of trials; click selects one and Esc clears.",
         );
@@ -800,7 +803,7 @@ pub fn right_panel(ui: &mut Ui, context: &mut SheetContext<'_>) {
         .collect::<Vec<_>>();
     crate::ui::widgets::measurement_table(ui, &rows);
     if selection.len() > listed {
-        super::panel_note(
+        rspice_results_ui::presentation::panel_note(
             ui,
             &format!(
                 "{} more brushed trials are not listed.",
@@ -811,7 +814,7 @@ pub fn right_panel(ui: &mut Ui, context: &mut SheetContext<'_>) {
     if ui.button("Clear brush").clicked() {
         clear_selection(context);
     }
-    super::panel_note(
+    rspice_results_ui::presentation::panel_note(
         ui,
         "A trial is reproduced from the seed in its name. No per-trial waveform set is \
          retained, so there is nothing further to open here.",

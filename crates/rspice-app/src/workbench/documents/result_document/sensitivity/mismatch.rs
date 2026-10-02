@@ -15,6 +15,7 @@
 //! which would claim the unlisted variables carry nothing.
 
 use egui::{Sense, Ui};
+use rspice_results_ui::presentation::{panel_note, well_hint};
 use std::cmp::Ordering;
 use std::sync::Arc;
 
@@ -27,9 +28,9 @@ use crate::workbench::AppState;
 
 use super::super::AnalysisPresentationKey;
 use super::super::frame_work::{self, DatasetWalk};
-use super::super::strip::StripHeader;
 use super::super::virtual_rows::RowOffsets;
-use super::super::{panel_note, well_hint};
+use rspice_results_ui::strip::StripHeader;
+
 use super::{CELL_INSET, HEADER_HEIGHT, PANEL_ROW_HEIGHT, ROW_HEIGHT, column_rect, paint_cell};
 
 const RANK_WIDTH: f32 = 44.0;

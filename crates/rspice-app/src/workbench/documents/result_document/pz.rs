@@ -11,8 +11,8 @@ use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
 use rspice_results::pole_zero::data::{ComplexRoot, PoleZeroData};
 
-use super::strip::{self, LegendChip};
-use super::well_hint;
+use rspice_results_ui::presentation::well_hint;
+use rspice_results_ui::strip::{self, LegendChip};
 
 fn active_data(state: &AppState) -> Option<PoleZeroData> {
     let analysis = state.simulation.active_analysis()?;
@@ -230,7 +230,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         &response,
     );
     if response.view.any() {
-        let change = super::square_xy_view_change((x0, x1), (y0, y1), response.view);
+        let change = rspice_results_ui::presentation::square_xy_view_change(
+            (x0, x1),
+            (y0, y1),
+            response.view,
+        );
         state
             .ui
             .results
@@ -247,7 +251,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     {
         let mut best = 16.0f32 * 16.0;
         for (i, root) in data.roots.iter().enumerate() {
-            let pos = super::xy_screen_pos(
+            let pos = rspice_results_ui::presentation::xy_screen_pos(
                 response.plot_rect,
                 (root.real, root.imag),
                 ranges.0,
@@ -287,7 +291,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     if let Some((_, i)) = target {
         let root = &data.roots[i];
-        let pos = super::xy_screen_pos(
+        let pos = rspice_results_ui::presentation::xy_screen_pos(
             response.plot_rect,
             (root.real, root.imag),
             ranges.0,
@@ -320,7 +324,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             ));
         }
         let title = if root.is_pole() { "pole" } else { "zero" };
-        super::point_card(&plot_ui, response.plot_rect, pos, title, color, &rows);
+        rspice_results_ui::presentation::point_card(
+            &plot_ui,
+            response.plot_rect,
+            pos,
+            title,
+            color,
+            &rows,
+        );
     }
 }
 
@@ -332,7 +343,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "Roots", None);
     let Some(data) = active_data(state) else {
-        super::panel_note(ui, "Roots appear once a pole-zero analysis runs.");
+        rspice_results_ui::presentation::panel_note(
+            ui,
+            "Roots appear once a pole-zero analysis runs.",
+        );
         return;
     };
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
@@ -401,7 +415,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         .iter()
         .map(|(key, value, highlight)| (key.as_str(), value.clone(), *highlight))
         .collect();
-    super::stat_table(ui, &summary_refs);
+    rspice_results_ui::presentation::stat_table(ui, &summary_refs);
 
     ui.add_space(8.0);
     section_header(ui, "Retained roots", None);
@@ -433,16 +447,16 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         .iter()
         .map(|(k, v, h)| (k.as_str(), v.clone(), *h))
         .collect();
-    super::stat_table(ui, &row_refs);
+    rspice_results_ui::presentation::stat_table(ui, &row_refs);
     if omitted > 0 {
-        super::panel_note(
+        rspice_results_ui::presentation::panel_note(
             ui,
             &format!(
                 "{omitted} additional retained root representatives are omitted from this compact table."
             ),
         );
     }
-    super::panel_note(
+    rspice_results_ui::presentation::panel_note(
         ui,
         "Conjugate pairs are listed once using the +jω member. Crosses are poles and circles are zeros. The shaded left half-plane is asymptotically stable; poles on the imaginary axis are marginal.",
     );

@@ -16,6 +16,8 @@ workspace = true
 test-support = []
 
 [dependencies]
+egui = { version = "0.35.0", default-features = false }
+rspice-ui-kit = { workspace = true, features = ["plot"] }
 rspice-app-types.workspace = true
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false }
 rspice-results = { workspace = true, features = ["engine-evidence"] }

@@ -303,7 +303,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         && analysis.analysis_type == crate::state::AnalysisType::Qpxf
     {
         section_header(ui, "QPXF unit transfers", None);
-        super::panel_note(
+        rspice_results_ui::presentation::panel_note(
             ui,
             "The horizontal axis is physical output frequency. Each curve is the output per unit excitation of its named input source and signed tone tuple. Finite sampled group delays are shown in seconds; undefined intervals are omitted from the curves and retained in the CSV table.",
         );
@@ -311,7 +311,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             &analysis.result_payload
         {
             let m = &response.metadata;
-            super::panel_note(
+            rspice_results_ui::presentation::panel_note(
                 ui,
                 &format!(
                     "{} sources × {} input tuples. Output {:?} at tuple {:?}. Authored axis: {:?}; tones {:?} Hz.",
@@ -331,7 +331,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                     .flatten()
                     .filter(|d| !matches!(d, rspice_core::engine::QpxfGroupDelay::Finite(_)))
                     .count();
-                super::panel_note(
+                rspice_results_ui::presentation::panel_note(
                     ui,
                     &format!(
                         "Group-delay magnitude floor: {}. {} undefined delay samples. Delay uses sampled phase differences on the selected frequency grid.",
@@ -347,7 +347,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         && analysis.analysis_type == crate::state::AnalysisType::Qpac
     {
         section_header(ui, "QPAC conversion response", None);
-        super::panel_note(
+        rspice_results_ui::presentation::panel_note(
             ui,
             "The horizontal axis is the signed probe offset. Physical input and output frequencies equal offset plus their tone tuple dotted with the QPSS tones. Full signed-tuple responses are available in the result table and CSV export.",
         );
@@ -355,7 +355,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             &analysis.result_payload
         {
             let m = &response.metadata;
-            super::panel_note(
+            rspice_results_ui::presentation::panel_note(
                 ui,
                 &format!(
                     "Source: {} ({:?}), magnitude {}, phase {}°. Input tuple {:?}; output tuple {:?}. Tones: {:?} Hz.",
@@ -378,7 +378,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         .is_some_and(|analysis| analysis.analysis_type.is_raw_frequency_curve())
     {
         section_header(ui, "Distortion curves", None);
-        super::panel_note(
+        rspice_results_ui::presentation::panel_note(
             ui,
             "Fundamental response and Volterra product ratios are retained as exact complex phasors; the plot projects their magnitude to dB and dBc without changing zero into a finite floor.",
         );
@@ -389,11 +389,14 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let model = match build_model(state) {
         Ok(model) => model,
         Err(NoMargins::NoResponse) => {
-            super::panel_note(ui, "No usable frequency response in the active run.");
+            rspice_results_ui::presentation::panel_note(
+                ui,
+                "No usable frequency response in the active run.",
+            );
             return;
         }
         Err(NoMargins::AnalysisFailed(reason)) => {
-            super::panel_note(
+            rspice_results_ui::presentation::panel_note(
                 ui,
                 &match reason {
                     Some(reason) => format!(
@@ -406,7 +409,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         }
     };
     let rows = margin_rows(model.margins, &quantity_policy);
-    super::stat_table(ui, &rows);
+    rspice_results_ui::presentation::stat_table(ui, &rows);
 
     // A folded phase margin reads like a verdict and is not one. It goes above
     // the sweep-provenance notes because it is the stronger claim: the others
@@ -415,24 +418,24 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     if let Some(loop_phase) = model.margins.pm_phase_deg
         && crate::results::stability::phase_margin_is_folded(loop_phase)
     {
-        super::panel_note(
+        rspice_results_ui::presentation::panel_note(
             ui,
             &crate::results::stability::folded_phase_margin_note(loop_phase),
         );
     }
 
     if model.phase_deg.is_none() {
-        super::panel_note(
+        rspice_results_ui::presentation::panel_note(
             ui,
             "Phase data unavailable for this response — re-run the analysis to compute margins.",
         );
     } else if model.margins.adc_is_dc {
-        super::panel_note(
+        rspice_results_ui::presentation::panel_note(
             ui,
             "Margins measured on the simulated curves; the plot markers show the same values.",
         );
     } else {
-        super::panel_note(
+        rspice_results_ui::presentation::panel_note(
             ui,
             "Margins measured on the simulated curves; the plot markers show the same values. The sweep does not open flat, so the gain shown is the one at its lowest frequency — not the DC gain — and f₋₃dB is referenced to that.",
         );
@@ -498,7 +501,10 @@ pub(super) fn noise_spectrum_right_panel(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "Noise spectrum", None);
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let Some(model) = build_noise_model(state) else {
-        super::panel_note(ui, "No valid ordinary noise spectrum is selected.");
+        rspice_results_ui::presentation::panel_note(
+            ui,
+            "No valid ordinary noise spectrum is selected.",
+        );
         return;
     };
     let band = model.band.unwrap_or_else(|| {
@@ -534,8 +540,8 @@ pub(super) fn noise_spectrum_right_panel(ui: &mut Ui, state: &mut AppState) {
             model.input_rms.is_some(),
         ),
     ];
-    super::stat_table(ui, &rows);
-    super::panel_note(
+    rspice_results_ui::presentation::stat_table(ui, &rows);
+    rspice_results_ui::presentation::panel_note(
         ui,
         "The plot takes the square root of retained power spectral density and displays nV/√Hz for voltage or nA/√Hz for current, or ns/√Hz for timing, without altering source samples.",
     );

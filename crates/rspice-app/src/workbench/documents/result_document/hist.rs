@@ -22,8 +22,8 @@ use rspice_results::yield_analysis::{SpecLimitType, YieldResult};
 use rspice_results_ui::histogram::display::{HistogramDisplay, hist_axis};
 
 use super::frame_work::{self, DatasetWalk};
-use super::strip::{self, LegendChip};
-use super::well_hint;
+use rspice_results_ui::presentation::well_hint;
+use rspice_results_ui::strip::{self, LegendChip};
 
 /// Return the one yield result authorized by both the active immutable
 /// dataset and the selected Monte-Carlo measurement. Yield results are stored
@@ -886,7 +886,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let Some(name) = selected_histogram_name(state) else {
         section_header(ui, "Distribution", None);
-        super::panel_note(ui, "Stats appear once a Monte Carlo run is loaded.");
+        rspice_results_ui::presentation::panel_note(
+            ui,
+            "Stats appear once a Monte Carlo run is loaded.",
+        );
         return;
     };
     section_header(ui, "Display range", None);
@@ -926,7 +929,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let plan = hist_plan(state, &name);
     let Some(histogram) = plan.histogram.as_deref() else {
         section_header(ui, "Distribution", None);
-        super::panel_note(
+        rspice_results_ui::presentation::panel_note(
             ui,
             "The selected samples, retained statistics, or display range are invalid or unavailable.",
         );
@@ -945,9 +948,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             ("Below range", histogram.underflow.to_string(), false),
             ("Above range", histogram.overflow.to_string(), false),
         ];
-        super::stat_table(ui, &rows);
+        rspice_results_ui::presentation::stat_table(ui, &rows);
     } else {
-        super::stat_table(
+        rspice_results_ui::presentation::stat_table(
             ui,
             &[
                 ("Measure", histogram.name.clone(), false),
@@ -975,14 +978,14 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                 "Unavailable — limits exceed the finite range".into()
             }
         };
-        super::stat_table(
+        rspice_results_ui::presentation::stat_table(
             ui,
             &[
                 ("Level", format!("{}%", confidence.level_pct), false),
                 ("Mean interval", limits, true),
             ],
         );
-        super::panel_note(
+        rspice_results_ui::presentation::panel_note(
             ui,
             if confidence.conditional_on_successful_trials {
                 "Describes successful trials only; failed trials censor the original population. This is not a yield interval."
@@ -1007,7 +1010,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         },
     );
     let binning = binning_label(histogram);
-    super::stat_table(
+    rspice_results_ui::presentation::stat_table(
         ui,
         &[
             ("Run completion", completion, false),
@@ -1055,15 +1058,15 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                 false,
             ),
         ];
-        super::stat_table(ui, &rows);
+        rspice_results_ui::presentation::stat_table(ui, &rows);
     } else {
         section_header(ui, "Spec", None);
-        super::panel_note(
+        rspice_results_ui::presentation::panel_note(
             ui,
             "No unambiguous specification or yield evidence is retained for this measurement.",
         );
     }
-    super::panel_note(
+    rspice_results_ui::presentation::panel_note(
         ui,
         "The shaded band is descriptive ±1σ only when exact retained moments are available. No distribution fit is inferred.",
     );

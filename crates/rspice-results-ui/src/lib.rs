@@ -10,4 +10,6 @@ pub mod eye_diagram;
 pub mod fft;
 pub mod histogram;
 pub mod nyquist;
+pub mod presentation;
 pub mod smith_chart;
+pub mod strip;

@@ -5751,10 +5751,12 @@ dependencies = [
 name = "rspice-results-ui"
 version = "0.1.0"
 dependencies = [
+ "egui",
  "num-complex",
  "rspice-app-types",
  "rspice-core",
  "rspice-results",
+ "rspice-ui-kit",
  "serde",
  "thiserror 2.0.20",
 ]
