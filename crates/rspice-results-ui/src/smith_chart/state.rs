@@ -1,14 +1,4 @@
-//! Smith chart viewer state: reference impedance and S-parameter traces.
-//!
-//! This is deliberately only what `result_document::smith` reads. The viewer
-//! draws the chart itself and converts Γ to impedance inline, so nothing here
-//! computes geometry.
-//!
-//! What used to live here — chart modes (Z / Y / combined), markers with VSWR
-//! and return-loss readout, VSWR circles, constant-R/X circle math, and a
-//! hand-rolled complex type with an impedance/admittance pair on top of it —
-//! was ~900 lines that no code path reached. Rebuilding any of it belongs with
-//! the viewer feature that needs it, against `num_complex`.
+//! Retained S-parameter traces for the Smith chart presentation.
 
 use num_complex::Complex64;
 

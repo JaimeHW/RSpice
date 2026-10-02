@@ -4,6 +4,20 @@ use crate::{
     family_metadata::AnalysisResultFamilyMetadata, waveform::RetainedWaveform,
 };
 use std::collections::BTreeMap;
+/// Convert a physical reflection coefficient to (resistance, reactance) in ohms.
+/// The reference impedance must be the retained reference for that port.
+/// Returns `None` at the open-circuit singularity, using the viewer's existing
+/// denominator threshold of 1e-12.
+pub fn impedance_from_gamma(gamma_re: f64, gamma_im: f64, z0: f64) -> Option<(f64, f64)> {
+    let denominator = (1.0 - gamma_re).powi(2) + gamma_im.powi(2);
+    (denominator > 1.0e-12).then(|| {
+        (
+            z0 * (1.0 - gamma_re * gamma_re - gamma_im * gamma_im) / denominator,
+            z0 * (2.0 * gamma_im) / denominator,
+        )
+    })
+}
+
 /// The network term one retained trace name spells.
 ///
 /// Shared with the polar sheet: both read the same S-parameter naming
@@ -402,6 +416,15 @@ pub fn report_tables<W: AsRef<RetainedWaveform>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nondefault_reference_impedance_controls_impedance_conversion() {
+        let (resistance, reactance) =
+            impedance_from_gamma(0.2, 0.0, 75.0).expect("finite impedance");
+        assert!((resistance - 112.5).abs() < 1.0e-12);
+        assert_eq!(reactance, 0.0);
+    }
+
     #[test]
     fn trace_identity_distinguishes_reflection_transmission_and_mixed_mode() {
         assert_eq!(
