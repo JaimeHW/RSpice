@@ -16,12 +16,9 @@
 //! [`state::NyquistState`] for why there is exactly one of it.
 
 pub mod state;
+pub mod view;
 
 pub use rspice_results::nyquist::{
     EncirclementCount, NyquistData, NyquistMargin, closed_loop_rhp_poles,
 };
 pub use state::NyquistState;
-
-// =============================================================================
-// Tests
-// =============================================================================
