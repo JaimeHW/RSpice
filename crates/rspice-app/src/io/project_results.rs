@@ -3,22 +3,18 @@ use crate::state::{AnalysisResult, SimulationRun, SimulationState, WaveformData}
 use rspice_formats::project_results::*;
 use std::collections::HashSet;
 
-impl From<&WaveformData> for ProjectWaveformData {
-    fn from(waveform: &WaveformData) -> Self {
-        Self::from_waveform(&waveform.data, waveform.color.clone(), waveform.visible)
-    }
+fn capture_waveform(waveform: &WaveformData) -> ProjectWaveformData {
+    ProjectWaveformData::from_waveform(&waveform.data, waveform.color.clone(), waveform.visible)
 }
 
 impl From<&AnalysisResult> for ProjectAnalysisResult {
     fn from(analysis: &AnalysisResult) -> Self {
-        Self::from_analysis(&analysis.data, |waveform| {
-            ProjectWaveformData::from(waveform)
-        })
+        Self::from_analysis(&analysis.data, capture_waveform)
     }
 }
 impl From<&SimulationRun> for ProjectSimulationRun {
     fn from(run: &SimulationRun) -> Self {
-        Self::from_run(&run.data, |waveform| ProjectWaveformData::from(waveform))
+        Self::from_run(&run.data, capture_waveform)
     }
 }
 pub(crate) fn capture_simulation_results(state: &SimulationState) -> ProjectSimulationResults {

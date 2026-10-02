@@ -1610,8 +1610,8 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     // statistical sheets share is in `population.rs`. ResultsState's viewer
     // interactions moved to `viewer_state.rs`; the ceiling now follows the
     // remaining source exactly and may not grow during the crate split.
-    ("workbench/documents/result_document.rs", 5_375),
-    ("workbench/documents/result_document/waves.rs", 4_229),
+    ("workbench/documents/result_document.rs", 4_601),
+    ("workbench/documents/result_document/waves.rs", 2_799),
     ("workbench/documents/visualization_studio.rs", 4_695),
     ("workbench/documents/visualization_studio/dock.rs", 3_520),
     ("workbench/surfaces/pdk_technology_admin.rs", 5_115),

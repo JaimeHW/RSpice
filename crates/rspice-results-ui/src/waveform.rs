@@ -1,7 +1,9 @@
-//! Application presentation of exact retained waveform samples.
+//! Display choices and bounded drawing caches over exact retained waveform samples.
 
-use super::SharedWaveformValues;
+use crate::presentation::trace_color;
 use rspice_results::waveform::RetainedWaveform;
+use rspice_results::waveform::SharedWaveformValues;
+use rspice_ui_kit::tokens::Tokens;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
@@ -19,7 +21,7 @@ pub struct DisplayWaveformCache {
     pub source_sample_count: usize,
 }
 
-/// A retained waveform with its application display choices and derived cache.
+/// A retained waveform with its display choices and derived cache.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WaveformData {
     pub data: RetainedWaveform,
@@ -119,7 +121,7 @@ impl WaveformData {
         });
     }
 
-    pub(crate) fn into_bounded_preview(mut self, maximum_samples: usize) -> Result<Self, String> {
+    pub fn into_bounded_preview(mut self, maximum_samples: usize) -> Result<Self, String> {
         let count = self.data.x.len();
         self.data = self.data.into_bounded_preview(maximum_samples)?;
         self.rebuild_display_cache(maximum_samples);
@@ -127,6 +129,46 @@ impl WaveformData {
             cache.source_sample_count = count;
         }
         Ok(self)
+    }
+}
+
+/// Resolve a waveform's display color from its stored hex + palette fallback.
+pub fn waveform_color(waveform: &WaveformData, index: usize, t: &Tokens) -> egui::Color32 {
+    trace_color(
+        &waveform.color,
+        t.color.traces[index % t.color.traces.len()],
+    )
+}
+
+impl rspice_results::waveform::OutputWaveform for WaveformData {
+    fn from_retained(data: RetainedWaveform) -> Self {
+        Self {
+            data,
+            color: "#f5b700".to_owned(),
+            visible: true,
+            display_cache: None,
+        }
+    }
+
+    fn reset_display_cache(&mut self) {
+        self.display_cache = None;
+    }
+
+    fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
+    }
+
+    fn rebuild_output_display_cache(&mut self) {
+        self.rebuild_display_cache(DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
+    }
+
+    fn adopt_presentation(&mut self, source: Self) {
+        self.display_cache = source.display_cache;
+        self.visible = source.visible;
+    }
+
+    fn into_output_preview(self, maximum_samples: usize) -> Result<Self, String> {
+        self.into_bounded_preview(maximum_samples)
     }
 }
 

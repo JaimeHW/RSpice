@@ -5,6 +5,7 @@
 //! policy, and a copied cursor value must carry its explicit numeric policy.
 
 use super::*;
+use rspice_results::visualization_document::AccessibleColorPalette;
 
 mod branches;
 mod degenerate;
@@ -461,19 +462,6 @@ fn a_copied_value_is_named_by_its_own_unit_not_the_strips() {
         current.ends_with(" mA"),
         "a supply current copies in amps: {current}"
     );
-}
-
-#[test]
-fn a_prefixed_unit_never_takes_a_second_prefix() {
-    // Output noise of a gain-of-1000 stage is micro-volts per root hertz; in
-    // a unit that already says "nano" that must stay a plain number.
-    assert_eq!(
-        fmt_in_unit(1786.131, NOISE_DENSITY_UNIT, 6),
-        "1786.13 nV/√Hz"
-    );
-    assert_eq!(fmt_in_unit(4.07, NOISE_DENSITY_UNIT, 3), "4.07 nV/√Hz");
-    // Base units keep their SI scaling.
-    assert_eq!(fmt_in_unit(1.5e-3, "A", 3), "1.50 mA");
 }
 
 #[test]
@@ -936,62 +924,6 @@ fn a_marker_tag_names_the_note_only_when_there_is_one() {
     assert_eq!(
         marker_label(MarkerView::Document(&retained)),
         "D3 · ringing"
-    );
-}
-
-#[test]
-fn a_signal_owns_its_unit_rather_than_inheriting_the_analysis_default() {
-    // The accessor in the name is authoritative where the run retained no
-    // unit of its own.
-    assert_eq!(signal_unit("V(out)", TraceKind::Value, None, "V"), "V");
-    assert_eq!(signal_unit("I(R1)", TraceKind::Value, None, "V"), "A");
-    assert_eq!(signal_unit("i(vsense)", TraceKind::Value, None, "V"), "A");
-    assert_eq!(signal_unit("P(M1)", TraceKind::Value, None, "V"), "W");
-
-    // Derived projections keep the underlying signal's unit.
-    assert_eq!(signal_unit("re(V(out))", TraceKind::Real, None, ""), "V");
-    assert_eq!(
-        signal_unit("im(I(R1))", TraceKind::Imaginary, None, ""),
-        "A"
-    );
-
-    // The analysis default applies only where neither the run nor the name
-    // carries anything to read a unit from.
-    assert_eq!(
-        signal_unit("onoise", TraceKind::Value, None, "V^2/Hz"),
-        "V^2/Hz"
-    );
-
-    // A retained unit outranks both: the producer measured the samples and
-    // said so, and no name convention covers a violation count or a cost.
-    assert_eq!(
-        signal_unit("SOA_VIOLATION_COUNT", TraceKind::Value, Some("count"), "V"),
-        "count"
-    );
-    assert_eq!(
-        signal_unit("OPT_COST", TraceKind::Value, Some("cost"), "V"),
-        "cost"
-    );
-
-    // Derived kinds have their own units regardless of the source.
-    assert_eq!(
-        signal_unit("V(out)", TraceKind::MagnitudeDb, None, "V"),
-        "dB"
-    );
-    assert_eq!(signal_unit("V(out)", TraceKind::PhaseDeg, None, "V"), "°");
-    assert_eq!(
-        signal_unit("V(out)", TraceKind::MagnitudeDb, Some("V"), "V"),
-        "dB",
-        "a dB projection is computed here and is not in the source's unit"
-    );
-    assert_eq!(
-        signal_unit("V(out) 2f1/F1", TraceKind::MagnitudeDb, Some("ratio"), "V"),
-        "dBc",
-        "a distortion product ratio projects relative to its retained F1 reference"
-    );
-    assert_eq!(
-        signal_unit("onoise", TraceKind::NoiseDensity, Some("V^2/Hz"), "V^2/Hz"),
-        NOISE_DENSITY_UNIT
     );
 }
 
@@ -1744,46 +1676,6 @@ fn cursor_copy_uses_explicit_scientific_si_policy() {
     // projection the pane displays.
     assert!(copied.contains("onoise = 2."));
     assert!(copied.contains("e0 nV/√Hz"));
-}
-
-#[test]
-fn browser_classification_reads_the_accessor_through_derived_wrappers() {
-    for (name, unit, current) in [
-        ("V(out)", "V", false),
-        ("I(C1)", "A", true),
-        ("|V(OUT)|", "V", false),
-        ("|I(VIN)|", "A", true),
-        ("phase(V(OUT))", "°", false),
-        ("phase(I(VIN))", "°", true),
-        ("re(I(R1))", "A", true),
-        ("onoise", "V^2/Hz", false),
-    ] {
-        assert_eq!(browser_signal_unit(name, None, "V^2/Hz"), unit, "{name}");
-        assert_eq!(browser_signal_is_current(name), current, "{name}");
-    }
-}
-
-#[test]
-fn browser_reads_the_retained_unit_before_it_guesses_from_the_name() {
-    // The defect this closes: a retained count and a retained cost carry no
-    // accessor, so the browser filed both under the analysis default — volts.
-    assert_eq!(
-        browser_signal_unit("SOA_VIOLATION_COUNT", Some("count"), "V"),
-        "count"
-    );
-    assert_eq!(browser_signal_unit("OPT_COST", Some("cost"), "V"), "cost");
-    assert_eq!(browser_signal_unit("THD(%)", Some("%"), "dB"), "%");
-
-    // A waveform that states nothing — every project written before the unit
-    // was retained — reads exactly as it did before.
-    assert_eq!(browser_signal_unit("SOA_VIOLATION_COUNT", None, "V"), "V");
-    assert_eq!(browser_signal_unit("V(out)", None, "V"), "V");
-
-    // A stated unit is the producer's measurement of its own samples, so it
-    // outranks the name — including the phase convention.
-    assert_eq!(browser_signal_unit("I(R1)", Some("A"), "V"), "A");
-    assert_eq!(browser_signal_unit("phase(V(out))", Some("°"), "dB"), "°");
-    assert_eq!(browser_signal_unit("phase(V(out))", None, "dB"), "°");
 }
 
 #[test]

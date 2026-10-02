@@ -278,33 +278,7 @@ impl CursorInterpolation {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ComplexNumberDisplay {
-    #[default]
-    MagnitudePhaseDegrees,
-    RealImaginary,
-    MagnitudePhaseRadians,
-}
-
-impl ComplexNumberDisplay {
-    const fn index(self) -> usize {
-        match self {
-            Self::MagnitudePhaseDegrees => 0,
-            Self::RealImaginary => 1,
-            Self::MagnitudePhaseRadians => 2,
-        }
-    }
-
-    fn from_index(index: usize) -> Result<Self, &'static str> {
-        match index {
-            0 => Ok(Self::MagnitudePhaseDegrees),
-            1 => Ok(Self::RealImaginary),
-            2 => Ok(Self::MagnitudePhaseRadians),
-            _ => Err("complex-number display index is outside its domain"),
-        }
-    }
-}
+pub use rspice_results_ui::waves::ComplexNumberDisplay;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

@@ -29,7 +29,6 @@ pub use rspice_results::result_import::{ResultImportFormat, ResultImportSource};
 mod run_receipt;
 mod state_impl;
 mod state_model;
-mod waveform;
 pub use rspice_results::yield_analysis::YieldEvidence;
 
 pub const MAX_RUN_HISTORY: usize = 20;
@@ -149,9 +148,9 @@ pub use rspice_results::waveform::SharedWaveformValues;
 pub use run::SimulationRun;
 pub type RunHistory = rspice_results::run_history::RunHistory<SimulationRun>;
 pub(crate) use rspice_results::run_history::RunHistoryRevision;
+pub use rspice_results_ui::waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, WaveformData};
 pub use rspice_simulation::execution::SimulationRunIntent;
 pub use state_model::SimulationState;
-pub use waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, WaveformData};
 
 pub use rspice_results::monte_carlo_checkpoint::{
     MonteCarloCheckpointEvidence, MonteCarloCheckpointLibrary,

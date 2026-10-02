@@ -1,5 +1,8 @@
 //! Sampled waveform data.
 
+mod output;
+pub use output::OutputWaveform;
+
 mod retained;
 pub use retained::{ComplexWaveformComponents, RetainedWaveform, SharedWaveformValues};
 

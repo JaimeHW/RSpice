@@ -271,7 +271,7 @@ use rspice_results_ui::derived::DerivedSeries;
 use rspice_results_ui::eye_diagram::EyeTimebase;
 use rspice_results_ui::eye_diagram::view::EyeTexture;
 use rspice_results_ui::fft::view::FftSeries;
-use rspice_results_ui::presentation::{PlotView, trace_color, well_hint};
+use rspice_results_ui::presentation::{PlotView, well_hint};
 
 /// One axis interval, low then high, in data space.
 pub(crate) type AxisExtent = (f64, f64);
@@ -2465,13 +2465,7 @@ pub(super) fn finite_extremes(values: &[f64]) -> Option<(f64, f64)> {
 // shared right-panel furniture
 // ---------------------------------------------------------------------------
 
-/// Resolve a waveform's display color from its stored hex + palette fallback.
-pub fn waveform_color(waveform: &WaveformData, index: usize, t: &Tokens) -> egui::Color32 {
-    trace_color(
-        &waveform.color,
-        t.color.traces[index % t.color.traces.len()],
-    )
-}
+pub use rspice_results_ui::waveform::waveform_color;
 
 // ---------------------------------------------------------------------------
 // center view

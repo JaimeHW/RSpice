@@ -19,13 +19,12 @@ mod bindings;
 mod dc_family;
 mod materialize;
 mod probe;
-mod waveform;
 pub use materialize::{
     apply_saved_output_policy, materialize_deferred_saved_output, materialize_live_saved_outputs,
     materialize_saved_outputs, retain_plan_saved_outputs,
 };
 pub use probe::resolve_raw_probe;
-pub use waveform::OutputWaveform;
+pub use rspice_results::waveform::OutputWaveform;
 
 fn resolve_contract_waveform<W: OutputWaveform>(
     contract: &PreparedSavedOutput,

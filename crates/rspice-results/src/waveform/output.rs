@@ -1,6 +1,6 @@
 //! Host presentation hooks around exact retained waveform data.
 
-use rspice_results::waveform::RetainedWaveform;
+use super::RetainedWaveform;
 
 /// Output calculations operate on exact samples. Hosts may retain presentation
 /// alongside them; these hooks never supply numerical data to a calculation.

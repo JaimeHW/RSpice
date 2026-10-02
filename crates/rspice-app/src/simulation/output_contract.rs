@@ -1,7 +1,6 @@
 //! Application presentation and adoption of exact runtime saved outputs.
 
 use crate::state::{AnalysisResult, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, WaveformData};
-use rspice_results::waveform::RetainedWaveform;
 use rspice_simulation::output_contract::{PreparedSavedOutput, materialization};
 
 #[cfg(test)]
@@ -23,38 +22,6 @@ use rspice_simulation::output_contract::{
 };
 #[cfg(test)]
 use std::sync::Arc;
-
-impl materialization::OutputWaveform for WaveformData {
-    fn from_retained(data: RetainedWaveform) -> Self {
-        Self {
-            data,
-            color: "#f5b700".to_owned(),
-            visible: true,
-            display_cache: None,
-        }
-    }
-
-    fn reset_display_cache(&mut self) {
-        self.display_cache = None;
-    }
-
-    fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
-    }
-
-    fn rebuild_output_display_cache(&mut self) {
-        self.rebuild_display_cache(DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
-    }
-
-    fn adopt_presentation(&mut self, source: Self) {
-        self.display_cache = source.display_cache;
-        self.visible = source.visible;
-    }
-
-    fn into_output_preview(self, maximum_samples: usize) -> Result<Self, String> {
-        self.into_bounded_preview(maximum_samples)
-    }
-}
 
 pub(in crate::simulation) fn apply_saved_output_policy(
     analysis: &mut AnalysisResult,
