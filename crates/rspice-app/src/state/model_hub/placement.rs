@@ -66,24 +66,6 @@ pub enum PartPlacement {
     CellInstance(Box<LibraryCellInstance>),
 }
 
-impl PartPlacement {
-    /// The symbol identity a receipt or a test can name.
-    #[must_use]
-    pub fn symbol_reference(&self) -> String {
-        match self {
-            Self::NativeDevice {
-                component_type,
-                variant,
-                ..
-            } => match variant {
-                Some(variant) => format!("{}:{variant}", component_type.descriptor().stable_id),
-                None => component_type.descriptor().stable_id.to_owned(),
-            },
-            Self::CellInstance(_) => CELL_INSTANCE_REFERENCE.to_owned(),
-        }
-    }
-}
-
 /// Resolves a manifest part into the placement the schematic commits.
 ///
 /// `library` is the project model library the part's bytes were retained into,
@@ -525,6 +507,9 @@ mod tests {
     fn a_subcircuit_without_a_symbol_block_still_places_from_its_ports() {
         let legacy = part("DIV", PartKind::Subckt, &["IN", "OUT"], None);
         let placement = plan_part_placement(&legacy, "lib", None).expect("a legacy subckt places");
-        assert_eq!(placement.symbol_reference(), CELL_INSTANCE_REFERENCE);
+        let PartPlacement::CellInstance(binding) = placement else {
+            panic!("a subcircuit must place as a cell instance");
+        };
+        assert_eq!(binding.terminal_order, ["IN", "OUT"]);
     }
 }

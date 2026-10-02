@@ -576,7 +576,7 @@ fn arm_library_part(
     placement: PartPlacement,
     ctx: &egui::Context,
 ) {
-    let armed = state.schematic.arm_pack_part(placement);
+    let armed = crate::workbench::app::arm_pack_part(state, placement);
     finish_shelf_placement(state, ctx, &armed);
 }
 
@@ -886,6 +886,7 @@ fn armed_shelf_entry(state: &AppState) -> Option<ShelfEntry> {
             .editor
             .pending_library_cell
             .as_ref()
+            .map(|pending| &pending.binding)
             .map(ShelfEntry::from_binding);
     }
     // A native device armed from the model library carries that part's card,
@@ -1013,7 +1014,13 @@ fn resolve_shelf_entry(
 ) -> Option<ShelfEntryRow> {
     let placing_cell =
         state.schematic.session.editor.tool == Tool::Place(ComponentType::CellInstance);
-    let pending = state.schematic.session.editor.pending_library_cell.as_ref();
+    let pending = state
+        .schematic
+        .session
+        .editor
+        .pending_library_cell
+        .as_ref()
+        .map(|pending| &pending.binding);
     match entry {
         ShelfEntry::Primitive(kind) => Some(ShelfEntryRow {
             entry: entry.clone(),
@@ -1588,6 +1595,7 @@ fn builtin_xspice_catalog(ui: &mut Ui, state: &mut AppState) -> Option<LibraryCe
             .editor
             .pending_library_cell
             .as_ref()
+            .map(|pending| &pending.binding)
             .and_then(|binding| binding.builtin_xspice.as_ref())
             .is_some_and(|binding| binding.stable_id == descriptor.stable_id)
             && state.schematic.session.editor.tool == Tool::Place(ComponentType::CellInstance);
@@ -1706,6 +1714,7 @@ fn generated_veriloga_catalog(ui: &mut Ui, state: &mut AppState) -> Option<Libra
             .editor
             .pending_library_cell
             .as_ref()
+            .map(|pending| &pending.binding)
             .and_then(|binding| binding.generated_veriloga.as_ref())
             .is_some_and(|binding| binding.model_name == descriptor.model_name)
             && state.schematic.session.editor.tool == Tool::Place(ComponentType::CellInstance);
@@ -1958,20 +1967,13 @@ pub(super) fn arm_primitive(app: &mut RSpiceApp, kind: ComponentType, ctx: &egui
     finish_shelf_placement(state, ctx, kind.display_name());
 }
 
-/// Arms one library cell for placement.
-///
-/// It takes the session state rather than the application because that is all
-/// arming touches: a pending binding, a tool, a toast, and the canvas focus.
+/// Capture the current placement context and return focus to the canvas.
 fn arm_cell(
     state: &mut crate::workbench::app_state::AppState,
     binding: LibraryCellInstance,
     ctx: &egui::Context,
 ) {
-    let label = format!("{}/{}", binding.library, binding.cell);
-    state.schematic.session.editor.pending_library_cell = Some(binding);
-    state
-        .schematic
-        .arm_tool(Tool::Place(ComponentType::CellInstance));
+    let label = crate::workbench::app::arm_library_cell_placement(state, binding);
     finish_shelf_placement(state, ctx, &label);
 }
 

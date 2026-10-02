@@ -40,7 +40,7 @@ pub fn pending_library_cell_component(
         Component::new(0, ComponentType::CellInstance, grid_pos)
             .with_rotation(editor.preview_rotation)
             .with_mirror_h(editor.preview_mirror_h)
-            .with_library_cell(editor.pending_library_cell.clone()?),
+            .with_library_cell(editor.pending_library_cell.as_ref()?.binding.clone()),
     )
 }
 

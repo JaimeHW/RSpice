@@ -480,14 +480,27 @@ fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos
     match component_type {
         ComponentType::Port => place_pending_port(state, grid_pos),
         ComponentType::CellInstance => {
-            let Some(library_cell) = state.schematic.session.editor.pending_library_cell.clone()
-            else {
+            let Some(pending) = state.schematic.session.editor.pending_library_cell.as_ref() else {
                 state.push_user_message(ConsoleMessage::warning(
                     "No library cell selected for placement".to_string(),
                 ));
                 state.schematic.cancel_tool();
                 return;
             };
+            if state.schematic_edit_read_only()
+                || state.schematic.session.editor.tool != Tool::Place(ComponentType::CellInstance)
+                || !pending
+                    .authority
+                    .matches(&super::requests::editor_request_source(state))
+            {
+                state.push_user_message(ConsoleMessage::warning(
+                    "Library cell was not placed: the active schematic context changed; choose the cell again."
+                        .to_owned(),
+                ));
+                state.schematic.cancel_tool();
+                return;
+            }
+            let library_cell = pending.binding.clone();
             let changed = state
                 .schematic
                 .with_undo("place library cell", |schematic| {

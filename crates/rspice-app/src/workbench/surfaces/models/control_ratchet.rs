@@ -381,7 +381,7 @@ const CONTROL_EFFECTS: &[(&str, &str)] = &[
     ("Show pack", "models_view.catalog_scope + selected_pack"),
     (
         "Place",
-        "ManagerAction::PlacePart -> schematic.arm_pack_part, or ModelHubRequest::InstallPack \
+        "ManagerAction::PlacePart -> arm_pack_part, or ModelHubRequest::InstallPack \
          whose completion arms the same cursor",
     ),
     ("Add to project…", "models_view.dialog = ConfirmPart"),

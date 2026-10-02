@@ -1,4 +1,4 @@
-//! Document context retained from a pin form through its placement sequence.
+//! Document context retained by an armed placement batch.
 
 use crate::requests::EditorRequestSource;
 
@@ -14,8 +14,8 @@ impl PlacementAuthority {
     }
 
     /// Match the project, document, occurrence and sheet that own the batch.
-    /// Revisions may advance within that context: each click validates its
-    /// name, contract, topology and interface order against the live design.
+    /// Revisions may advance within that context. Each placement owner remains
+    /// responsible for validating its contract against the live design.
     /// Requiring frozen content or sheet-catalog revisions here would reject
     /// a batch's own subsequent placements and same-document conflict retries.
     /// This context check does not grant edit permission.

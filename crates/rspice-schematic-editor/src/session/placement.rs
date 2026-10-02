@@ -1,6 +1,25 @@
-//! Model-card state carried by one armed device placement.
+//! Library binding and model-card state carried by armed placement tools.
 
+use super::placement_authority::PlacementAuthority;
 use super::tool::Tool;
+use crate::requests::EditorRequestSource;
+use rspice_design::schematic::component::LibraryCellInstance;
+
+/// A frozen cell binding and the document context that owns its placement batch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingLibraryCellPlacement {
+    pub binding: LibraryCellInstance,
+    pub authority: PlacementAuthority,
+}
+
+impl PendingLibraryCellPlacement {
+    pub fn new(binding: LibraryCellInstance, source: EditorRequestSource) -> Self {
+        Self {
+            binding,
+            authority: PlacementAuthority::new(source),
+        }
+    }
+}
 
 /// A model card armed for the next placement of one exact device kind.
 ///

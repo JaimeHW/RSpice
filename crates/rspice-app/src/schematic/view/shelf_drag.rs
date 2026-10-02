@@ -296,8 +296,12 @@ mod tests {
         state.schematic.session.editor.preview_rotation = Rotation::R90;
         state.schematic.session.editor.preview_mirror_h = true;
         state.schematic.session.editor.tool = Tool::Place(ComponentType::Capacitor);
-        state.schematic.session.editor.pending_library_cell =
-            Some(LibraryCellInstance::new("work", "stale", "schematic"));
+        state.schematic.session.editor.pending_library_cell = Some(
+            rspice_schematic_editor::session::placement::PendingLibraryCellPlacement::new(
+                LibraryCellInstance::new("work", "stale", "schematic"),
+                crate::workbench::app::schematic_editor_request_source(&state),
+            ),
+        );
         let payload =
             SchematicShelfDragPayload::primitive(ComponentType::Resistor).expect("placeable");
 

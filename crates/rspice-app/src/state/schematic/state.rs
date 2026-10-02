@@ -54,8 +54,6 @@ pub use rspice_design::schematic::stretch::{
     StretchOrthogonalPolicy, StretchSelectionError, StretchTarget,
 };
 
-pub use rspice_schematic_editor::session::placement::PendingPartModel;
-
 // =============================================================================
 // SchematicState
 // =============================================================================

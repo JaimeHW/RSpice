@@ -1347,7 +1347,7 @@ mod tests {
         let place::PlaceRoute::Arm(placement) = route else {
             panic!("a card the build already holds is armed, not retained: {route:?}");
         };
-        state.schematic.arm_pack_part(*placement);
+        crate::workbench::app::arm_pack_part(&mut state, *placement);
         assert_eq!(
             state.schematic.session.editor.tool,
             crate::state::Tool::Place(crate::state::ComponentType::Diode)
@@ -1396,7 +1396,7 @@ mod tests {
         let place::PlaceRoute::Arm(placement) = route else {
             panic!("bytes already in the project are armed, not retained: {route:?}");
         };
-        state.schematic.arm_pack_part(*placement);
+        crate::workbench::app::arm_pack_part(&mut state, *placement);
         assert_eq!(
             state.schematic.session.editor.tool,
             crate::state::Tool::Place(crate::state::ComponentType::CellInstance)
@@ -1407,6 +1407,7 @@ mod tests {
             .editor
             .pending_library_cell
             .as_ref()
+            .map(|pending| &pending.binding)
             .expect("the armed cursor carries the cell it was chosen from");
         assert_eq!(binding.library, "proving_parts");
         assert_eq!(binding.cell, "PROVING_DIV");
@@ -1494,7 +1495,7 @@ mod tests {
         else {
             panic!("bytes already retained are armed, not retained again");
         };
-        state.schematic.arm_pack_part(*placement);
+        crate::workbench::app::arm_pack_part(&mut state, *placement);
         assert_eq!(
             state
                 .schematic
@@ -1502,6 +1503,7 @@ mod tests {
                 .editor
                 .pending_library_cell
                 .as_ref()
+                .map(|pending| &pending.binding)
                 .map(|binding| binding.cell.as_str()),
             Some(PART_ID),
             "the armed cursor carries the part the release published"

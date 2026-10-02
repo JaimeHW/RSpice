@@ -150,7 +150,13 @@ pub(crate) fn schematic_symbol_context(state: &AppState) -> SchematicSymbolConte
     );
     SchematicSymbolContext::new(
         state.schematic.document(),
-        state.schematic.session.editor.pending_library_cell.as_ref(),
+        state
+            .schematic
+            .session
+            .editor
+            .pending_library_cell
+            .as_ref()
+            .map(|pending| &pending.binding),
         &resolver,
         symbol_context_revision(state),
     )

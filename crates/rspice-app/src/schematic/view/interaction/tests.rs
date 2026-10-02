@@ -26,6 +26,153 @@ fn pointer_viewport() -> Viewport {
     }
 }
 
+#[test]
+fn library_cell_batch_preserves_binding_transform_and_undo_across_revisions() {
+    for sheets in [false, true] {
+        let mut state = AppState::default();
+        if sheets {
+            let document = state.workspace.content.active_schematic_reference();
+            state
+                .workspace
+                .content
+                .design_management
+                .bootstrap_for_cell_view(&document.key(), "Sheet 1", [])
+                .unwrap();
+        }
+        let descriptor = crate::state::engine_only_xspice_devices()
+            .iter()
+            .find(|descriptor| descriptor.model_type == "d_lut")
+            .unwrap();
+        let binding = crate::state::builtin_xspice_library_binding(descriptor).unwrap();
+        crate::workbench::app::arm_library_cell_placement(&mut state, binding.clone());
+        state.schematic.session.editor.preview_rotation = crate::state::Rotation::R90;
+        state.schematic.session.editor.preview_mirror_h = true;
+        let source = super::super::requests::editor_request_source(&state);
+        for position in [Point::new(40, 20), Point::new(80, 20)] {
+            place_component(&mut state, ComponentType::CellInstance, position);
+            let document = state.schematic.document();
+            let placed = document.components.last().unwrap();
+            assert_eq!(placed.library_cell.as_ref(), Some(&binding));
+            assert_eq!(placed.pos, position);
+            assert_eq!(placed.rotation, crate::state::Rotation::R90);
+            assert!(placed.mirror_h);
+            state.sync_active_schematic_to_workspace();
+        }
+        assert_eq!(state.schematic.document().components.len(), 2);
+        let current = super::super::requests::editor_request_source(&state);
+        assert_ne!(source.content_version, current.content_version);
+        assert_ne!(source.topology_version, current.topology_version);
+        if sheets {
+            assert_ne!(source.sheet, current.sheet);
+        }
+        assert!(
+            state
+                .schematic
+                .session
+                .editor
+                .pending_library_cell
+                .as_ref()
+                .unwrap()
+                .authority
+                .matches(&current)
+        );
+        assert!(state.schematic.can_undo());
+        state.schematic.undo();
+        state.sync_active_schematic_to_workspace();
+        assert_eq!(state.schematic.document().components.len(), 1);
+        place_component(&mut state, ComponentType::CellInstance, Point::new(120, 20));
+        assert_eq!(state.schematic.document().components.len(), 2);
+        state.schematic.undo();
+        assert_eq!(state.schematic.document().components.len(), 1);
+        state.schematic.undo();
+        assert!(state.schematic.document().components.is_empty());
+        assert!(!state.schematic.can_undo());
+    }
+}
+
+#[test]
+fn library_cell_placement_rejects_changed_context_or_permission_without_an_edit() {
+    for change in [
+        "design",
+        "buffer",
+        "occurrence",
+        "sheet",
+        "read-only",
+        "safe-mode",
+        "missing",
+        "tool",
+    ] {
+        let mut state = AppState::default();
+        let master = crate::state::CellViewRef::new("work", "cell_parent", "schematic");
+        state
+            .workspace
+            .descend_into("X1".to_owned(), master.clone(), ViewType::Schematic);
+        let first = state
+            .workspace
+            .content
+            .design_management
+            .bootstrap_for_cell_view(&master.key(), "Sheet 1", [])
+            .unwrap();
+        crate::workbench::app::arm_library_cell_placement(
+            &mut state,
+            crate::state::LibraryCellInstance::new("work", "child", "schematic"),
+        );
+        match change {
+            "design" => state.design_execution_epoch += 1,
+            "buffer" => state.active_schematic_epoch += 1,
+            "occurrence" => {
+                state.workspace.ascend_one().unwrap();
+                state
+                    .workspace
+                    .descend_into("X2".to_owned(), master, ViewType::Schematic);
+            }
+            "sheet" => {
+                let catalog = state
+                    .workspace
+                    .content
+                    .design_management
+                    .sheet_catalog_mut(&master.key())
+                    .unwrap();
+                let second = catalog
+                    .create_sheet(
+                        SheetDefinition {
+                            name: "Sheet 2".to_owned(),
+                            template: SheetTemplate::AnalogSchematic,
+                            port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                            explicit_page_number: Some(2),
+                        },
+                        Some(first),
+                    )
+                    .unwrap();
+                catalog.set_active(second).unwrap();
+            }
+            "read-only" => state.schematic.session.read_only = true,
+            "safe-mode" => state.workbench.safe_mode.activate(
+                crate::workbench::state::LocalSafeModeOptions {
+                    open_project_read_only: true,
+                    ..Default::default()
+                },
+                "library placement test".to_owned(),
+            ),
+            "missing" => state.schematic.session.editor.pending_library_cell = None,
+            "tool" => state.schematic.arm_tool(Tool::Wire),
+            _ => unreachable!(),
+        }
+        let content = state.schematic.content_version();
+        let topology = state.schematic.topology_version();
+        place_component(&mut state, ComponentType::CellInstance, Point::new(40, 20));
+        assert!(state.schematic.document().components.is_empty(), "{change}");
+        assert_eq!(state.schematic.content_version(), content, "{change}");
+        assert_eq!(state.schematic.topology_version(), topology, "{change}");
+        assert!(!state.schematic.can_undo(), "{change}");
+        assert_eq!(
+            state.schematic.session.editor.tool,
+            Tool::Select,
+            "{change}"
+        );
+    }
+}
+
 fn with_test_ui(mut body: impl FnMut(&egui::Ui)) {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);

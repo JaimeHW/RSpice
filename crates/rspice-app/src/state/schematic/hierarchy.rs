@@ -733,9 +733,9 @@ mod tests {
 
     #[test]
     fn hierarchy_candidates_preserve_editor_state_without_mutating_source() {
-        use crate::state::schematic::state::PendingPartModel;
         use crate::state::{Rotation, Tool, Wire};
         use rspice_design::schematic::history::SchematicSnapshot;
+        use rspice_schematic_editor::session::placement::PendingPartModel;
 
         let mut schematic = SchematicState::default();
         assert!(schematic.with_undo("seed", |state| {

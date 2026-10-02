@@ -204,9 +204,8 @@ fn installing_a_release_retains_its_part_pins_it_and_arms_the_placement() {
         .placement
         .as_ref()
         .expect("a part added for placement is armed");
-    assert_eq!(
-        placement.symbol_reference(),
-        "rspice.library.cell_instance",
+    assert!(
+        matches!(placement, PartPlacement::CellInstance(_)),
         "a subcircuit part is drawn as a cell instance"
     );
     assert_eq!(
@@ -238,6 +237,7 @@ fn installing_a_release_retains_its_part_pins_it_and_arms_the_placement() {
         .editor
         .pending_library_cell
         .as_ref()
+        .map(|pending| &pending.binding)
         .expect("an armed cell binding");
     assert_eq!(armed.cell, PART);
     assert_eq!(armed.terminal_order, ["IN".to_owned(), "OUT".to_owned()]);
@@ -708,7 +708,8 @@ fn acceptance_sequence(
         .session
         .editor
         .pending_library_cell
-        .clone()
+        .as_ref()
+        .map(|pending| pending.binding.clone())
         .expect("an armed binding");
     let id = state
         .schematic
@@ -772,11 +773,14 @@ fn a_model_card_part_arms_its_native_device_and_symbol_skin() {
     // The placement half of the shelf gesture, driven from the same arming
     // entry point the operation machine uses.
     let mut state = open_project();
-    let armed = state.schematic.arm_pack_part(PartPlacement::NativeDevice {
-        component_type: ComponentType::Diode,
-        variant: Some("zener".to_owned()),
-        model: "1N4728A".to_owned(),
-    });
+    let armed = crate::workbench::app::arm_pack_part(
+        &mut state,
+        PartPlacement::NativeDevice {
+            component_type: ComponentType::Diode,
+            variant: Some("zener".to_owned()),
+            model: "1N4728A".to_owned(),
+        },
+    );
     assert_eq!(armed, "1N4728A");
     assert_eq!(
         state.schematic.session.editor.tool,

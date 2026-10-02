@@ -3,9 +3,7 @@
 use egui::Context;
 use rspice_schematic_editor::xspice_placement;
 
-use crate::state::{
-    Tool, builtin_xspice_library_binding_with_vector_widths, engine_only_xspice_devices,
-};
+use crate::state::{builtin_xspice_library_binding_with_vector_widths, engine_only_xspice_devices};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
@@ -64,11 +62,8 @@ impl RSpiceApp {
         match response.choice {
             DialogChoice::Primary => match validate_draft(self) {
                 Ok(binding) => {
-                    let label = format!("{}/{}", binding.library, binding.cell);
-                    self.state.schematic.session.editor.pending_library_cell = Some(binding);
-                    self.state
-                        .schematic
-                        .arm_tool(Tool::Place(crate::state::ComponentType::CellInstance));
+                    let label =
+                        crate::workbench::app::arm_library_cell_placement(&mut self.state, binding);
                     self.state.dialogs.builtin_xspice_placement.close();
                     self.state.ui.toasts.success(
                         ctx,
@@ -127,6 +122,7 @@ fn materialize_draft(app: &RSpiceApp) -> Result<crate::state::LibraryCellInstanc
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::Tool;
 
     #[test]
     fn materialization_uses_the_exact_selected_width() {

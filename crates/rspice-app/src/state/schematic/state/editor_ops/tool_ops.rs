@@ -11,38 +11,6 @@ impl SchematicState {
         self.session.editor.arm_tool(tool);
     }
 
-    /// Arm one part published by a distributed model pack.
-    ///
-    /// Returns the label a receipt or toast names. The two placement shapes
-    /// differ in what the schematic has to remember: a macromodel is a cell
-    /// instance and carries its whole interface in the binding, while a model
-    /// card is a native device that has to be told which card it holds and
-    /// which of the family's symbol skins to wear.
-    pub fn arm_pack_part(&mut self, placement: crate::state::model_hub::PartPlacement) -> String {
-        match placement {
-            crate::state::model_hub::PartPlacement::CellInstance(binding) => {
-                let label = format!("{}/{}", binding.library, binding.cell);
-                self.session.editor.pending_library_cell = Some(*binding);
-                self.arm_tool(Tool::Place(ComponentType::CellInstance));
-                label
-            }
-            crate::state::model_hub::PartPlacement::NativeDevice {
-                component_type,
-                variant,
-                model,
-            } => {
-                self.session.editor.pending_library_cell = None;
-                self.arm_tool(Tool::Place(component_type));
-                self.session.editor.pending_part_model = Some(PendingPartModel {
-                    tool: Tool::Place(component_type),
-                    model: model.clone(),
-                    variant,
-                });
-                model
-            }
-        }
-    }
-
     pub fn cancel_tool(&mut self) {
         self.session.editor.cancel_tool();
     }
@@ -59,6 +27,7 @@ impl SchematicState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rspice_schematic_editor::session::placement::PendingPartModel;
 
     #[test]
     fn canvas_settings_are_blocked_only_by_in_progress_canvas_interactions() {

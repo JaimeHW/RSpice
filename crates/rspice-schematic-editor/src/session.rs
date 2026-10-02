@@ -25,7 +25,7 @@ use self::{
     bus::{BusDrawing, PendingBusTap},
     design_note::PendingDesignNotePlacement,
     documentation_shape::{DocumentationShapeDrawing, PendingDocumentationShapePlacement},
-    placement::PendingPartModel,
+    placement::{PendingLibraryCellPlacement, PendingPartModel},
     port::PendingPortSequence,
     snap::SnapEngine,
     stimulus_placement::PendingStimulusPlacement,
@@ -33,8 +33,7 @@ use self::{
     wire::WireDrawing,
 };
 use rspice_design::schematic::{
-    clipboard::ClipboardData, component::LibraryCellInstance, document::SchematicDocument,
-    rotation::Rotation, selection::Selection,
+    clipboard::ClipboardData, document::SchematicDocument, rotation::Rotation, selection::Selection,
 };
 use rspice_design_model::Point;
 
@@ -80,7 +79,7 @@ pub struct EditorSession {
     /// Pending library/cell/view placement payload used with `Tool::Place(CellInstance)`.
     ///
     /// Runtime interaction state only and never persisted to schematic files.
-    pub pending_library_cell: Option<LibraryCellInstance>,
+    pub pending_library_cell: Option<PendingLibraryCellPlacement>,
 
     /// Model card armed for the next native-device placement.
     ///

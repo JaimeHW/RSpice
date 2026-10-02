@@ -7,7 +7,7 @@
 //! # One route, entered from two doors
 //!
 //! There is exactly one way a part reaches the cursor:
-//! [`crate::state::schematic::SchematicState::arm_pack_part`], taking a
+//! [`crate::workbench::app::arm_pack_part`], taking a
 //! [`PartPlacement`]. The Model Hub already drives it — `InstallPack { part }`
 //! retains the bytes, publishes the project revision, and arms the cursor last,
 //! in that order, so a placement is never armed against a part the project does
@@ -119,7 +119,7 @@ pub(super) fn session_block_reason(state: &AppState, route: &PlaceRoute) -> Opti
 /// canvas focus, and the workspace receipt. It is the same completion the Model
 /// Hub performs when a retention lands, one operation later.
 pub(super) fn arm(state: &mut AppState, ctx: &egui::Context, placement: PartPlacement) {
-    let armed = state.schematic.arm_pack_part(placement);
+    let armed = crate::workbench::app::arm_pack_part(state, placement);
     crate::schematic::view::request_schematic_canvas_focus(ctx);
     state.ui.toasts.success(
         ctx,

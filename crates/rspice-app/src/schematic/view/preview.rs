@@ -506,7 +506,12 @@ mod tests {
             name: "OUT".to_owned(),
             direction: crate::state::PortDirection::Out,
         }]);
-        state.schematic.session.editor.pending_library_cell = Some(binding);
+        state.schematic.session.editor.pending_library_cell = Some(
+            rspice_schematic_editor::session::placement::PendingLibraryCellPlacement::new(
+                binding,
+                crate::workbench::app::schematic_editor_request_source(&state),
+            ),
+        );
         state.schematic.session.editor.preview_rotation = crate::state::Rotation::R90;
         state.schematic.session.editor.preview_mirror_h = true;
         let context = schematic_symbol_context(&state);
