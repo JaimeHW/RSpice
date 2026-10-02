@@ -10,6 +10,7 @@ pub mod navigation;
 pub mod net_labels;
 pub mod resolved_symbol_render;
 pub mod viewport;
+pub mod violations;
 
 pub mod design_notes;
 pub mod drawing;
