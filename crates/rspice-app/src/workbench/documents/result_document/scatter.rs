@@ -1165,13 +1165,13 @@ mod tests {
             kind: ColumnKind::Measurement,
             unit: String::new(),
             values: Vec::new(),
-            limit: Some(population::PopulationLimit::for_test(None, Some(1.2))),
+            limit: Some(population::test_limit(None, Some(1.2))),
         };
         let (_, high) = axis_range(&values, &near);
         assert!(high > 1.2, "the bound at 1.2 is not on the axis: {high}");
 
         let far = PopulationColumn {
-            limit: Some(population::PopulationLimit::for_test(None, Some(50.0))),
+            limit: Some(population::test_limit(None, Some(50.0))),
             ..near.clone()
         };
         let (_, high) = axis_range(&values, &far);

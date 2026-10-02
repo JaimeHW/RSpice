@@ -52,6 +52,8 @@ pub mod phase_noise;
 pub mod plot_axis;
 #[cfg(feature = "engine-evidence")]
 pub mod pole_zero;
+#[cfg(feature = "engine-evidence")]
+pub mod population;
 pub mod provenance;
 pub mod report_document;
 #[cfg(feature = "engine-evidence")]
