@@ -7,19 +7,62 @@
 
 use egui::{Sense, Stroke, Ui, pos2, vec2};
 
-use super::state::numeric_source_text;
-use crate::quantity::{
+use rspice_app_types::property::{DisplayMode, PropertyDefinition, PropertyType, PropertyValue};
+use rspice_app_types::quantity::{
     QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, format_engineering_value,
 };
-use crate::state::property_types::{DisplayMode, PropertyDefinition, PropertyType, PropertyValue};
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{chip, mono_input, select_mono_with_response};
 use rspice_design::properties::value::{
     parse_expression_source, parse_number_source, property_quantity_kind,
 };
+use rspice_ui_kit::theme::{self, FontWeight};
+use rspice_ui_kit::tokens::{self, Tokens};
+use rspice_ui_kit::widgets::{chip, mono_input, select_mono_with_response};
 
-pub(super) struct ValueEditorOutput {
+/// Whether the editor's own text carries this property's unit.
+///
+/// The unit-safe parser refuses a bare number for these kinds, so the unit is
+/// part of the value's syntax rather than metadata about it. The caption reads
+/// the same predicate and suppresses its unit chip for them, so the unit is
+/// presented exactly once.
+pub fn unit_is_part_of_value_text(definition: &PropertyDefinition) -> bool {
+    definition.prop_type == PropertyType::Number
+        && matches!(
+            definition.unit.as_deref(),
+            Some("s" | "Hz" | "°" | "deg" | "rad" | "K" | "°C" | "°F")
+        )
+}
+
+/// Append the unit the value's own syntax must carry, if any.
+///
+/// One owner for the suffix so the exact form and the engineering form the
+/// editor offers can never disagree about it.
+fn unit_suffixed(definition: &PropertyDefinition, magnitude: &str) -> String {
+    match definition.unit.as_deref() {
+        Some("s") => format!("{magnitude} s"),
+        Some("Hz") => format!("{magnitude} Hz"),
+        Some("°" | "deg") => format!("{magnitude} deg"),
+        Some("rad") => format!("{magnitude} rad"),
+        Some("K") => format!("{magnitude} K"),
+        Some("°C") => format!("{magnitude} °C"),
+        Some("°F") => format!("{magnitude} °F"),
+        _ => magnitude.to_owned(),
+    }
+}
+
+/// Build the retained editor source from the schema value without applying a
+/// presentation-only precision limit. Quantity-aware fields receive an
+/// explicit base unit so merely opening their tab cannot turn a valid stored
+/// value into an invalid draft under the strict input policy.
+pub fn numeric_source_text(definition: &PropertyDefinition, value: &PropertyValue) -> String {
+    match value {
+        PropertyValue::Number { value, .. } => unit_suffixed(definition, &value.to_string()),
+        PropertyValue::Expression(expression) => expression.clone(),
+        _ => value.display_string(),
+    }
+}
+
+/// Typed edits, retained numeric text and focus identity from one field.
+pub struct ValueEditorOutput {
     pub changed: Option<PropertyValue>,
     pub control_id: Option<egui::Id>,
     pub numeric_text: Option<String>,
@@ -62,8 +105,8 @@ impl ValueEditorOutput {
 
 /// Render the appropriate value editor for a property type.
 ///
-/// Returns Some(new_value) if the value was changed.
-pub(super) fn render_value_editor(
+/// Returns typed edits, retained numeric text, parse errors and control identity.
+pub fn render_value_editor(
     ui: &mut Ui,
     def: &PropertyDefinition,
     current: &PropertyValue,
@@ -193,13 +236,13 @@ fn render_expression_editor(
 
 /// Editor text for a stored numeric value.
 ///
-/// An engineer reads `1n s`, not `0.000000001 s`, so the editor offers the
-/// engineering form — but this text is also what a commit re-parses, and the
+/// The editor offers a compact form such as `1ns` for `0.000000001 s`. The
+/// text is also what a commit re-parses, and the
 /// engineering formatter rounds. The candidate is therefore run back through
 /// the real parser and used only when it reproduces the stored number bit for
 /// bit; anything lossy keeps the exact decimal. Temperatures and angles are
 /// left alone because SI prefixes are not idiomatic for them ("1m °C").
-pub(super) fn editor_source_text(
+pub fn editor_source_text(
     def: &PropertyDefinition,
     value: &PropertyValue,
     quantity_policy: QuantityPresentationPolicy,
@@ -430,6 +473,8 @@ fn render_boolean_editor(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rspice_design::properties::PropertyCatalog;
+    use rspice_design::schematic::component_type::ComponentType;
 
     #[test]
     fn retained_numeric_sources_are_unit_safe_and_do_not_quantize_schema_values() {
@@ -490,9 +535,9 @@ mod tests {
 
     #[test]
     fn expression_numeric_fallback_uses_lossless_retained_source() {
-        let registry = crate::properties::PropertyEditorSchema::new();
+        let registry = PropertyCatalog::new();
         let phase = registry
-            .get(crate::state::ComponentType::VoltageSource)
+            .get(ComponentType::VoltageSource)
             .and_then(|sheet| sheet.get("acphase"))
             .expect("voltage-source AC phase definition");
         let stored = 89.123_456_789_012_3;
@@ -513,15 +558,15 @@ mod tests {
 
     #[test]
     fn optional_source_sentinels_are_blank_valid_expression_drafts() {
-        let registry = crate::properties::PropertyEditorSchema::new();
+        let registry = PropertyCatalog::new();
         let policy = QuantityPresentationPolicy::default();
         let locale = UiNumberLocale::default();
 
         for kind in [
-            crate::state::ComponentType::VoltageSource,
-            crate::state::ComponentType::VoltageSourceAc,
-            crate::state::ComponentType::CurrentSource,
-            crate::state::ComponentType::CurrentSourceAc,
+            ComponentType::VoltageSource,
+            ComponentType::VoltageSourceAc,
+            ComponentType::CurrentSource,
+            ComponentType::CurrentSourceAc,
         ] {
             let sheet = registry.get(kind).expect("source property sheet");
             for name in ["pacdbm", "rp"] {

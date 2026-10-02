@@ -18,11 +18,8 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 
-use super::editors::render_value_editor;
-use super::state::{
-    ComponentEditorContext, TabbedDialogResult, TabbedPropertyDialogState,
-    unit_is_part_of_value_text,
-};
+use super::state::{ComponentEditorContext, TabbedDialogResult, TabbedPropertyDialogState};
+use rspice_schematic_editor::property_values::{render_value_editor, unit_is_part_of_value_text};
 
 const DIALOG_SIZE: DialogSize = DialogSize::ComponentEditor;
 const EYEBROW: &str = "EDIT · TYPED PARAMETERS";

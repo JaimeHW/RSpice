@@ -9,6 +9,7 @@ use crate::state::property_types::{
     PropertyDefinition, PropertySheet, PropertyType, PropertyValue,
 };
 use crate::state::{Component, ComponentType};
+use rspice_schematic_editor::property_values::{editor_source_text, numeric_source_text};
 use rspice_schematic_editor::pwl_editor::PwlEditorState;
 use rspice_schematic_editor::requests::EditorRequestSource;
 use std::collections::{HashMap, HashSet};
@@ -449,8 +450,7 @@ impl TabbedPropertyDialogState {
                 .original_values
                 .get(&def.name)
                 .unwrap_or(&def.default_value);
-            let text =
-                super::editors::editor_source_text(def, value, quantity_policy, number_locale);
+            let text = editor_source_text(def, value, quantity_policy, number_locale);
             self.original_numeric_text_drafts
                 .insert(def.name.clone(), text.clone());
             if !self.modified.contains(&def.name) {
@@ -741,7 +741,7 @@ impl TabbedPropertyDialogState {
                 let value = self.values.get(&def.name).unwrap_or(&def.default_value);
                 (
                     def.name.clone(),
-                    super::editors::editor_source_text(def, value, quantity_policy, number_locale),
+                    editor_source_text(def, value, quantity_policy, number_locale),
                 )
             })
             .collect::<Vec<_>>();
@@ -773,52 +773,6 @@ impl TabbedPropertyDialogState {
     fn refresh_validation_summary(&mut self) {
         self.global_error = (!self.validation_errors.is_empty())
             .then(|| format!("{} validation error(s)", self.validation_errors.len()));
-    }
-}
-
-/// Build the retained editor source from the schema value without applying a
-/// presentation-only precision limit. Quantity-aware fields receive an
-/// explicit base unit so merely opening their tab cannot turn a valid stored
-/// value into an invalid draft under the strict input policy.
-/// Whether the editor's own text carries this property's unit.
-///
-/// The unit-safe parser refuses a bare number for these kinds, so the unit is
-/// part of the value's syntax rather than metadata about it. The caption reads
-/// the same predicate and suppresses its unit chip for them, so the unit is
-/// presented exactly once.
-pub(super) fn unit_is_part_of_value_text(definition: &PropertyDefinition) -> bool {
-    definition.prop_type == PropertyType::Number
-        && matches!(
-            definition.unit.as_deref(),
-            Some("s" | "Hz" | "°" | "deg" | "rad" | "K" | "°C" | "°F")
-        )
-}
-
-/// Append the unit the value's own syntax must carry, if any.
-///
-/// One owner for the suffix so the exact form and the engineering form the
-/// editor offers can never disagree about it.
-pub(super) fn unit_suffixed(definition: &PropertyDefinition, magnitude: &str) -> String {
-    match definition.unit.as_deref() {
-        Some("s") => format!("{magnitude} s"),
-        Some("Hz") => format!("{magnitude} Hz"),
-        Some("°" | "deg") => format!("{magnitude} deg"),
-        Some("rad") => format!("{magnitude} rad"),
-        Some("K") => format!("{magnitude} K"),
-        Some("°C") => format!("{magnitude} °C"),
-        Some("°F") => format!("{magnitude} °F"),
-        _ => magnitude.to_owned(),
-    }
-}
-
-pub(super) fn numeric_source_text(
-    definition: &PropertyDefinition,
-    value: &PropertyValue,
-) -> String {
-    match value {
-        PropertyValue::Number { value, .. } => unit_suffixed(definition, &value.to_string()),
-        PropertyValue::Expression(expression) => expression.clone(),
-        _ => value.display_string(),
     }
 }
 

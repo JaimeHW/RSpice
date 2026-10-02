@@ -2,7 +2,6 @@
 //!
 //! Schema-driven typed instance editing in the dedicated two-pane mockup shell.
 
-mod editors;
 mod render;
 mod state;
 
