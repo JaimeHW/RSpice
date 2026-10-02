@@ -58,7 +58,8 @@ pub(super) struct Identity<'a> {
 pub(super) fn header(ui: &mut Ui, identity: &Identity<'_>) -> bool {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let chip_color = crate::properties::tabbed_dialog::provenance_colour(ui, identity.provenance);
+    let chip_color =
+        rspice_schematic_editor::component_properties::provenance_colour(ui, identity.provenance);
     let chip_font = theme::mono(tokens::FS_0, FontWeight::Medium);
     let chip_track = measured_width(ui, identity.chip, chip_font.clone()).clamp(80.0, 210.0);
     // Placed against one allocated band rather than by nesting a right-aligned

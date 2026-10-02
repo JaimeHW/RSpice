@@ -1,895 +1,122 @@
-//! The schematic instance editor on the modal primitive.
-//!
-//! Registry categories become sections in the independently scrolling
-//! Parameters pane, while the evidence pane is rebuilt from live document
-//! state on every frame. Each property is a stable-height field block in the
-//! mockup's two-column grid, with validation replacing its reserved hint
-//! track instead of reflowing neighboring controls. PWL sources gain a
-//! structured point editor, every
-//! model-bound family gains model browsing, and source families gain a live
-//! preview. The shell follows the mockup's Cancel, Apply, and OK lifecycle.
+//! Component property services and dialog lifecycle adapter.
 
+use super::state::{ComponentPropertyContext, RetainedTableFile, TabbedPropertyDialogState};
 use crate::properties::PropertyEditorSchema;
-use egui::{Align, Id, Layout, Margin, Sense, Stroke, Ui, vec2};
-
+use crate::properties::model_browser::ModelBrowserState;
 use crate::quantity::{QuantityPresentationPolicy, UiNumberLocale};
-use crate::state::property_types::PropertyValue;
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
-
-use super::state::{ComponentEditorContext, TabbedDialogResult, TabbedPropertyDialogState};
+use crate::simulation::stimulus_realize::PreviewTiming;
+use crate::state::{Component, ComponentType, PropertyValue};
+use crate::ui::tokens::Tokens;
+use egui::{Margin, Stroke, Ui};
 use rspice_schematic_editor::component_properties::{
-    PropertyBrowseRequest, render_component_parameters, section_band,
+    ComponentPropertyDialogResult, ComponentPropertyDialogView, ComponentPropertyDraft,
+    ComponentPropertyServices, PropertyBrowseRequest, render_component_property_dialog,
+    section_band,
 };
 
-const DIALOG_SIZE: DialogSize = DialogSize::ComponentEditor;
-const EYEBROW: &str = "EDIT · TYPED PARAMETERS";
-const DESCRIPTION: &str = "Edit identity, model, parameters, orientation, connectivity, display, constraints, and review metadata.";
-
-/// Render the dedicated schematic instance editor.
-///
-/// Every component family is driven by its registered typed property sheet;
-/// the shell and evidence pane follow the latest component-editor mockup.
 pub fn render_tabbed_property_dialog(
     ctx: &egui::Context,
     state: &mut TabbedPropertyDialogState,
-    context: &ComponentEditorContext,
+    context: &ComponentPropertyContext,
     registry: &PropertyEditorSchema,
     model_library_manager: &crate::state::ModelLibraryManager,
     quantity_policy: QuantityPresentationPolicy,
     number_locale: UiNumberLocale,
     commit_policy: crate::state::PropertyCommitPolicy,
-) -> TabbedDialogResult {
-    let mut result = TabbedDialogResult::None;
+) -> ComponentPropertyDialogResult {
     if !state.open {
-        return result;
+        return ComponentPropertyDialogResult::None;
     }
-    let Some(component_type) = state.draft.component_type else {
+    let Some(kind) = state.draft.component_type else {
         state.close();
-        return TabbedDialogResult::Cancelled;
+        return ComponentPropertyDialogResult::Cancelled;
     };
-    let Some(sheet) = registry.get(component_type) else {
+    let Some(sheet) = registry.get(kind) else {
         state.close();
-        return TabbedDialogResult::Cancelled;
+        return ComponentPropertyDialogResult::Cancelled;
     };
-
-    state.draft.sync_pwl_validation_error();
-    let session_error = state.session_error.clone();
-    let dirty = state.draft.has_modifications();
-    let footer_hint = session_error
-        .clone()
-        .or_else(|| dirty.then(|| "Unapplied changes".to_owned()));
-
-    let mut dialog = Dialog::new(EYEBROW, "Edit instance properties", "OK")
-        .description(DESCRIPTION)
-        .size(DIALOG_SIZE)
-        .fixed_height(680.0)
-        .without_header()
-        .flush_body()
-        .manual_body_scroll()
-        .ghost("Cancel")
-        .secondary("Apply")
-        .secondary_enabled(dirty && state.draft.can_apply(commit_policy) && session_error.is_none())
-        .primary_enabled(
-            session_error.is_none() && (!dirty || state.draft.can_apply(commit_policy)),
-        )
-        .interaction_enabled(!state.model_browser.open)
-        .initial_focus(DialogInitialFocus::BodyControl);
-    if let Some(hint) = footer_hint.as_deref() {
-        dialog = dialog.hint(hint);
+    let view = ComponentPropertyDialogView {
+        component_name: state.component_name.as_deref(),
+        context: &context.editor,
+        sheet,
+        advisories: &state.source_advisories,
+        session_error: state.session_error.clone(),
+        model_browser_open: state.model_browser.open,
+        show_source_preview: crate::simulation::stimulus_realize::is_independent_source(kind),
+        quantity_policy,
+        number_locale,
+        commit_policy,
+    };
+    let mut services = ComponentDialogServices {
+        model_browser: &mut state.model_browser,
+        session_error: &mut state.session_error,
+        preview: ComponentPreview {
+            baseline: state.component_baseline.as_ref(),
+            component_id: state.component_id,
+            kind,
+            data_root: state.data_root.as_deref(),
+            timing: state.preview_timing,
+            retained_table: context.retained_table.as_ref(),
+            registry,
+        },
+    };
+    let result = render_component_property_dialog(ctx, &mut state.draft, view, &mut services);
+    if result == ComponentPropertyDialogResult::Cancelled {
+        state.close();
     }
-
-    let mut side_action = TabbedDialogResult::None;
-    let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
-        component_identity_header(ui, state, context);
-        let body_height = ui.available_height().max(1.0);
-        ui.painter().rect_filled(
-            ui.available_rect_before_wrap(),
-            0.0,
-            Tokens::get(ui.ctx()).color.bg_panel,
-        );
-        let wide = ctx.content_rect().width() > 760.0;
-        let mut first_parameter = None;
-        if wide {
-            let gap = 1.0;
-            let left_width = ((ui.available_width() - gap) * (1.1 / 2.1)).max(300.0);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                ui.allocate_ui_with_layout(
-                    vec2(left_width, body_height),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        first_parameter =
-                            parameters_pane(ui, state, sheet, quantity_policy, number_locale);
-                    },
-                );
-                let (divider, _) = ui.allocate_exact_size(vec2(gap, body_height), Sense::hover());
-                ui.painter()
-                    .rect_filled(divider, 0.0, Tokens::get(ui.ctx()).color.border);
-                ui.allocate_ui_with_layout(
-                    vec2(ui.available_width(), body_height),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        evidence_pane(
-                            ui,
-                            state,
-                            context,
-                            component_type,
-                            registry,
-                            &mut side_action,
-                        )
-                    },
-                );
-            });
-        } else {
-            let gap = 1.0;
-            let parameters_height = ((body_height - gap) * 0.56).max(1.0);
-            ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                ui.allocate_ui_with_layout(
-                    vec2(ui.available_width(), parameters_height),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        first_parameter =
-                            parameters_pane(ui, state, sheet, quantity_policy, number_locale);
-                    },
-                );
-                let (divider, _) =
-                    ui.allocate_exact_size(vec2(ui.available_width(), gap), Sense::hover());
-                ui.painter()
-                    .rect_filled(divider, 0.0, Tokens::get(ui.ctx()).color.border);
-                ui.allocate_ui_with_layout(
-                    vec2(ui.available_width(), ui.available_height()),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        evidence_pane(
-                            ui,
-                            state,
-                            context,
-                            component_type,
-                            registry,
-                            &mut side_action,
-                        )
-                    },
-                );
-            });
-        }
-        first_parameter
-    });
-
-    let dirty_after_render = state.draft.has_modifications();
-    if side_action != TabbedDialogResult::None {
-        result = side_action;
-    } else {
-        match choice {
-            DialogChoice::Primary => {
-                if !dirty_after_render {
-                    state.close();
-                    result = TabbedDialogResult::Cancelled;
-                } else if state.draft.prepare_commit(sheet, commit_policy) {
-                    result = if state.draft.validation_errors.is_empty() {
-                        TabbedDialogResult::AppliedAndClose
-                    } else {
-                        TabbedDialogResult::Applied
-                    };
-                }
-            }
-            DialogChoice::Secondary => {
-                if dirty_after_render && state.draft.prepare_commit(sheet, commit_policy) {
-                    result = TabbedDialogResult::Applied;
-                }
-            }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                state.close();
-                result = TabbedDialogResult::Cancelled;
-            }
-            DialogChoice::None => {}
-        }
-    }
-
     render_model_browser(ctx, state, model_library_manager);
     result
 }
 
-fn component_identity_header(
-    ui: &mut Ui,
-    state: &mut TabbedPropertyDialogState,
-    context: &ComponentEditorContext,
-) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let width = ui.available_width();
-    let frame = egui::Frame::NONE
-        .fill(c.bg_panel_2)
-        .inner_margin(Margin::symmetric(16, 10))
-        .show(ui, |ui| {
-            ui.set_width(width - 32.0);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 12.0;
-                let (glyph, _) = ui.allocate_exact_size(vec2(34.0, 34.0), Sense::hover());
-                ui.painter().rect_filled(glyph, 5.0, c.bg_panel);
-                ui.painter().rect_stroke(
-                    glyph,
-                    5.0,
-                    Stroke::new(1.0, c.border),
-                    egui::StrokeKind::Inside,
-                );
-                ui.painter().text(
-                    glyph.center(),
-                    egui::Align2::CENTER_CENTER,
-                    &context.glyph,
-                    theme::mono(tokens::FS_2, FontWeight::SemiBold),
-                    c.accent,
-                );
-
-                // A source carrying a provenance chip needs room for the chip
-                // *and* the family beside it; everything else keeps the track
-                // the family alone has always had.
-                let status_width = if context.stimulus.is_some() {
-                    (ui.available_width() * 0.44).clamp(200.0, 330.0)
-                } else {
-                    (ui.available_width() * 0.28).clamp(110.0, 190.0)
-                };
-                let identity_width =
-                    (ui.available_width() - status_width - ui.spacing().item_spacing.x).max(180.0);
-                ui.allocate_ui_with_layout(
-                    vec2(identity_width, 34.0),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        // Claim the whole track. `allocate_ui_with_layout`
-                        // advances the cursor by the content it ends up with,
-                        // not by the size it was asked for, so a short instance
-                        // path would otherwise drag the family badge in off the
-                        // right edge instead of leaving it flush.
-                        ui.set_min_width(identity_width);
-                        ui.spacing_mut().item_spacing.y = 2.0;
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 7.0;
-                            ui.label(
-                                egui::RichText::new("Instance")
-                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                    .color(c.text_dim),
-                            );
-                            let mut name = state
-                                .draft
-                                .get_value("name")
-                                .map(PropertyValue::display_string)
-                                .or_else(|| state.component_name.clone())
-                                .unwrap_or_default();
-                            let response = ui.add(
-                                egui::TextEdit::singleline(&mut name)
-                                    .font(theme::mono(tokens::FS_1, FontWeight::SemiBold))
-                                    .desired_width(88.0),
-                            );
-                            if response.changed() {
-                                state.draft.set_value("name", PropertyValue::String(name));
-                            }
-                            ui.label(
-                                egui::RichText::new(&context.library_cell)
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                    .color(c.text_faint),
-                            );
-                        });
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
-                            ui.label(
-                                egui::RichText::new(&context.subtitle)
-                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                    .color(c.text_dim),
-                            );
-                            ui.label(
-                                egui::RichText::new("·")
-                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                    .color(c.text_faint),
-                            );
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(&context.instance_path)
-                                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                        .color(c.text_dim),
-                                )
-                                .truncate(),
-                            );
-                        });
-                    },
-                );
-                ui.allocate_ui_with_layout(
-                    vec2(status_width, 34.0),
-                    Layout::right_to_left(Align::Center),
-                    |ui| {
-                        ui.set_min_width(status_width);
-                        ui.spacing_mut().item_spacing.x = 8.0;
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(&context.family)
-                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                    .color(c.text_dim),
-                            )
-                            .truncate(),
-                        );
-                        if let Some(stimulus) = &context.stimulus {
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(stimulus.state.label())
-                                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                                        .color(provenance_colour(ui, stimulus.state)),
-                                )
-                                .truncate(),
-                            );
-                        }
-                    },
-                );
-            });
-        });
-    ui.painter().hline(
-        frame.response.rect.x_range(),
-        frame.response.rect.bottom(),
-        Stroke::new(1.0, c.border),
-    );
+struct ComponentPreview<'a> {
+    baseline: Option<&'a Component>,
+    component_id: Option<u64>,
+    kind: ComponentType,
+    data_root: Option<&'a std::path::Path>,
+    timing: PreviewTiming,
+    retained_table: Option<&'a RetainedTableFile>,
+    registry: &'a PropertyEditorSchema,
 }
 
-fn parameters_pane(
-    ui: &mut Ui,
-    state: &mut TabbedPropertyDialogState,
-    sheet: &crate::state::property_types::PropertySheet,
-    quantity_policy: QuantityPresentationPolicy,
-    number_locale: UiNumberLocale,
-) -> Option<Id> {
-    let TabbedPropertyDialogState {
-        draft,
-        source_advisories,
-        model_browser,
-        data_root,
-        session_error,
-        ..
-    } = state;
-    render_component_parameters(
-        ui,
-        draft,
-        sheet,
-        source_advisories,
-        quantity_policy,
-        number_locale,
-        &mut |request, draft| match request {
+struct ComponentDialogServices<'a> {
+    model_browser: &'a mut ModelBrowserState,
+    session_error: &'a mut Option<String>,
+    preview: ComponentPreview<'a>,
+}
+
+impl ComponentPropertyServices for ComponentDialogServices<'_> {
+    fn browse(&mut self, request: PropertyBrowseRequest<'_>, draft: &mut ComponentPropertyDraft) {
+        match request {
             PropertyBrowseRequest::DataFile(property) => {
-                match attach_data_file(data_root.as_deref()) {
+                match attach_data_file(self.preview.data_root) {
                     Ok(Some(reference)) => {
                         draft.set_value(property, PropertyValue::String(reference));
-                        *session_error = None;
+                        *self.session_error = None;
                     }
                     Ok(None) => {}
-                    Err(error) => *session_error = Some(error),
+                    Err(error) => *self.session_error = Some(error),
                 }
             }
             PropertyBrowseRequest::Model => {
-                model_browser.type_filter = draft.component_type.and_then(model_type_for_component);
-                model_browser.allow_corner_selection = false;
-                model_browser.selected_library = draft
+                self.model_browser.type_filter =
+                    draft.component_type.and_then(model_type_for_component);
+                self.model_browser.allow_corner_selection = false;
+                self.model_browser.selected_library = draft
                     .get_value("model_library")
                     .map(PropertyValue::display_string)
                     .filter(|value| !value.trim().is_empty());
-                model_browser.selected_model = draft
+                self.model_browser.selected_model = draft
                     .get_value("model")
                     .map(PropertyValue::display_string)
                     .filter(|value| !value.trim().is_empty());
-                model_browser.selected_corner = None;
-                model_browser.open = true;
-            }
-        },
-    )
-}
-
-fn evidence_pane(
-    ui: &mut Ui,
-    state: &TabbedPropertyDialogState,
-    context: &ComponentEditorContext,
-    component_type: crate::state::ComponentType,
-    registry: &PropertyEditorSchema,
-    action: &mut TabbedDialogResult,
-) {
-    egui::Frame::NONE
-        .fill(Tokens::get(ui.ctx()).color.bg_panel)
-        .show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("component-editor-evidence")
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    evidence_contents(ui, state, context, component_type, registry, action)
-                });
-        });
-}
-
-fn evidence_contents(
-    ui: &mut Ui,
-    state: &TabbedPropertyDialogState,
-    context: &ComponentEditorContext,
-    component_type: crate::state::ComponentType,
-    registry: &PropertyEditorSchema,
-    action: &mut TabbedDialogResult,
-) {
-    model_binding_card(ui, state, context, action);
-    operating_point_card(ui, context, action);
-    if supports_source_preview(component_type) {
-        source_preview_card(ui, state, context, component_type, registry);
-        stimulus_library_card(ui, state, context, action);
-    }
-    terminals_card(ui, context);
-}
-
-/// The colour a provenance chip takes.
-///
-/// Only the two states a reader has to act on are coloured: the library having
-/// moved past the copy, or the definition having gone away, is a finding; a
-/// local edit is deliberate and marked rather than flagged. This is the same
-/// rule the Studio's Definition column follows, because it is the same fact.
-///
-/// Shared with the stimulus link dialog, whose header carries the same chip
-/// over the same instance: two tables of this rule would let one surface call a
-/// state a finding while the other beside it called it routine.
-pub(crate) fn provenance_colour(
-    ui: &Ui,
-    provenance: crate::state::stimulus_library::provenance::ProvenanceState,
-) -> egui::Color32 {
-    use crate::state::stimulus_library::provenance::ProvenanceState;
-
-    let c = Tokens::get(ui.ctx()).color;
-    match provenance {
-        ProvenanceState::Behind { .. }
-        | ProvenanceState::ModifiedBehind { .. }
-        | ProvenanceState::Removed { .. } => c.warn,
-        ProvenanceState::Modified { .. } => c.accent,
-        ProvenanceState::FromSchematic | ProvenanceState::Adopted { .. } => c.text_faint,
-    }
-}
-
-/// Where this source stands with the project's stimulus library, and the four
-/// verbs that move it.
-///
-/// Only two of the verbs are unconditional. Opening a definition and
-/// re-adopting one are offers about a record the library may not hold and a
-/// revision that may not exist, so they are absent rather than disabled: a
-/// control that is here works, and the status line above already states why
-/// there is nothing to open.
-///
-/// Three of the four act on the card the *instance* carries, not on the draft
-/// in front of the reader, and all three leave this editor. While the draft
-/// holds unapplied edits they are therefore disabled, with the reason on them:
-/// a reader who retuned a frequency and pressed Save would otherwise publish
-/// the card they had just edited away from, and the editor would close over
-/// the edit without a word. This is the rule the model binding already keeps —
-/// `Open model detail…` goes unavailable while the draft names a model the
-/// instance has not been given — applied to the whole card, because adopting
-/// and extracting read the whole card.
-///
-/// Opening the definition is the one verb that reads nothing of the draft: it
-/// shows a library record the draft cannot change, exactly as `Open model
-/// detail…` stays available while the draft's model is the committed one.
-fn stimulus_library_card(
-    ui: &mut Ui,
-    state: &TabbedPropertyDialogState,
-    context: &ComponentEditorContext,
-    action: &mut TabbedDialogResult,
-) {
-    let Some(stimulus) = context.stimulus.as_ref() else {
-        return;
-    };
-    let unapplied = state
-        .draft
-        .has_modifications()
-        .then_some("Apply or cancel this editor's edits first");
-    let held = stimulus
-        .definition
-        .as_deref()
-        .zip(stimulus.library_revision);
-    section_block(ui, "Stimulus library", &stimulus.state.label(), |ui| {
-        let t = Tokens::get(ui.ctx());
-        match held {
-            Some((definition, revision)) => {
-                evidence_row(ui, "Definition", definition);
-                evidence_row(ui, "Library holds", &format!("r{revision}"));
-            }
-            None if stimulus.definition.is_some() => {
-                evidence_row(
-                    ui,
-                    "Definition",
-                    stimulus.definition.as_deref().unwrap_or_default(),
-                );
-                ui.label(
-                    egui::RichText::new(
-                        "The library no longer holds it. This instance keeps the card it copied.",
-                    )
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.warn),
-                );
-            }
-            None => {
-                ui.label(
-                    egui::RichText::new(if stimulus.library_is_empty {
-                        "This project has authored no stimulus definitions yet."
-                    } else {
-                        "This source was drawn on the sheet and adopted no definition."
-                    })
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-                );
+                self.model_browser.selected_corner = None;
+                self.model_browser.open = true;
             }
         }
-        ui.add_space(8.0);
-        ui.horizontal_wrapped(|ui| {
-            if !stimulus.library_is_empty
-                && stimulus_verb(
-                    ui,
-                    "Adopt definition…",
-                    unapplied,
-                    "Copy a library definition's card onto this instance and record which \
-                     revision it came from",
-                )
-            {
-                *action = TabbedDialogResult::AdoptStimulus;
-            }
-            if stimulus_verb(
-                ui,
-                "Save as library definition…",
-                unapplied,
-                "Publish this instance's card as a project stimulus definition",
-            ) {
-                *action = TabbedDialogResult::ExtractStimulus;
-            }
-            if held.is_some()
-                && stimulus_verb(
-                    ui,
-                    "Open in Stimulus Library",
-                    None,
-                    "Show this definition in the Stimulus Library workspace",
-                )
-            {
-                *action = TabbedDialogResult::OpenStimulusDefinition;
-            }
-            let readopt = held
-                .filter(|_| stimulus.state.offers_readoption())
-                .map(|(_, revision)| format!("Re-adopt r{revision}"));
-            if let Some(label) = readopt.as_deref()
-                && stimulus_verb(
-                    ui,
-                    label,
-                    unapplied,
-                    "Copy the library's revision onto this instance and reload this editor from \
-                     it",
-                )
-            {
-                *action = TabbedDialogResult::ReadoptStimulus;
-            }
-        });
-    });
-}
-
-/// One verb in the Stimulus library block.
-///
-/// A verb that cannot be taken right now is drawn disabled and announces why,
-/// rather than vanishing: the reason is a state the reader clears in one act,
-/// and a control that disappeared would leave them looking for it.
-fn stimulus_verb(ui: &mut Ui, label: &str, unavailable: Option<&str>, hover: &str) -> bool {
-    let response = crate::ui::widgets::Button::new(label)
-        .enabled(unavailable.is_none())
-        .show(ui);
-    match unavailable {
-        Some(reason) => {
-            response.on_disabled_hover_text(reason);
-            false
-        }
-        None => response.on_hover_text(hover).clicked(),
     }
-}
-
-/// Whether this family has a card the engine can be asked about.
-///
-/// Every independent source does. Whether the engine can then *draw* it is a
-/// second question with its own answer — a missing data file, a noise train
-/// that only exists once a run builds it — and the card states that in place
-/// rather than disappearing, because a source that vanishes from the evidence
-/// pane looks like a source the editor does not understand.
-fn supports_source_preview(kind: crate::state::ComponentType) -> bool {
-    crate::simulation::stimulus_realize::is_independent_source(kind)
-}
-
-fn section_block(ui: &mut Ui, title: &str, status: &str, body: impl FnOnce(&mut Ui)) {
-    let t = Tokens::get(ui.ctx());
-    section_band(ui, title, status);
-    egui::Frame::NONE
-        .fill(t.color.bg_panel)
-        .inner_margin(Margin {
-            left: 16,
-            right: 16,
-            top: 4,
-            bottom: 10,
-        })
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            body(ui);
-        });
-    let y = ui.cursor().top();
-    ui.painter()
-        .hline(ui.max_rect().x_range(), y, Stroke::new(1.0, t.color.border));
-}
-
-fn evidence_row(ui: &mut Ui, label: &str, value: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
-        ui.set_min_height(19.0);
-        ui.label(
-            egui::RichText::new(label)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-        );
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(value)
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text),
-                )
-                .truncate(),
-            );
-        });
-    });
-}
-
-fn model_binding_card(
-    ui: &mut Ui,
-    state: &TabbedPropertyDialogState,
-    context: &ComponentEditorContext,
-    action: &mut TabbedDialogResult,
-) {
-    let draft_model = state
-        .draft
-        .get_value("model")
-        .map(PropertyValue::display_string)
-        .filter(|model| !model.trim().is_empty());
-    let draft_library = state
-        .draft
-        .get_value("model_library")
-        .map(PropertyValue::display_string)
-        .filter(|library| !library.trim().is_empty());
-    let pending_model = context.model.as_ref().and_then(|model| {
-        let identity_changed = draft_model
-            .as_deref()
-            .is_some_and(|draft| !draft.eq_ignore_ascii_case(&model.name))
-            || draft_library.as_deref().is_some_and(|library| {
-                model
-                    .library
-                    .as_deref()
-                    .is_none_or(|resolved| !library.eq_ignore_ascii_case(resolved))
-            });
-        identity_changed.then(|| draft_model.as_deref().unwrap_or(&model.name))
-    });
-    let status = if pending_model.is_some() {
-        "pending"
-    } else {
-        context
-            .model
-            .as_ref()
-            .map(|model| {
-                if model.status.contains("resolved") {
-                    "qualified"
-                } else if model.status.contains("inline") || model.status.contains("exact") {
-                    "exact"
-                } else {
-                    "unverified"
-                }
-            })
-            .unwrap_or("not bound")
-    };
-
-    section_block(ui, "Model binding", status, |ui| {
-        if let Some(model) = &context.model {
-            let t = Tokens::get(ui.ctx());
-            if let Some(pending_model) = pending_model {
-                evidence_row(ui, "Model", pending_model);
-                evidence_row(
-                    ui,
-                    "Source",
-                    draft_library.as_deref().unwrap_or("Pending validation"),
-                );
-                evidence_row(ui, "Section", &model.section);
-                ui.label(
-                    egui::RichText::new("Apply to resolve the new model binding.")
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.warn),
-                );
-            } else {
-                evidence_row(ui, "Model", &model.name);
-                evidence_row(ui, "Source", &model.source);
-                evidence_row(ui, "Section", &model.section);
-                ui.label(
-                    egui::RichText::new(&model.status)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_faint),
-                );
-            }
-            if model.can_open || model.can_qualify {
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if crate::ui::widgets::Button::new("Open model detail…")
-                        .enabled(model.can_open && pending_model.is_none())
-                        .show(ui)
-                        .clicked()
-                    {
-                        *action = TabbedDialogResult::OpenModel;
-                    }
-                    if crate::ui::widgets::Button::new("Qualification…")
-                        .enabled(model.can_qualify && pending_model.is_none())
-                        .show(ui)
-                        .clicked()
-                    {
-                        *action = TabbedDialogResult::OpenQualification;
-                    }
-                });
-            }
-        } else if let Some(model) = draft_model.as_deref() {
-            evidence_row(ui, "Model", model);
-            evidence_row(ui, "Source", "No catalog source resolved");
-            evidence_row(ui, "Section", "default");
-        } else {
-            let t = Tokens::get(ui.ctx());
-            ui.label(
-                egui::RichText::new("This component has no model binding.")
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-            );
-        }
-    });
-}
-
-fn operating_point_card(
-    ui: &mut Ui,
-    context: &ComponentEditorContext,
-    action: &mut TabbedDialogResult,
-) {
-    let status = context
-        .operating_point
-        .as_ref()
-        .map(|operating_point| {
-            format!(
-                "Run {} · {}{}",
-                operating_point.run_id,
-                operating_point.analysis,
-                if operating_point.current {
-                    ""
-                } else {
-                    " · stale"
-                }
-            )
-        })
-        .unwrap_or_else(|| "no retained run".to_owned());
-    section_block(ui, "Evaluated at operating point", &status, |ui| {
-        if let Some(operating_point) = &context.operating_point {
-            for (label, value) in &operating_point.rows {
-                evidence_row(ui, label, value);
-            }
-            ui.add_space(8.0);
-            if crate::ui::widgets::Button::new("Cross-probe in results…")
-                .show(ui)
-                .clicked()
-            {
-                *action = TabbedDialogResult::CrossProbe;
-            }
-        } else {
-            let t = Tokens::get(ui.ctx());
-            ui.label(
-                egui::RichText::new("No retained device operating point")
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-            );
-            ui.label(
-                egui::RichText::new("Run a DC operating-point analysis to populate this card.")
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_faint),
-            );
-        }
-    });
-}
-
-fn terminals_card(ui: &mut Ui, context: &ComponentEditorContext) {
-    let open_count = context
-        .terminals
-        .iter()
-        .filter(|terminal| terminal.net.is_none())
-        .count();
-    let status = if context.terminals.is_empty() {
-        "none declared".to_owned()
-    } else if open_count == 0 {
-        "all bound".to_owned()
-    } else {
-        format!("{open_count} open")
-    };
-    section_band(ui, "Terminals", &status);
-    if context.terminals.is_empty() {
-        let t = Tokens::get(ui.ctx());
-        egui::Frame::NONE
-            .fill(t.color.bg_panel)
-            .inner_margin(Margin::symmetric(16, 10))
-            .show(ui, |ui| {
-                ui.label(
-                    egui::RichText::new("This component has no declared terminals.")
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                );
-            });
-        return;
+    fn preview_source(&mut self, ui: &mut Ui, draft: &ComponentPropertyDraft) {
+        source_preview_card(ui, draft, &self.preview);
     }
-
-    terminal_table_row(ui, "PIN", "DIRECTION", "NET", true, false);
-    for terminal in &context.terminals {
-        terminal_table_row(
-            ui,
-            &terminal.pin,
-            &terminal.direction,
-            terminal.net.as_deref().unwrap_or("open"),
-            false,
-            terminal.net.is_none(),
-        );
-    }
-}
-
-fn terminal_table_row(
-    ui: &mut Ui,
-    pin: &str,
-    direction: &str,
-    net: &str,
-    heading: bool,
-    open: bool,
-) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    // The row must span the whole evidence pane: a shrink-to-fit frame would
-    // stop its fill and its bottom rule at the widest cell, leaving the table
-    // narrower than the band above it.
-    let row_width = ui.available_width();
-    let frame = egui::Frame::NONE
-        .fill(if heading { c.bg_panel_2 } else { c.bg_panel })
-        .inner_margin(Margin::symmetric(10, 6))
-        .show(ui, |ui| {
-            ui.set_width(row_width - 20.0);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 10.0;
-                let font = if heading {
-                    theme::mono(tokens::FS_0, FontWeight::Medium)
-                } else {
-                    theme::mono(tokens::FS_0, FontWeight::Regular)
-                };
-                let color = if heading { c.text_faint } else { c.text };
-                ui.add_sized(
-                    [62.0, 16.0],
-                    egui::Label::new(egui::RichText::new(pin).font(font.clone()).color(color)),
-                );
-                ui.add_sized(
-                    [88.0, 16.0],
-                    egui::Label::new(
-                        egui::RichText::new(direction)
-                            .font(if heading {
-                                font.clone()
-                            } else {
-                                theme::sans(tokens::FS_0, FontWeight::Regular)
-                            })
-                            .color(if heading { c.text_faint } else { c.text_dim }),
-                    ),
-                );
-                ui.add(
-                    egui::Label::new(egui::RichText::new(net).font(font).color(if open {
-                        c.warn
-                    } else {
-                        color
-                    }))
-                    .truncate(),
-                );
-            });
-        });
-    ui.painter().hline(
-        frame.response.rect.x_range(),
-        frame.response.rect.bottom(),
-        Stroke::new(1.0, c.border),
-    );
 }
 
 /// The engine's own evaluation of this source, over the plan's transient.
@@ -907,21 +134,19 @@ fn terminal_table_row(
 /// surfaces come to disagree about the same curve.
 fn source_preview_card(
     ui: &mut Ui,
-    state: &TabbedPropertyDialogState,
-    context: &ComponentEditorContext,
-    kind: crate::state::ComponentType,
-    registry: &PropertyEditorSchema,
+    draft: &ComponentPropertyDraft,
+    preview: &ComponentPreview<'_>,
 ) {
-    let timing = state.preview_timing();
+    let timing = preview.timing;
     section_band(ui, "Transient stimulus preview", "engine evaluator");
-    let component = preview_component(state, kind, registry);
+    let component = preview_component(draft, preview);
     let unit = component
         .as_ref()
         .map_or("V", crate::simulation::placed_sources::source_unit);
     let curve = component
         .ok_or_else(|| "This editor has no instance to evaluate.".to_owned())
         .and_then(|component| {
-            let tables = preview_tables(state, context, &component);
+            let tables = preview_tables(preview, &component);
             crate::properties::source_preview::source_curve(&component, timing, tables)
         });
     egui::Frame::NONE
@@ -951,20 +176,19 @@ fn source_preview_card(
 /// rather than field by field, so it is the same component a commit would
 /// write.
 fn preview_component(
-    state: &TabbedPropertyDialogState,
-    kind: crate::state::ComponentType,
-    registry: &PropertyEditorSchema,
-) -> Option<crate::state::Component> {
-    let mut component = state.component_baseline.clone().or_else(|| {
-        state
+    draft: &ComponentPropertyDraft,
+    preview: &ComponentPreview<'_>,
+) -> Option<Component> {
+    let mut component = preview.baseline.cloned().or_else(|| {
+        preview
             .component_id
-            .map(|id| crate::state::Component::new(id, kind, crate::state::Point::origin()))
+            .map(|id| crate::state::Component::new(id, preview.kind, crate::state::Point::origin()))
     })?;
-    component.kind = kind;
+    component.kind = preview.kind;
     crate::properties::property_bridge::apply_properties_to_component(
         &mut component,
-        &state.draft.values,
-        registry,
+        &draft.values,
+        preview.registry,
     )
     .ok()?;
     Some(component)
@@ -974,17 +198,14 @@ fn preview_component(
 /// adopted definition's retained copy while the draft still names the file
 /// that copy stands in for.
 fn preview_tables<'a>(
-    state: &'a TabbedPropertyDialogState,
-    context: &'a ComponentEditorContext,
-    draft: &crate::state::Component,
+    preview: &ComponentPreview<'a>,
+    draft: &Component,
 ) -> crate::simulation::table_route::TableSources<'a> {
     let reference = crate::simulation::stimulus_realize::data_file_reference(draft);
     crate::simulation::table_route::TableSources {
-        data_root: state.data_root.as_deref(),
-        retained: context
-            .stimulus
-            .as_ref()
-            .and_then(|stimulus| stimulus.retained_table.as_ref())
+        data_root: preview.data_root,
+        retained: preview
+            .retained_table
             .filter(|table| reference.as_deref() == Some(table.reference.as_str()))
             .map(|table| table.path.as_path()),
     }
@@ -1214,36 +435,37 @@ mod tests {
         (state, registry)
     }
 
+    fn preview<'a>(
+        state: &'a TabbedPropertyDialogState,
+        kind: ComponentType,
+        registry: &'a PropertyEditorSchema,
+    ) -> ComponentPreview<'a> {
+        ComponentPreview {
+            baseline: state.component_baseline.as_ref(),
+            component_id: state.component_id,
+            kind,
+            data_root: state.data_root.as_deref(),
+            timing: state.preview_timing,
+            retained_table: None,
+            registry,
+        }
+    }
+
     fn trace_of(
         state: &TabbedPropertyDialogState,
         kind: ComponentType,
         registry: &PropertyEditorSchema,
     ) -> stimulus_realize::WaveformTrace {
-        let component = preview_component(state, kind, registry).expect("a component");
+        let component =
+            preview_component(&state.draft, &preview(state, kind, registry)).expect("a component");
         // Through the shared painter's own evaluation, so a test cannot agree
         // with a sampling the card does not use.
         crate::properties::source_preview::source_curve(
             &component,
-            state.preview_timing(),
+            state.preview_timing,
             crate::simulation::table_route::TableSources::default(),
         )
         .expect("curve")
-    }
-
-    /// Every independent source has a card, so every independent source gets a
-    /// preview card — including the two file-backed families the old
-    /// hand-rolled sampler had no arm for and therefore hid.
-    #[test]
-    fn every_independent_source_is_offered_a_preview_and_nothing_else_is() {
-        for kind in ComponentType::ALL {
-            assert_eq!(
-                supports_source_preview(kind),
-                stimulus_realize::is_independent_source(kind),
-                "{kind:?}"
-            );
-        }
-        assert!(supports_source_preview(ComponentType::VoltageSourcePwlFile));
-        assert!(!supports_source_preview(ComponentType::BehavioralSource));
     }
 
     /// The draft is what the curve follows, and it reaches the engine through
@@ -1287,113 +509,13 @@ mod tests {
     #[test]
     fn a_noise_source_states_its_defect_rather_than_drawing_a_realization() {
         let (state, registry) = editor(ComponentType::CurrentSourceNoise);
-        let component =
-            preview_component(&state, ComponentType::CurrentSourceNoise, &registry).expect("built");
+        let component = preview_component(
+            &state.draft,
+            &preview(&state, ComponentType::CurrentSourceNoise, &registry),
+        )
+        .expect("built");
         let spec = stimulus_realize::source_spec(&component).expect("spec");
 
         assert!(stimulus_realize::preview_defect(&spec).is_some());
-    }
-
-    /// The stimulus library block, as a screen reader receives it.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn stimulus_verbs(
-        state: &TabbedPropertyDialogState,
-        context: &ComponentEditorContext,
-    ) -> Vec<(String, bool)> {
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        ctx.enable_accesskit();
-        let mut action = TabbedDialogResult::None;
-        ctx.run_ui(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                stimulus_library_card(ui, state, context, &mut action);
-            });
-        })
-        .platform_output
-        .accesskit_update
-        .expect("AccessKit tree update")
-        .nodes
-        .into_iter()
-        .filter_map(|(_, node)| {
-            node.label()
-                .map(|label| (label.to_owned(), node.is_disabled()))
-        })
-        .collect()
-    }
-
-    /// One source that has adopted `sensor_drive`, with the library one
-    /// revision past it so every verb is offered at once.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn adopted_context() -> ComponentEditorContext {
-        use crate::state::stimulus_library::provenance::ProvenanceState;
-
-        ComponentEditorContext {
-            stimulus: Some(crate::properties::StimulusEditorContext {
-                state: ProvenanceState::Behind {
-                    adopted: 1,
-                    library: 2,
-                },
-                definition: Some("sensor_drive".to_owned()),
-                library_revision: Some(2),
-                library_is_empty: false,
-                retained_table: None,
-            }),
-            ..ComponentEditorContext::default()
-        }
-    }
-
-    /// A verb that acts on the instance's card is withheld while the editor
-    /// holds edits that card does not have yet.
-    ///
-    /// Adopting, saving and re-adopting all read or replace the whole card and
-    /// all three leave this editor; a reader who retuned a frequency and
-    /// pressed Save would otherwise publish the card they had just edited away
-    /// from, with the edit discarded and nothing said. Opening the definition
-    /// reads nothing of the draft, so it stays available — which is the rule
-    /// `Open model detail…` already keeps for the model binding.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn the_card_verbs_are_withheld_while_the_editor_holds_unapplied_edits() {
-        let (mut state, _) = editor(ComponentType::VoltageSourceSin);
-        let context = adopted_context();
-
-        let clean = stimulus_verbs(&state, &context);
-        for verb in [
-            "Adopt definition…",
-            "Save as library definition…",
-            "Open in Stimulus Library",
-            "Re-adopt r2",
-        ] {
-            assert!(
-                clean
-                    .iter()
-                    .any(|(label, disabled)| label == verb && !disabled),
-                "{verb} is offered on a clean editor: {clean:?}"
-            );
-        }
-
-        state
-            .draft
-            .set_value("freq", crate::state::PropertyValue::string("2k"));
-        assert!(state.draft.has_modifications());
-        let dirty = stimulus_verbs(&state, &context);
-        for verb in [
-            "Adopt definition…",
-            "Save as library definition…",
-            "Re-adopt r2",
-        ] {
-            assert!(
-                dirty
-                    .iter()
-                    .any(|(label, disabled)| label == verb && *disabled),
-                "{verb} must not act on a card the editor has edited away from: {dirty:?}"
-            );
-        }
-        assert!(
-            dirty
-                .iter()
-                .any(|(label, disabled)| label == "Open in Stimulus Library" && !disabled),
-            "opening the definition reads nothing of the draft: {dirty:?}"
-        );
     }
 }

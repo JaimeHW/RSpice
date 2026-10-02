@@ -7,10 +7,7 @@
 use std::collections::HashMap;
 
 use crate::diagnostics::ConsoleMessage;
-use crate::properties::{
-    ComponentEditorContext, ComponentModelContext, ComponentOperatingPointContext,
-    ComponentTerminalContext, TabbedDialogResult, render_tabbed_property_dialog,
-};
+use crate::properties::{ComponentPropertyContext, render_tabbed_property_dialog};
 use crate::state::{Component, ComponentType, PropertySheet, PropertyValue};
 use crate::workbench::app::dialogs::stimulus_link::{
     StimulusLinkMode, commit_readoption, open_stimulus_definition, open_stimulus_link,
@@ -19,10 +16,17 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::state::{ModelsPage, Workspace};
 use rspice_design::connectivity::summary::projection_nets;
 use rspice_design::hierarchy::HierarchySource;
+use rspice_schematic_editor::component_properties::{
+    ComponentEditorContext, ComponentModelContext, ComponentOperatingPointContext,
+    ComponentPropertyDialogResult, ComponentTerminalContext, StimulusEditorContext,
+};
 
 /// Render the floating schematic component editor.
 /// Call this from the main app update loop
-pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> TabbedDialogResult {
+pub fn render_property_dialog(
+    ctx: &egui::Context,
+    state: &mut AppState,
+) -> ComponentPropertyDialogResult {
     if state.tabbed_property_dialog.open {
         state.tabbed_property_dialog.session_error = component_property_session_error(state);
         refresh_source_contract_advisories(state);
@@ -45,14 +49,14 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
     // Handle dialog result - apply changes back to component
     if matches!(
         result,
-        TabbedDialogResult::Applied | TabbedDialogResult::AppliedAndClose
+        ComponentPropertyDialogResult::Applied | ComponentPropertyDialogResult::AppliedAndClose
     ) && let Some(comp_id) = state.tabbed_property_dialog.component_id
     {
-        let close_after_commit = result == TabbedDialogResult::AppliedAndClose;
+        let close_after_commit = result == ComponentPropertyDialogResult::AppliedAndClose;
         if let Some(error) = component_property_session_error(state) {
             state.tabbed_property_dialog.open = true;
             state.tabbed_property_dialog.session_error = Some(error);
-            return TabbedDialogResult::None;
+            return ComponentPropertyDialogResult::None;
         }
         let committed = state.tabbed_property_dialog.draft.take_prepared_commit();
         let committed_names: Vec<String> = committed.keys().cloned().collect();
@@ -73,7 +77,7 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
                 "The selected component no longer exists. Close and reopen Object properties."
                     .to_owned(),
             );
-            return TabbedDialogResult::None;
+            return ComponentPropertyDialogResult::None;
         };
         let mut candidate = component.clone();
         if let Err(error) = crate::properties::property_bridge::apply_properties_to_component(
@@ -85,7 +89,7 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
             state.tabbed_property_dialog.draft.commit_error = Some(format!(
                 "The component was not changed: {error} Correct its Parameters text in the inspector."
             ));
-            return TabbedDialogResult::None;
+            return ComponentPropertyDialogResult::None;
         }
         if let Err(error) = validate_component_identity(state, comp_id, &candidate) {
             state.tabbed_property_dialog.open = true;
@@ -96,13 +100,13 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
                 .insert("name".to_owned(), error);
             state.tabbed_property_dialog.draft.commit_error =
                 Some("Correct the instance reference before applying.".to_owned());
-            return TabbedDialogResult::None;
+            return ComponentPropertyDialogResult::None;
         }
         if let Err(error) = validate_model_binding_authority(state, &candidate, &values) {
             state.tabbed_property_dialog.open = true;
             state.tabbed_property_dialog.draft.commit_error =
                 Some(format!("The model binding was not changed: {error}"));
-            return TabbedDialogResult::None;
+            return ComponentPropertyDialogResult::None;
         }
         let Some(property_sheet) = state.property_registry.get(candidate.kind) else {
             state.tabbed_property_dialog.open = true;
@@ -110,13 +114,13 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
                 "The component was not changed because its property schema is unavailable."
                     .to_owned(),
             );
-            return TabbedDialogResult::None;
+            return ComponentPropertyDialogResult::None;
         };
         if let Err(error) = validate_component_contract(&candidate, &values, property_sheet) {
             state.tabbed_property_dialog.open = true;
             state.tabbed_property_dialog.draft.commit_error =
                 Some(format!("The component was not changed: {error}"));
-            return TabbedDialogResult::None;
+            return ComponentPropertyDialogResult::None;
         }
         if candidate.kind == crate::state::ComponentType::Port
             && let Err(error) = state
@@ -126,7 +130,7 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
             state.tabbed_property_dialog.open = true;
             state.tabbed_property_dialog.draft.commit_error =
                 Some(format!("The interface contract was not changed: {error}."));
-            return TabbedDialogResult::None;
+            return ComponentPropertyDialogResult::None;
         }
         let changed_port_contract =
             candidate.kind == crate::state::ComponentType::Port && &candidate != component;
@@ -137,7 +141,7 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
             state.tabbed_property_dialog.open = true;
             state.tabbed_property_dialog.draft.commit_error =
                 Some(format!("The component was not changed: {error}"));
-            return TabbedDialogResult::None;
+            return ComponentPropertyDialogResult::None;
         }
         if changed_port_contract {
             state.sync_active_schematic_to_workspace();
@@ -180,22 +184,26 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
     }
 
     match result {
-        TabbedDialogResult::OpenModel | TabbedDialogResult::OpenQualification => {
+        ComponentPropertyDialogResult::OpenModel
+        | ComponentPropertyDialogResult::OpenQualification => {
             let model = editor_context
+                .editor
                 .model
                 .as_ref()
                 .map(|model| model.name.clone());
             let library = editor_context
+                .editor
                 .model
                 .as_ref()
                 .and_then(|model| model.library.clone());
             state.tabbed_property_dialog.close();
             state.workbench.activate(Workspace::Models);
-            state.workbench.models_page = if result == TabbedDialogResult::OpenQualification {
-                ModelsPage::Qualification
-            } else {
-                ModelsPage::Models
-            };
+            state.workbench.models_page =
+                if result == ComponentPropertyDialogResult::OpenQualification {
+                    ModelsPage::Qualification
+                } else {
+                    ModelsPage::Models
+                };
             if let Some(model) = model {
                 state.workbench.selected_model = Some(model);
             }
@@ -203,16 +211,17 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
                 state.select_model_library(&library);
             }
         }
-        TabbedDialogResult::CrossProbe => {
+        ComponentPropertyDialogResult::CrossProbe => {
             state.tabbed_property_dialog.close();
             state.workbench.activate(Workspace::Results);
         }
-        TabbedDialogResult::AdoptStimulus | TabbedDialogResult::ExtractStimulus => {
+        ComponentPropertyDialogResult::AdoptStimulus
+        | ComponentPropertyDialogResult::ExtractStimulus => {
             // The link transaction is about the instance on the sheet, not
             // about this editor's draft, so the editor closes first: two modal
             // surfaces over one component would let a reader apply one edit
             // through each and see only the second.
-            let mode = if result == TabbedDialogResult::AdoptStimulus {
+            let mode = if result == ComponentPropertyDialogResult::AdoptStimulus {
                 StimulusLinkMode::Adopt
             } else {
                 StimulusLinkMode::Extract
@@ -224,8 +233,9 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
                 }
             }
         }
-        TabbedDialogResult::OpenStimulusDefinition => {
+        ComponentPropertyDialogResult::OpenStimulusDefinition => {
             let definition = editor_context
+                .editor
                 .stimulus
                 .as_ref()
                 .and_then(|stimulus| stimulus.definition.clone());
@@ -234,8 +244,9 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
                 open_stimulus_definition(state, &definition);
             }
         }
-        TabbedDialogResult::ReadoptStimulus => {
+        ComponentPropertyDialogResult::ReadoptStimulus => {
             let definition = editor_context
+                .editor
                 .stimulus
                 .as_ref()
                 .and_then(|stimulus| stimulus.definition.clone());
@@ -477,9 +488,9 @@ fn property_value_as_number(value: &PropertyValue) -> Option<f64> {
     })
 }
 
-fn component_editor_context(state: &AppState) -> ComponentEditorContext {
+fn component_editor_context(state: &AppState) -> ComponentPropertyContext {
     let Some(component_id) = state.tabbed_property_dialog.component_id else {
-        return ComponentEditorContext::default();
+        return ComponentPropertyContext::default();
     };
     let Some(component) = state
         .schematic
@@ -488,7 +499,7 @@ fn component_editor_context(state: &AppState) -> ComponentEditorContext {
         .iter()
         .find(|component| component.id == component_id)
     else {
-        return ComponentEditorContext::default();
+        return ComponentPropertyContext::default();
     };
 
     let instance_path = format!(
@@ -508,7 +519,7 @@ fn component_editor_context(state: &AppState) -> ComponentEditorContext {
             )
         });
 
-    ComponentEditorContext {
+    let mut editor = ComponentEditorContext {
         glyph: component_editor_glyph(component.kind).to_owned(),
         subtitle: component
             .library_cell
@@ -529,7 +540,13 @@ fn component_editor_context(state: &AppState) -> ComponentEditorContext {
         model: component_model_context(state, component),
         operating_point: component_operating_point_context(state, component),
         terminals: component_terminal_context(state, component),
-        stimulus: component_stimulus_context(state, component),
+        stimulus: None,
+    };
+    let (stimulus, retained_table) = component_stimulus_context(state, component);
+    editor.stimulus = stimulus;
+    ComponentPropertyContext {
+        editor,
+        retained_table,
     }
 }
 
@@ -542,16 +559,19 @@ fn component_editor_context(state: &AppState) -> ComponentEditorContext {
 fn component_stimulus_context(
     state: &AppState,
     component: &Component,
-) -> Option<crate::properties::StimulusEditorContext> {
+) -> (
+    Option<StimulusEditorContext>,
+    Option<crate::properties::RetainedTableFile>,
+) {
     if !crate::simulation::stimulus_realize::is_independent_source(component.kind) {
-        return None;
+        return (None, None);
     }
     let library = &state.workspace.content.stimulus_library;
     let definition = component
         .stimulus_provenance
         .as_ref()
         .map(|provenance| provenance.definition.clone());
-    Some(crate::properties::StimulusEditorContext {
+    let editor = StimulusEditorContext {
         state: library.provenance_state(component),
         library_revision: definition
             .as_deref()
@@ -559,13 +579,14 @@ fn component_stimulus_context(
             .map(crate::state::stimulus_library::definition::StimulusDefinition::revision),
         definition,
         library_is_empty: library.is_empty(),
-        retained_table: library.retained_pwl_table(component).and_then(|table| {
-            Some(crate::properties::RetainedTableFile {
-                reference: crate::simulation::stimulus_realize::data_file_reference(component)?,
-                path: crate::simulation::table_route::materialized(table).ok()?,
-            })
-        }),
-    })
+    };
+    let retained_table = library.retained_pwl_table(component).and_then(|table| {
+        Some(crate::properties::RetainedTableFile {
+            reference: crate::simulation::stimulus_realize::data_file_reference(component)?,
+            path: crate::simulation::table_route::materialized(table).ok()?,
+        })
+    });
+    (Some(editor), retained_table)
 }
 
 fn component_editor_glyph(kind: ComponentType) -> &'static str {

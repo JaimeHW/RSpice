@@ -3,7 +3,18 @@
 //! Document authority, component publication, and external services belong to
 //! the host. This draft prepares a validated field delta without mutating a design.
 
+mod context;
+mod dialog;
+mod evidence;
 mod form;
+pub use context::{
+    ComponentEditorContext, ComponentModelContext, ComponentOperatingPointContext,
+    ComponentPropertyDialogResult, ComponentTerminalContext, StimulusEditorContext,
+};
+pub use dialog::{
+    ComponentPropertyDialogView, ComponentPropertyServices, render_component_property_dialog,
+};
+pub use evidence::provenance_colour;
 pub use form::{PropertyBrowseRequest, render_component_parameters, section_band};
 
 use rspice_app_types::property::{PropertyDefinition, PropertySheet, PropertyType, PropertyValue};

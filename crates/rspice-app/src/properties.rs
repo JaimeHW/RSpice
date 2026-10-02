@@ -19,7 +19,6 @@ pub(crate) mod tabbed_dialog;
 // Re-export main types
 
 pub use tabbed_dialog::{
-    ComponentEditorContext, ComponentModelContext, ComponentOperatingPointContext,
-    ComponentPropertySession, ComponentTerminalContext, RetainedTableFile, StimulusEditorContext,
-    TabbedDialogResult, TabbedPropertyDialogState, render_tabbed_property_dialog,
+    ComponentPropertyContext, ComponentPropertySession, RetainedTableFile,
+    TabbedPropertyDialogState, render_tabbed_property_dialog,
 };
