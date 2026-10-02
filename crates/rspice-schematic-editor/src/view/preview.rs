@@ -18,7 +18,6 @@ use rspice_design::schematic::{
     bus::{Bus, BusTap},
     design_note::{DesignNote, DesignNoteRenderContext},
     documentation_shape::geometry_from_points,
-    junction_candidates::{collect_junction_candidates, nearest_junction_candidate},
     net_label::NetLabel,
 };
 use rspice_design_model::{Point, design_management::CrossSheetPortDirection};
@@ -200,12 +199,9 @@ pub fn draw_junction_preview(
         hover_pos,
     )
     .snapped_position;
-    let active_wires = view
+    let candidate = view
         .design
-        .objects_on_active_sheet(&view.design.document.wires, |item| item.id);
-    let candidates = collect_junction_candidates(active_wires.as_ref());
-    let candidate =
-        nearest_junction_candidate(&candidates, requested, view.design.document.grid_size);
+        .nearest_junction_candidate(requested, view.design.document.grid_size);
     let preview = candidate.unwrap_or(requested);
     let pos = viewport.schematic_to_screen(preview);
     let palette = rspice_ui_kit::tokens::active_palette();

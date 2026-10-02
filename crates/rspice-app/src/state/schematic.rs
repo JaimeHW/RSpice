@@ -24,7 +24,6 @@ mod canvas_cache;
 use rspice_design::schematic::clipboard;
 use rspice_design::schematic::clipboard_edit;
 use rspice_design::schematic::history as committed_history;
-use rspice_design::schematic::junction_candidates;
 mod component;
 mod component_references;
 #[cfg(test)]

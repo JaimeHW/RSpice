@@ -7,10 +7,16 @@ use egui::Pos2;
 use rspice_schematic_editor::view::snap_resolution;
 pub(super) use snap_resolution::target_acquisition_radius;
 
-pub(super) fn conductor_attachment_pitch(state: &AppState) -> Option<i32> {
-    snap_resolution::conductor_attachment_pitch(
+pub(super) fn nearest_active_wire_screen_hit(
+    state: &AppState,
+    viewport: &Viewport,
+    pointer: Pos2,
+) -> Option<super::drawing::WireScreenHit> {
+    snap_resolution::nearest_active_wire_screen_hit(
+        &super::schematic_design_view(state),
         &state.schematic.session.editor.snap_engine,
-        state.schematic.document().grid_size,
+        viewport,
+        pointer,
     )
 }
 pub(super) fn resolve_grid_pointer(

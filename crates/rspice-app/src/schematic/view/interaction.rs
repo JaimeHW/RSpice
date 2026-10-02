@@ -20,7 +20,7 @@ use super::SchematicSymbolContext;
 use super::array_interaction::handle_armed_array_selection;
 use super::bus_interaction::{BusTapCandidateError, resolve_bus_tap_candidate_on_active_sheet};
 use super::coordinates::screen_to_schematic;
-use super::drawing::{WireScreenHit, nearest_wire_screen_hit};
+use super::drawing::WireScreenHit;
 use super::move_interaction::handle_armed_move_selection;
 use super::navigation::primary_pan_gesture_active;
 use super::selection_drag::handle_select_dragging;
@@ -28,7 +28,7 @@ use super::sheet_visibility::{
     active_junction_at, active_wire_at, objects_on_active_sheet, retain_selection_on_active_sheet,
 };
 use super::snap_resolution::{
-    conductor_attachment_pitch, resolve_grid_pointer, resolve_target_pointer,
+    nearest_active_wire_screen_hit, resolve_grid_pointer, resolve_target_pointer,
     target_acquisition_radius,
 };
 use super::stretch_interaction::handle_armed_stretch_selection;
@@ -454,21 +454,6 @@ fn report_bus_error(ui: &Ui, state: &mut AppState, title: &str, message: String)
     state.push_user_message(ConsoleMessage::warning(message));
 }
 
-fn nearest_active_wire_screen_hit(
-    state: &AppState,
-    viewport: &Viewport,
-    pointer: egui::Pos2,
-) -> Option<WireScreenHit> {
-    let wires = objects_on_active_sheet(state, &state.schematic.document().wires, |item| item.id);
-    nearest_wire_screen_hit(
-        viewport,
-        wires.as_ref(),
-        pointer,
-        6.0,
-        conductor_attachment_pitch(state),
-    )
-}
-
 /// A visual conductor acquisition owns the click. If no exact integer
 /// attachment can be represented, fail closed instead of silently falling
 /// back to a nearby grid point and creating a disconnected route.
@@ -864,15 +849,9 @@ enum JunctionPlacementOutcome {
 
 fn commit_explicit_junction(state: &mut AppState, requested: Point) -> JunctionPlacementOutcome {
     let grid_size = state.schematic.document().grid_size;
-    let active_wires =
-        objects_on_active_sheet(state, &state.schematic.document().wires, |item| item.id);
-    let hit_schematic = crate::state::SchematicState::from_document(
-        rspice_design::schematic::document::SchematicDocument {
-            wires: active_wires.into_owned(),
-            ..Default::default()
-        },
-    );
-    let Some(target) = hit_schematic.nearest_junction_candidate(requested, grid_size) else {
+    let Some(target) =
+        super::schematic_design_view(state).nearest_junction_candidate(requested, grid_size)
+    else {
         return JunctionPlacementOutcome::NoIntersection;
     };
 

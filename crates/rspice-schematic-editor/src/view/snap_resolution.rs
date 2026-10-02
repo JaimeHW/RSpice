@@ -7,6 +7,7 @@
 use egui::Pos2;
 
 use super::design_view::DesignView;
+use super::drawing::{WireScreenHit, nearest_wire_screen_hit};
 use crate::session::snap::{SnapEngine, SnapResult};
 
 use super::coordinates::{screen_to_grid, screen_to_schematic};
@@ -33,6 +34,24 @@ pub fn target_acquisition_radius(viewport: &Viewport) -> i32 {
 /// other one, so the attachment always stays on its body.
 pub fn conductor_attachment_pitch(engine: &SnapEngine, grid_size: i32) -> Option<i32> {
     (engine.enabled && engine.snap_to_grid).then_some(grid_size)
+}
+
+/// Resolve a visual conductor acquisition using the same active-sheet order,
+/// screen-space radius and attachment pitch for route clicks and previews.
+pub fn nearest_active_wire_screen_hit(
+    view: &DesignView<'_>,
+    engine: &SnapEngine,
+    viewport: &Viewport,
+    pointer: Pos2,
+) -> Option<WireScreenHit> {
+    let wires = view.objects_on_active_sheet(&view.document.wires, |wire| wire.id);
+    nearest_wire_screen_hit(
+        viewport,
+        wires.as_ref(),
+        pointer,
+        TARGET_ACQUISITION_RADIUS_POINTS,
+        conductor_attachment_pitch(engine, view.document.grid_size),
+    )
 }
 
 /// Resolve a pointer for grid-governed placement and geometry editing.

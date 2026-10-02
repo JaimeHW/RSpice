@@ -8,7 +8,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rspice_design::schematic::junction_candidates::collect_junction_candidates;
 use rspice_design::schematic::net_label::Junction;
 use rspice_design::schematic::wire::Wire;
 use rspice_design_model::Point;
@@ -39,11 +38,6 @@ pub struct CanvasCache {
 
     /// Junction marker positions.
     pub junctions: HashSet<Point>,
-
-    /// Ambiguous interior/interior crossings between distinct wires. Endpoint
-    /// and T contacts are already electrically connected and are not valid
-    /// targets for the explicit-junction authoring tool.
-    pub junction_candidates: Vec<Point>,
 }
 
 impl Clone for CanvasCache {
@@ -65,7 +59,6 @@ impl CanvasCache {
         self.wire_bounds.reserve(wires.len());
         self.wire_vertices.clear();
         self.junctions.clear();
-        self.junction_candidates.clear();
         self.wire_cells.clear();
         self.oversized_wires.clear();
 
@@ -107,7 +100,6 @@ impl CanvasCache {
         }
 
         self.junctions.extend(junctions.iter().map(|j| j.pos));
-        self.junction_candidates = collect_junction_candidates(wires);
         self.version = Some(version);
     }
 

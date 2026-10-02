@@ -4,6 +4,7 @@ use crate::session::{canvas_cache::CanvasCache, visibility::SchematicReviewMarke
 use rspice_design::schematic::{
     design_note::{DesignNote, DesignNoteKind, DesignReviewState},
     document::SchematicDocument,
+    junction_candidates::{collect_junction_candidates, nearest_junction_candidate},
 };
 use rspice_design_model::{Point, design_management::SheetCatalog};
 use std::borrow::Cow;
@@ -75,6 +76,14 @@ impl<'a> DesignView<'a> {
             .map(|junction| junction.id)
     }
 
+    /// Only visible conductors contribute explicit-junction targets. A cache
+    /// covering the whole document cannot establish active-sheet crossings.
+    pub fn nearest_junction_candidate(&self, point: Point, radius: i32) -> Option<Point> {
+        let wires = self.objects_on_active_sheet(&self.document.wires, |wire| wire.id);
+        let candidates = collect_junction_candidates(wires.as_ref());
+        nearest_junction_candidate(&candidates, point, radius)
+    }
+
     pub fn active_wire_point_is_draggable(&self, point: Point) -> bool {
         self.active_junction_at(point).is_some()
             || self
@@ -117,6 +126,95 @@ pub fn design_note_visible(note: &DesignNote, visibility: SchematicReviewMarkerV
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rspice_design::schematic::wire::Wire;
+    use rspice_design_model::design_management::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+
+    fn view(document: &SchematicDocument) -> DesignView<'_> {
+        DesignView {
+            document,
+            canvas_cache: None,
+            sheet_catalog: None,
+            review_markers: SchematicReviewMarkerVisibility::All,
+        }
+    }
+
+    #[test]
+    fn junction_candidates_use_only_active_sheet_conductors() {
+        let document = SchematicDocument {
+            wires: vec![
+                Wire::new(1, vec![Point::new(0, 20), Point::new(40, 20)]),
+                Wire::new(2, vec![Point::new(20, 0), Point::new(20, 40)]),
+                Wire::new(3, vec![Point::new(0, 0), Point::new(40, 40)]),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            view(&document).nearest_junction_candidate(Point::new(19, 21), 4),
+            Some(Point::new(20, 20))
+        );
+        assert_eq!(
+            view(&document).nearest_junction_candidate(Point::new(100, 100), 4),
+            None
+        );
+
+        let mut catalog = SheetCatalog::default();
+        let mut sheets = Vec::new();
+        for page in [1, 2] {
+            sheets.push(
+                catalog
+                    .create_sheet(
+                        SheetDefinition {
+                            name: format!("Sheet {page}"),
+                            template: SheetTemplate::AnalogSchematic,
+                            port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                            explicit_page_number: Some(page),
+                        },
+                        sheets.last().copied(),
+                    )
+                    .unwrap(),
+            );
+        }
+        catalog
+            .assign_objects(catalog.revision(), sheets[1], [2, 3])
+            .unwrap();
+        catalog.set_active(sheets[0]).unwrap();
+        assert_eq!(
+            DesignView {
+                sheet_catalog: Some(&catalog),
+                ..view(&document)
+            }
+            .nearest_junction_candidate(Point::new(20, 20), 4),
+            None,
+            "hidden conductors cannot create a visible crossing"
+        );
+        catalog
+            .assign_objects(catalog.revision(), sheets[0], [2])
+            .unwrap();
+        assert_eq!(
+            DesignView {
+                sheet_catalog: Some(&catalog),
+                ..view(&document)
+            }
+            .nearest_junction_candidate(Point::new(20, 20), 4),
+            Some(Point::new(20, 20))
+        );
+    }
+
+    #[test]
+    fn endpoint_and_t_contacts_are_not_explicit_junction_targets() {
+        let document = SchematicDocument {
+            wires: vec![
+                Wire::new(1, vec![Point::new(0, 20), Point::new(40, 20)]),
+                Wire::new(2, vec![Point::new(20, 20), Point::new(20, 40)]),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            view(&document).nearest_junction_candidate(Point::new(20, 20), 4),
+            None
+        );
+    }
+
     #[test]
     fn review_marker_visibility_preserves_non_review_documentation() {
         let plain = DesignNote::new(

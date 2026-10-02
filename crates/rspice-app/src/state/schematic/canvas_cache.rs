@@ -1,7 +1,5 @@
 //! App integration for the editor's topology-versioned canvas geometry.
 
-use super::junction_candidates::{collect_junction_candidates, nearest_junction_candidate};
-use super::point::Point;
 use super::state::SchematicState;
 use rspice_schematic_editor::session::canvas_cache::CanvasCache;
 
@@ -19,27 +17,13 @@ impl SchematicState {
     pub fn canvas_cache(&self) -> Option<&CanvasCache> {
         self.session.editor.canvas_cache(self.topology_version())
     }
-
-    /// Return the nearest valid explicit-junction target within `radius`.
-    /// The frame cache serves the hot path; the fallback keeps the first
-    /// interactive frame correct before derived geometry has been rebuilt.
-    pub fn nearest_junction_candidate(&self, pos: Point, radius: i32) -> Option<Point> {
-        let fallback;
-        let candidates = if let Some(cache) = self.canvas_cache() {
-            cache.junction_candidates.as_slice()
-        } else {
-            fallback = collect_junction_candidates(&self.design.document().wires);
-            fallback.as_slice()
-        };
-        nearest_junction_candidate(candidates, pos, radius)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::state::SchematicState;
     use super::super::wire::Wire;
-    use super::Point;
+    use rspice_design_model::Point;
 
     /// The cached hit-test answers must match the linear-scan fallback,
     /// and topology bumps must invalidate.
@@ -83,56 +67,6 @@ mod tests {
         assert_eq!(
             cache.wire_bounds[0],
             (Point::new(-20, 0), Point::new(40, 0))
-        );
-    }
-
-    #[test]
-    fn junction_candidates_are_deduplicated_cached_and_nearest() {
-        let mut state = SchematicState::default();
-        state.design.document_mut_for_test().wires = vec![
-            Wire::new(1, vec![Point::new(0, 20), Point::new(40, 20)]),
-            Wire::new(2, vec![Point::new(20, 0), Point::new(20, 40)]),
-            Wire::new(3, vec![Point::new(0, 0), Point::new(40, 40)]),
-        ];
-        state.bump_topology_version();
-
-        assert_eq!(
-            state.nearest_junction_candidate(Point::new(19, 21), 4),
-            Some(Point::new(20, 20))
-        );
-        state.ensure_canvas_cache();
-        let cache = state.canvas_cache().expect("cache fresh");
-        assert_eq!(cache.junction_candidates, vec![Point::new(20, 20)]);
-        assert_eq!(
-            state.nearest_junction_candidate(Point::new(19, 21), 4),
-            Some(Point::new(20, 20))
-        );
-        assert_eq!(
-            state.nearest_junction_candidate(Point::new(100, 100), 4),
-            None
-        );
-    }
-
-    #[test]
-    fn endpoint_and_t_contacts_are_not_explicit_junction_targets() {
-        let mut state = SchematicState::default();
-        state.design.document_mut_for_test().wires = vec![
-            Wire::new(1, vec![Point::new(0, 20), Point::new(40, 20)]),
-            Wire::new(2, vec![Point::new(20, 20), Point::new(20, 40)]),
-        ];
-        state.bump_topology_version();
-
-        assert_eq!(
-            state.nearest_junction_candidate(Point::new(20, 20), 4),
-            None
-        );
-        state.ensure_canvas_cache();
-        assert!(
-            state
-                .canvas_cache()
-                .expect("cache fresh")
-                .junction_candidates
-                .is_empty()
         );
     }
 

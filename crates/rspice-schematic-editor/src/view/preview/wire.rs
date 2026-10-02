@@ -2,8 +2,8 @@
 
 use super::super::{
     coordinates::screen_to_schematic,
-    drawing::{nearest_wire_screen_hit, paint_conductor},
-    snap_resolution::{conductor_attachment_pitch, resolve_target_pointer},
+    drawing::paint_conductor,
+    snap_resolution::{nearest_active_wire_screen_hit, resolve_target_pointer},
     symbol_context::SchematicSymbolContext,
     viewport::Viewport,
 };
@@ -73,16 +73,9 @@ pub fn resolve_wire_preview_snap(
             pointer,
         ));
     }
-    let active_wires = view
-        .design
-        .objects_on_active_sheet(&view.design.document.wires, |wire| wire.id);
-    let Some(hit) = nearest_wire_screen_hit(
-        viewport,
-        active_wires.as_ref(),
-        pointer,
-        6.0,
-        conductor_attachment_pitch(&view.editor.snap_engine, view.design.document.grid_size),
-    ) else {
+    let Some(hit) =
+        nearest_active_wire_screen_hit(&view.design, &view.editor.snap_engine, viewport, pointer)
+    else {
         return Some(resolve_target_pointer(
             &view.design,
             &view.editor.snap_engine,
@@ -92,7 +85,12 @@ pub fn resolve_wire_preview_snap(
         ));
     };
     let attachment = hit.attachment?;
-    let wire = active_wires.iter().find(|wire| wire.id == hit.wire_id)?;
+    let wire = view
+        .design
+        .document
+        .wires
+        .iter()
+        .find(|wire| wire.id == hit.wire_id && view.design.object_is_visible(wire.id))?;
     let raw = screen_to_schematic(viewport, pointer);
     let distance = (f64::from(raw.x) - f64::from(attachment.x))
         .hypot(f64::from(raw.y) - f64::from(attachment.y));
