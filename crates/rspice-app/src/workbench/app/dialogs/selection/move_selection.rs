@@ -4,30 +4,25 @@
 //! the document; the schematic interaction layer accumulates a snapped
 //! pointer/keyboard delta and commits the configured movement exactly once.
 
-use crate::ui::widgets::{field_label, read_only_value};
-use egui::{Context, Ui};
+use egui::Context;
+use rspice_schematic_editor::selection_forms;
 use rspice_schematic_editor::view::grid::snap_label;
 
 use crate::diagnostics::ConsoleMessage;
 use crate::schematic::view::schematic_symbol_context;
-use crate::state::{MoveSelectionMode, Point, Tool};
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::state::{Point, Tool};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
-    SchematicCommandPreview, schematic_command_workflow, select_with_response,
 };
 
-use crate::workbench::app::{MoveSelectionDialogState, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} CONNECTIVITY PRESERVING";
 const TITLE: &str = "Move selection";
 const PRIMARY: &str = "Arm move tool";
 const DESCRIPTION: &str = "Move selected objects with connected wires following and preview any resulting geometry or hierarchy violations.";
-use crate::workbench::app::dialogs::schematic_command::{
-    DISCARD_DETAIL, DISCARD_TITLE, FOOTER_NOTE,
-};
+use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
 
 #[derive(Debug)]
 enum DraftValidation {
@@ -106,13 +101,18 @@ impl RSpiceApp {
             );
         }
         let mut response = dialog.show_transaction(ctx, |ui| {
-            workflow_body(
+            let draft = &mut self.state.dialogs.move_selection;
+            let (focus, edited) = selection_forms::show_move(
                 ui,
                 &summary,
                 snap,
                 validation_message.as_deref(),
-                &mut self.state.dialogs.move_selection,
-            )
+                &mut draft.mode,
+            );
+            if edited {
+                draft.mark_edited();
+            }
+            focus
         });
         match response.choice {
             DialogChoice::Primary => {
@@ -179,72 +179,6 @@ pub(crate) fn cancel_armed_move_selection(state: &mut AppState) {
     }
 }
 
-fn workflow_body(
-    ui: &mut Ui,
-    summary: &str,
-    snap: &str,
-    validation_message: Option<&str>,
-    draft: &mut MoveSelectionDialogState,
-) -> Option<egui::Id> {
-    let preview = SchematicCommandPreview {
-        subject: summary,
-        location: "anchor and destination pending",
-        electrical_outcome: "connectivity-preserving transform",
-        grid: snap,
-    };
-    let focus = schematic_command_workflow(
-        ui,
-        "MOVE",
-        preview,
-        if validation_message.is_some() {
-            "blocked"
-        } else {
-            "legal preview"
-        },
-        validation_message.is_none(),
-        |ui| {
-            let labels = MoveSelectionMode::ALL.map(|mode| mode.label().to_owned());
-            let output = field_label(ui, "Mode", |ui| {
-                select_with_response(
-                    ui,
-                    "move-selection-mode",
-                    "Move mode",
-                    draft.mode.label(),
-                    &labels,
-                    ui.available_width(),
-                )
-            });
-            ui.add_space(9.0);
-            read_only_value(ui, "Snap", snap);
-            ui.add_space(9.0);
-            read_only_value(ui, "Selection", summary);
-            ui.add_space(12.0);
-            let t = Tokens::get(ui.ctx());
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(validation_message.unwrap_or(FOOTER_NOTE))
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(if validation_message.is_some() {
-                            t.color.err
-                        } else {
-                            t.color.text_faint
-                        }),
-                )
-                .wrap(),
-            );
-            output
-        },
-    );
-    if let Some(index) = focus.picked {
-        let next = MoveSelectionMode::ALL[index];
-        if next != draft.mode {
-            draft.mode = next;
-            draft.mark_edited();
-        }
-    }
-    Some(focus.response.id)
-}
-
 fn selection_summary(state: &AppState) -> String {
     let selection = &state.schematic.session.editor.selection;
     let count = state.schematic.live_movable_selection_count();
@@ -285,6 +219,7 @@ fn selection_summary(state: &AppState) -> String {
 mod tests {
     use super::*;
     use crate::state::{ComponentType, Point, SchematicSnapshot};
+    use crate::workbench::app::dialogs::state::MoveSelectionDialogState;
 
     #[test]
     fn open_freezes_selection_and_complete_design_snapshot() {

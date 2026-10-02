@@ -4,23 +4,18 @@
 //! contract. Arming transfers exclusive intent to the schematic canvas, where
 //! a candidate is previewed and committed as one undoable mutation.
 
-use crate::ui::widgets::{field_label, read_only_value};
-use egui::{Context, Ui};
+use egui::Context;
+use rspice_schematic_editor::selection_forms;
 use rspice_schematic_editor::view::grid::snap_label;
 
 use crate::diagnostics::ConsoleMessage;
-use crate::state::{StretchOrthogonalPolicy, StretchTarget, Tool};
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::state::{StretchTarget, Tool};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
-    SchematicCommandPreview, schematic_command_workflow, select_with_response,
 };
 
-use crate::workbench::app::dialogs::schematic_command::{
-    DISCARD_DETAIL, DISCARD_TITLE, FOOTER_NOTE,
-};
-use crate::workbench::app::{RSpiceApp, SchematicEditAuthority, StretchSelectionDialogState};
+use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
+use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} GEOMETRY EDIT";
@@ -109,13 +104,18 @@ impl RSpiceApp {
             );
         }
         let mut response = dialog.show_transaction(ctx, |ui| {
-            workflow_body(
+            let draft = &mut self.state.dialogs.stretch_selection;
+            let (focus, edited) = selection_forms::show_stretch(
                 ui,
                 &selection,
                 snap,
                 validation_message.as_deref(),
-                &mut self.state.dialogs.stretch_selection,
-            )
+                &mut draft.policy,
+            );
+            if edited {
+                draft.mark_edited();
+            }
+            focus
         });
         match response.choice {
             DialogChoice::Primary => {
@@ -186,75 +186,6 @@ pub(crate) fn cancel_armed_stretch_selection(state: &mut AppState) {
     }
 }
 
-fn workflow_body(
-    ui: &mut Ui,
-    selection: &str,
-    snap: &str,
-    validation_message: Option<&str>,
-    draft: &mut StretchSelectionDialogState,
-) -> Option<egui::Id> {
-    let preview = SchematicCommandPreview {
-        subject: selection,
-        location: "anchor and destination pending",
-        electrical_outcome: match draft.policy {
-            StretchOrthogonalPolicy::PreserveOrthogonal => "orthogonal segment update",
-            StretchOrthogonalPolicy::AllowDiagonal => "diagonal segment update",
-        },
-        grid: snap,
-    };
-    let focus = schematic_command_workflow(
-        ui,
-        "STRETCH",
-        preview,
-        if validation_message.is_some() {
-            "blocked"
-        } else {
-            "legal preview"
-        },
-        validation_message.is_none(),
-        |ui| {
-            read_only_value(ui, "Selection", selection);
-            ui.add_space(9.0);
-            let labels = StretchOrthogonalPolicy::ALL.map(|policy| policy.label().to_owned());
-            let output = field_label(ui, "Orthogonal policy", |ui| {
-                select_with_response(
-                    ui,
-                    "stretch-selection-orthogonal-policy",
-                    "Orthogonal policy",
-                    draft.policy.label(),
-                    &labels,
-                    ui.available_width(),
-                )
-            });
-            ui.add_space(9.0);
-            read_only_value(ui, "Snap", snap);
-            ui.add_space(12.0);
-            let t = Tokens::get(ui.ctx());
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(validation_message.unwrap_or(FOOTER_NOTE))
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(if validation_message.is_some() {
-                            t.color.err
-                        } else {
-                            t.color.text_faint
-                        }),
-                )
-                .wrap(),
-            );
-            output
-        },
-    );
-    if let Some(index) = focus.picked {
-        let next = StretchOrthogonalPolicy::ALL[index];
-        if next != draft.policy {
-            draft.policy = next;
-            draft.mark_edited();
-        }
-    }
-    Some(focus.response.id)
-}
-
 fn target_summary(state: &AppState) -> String {
     match state.dialogs.stretch_selection.canvas.target {
         Some(StretchTarget::WireSegment {
@@ -288,7 +219,8 @@ fn target_summary(state: &AppState) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{Point, Wire};
+    use crate::state::{Point, StretchOrthogonalPolicy, Wire};
+    use crate::workbench::app::dialogs::state::StretchSelectionDialogState;
 
     #[test]
     fn open_freezes_authority_and_exact_default_policy() {

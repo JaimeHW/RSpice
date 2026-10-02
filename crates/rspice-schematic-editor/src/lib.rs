@@ -7,6 +7,7 @@ pub mod export;
 pub mod net_label_placement;
 pub mod pin_placement;
 pub mod port_overlay;
+pub mod selection_forms;
 pub mod session;
 pub mod source_labels;
 pub mod symbol_editor;

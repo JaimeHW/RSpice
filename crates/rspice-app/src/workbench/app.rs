@@ -180,10 +180,10 @@ pub(crate) use dialogs::state::{
     EngineeringTableDialogState, EngineeringTableExportFormat, EngineeringTableExportScope,
     GridSnapRoutingDialogState, GridSnapRoutingDraft, GridSnapRoutingFocusTarget,
     GridSnapSpacingChoice, HelpCenterPage, HierarchyDescendEditMode, HierarchyParentContext,
-    MoveSelectionDialogState, NamedNetObjectPropertiesDraft, NetLabelObjectPropertiesDraft,
-    NewWindowInitialContent, ObjectPropertiesDraft, PlanRemovalConsequence, PlanRemovalTarget,
-    PlanRemovalTone, RenameSelectionTarget, ReplaceInstanceOpen, StretchSelectionDialogState,
-    TechnologyAttachmentDialogState, WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
+    NamedNetObjectPropertiesDraft, NetLabelObjectPropertiesDraft, NewWindowInitialContent,
+    ObjectPropertiesDraft, PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone,
+    RenameSelectionTarget, ReplaceInstanceOpen, TechnologyAttachmentDialogState,
+    WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
 };
 pub use dialogs::state::{DialogState, LicensePhase};
 
