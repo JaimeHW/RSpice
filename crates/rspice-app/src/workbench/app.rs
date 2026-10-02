@@ -193,7 +193,9 @@ pub use dialogs::state::{DialogState, LicensePhase};
 #[cfg(test)]
 pub(in crate::workbench) use dialogs::plan_removal::REVEAL_BLOCKER;
 
-pub(crate) use schematic::edit_authority::SchematicEditAuthority;
+pub(crate) use schematic::edit_authority::{
+    SchematicEditAuthority, schematic_editor_request_source, symbol_context_revision,
+};
 
 pub(crate) use schematic::named_net::{
     NamedNetTarget, apply_named_net_rename, selected_named_net_target, validate_named_net_rename,

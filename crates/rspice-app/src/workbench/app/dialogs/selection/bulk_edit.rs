@@ -142,13 +142,14 @@ impl SelectionBulkEditAuthority {
         let reopen = |reason: &str| {
             format!("{reason}. Close and reopen Selection and bulk property editing.")
         };
-        if self.active.design_execution_epoch != state.design_execution_epoch {
+        let current = crate::workbench::app::schematic_editor_request_source(state);
+        if self.active.source.design_epoch != current.design_epoch {
             return Some(reopen("The design document changed"));
         }
-        if self.active.active_schematic_epoch != state.active_schematic_epoch {
+        if self.active.source.document_epoch != current.document_epoch {
             return Some(reopen("The active schematic buffer changed"));
         }
-        if self.active.topology_version != state.schematic.topology_version()
+        if self.active.source.topology_version != current.topology_version
             || !self
                 .active
                 .snapshot
@@ -160,6 +161,9 @@ impl SelectionBulkEditAuthority {
             || self.active_key != state.workspace.content.active_schematic_reference().key()
         {
             return Some(reopen("The active cell/view changed"));
+        }
+        if !self.active.matches_source(&current) {
+            return Some(reopen("The schematic source or editing scope changed"));
         }
         if self.active.grid_size != state.schematic.document().grid_size
             || self.active.document_policy != state.schematic.document().document_policy

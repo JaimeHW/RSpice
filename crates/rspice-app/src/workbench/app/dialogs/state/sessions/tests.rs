@@ -7,6 +7,10 @@
 
 use super::*;
 
+fn edit_authority() -> super::SchematicEditAuthority {
+    super::SchematicEditAuthority::capture(&crate::workbench::app_state::AppState::default())
+}
+
 fn assert_blocks_shortcuts(configure: impl FnOnce(&mut DialogState)) {
     let mut dialogs = DialogState::default();
     assert!(!dialogs.application_modal_open());
@@ -74,33 +78,11 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
             .open(0, 0, 0, "user/top/schematic".to_owned(), Vec::new());
     });
     assert_blocks_shortcuts(|dialogs| {
-        dialogs.move_selection.open(super::SchematicEditAuthority {
-            design_execution_epoch: 0,
-            active_schematic_epoch: 0,
-            topology_version: 0,
-            view_path: "user/top/schematic".to_owned(),
-            grid_size: 10,
-            document_policy: crate::state::SchematicDocumentPolicy::default(),
-            snapshot: crate::state::SchematicSnapshot::capture(
-                &crate::state::SchematicState::default().document(),
-            ),
-            selection: crate::state::Selection::default(),
-        });
+        dialogs.move_selection.open(edit_authority());
     });
     assert_blocks_shortcuts(|dialogs| {
         dialogs.stretch_selection.open(
-            super::SchematicEditAuthority {
-                design_execution_epoch: 0,
-                active_schematic_epoch: 0,
-                topology_version: 0,
-                view_path: "user/top/schematic".to_owned(),
-                grid_size: 10,
-                document_policy: crate::state::SchematicDocumentPolicy::default(),
-                snapshot: crate::state::SchematicSnapshot::capture(
-                    &crate::state::SchematicState::default().document(),
-                ),
-                selection: crate::state::Selection::default(),
-            },
+            edit_authority(),
             crate::state::StretchTarget::WireSegment {
                 wire_id: 1,
                 segment_index: 0,
@@ -109,36 +91,14 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
     });
     assert_blocks_shortcuts(|dialogs| {
         dialogs.array_selection.open(
-            super::SchematicEditAuthority {
-                design_execution_epoch: 0,
-                active_schematic_epoch: 0,
-                topology_version: 0,
-                view_path: "user/top/schematic".to_owned(),
-                grid_size: 10,
-                document_policy: crate::state::SchematicDocumentPolicy::default(),
-                snapshot: crate::state::SchematicSnapshot::capture(
-                    &crate::state::SchematicState::default().document(),
-                ),
-                selection: crate::state::Selection::default(),
-            },
+            edit_authority(),
             "8 \u{00d7} 1".to_owned(),
             "U4\u{2026}U11 \u{00b7} DATA[0]\u{2026}DATA[7]".to_owned(),
         );
     });
     assert_blocks_shortcuts(|dialogs| {
         dialogs.replace_instance.open(ReplaceInstanceOpen {
-            authority: super::SchematicEditAuthority {
-                design_execution_epoch: 0,
-                active_schematic_epoch: 0,
-                topology_version: 0,
-                view_path: "user/top/schematic".to_owned(),
-                grid_size: 10,
-                document_policy: crate::state::SchematicDocumentPolicy::default(),
-                snapshot: crate::state::SchematicSnapshot::capture(
-                    &crate::state::SchematicState::default().document(),
-                ),
-                selection: crate::state::Selection::default(),
-            },
+            authority: edit_authority(),
             replacement_authority: {
                 let mut schematic = crate::state::SchematicState::default();
                 schematic

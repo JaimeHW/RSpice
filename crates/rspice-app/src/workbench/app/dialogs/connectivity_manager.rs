@@ -1349,10 +1349,9 @@ impl RSpiceApp {
 
 fn connectivity_authority_error(state: &AppState) -> Option<String> {
     let authority = state.dialogs.connectivity_manager.authority.as_ref()?;
-    let stale = authority.design_execution_epoch != state.design_execution_epoch
-        || authority.active_schematic_epoch != state.active_schematic_epoch
-        || authority.topology_version != state.schematic.topology_version()
-        || authority.view_path != state.workspace.content.active_view.display_path()
+    let stale = !authority.matches_source(&crate::workbench::app::schematic_editor_request_source(
+        state,
+    )) || authority.view_path != state.workspace.content.active_view.display_path()
         || authority.grid_size != state.schematic.document().grid_size
         || authority.document_policy != state.schematic.document().document_policy
         || !authority

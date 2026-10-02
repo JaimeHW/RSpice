@@ -1,33 +1,13 @@
 //! Validate editor request targets and route cross-feature effects through app owners.
 
 use crate::workbench::app_state::AppState;
-use rspice_schematic_editor::requests::{EditorAction, EditorRequest, EditorRequestSource};
+use rspice_schematic_editor::requests::{EditorAction, EditorRequest};
 use rspice_schematic_editor::view::keyboard_navigation;
 use rspice_schematic_editor::view::pointer_target::{
     PointerSelectionEffect, select_pointer_target,
 };
 
-pub(super) fn editor_request_source(state: &AppState) -> EditorRequestSource {
-    let document = state.workspace.content.active_schematic_reference();
-    let document_key = document.key();
-    let sheet = state
-        .workspace
-        .content
-        .design_management
-        .sheet_catalog(&document_key)
-        .map(|catalog| (catalog.active_sheet_id(), catalog.revision()));
-    EditorRequestSource {
-        project: state.workspace.content.project.id(),
-        document,
-        occurrence: state.workspace.content.active_occurrence().cloned(),
-        design_epoch: state.design_execution_epoch,
-        document_epoch: state.active_schematic_epoch,
-        content_version: state.schematic.content_version(),
-        topology_version: state.schematic.topology_version(),
-        symbol_revision: super::symbol_context_revision(state),
-        sheet,
-    }
-}
+pub(super) use crate::workbench::app::schematic_editor_request_source as editor_request_source;
 
 pub(super) fn apply_editor_request(state: &mut AppState, request: EditorRequest) {
     if request.source != editor_request_source(state)

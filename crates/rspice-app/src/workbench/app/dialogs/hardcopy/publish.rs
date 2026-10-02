@@ -808,7 +808,6 @@ fn validate_schematic_page_authority(
     state: &crate::workbench::app_state::AppState,
     authority: &super::SchematicPageSetupAuthority,
 ) -> Result<(), String> {
-    authority.edit.validate(state, "Page Setup")?;
     let Some(governed) = &authority.governed_sheet else {
         let active_governed_sheet = state
             .workspace
@@ -817,7 +816,7 @@ fn validate_schematic_page_authority(
             .sheet_catalog(&state.workspace.content.active_key())
             .and_then(|catalog| catalog.active_sheet_id());
         return if active_governed_sheet.is_none() {
-            Ok(())
+            authority.edit.validate(state, "Page Setup")
         } else {
             Err(
                 "The active schematic acquired governed sheet authority. Close and reopen Page Setup."
@@ -844,7 +843,7 @@ fn validate_schematic_page_authority(
     {
         return Err("The governed active sheet changed. Close and reopen Page Setup.".to_owned());
     }
-    Ok(())
+    authority.edit.validate(state, "Page Setup")
 }
 
 fn authored_sheet_format(

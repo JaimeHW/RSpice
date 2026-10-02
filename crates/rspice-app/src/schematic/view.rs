@@ -3,7 +3,7 @@
 //! The main schematic canvas using egui's painter for vectorized rendering.
 //! This will be optimized for 60fps with direct GPU rendering.
 
-use std::hash::{DefaultHasher, Hash, Hasher};
+use crate::workbench::app::symbol_context_revision;
 
 use egui::{Sense, Ui, WidgetInfo, WidgetType};
 
@@ -157,30 +157,6 @@ pub(crate) fn schematic_symbol_context(state: &AppState) -> SchematicSymbolConte
         &resolver,
         symbol_context_revision(state),
     )
-}
-
-fn symbol_context_revision(state: &AppState) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    state.library_manager.revision().hash(&mut hasher);
-    state
-        .workspace
-        .content
-        .schematic_buffers
-        .len()
-        .hash(&mut hasher);
-    let mut folded_xor = 0_u64;
-    let mut folded_sum = 0_u64;
-    for (key, buffer) in &state.workspace.content.schematic_buffers {
-        let mut entry = DefaultHasher::new();
-        key.hash(&mut entry);
-        buffer.topology_version().hash(&mut entry);
-        let entry = entry.finish();
-        folded_xor ^= entry;
-        folded_sum = folded_sum.wrapping_add(entry.rotate_left(17));
-    }
-    folded_xor.hash(&mut hasher);
-    folded_sum.hash(&mut hasher);
-    hasher.finish()
 }
 
 fn refresh_symbol_context_after_interactions(
