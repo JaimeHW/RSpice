@@ -13,17 +13,6 @@ pub struct PendingPortPlacement {
     pub contract: PortContract,
     pub expected_topology_version: u64,
     pub expected_netlist_order: usize,
-    pub document_authority: Option<PortPlacementAuthority>,
-}
-
-/// Application-document authority captured when a validated port draft arms
-/// the one-shot canvas tool. Schematic-only callers can leave it absent, but
-/// the interactive placement boundary requires an exact match.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PortPlacementAuthority {
-    pub design_execution_epoch: u64,
-    pub active_schematic_epoch: u64,
-    pub view_path: String,
 }
 
 /// The names still to place and the contract they share.
@@ -142,7 +131,6 @@ impl PendingPortPlacement {
             contract,
             expected_topology_version,
             expected_netlist_order,
-            document_authority: None,
         }
     }
 
@@ -170,21 +158,6 @@ impl PendingPortPlacement {
             contract,
             expected_topology_version,
             expected_netlist_order,
-            document_authority: None,
         }
-    }
-
-    pub fn with_document_authority(
-        mut self,
-        design_execution_epoch: u64,
-        active_schematic_epoch: u64,
-        view_path: impl Into<String>,
-    ) -> Self {
-        self.document_authority = Some(PortPlacementAuthority {
-            design_execution_epoch,
-            active_schematic_epoch,
-            view_path: view_path.into(),
-        });
-        self
     }
 }
