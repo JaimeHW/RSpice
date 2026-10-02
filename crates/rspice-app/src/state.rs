@@ -200,9 +200,8 @@ pub use simulation::{SavedOutputAxis, SavedOutputBoundSource, SavedOutputSourceB
 // should have to learn what they act on.
 pub use stimulus_library::library::StimulusLibrary;
 pub use symbol::{
-    MAX_SYMBOL_PIN_NAME_BYTES, MAX_SYMBOL_TEXT_BYTES, PinFindingKind, PinSummary,
-    SYMBOL_DOCUMENT_METADATA_KEY, SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata,
-    SymbolPin, SymbolPinElectricalKind, SymbolShape, SymbolTextAlign, SymbolTextSize,
+    PinFindingKind, PinSummary, SYMBOL_DOCUMENT_METADATA_KEY, SymbolAttributeKind, SymbolDocument,
+    SymbolEditorMetadata, SymbolPin, SymbolShape,
 };
 #[cfg(test)]
 pub use symbol_resolver::ResolvedCellSymbol;

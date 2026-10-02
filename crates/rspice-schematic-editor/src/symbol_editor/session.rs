@@ -234,10 +234,8 @@ pub struct SymbolEditorSession {
     /// multi-object selection.
     pub dragging_group: Option<rspice_design_model::Point>,
     pub drag_undo_recorded: bool,
-    /// `true` once the open inspector field has pushed its undo snapshot.
-    /// Typing into a coordinate is one edit, not one per keystroke; the flag
-    /// clears when the field loses focus.
-    pub inspector_undo_recorded: bool,
+    /// Field drafts and undo grouping, scoped to the active symbol and selection.
+    pub inspector: super::inspector::SymbolInspectorSession,
     pub marquee_start: Option<rspice_design_model::Point>,
     pub marquee_current: Option<rspice_design_model::Point>,
     pub zoom: f32,
@@ -267,7 +265,7 @@ impl Default for SymbolEditorSession {
             dragging_origin: false,
             dragging_group: None,
             drag_undo_recorded: false,
-            inspector_undo_recorded: false,
+            inspector: super::inspector::SymbolInspectorSession::default(),
             marquee_start: None,
             marquee_current: None,
             zoom: 4.0,

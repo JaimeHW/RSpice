@@ -1,5 +1,6 @@
 //! Symbol canvas geometry, viewport and painting over explicit editor inputs.
 
+pub mod inspector;
 pub mod interaction;
 pub mod session;
 

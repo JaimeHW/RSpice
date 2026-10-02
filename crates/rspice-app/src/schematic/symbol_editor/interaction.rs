@@ -5,23 +5,11 @@ use crate::state::{SymbolDocument, SymbolEditorMetadata};
 use crate::workbench::AppState;
 use rspice_schematic_editor::symbol_editor::SymbolViewport;
 use rspice_schematic_editor::symbol_editor::interaction::{
-    SymbolCanvasRequest, SymbolEditCapabilities, SymbolRequestSource, bind_canvas_source,
-    canvas_request, edit_canvas,
+    SymbolCanvasRequest, SymbolEditCapabilities, bind_canvas_source, canvas_request, edit_canvas,
 };
 
-fn request_source(state: &AppState) -> SymbolRequestSource {
-    SymbolRequestSource {
-        project: state.workspace.content.project.id(),
-        document: state.workspace.content.active_view.clone(),
-        occurrence: state.workspace.content.active_occurrence().cloned(),
-        design_epoch: state.design_execution_epoch,
-        document_epoch: state.active_schematic_epoch,
-        library_revision: state.library_manager.revision(),
-    }
-}
-
 pub(super) fn bind_active_canvas(state: &mut AppState) {
-    let source = request_source(state);
+    let source = state.symbol_editor_request_source();
     bind_canvas_source(&mut state.ui.symbol.editor, source);
 }
 
@@ -51,7 +39,7 @@ fn apply_canvas_request(
     metadata: &mut SymbolEditorMetadata,
     request: SymbolCanvasRequest,
 ) {
-    if request.source != request_source(state)
+    if request.source != state.symbol_editor_request_source()
         || state.ui.symbol.editor.canvas_source.as_ref() != Some(&request.source)
         || request.tool != state.ui.symbol.editor.tool
         || request.selection != state.ui.symbol.editor.effective_selection()
@@ -81,7 +69,7 @@ fn apply_canvas_request(
             state.push_user_message(ConsoleMessage::warning(error));
         } else {
             // Advancing our own revision keeps every event of this drag on one undo entry.
-            state.ui.symbol.editor.canvas_source = Some(request_source(state));
+            state.ui.symbol.editor.canvas_source = Some(state.symbol_editor_request_source());
         }
     }
 }

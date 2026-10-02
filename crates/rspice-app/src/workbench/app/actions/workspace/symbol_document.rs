@@ -11,6 +11,7 @@
 #[cfg(test)]
 mod tests;
 
+use rspice_schematic_editor::symbol_editor::interaction::SymbolRequestSource;
 use std::collections::BTreeMap;
 
 use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
@@ -31,6 +32,17 @@ use rspice_design::symbol::edit::{
 use super::{MAX_FINDING_ROWS, log_severity_from_drc, parse_encoded_ports};
 
 impl AppState {
+    pub(crate) fn symbol_editor_request_source(&self) -> SymbolRequestSource {
+        SymbolRequestSource {
+            project: self.workspace.content.project.id(),
+            document: self.workspace.content.active_view.clone(),
+            occurrence: self.workspace.content.active_occurrence().cloned(),
+            design_epoch: self.design_execution_epoch,
+            document_epoch: self.active_schematic_epoch,
+            library_revision: self.library_manager.revision(),
+        }
+    }
+
     pub(crate) fn active_symbol_ports(&self) -> Vec<PortSpec> {
         let reference = &self.workspace.content.active_view;
         let schematic_ref = CellViewRef::new(&reference.library, &reference.cell, "schematic");

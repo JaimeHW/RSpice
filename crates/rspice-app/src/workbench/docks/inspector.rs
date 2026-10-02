@@ -253,7 +253,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     if app.state.workspace.content.active_view_type()
                         == crate::state::ViewType::Symbol =>
                 {
-                    symbol::show(ui, app);
+                    symbol::show(ui, &mut app.state);
                 }
                 Workspace::Design => design::show(ui, app),
                 Workspace::Simulate => simulation::simulate(ui, app),

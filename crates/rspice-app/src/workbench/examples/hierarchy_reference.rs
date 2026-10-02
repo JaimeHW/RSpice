@@ -34,9 +34,10 @@ use crate::state::{
     PortDiscipline, PortSpec, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
     SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicState, SheetDefinition,
     SheetId, SheetPortPolicy, SheetTemplate, SymbolDocument, SymbolEditorMetadata, SymbolShape,
-    SymbolTextAlign, SymbolTextSize, UnresolvedBindingPolicy, View, ViewType,
+    UnresolvedBindingPolicy, View, ViewType,
 };
 use crate::workbench::app_state::AppState;
+use rspice_design::symbol::{SymbolTextAlign, SymbolTextSize};
 
 /// The project library the bootstrapped workspace already owns.
 pub(crate) const USER_LIBRARY: &str = "user";

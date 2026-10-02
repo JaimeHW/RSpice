@@ -48,7 +48,7 @@ fn viewport() -> SymbolViewport {
 
 fn request(state: &AppState, input: SymbolCanvasInput) -> SymbolCanvasRequest {
     SymbolCanvasRequest {
-        source: request_source(state),
+        source: state.symbol_editor_request_source(),
         tool: state.ui.symbol.editor.tool,
         selection: state.ui.symbol.editor.effective_selection(),
         viewport: viewport(),
