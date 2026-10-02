@@ -1,5 +1,6 @@
 //! Schematic presentation over canonical design data and explicit view settings.
 
+pub mod annotations;
 pub mod bus_geometry;
 mod component_palette;
 pub mod export;
