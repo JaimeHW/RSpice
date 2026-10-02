@@ -8,9 +8,8 @@ use crate::state::{
 pub(crate) use rspice_results::population::Whiskers;
 use rspice_results::population::{self as projection, PopulationData, PopulationRequirements};
 pub(super) use rspice_results::population::{
-    BoxStatistics, ColumnKind, PopulationColumn, PopulationLimit, TrialStatus, UNPAIRED_REASON,
-    box_statistics, cpk, is_a_population, kernel_density, least_squares, mean, pearson,
-    silverman_bandwidth, sorted, std_dev, wilson_interval,
+    BoxStatistics, ColumnKind, PopulationColumn, PopulationLimit, TrialStatus, box_statistics, cpk,
+    is_a_population, kernel_density, silverman_bandwidth, sorted, std_dev, wilson_interval,
 };
 use std::ops::Deref;
 use std::sync::Arc;
@@ -146,22 +145,6 @@ fn build(
         }),
         data,
     })
-}
-
-#[cfg(test)]
-pub(super) fn test_limit(min: Option<f64>, max: Option<f64>) -> PopulationLimit {
-    PopulationLimit::from_spec(
-        &PreparedSpecification::new(SpecEntry {
-            measurement: "test".into(),
-            expression: String::new(),
-            min,
-            max,
-            unit: String::new(),
-            scope: SpecPointScope::AllPoints,
-        })
-        .unwrap(),
-    )
-    .unwrap()
 }
 
 #[cfg(test)]

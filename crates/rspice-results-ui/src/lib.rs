@@ -15,6 +15,7 @@ pub mod nyquist;
 pub mod optimization;
 pub mod polar;
 pub mod presentation;
+pub mod scatter;
 pub mod smith_chart;
 pub mod strip;
 pub mod transfer_function;

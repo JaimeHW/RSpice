@@ -2109,7 +2109,7 @@ pub struct ResultsState {
     pub(crate) study: sensitivity::SensitivitySheetState,
     network_matrix: network_matrix::NetworkMatrixState,
     /// Scatter sheet controls and the brushed trial selection.
-    pub(crate) scatter: scatter::ScatterSheetState,
+    pub(crate) scatter: rspice_results_ui::scatter::ScatterSheetState,
     /// Box/violin sheet controls: the grouping, the margin scale, the body
     /// and the whisker rule.
     pub(crate) box_violin: box_violin::BoxViolinSheetState,
