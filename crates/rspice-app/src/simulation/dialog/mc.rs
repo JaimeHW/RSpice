@@ -213,7 +213,7 @@ mod tests {
 mod confidence_tests {
     use super::*;
     use crate::simulation::plan::AnalysisDraft;
-    use crate::state::MonteCarloMeanMethod;
+    use rspice_results::monte_carlo::MonteCarloMeanMethod;
 
     #[test]
     fn monte_carlo_confidence_draft_round_trips_and_migrates() {

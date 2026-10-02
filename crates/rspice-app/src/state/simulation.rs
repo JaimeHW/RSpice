@@ -153,9 +153,6 @@ pub use rspice_simulation::execution::SimulationRunIntent;
 pub use state_model::SimulationState;
 pub use waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, WaveformData};
 
-pub use rspice_results::monte_carlo::MonteCarloMeanInterval;
-#[cfg(test)]
-pub use rspice_results::monte_carlo::{MonteCarloMeanConfidence, MonteCarloMeanMethod};
 pub use rspice_results::monte_carlo_checkpoint::{
     MonteCarloCheckpointEvidence, MonteCarloCheckpointLibrary,
 };

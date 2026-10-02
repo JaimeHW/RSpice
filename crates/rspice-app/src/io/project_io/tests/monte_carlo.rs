@@ -227,12 +227,12 @@ fn project_file_round_trips_exact_result_family_metadata_and_migrates_v6_absence
         failures: 1,
         all_converged: false,
         variables: vec![crate::state::MonteCarloVariableMetadata {
-            mean_confidence: Some(crate::state::MonteCarloMeanConfidence {
+            mean_confidence: Some(rspice_results::monte_carlo::MonteCarloMeanConfidence {
                 level_pct: 95.0,
-                method: crate::state::MonteCarloMeanMethod::StudentT,
+                method: rspice_results::monte_carlo::MonteCarloMeanMethod::StudentT,
                 successful_samples: 2,
                 conditional_on_successful_trials: true,
-                interval: crate::state::MonteCarloMeanInterval::Available {
+                interval: rspice_results::monte_carlo::MonteCarloMeanInterval::Available {
                     lower: 0.9,
                     upper: 1.1,
                 },

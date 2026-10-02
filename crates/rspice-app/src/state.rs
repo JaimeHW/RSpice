@@ -227,10 +227,7 @@ pub use workspace::{
     UNGROUPED_NAME, group_namer, validate_owned_netlist_artifact_path,
 };
 
-pub use simulation::MonteCarloMeanInterval;
 pub use simulation::{MonteCarloCheckpointEvidence, MonteCarloCheckpointLibrary};
-#[cfg(test)]
-pub use simulation::{MonteCarloMeanConfidence, MonteCarloMeanMethod};
 #[cfg(test)]
 pub use workspace::SavedOutputDisplayIntent;
 

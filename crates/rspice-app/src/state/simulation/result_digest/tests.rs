@@ -1400,7 +1400,9 @@ fn every_sensitivity_study_field_moves_the_result_digest() {
 
 #[test]
 fn monte_carlo_mean_confidence_is_authenticated_without_changing_absent_evidence() {
-    use crate::state::{MonteCarloMeanConfidence, MonteCarloMeanInterval, MonteCarloMeanMethod};
+    use rspice_results::monte_carlo::{
+        MonteCarloMeanConfidence, MonteCarloMeanInterval, MonteCarloMeanMethod,
+    };
     let mut result = analysis(AnalysisType::MonteCarlo).with_family_metadata(
         AnalysisResultFamilyMetadata::MonteCarlo {
             seed: 9,

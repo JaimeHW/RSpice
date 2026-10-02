@@ -2,6 +2,9 @@
 //!
 //! Core data types for histogram construction and analysis.
 
+mod moments;
+pub use moments::SampleMoments;
+
 mod distribution;
 pub use distribution::{EmpiricalCdf, HistogramDisplayMode, HistogramDistribution};
 

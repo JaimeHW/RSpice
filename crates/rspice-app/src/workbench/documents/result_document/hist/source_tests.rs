@@ -404,15 +404,15 @@ fn histogram_shows_retained_mean_confidence_without_inventing_legacy_limits() {
     let mut variable = super::tests::mc_variable("gain");
     let mut legacy = state_with(variable.clone());
     assert!(!paint(&mut legacy, true).contains("CONFIDENCE IN MEAN"));
-    variable.mean_confidence = Some(crate::state::MonteCarloMeanConfidence {
+    variable.mean_confidence = Some(rspice_results::monte_carlo::MonteCarloMeanConfidence {
         level_pct: 90.0,
-        method: crate::state::MonteCarloMeanMethod::PercentileBootstrap {
+        method: rspice_results::monte_carlo::MonteCarloMeanMethod::PercentileBootstrap {
             resamples: 2000,
             seed: 7,
         },
         successful_samples: variable.samples.len(),
         conditional_on_successful_trials: false,
-        interval: crate::state::MonteCarloMeanInterval::Available {
+        interval: rspice_results::monte_carlo::MonteCarloMeanInterval::Available {
             lower: 0.9,
             upper: 1.1,
         },

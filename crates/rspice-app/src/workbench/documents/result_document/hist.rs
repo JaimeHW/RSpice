@@ -12,18 +12,16 @@ use crate::source_revision::SourceRevision;
 use crate::state::{
     AnalysisResultFamilyMetadata, AnalysisType, MonteCarloVariableMetadata, SimulationState,
 };
-use crate::ui::plot::{self, Axis, PlotSpec, XScale, fmt_si};
-use crate::ui::tokens::Tokens;
-use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
-use rspice_results::histogram::Histogram;
+use rspice_results::histogram::{Histogram, SampleMoments};
 use rspice_results::histogram::{HistogramBuilder, HistogramDisplayMode};
 use rspice_results::yield_analysis::{SpecLimitType, YieldResult};
-use rspice_results_ui::histogram::display::{HistogramDisplay, hist_axis};
+use rspice_results_ui::histogram::display::HistogramDisplay;
+use rspice_results_ui::histogram::view::{
+    self, HistogramInspector, HistogramPlot, HistogramUnavailable, MonteCarloMethod,
+};
 
 use super::frame_work::{self, DatasetWalk};
-use rspice_results_ui::presentation::well_hint;
-use rspice_results_ui::strip::{self, LegendChip};
 
 /// Return the one yield result authorized by both the active immutable
 /// dataset and the selected Monte-Carlo measurement. Yield results are stored
@@ -79,15 +77,6 @@ fn yield_target_measurement(target: &str) -> &str {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct ExactMoments {
-    count: usize,
-    mean: f64,
-    std_dev: f64,
-    min: f64,
-    max: f64,
-}
-
 fn nearly_equal(left: f64, right: f64) -> bool {
     if left == right {
         return left.is_finite();
@@ -96,60 +85,13 @@ fn nearly_equal(left: f64, right: f64) -> bool {
     (left / scale - right / scale).abs() <= 128.0 * f64::EPSILON
 }
 
-fn compensated_sum(values: impl Iterator<Item = f64>) -> f64 {
-    let (mut sum, mut correction) = (0.0_f64, 0.0_f64);
-    for value in values {
-        let next = sum + value;
-        correction += if sum.abs() >= value.abs() {
-            (sum - next) + value
-        } else {
-            (value - next) + sum
-        };
-        sum = next;
-    }
-    sum + correction
-}
-
-fn moments_from_samples(samples: &[f64]) -> Option<ExactMoments> {
+fn moments_from_samples(samples: &[f64]) -> Option<SampleMoments> {
     frame_work::note(DatasetWalk::HistMoments);
-    if samples.is_empty() || samples.iter().any(|value| !value.is_finite()) {
-        return None;
-    }
-
-    let count = samples.len();
-    let min = samples.iter().copied().fold(f64::INFINITY, f64::min);
-    let max = samples.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    // Center only tightly clustered values of one sign; otherwise scaling
-    // about zero preserves small residuals in populations that span zero.
-    let anchor = if (min > 0.0 && min >= max * 0.5) || (max < 0.0 && max <= min * 0.5) {
-        samples[0]
-    } else {
-        0.0
-    };
-    let scale = (min - anchor).abs().max((max - anchor).abs());
-    let (mean, std_dev) = if scale == 0.0 {
-        (anchor, 0.0)
-    } else {
-        let normalized_mean =
-            compensated_sum(samples.iter().map(|value| (value - anchor) / scale)) / count as f64;
-        let variance = compensated_sum(
-            samples
-                .iter()
-                .map(|value| ((value - anchor) / scale - normalized_mean).powi(2)),
-        ) / count.saturating_sub(1).max(1) as f64;
-        (anchor + normalized_mean * scale, variance.sqrt() * scale)
-    };
-    (mean.is_finite() && std_dev.is_finite()).then_some(ExactMoments {
-        count,
-        mean,
-        std_dev,
-        min,
-        max,
-    })
+    SampleMoments::from_samples(samples)
 }
 
 fn moments_match(
-    moments: ExactMoments,
+    moments: SampleMoments,
     count: usize,
     mean: f64,
     std_dev: f64,
@@ -273,7 +215,7 @@ fn active_monte_carlo_authority<'a>(
     })
 }
 
-fn exact_moments(state: &AppState, histogram_name: &str) -> Option<ExactMoments> {
+fn exact_moments(state: &AppState, histogram_name: &str) -> Option<SampleMoments> {
     if state
         .simulation
         .active_analysis()
@@ -322,7 +264,7 @@ pub(super) struct HistPlan {
     mode: HistogramDisplayMode,
     display: Result<Arc<HistogramDisplay>, &'static str>,
     display_source: SourceRevision,
-    moments: Option<ExactMoments>,
+    moments: Option<SampleMoments>,
     yield_is_consistent: bool,
 }
 
@@ -490,44 +432,6 @@ pub(super) fn active_histogram_display(state: &AppState) -> Option<Arc<Histogram
         .map(Arc::clone)
 }
 
-/// The share of the frame the single bar of a degenerate distribution covers.
-const DEGENERATE_BAR_FRACTION: f32 = 0.18;
-
-/// The yield figure, with the population it was measured over.
-///
-/// A percentage alone reads as a property of the run, and it is not: the
-/// denominator is the trials the yield engine had evidence for, and a Monte
-/// Carlo that requested a hundred and completed ninety reports a yield over
-/// ninety. Both halves are stated here rather than left for the reader to
-/// reconstruct from the "Failures" row and the method panel — the count that
-/// makes the percentage mean something belongs beside it.
-fn yield_label(result: &YieldResult, authority: Option<MonteCarloAuthority<'_>>) -> String {
-    let mut label = format!(
-        "{:.1} % · {} of {} evaluated",
-        result.yield_percent, result.pass_count, result.total_runs
-    );
-    if let Some(authority) = authority
-        && authority.failures > 0
-    {
-        label.push_str(&format!(" · {} diverged excluded", authority.failures));
-    }
-    label
-}
-
-/// What the method panel says about display binning.
-///
-/// A collapsed distribution states that it is one: "1 retained bins" reads as
-/// a count that happens to be small, when what the reader needs to know is
-/// that the bin has no width because the measurement never moved.
-fn binning_label(histogram: &rspice_results::histogram::Histogram) -> String {
-    if hist_axis(histogram).degenerate_at.is_some() {
-        return "1 display bin · zero width, every sample at one value".to_owned();
-    }
-    let count = histogram.bins.len();
-    let plural = if count == 1 { "" } else { "s" };
-    format!("{count} display bin{plural} · rebuilt from exact samples")
-}
-
 /// The distribution the reader has selected, by name.
 fn selected_histogram_name(state: &AppState) -> Option<String> {
     let names = histogram_names(state);
@@ -539,537 +443,106 @@ fn selected_histogram_name(state: &AppState) -> Option<String> {
     Some(names[index].to_owned())
 }
 
-// ---------------------------------------------------------------------------
-// center view
-// ---------------------------------------------------------------------------
-
-/// Render the histogram.
+/// Render controls, resolve the current population, and apply local plot outcomes.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-
     let names: Vec<String> = histogram_names(state)
         .into_iter()
         .map(str::to_owned)
         .collect();
-    if !names.is_empty() {
-        let settings = &mut state.analysis.histogram_state;
-        if settings.selected.is_none() {
-            settings.selected = names.first().cloned();
-        }
-        let selected_text = settings.selected.as_deref().unwrap_or_default().to_owned();
-        let changed = ui
-            .horizontal_wrapped(|ui| {
-                let mut changed = false;
-                ui.label("Measure");
-                egui::ComboBox::from_id_salt("hist_measurement")
-                    .selected_text(&selected_text)
-                    .show_ui(ui, |ui| {
-                        for name in &names {
-                            changed |= ui
-                                .selectable_value(&mut settings.selected, Some(name.clone()), name)
-                                .changed();
-                        }
-                    });
-                ui.label("Display");
-                egui::ComboBox::from_id_salt("hist_mode")
-                    .selected_text(settings.mode.label())
-                    .show_ui(ui, |ui| {
-                        for mode in HistogramDisplayMode::ALL {
-                            changed |= ui
-                                .selectable_value(&mut settings.mode, mode, mode.label())
-                                .changed();
-                        }
-                    });
-                ui.label("Bins");
-                changed |= ui
-                    .add_enabled(
-                        settings.mode != HistogramDisplayMode::Cdf,
-                        egui::DragValue::new(&mut settings.bin_count).range(1..=1000),
-                    )
-                    .changed();
-                changed
-            })
-            .inner;
-        if changed {
+    if view::controls(ui, &mut state.analysis.histogram_state, &names) {
+        state
+            .ui
+            .results
+            .reset_plot_view(super::ResultViewer::Hist, 0);
+    }
+    let plan = selected_histogram_name(state).map(|name| hist_plan(state, &name));
+    let model = match &plan {
+        None => Err(HistogramUnavailable::NoSelection {
+            has_measurements: !names.is_empty(),
+        }),
+        Some(plan) => plan
+            .histogram
+            .as_deref()
+            .ok_or(HistogramUnavailable::Invalid)
+            .map(|histogram| HistogramPlot {
+                histogram,
+                display: plan
+                    .display
+                    .as_ref()
+                    .map(Arc::as_ref)
+                    .map_err(|reason| *reason),
+                moments: plan.moments,
+                spec_limits: selected_yield_result(
+                    &state.simulation,
+                    &histogram.name,
+                    plan.yield_is_consistent,
+                )
+                .map(|result| (result.spec.min, result.spec.max)),
+                source: &plan.display_source,
+            }),
+    };
+    let plot_view = state.ui.results.plot_view(super::ResultViewer::Hist, 0);
+    let out = view::show(ui, model, plot_view, &mut state.ui.results.cache);
+    if out.fit_requested {
+        state
+            .ui
+            .results
+            .reset_plot_view(super::ResultViewer::Hist, 0);
+    }
+    if let Some(response) = out.plot {
+        super::record_drawn_axes(&mut state.ui.results, super::ResultViewer::Hist, &response);
+        if response.view.any() {
             state
                 .ui
                 .results
-                .reset_plot_view(super::ResultViewer::Hist, 0);
+                .plot_view_mut(super::ResultViewer::Hist, 0)
+                .apply(&response.view);
         }
-    }
-    let Some(name) = selected_histogram_name(state) else {
-        well_hint(
-            ui,
-            if names.is_empty() {
-                "No distribution yet — run a Monte Carlo analysis"
-            } else {
-                "The selected measurement is unavailable. Choose a measurement above."
-            },
-        );
-        return;
-    };
-    // Resolved before the distribution is borrowed, so the population is
-    // walked once per dataset generation rather than once per frame.
-    let plan = hist_plan(state, &name);
-    let Some(histogram) = plan.histogram.as_deref() else {
-        well_hint(
-            ui,
-            "The selected samples, retained statistics, or display range are invalid or unavailable",
-        );
-        return;
-    };
-    if histogram.bins.is_empty() || histogram.total_count == 0 {
-        well_hint(ui, "The selected distribution is empty");
-        return;
-    }
-    let display = match &plan.display {
-        Ok(display) => display.as_ref(),
-        Err(reason) => {
-            well_hint(ui, reason);
-            return;
-        }
-    };
-    let mode = display.mode;
-    let moments = plan.moments;
-    let spec_limits =
-        selected_yield_result(&state.simulation, &histogram.name, plan.yield_is_consistent)
-            .map(|result| (result.spec.min, result.spec.max));
-
-    let subtitle = format!("{} · {} samples", histogram.name, histogram.total_count);
-    let mut legend = vec![LegendChip {
-        name: mode.label(),
-        color: c.accent,
-        on: true,
-    }];
-    if moments.is_some() {
-        legend.push(LegendChip {
-            name: "descriptive ±1σ",
-            color: c.text_dim,
-            on: true,
-        });
-    }
-    if spec_limits.is_some() {
-        legend.push(LegendChip {
-            name: "retained spec limit",
-            color: c.err,
-            on: true,
-        });
-    }
-    let view = state.ui.results.plot_view(super::ResultViewer::Hist, 0);
-    let header = strip::StripHeader::new("MC", &subtitle, &legend)
-        .zoomed(view.is_zoomed())
-        .show(ui);
-    if header.fit_clicked {
-        state
-            .ui
-            .results
-            .reset_plot_view(super::ResultViewer::Hist, 0);
-    }
-
-    let axis = hist_axis(histogram);
-    let (x0, x1) = view.x.unwrap_or((axis.x0, axis.x1));
-    if !(x1 - x0).is_finite() || x1 <= x0 {
-        well_hint(
-            ui,
-            "The sample range exceeds the linear display range. Set a narrower range in the Distribution panel.",
-        );
-        return;
-    }
-    let y1 = display.y_max();
-    let (y0, y1) = view.y.unwrap_or((0.0, y1));
-
-    let mut spec = PlotSpec::new(
-        Axis::linear(x0, x1, ""),
-        XScale::Linear,
-        Axis::linear_with(y0, y1, mode.unit(), 5),
-    )
-    .accessible_name("Statistical histogram");
-    spec.left_margin = 48.0;
-
-    // Descriptive ±1σ band and mean marker from exact retained sample
-    // moments. This is deliberately not called a distribution fit: no fit
-    // family or goodness-of-fit evidence is retained by the result schema.
-    if let Some(moments) = moments {
-        if moments.std_dev > 0.0 {
-            let band_start = (moments.mean - moments.std_dev).max(x0);
-            let band_end = (moments.mean + moments.std_dev).min(x1);
-            if band_start < band_end {
-                spec.bands.push(plot::Band {
-                    x0: band_start,
-                    x1: band_end,
-                });
-            }
-        }
-        spec.markers.push(plot::Marker {
-            x: moments.mean,
-            y: y1 * 0.86,
-            color: c.accent,
-            label: format!("µ {}", fmt_si(moments.mean, "", 2)),
-            drop_line: true,
-            label_dy: 0.0,
-            shape: plot::MarkerShape::Point,
-        });
-    }
-
-    // Spec limits from the yield manager, when present.
-    if let Some((lsl, usl)) = spec_limits {
-        if let Some(lsl) = lsl
-            && lsl > x0
-            && lsl < x1
-        {
-            spec.markers.push(plot::Marker {
-                x: lsl,
-                y: y1 * 0.72,
-                color: c.err,
-                label: format!("LSL {}", fmt_si(lsl, "", 2)),
-                drop_line: true,
-                label_dy: 0.0,
-                shape: plot::MarkerShape::Point,
-            });
-        }
-        if let Some(usl) = usl
-            && usl > x0
-            && usl < x1
-        {
-            spec.markers.push(plot::Marker {
-                x: usl,
-                y: y1 * 0.72,
-                color: c.err,
-                label: format!("USL {}", fmt_si(usl, "", 2)),
-                drop_line: true,
-                label_dy: 0.0,
-                shape: plot::MarkerShape::Point,
-            });
-        }
-    }
-
-    // A distribution with no width has nothing for the ±1σ band or the bin
-    // rectangles to say, so it names the value it collapsed onto instead.
-    if let Some(value) = axis.degenerate_at {
-        spec.markers.push(plot::Marker {
-            x: value,
-            y: y1 * 0.55,
-            color: c.accent,
-            label: format!(
-                "all {} samples at {}",
-                histogram.total_count,
-                fmt_si(value, "", 3)
-            ),
-            drop_line: false,
-            label_dy: 0.0,
-            shape: plot::MarkerShape::Point,
-        });
-    }
-
-    // Bars under everything else, with the out-of-spec regions washed in
-    // the error tint — the fail zone itself, not the data envelope.
-    let bins = &histogram.bins;
-    let degenerate_at = axis.degenerate_at;
-    let ordinates = &display.ordinates;
-    let accent = c.accent;
-    let accent_dim = c.accent_dim;
-    let err = c.err;
-    state.ui.results.cache.ensure_source(&plan.display_source);
-    if let Some(cdf) = &display.cdf {
-        spec.traces
-            .push(plot::Trace::new(&cdf.x, &cdf.y, accent).cache_key(0x4849_5354_4344_4600));
-    }
-    spec.underlay = Some(Box::new(move |painter, mapper| {
-        if let Some((lsl, usl)) = spec_limits {
-            let wash = err.gamma_multiply(0.09);
-            if let Some(lsl) = lsl
-                && lsl > x0
-            {
-                let rect = egui::Rect::from_min_max(
-                    egui::pos2(mapper.rect.left(), mapper.rect.top()),
-                    egui::pos2(mapper.x(lsl.min(x1)), mapper.rect.bottom()),
-                );
-                painter.rect_filled(rect, 0.0, wash);
-            }
-            if let Some(usl) = usl
-                && usl < x1
-            {
-                let rect = egui::Rect::from_min_max(
-                    egui::pos2(mapper.x(usl.max(x0)), mapper.rect.top()),
-                    egui::pos2(mapper.rect.right(), mapper.rect.bottom()),
-                );
-                painter.rect_filled(rect, 0.0, wash);
-            }
-        }
-        if let Some(cdf) = &display.cdf {
-            let first = cdf.x[0];
-            let last = *cdf.x.last().unwrap();
-            for (left, right, value) in [(x0, first.min(x1), 0.0), (last.max(x0), x1, 1.0)] {
-                if left < right {
-                    painter.line_segment(
-                        [
-                            egui::pos2(mapper.x(left), mapper.y(value)),
-                            egui::pos2(mapper.x(right), mapper.y(value)),
-                        ],
-                        egui::Stroke::new(1.8, accent),
-                    );
-                }
-            }
-            return;
-        }
-        // One bar for a distribution whose bin edges coincide: the retained
-        // rectangle has no width, so the frame supplies one.
-        if let Some(value) = degenerate_at {
-            if let Some(&ordinate) = ordinates.first().filter(|value| **value > 0.0) {
-                let half = mapper.rect.width() * DEGENERATE_BAR_FRACTION * 0.5;
-                let centre = mapper.x(value);
-                let rect = egui::Rect::from_min_max(
-                    egui::pos2(centre - half, mapper.y(ordinate)),
-                    egui::pos2(centre + half, mapper.y(0.0)),
-                );
-                painter.rect(
-                    rect,
-                    0.0,
-                    accent_dim,
-                    egui::Stroke::new(1.0, accent),
-                    egui::StrokeKind::Inside,
-                );
-            }
-            return;
-        }
-        for (bin, &ordinate) in bins.iter().zip(ordinates) {
-            if ordinate == 0.0 {
-                continue;
-            }
-            let left = mapper.x(bin.lower) + 1.0;
-            let right = (mapper.x(bin.upper) - 1.0).max(left + 1.0);
-            let top = mapper.y(ordinate);
-            let bottom = mapper.y(0.0);
-            let rect = egui::Rect::from_min_max(egui::pos2(left, top), egui::pos2(right, bottom));
-            painter.rect(
-                rect,
-                0.0,
-                accent_dim,
-                egui::Stroke::new(1.0, accent),
-                egui::StrokeKind::Inside,
-            );
-        }
-    }));
-
-    let readout = |x: f64| -> Vec<(String, String)> {
-        let value = display.value_at(histogram, x);
-        vec![
-            ("x".to_owned(), fmt_si(x, "", 3)),
-            (
-                mode.label().to_owned(),
-                if mode == HistogramDisplayMode::Count {
-                    format!("{value:.0}")
-                } else {
-                    fmt_si(value, mode.unit(), 4)
-                },
-            ),
-        ]
-    };
-
-    let response = plot::show(ui, &spec, &mut state.ui.results.cache, None, Some(&readout));
-    super::record_drawn_axes(&mut state.ui.results, super::ResultViewer::Hist, &response);
-    if response.view.any() {
-        state
-            .ui
-            .results
-            .plot_view_mut(super::ResultViewer::Hist, 0)
-            .apply(&response.view);
     }
 }
 
-// ---------------------------------------------------------------------------
-// right panel
-// ---------------------------------------------------------------------------
-
-/// Distribution stats + spec/yield verdict.
+/// Resolve source authority around range controls and render the qualified facts.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let Some(name) = selected_histogram_name(state) else {
-        section_header(ui, "Distribution", None);
-        rspice_results_ui::presentation::panel_note(
+        view::right_panel(
             ui,
-            "Stats appear once a Monte Carlo run is loaded.",
+            Err(HistogramUnavailable::NoSelection {
+                has_measurements: false,
+            }),
         );
         return;
     };
-    section_header(ui, "Display range", None);
     let current_range = active_histogram(state).map(|histogram| histogram.range());
-    let settings = &mut state.analysis.histogram_state;
-    let mut range_changed = ui
-        .checkbox(&mut settings.custom_range, "Custom range")
-        .changed();
-    if range_changed
-        && settings.custom_range
-        && let Some((min, max)) = current_range
-        && min < max
-    {
-        settings.custom_min = min;
-        settings.custom_max = max;
-    }
-    if settings.custom_range {
-        range_changed |= ui
-            .horizontal_wrapped(|ui| {
-                ui.label("Min");
-                let min_changed = ui
-                    .add(egui::DragValue::new(&mut settings.custom_min))
-                    .changed();
-                ui.label("Max");
-                ui.add(egui::DragValue::new(&mut settings.custom_max))
-                    .changed()
-                    || min_changed
-            })
-            .inner;
-    }
-    if range_changed {
+    if view::range_controls(ui, &mut state.analysis.histogram_state, current_range) {
         state
             .ui
             .results
             .reset_plot_view(super::ResultViewer::Hist, 0);
     }
     let plan = hist_plan(state, &name);
-    let Some(histogram) = plan.histogram.as_deref() else {
-        section_header(ui, "Distribution", None);
-        rspice_results_ui::presentation::panel_note(
-            ui,
-            "The selected samples, retained statistics, or display range are invalid or unavailable.",
-        );
-        return;
-    };
-
-    section_header(ui, "Distribution", None);
-    if let Some(moments) = plan.moments {
-        let rows = [
-            ("Measure", histogram.name.clone(), false),
-            ("Exact samples", moments.count.to_string(), false),
-            ("Mean", fmt_si(moments.mean, "", 3), true),
-            ("Std dev", fmt_si(moments.std_dev, "", 3), true),
-            ("Min", fmt_si(moments.min, "", 3), false),
-            ("Max", fmt_si(moments.max, "", 3), false),
-            ("Below range", histogram.underflow.to_string(), false),
-            ("Above range", histogram.overflow.to_string(), false),
-        ];
-        rspice_results_ui::presentation::stat_table(ui, &rows);
-    } else {
-        rspice_results_ui::presentation::stat_table(
-            ui,
-            &[
-                ("Measure", histogram.name.clone(), false),
-                (
-                    "Exact moments",
-                    "Unavailable — retained summary disagrees with samples or moments exceed the finite range".to_owned(),
-                    false,
-                ),
-            ],
-        );
-    }
-
-    let mc = active_monte_carlo_authority(state, &histogram.name);
-    let mean_confidence = mc.and_then(|authority| authority.variable.mean_confidence);
-    if let Some(confidence) = mean_confidence {
-        section_header(ui, "Confidence in mean", None);
-        let limits = match confidence.interval {
-            crate::state::MonteCarloMeanInterval::Available { lower, upper } => {
-                format!("{} to {}", fmt_si(lower, "", 4), fmt_si(upper, "", 4))
-            }
-            crate::state::MonteCarloMeanInterval::InsufficientSamples => {
-                "Unavailable — fewer than two successful trials".into()
-            }
-            crate::state::MonteCarloMeanInterval::Unrepresentable => {
-                "Unavailable — limits exceed the finite range".into()
-            }
-        };
-        rspice_results_ui::presentation::stat_table(
-            ui,
-            &[
-                ("Level", format!("{}%", confidence.level_pct), false),
-                ("Mean interval", limits, true),
-            ],
-        );
-        rspice_results_ui::presentation::panel_note(
-            ui,
-            if confidence.conditional_on_successful_trials {
-                "Describes successful trials only; failed trials censor the original population. This is not a yield interval."
-            } else {
-                "Uncertainty in the population mean for independent trials. Student t is exact for normal observations; bootstrap coverage depends on sample size and resampling."
-            },
-        );
-    }
-
-    section_header(ui, "Method authority", None);
-    let seed = mc.map_or_else(
-        || "Unavailable — not retained".to_owned(),
-        |authority| format!("{} · 0x{:X}", authority.seed, authority.seed),
-    );
-    let completion = mc.map_or_else(
-        || "Unavailable — not retained".to_owned(),
-        |authority| {
-            format!(
-                "{} / {} · {} failed",
-                authority.runs_completed, authority.runs_requested, authority.failures
-            )
-        },
-    );
-    let binning = binning_label(histogram);
-    rspice_results_ui::presentation::stat_table(
-        ui,
-        &[
-            ("Run completion", completion, false),
-            ("Seed", seed, false),
-            (
-                if mean_confidence.is_some() {
-                    "Mean estimator"
-                } else {
-                    "Estimator"
-                },
-                mean_confidence.map_or_else(
-                    || "Unavailable — method not retained".to_owned(),
-                    |confidence| confidence.estimator_label(),
-                ),
-                false,
+    let model = plan
+        .histogram
+        .as_deref()
+        .ok_or(HistogramUnavailable::Invalid)
+        .map(|histogram| HistogramInspector {
+            histogram,
+            moments: plan.moments,
+            method: active_monte_carlo_authority(state, &histogram.name).map(|authority| {
+                MonteCarloMethod {
+                    seed: authority.seed,
+                    runs_requested: authority.runs_requested,
+                    runs_completed: authority.runs_completed,
+                    failures: authority.failures,
+                    mean_confidence: authority.variable.mean_confidence,
+                }
+            }),
+            yield_result: selected_yield_result(
+                &state.simulation,
+                &histogram.name,
+                plan.yield_is_consistent,
             ),
-            (
-                "Distribution fit",
-                "Unavailable — no fit evidence retained".to_owned(),
-                false,
-            ),
-            ("Binning", binning, false),
-        ],
-    );
-
-    if let Some(yield_result) =
-        selected_yield_result(&state.simulation, &histogram.name, plan.yield_is_consistent)
-    {
-        section_header(ui, "Spec", None);
-        let cpk = yield_result
-            .stats
-            .cpk
-            .map_or("—".to_owned(), |v| format!("{v:.2}"));
-        let rows = [
-            ("Yield", yield_label(yield_result, mc), true),
-            ("Cpk", cpk, false),
-            (
-                "Failures",
-                format!("{} / {}", yield_result.fail_count, yield_result.total_runs),
-                false,
-            ),
-            (
-                "Confidence interval",
-                "Unavailable — not retained".to_owned(),
-                false,
-            ),
-        ];
-        rspice_results_ui::presentation::stat_table(ui, &rows);
-    } else {
-        section_header(ui, "Spec", None);
-        rspice_results_ui::presentation::panel_note(
-            ui,
-            "No unambiguous specification or yield evidence is retained for this measurement.",
-        );
-    }
-    rspice_results_ui::presentation::panel_note(
-        ui,
-        "The shaded band is descriptive ±1σ only when exact retained moments are available. No distribution fit is inferred.",
-    );
+        });
+    view::right_panel(ui, model);
 }
 
 #[cfg(test)]
@@ -1183,130 +656,6 @@ mod tests {
             Some(88.0)
         );
         assert!(selected_yield_result(&simulation, "v(out)", true).is_none());
-    }
-
-    /// The histogram a zero-variation Monte Carlo produces.
-    ///
-    /// `VariableStatistics::compute_histogram` returns `(vec![n], vec![v, v])`
-    /// whenever the sample range is not positive, and
-    /// `populate_monte_carlo_histograms` maps that to one bin whose two edges
-    /// are the same number. This is that shape, byte for byte.
-    fn zero_variation_histogram(
-        value: f64,
-        samples: usize,
-    ) -> rspice_results::histogram::Histogram {
-        rspice_results::histogram::Histogram {
-            name: "V(out)".to_owned(),
-            bins: vec![rspice_results::histogram::HistogramBin {
-                lower: value,
-                upper: value,
-                count: samples,
-                weight: samples as f64,
-            }],
-            total_count: samples,
-            total_weight: samples as f64,
-            underflow: 0,
-            overflow: 0,
-            data_min: value,
-            data_max: value,
-        }
-    }
-
-    /// The plan's gate: a Monte Carlo whose measurement never moved must
-    /// still draw as a distribution.
-    #[test]
-    fn a_zero_variation_monte_carlo_is_ruled_around_the_value_it_collapsed_onto() {
-        let histogram = zero_variation_histogram(1.5, 40);
-        let axis = hist_axis(&histogram);
-
-        assert_eq!(
-            axis.degenerate_at,
-            Some(1.5),
-            "the sheet did not recognize a single zero-width bin"
-        );
-        assert!(
-            axis.x0 < 1.5 && 1.5 < axis.x1,
-            "the value is not inside its own window: {axis:?}"
-        );
-        // Wide enough that the axis labels differ from one another, which the
-        // 6 % padding of a zero span never achieves.
-        assert!(
-            axis.x1 - axis.x0 >= 1.5 * 1.0e-3,
-            "the window is narrower than the value's own resolution: {axis:?}"
-        );
-        assert_ne!(
-            fmt_si(axis.x0, "", 3),
-            fmt_si(axis.x1, "", 3),
-            "both ends of the axis print the same number"
-        );
-    }
-
-    /// The percentage states the population it was measured over.
-    ///
-    /// "97.0 %" alone reads as a property of the run. It is a property of the
-    /// trials the yield engine had evidence for, which is not the number
-    /// requested when trials diverged, and the reader had to reconstruct the
-    /// difference from two other rows and a second panel.
-    #[test]
-    fn the_yield_figure_states_the_population_it_was_measured_over() {
-        let result = result("V(out)", 97.0);
-        assert_eq!(
-            yield_label(&result, None),
-            "97.0 % · 97 of 100 evaluated",
-            "the yield percentage stands on its own with no denominator"
-        );
-
-        let variable = mc_variable("V(out)");
-        let authority = MonteCarloAuthority {
-            seed: 7,
-            runs_requested: 110,
-            runs_completed: 100,
-            failures: 10,
-            variable: &variable,
-        };
-        assert_eq!(
-            yield_label(&result, Some(authority)),
-            "97.0 % · 97 of 100 evaluated · 10 diverged excluded"
-        );
-    }
-
-    #[test]
-    fn a_degenerate_distribution_says_its_bin_has_no_width() {
-        assert_eq!(
-            binning_label(&zero_variation_histogram(1.5, 40)),
-            "1 display bin · zero width, every sample at one value"
-        );
-    }
-
-    #[test]
-    fn an_ordinary_distribution_keeps_its_padded_data_window() {
-        let mut histogram = zero_variation_histogram(0.0, 0);
-        histogram.bins = vec![
-            rspice_results::histogram::HistogramBin {
-                lower: 1.0,
-                upper: 2.0,
-                count: 3,
-                weight: 3.0,
-            },
-            rspice_results::histogram::HistogramBin {
-                lower: 2.0,
-                upper: 3.0,
-                count: 1,
-                weight: 1.0,
-            },
-        ];
-        histogram.total_count = 4;
-        histogram.data_min = 1.0;
-        histogram.data_max = 3.0;
-
-        let axis = hist_axis(&histogram);
-        assert_eq!(axis.degenerate_at, None);
-        assert!((axis.x0 - 0.88).abs() < 1.0e-12, "{axis:?}");
-        assert!((axis.x1 - 3.12).abs() < 1.0e-12, "{axis:?}");
-        assert_eq!(
-            binning_label(&histogram),
-            "2 display bins · rebuilt from exact samples"
-        );
     }
 
     pub(super) fn mc_variable(name: &str) -> MonteCarloVariableMetadata {
