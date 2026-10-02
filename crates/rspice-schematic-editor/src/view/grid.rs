@@ -211,6 +211,17 @@ fn line_mesh(pitch: f32, cols: i32, rows: i32, color: Color32, hairline: f32) ->
     mesh
 }
 
+/// Display name of the document's grid pitch.
+pub fn snap_label(
+    pitch: rspice_design::schematic::document_policy::SchematicGridPitch,
+) -> &'static str {
+    match pitch {
+        rspice_design::schematic::document_policy::SchematicGridPitch::Mil50 => "50 mil",
+        rspice_design::schematic::document_policy::SchematicGridPitch::Mil25 => "25 mil",
+        rspice_design::schematic::document_policy::SchematicGridPitch::Metric => "Metric",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

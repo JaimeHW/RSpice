@@ -4,6 +4,7 @@ pub mod annotations;
 pub mod bus_geometry;
 mod component_palette;
 pub mod export;
+pub mod net_label_placement;
 pub mod pin_placement;
 pub mod port_overlay;
 pub mod session;

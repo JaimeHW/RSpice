@@ -50,7 +50,9 @@ pub use dialog::{
 };
 pub use docbar::docbar_at_height;
 pub use form::name_control;
-pub use form::{choice_row, input_row, kv_row, mono_input, switch_row};
+pub use form::{
+    choice_row, field_label, input_row, kv_row, mono_input, read_only_value, switch_row,
+};
 pub use pane::{
     PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W, PaneSide, pane_footer, pane_header,
     pane_section_label, two_pane,

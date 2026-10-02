@@ -9,18 +9,16 @@
 //! and publishes name, anchor and kind together — a connector never exists as
 //! a plain label in any recorded state.
 
-use egui::{Context, Frame, Response, Stroke, TextEdit, Ui, Vec2};
+use egui::Context;
+use rspice_schematic_editor::net_label_placement::{self, NetLabelPlacementView};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::state::{CrossSheetPortDirection, NetLabel, NetLabelKind, NetNamingPolicy, Point, Tool};
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::state::{CrossSheetPortDirection, NetLabel, NetLabelKind, Point, Tool};
 use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, select,
+    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
 
-use crate::workbench::app::dialogs::schematic_command::{field_label, read_only_value, snap_label};
-use crate::workbench::app::{NetLabelPlacementDialogState, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} CONNECTIVITY";
@@ -32,9 +30,6 @@ const CONNECTOR_TITLE: &str = "Place off-sheet connector";
 const CONNECTOR_PRIMARY: &str = "Place connector";
 const CONNECTOR_DESCRIPTION: &str =
     "Declare a validated electrical name that continues on another sheet of this cellview.";
-const FIELD_ID: &str = "place-net-label-name";
-const DIRECTION_FIELD_ID: &str = "place-net-label-direction";
-const DIRECTION_LABEL: &str = "Direction";
 const DISCARD_TITLE: &str = "Unsaved label name";
 const DISCARD_DETAIL: &str =
     "Choose Discard changes again to close. The schematic and undo history are unchanged.";
@@ -156,7 +151,7 @@ impl RSpiceApp {
             "Cancel"
         })
         .primary_enabled(validation.can_commit())
-        .initial_focus(DialogInitialFocus::Control(egui::Id::new(FIELD_ID)));
+        .initial_focus(DialogInitialFocus::Control(net_label_placement::name_id()));
         if discard_confirm {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
@@ -169,14 +164,18 @@ impl RSpiceApp {
         let grid_pitch = self.state.schematic.document().document_policy.grid_pitch;
         let naming_policy = self.state.schematic.document().document_policy.net_naming;
         let mut response = dialog.show_transaction(ctx, |ui| {
-            let (focus, changed) = dialog_body(
+            let draft = &mut self.state.dialogs.net_label_placement;
+            let (focus, changed) = net_label_placement::show(
                 ui,
-                anchor,
-                grid_pitch,
-                naming_policy,
-                &mut self.state.dialogs.net_label_placement,
-                message.as_deref(),
-                message_is_error,
+                NetLabelPlacementView {
+                    anchor,
+                    grid_pitch,
+                    naming_policy,
+                    validation_message: message.as_deref(),
+                    validation_is_error: message_is_error,
+                },
+                &mut draft.name,
+                &mut draft.kind,
             );
             edited = changed;
             focus
@@ -309,149 +308,6 @@ fn apply_commit(state: &mut AppState, commit: NetLabelPlacementCommit) -> Result
                 .to_owned(),
         ),
     }
-}
-
-fn dialog_body(
-    ui: &mut Ui,
-    anchor: Option<Point>,
-    grid_pitch: crate::state::SchematicGridPitch,
-    naming_policy: NetNamingPolicy,
-    draft: &mut NetLabelPlacementDialogState,
-    validation_message: Option<&str>,
-    validation_is_error: bool,
-) -> (Option<egui::Id>, bool) {
-    let anchor_text = anchor.map_or_else(
-        || "anchor unavailable".to_owned(),
-        |anchor| {
-            format!(
-                "({}, {}) \u{00b7} snapped {}",
-                anchor.x,
-                anchor.y,
-                snap_label(grid_pitch)
-            )
-        },
-    );
-    read_only_value(ui, "Anchor", &anchor_text);
-    ui.add_space(10.0);
-
-    let t = Tokens::get(ui.ctx());
-    let response = field_label(ui, "Net name", |ui| {
-        ui.add_sized(
-            Vec2::new(ui.available_width(), t.metrics.ctl_h),
-            TextEdit::singleline(&mut draft.name)
-                .id(egui::Id::new(FIELD_ID))
-                .font(egui::TextStyle::Monospace)
-                .hint_text("for example: vout or DATA[7]")
-                .margin(egui::Margin::symmetric(8, 4)),
-        )
-    });
-    configure_name_accessibility(ui, &response, validation_message, validation_is_error);
-    let mut changed = response.changed();
-    if let Some(direction) = draft.kind.off_sheet_direction() {
-        ui.add_space(10.0);
-        changed |= direction_field(ui, direction, &mut draft.kind);
-    }
-
-    // Reserve a stable validation row so typing never moves the remaining
-    // controls or footer.
-    ui.allocate_ui_with_layout(
-        Vec2::new(ui.available_width(), 32.0),
-        egui::Layout::top_down(egui::Align::Min),
-        |ui| {
-            if let Some(message) = validation_message {
-                ui.add_space(4.0);
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(message)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(if validation_is_error {
-                                t.color.err
-                            } else {
-                                t.color.text_dim
-                            }),
-                    )
-                    .wrap(),
-                );
-            }
-        },
-    );
-
-    let policy = match naming_policy {
-        NetNamingPolicy::StrictCaseSensitive => "Strict case-sensitive SPICE syntax",
-        NetNamingPolicy::SpiceCompatibleRelaxed => "SPICE-compatible relaxed syntax",
-    };
-    read_only_value(ui, "Document naming policy", policy);
-    ui.add_space(10.0);
-    let note = if draft.kind.off_sheet_direction().is_some() {
-        "Connectors with the same accepted name form one electrical net across every sheet of this cellview. Cancel or Escape leaves the document unchanged."
-    } else {
-        "Labels with the same accepted name form one electrical net. Cancel or Escape leaves the document unchanged."
-    };
-    Frame::new()
-        .fill(t.color.bg_panel)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .corner_radius(5.0)
-        .inner_margin(egui::Margin::symmetric(8, 6))
-        .show(ui, |ui| {
-            ui.set_min_width((ui.available_width() - 16.0).max(1.0));
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(note)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                )
-                .wrap(),
-            );
-        });
-
-    (Some(response.id), changed)
-}
-
-/// The one control the connector adds. It is offered only when the armed tool
-/// declared an off-sheet kind, so the plain label transaction is unchanged.
-fn direction_field(
-    ui: &mut Ui,
-    selected: CrossSheetPortDirection,
-    kind: &mut NetLabelKind,
-) -> bool {
-    let options = NetLabelKind::DIRECTIONS
-        .map(|direction| NetLabelKind::direction_label(direction).to_owned());
-    field_label(ui, DIRECTION_LABEL, |ui| {
-        select(
-            ui,
-            DIRECTION_FIELD_ID,
-            DIRECTION_LABEL,
-            NetLabelKind::direction_label(selected),
-            &options,
-            ui.available_width(),
-        )
-    })
-    .is_some_and(|index| {
-        *kind = NetLabelKind::OffSheet {
-            direction: NetLabelKind::DIRECTIONS[index],
-        };
-        true
-    })
-}
-
-fn configure_name_accessibility(
-    ui: &Ui,
-    response: &Response,
-    message: Option<&str>,
-    invalid: bool,
-) {
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_label("Net name");
-        node.set_description(match message {
-            Some(message) => format!("Required electrical net name. {message}"),
-            None => "Required electrical net name".to_owned(),
-        });
-        if invalid {
-            node.set_invalid(egui::accesskit::Invalid::True);
-        } else {
-            node.clear_invalid();
-        }
-    });
 }
 
 #[cfg(test)]
@@ -752,40 +608,5 @@ mod tests {
         assert_eq!(joined.len(), 1, "the shared name is one node");
         assert!(joined[0].authored_name);
         assert_eq!(joined[0].wire_ids.len(), 2, "both conductors joined");
-    }
-
-    #[test]
-    fn mockup_action_contract_and_field_identity_are_stable() {
-        assert_eq!(EYEBROW, "SCHEMATIC \u{00b7} CONNECTIVITY");
-        assert_eq!(TITLE, "Place net label");
-        assert_eq!(PRIMARY, "Place label");
-        assert_eq!(FIELD_ID, "place-net-label-name");
-        assert_eq!(CONNECTOR_TITLE, "Place off-sheet connector");
-        assert_eq!(CONNECTOR_PRIMARY, "Place connector");
-        assert_eq!(DIRECTION_FIELD_ID, "place-net-label-direction");
-        assert_ne!(FIELD_ID, DIRECTION_FIELD_ID);
-        assert_eq!(
-            DESCRIPTION,
-            "Assign a validated electrical name at the selected snapped schematic anchor."
-        );
-        for value in [
-            EYEBROW,
-            TITLE,
-            PRIMARY,
-            DESCRIPTION,
-            CONNECTOR_TITLE,
-            CONNECTOR_PRIMARY,
-            CONNECTOR_DESCRIPTION,
-            DIRECTION_LABEL,
-            DISCARD_TITLE,
-            DISCARD_DETAIL,
-        ] {
-            for forbidden in ['\u{00c2}', '\u{00e2}', '\u{fffd}'] {
-                assert!(
-                    !value.contains(forbidden),
-                    "mojibake in rendered contract string: {value:?}"
-                );
-            }
-        }
     }
 }

@@ -4,7 +4,9 @@
 //! the document; the schematic interaction layer accumulates a snapped
 //! pointer/keyboard delta and commits the configured movement exactly once.
 
+use crate::ui::widgets::{field_label, read_only_value};
 use egui::{Context, Ui};
+use rspice_schematic_editor::view::grid::snap_label;
 
 use crate::diagnostics::ConsoleMessage;
 use crate::schematic::view::schematic_symbol_context;
@@ -24,7 +26,7 @@ const TITLE: &str = "Move selection";
 const PRIMARY: &str = "Arm move tool";
 const DESCRIPTION: &str = "Move selected objects with connected wires following and preview any resulting geometry or hierarchy violations.";
 use crate::workbench::app::dialogs::schematic_command::{
-    DISCARD_DETAIL, DISCARD_TITLE, FOOTER_NOTE, field_label, read_only_value, snap_label,
+    DISCARD_DETAIL, DISCARD_TITLE, FOOTER_NOTE,
 };
 
 #[derive(Debug)]

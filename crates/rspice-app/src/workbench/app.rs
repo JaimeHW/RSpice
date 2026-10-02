@@ -181,10 +181,9 @@ pub(crate) use dialogs::state::{
     GridSnapRoutingDialogState, GridSnapRoutingDraft, GridSnapRoutingFocusTarget,
     GridSnapSpacingChoice, HelpCenterPage, HierarchyDescendEditMode, HierarchyParentContext,
     MoveSelectionDialogState, NamedNetObjectPropertiesDraft, NetLabelObjectPropertiesDraft,
-    NetLabelPlacementDialogState, NewWindowInitialContent, ObjectPropertiesDraft,
-    PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone, RenameSelectionTarget,
-    ReplaceInstanceOpen, StretchSelectionDialogState, TechnologyAttachmentDialogState,
-    WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
+    NewWindowInitialContent, ObjectPropertiesDraft, PlanRemovalConsequence, PlanRemovalTarget,
+    PlanRemovalTone, RenameSelectionTarget, ReplaceInstanceOpen, StretchSelectionDialogState,
+    TechnologyAttachmentDialogState, WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
 };
 pub use dialogs::state::{DialogState, LicensePhase};
 

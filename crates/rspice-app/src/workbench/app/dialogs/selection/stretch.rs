@@ -4,7 +4,9 @@
 //! contract. Arming transfers exclusive intent to the schematic canvas, where
 //! a candidate is previewed and committed as one undoable mutation.
 
+use crate::ui::widgets::{field_label, read_only_value};
 use egui::{Context, Ui};
+use rspice_schematic_editor::view::grid::snap_label;
 
 use crate::diagnostics::ConsoleMessage;
 use crate::state::{StretchOrthogonalPolicy, StretchTarget, Tool};
@@ -16,7 +18,7 @@ use crate::ui::widgets::{
 };
 
 use crate::workbench::app::dialogs::schematic_command::{
-    DISCARD_DETAIL, DISCARD_TITLE, FOOTER_NOTE, field_label, read_only_value, snap_label,
+    DISCARD_DETAIL, DISCARD_TITLE, FOOTER_NOTE,
 };
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority, StretchSelectionDialogState};
 use crate::workbench::app_state::AppState;

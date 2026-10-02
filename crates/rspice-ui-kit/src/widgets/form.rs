@@ -1,7 +1,7 @@
 //! Form primitives — inspector rows, key-value rows, checkboxes, and the
 //! mono value input.
 
-use egui::{Response, TextEdit, Ui, vec2};
+use egui::{Frame, Response, TextEdit, Ui, vec2};
 
 use crate::theme::{self, FontWeight};
 use crate::tokens::{self, Tokens};
@@ -144,4 +144,39 @@ pub fn choice_row(ui: &mut Ui, label: &str, options: &[&str], value: &mut usize)
         },
     );
     changed
+}
+
+/// A stacked uppercase label above its field.
+pub fn field_label<R>(ui: &mut Ui, label: &str, content: impl FnOnce(&mut Ui) -> R) -> R {
+    let t = Tokens::get(ui.ctx());
+    ui.label(
+        egui::RichText::new(label.to_ascii_uppercase())
+            .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
+            .color(t.color.text_dim),
+    );
+    ui.add_space(4.0);
+    content(ui)
+}
+
+/// A wrapped, read-only engineering value under a stacked label.
+pub fn read_only_value(ui: &mut Ui, label: &str, value: &str) {
+    let t = Tokens::get(ui.ctx());
+    field_label(ui, label, |ui| {
+        Frame::new()
+            .fill(t.color.bg_panel)
+            .stroke(egui::Stroke::new(1.0, t.color.border))
+            .corner_radius(5.0)
+            .inner_margin(egui::Margin::symmetric(8, 6))
+            .show(ui, |ui| {
+                ui.set_min_width((ui.available_width() - 16.0).max(1.0));
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(value)
+                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text),
+                    )
+                    .wrap(),
+                );
+            });
+    });
 }
