@@ -32,3 +32,5 @@ pub mod transform_input;
 pub mod stretch_interaction;
 
 pub mod preview;
+
+pub mod scene;

@@ -33,7 +33,6 @@ mod snap_resolution;
 mod stretch_interaction;
 pub(crate) mod violations;
 
-use rspice_schematic_editor::view::geometry::segment_intersects_rect;
 use rspice_schematic_editor::view::{
     coordinates, design_notes, documentation_shapes, drawing, navigation, net_labels, viewport,
 };

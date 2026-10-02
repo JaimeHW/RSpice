@@ -1,59 +1,27 @@
-//! Canvas scene assembly.
-//!
-//! Builds the frame's scene: what is visible in the viewport, what is
-//! selected or highlighted, and the labels that need to be drawn, so the
-//! painter walks a prepared list rather than the whole design.
+//! App scene composition and project/run provenance for editor-owned painting.
 
-use rspice_schematic_editor::view::design_view::design_note_visible;
-use std::collections::BTreeMap;
-
-use egui::{Painter, Rect, Stroke};
-
+use super::{
+    super::symbols::SymbolLibrary,
+    SchematicSymbolContext,
+    drawing::ProbeVisualStatus,
+    drawing_sheet::ActiveDrawingSheet,
+    sheet_visibility::{active_junction_at, active_sheet_has_objects, object_is_on_active_sheet},
+    viewport::Viewport,
+};
 use crate::schematic::bus_notations;
 use crate::state::{
-    CellViewRef, CrossProbeIndex, DesignNote, Point, SchematicAnnotationVisibility,
+    CellViewRef, CrossProbeIndex, Point, SchematicAnnotationVisibility,
     SchematicBackAnnotationContent, SchematicHierarchyVisibility, SchematicNetHighlighting,
 };
 use crate::workbench::app_state::{AppState, SchematicKeyboardFocus};
+use egui::{Painter, Rect};
 use rspice_design::connectivity::summary::projection_nets;
-
-use super::super::symbols::SymbolLibrary;
-use super::SchematicSymbolContext;
-use super::design_notes::{
-    conservative_world_bounds as design_note_world_bounds, design_note_at, draw_design_note,
+use rspice_schematic_editor::view::{
+    design_view::DesignView,
+    scene::{
+        self, OperatingPointCanvasAnnotation, named_net_class_color, normalized_probe_expression,
+    },
 };
-use super::documentation_shapes::{
-    documentation_shape_at, draw_documentation_shape, world_bounds as documentation_shape_bounds,
-};
-use super::drawing::{
-    ProbeVisualStatus, chain_conductors, draw_bus, draw_bus_tap, draw_component, draw_conductor,
-    draw_junction, draw_probe, paint_conductor, probe_at_screen, probe_world_bounds,
-};
-use super::drawing_sheet::ActiveDrawingSheet;
-use super::net_labels::{draw_net_label, net_label_at, world_bounds as net_label_world_bounds};
-use super::sheet_visibility::{
-    active_junction_at, active_sheet_has_objects, object_is_on_active_sheet,
-    objects_on_active_sheet,
-};
-use super::viewport::Viewport;
-use rspice_design::schematic::design_note::DesignNoteRenderContext;
-
-/// Culling margin in world units: symbols extend up to ~40 units from their
-/// anchor and labels overhang further; generous slack keeps pop-in impossible
-/// while still rejecting everything genuinely off-screen.
-const CULL_MARGIN: f32 = 160.0;
-const EMPTY_HINT_MOBILE_BREAKPOINT: f32 = 460.0;
-const EMPTY_HINT_DESKTOP_LINES: [&str; 3] = [
-    "Empty schematic",
-    "Use Place instance to choose devices and sources",
-    "File > Open project loads an existing design",
-];
-const EMPTY_HINT_MOBILE_LINES: [&str; 4] = [
-    "Empty schematic",
-    "Use Place instance to choose a component",
-    "The toolbar provides wiring, labels, and probes",
-    "File > Open project loads an existing design",
-];
 
 pub(super) fn draw_scene(
     painter: &Painter,
@@ -78,7 +46,7 @@ pub(super) fn draw_scene(
             .drawing_area
             .screen_rect(viewport)
             .intersect(available);
-        draw_empty_hint(
+        scene::draw_empty_hint(
             painter,
             if drawing_area.is_positive() {
                 drawing_area
@@ -88,419 +56,45 @@ pub(super) fn draw_scene(
         );
     }
 
-    let preview_bounds = if state.schematic.session.editor.selection_rect.is_active() {
-        let (min_x, min_y, max_x, max_y) = state.schematic.session.editor.selection_rect.bounds();
-        Some((min_x, min_y, max_x, max_y))
-    } else {
-        None
-    };
-
-    // Viewport culling: only elements whose bounds intersect the visible
-    // world rect are transformed and tessellated.
-    let (wx0, wy0, wx1, wy1) = viewport.visible_world_rect(CULL_MARGIN);
-    let cache = state.schematic.canvas_cache();
-    let visible_wire_indices = cache
-        .map(|cache| cache.wire_indices_in_world_rect(wx0, wy0, wx1, wy1))
-        .unwrap_or_else(|| (0..state.schematic.document().wires.len()).collect());
-    let net_class_colors = if state.ui.schematic_visibility.net_highlighting
-        == SchematicNetHighlighting::NetClassColors
-    {
-        net_class_colors(state)
-    } else {
-        std::collections::HashMap::new()
-    };
-
-    for bus in &state.schematic.document().buses {
-        if !object_is_on_active_sheet(state, bus.id) {
-            continue;
-        }
-        if !polyline_intersects_view(&bus.points, wx0, wy0, wx1, wy1) {
-            continue;
-        }
-        let mut selected = state.schematic.session.editor.selection.has_bus(bus.id);
-        if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
-            selected = bus.points.windows(2).any(|segment| {
-                super::segment_intersects_rect(segment[0], segment[1], min_x, min_y, max_x, max_y)
-            });
-        }
-        draw_bus(painter, viewport, bus, selected);
-    }
-
-    // Wires of one style that meet end to end are painted as one path, so the
-    // corner two wires form is a mitered join. Plain wires go down first,
-    // then highlighted nets, then the selection, so emphasis stays on top.
-    type ConductorStyle = (bool, Option<[u8; 4]>);
-    let mut conductor_groups: BTreeMap<ConductorStyle, (Option<egui::Color32>, Vec<&[Point]>)> =
-        BTreeMap::new();
-    for index in visible_wire_indices {
-        let Some(wire) = state.schematic.document().wires.get(index) else {
-            continue;
-        };
-        if !object_is_on_active_sheet(state, wire.id) {
-            continue;
-        }
-        if let Some((min, max)) = cache.and_then(|c| c.wire_bounds.get(index))
-            && ((max.x as f32) < wx0
-                || (min.x as f32) > wx1
-                || (max.y as f32) < wy0
-                || (min.y as f32) > wy1)
-        {
-            continue;
-        }
-        let mut is_selected = state
-            .schematic
-            .session
-            .editor
-            .selection
-            .wires
-            .contains(&wire.id);
-
-        if !is_selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
-            is_selected = wire
-                .points
-                .iter()
-                .any(|p| p.x >= min_x && p.x <= max_x && p.y >= min_y && p.y <= max_y);
-        }
-
-        let highlight_color = match state.ui.schematic_visibility.net_highlighting {
-            SchematicNetHighlighting::SelectedAcrossHierarchy => state
-                .schematic
-                .session
-                .editor
-                .net_highlight
-                .is_wire_highlighted(wire.id)
-                .then_some(crate::ui::tokens::active_palette().warn),
-            SchematicNetHighlighting::NetClassColors => net_class_colors.get(&wire.id).copied(),
-            SchematicNetHighlighting::Off => None,
-        };
-        conductor_groups
-            .entry((is_selected, highlight_color.map(|color| color.to_array())))
-            .or_insert_with(|| (highlight_color, Vec::new()))
-            .1
-            .push(wire.points.as_slice());
-    }
-    for ((is_selected, _), (highlight_color, polylines)) in conductor_groups {
-        for chain in chain_conductors(polylines) {
-            draw_conductor(painter, viewport, &chain, is_selected, highlight_color);
-        }
-    }
-
-    for tap in &state.schematic.document().bus_taps {
-        if !object_is_on_active_sheet(state, tap.id) {
-            continue;
-        }
-        let route = crate::schematic::bus_geometry::bus_tap_route_points(tap);
-        let Some(first) = route.first() else {
-            continue;
-        };
-        let (mut min_x, mut max_x, mut min_y, mut max_y) = (first.x, first.x, first.y, first.y);
-        for point in &route[1..] {
-            min_x = min_x.min(point.x);
-            max_x = max_x.max(point.x);
-            min_y = min_y.min(point.y);
-            max_y = max_y.max(point.y);
-        }
-        if (max_x as f32) < wx0
-            || (min_x as f32) > wx1
-            || (max_y as f32) < wy0
-            || (min_y as f32) > wy1
-        {
-            continue;
-        }
-        let mut selected = state.schematic.session.editor.selection.has_bus_tap(tap.id);
-        if !selected && let Some((rx0, ry0, rx1, ry1)) = preview_bounds {
-            selected = route.windows(2).any(|segment| {
-                super::segment_intersects_rect(segment[0], segment[1], rx0, ry0, rx1, ry1)
-            });
-        }
-        draw_bus_tap(painter, viewport, tap, selected);
-    }
-
-    for component in &state.schematic.document().components {
-        if !object_is_on_active_sheet(state, component.id) {
-            continue;
-        }
-        let (min, max) = symbol_context.component_bounds(component);
-        if (max.x as f32) < wx0
-            || (min.x as f32) > wx1
-            || (max.y as f32) < wy0
-            || (min.y as f32) > wy1
-        {
-            continue;
-        }
-        let mut is_selected = state
-            .schematic
-            .session
-            .editor
-            .selection
-            .components
-            .contains(&component.id);
-
-        if !is_selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
-            is_selected = max.x >= min_x && min.x <= max_x && max.y >= min_y && min.y <= max_y;
-        }
-
-        draw_component(
-            painter,
-            viewport,
-            component,
-            is_selected,
-            symbol_library,
-            symbol_context,
-            state.ui.schematic_visibility.parameter_labels,
-        );
-    }
-
-    for junction in &state.schematic.document().junctions {
-        if !object_is_on_active_sheet(state, junction.id) {
-            continue;
-        }
-        let (jx, jy) = (junction.pos.x as f32, junction.pos.y as f32);
-        if jx < wx0 || jx > wx1 || jy < wy0 || jy > wy1 {
-            continue;
-        }
-        draw_junction(
-            painter,
-            viewport,
-            junction.pos,
-            state
-                .schematic
-                .session
-                .editor
-                .selection
-                .has_junction(junction.pos),
-            state.dialogs.interaction.hover_wire_vertex == Some((junction.pos.x, junction.pos.y)),
-        );
-    }
-
-    draw_operating_point_annotations(painter, available, viewport, state);
-
-    // Presentation geometry is a background documentation layer. It remains
-    // selectable, but is intentionally painted below authored text and names.
-    let hovered_shape = if state.schematic.session.editor.tool == crate::state::Tool::Select {
-        let shapes = objects_on_active_sheet(
-            state,
-            &state.schematic.document().documentation_shapes,
-            |item| item.id,
-        );
-        painter
-            .ctx()
-            .pointer_hover_pos()
-            .filter(|position| available.contains(*position))
-            .and_then(|position| documentation_shape_at(viewport, shapes.as_ref(), position))
-    } else {
-        None
-    };
-    for shape in &state.schematic.document().documentation_shapes {
-        if !object_is_on_active_sheet(state, shape.id) {
-            continue;
-        }
-        let (min, max) = documentation_shape_bounds(shape);
-        if (max.x as f32) < wx0
-            || (min.x as f32) > wx1
-            || (max.y as f32) < wy0
-            || (min.y as f32) > wy1
-        {
-            continue;
-        }
-        let mut selected = state
-            .schematic
-            .session
-            .editor
-            .selection
-            .has_documentation_shape(shape.id);
-        if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
-            selected = super::documentation_shapes::shape_intersects_rect(
-                shape, min_x, min_y, max_x, max_y, false,
-            );
-        }
-        draw_documentation_shape(
-            painter,
-            viewport,
-            shape,
-            selected,
-            hovered_shape == Some(shape.id),
-        );
-    }
-
-    // Net labels are authored text, not derived annotations. Paint them after
-    // junction and OP overlays so the source net name always remains legible.
-    let hovered_label = if state.schematic.session.editor.tool == crate::state::Tool::Select {
-        let labels =
-            objects_on_active_sheet(state, &state.schematic.document().net_labels, |item| {
-                item.id
-            });
-        painter
-            .ctx()
-            .pointer_hover_pos()
-            .filter(|pointer| available.contains(*pointer))
-            .and_then(|pointer| net_label_at(painter.ctx(), viewport, labels.as_ref(), pointer))
-    } else {
-        None
-    };
-    for label in &state.schematic.document().net_labels {
-        if !object_is_on_active_sheet(state, label.id) {
-            continue;
-        }
-        let (min, max) = net_label_world_bounds(label);
-        if (max.x as f32) < wx0
-            || (min.x as f32) > wx1
-            || (max.y as f32) < wy0
-            || (min.y as f32) > wy1
-        {
-            continue;
-        }
-        let mut selected = state
-            .schematic
-            .session
-            .editor
-            .selection
-            .has_net_label(label.id);
-        if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
-            selected = max.x >= min_x && min.x <= max_x && max.y >= min_y && min.y <= max_y;
-        }
-        draw_net_label(
-            painter,
-            viewport,
-            label,
-            selected,
-            hovered_label == Some(label.id),
-            false,
-        );
-    }
-
-    // Documentation objects are painted above electrical names but below
-    // validation markers. They never participate in conductor rendering.
-    let hovered_note = if state.schematic.session.editor.tool == crate::state::Tool::Select {
-        let notes = visible_design_notes(state);
-        painter
-            .ctx()
-            .pointer_hover_pos()
-            .filter(|pointer| available.contains(*pointer))
-            .and_then(|pointer| {
-                design_note_at(
-                    painter.ctx(),
-                    viewport,
-                    notes.as_ref(),
-                    &DesignNoteRenderContext::for_document(
-                        state.schematic.document(),
-                        &state.workspace.content.active_view.display_path(),
-                    ),
-                    pointer,
-                )
-            })
-    } else {
-        None
-    };
-    for note in &state.schematic.document().design_notes {
-        if !object_is_on_active_sheet(state, note.id) {
-            continue;
-        }
-        if !design_note_visible(note, state.ui.schematic_visibility.review_markers) {
-            continue;
-        }
-        let (min, max) = design_note_world_bounds(note);
-        if (max.x as f32) < wx0
-            || (min.x as f32) > wx1
-            || (max.y as f32) < wy0
-            || (min.y as f32) > wy1
-        {
-            continue;
-        }
-        let mut selected = state
-            .schematic
-            .session
-            .editor
-            .selection
-            .has_design_note(note.id);
-        if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
-            selected = max.x >= min_x && min.x <= max_x && max.y >= min_y && min.y <= max_y;
-        }
-        draw_design_note(
-            painter,
-            viewport,
-            note,
-            &DesignNoteRenderContext::for_document(
-                state.schematic.document(),
-                &state.workspace.content.active_view.display_path(),
-            ),
-            selected,
-            hovered_note == Some(note.id),
-        );
-    }
-
-    // Probe flags are durable output intent and remain visible above authored
-    // conductor/text layers. Their reference is the exact bound expression
-    // when resolved, otherwise the stable unbound P<n> marker identity.
-    let hovered_probe = if state.schematic.session.editor.tool == crate::state::Tool::Select {
-        let probes =
-            objects_on_active_sheet(state, &state.schematic.document().probes, |item| item.id);
-        painter
-            .ctx()
-            .pointer_hover_pos()
-            .filter(|pointer| available.contains(*pointer))
-            .and_then(|pointer| probe_at_screen(viewport, probes.as_ref(), pointer))
-    } else {
-        None
-    };
     let probe_statuses = probe_visual_statuses(state);
-    for probe in &state.schematic.document().probes {
-        if !object_is_on_active_sheet(state, probe.id) {
-            continue;
-        }
-        let (min, max) = probe_world_bounds(probe);
-        if (max.x as f32) < wx0
-            || (min.x as f32) > wx1
-            || (max.y as f32) < wy0
-            || (min.y as f32) > wy1
-        {
-            continue;
-        }
-        let mut selected = state.schematic.session.editor.selection.has_probe(probe.id);
-        if !selected {
-            selected = state
-                .ui
-                .results
-                .valid_selected_trace(&state.simulation)
-                .and_then(|trace| {
-                    probe
-                        .source_expression
-                        .as_deref()
-                        .map(|expression| (trace.source_name(), expression))
-                })
-                .is_some_and(|(trace, expression)| {
-                    normalized_probe_expression(trace) == normalized_probe_expression(expression)
-                });
-        }
-        if !selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
-            selected = max.x >= min_x && min.x <= max_x && max.y >= min_y && min.y <= max_y;
-        }
-        draw_probe(
-            painter,
-            viewport,
-            probe,
-            probe_visual_status(probe, &probe_statuses),
-            selected,
-            hovered_probe == Some(probe.id),
-        );
-    }
-
-    if let Some((hx, hy)) = state.dialogs.interaction.hover_wire_vertex {
-        let hover_pos = Point::new(hx, hy);
-        let is_junction = active_junction_at(state, hover_pos).is_some();
-        if !is_junction {
-            let pos = viewport.schematic_to_screen(hover_pos);
-            let radius = 3.0 * viewport.zoom;
-            painter.circle_stroke(
-                pos,
-                radius,
-                Stroke::new(
-                    1.0 * viewport.zoom,
-                    crate::ui::tokens::active_palette().accent,
-                ),
-            );
-        }
-    }
+    let probe_status =
+        |probe: &crate::state::SchematicProbe| probe_visual_status(probe, &probe_statuses);
+    let selected_trace_expression = || {
+        state
+            .ui
+            .results
+            .valid_selected_trace(&state.simulation)
+            .map(|trace| trace.source_name())
+    };
+    scene::draw_content(
+        painter,
+        available,
+        viewport,
+        &scene::SceneView {
+            design: super::schematic_design_view(state),
+            editor: &state.schematic.session.editor,
+            net_highlighting: state.ui.schematic_visibility.net_highlighting,
+            parameter_labels: state.ui.schematic_visibility.parameter_labels,
+            hover_wire_vertex: state.dialogs.interaction.hover_wire_vertex,
+        },
+        scene::SceneSymbols {
+            library: symbol_library,
+            context: symbol_context,
+        },
+        scene::SceneOverlays {
+            net_class_colors: if state.ui.schematic_visibility.net_highlighting
+                == SchematicNetHighlighting::NetClassColors
+            {
+                net_class_colors(state)
+            } else {
+                std::collections::HashMap::new()
+            },
+            operating_point: operating_point_annotations(state),
+            probe_status: &probe_status,
+            selected_trace_expression: &selected_trace_expression,
+        },
+        || state.workspace.content.active_view.display_path(),
+    );
 
     super::drawing_sheet::draw_overflow_advisories(
         painter,
@@ -516,17 +110,15 @@ pub(super) fn draw_scene(
         super::violations::draw_violation_markers(painter, viewport, state);
     }
 
-    draw_keyboard_focus(painter, viewport, state, symbol_context);
+    scene::draw_keyboard_focus(
+        painter,
+        viewport,
+        &super::schematic_design_view(state),
+        &state.schematic.session.editor.selection,
+        state.dialogs.interaction.schematic_keyboard_focus,
+        symbol_context,
+    );
 }
-
-/// The visible fraction of a parent-context sheet's own colour.
-///
-/// Low enough that the open sheet is unambiguously the subject, high enough
-/// that a conductor stays followable from the child up into its parent.
-const PARENT_CONTEXT_OPACITY: f32 = 0.22;
-/// The parent's conductors are the same conductors, so they keep the conductor
-/// stroke and are separated from the open sheet by tone alone.
-const PARENT_CONTEXT_STROKE_WIDTH: f32 = 1.1;
 
 /// The ancestor sheets drawn dimmed beneath the open one, outermost first,
 /// each with the buffer key its multi-sheet membership is recorded under.
@@ -573,123 +165,6 @@ fn parent_context_buffer_key(state: &AppState, reference: &CellViewRef) -> Optio
         .keys()
         .find(|candidate| candidate.eq_ignore_ascii_case(&key))
         .cloned()
-}
-
-/// Whether one object of the cell view `key` names is on that document's own
-/// active sheet.
-///
-/// [`object_is_on_active_sheet`] answers the same question for the open
-/// document; a parent is a different document, so it is asked about its own
-/// sheet rather than about the child's.
-fn object_is_on_sheet(state: &AppState, key: &str, object_id: u64) -> bool {
-    let Some(catalog) = state.workspace.content.design_management.sheet_catalog(key) else {
-        return true;
-    };
-    let Some(active_sheet_id) = catalog.active_sheet_id() else {
-        return true;
-    };
-    state
-        .workspace
-        .content
-        .design_management
-        .sheet_for_object_or_active(key, object_id)
-        == Some(active_sheet_id)
-}
-
-/// Paint the ancestor sheets dimmed beneath the open one.
-///
-/// What a parent contributes is connectivity — the conductors the child's ports
-/// are wired into, and the footprints of the instances that own them. Their
-/// symbols are deliberately not re-resolved: a ghost that borrowed the child's
-/// symbol context would draw the wrong artwork for a parent instance whose id
-/// collides with one of the child's.
-fn draw_parent_context(painter: &Painter, viewport: &Viewport, state: &AppState) {
-    let palette = crate::ui::tokens::active_palette();
-    let conductor = palette.wire.gamma_multiply(PARENT_CONTEXT_OPACITY);
-    let outline = palette.symbol.gamma_multiply(PARENT_CONTEXT_OPACITY);
-    let stroke = Stroke::new(PARENT_CONTEXT_STROKE_WIDTH * viewport.zoom, conductor);
-    let (wx0, wy0, wx1, wy1) = viewport.visible_world_rect(CULL_MARGIN);
-
-    for (key, sheet) in parent_context_sheets(state) {
-        let wires = sheet
-            .document()
-            .wires
-            .iter()
-            .filter(|wire| {
-                object_is_on_sheet(state, &key, wire.id)
-                    && polyline_intersects_view(&wire.points, wx0, wy0, wx1, wy1)
-            })
-            .map(|wire| wire.points.as_slice());
-        for chain in chain_conductors(wires) {
-            paint_conductor(
-                painter,
-                chain
-                    .iter()
-                    .map(|point| viewport.schematic_to_screen(*point))
-                    .collect(),
-                stroke,
-            );
-        }
-        for bus in &sheet.document().buses {
-            if !object_is_on_sheet(state, &key, bus.id)
-                || !polyline_intersects_view(&bus.points, wx0, wy0, wx1, wy1)
-            {
-                continue;
-            }
-            paint_conductor(
-                painter,
-                bus.points
-                    .iter()
-                    .map(|point| viewport.schematic_to_screen(*point))
-                    .collect(),
-                stroke,
-            );
-        }
-        for junction in &sheet.document().junctions {
-            let (jx, jy) = (junction.pos.x as f32, junction.pos.y as f32);
-            if !object_is_on_sheet(state, &key, junction.id)
-                || jx < wx0
-                || jx > wx1
-                || jy < wy0
-                || jy > wy1
-            {
-                continue;
-            }
-            painter.circle_filled(
-                viewport.schematic_to_screen(junction.pos),
-                (2.0 * viewport.zoom).max(1.0),
-                conductor,
-            );
-        }
-        for component in &sheet.document().components {
-            let (min_x, min_y, max_x, max_y) = component.bounding_box();
-            if !object_is_on_sheet(state, &key, component.id)
-                || (max_x as f32) < wx0
-                || (min_x as f32) > wx1
-                || (max_y as f32) < wy0
-                || (min_y as f32) > wy1
-            {
-                continue;
-            }
-            painter.rect_stroke(
-                Rect::from_two_pos(
-                    viewport.schematic_to_screen(Point::new(min_x, min_y)),
-                    viewport.schematic_to_screen(Point::new(max_x, max_y)),
-                ),
-                2.0,
-                Stroke::new(1.0, outline),
-                egui::StrokeKind::Inside,
-            );
-        }
-    }
-}
-
-fn normalized_probe_expression(expression: &str) -> String {
-    expression
-        .chars()
-        .filter(|character| !character.is_ascii_whitespace())
-        .flat_map(char::to_lowercase)
-        .collect()
 }
 
 fn probe_visual_status(
@@ -778,199 +253,6 @@ fn probe_visual_statuses(state: &AppState) -> ProbeMaterializationStatuses {
     statuses
 }
 
-fn polyline_intersects_view(points: &[Point], wx0: f32, wy0: f32, wx1: f32, wy1: f32) -> bool {
-    let Some(first) = points.first() else {
-        return false;
-    };
-    let (mut min_x, mut min_y, mut max_x, mut max_y) = (first.x, first.y, first.x, first.y);
-    for point in &points[1..] {
-        min_x = min_x.min(point.x);
-        min_y = min_y.min(point.y);
-        max_x = max_x.max(point.x);
-        max_y = max_y.max(point.y);
-    }
-    (max_x as f32) >= wx0 && (min_x as f32) <= wx1 && (max_y as f32) >= wy0 && (min_y as f32) <= wy1
-}
-
-fn draw_keyboard_focus(
-    painter: &Painter,
-    viewport: &Viewport,
-    state: &AppState,
-    symbol_context: &SchematicSymbolContext,
-) {
-    let Some(focus) = state.dialogs.interaction.schematic_keyboard_focus else {
-        return;
-    };
-    if !keyboard_focus_matches_selection(state, focus) {
-        return;
-    }
-    let Some((min, max)) = keyboard_focus_bounds(state, symbol_context, focus) else {
-        return;
-    };
-    let mut rect = Rect::from_two_pos(
-        viewport.schematic_to_screen(min),
-        viewport.schematic_to_screen(max),
-    )
-    .expand(4.0);
-    rect = Rect::from_center_size(
-        rect.center(),
-        egui::vec2(rect.width().max(16.0), rect.height().max(16.0)),
-    );
-    let palette = crate::ui::tokens::active_palette();
-    painter.rect_stroke(
-        rect,
-        3.0,
-        Stroke::new(3.5, palette.canvas_bg),
-        egui::StrokeKind::Outside,
-    );
-    painter.rect_stroke(
-        rect,
-        3.0,
-        Stroke::new(1.5, palette.accent),
-        egui::StrokeKind::Outside,
-    );
-}
-
-pub(super) fn keyboard_focus_matches_selection(
-    state: &AppState,
-    focus: SchematicKeyboardFocus,
-) -> bool {
-    let selection = &state.schematic.session.editor.selection;
-    match focus {
-        SchematicKeyboardFocus::Component(id) => selection.single_component() == Some(id),
-        SchematicKeyboardFocus::Wire(id) => {
-            selection.single_wire() == Some(id)
-                || selection
-                    .single_wire_segment()
-                    .is_some_and(|selected| selected.wire_id == id)
-                || selection
-                    .single_wire_vertex()
-                    .is_some_and(|selected| selected.wire_id == id)
-        }
-        SchematicKeyboardFocus::Bus(id) => selection.single_bus() == Some(id),
-        SchematicKeyboardFocus::BusTap(id) => selection.single_bus_tap() == Some(id),
-        SchematicKeyboardFocus::Junction(id) => {
-            selection.single_junction().is_some_and(|position| {
-                state
-                    .schematic
-                    .document()
-                    .junctions
-                    .iter()
-                    .any(|junction| junction.id == id && junction.pos == position)
-            })
-        }
-        SchematicKeyboardFocus::NetLabel(id) => selection.single_net_label() == Some(id),
-        SchematicKeyboardFocus::Probe(id) => selection.single_probe() == Some(id),
-        SchematicKeyboardFocus::DesignNote(id) => selection.single_design_note() == Some(id),
-        SchematicKeyboardFocus::DocumentationShape(id) => {
-            selection.single_documentation_shape() == Some(id)
-        }
-    }
-}
-
-fn keyboard_focus_bounds(
-    state: &AppState,
-    symbol_context: &SchematicSymbolContext,
-    focus: SchematicKeyboardFocus,
-) -> Option<(Point, Point)> {
-    let id = match focus {
-        SchematicKeyboardFocus::Component(id)
-        | SchematicKeyboardFocus::Wire(id)
-        | SchematicKeyboardFocus::Bus(id)
-        | SchematicKeyboardFocus::BusTap(id)
-        | SchematicKeyboardFocus::Junction(id)
-        | SchematicKeyboardFocus::NetLabel(id)
-        | SchematicKeyboardFocus::Probe(id)
-        | SchematicKeyboardFocus::DesignNote(id)
-        | SchematicKeyboardFocus::DocumentationShape(id) => id,
-    };
-    if !object_is_on_active_sheet(state, id) {
-        return None;
-    }
-    match focus {
-        SchematicKeyboardFocus::Component(id) => state
-            .schematic
-            .document()
-            .components
-            .iter()
-            .find(|object| object.id == id)
-            .map(|object| symbol_context.component_bounds(object)),
-        SchematicKeyboardFocus::Wire(id) => state
-            .schematic
-            .document()
-            .wires
-            .iter()
-            .find(|object| object.id == id)
-            .and_then(|object| points_bounds(&object.points)),
-        SchematicKeyboardFocus::Bus(id) => state
-            .schematic
-            .document()
-            .buses
-            .iter()
-            .find(|object| object.id == id)
-            .and_then(|object| points_bounds(&object.points)),
-        SchematicKeyboardFocus::BusTap(id) => state
-            .schematic
-            .document()
-            .bus_taps
-            .iter()
-            .find(|object| object.id == id)
-            .and_then(|object| {
-                points_bounds(&crate::schematic::bus_geometry::bus_tap_route_points(
-                    object,
-                ))
-            }),
-        SchematicKeyboardFocus::Junction(id) => state
-            .schematic
-            .document()
-            .junctions
-            .iter()
-            .find(|object| object.id == id)
-            .map(|object| (object.pos, object.pos)),
-        SchematicKeyboardFocus::NetLabel(id) => state
-            .schematic
-            .document()
-            .net_labels
-            .iter()
-            .find(|object| object.id == id)
-            .map(net_label_world_bounds),
-        SchematicKeyboardFocus::Probe(id) => state
-            .schematic
-            .document()
-            .probes
-            .iter()
-            .find(|object| object.id == id)
-            .map(probe_world_bounds),
-        SchematicKeyboardFocus::DesignNote(id) => visible_design_notes(state)
-            .iter()
-            .find(|object| object.id == id)
-            .map(design_note_world_bounds),
-        SchematicKeyboardFocus::DocumentationShape(id) => state
-            .schematic
-            .document()
-            .documentation_shapes
-            .iter()
-            .find(|object| object.id == id)
-            .map(documentation_shape_bounds),
-    }
-}
-
-fn points_bounds(points: &[Point]) -> Option<(Point, Point)> {
-    let first = *points.first()?;
-    let (mut min, mut max) = (first, first);
-    for point in &points[1..] {
-        min.x = min.x.min(point.x);
-        min.y = min.y.min(point.y);
-        max.x = max.x.max(point.x);
-        max.y = max.y.max(point.y);
-    }
-    Some((min, max))
-}
-
-pub(super) fn visible_design_notes(state: &AppState) -> std::borrow::Cow<'_, [DesignNote]> {
-    super::schematic_design_view(state).visible_design_notes()
-}
-
 /// Conductor colours for the net-class mode, one colour per electrical net.
 ///
 /// The partition is the netlister's, never the canvas's own: two conductor
@@ -1006,38 +288,6 @@ fn net_class_colors(state: &AppState) -> std::collections::HashMap<u64, egui::Co
         }
     }
     colors
-}
-
-fn named_net_class_color(name: &str) -> egui::Color32 {
-    let palette = crate::ui::tokens::active_palette();
-    let normalized = name.trim().to_ascii_lowercase();
-    if matches!(
-        normalized.as_str(),
-        "0" | "gnd" | "ground" | "vss" | "vssa" | "vssd"
-    ) {
-        return palette.ok;
-    }
-    if normalized.starts_with("vdd")
-        || normalized.starts_with("vcc")
-        || normalized.starts_with("vee")
-        || normalized.starts_with("supply")
-    {
-        return palette.warn;
-    }
-    if normalized.contains("clk") || normalized.contains("clock") {
-        return palette.info;
-    }
-    let hash = normalized.bytes().fold(0_u64, |hash, byte| {
-        hash.wrapping_mul(109).wrapping_add(u64::from(byte))
-    });
-    palette.traces[hash as usize % palette.traces.len()]
-}
-
-#[derive(Debug, Clone, PartialEq)]
-struct OperatingPointCanvasAnnotation {
-    position: Point,
-    label: String,
-    selected_current: bool,
 }
 
 fn device_op_param_unit(name: &str) -> &'static str {
@@ -1375,129 +625,34 @@ fn device_power<'a>(
     })
 }
 
-fn draw_operating_point_annotations(
-    painter: &Painter,
-    available: Rect,
-    viewport: &Viewport,
+fn draw_parent_context(painter: &Painter, viewport: &Viewport, state: &AppState) {
+    scene::draw_parent_context(
+        painter,
+        viewport,
+        parent_context_sheets(state)
+            .into_iter()
+            .map(|(key, sheet)| DesignView {
+                document: sheet.document(),
+                canvas_cache: None,
+                sheet_catalog: state
+                    .workspace
+                    .content
+                    .design_management
+                    .sheet_catalog(&key),
+                review_markers: Default::default(),
+            }),
+    );
+}
+
+pub(super) fn keyboard_focus_matches_selection(
     state: &AppState,
-) {
-    use crate::ui::theme::{self, FontWeight};
-
-    let palette = crate::ui::tokens::active_palette();
-    for annotation in operating_point_annotations(state) {
-        let anchor = viewport.schematic_to_screen(annotation.position);
-        if !available.expand(12.0).contains(anchor) {
-            continue;
-        }
-        let galley = painter.layout_no_wrap(
-            annotation.label,
-            theme::mono(crate::ui::tokens::FS_0, FontWeight::Medium),
-            if annotation.selected_current {
-                palette.info
-            } else {
-                palette.net_label
-            },
-        );
-        let offset = if annotation.selected_current {
-            egui::vec2(8.0, 12.0)
-        } else {
-            egui::vec2(7.0, -galley.size().y - 7.0)
-        };
-        let mut text_pos = anchor + offset;
-        text_pos.x = text_pos.x.clamp(
-            available.left() + 3.0,
-            available.right() - galley.size().x - 3.0,
-        );
-        text_pos.y = text_pos.y.clamp(
-            available.top() + 3.0,
-            available.bottom() - galley.size().y - 3.0,
-        );
-        let background = Rect::from_min_size(text_pos, galley.size()).expand2(egui::vec2(4.0, 2.0));
-        painter.rect_filled(background, 2.0, palette.bg_elevated);
-        painter.rect_stroke(
-            background,
-            2.0,
-            Stroke::new(1.0, palette.border),
-            egui::StrokeKind::Inside,
-        );
-        painter.galley(text_pos, galley, palette.text);
-    }
-}
-
-/// Centered get-started hint for an empty sheet.
-fn draw_empty_hint(painter: &Painter, available: Rect) {
-    use crate::ui::theme::{self, FontWeight};
-
-    let palette = crate::ui::tokens::active_palette();
-    let center = available.center();
-    if available.width() < EMPTY_HINT_MOBILE_BREAKPOINT {
-        draw_empty_hint_mobile(painter, center);
-        return;
-    }
-    painter.text(
-        center - egui::vec2(0.0, 22.0),
-        egui::Align2::CENTER_CENTER,
-        EMPTY_HINT_DESKTOP_LINES[0],
-        theme::sans(15.0, FontWeight::Medium),
-        palette.text_dim,
-    );
-    painter.text(
-        center + egui::vec2(0.0, 2.0),
-        egui::Align2::CENTER_CENTER,
-        EMPTY_HINT_DESKTOP_LINES[1],
-        theme::sans(12.0, FontWeight::Regular),
-        palette.text_faint,
-    );
-    painter.text(
-        center + egui::vec2(0.0, 22.0),
-        egui::Align2::CENTER_CENTER,
-        EMPTY_HINT_DESKTOP_LINES[2],
-        theme::sans(12.0, FontWeight::Regular),
-        palette.text_faint,
-    );
-}
-
-fn draw_empty_hint_mobile(painter: &Painter, center: egui::Pos2) {
-    use crate::ui::theme::{self, FontWeight};
-
-    let palette = crate::ui::tokens::active_palette();
-    let lines = empty_hint_lines_for_width(EMPTY_HINT_MOBILE_BREAKPOINT - 1.0);
-    let line_height = 20.0;
-    let first_y = center.y - (lines.len().saturating_sub(1) as f32 * line_height) * 0.5;
-    for (index, line) in lines.iter().enumerate() {
-        let title = index == 0;
-        painter.text(
-            egui::pos2(center.x, first_y + index as f32 * line_height),
-            egui::Align2::CENTER_CENTER,
-            *line,
-            theme::sans(
-                if title { 15.0 } else { 12.0 },
-                if title {
-                    FontWeight::Medium
-                } else {
-                    FontWeight::Regular
-                },
-            ),
-            if title {
-                palette.text_dim
-            } else {
-                palette.text_faint
-            },
-        );
-    }
-}
-
-fn empty_hint_lines_for_width(width: f32) -> &'static [&'static str] {
-    if width < EMPTY_HINT_MOBILE_BREAKPOINT {
-        &EMPTY_HINT_MOBILE_LINES
-    } else {
-        &EMPTY_HINT_DESKTOP_LINES
-    }
-}
-
-#[cfg(test)]
-fn empty_hint_estimated_width(line: &str) -> f32 {
-    line.chars().count() as f32 * 7.0
+    focus: SchematicKeyboardFocus,
+) -> bool {
+    scene::keyboard_focus_matches_selection(
+        &super::schematic_design_view(state),
+        &state.schematic.session.editor.selection,
+        focus,
+    )
 }
 
 #[cfg(test)]
@@ -1741,19 +896,6 @@ mod tests {
             probe_visual_status(&probe, &statuses),
             ProbeVisualStatus::Disabled
         );
-    }
-
-    #[test]
-    fn phone_width_empty_hint_lines_fit_canvas() {
-        let lines = empty_hint_lines_for_width(390.0);
-        let safe_width = 390.0 - 32.0;
-
-        for line in lines {
-            assert!(
-                empty_hint_estimated_width(line) <= safe_width,
-                "{line:?} should fit within {safe_width}px"
-            );
-        }
     }
 
     fn state_with_operating_point() -> AppState {
