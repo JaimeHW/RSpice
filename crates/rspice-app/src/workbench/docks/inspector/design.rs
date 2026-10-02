@@ -532,7 +532,7 @@ fn hero(ui: &mut Ui, app: &mut RSpiceApp, spec: Hero) {
     );
 
     match spec.preview {
-        HeroPreview::Symbol(kind) => crate::schematic::view::draw_symbol_preview(
+        HeroPreview::Symbol(kind) => rspice_schematic_editor::symbols::draw_symbol_preview(
             ui.painter(),
             preview.shrink(12.0),
             kind,
