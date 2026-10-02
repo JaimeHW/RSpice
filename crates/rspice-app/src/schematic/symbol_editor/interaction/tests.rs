@@ -4,8 +4,9 @@ use super::*;
 use crate::state::{
     Cell, CellViewRef, Library, Point, PortDirection, SymbolPin, SymbolShape, View, ViewType,
 };
-use crate::workbench::{SymbolSelection, SymbolTool};
+use crate::workbench::SymbolTool;
 use rspice_schematic_editor::symbol_editor::interaction::SymbolCanvasInput;
+use rspice_schematic_editor::symbol_editor::session::SymbolSelection;
 
 fn open_symbol() -> AppState {
     let mut state = AppState::default();

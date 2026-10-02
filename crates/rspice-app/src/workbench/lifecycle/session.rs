@@ -167,9 +167,7 @@ impl SelectionBulkFilterSession {
 }
 
 pub use rspice_schematic_editor::symbol_editor::session::{
-    SymbolClipboard, SymbolEditorSession, SymbolGridSpacing, SymbolSelection, SymbolTool,
-    mirror_point_h_about, mirror_point_v_about, mirror_shape_h_about, mirror_shape_v_about,
-    rotate_point_cw_about, rotate_shape_cw_about,
+    SymbolEditorSession, SymbolGridSpacing, SymbolTool,
 };
 
 #[derive(Debug, Clone, Default)]

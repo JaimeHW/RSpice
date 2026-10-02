@@ -1463,7 +1463,7 @@ impl Command {
             Self::NextWorkspace => app.state.workbench.cycle_workspace(false),
             Self::SelectTool => {
                 if active_symbol_editor(app) {
-                    app.state.ui.symbol.editor.tool = crate::workbench::SymbolTool::Select;
+                    app.activate_symbol_tool(crate::workbench::SymbolTool::Select);
                 } else {
                     set_tool(app, Tool::Select);
                 }
@@ -1592,52 +1592,19 @@ impl Command {
             Self::RevisionHistory => {
                 crate::workbench::app::open_project_revision_history(&mut app.state);
             }
-            Self::SymbolPinTool => {
-                app.state.ui.symbol.editor.tool = super::SymbolTool::PlacePin;
-                let next = app
-                    .state
-                    .load_active_symbol_document()
-                    .ok()
-                    .and_then(|document| {
-                        document
-                            .pins
-                            .iter()
-                            .find(|pin| pin.position.is_none())
-                            .map(|pin| pin.name.clone())
-                    });
-                if let Some(pin) = next {
-                    app.state.ui.symbol.editor.select_pin(pin);
-                } else {
-                    app.state.ui.symbol.editor.clear_selection();
-                }
-            }
-            Self::SymbolPolylineTool => {
-                app.state.ui.symbol.editor.tool = super::SymbolTool::Line;
-                app.state.ui.symbol.editor.pending_polyline.clear();
-            }
-            Self::SymbolRectangleTool => {
-                app.state.ui.symbol.editor.tool = super::SymbolTool::Rectangle;
-                app.state.ui.symbol.editor.shape_start = None;
-            }
-            Self::SymbolCircleTool => {
-                app.state.ui.symbol.editor.tool = super::SymbolTool::Circle;
-                app.state.ui.symbol.editor.shape_start = None;
-            }
-            Self::SymbolArcTool => {
-                app.state.ui.symbol.editor.tool = super::SymbolTool::Arc;
-                app.state.ui.symbol.editor.shape_start = None;
-            }
-            Self::SymbolPolygonTool => {
-                app.state.ui.symbol.editor.tool = super::SymbolTool::Polygon;
-                app.state.ui.symbol.editor.pending_polyline.clear();
-            }
-            Self::SymbolTextTool => app.state.ui.symbol.editor.tool = super::SymbolTool::Text,
-            Self::SymbolRotatePin => {
-                crate::schematic::symbol_editor::rotate_selected_pin(&mut app.state)
-            }
-            Self::SymbolMirrorPin => {
-                crate::schematic::symbol_editor::mirror_selected_pin(&mut app.state)
-            }
+            Self::SymbolPinTool => app.activate_symbol_tool(super::SymbolTool::PlacePin),
+            Self::SymbolPolylineTool => app.activate_symbol_tool(super::SymbolTool::Line),
+            Self::SymbolRectangleTool => app.activate_symbol_tool(super::SymbolTool::Rectangle),
+            Self::SymbolCircleTool => app.activate_symbol_tool(super::SymbolTool::Circle),
+            Self::SymbolArcTool => app.activate_symbol_tool(super::SymbolTool::Arc),
+            Self::SymbolPolygonTool => app.activate_symbol_tool(super::SymbolTool::Polygon),
+            Self::SymbolTextTool => app.activate_symbol_tool(super::SymbolTool::Text),
+            Self::SymbolRotatePin => app.transform_selected_symbol_pin(
+                rspice_schematic_editor::symbol_editor::commands::SymbolPinTransform::Rotate,
+            ),
+            Self::SymbolMirrorPin => app.transform_selected_symbol_pin(
+                rspice_schematic_editor::symbol_editor::commands::SymbolPinTransform::Mirror,
+            ),
             Self::SymbolUpdatePinsFromContract => {
                 match app.state.update_active_symbol_pins_from_contract() {
                     Ok(summary) => app

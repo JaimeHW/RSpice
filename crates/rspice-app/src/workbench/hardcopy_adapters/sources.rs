@@ -71,10 +71,10 @@ use crate::hardcopy::sources::{
 use crate::workbench::documents::result_document::ResultViewer;
 #[cfg(test)]
 use crate::workbench::documents::visualization_studio::VisualizationStudioState;
-#[cfg(test)]
-use crate::workbench::lifecycle::session::SymbolSelection;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use rspice_results::studio_presentation::VisualizationPane as StudioPane;
+#[cfg(test)]
+use rspice_schematic_editor::symbol_editor::session::SymbolSelection;
 #[cfg(test)]
 use rspice_results::studio_presentation::VisualizationStudioPresentation;
 

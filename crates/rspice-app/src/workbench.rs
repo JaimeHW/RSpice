@@ -77,10 +77,8 @@ pub(crate) use cross_probe::synchronize_schematic_cross_probe;
 pub use documents::result_document::ResultViewer;
 pub(crate) use lifecycle::session::SchematicVisibilityRecovery;
 pub use lifecycle::session::{
-    SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind, SymbolClipboard,
-    SymbolGridSpacing, SymbolSelection, SymbolTool, UiSessionState, UiSessionStateSer,
-    mirror_point_h_about, mirror_point_v_about, mirror_shape_h_about, mirror_shape_v_about,
-    rotate_point_cw_about, rotate_shape_cw_about,
+    SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind, SymbolGridSpacing,
+    SymbolTool, UiSessionState, UiSessionStateSer,
 };
 pub use lifecycle::window_session::ApplicationWindowId;
 pub use localization::UiTextLocale;
