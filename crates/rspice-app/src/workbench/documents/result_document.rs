@@ -269,6 +269,7 @@ use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_results_ui::derived::DerivedSeries;
 use rspice_results_ui::eye_diagram::EyeTimebase;
+use rspice_results_ui::eye_diagram::view::EyeTexture;
 use rspice_results_ui::fft::view::FftSeries;
 use rspice_results_ui::presentation::{PlotView, trace_color, well_hint};
 
@@ -2443,30 +2444,6 @@ pub(crate) struct ExprSeries {
     pub version: u64,
     /// Evaluation result, or the error to show on the strip.
     pub series: ExpressionSeriesResult,
-}
-
-/// GPU density image for the EYE viewer, baked once per (data revision,
-/// plot size, trace color) — per frame the eye then costs one textured
-/// quad instead of restroking every folded acquisition.
-#[derive(Clone)]
-pub struct EyeTexture {
-    pub(crate) revision: u64,
-    pub(crate) size: [usize; 2],
-    pub(crate) color: egui::Color32,
-    /// The data-space window the texture covers, which the draw maps onto
-    /// whatever the reader has zoomed to.
-    pub(crate) extent_bits: [u64; 4],
-    pub(crate) handle: egui::TextureHandle,
-}
-
-impl std::fmt::Debug for EyeTexture {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EyeTexture")
-            .field("revision", &self.revision)
-            .field("size", &self.size)
-            .field("extent_bits", &self.extent_bits)
-            .finish_non_exhaustive()
-    }
 }
 
 /// Stability numbers and axis extremes computed from the active AC curves.

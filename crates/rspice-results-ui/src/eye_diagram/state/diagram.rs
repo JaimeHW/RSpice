@@ -1,14 +1,7 @@
 //! Eye diagram viewer state.
 //!
-//! Only what `result_document::eye` reads: the loaded data, its measurements,
-//! the compliance mask and whether to draw it, and a revision counter the
-//! viewer's density-texture cache keys on.
-//!
-//! The persistence and colour-map settings, grid and measurement toggles,
-//! trace selection, manual h/v scales, the pan/zoom view range, cursors,
-//! markers, the persistence cache, and the measurement-pane width hints were a
-//! controls row and an interaction model that were never built. The viewer
-//! rasterises density itself and derives its axes from `data.ui_count`.
+//! Loaded data, measurements, compliance mask and local controls consumed by
+//! `eye_diagram::view`. The data revision keys the view's density texture.
 
 use super::super::EyeData;
 use super::super::EyeMeasurements;

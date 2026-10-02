@@ -4,6 +4,7 @@
 //! geometry and compliance calculations. This module coordinates viewer state.
 
 pub mod state;
+pub mod view;
 
 pub use rspice_core::analysis::signal_integrity::EyeTrace;
 pub use rspice_core::analysis::signal_integrity::{
