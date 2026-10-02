@@ -218,9 +218,12 @@ fn family_envelopes_are_memoized_against_the_models_that_produced_them() {
     let mut active = SimulationRun::new(2);
     active.add_analysis(family_analysis(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0]));
     let active_dataset = active.dataset_id;
-    let manifest = FamilyManifest::from_analysis(&active.analyses[0])
-        .unwrap()
-        .unwrap();
+    let manifest = FamilyManifest::from_metadata(
+        active.analyses[0].analysis_type,
+        active.analyses[0].family_metadata.as_ref(),
+    )
+    .unwrap()
+    .unwrap();
     let selection = SourceSampleSelection::new(active_dataset, 41, vec![0, 1, 2, 3, 4, 5])
         .unwrap()
         .with_family_presentation(&manifest, &family_policy())

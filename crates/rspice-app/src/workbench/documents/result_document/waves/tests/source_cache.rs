@@ -164,9 +164,12 @@ fn wave_cache_family_envelopes_follow_rebuilt_model_generations() {
     };
     *x_values = vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0];
     let run = &simulation.runs[0];
-    let manifest = FamilyManifest::from_analysis(&run.analyses[0])
-        .unwrap()
-        .unwrap();
+    let manifest = FamilyManifest::from_metadata(
+        run.analyses[0].analysis_type,
+        run.analyses[0].family_metadata.as_ref(),
+    )
+    .unwrap()
+    .unwrap();
     let selection = SourceSampleSelection::new(run.dataset_id, 41, vec![0, 1, 2, 3, 4, 5])
         .unwrap()
         .with_family_presentation(&manifest, &family_policy())

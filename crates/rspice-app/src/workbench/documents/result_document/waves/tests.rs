@@ -72,7 +72,7 @@ use crate::state::{
     WaveformData,
 };
 use crate::workbench::ChoicePreference;
-use crate::workbench::documents::visualization_family::FamilyManifest;
+use rspice_results::family_projection::FamilyManifest;
 
 fn assert_editor_spans_disjoint(left: EditorSpan, right: EditorSpan) {
     assert!(
@@ -1348,9 +1348,12 @@ fn family_policy_expands_stable_styles_and_preserves_overlay_sources() {
     let mut active = SimulationRun::new(2);
     active.add_analysis(family_analysis(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0]));
     let active_dataset = active.dataset_id;
-    let manifest = FamilyManifest::from_analysis(&active.analyses[0])
-        .unwrap()
-        .unwrap();
+    let manifest = FamilyManifest::from_metadata(
+        active.analyses[0].analysis_type,
+        active.analyses[0].family_metadata.as_ref(),
+    )
+    .unwrap()
+    .unwrap();
     let selection = SourceSampleSelection::new(active_dataset, 41, vec![0, 1, 2, 3, 4, 5])
         .unwrap()
         .with_family_presentation(&manifest, &family_policy())
@@ -1497,9 +1500,12 @@ fn family_policy_expands_stable_styles_and_preserves_overlay_sources() {
 fn incompatible_family_overlay_is_visibly_rejected_without_drawing_native_x() {
     let mut active = SimulationRun::new(2);
     active.add_analysis(family_analysis(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0]));
-    let manifest = FamilyManifest::from_analysis(&active.analyses[0])
-        .unwrap()
-        .unwrap();
+    let manifest = FamilyManifest::from_metadata(
+        active.analyses[0].analysis_type,
+        active.analyses[0].family_metadata.as_ref(),
+    )
+    .unwrap()
+    .unwrap();
     let selection = SourceSampleSelection::new(active.dataset_id, 41, vec![0, 1, 2, 3, 4, 5])
         .unwrap()
         .with_family_presentation(&manifest, &family_policy())
@@ -1544,9 +1550,12 @@ fn incompatible_family_overlay_is_visibly_rejected_without_drawing_native_x() {
 fn filtered_overlay_uses_typed_ast_and_ignores_excluded_duplicate_x_rows() {
     let mut active = SimulationRun::new(2);
     active.add_analysis(family_analysis(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0]));
-    let manifest = FamilyManifest::from_analysis(&active.analyses[0])
-        .unwrap()
-        .unwrap();
+    let manifest = FamilyManifest::from_metadata(
+        active.analyses[0].analysis_type,
+        active.analyses[0].family_metadata.as_ref(),
+    )
+    .unwrap()
+    .unwrap();
     let process = FamilyDimension::new("process", ValueType::Text).unwrap();
     let mut policy = family_policy();
     policy.filter = Some(FamilyFilterExpression {

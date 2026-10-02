@@ -47,11 +47,11 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{IconButton, chip, section_header};
 use crate::workbench::AppState;
-use crate::workbench::documents::visualization_family::{
-    FamilyRenderGroup, FamilyRenderPlan, FamilyTraceStyle, SourceSampleSelection,
-};
 use crate::workbench::{
     ComplexNumberDisplay, CursorInterpolation, LargeDatasetDisplay, ResultPresentationPolicy,
+};
+use rspice_results::family_projection::{
+    FamilyRenderGroup, FamilyRenderPlan, FamilyTraceStyle, SourceSampleSelection,
 };
 
 use super::frame_work::{self, FrameSampleRead};
@@ -1073,7 +1073,12 @@ pub(super) fn build_models(
             };
 
             let overlay_family_plan = match sample_selection
-                .map(|selection| selection.overlay_render_plan(overlay_analysis))
+                .map(|selection| {
+                    selection.overlay_render_plan(
+                        overlay_analysis.analysis_type,
+                        overlay_analysis.family_metadata.as_ref(),
+                    )
+                })
                 .transpose()
             {
                 Ok(plan) => plan.flatten(),

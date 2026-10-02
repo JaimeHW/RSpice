@@ -81,7 +81,7 @@ use rspice_results::studio_presentation::{
 };
 
 use super::result_document;
-use super::visualization_family::{FamilyManifest, FamilyValueKind, SourceSampleSelection};
+use rspice_results::family_projection::{FamilyManifest, FamilyValueKind, SourceSampleSelection};
 
 const SUMMARY: &str = "Compose waveform, tabular, statistical, RF, eye, field, and report-page views with family slicing, exact axes, annotations, measurements, and large-data policies.";
 const EVIDENCE: &str = "Implemented visualization entities retain dataset and analysis identities, viewer type, pane/page placement, links, exact markers, scalar measurements, and annotations without mutating source samples.";
@@ -1189,11 +1189,11 @@ fn open_dock(app: &mut RSpiceApp, dock: VisualizationDock) {
     });
     let phase_continuous = app.state.ui.results.phase_continuous;
     let active_viewer = app.state.ui.results.viewer;
-    let family_manifest = app
-        .state
-        .simulation
-        .active_analysis()
-        .and_then(|analysis| FamilyManifest::from_analysis(analysis).ok().flatten());
+    let family_manifest = app.state.simulation.active_analysis().and_then(|analysis| {
+        FamilyManifest::from_metadata(analysis.analysis_type, analysis.family_metadata.as_ref())
+            .ok()
+            .flatten()
+    });
     let active_family_policy = active_pane.as_ref().and_then(|pane| {
         app.state
             .workbench

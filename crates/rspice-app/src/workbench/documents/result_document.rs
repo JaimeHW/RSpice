@@ -252,7 +252,6 @@ pub use crate::state::result_presentation::{
 };
 use crate::state::result_presentation::{ResultExpressionGroup, ResultPresentation};
 
-use super::visualization_family::SourceSampleSelection;
 use crate::product::{AnalysisInstanceId, DatasetId, ResultDocumentId};
 use crate::results::visualization_document::{MarkerId, PaneId};
 use crate::simulation::SimulationController;
@@ -267,6 +266,7 @@ use crate::workbench::app_state::ActiveViewer;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_results::family_projection::SourceSampleSelection;
 use rspice_results_ui::derived::DerivedSeries;
 use rspice_results_ui::eye_diagram::EyeTimebase;
 use rspice_results_ui::eye_diagram::view::EyeTexture;

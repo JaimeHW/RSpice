@@ -11,7 +11,10 @@ fn fixture(indices: Vec<usize>, text: &str) -> (AppState, Vec<StripModel>) {
     state.simulation.complete_run();
     let run = state.simulation.active_run().unwrap();
     let analysis = &run.analyses[0];
-    let manifest = FamilyManifest::from_analysis(analysis).unwrap().unwrap();
+    let manifest =
+        FamilyManifest::from_metadata(analysis.analysis_type, analysis.family_metadata.as_ref())
+            .unwrap()
+            .unwrap();
     let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
     let selection = SourceSampleSelection::new(run.dataset_id, analysis.id, indices)
         .unwrap()
@@ -102,9 +105,12 @@ fn changing_scope_refreshes_calculations_while_visibility_does_not() {
     let version = state.simulation.data_version;
     let run = state.simulation.active_run().unwrap();
     let digest = run.dataset_content_digest();
-    let manifest = FamilyManifest::from_analysis(&run.analyses[0])
-        .unwrap()
-        .unwrap();
+    let manifest = FamilyManifest::from_metadata(
+        run.analyses[0].analysis_type,
+        run.analyses[0].family_metadata.as_ref(),
+    )
+    .unwrap()
+    .unwrap();
     let next = SourceSampleSelection::new(run.dataset_id, 41, vec![0, 1])
         .unwrap()
         .with_family_presentation(&manifest, &family_policy())
@@ -152,9 +158,12 @@ fn restored_expression_and_typed_family_filter_keep_the_selected_measurement() {
     reopened.simulation = state.simulation.clone();
     super::super::super::restore_presentation(&mut reopened, presentation);
     let run = reopened.simulation.active_run().unwrap();
-    let manifest = FamilyManifest::from_analysis(&run.analyses[0])
-        .unwrap()
-        .unwrap();
+    let manifest = FamilyManifest::from_metadata(
+        run.analyses[0].analysis_type,
+        run.analyses[0].family_metadata.as_ref(),
+    )
+    .unwrap()
+    .unwrap();
     let indices = manifest
         .matching_source_indices_for_filter(policy.filter.as_ref())
         .unwrap();

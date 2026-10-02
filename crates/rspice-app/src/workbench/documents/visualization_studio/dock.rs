@@ -2943,7 +2943,7 @@ fn active_family_manifest(app: &RSpiceApp) -> Result<FamilyManifest, String> {
         .simulation
         .active_analysis()
         .ok_or_else(|| "Select an analysis with retained family data.".to_owned())?;
-    FamilyManifest::from_analysis(analysis)?
+    FamilyManifest::from_metadata(analysis.analysis_type, analysis.family_metadata.as_ref())?
         .ok_or_else(|| "The active analysis has no retained family manifest.".to_owned())
 }
 
@@ -2978,8 +2978,9 @@ pub(super) fn active_family_sample_selection(
             "The active renderer binding does not match the family policy pane.".to_owned(),
         );
     }
-    let manifest = FamilyManifest::from_analysis(analysis)?
-        .ok_or_else(|| "The pane's source no longer contains family metadata.".to_owned())?;
+    let manifest =
+        FamilyManifest::from_metadata(analysis.analysis_type, analysis.family_metadata.as_ref())?
+            .ok_or_else(|| "The pane's source no longer contains family metadata.".to_owned())?;
     let indices = manifest.matching_source_indices_for_filter(policy.filter.as_ref())?;
     for waveform in &analysis.waveforms {
         manifest.compatible_waveform_len(waveform.x.len())?;

@@ -5,10 +5,6 @@
 //! correlation study, a visualization. They render inside a surface but do
 //! not own navigation, chrome, or the route: a surface decides which of these
 //! is showing, and these decide what it looks like.
-//!
-//! `visualization_family` is the taxonomy the studio and the result viewers
-//! agree on, which is why it sits with them rather than with the design
-//! system.
 
 /// The document the Code & Automation workspace currently presents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -41,5 +37,4 @@ pub(crate) mod result_document;
 pub(crate) mod text_document_model;
 pub(crate) mod text_editor_commands;
 pub(crate) mod virtual_text_editor;
-pub(crate) mod visualization_family;
 pub(crate) mod visualization_studio;

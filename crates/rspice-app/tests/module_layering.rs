@@ -588,7 +588,6 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "feature_availability",
     "feature_availability_data",
     "design_system",
-    "documents/visualization_family",
     // Document engines and the interaction session they hang off.
     "lifecycle/session",
     "documents/netlist_document",

@@ -1796,8 +1796,9 @@ pub(super) fn family_query_for_point(
         .and_then(|plan_id| state.simulation.active_run_for_plan(plan_id))
         .and_then(|run| run.analyses.get(analysis_index))
         .and_then(|analysis| {
-            crate::workbench::documents::visualization_family::FamilyManifest::from_analysis(
-                analysis,
+            rspice_results::family_projection::FamilyManifest::from_metadata(
+                analysis.analysis_type,
+                analysis.family_metadata.as_ref(),
             )
             .ok()
             .flatten()
