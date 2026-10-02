@@ -220,6 +220,7 @@ mod tests {
                         let response = ui.interact(
                             bounds,
                             egui::Id::new("move-canvas"),
+                            // accessibility-pointer-shim: synthetic input for the move handler test.
                             egui::Sense::click_and_drag(),
                         );
                         if !commit {

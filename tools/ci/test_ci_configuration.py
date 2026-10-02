@@ -1778,8 +1778,8 @@ class CiConfigurationTests(unittest.TestCase):
             "crates/rspice-app/src/workbench/documents/netlist_document/baseline.rs",
             "crates/rspice-app/src/workbench/documents/netlist_document/diagnostics.rs",
             "crates/rspice-simulation/src/manual_deck.rs",
-            "crates/rspice-app/src/simulation/runner/wasm_worker.rs",
-            "crates/rspice-app/src/simulation/runner/worker_contract.rs",
+            "crates/rspice-simulation/src/runner/wasm_worker.rs",
+            "crates/rspice-simulation/src/runner/worker_contract.rs",
             "crates/rspice-app/src/state/simulation/ac_bode.rs",
             "crates/rspice-veriloga/tests/support/mod.rs",
         ]

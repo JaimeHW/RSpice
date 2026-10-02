@@ -145,6 +145,7 @@ fn a_multi_object_grab_moves_the_whole_selection_as_one_edit() {
             |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     bind_active_canvas(&mut state);
+                    // accessibility-pointer-shim: synthetic input for the canvas handler test.
                     let response = ui.allocate_rect(viewport().rect, egui::Sense::click_and_drag());
                     let mut document = state.load_active_symbol_document().unwrap();
                     let mut metadata = state.load_active_symbol_editor_metadata(&document).unwrap();

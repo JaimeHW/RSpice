@@ -193,6 +193,7 @@ mod tests {
                         let response = ui.interact(
                             bounds,
                             egui::Id::new("array-canvas"),
+                            // accessibility-pointer-shim: synthetic input for the array handler test.
                             egui::Sense::click_and_drag(),
                         );
                         if !commit {

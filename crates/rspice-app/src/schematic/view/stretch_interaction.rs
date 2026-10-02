@@ -252,6 +252,7 @@ mod tests {
                         let response = ui.interact(
                             bounds,
                             egui::Id::new("stretch-canvas"),
+                            // accessibility-pointer-shim: synthetic input for the stretch handler test.
                             egui::Sense::click_and_drag(),
                         );
                         if !commit {
