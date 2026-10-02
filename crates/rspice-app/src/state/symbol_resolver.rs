@@ -1,7 +1,7 @@
 //! Resolve symbols over the current editor buffers and library catalog.
 
 use super::{CellViewRef, LibraryCellInstance, LibraryManager};
-pub use rspice_design::resolved_symbol::{ResolvedCellSymbol, ResolvedSymbolSource};
+pub use rspice_design::resolved_symbol::ResolvedCellSymbol;
 use rspice_design::schematic::{document::SchematicDocument, owned::Schematic};
 use rspice_design::symbol_resolver as resolution;
 use std::collections::HashMap;

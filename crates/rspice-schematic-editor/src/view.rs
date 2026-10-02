@@ -30,3 +30,5 @@ pub mod move_interaction;
 pub mod transform_input;
 
 pub mod stretch_interaction;
+
+pub mod preview;

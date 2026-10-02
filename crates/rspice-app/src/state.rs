@@ -205,7 +205,7 @@ pub use symbol::{
 };
 #[cfg(test)]
 pub use symbol_resolver::ResolvedCellSymbol;
-pub use symbol_resolver::{ResolvedSymbolSource, SymbolResolver};
+pub use symbol_resolver::SymbolResolver;
 pub(crate) use workspace::PreparedProjectLibraryMutation;
 pub use workspace::{
     CaptureGroup, CaptureGroupMembership, CaptureGroupRule, CellViewRef, ComplexExpressionPolicy,

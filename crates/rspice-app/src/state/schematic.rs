@@ -129,7 +129,7 @@ pub use rspice_design::schematic::wire::WireConnection;
 pub use selection::{
     DuplicateExternalNets, JunctionSelection, SchematicSelectionFilter, Selection,
 };
-pub use snap::{SnapEngine, SnapResult, SnapTarget, SnapTargetType};
+pub use snap::{SnapEngine, SnapResult};
 pub use state::{
     MoveSelectionMode, PendingStimulusPlacement, SchematicState, StretchOrthogonalPolicy,
     StretchTarget,

@@ -22,7 +22,6 @@ mod mobile_controls;
 mod move_interaction;
 mod preview;
 mod requests;
-pub(crate) use rspice_schematic_editor::view::resolved_symbol_render;
 pub(crate) use rspice_schematic_editor::view::symbol_context::SchematicSymbolContext;
 use rspice_schematic_editor::view::symbol_context::SelectionWindow;
 mod scene;

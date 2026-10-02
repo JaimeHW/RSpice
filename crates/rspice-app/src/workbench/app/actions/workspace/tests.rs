@@ -12,14 +12,14 @@ use crate::diagnostics::{LogAnchor, LogSource};
 use crate::state::{
     Cell, CellViewRef, Component, ComponentType, LayoutEdit, LayoutInstance, LayoutObjectId,
     LayoutOrientation, LayoutPoint, LayoutTransform, Library, LibraryCellInstance, Point,
-    PortDirection, PortSpec, ResolvedSymbolSource, Rotation, SYMBOL_DOCUMENT_METADATA_KEY,
-    SchematicState, SymbolDocument, SymbolEditorMetadata, SymbolPin, SymbolResolver, View,
-    ViewType, Wire,
+    PortDirection, PortSpec, Rotation, SYMBOL_DOCUMENT_METADATA_KEY, SchematicState,
+    SymbolDocument, SymbolEditorMetadata, SymbolPin, SymbolResolver, View, ViewType, Wire,
 };
 use crate::workbench::ChoicePreference;
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::Workspace;
 use rspice_design::drc::{DrcLocation, DrcViolationType};
+use rspice_design::resolved_symbol::ResolvedSymbolSource;
 
 #[test]
 fn generated_symbol_sync_advances_the_catalog_only_for_real_changes() {

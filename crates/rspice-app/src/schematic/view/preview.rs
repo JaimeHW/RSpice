@@ -1,45 +1,29 @@
-//! Placement preview.
-//!
-//! Draws the ghost of an object being placed, following the cursor at the
-//! current grid snap and orientation, before the placement is committed.
+//! App-owned preview orchestration and canonical transform candidates.
 
-use egui::{Painter, Pos2, Rect, Response, Stroke, Vec2};
-
-use crate::state::{
-    Bus, BusTap, Component, ComponentType, DesignNote, NetLabel, Point, PortSpec,
-    ResolvedSymbolSource, SchematicArrayKind, SchematicArrayPlacement, SnapResult, SnapTarget,
-    SnapTargetType, SymbolResolver, Tool, geometry_from_points,
+use super::super::symbols::SymbolLibrary;
+use super::{
+    SchematicShelfDragPayload, SchematicSymbolContext,
+    array_interaction::array_placement,
+    design_notes::draw_design_note,
+    documentation_shapes::draw_documentation_shape,
+    drawing::{draw_bus, draw_bus_tap, draw_component, draw_junction, draw_wire},
+    net_labels::draw_net_label,
+    snap_resolution::resolve_grid_pointer,
+    viewport::Viewport,
 };
+use crate::state::{Point, SchematicArrayKind, SchematicArrayPlacement, SymbolResolver, Tool};
 use crate::workbench::app_state::AppState;
-
-use super::super::symbols::{SymbolLibrary, draw_symbol, draw_symbol_with_dimensions};
-use super::SchematicShelfDragPayload;
-use super::SchematicSymbolContext;
-use super::array_interaction::array_placement;
-use super::bus_interaction::resolve_bus_tap_candidate_on_active_sheet;
-use super::coordinates::screen_to_schematic;
-use super::design_notes::draw_design_note;
-use super::documentation_shapes::{
-    draw_documentation_shape, draw_geometry, preview_anchor_color, preview_stroke,
-};
-use super::drawing::{
-    compatible_builtin_xspice_asset, draw_artwork_lead_extensions, draw_bus, draw_bus_tap,
-    draw_component, draw_junction, draw_port_direction_overlay, draw_symbol_resolution_error,
-    draw_wire, nearest_wire_screen_hit, paint_conductor, port_symbol_stroke,
-};
-use super::net_labels::draw_net_label;
-use super::resolved_symbol_render::{draw_resolved_symbol, resolved_symbol_world_bounds};
-use super::sheet_visibility::{
-    active_junction_at, object_is_on_active_sheet, objects_on_active_sheet,
-};
-use super::snap_resolution::{
-    conductor_attachment_pitch, resolve_grid_pointer, resolve_target_pointer,
-};
-use super::viewport::Viewport;
+use egui::{Painter, Rect, Response, Stroke, Vec2};
 use rspice_design::schematic::design_note::DesignNoteRenderContext;
+use rspice_schematic_editor::view::preview::{self, PreviewView};
 
-const WIRE_PREVIEW_STROKE_WIDTH: f32 = 1.5;
-const COMPONENT_PREVIEW_GHOST_ALPHA: f32 = 0.55;
+fn preview_view(state: &AppState) -> PreviewView<'_> {
+    PreviewView {
+        design: super::schematic_design_view(state),
+        editor: &state.schematic.session.editor,
+        can_edit: !state.schematic_edit_read_only(),
+    }
+}
 
 pub(super) fn draw_interaction_previews(
     painter: &Painter,
@@ -68,30 +52,27 @@ pub(super) fn draw_interaction_previews(
     );
     draw_bus_preview(painter, response, state, viewport);
     draw_wire_preview(painter, response, state, viewport, symbol_context);
-    draw_bus_tap_preview(painter, response, state, viewport);
-    draw_junction_preview(painter, response, state, viewport);
-    draw_net_label_preview(painter, response, state, viewport, symbol_context);
-    draw_design_note_preview(painter, response, state, viewport);
-    draw_documentation_shape_preview(painter, response, state, viewport);
-    draw_component_preview(
+    let view = preview_view(state);
+    preview::draw_bus_tap_preview(painter, response, &view, viewport);
+    preview::draw_junction_preview(painter, response, &view, viewport);
+    preview::draw_net_label_preview(painter, response, &view, viewport, symbol_context);
+    preview::draw_design_note_preview(painter, response, &view, viewport, || {
+        state.workspace.content.active_view.display_path()
+    });
+    preview::draw_documentation_shape_preview(painter, response, &view, viewport);
+    preview::draw_component_preview(
         painter,
         response,
-        state,
+        &view,
         viewport,
         symbol_context,
         symbol_library,
     );
-    draw_selection_rect(painter, state, viewport);
+    preview::draw_selection_rect(painter, &view, viewport);
     draw_placement_badge(painter, response, state);
 }
 
-/// The one line a sequenced placement owes the pointer: what the next click
-/// places, and where it is in the batch.
-///
-/// It is painted last so nothing covers it, it carries only draft-dependent
-/// text, and it states the model's refusal when the click will not succeed —
-/// which is the only way a reader learns that a name was taken by someone else
-/// without first clicking and reading the console.
+/// Show the next sequenced placement and the model's current refusal, if any.
 fn draw_placement_badge(painter: &Painter, response: &Response, state: &AppState) {
     let Some(sequence) = state
         .schematic
@@ -638,198 +619,6 @@ fn draw_transform_feedback(painter: &Painter, response: &Response, valid: bool, 
     painter.galley(position, galley, color);
 }
 
-fn draw_documentation_shape_preview(
-    painter: &Painter,
-    response: &Response,
-    state: &AppState,
-    viewport: &Viewport,
-) {
-    if state.schematic_edit_read_only()
-        || state.schematic.session.editor.tool != Tool::DocumentationShape
-    {
-        return;
-    }
-    let Some(pending) = state
-        .schematic
-        .session
-        .editor
-        .pending_documentation_shape
-        .as_ref()
-    else {
-        return;
-    };
-    let drawing = &state.schematic.session.editor.documentation_shape_drawing;
-    let hover_point = if drawing.keyboard_active {
-        drawing.keyboard_cursor
-    } else {
-        response
-            .hover_pos()
-            .map(|position| resolve_grid_pointer(state, viewport, position).snapped_position)
-    };
-    let Some(hover_point) = hover_point else {
-        return;
-    };
-    let hover = viewport.schematic_to_screen(hover_point);
-    let mut points = state
-        .schematic
-        .session
-        .editor
-        .documentation_shape_drawing
-        .points
-        .clone();
-    if points.last() != Some(&hover_point) {
-        points.push(hover_point);
-    }
-    let geometry = geometry_from_points(pending.kind, &points);
-    let valid = geometry.is_ok();
-    if let Ok(geometry) = geometry {
-        draw_geometry(painter, viewport, &geometry, preview_stroke(true));
-    } else if points.len() >= 2 {
-        let screen_points = points
-            .iter()
-            .map(|point| viewport.schematic_to_screen(*point))
-            .collect::<Vec<_>>();
-        painter.add(egui::Shape::line(screen_points, preview_stroke(false)));
-    }
-    let color = preview_anchor_color(valid);
-    for point in &points {
-        painter.circle_stroke(
-            viewport.schematic_to_screen(*point),
-            3.0,
-            Stroke::new(1.0, color),
-        );
-    }
-    let label = format!(
-        "{}, {} \u{b7} {} \u{b7} non-electrical",
-        hover_point.x,
-        hover_point.y,
-        pending.kind.label()
-    );
-    let galley = painter.layout_no_wrap(
-        label,
-        crate::ui::theme::mono(
-            crate::ui::tokens::FS_0,
-            crate::ui::theme::FontWeight::Regular,
-        ),
-        color,
-    );
-    painter.galley(hover + egui::vec2(10.0, 10.0), galley, color);
-}
-
-fn draw_design_note_preview(
-    painter: &Painter,
-    response: &Response,
-    state: &AppState,
-    viewport: &Viewport,
-) {
-    if state.schematic_edit_read_only() || state.schematic.session.editor.tool != Tool::DesignNote {
-        return;
-    }
-    let (Some(hover), Some(pending)) = (
-        response.hover_pos(),
-        state.schematic.session.editor.pending_design_note.as_ref(),
-    ) else {
-        return;
-    };
-    let position = resolve_grid_pointer(state, viewport, hover).snapped_position;
-    let Ok(note) = DesignNote::new(0, position, pending.kind, pending.text.clone()) else {
-        return;
-    };
-    draw_design_note(
-        painter,
-        viewport,
-        &note,
-        &DesignNoteRenderContext::for_document(
-            state.schematic.document(),
-            &state.workspace.content.active_view.display_path(),
-        ),
-        false,
-        false,
-    );
-}
-
-fn draw_net_label_preview(
-    painter: &Painter,
-    response: &Response,
-    state: &AppState,
-    viewport: &Viewport,
-    symbol_context: &SchematicSymbolContext,
-) {
-    if state.schematic_edit_read_only()
-        || !matches!(
-            state.schematic.session.editor.tool,
-            Tool::Label | Tool::OffSheetConnector
-        )
-    {
-        return;
-    }
-    let Some(hover) = response.hover_pos() else {
-        return;
-    };
-    let position = resolve_target_pointer(state, symbol_context, viewport, hover).snapped_position;
-    // The ghost carries the armed tool's kind, so a connector's direction tab
-    // appears before the click rather than only after the transaction commits.
-    let ghost = if state.schematic.session.editor.tool == Tool::OffSheetConnector {
-        NetLabel::off_sheet(
-            0,
-            position,
-            "click to name",
-            crate::state::CrossSheetPortDirection::default(),
-        )
-    } else {
-        NetLabel::new(0, position, "click to name")
-    };
-    draw_net_label(painter, viewport, &ghost, false, false, true);
-}
-
-fn draw_junction_preview(
-    painter: &Painter,
-    response: &Response,
-    state: &AppState,
-    viewport: &Viewport,
-) {
-    if state.schematic_edit_read_only() || state.schematic.session.editor.tool != Tool::Junction {
-        return;
-    }
-    let Some(hover_pos) = response.hover_pos() else {
-        return;
-    };
-
-    let requested = resolve_grid_pointer(state, viewport, hover_pos).snapped_position;
-    let active_wires =
-        objects_on_active_sheet(state, &state.schematic.document().wires, |item| item.id);
-    let hit_schematic = crate::state::SchematicState::from_document(
-        rspice_design::schematic::document::SchematicDocument {
-            wires: active_wires.into_owned(),
-            ..Default::default()
-        },
-    );
-    let candidate =
-        hit_schematic.nearest_junction_candidate(requested, state.schematic.document().grid_size);
-    let preview = candidate.unwrap_or(requested);
-    let pos = viewport.schematic_to_screen(preview);
-    let palette = crate::ui::tokens::active_palette();
-    let mixed_bus = candidate.is_some_and(|point| {
-        state
-            .schematic
-            .document()
-            .buses
-            .iter()
-            .any(|bus| object_is_on_active_sheet(state, bus.id) && bus.contains_point(point))
-    });
-    let color = match candidate {
-        Some(_) if mixed_bus => palette.err,
-        Some(point) if active_junction_at(state, point).is_some() => palette.warn,
-        Some(_) => palette.accent,
-        None => palette.err,
-    };
-    let radius = (4.0 * viewport.zoom).max(3.0);
-    painter.circle_stroke(pos, radius, Stroke::new(1.0, color));
-    if !mixed_bus && candidate.is_some_and(|point| active_junction_at(state, point).is_none()) {
-        painter.circle_filled(pos, (1.75 * viewport.zoom).max(1.5), color);
-    }
-}
-
 fn draw_bus_preview(
     painter: &Painter,
     response: &Response,
@@ -847,70 +636,7 @@ fn draw_bus_preview(
         state.schematic.update_bus_preview(position);
     }
 
-    let mut points = state.schematic.session.editor.bus_drawing.points.clone();
-    let preview = state.schematic.session.editor.bus_drawing.preview_path();
-    points.extend(preview.into_iter().skip(1));
-    if points.len() < 2 {
-        if let Some(start) = points.first() {
-            painter.circle_stroke(
-                viewport.schematic_to_screen(*start),
-                (5.0 * viewport.zoom).max(3.0),
-                Stroke::new(1.0, crate::ui::tokens::active_palette().accent),
-            );
-        }
-        return;
-    }
-    let bus = Bus {
-        id: 0,
-        points,
-        declaration: state
-            .schematic
-            .session
-            .editor
-            .bus_drawing
-            .declaration
-            .clone(),
-    };
-    draw_bus(painter, viewport, &bus, true);
-}
-
-fn draw_bus_tap_preview(
-    painter: &Painter,
-    response: &Response,
-    state: &AppState,
-    viewport: &Viewport,
-) {
-    if state.schematic_edit_read_only() || state.schematic.session.editor.tool != Tool::BusTap {
-        return;
-    }
-    let Some(hover) = response.hover_pos() else {
-        return;
-    };
-    let requested = screen_to_schematic(viewport, hover);
-    let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
-    match resolve_bus_tap_candidate_on_active_sheet(state, requested, hit_radius) {
-        Ok(candidate) => {
-            let Some(pending) = state.schematic.session.editor.pending_bus_tap.as_ref() else {
-                return;
-            };
-            let tap = BusTap {
-                id: 0,
-                bus_id: candidate.bus_id,
-                bus_point: candidate.bus_point,
-                connection_point: candidate.connection_point,
-                slice: pending.slice.clone(),
-                orientation: candidate.orientation,
-            };
-            draw_bus_tap(painter, viewport, &tap, true);
-        }
-        Err(_) => {
-            painter.circle_stroke(
-                viewport.schematic_to_screen(requested),
-                (4.0 * viewport.zoom).max(3.0),
-                Stroke::new(1.0, crate::ui::tokens::active_palette().err),
-            );
-        }
-    }
+    preview::draw_bus_preview(painter, &preview_view(state), viewport);
 }
 
 fn draw_wire_preview(
@@ -927,7 +653,12 @@ fn draw_wire_preview(
 
     let snap_feedback = if wire_active {
         response.hover_pos().and_then(|hover_pos| {
-            let result = resolve_wire_preview_snap(state, symbol_context, viewport, hover_pos);
+            let result = preview::resolve_wire_preview_snap(
+                &preview_view(state),
+                symbol_context,
+                viewport,
+                hover_pos,
+            );
             if let Some(result) = result.as_ref() {
                 state.schematic.update_wire_preview(result.snapped_position);
             } else {
@@ -939,436 +670,15 @@ fn draw_wire_preview(
         None
     };
 
-    if wire_active {
-        let drawing = &state.schematic.session.editor.wire_drawing;
-        let to_screen = |point: &Point| viewport.schematic_to_screen(*point);
-        let committed: Vec<Pos2> = drawing.points.iter().map(to_screen).collect();
-        // The whole route a click would commit, corner included, goes down
-        // first in the hint tone as one mitered path, and the committed
-        // prefix is painted over it in full tone with a butt end at the last
-        // vertex. No end edge lies on another stroke's edge, which is what
-        // turns egui's alpha-feathered anti-aliasing into a lighter hairline.
-        let route: Vec<Pos2> = drawing.get_full_path().iter().map(to_screen).collect();
-
-        if let Some(start) = committed.first().copied() {
-            let wire_color = crate::ui::tokens::active_palette().accent;
-            let width = WIRE_PREVIEW_STROKE_WIDTH * viewport.zoom;
-            paint_conductor(
-                painter,
-                route,
-                Stroke::new(width, wire_color.gamma_multiply(0.6)),
-            );
-            paint_conductor(painter, committed, Stroke::new(width, wire_color));
-            painter.circle_filled(start, 4.0 * viewport.zoom, wire_color);
-        }
-    }
-
-    if let Some(result) = snap_feedback.as_ref() {
-        draw_wire_snap_feedback(painter, state, viewport, result);
-    }
-}
-
-/// Resolve exactly what a wire click would commit. Visual conductor
-/// acquisition owns the gesture before generic target priority, and a
-/// non-representable diagonal acquisition fails closed instead of showing a
-/// preview that cannot be committed.
-fn resolve_wire_preview_snap(
-    state: &AppState,
-    symbol_context: &SchematicSymbolContext,
-    viewport: &Viewport,
-    pointer: egui::Pos2,
-) -> Option<SnapResult> {
-    if !state.schematic.session.editor.snap_engine.enabled {
-        return Some(resolve_target_pointer(
-            state,
-            symbol_context,
-            viewport,
-            pointer,
-        ));
-    }
-    let active_wires =
-        objects_on_active_sheet(state, &state.schematic.document().wires, |wire| wire.id);
-    let Some(hit) = nearest_wire_screen_hit(
+    preview::draw_wire_preview(
+        painter,
+        &preview_view(state),
         viewport,
-        active_wires.as_ref(),
-        pointer,
-        6.0,
-        conductor_attachment_pitch(state),
-    ) else {
-        return Some(resolve_target_pointer(
-            state,
-            symbol_context,
-            viewport,
-            pointer,
-        ));
-    };
-    let attachment = hit.attachment?;
-    let wire = active_wires.iter().find(|wire| wire.id == hit.wire_id)?;
-    let raw = screen_to_schematic(viewport, pointer);
-    let distance = (f64::from(raw.x) - f64::from(attachment.x))
-        .hypot(f64::from(raw.y) - f64::from(attachment.y));
-    let target = if wire.points.first() == Some(&attachment) {
-        state
-            .schematic
-            .session
-            .editor
-            .snap_engine
-            .snap_to_wire_endpoints
-            .then(|| SnapTarget::wire_endpoint(attachment, wire.id, true, distance))
-    } else if wire.points.last() == Some(&attachment) {
-        state
-            .schematic
-            .session
-            .editor
-            .snap_engine
-            .snap_to_wire_endpoints
-            .then(|| SnapTarget::wire_endpoint(attachment, wire.id, false, distance))
-    } else {
-        let segment_index = wire
-            .segments()
-            .position(|segment| segment.contains_point(attachment))
-            .unwrap_or_default();
-        state
-            .schematic
-            .session
-            .editor
-            .snap_engine
-            .snap_to_wire_segments
-            .then(|| SnapTarget::wire_segment(attachment, wire.id, segment_index, distance))
-    };
-    Some(match target {
-        Some(target) => SnapResult::with_target(target, raw),
-        None => resolve_target_pointer(state, symbol_context, viewport, pointer),
-    })
-}
-
-fn draw_wire_snap_feedback(
-    painter: &Painter,
-    state: &AppState,
-    viewport: &Viewport,
-    result: &SnapResult,
-) {
-    if !result.show_indicator {
-        return;
-    }
-    let Some(copy) = wire_snap_feedback_copy(state, result) else {
-        return;
-    };
-
-    let palette = crate::ui::tokens::active_palette();
-    let center = viewport.schematic_to_screen(result.snapped_position);
-    painter.circle_stroke(center, 5.0, Stroke::new(1.25, palette.accent));
-    painter.line_segment(
-        [center - egui::vec2(2.5, 0.0), center + egui::vec2(2.5, 0.0)],
-        Stroke::new(1.0, palette.accent),
+        snap_feedback.as_ref(),
     );
-    painter.line_segment(
-        [center - egui::vec2(0.0, 2.5), center + egui::vec2(0.0, 2.5)],
-        Stroke::new(1.0, palette.accent),
-    );
-
-    let galley = painter.layout_no_wrap(
-        copy,
-        crate::ui::theme::mono(
-            crate::ui::tokens::FS_0,
-            crate::ui::theme::FontWeight::Regular,
-        ),
-        palette.text,
-    );
-    let requested = center + egui::vec2(10.0, -galley.size().y * 0.5);
-    let background_size = galley.size() + egui::vec2(8.0, 5.0);
-    let clip = painter.clip_rect().shrink(3.0);
-    let origin = egui::pos2(
-        requested.x.clamp(
-            clip.left(),
-            (clip.right() - background_size.x).max(clip.left()),
-        ),
-        requested.y.clamp(
-            clip.top(),
-            (clip.bottom() - background_size.y).max(clip.top()),
-        ),
-    );
-    let background = Rect::from_min_size(origin, background_size);
-    painter.rect_filled(background, 3.0, palette.bg_elevated.gamma_multiply(0.96));
-    painter.rect_stroke(
-        background,
-        3.0,
-        Stroke::new(1.0, palette.border_strong),
-        egui::StrokeKind::Inside,
-    );
-    painter.galley(origin + egui::vec2(4.0, 2.5), galley, palette.text);
 }
 
-/// Copy shown beside the live acquisition marker. Net names are included only
-/// when an authored label proves them; unknown nets are never guessed from IDs
-/// or a potentially stale generated-net cache.
-fn wire_snap_feedback_copy(state: &AppState, result: &SnapResult) -> Option<String> {
-    if !result.show_indicator {
-        return None;
-    }
-    let target = result.target.as_ref()?;
-    let target_copy = match &target.target_type {
-        SnapTargetType::Terminal {
-            component_id,
-            terminal_name,
-        } => {
-            let component = state
-                .schematic
-                .document()
-                .components
-                .iter()
-                .find(|component| component.id == *component_id);
-            let owner = component
-                .filter(|component| !component.name.trim().is_empty())
-                .map(|component| component.name.as_str())
-                .map(str::to_owned)
-                .unwrap_or_else(|| format!("component #{component_id}"));
-            format!("Pin {owner}.{terminal_name}")
-        }
-        SnapTargetType::Junction => "Junction".to_owned(),
-        SnapTargetType::WireEndpoint { wire_id, is_start } => format!(
-            "Wire #{wire_id} {} endpoint",
-            if *is_start { "start" } else { "end" }
-        ),
-        SnapTargetType::WireSegment {
-            wire_id,
-            segment_index,
-        } => format!("Wire #{wire_id} segment {}", segment_index + 1),
-        SnapTargetType::Grid => return None,
-    };
-
-    Some(match net_name_at_snap_target(state, target.position) {
-        Some(net_name) => format!("{target_copy} | net {net_name}"),
-        None => target_copy,
-    })
-}
-
-fn net_name_at_snap_target(state: &AppState, target: Point) -> Option<&str> {
-    state
-        .schematic
-        .document()
-        .net_labels
-        .iter()
-        .find(|label| {
-            object_is_on_active_sheet(state, label.id)
-                && label.pos == target
-                && !label.name.trim().is_empty()
-        })
-        .map(|label| label.name.as_str())
-        .or_else(|| {
-            state
-                .schematic
-                .document()
-                .wires
-                .iter()
-                .filter(|wire| {
-                    object_is_on_active_sheet(state, wire.id) && wire.contains_point(target)
-                })
-                .find_map(|wire| {
-                    state
-                        .schematic
-                        .document()
-                        .net_labels
-                        .iter()
-                        .find(|label| {
-                            object_is_on_active_sheet(state, label.id)
-                                && !label.name.trim().is_empty()
-                                && wire.contains_point(label.pos)
-                        })
-                        .map(|label| label.name.as_str())
-                })
-        })
-}
-
-#[cfg(test)]
-fn pending_library_cell_preview<'a>(
-    state: &AppState,
-    symbol_context: &'a SchematicSymbolContext,
-    grid_pos: Point,
-) -> Option<(Component, &'a crate::state::ResolvedCellSymbol)> {
-    let binding = state
-        .schematic
-        .session
-        .editor
-        .pending_library_cell
-        .clone()?;
-    let symbol = symbol_context.pending_library_symbol()?;
-    let component = Component::new(0, ComponentType::CellInstance, grid_pos)
-        .with_rotation(state.schematic.session.editor.preview_rotation)
-        .with_mirror_h(state.schematic.session.editor.preview_mirror_h)
-        .with_library_cell(binding);
-    Some((component, symbol))
-}
-
-fn pending_library_cell_component(state: &AppState, grid_pos: Point) -> Option<Component> {
-    Some(
-        Component::new(0, ComponentType::CellInstance, grid_pos)
-            .with_rotation(state.schematic.session.editor.preview_rotation)
-            .with_mirror_h(state.schematic.session.editor.preview_mirror_h)
-            .with_library_cell(
-                state
-                    .schematic
-                    .session
-                    .editor
-                    .pending_library_cell
-                    .clone()?,
-            ),
-    )
-}
-
-fn draw_component_preview(
-    painter: &Painter,
-    response: &Response,
-    state: &AppState,
-    viewport: &Viewport,
-    symbol_context: &SchematicSymbolContext,
-    symbol_library: Option<&SymbolLibrary>,
-) {
-    if !component_preview_enabled(state.schematic_edit_read_only()) {
-        return;
-    }
-
-    let preview_tool = state.schematic.session.editor.tool;
-    let preview_rotation_degrees = state.schematic.session.editor.preview_rotation.degrees();
-    let preview_mirror_h = state.schematic.session.editor.preview_mirror_h;
-
-    if let Tool::Place(component_type) = preview_tool
-        && let Some(hover_pos) = response.hover_pos()
-    {
-        let grid_pos = resolve_grid_pointer(state, viewport, hover_pos).snapped_position;
-        let preview_pos = viewport.schematic_to_screen(grid_pos);
-
-        // Ghost the symbol in dimmed accent until it is placed.
-        let preview_stroke = Stroke::new(
-            1.0 * viewport.zoom,
-            crate::ui::tokens::active_palette()
-                .accent
-                .gamma_multiply(COMPONENT_PREVIEW_GHOST_ALPHA),
-        );
-
-        if component_type == ComponentType::CellInstance
-            && let Some(preview_component) = pending_library_cell_component(state, grid_pos)
-        {
-            // Artwork first, exactly as the canvas resolves it: the ghost
-            // must be the symbol that lands when the pointer is released.
-            if let Some((library, filename, width, height)) = symbol_library
-                .and_then(|library| compatible_builtin_xspice_asset(&preview_component, library))
-                && let Some((symbol, adjusted_rotation)) =
-                    library.get_asset_with_rotation(filename, preview_rotation_degrees)
-            {
-                draw_symbol_with_dimensions(
-                    painter,
-                    symbol,
-                    width,
-                    height,
-                    preview_pos,
-                    viewport.zoom,
-                    adjusted_rotation,
-                    preview_component.mirror_h,
-                    preview_component.mirror_v,
-                    preview_stroke,
-                );
-                draw_artwork_lead_extensions(
-                    painter,
-                    preview_pos,
-                    viewport.zoom,
-                    &preview_component,
-                    preview_stroke,
-                );
-            } else if let Some(symbol) = symbol_context.pending_library_symbol()
-                && symbol.source() == ResolvedSymbolSource::Authored
-                && resolved_symbol_world_bounds(&preview_component, symbol).is_some()
-            {
-                draw_resolved_symbol(
-                    painter,
-                    preview_pos,
-                    viewport.zoom,
-                    &preview_component,
-                    symbol,
-                    preview_stroke,
-                );
-            } else {
-                draw_symbol_resolution_error(
-                    painter,
-                    preview_pos,
-                    viewport.zoom,
-                    component_type,
-                    "unresolved cell",
-                );
-            }
-            return;
-        }
-
-        if let Some((symbol, adjusted_rotation)) = symbol_library.and_then(|library| {
-            library.get_with_rotation_variant(component_type, preview_rotation_degrees, None)
-        }) {
-            let pending_port_spec = state
-                .schematic
-                .session
-                .editor
-                .pending_port_sequence
-                .as_ref()
-                .and_then(|sequence| {
-                    Some(PortSpec {
-                        name: sequence.next_name()?.to_owned(),
-                        direction: sequence.direction,
-                    })
-                });
-            let symbol_stroke = if component_type == ComponentType::Port {
-                port_symbol_stroke(
-                    preview_stroke,
-                    viewport.zoom,
-                    false,
-                    pending_port_spec.as_ref(),
-                )
-            } else {
-                preview_stroke
-            };
-            draw_symbol(
-                painter,
-                symbol,
-                preview_pos,
-                viewport.zoom,
-                adjusted_rotation,
-                preview_mirror_h,
-                false,
-                symbol_stroke,
-            );
-            if component_type == ComponentType::Port {
-                draw_port_direction_overlay(
-                    painter,
-                    preview_pos,
-                    viewport.zoom,
-                    adjusted_rotation,
-                    preview_mirror_h,
-                    false,
-                    state
-                        .schematic
-                        .session
-                        .editor
-                        .pending_port_sequence
-                        .as_ref()
-                        .map(|sequence| sequence.direction)
-                        .unwrap_or_default(),
-                    symbol_stroke,
-                );
-            }
-        } else {
-            draw_symbol_resolution_error(
-                painter,
-                preview_pos,
-                viewport.zoom,
-                component_type,
-                "missing canonical SVG",
-            );
-        }
-    }
-}
-
-/// Paint the ephemeral component-shelf payload at its snapped drop point.
-///
-/// The payload never enters application state before release, so an aborted or
-/// invalid drag cannot leak an armed tool or pending library-cell binding.
+/// Resolve a shelf payload lazily against current libraries and document buffers.
 pub(super) fn draw_shelf_drag_preview(
     painter: &Painter,
     state: &AppState,
@@ -1377,143 +687,31 @@ pub(super) fn draw_shelf_drag_preview(
     pointer_pos: egui::Pos2,
     symbol_library: Option<&SymbolLibrary>,
 ) {
-    if !component_preview_enabled(state.schematic_edit_read_only()) {
-        return;
-    }
-    let grid_pos = resolve_grid_pointer(state, viewport, pointer_pos).snapped_position;
-    let preview_pos = viewport.schematic_to_screen(grid_pos);
-    let rotation = state.schematic.session.editor.preview_rotation;
-    let rotation_degrees = rotation.degrees();
-    let mirror_h = state.schematic.session.editor.preview_mirror_h;
-    let preview_stroke = Stroke::new(
-        viewport.zoom,
-        crate::ui::tokens::active_palette()
-            .accent
-            .gamma_multiply(COMPONENT_PREVIEW_GHOST_ALPHA),
+    preview::draw_shelf_drag_preview(
+        painter,
+        &preview_view(state),
+        viewport,
+        preview::ShelfPreview {
+            component_type: payload.component_type(),
+            binding: payload.binding(),
+        },
+        pointer_pos,
+        symbol_library,
+        |binding| {
+            SymbolResolver::new(
+                &state.library_manager,
+                &state.workspace.content.schematic_buffers,
+            )
+            .resolve_binding(binding)
+        },
     );
-
-    if let Some(binding) = payload.binding() {
-        let component = Component::new(0, ComponentType::CellInstance, grid_pos)
-            .with_rotation(rotation)
-            .with_mirror_h(mirror_h)
-            .with_library_cell(binding.clone());
-        // Artwork first, exactly as the canvas resolves it.
-        if let Some((library, filename, width, height)) =
-            symbol_library.and_then(|library| compatible_builtin_xspice_asset(&component, library))
-            && let Some((symbol, adjusted_rotation)) =
-                library.get_asset_with_rotation(filename, rotation_degrees)
-        {
-            draw_symbol_with_dimensions(
-                painter,
-                symbol,
-                width,
-                height,
-                preview_pos,
-                viewport.zoom,
-                adjusted_rotation,
-                mirror_h,
-                false,
-                preview_stroke,
-            );
-            draw_artwork_lead_extensions(
-                painter,
-                preview_pos,
-                viewport.zoom,
-                &component,
-                preview_stroke,
-            );
-        } else if let Some(symbol) = SymbolResolver::new(
-            &state.library_manager,
-            &state.workspace.content.schematic_buffers,
-        )
-        .resolve_binding(binding)
-            && symbol.source() == ResolvedSymbolSource::Authored
-            && resolved_symbol_world_bounds(&component, &symbol).is_some()
-        {
-            draw_resolved_symbol(
-                painter,
-                preview_pos,
-                viewport.zoom,
-                &component,
-                &symbol,
-                preview_stroke,
-            );
-        } else {
-            draw_symbol_resolution_error(
-                painter,
-                preview_pos,
-                viewport.zoom,
-                ComponentType::CellInstance,
-                "unresolved cell",
-            );
-        }
-        return;
-    }
-
-    let component_type = payload.component_type();
-    if let Some((symbol, adjusted_rotation)) = symbol_library.and_then(|library| {
-        library.get_with_rotation_variant(component_type, rotation_degrees, None)
-    }) {
-        draw_symbol(
-            painter,
-            symbol,
-            preview_pos,
-            viewport.zoom,
-            adjusted_rotation,
-            mirror_h,
-            false,
-            preview_stroke,
-        );
-    } else {
-        draw_symbol_resolution_error(
-            painter,
-            preview_pos,
-            viewport.zoom,
-            component_type,
-            "missing canonical SVG",
-        );
-    }
-}
-
-fn component_preview_enabled(read_only: bool) -> bool {
-    !read_only
-}
-
-fn draw_selection_rect(painter: &Painter, state: &AppState, tool_viewport: &Viewport) {
-    if state.schematic.session.editor.selection_rect.is_active() {
-        let (min_x, min_y, max_x, max_y) = state.schematic.session.editor.selection_rect.bounds();
-        let top_left = tool_viewport.schematic_to_screen(Point::new(min_x, min_y));
-        let bottom_right = tool_viewport.schematic_to_screen(Point::new(max_x, max_y));
-
-        let selection_rect = Rect::from_min_max(top_left, bottom_right);
-
-        let accent = crate::ui::tokens::active_palette().accent;
-        painter.rect_filled(selection_rect, 0.0, accent.gamma_multiply(0.14));
-        painter.rect_stroke(
-            selection_rect,
-            0.0,
-            Stroke::new(1.0, accent),
-            egui::StrokeKind::Inside,
-        );
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::schematic::view::schematic_symbol_context;
-
-    #[test]
-    fn component_preview_ghost_uses_design_alpha_and_hides_on_read_only() {
-        assert!((COMPONENT_PREVIEW_GHOST_ALPHA - 0.55).abs() < f32::EPSILON);
-        assert!(component_preview_enabled(false));
-        assert!(!component_preview_enabled(true));
-    }
-
-    #[test]
-    fn wire_preview_stroke_width_matches_live_preview_spec() {
-        assert!((WIRE_PREVIEW_STROKE_WIDTH - 1.5).abs() < f32::EPSILON);
-    }
+    use crate::state::ComponentType;
 
     #[test]
     fn wire_preview_snap_resolution_uses_resolved_cell_terminals() {
@@ -1543,105 +741,16 @@ mod tests {
         };
 
         assert_eq!(
-            resolve_target_pointer(
-                &state,
+            preview::resolve_wire_preview_snap(
+                &preview_view(&state),
                 &symbol_context,
                 &viewport,
                 egui::pos2(near_terminal.x as f32, near_terminal.y as f32),
             )
+            .expect("resolved terminal acquisition")
             .snapped_position,
             terminal
         );
-    }
-
-    #[test]
-    fn wire_preview_attaches_on_the_grid_along_the_conductor_and_exactly_in_free_mode() {
-        let mut state = AppState::default();
-        state
-            .schematic
-            .document_mut_for_test()
-            .wires
-            .push(crate::state::Wire::segment(
-                5,
-                Point::new(0, 10),
-                Point::new(20, 10),
-            ));
-        let symbol_context = schematic_symbol_context(&state);
-        let viewport = Viewport {
-            offset: egui::Pos2::ZERO,
-            zoom: 2.0,
-            bounds: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(400.0)),
-        };
-        let pointer = viewport.schematic_to_screen(Point::new(7, 10)) + egui::vec2(0.0, 2.0);
-
-        assert_eq!(state.schematic.document().grid_size, 10);
-        let result = resolve_wire_preview_snap(&state, &symbol_context, &viewport, pointer)
-            .expect("representable conductor acquisition");
-        assert_eq!(
-            result.snapped_position,
-            Point::new(10, 10),
-            "grid mode quantizes the attachment along the conductor"
-        );
-        assert_eq!(
-            result.target_type(),
-            Some(&SnapTargetType::WireSegment {
-                wire_id: 5,
-                segment_index: 0,
-            })
-        );
-        assert!(result.show_indicator);
-
-        state.schematic.session.editor.snap_engine.snap_to_grid = false;
-        let free = resolve_wire_preview_snap(&state, &symbol_context, &viewport, pointer)
-            .expect("representable conductor acquisition");
-        assert_eq!(
-            free.snapped_position,
-            Point::new(7, 10),
-            "Free mode keeps the exact visual attachment"
-        );
-    }
-
-    #[test]
-    fn wire_snap_feedback_uses_retained_net_name_and_never_invents_one() {
-        let mut state = AppState::default();
-        let component = Component::new(7, ComponentType::Resistor, Point::new(20, 20))
-            .with_name_value("R7", "1k");
-        let terminal_position = component.terminal_positions()[0].1;
-        state
-            .schematic
-            .document_mut_for_test()
-            .components
-            .push(component);
-        state
-            .schematic
-            .document_mut_for_test()
-            .net_labels
-            .push(NetLabel::new(1, terminal_position, "VOUT"));
-        let terminal = state.schematic.session.editor.snap_engine.find_snap_target(
-            terminal_position,
-            &state.schematic.document().components,
-            &[],
-            &[],
-        );
-        let expected = format!(
-            "Pin R7.{} | net VOUT",
-            terminal.terminal_name().expect("terminal target")
-        );
-        assert_eq!(
-            wire_snap_feedback_copy(&state, &terminal).as_deref(),
-            Some(expected.as_str())
-        );
-
-        let wire = crate::state::Wire::segment(41, Point::new(60, 20), Point::new(80, 20));
-        let unknown_wire = state.schematic.session.editor.snap_engine.find_snap_target(
-            Point::new(80, 20),
-            &[],
-            std::slice::from_ref(&wire),
-            &[],
-        );
-        let copy = wire_snap_feedback_copy(&state, &unknown_wire).expect("target copy");
-        assert_eq!(copy, "Wire #41 end endpoint");
-        assert!(!copy.contains("net"));
     }
 
     #[test]
@@ -1678,9 +787,14 @@ mod tests {
         state.schematic.session.editor.preview_mirror_h = true;
         let context = schematic_symbol_context(&state);
 
-        let (component, symbol) =
-            pending_library_cell_preview(&state, &context, Point::new(100, 50))
-                .expect("pending library cell has preview symbol");
+        let component = preview::pending_library_cell_component(
+            &state.schematic.session.editor,
+            Point::new(100, 50),
+        )
+        .expect("pending component");
+        let symbol = context
+            .pending_library_symbol()
+            .expect("pending authored symbol");
 
         assert_eq!(component.kind, ComponentType::CellInstance);
         assert_eq!(component.pos, Point::new(100, 50));
