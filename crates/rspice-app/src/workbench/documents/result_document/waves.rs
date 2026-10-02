@@ -13,6 +13,7 @@ use crate::ui::plot::fmt_significant;
 use rspice_results_ui::derived::DerivedSeries;
 use rspice_results_ui::presentation::well_hint;
 use rspice_results_ui::waves::cursor_interpolation;
+use rspice_results_ui::waves::header::{self as pane_header, WAVE_PANE_HEADER_HEIGHT, elide};
 use rspice_results_ui::waves::navigation::{
     self, WAVE_SHARED_X_HEIGHT, shared_axis_viewport_fraction,
 };
@@ -51,7 +52,6 @@ use egui::Ui;
 use crate::analysis::calculator;
 use crate::schematic::bus_notations;
 use crate::state::{AnalysisResult, AnalysisType, SimulationState};
-use crate::ui::icons::Icon;
 #[cfg(test)]
 use crate::ui::plot::Trace;
 use crate::ui::plot::sample::{SweepShape, sample_at_with_shape};
@@ -60,7 +60,6 @@ use crate::ui::plot::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{IconButton, chip};
 use crate::workbench::AppState;
 use crate::workbench::{ComplexNumberDisplay, LargeDatasetDisplay};
 use rspice_results::family_projection::SourceSampleSelection;
@@ -89,7 +88,6 @@ fn wave_left_margin(results: &ResultsState) -> f32 {
         _ => WAVE_SHARED_LEFT_MARGIN,
     }
 }
-const WAVE_PANE_HEADER_HEIGHT: f32 = 25.0;
 const WAVE_MIN_PLOT_HEIGHT: f32 = 24.0;
 
 /// Apply quick-view presentation overrides after constructing the immutable
@@ -769,16 +767,6 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
     }
 }
 
-/// Shorten a label to `max` characters with a typographic ellipsis.
-fn elide(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        return text.to_owned();
-    }
-    let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
-    out.push('…');
-    out
-}
-
 fn append_copied_cursor(
     target: &mut String,
     cursor: &str,
@@ -1250,32 +1238,6 @@ fn set_pane_log_y(results: &mut ResultsState, model: &StripModel, pane: &UnitPan
     }
 }
 
-fn trace_belongs_to_pane(
-    model: &StripModel,
-    pane: &UnitPane,
-    ordinal: usize,
-    trace: &StripTrace,
-) -> bool {
-    if !trace.kind.is_phase() {
-        return model.trace_unit(trace) == pane.unit;
-    }
-    let has_magnitude = model
-        .traces
-        .iter()
-        .any(|candidate| !candidate.kind.is_phase() && model.trace_unit(candidate) == "dB");
-    if has_magnitude {
-        pane.unit == "dB"
-    } else {
-        ordinal == 0
-    }
-}
-
-#[derive(Default)]
-struct UnitPaneHeaderResponse {
-    autoscale_y: bool,
-    toggle_log_y: bool,
-}
-
 fn show_unit_pane_header(
     ui: &mut Ui,
     state: &mut AppState,
@@ -1285,276 +1247,83 @@ fn show_unit_pane_header(
     log_y: bool,
     log_y_available: bool,
     height: f32,
-) -> UnitPaneHeaderResponse {
-    // A legend chip names the conductor the design drew; the trace keeps the
-    // engine's own name as its identity and as the key it is exported under.
+) -> pane_header::UnitPaneHeaderResponse {
+    // Design notation changes labels only; retained source names remain identities.
     let notations = bus_notations(&state.workspace, &state.schematic);
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let height = height.clamp(0.0, WAVE_PANE_HEADER_HEIGHT);
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), height),
-        egui::Sense::hover(),
-    );
-    ui.painter().rect_filled(rect, 0.0, c.bg_panel);
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom() - 0.5,
-        egui::Stroke::new(1.0, c.border),
-    );
-    if height < 18.0 {
-        return UnitPaneHeaderResponse::default();
-    }
-
     let pane_key = WavePanePresentationKey {
         analysis: model.analysis_key,
         unit: pane.unit.to_owned(),
     };
-    let active = state.ui.results.active_wave_pane.as_ref() == Some(&pane_key);
-    let action_width = 58.0;
-    // Fit the pane's actual unit tag: nV/√Hz is wider than the quantity tags
-    // the old fixed 46 px assumed, and a clipped unit misreads as a new unit.
-    let unit_label_width = ui.fonts_mut(|fonts| {
-        fonts
-            .layout_no_wrap(
-                pane.unit.to_owned(),
-                theme::mono(tokens::FS_0, FontWeight::Regular),
-                c.text,
-            )
-            .size()
-            .x
-    });
-    let unit_width = (unit_label_width + 28.0).max(46.0);
-    let unit_rect = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + 5.0, rect.top() + 1.5),
-        egui::pos2(
-            (rect.left() + unit_width).min(rect.right()),
-            rect.bottom() - 1.5,
-        ),
-    );
-    let actions_rect = egui::Rect::from_min_max(
-        egui::pos2(
-            (rect.right() - action_width).max(unit_rect.right()),
-            rect.top(),
-        ),
-        rect.right_bottom(),
-    );
-    let legend_rect = egui::Rect::from_min_max(
-        egui::pos2(unit_rect.right() + 3.0, rect.top()),
-        egui::pos2(
-            (actions_rect.left() - 3.0).max(unit_rect.right() + 3.0),
-            rect.bottom(),
-        ),
-    );
-
-    ui.scope_builder(
-        egui::UiBuilder::new()
-            .max_rect(unit_rect)
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-        |ui| {
-            ui.set_clip_rect(unit_rect);
-            let response = chip(ui, pane.unit, active)
-                .on_hover_text(format!("{} unit-scoped Y axis", pane.unit));
-            if response.clicked() {
-                state.ui.results.active_wave_pane = Some(pane_key.clone());
-            }
-        },
-    );
-
-    // Cursor A only reads out on the strip it was placed on; another strip's
-    // chips must not imply a value at an X they never sampled.
-    let cursor_a_value = (state.ui.results.cursor_readout_active()
+    // Cursor A only reads out on the strip it was placed on.
+    let cursor_a = (state.ui.results.cursor_readout_active()
         && state.ui.results.cursor_strip == Some(model.analysis_index))
     .then(|| {
         state.ui.results.cursors.a.map(|x| {
             (
                 x,
-                state.ui.preferences.result_presentation_policy(),
+                state.ui.preferences.result_presentation_policy().readout(),
                 state.ui.preferences.quantity_presentation_policy(),
             )
         })
     })
     .flatten();
+    let input = pane_header::PaneHeader {
+        height,
+        active: state.ui.results.active_wave_pane.as_ref() == Some(&pane_key),
+        log_y,
+        log_y_available,
+        cursor_a,
+    };
+    struct HeaderHost<'a> {
+        state: &'a mut AppState,
+        model: &'a StripModel,
+        pane_key: WavePanePresentationKey,
+    }
+    impl pane_header::PaneHeaderHost for HeaderHost<'_> {
+        fn trace_selected(&self, trace: &StripTrace) -> bool {
+            self.state
+                .ui
+                .results
+                .valid_selected_trace(&self.state.simulation)
+                .is_some_and(|selected| {
+                    selected.analysis_key() == self.model.analysis_key
+                        && selected.source_name() == trace.source_waveform_name
+                })
+        }
 
-    ui.scope_builder(
-        egui::UiBuilder::new()
-            .max_rect(legend_rect)
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-        |ui| {
-            ui.set_clip_rect(legend_rect);
-            egui::ScrollArea::horizontal()
-                .id_salt(("rspice.results.pane-legend", model.analysis_key, pane.unit))
-                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.x = 3.0;
-                    let traces = model
-                        .traces
-                        .iter()
-                        .take(model.signal_trace_count)
-                        .enumerate()
-                        .filter(|(_, trace)| trace_belongs_to_pane(model, pane, ordinal, trace));
-                    for (_, trace) in traces {
-                        let selected = state
-                            .ui
-                            .results
-                            .valid_selected_trace(&state.simulation)
-                            .is_some_and(|selected| {
-                                selected.analysis_key() == model.analysis_key
-                                    && selected.source_name() == trace.source_waveform_name
-                            });
-                        let (swatch, swatch_response) =
-                            ui.allocate_exact_size(egui::vec2(13.0, 19.0), egui::Sense::click());
-                        ui.painter().hline(
-                            egui::Rangef::new(swatch.left() + 1.0, swatch.right() - 1.0),
-                            swatch.center().y,
-                            egui::Stroke::new(2.0, trace.color),
-                        );
-                        swatch_response.widget_info(|| {
-                            egui::WidgetInfo::selected(
-                                egui::WidgetType::Button,
-                                true,
-                                trace.visible,
-                                format!("Toggle {} visibility", notations.display(&trace.name)),
-                            )
-                        });
-                        theme::paint_focus_ring(ui, &swatch_response, swatch);
-                        if swatch_response.clicked() {
-                            if let Some(key) = trace.family_visibility_key {
-                                state.ui.results.toggle_family_trace_visibility(key);
-                            } else {
-                                toggle_visibility(
-                                    state,
-                                    model.analysis_index,
-                                    trace.waveform_index,
-                                );
-                            }
-                        }
-                        // The instrument idiom: a trace states its own value
-                        // at cursor A right where its name is, so reading one
-                        // curve never costs a trip to the readout register.
-                        // A corner family draws one chip for the whole group,
-                        // so the chip states how many traces it stands for.
-                        let family = trace.family_group_ordinal.map(|_| {
-                            model
-                                .traces
-                                .iter()
-                                .filter(|candidate| {
-                                    candidate.presentation_key == trace.presentation_key
-                                        && candidate.family_group_ordinal.is_some()
-                                })
-                                .count()
-                        });
-                        let shown = notations.display(&trace.name);
-                        let label = match &cursor_a_value {
-                            Some((x, presentation, policy)) if trace.visible => {
-                                let digits =
-                                    usize::from(presentation.displayed_significant_digits().get());
-                                let value = sample_at_with_shape(
-                                    &trace.x,
-                                    &trace.y,
-                                    &trace.shape,
-                                    *x,
-                                    cursor_interpolation(presentation.cursor_interpolation()),
-                                );
-                                format!(
-                                    "{}  {}",
-                                    elide(&shown, 16),
-                                    model.format_trace_value(trace, value, digits, *policy)
-                                )
-                            }
-                            _ => elide(&shown, 20),
-                        };
-                        let label = match family {
-                            Some(count) if count > 1 => format!("{label}  ×{count}"),
-                            _ => label,
-                        };
-                        // A hidden trace keeps its chip so it can be brought
-                        // back, but must not read as a curve on the canvas.
-                        let label = if trace.visible {
-                            egui::RichText::new(label)
-                        } else {
-                            egui::RichText::new(label)
-                                .strikethrough()
-                                .color(c.text_faint)
-                        };
-                        if ui
-                            .selectable_label(selected, label)
-                            .on_hover_text(&*shown)
-                            .clicked()
-                        {
-                            state.ui.results.selected_trace =
-                                Some(SelectedResultTrace::from_identity(
-                                    model.analysis_key,
-                                    trace.source_waveform_name.clone(),
-                                ));
-                            state.ui.results.active_wave_pane = Some(pane_key.clone());
-                        }
-                    }
-                    ui.menu_button("+", |ui| {
-                        let mut any = false;
-                        for trace in
-                            model
-                                .traces
-                                .iter()
-                                .take(model.signal_trace_count)
-                                .filter(|trace| {
-                                    !trace.visible
-                                        && trace_belongs_to_pane(model, pane, ordinal, trace)
-                                })
-                        {
-                            any = true;
-                            if ui.button(&*notations.display(&trace.name)).clicked() {
-                                if let Some(key) = trace.family_visibility_key {
-                                    state.ui.results.toggle_family_trace_visibility(key);
-                                } else {
-                                    toggle_visibility(
-                                        state,
-                                        model.analysis_index,
-                                        trace.waveform_index,
-                                    );
-                                }
-                                ui.close();
-                            }
-                        }
-                        if !any {
-                            ui.label("All compatible signals are already shown");
-                        }
-                    })
-                    .response
-                    .on_hover_text(format!("Add a signal to the {} pane", pane.unit));
-                });
-        },
-    );
+        fn toggle_trace_visibility(&mut self, trace: &StripTrace) {
+            if let Some(key) = trace.family_visibility_key {
+                self.state.ui.results.toggle_family_trace_visibility(key);
+            } else {
+                toggle_visibility(self.state, self.model.analysis_index, trace.waveform_index);
+            }
+        }
 
-    let mut output = UnitPaneHeaderResponse::default();
-    ui.scope_builder(
-        egui::UiBuilder::new()
-            .max_rect(actions_rect)
-            .layout(egui::Layout::right_to_left(egui::Align::Center)),
-        |ui| {
-            ui.set_clip_rect(actions_rect);
-            let log = ui
-                .add_enabled_ui(log_y_available, |ui| chip(ui, "log", log_y))
-                .inner
-                .on_hover_text(if log_y_available {
-                    "Toggle logarithmic Y axis"
-                } else {
-                    "Logarithmic Y requires strictly positive visible values"
-                });
-            if log.clicked() {
-                output.toggle_log_y = true;
-            }
-            if IconButton::new(Icon::ZoomFit)
-                .side(19.0)
-                .tooltip("Autoscale Y to visible traces")
-                .show(ui)
-                .clicked()
-            {
-                output.autoscale_y = true;
-            }
+        fn select_trace(&mut self, trace: &StripTrace) {
+            self.state.ui.results.selected_trace = Some(SelectedResultTrace::from_identity(
+                self.model.analysis_key,
+                trace.source_waveform_name.clone(),
+            ));
+            self.activate_pane();
+        }
+
+        fn activate_pane(&mut self) {
+            self.state.ui.results.active_wave_pane = Some(self.pane_key.clone());
+        }
+    }
+    pane_header::show_header(
+        ui,
+        model,
+        pane,
+        ordinal,
+        input,
+        |name| notations.display(name),
+        &mut HeaderHost {
+            state,
+            model,
+            pane_key,
         },
-    );
-    output
+    )
 }
 
 /// Resolve source ownership, then apply the navigator's actions to the app.
