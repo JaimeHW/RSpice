@@ -43,7 +43,7 @@ fn rows_of(state: &mut AppState, a: Option<f64>, b: Option<f64>) -> Vec<ReadoutR
     readout_rows(
         &models[0],
         CursorPair { a, b },
-        presentation,
+        presentation.readout(),
         quantity_policy,
     )
 }

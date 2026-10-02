@@ -176,7 +176,7 @@ fn measurement_cursor_slope_accepts_resolvable_subpicosecond_intervals() {
                 a: Some(a),
                 b: Some(b),
             },
-            presentation,
+            presentation.readout(),
             state.ui.preferences.quantity_presentation_policy(),
         );
         assert_eq!(
@@ -194,7 +194,7 @@ fn measurement_cursor_slope_accepts_resolvable_subpicosecond_intervals() {
             a: Some(0.0),
             b: Some(0.0),
         },
-        presentation,
+        presentation.readout(),
         state.ui.preferences.quantity_presentation_policy(),
     );
     assert_eq!(coincident[0].slope, READOUT_ABSENT);

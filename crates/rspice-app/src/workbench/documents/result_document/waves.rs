@@ -8,8 +8,11 @@
 
 #[cfg(test)]
 use super::TracePresentationKey;
+#[cfg(test)]
+use crate::ui::plot::fmt_significant;
 use rspice_results_ui::derived::DerivedSeries;
 use rspice_results_ui::presentation::well_hint;
+use rspice_results_ui::waves::cursor_interpolation;
 use rspice_results_ui::waves::{
     CursorDomain, NOISE_DENSITY_UNIT, StripTrace, TraceKind, anchor_key, family_color, fmt_in_unit,
     stable_hash, trace_key,
@@ -43,20 +46,17 @@ use crate::schematic::bus_notations;
 use crate::state::{AnalysisResult, AnalysisType, SharedWaveformValues, SimulationState};
 use crate::ui::icons::Icon;
 use crate::ui::plot::sample::{
-    BranchSample, SweepClass, SweepShape, XOrientation, nearest_sample, sample_at_with_shape,
-    sample_branches_into,
+    BranchSample, SweepShape, sample_at_with_shape, sample_branches_into,
 };
 use crate::ui::plot::{
     self, Axis, CursorPair, DisplayDecimation, MAX_AXIS_TICKS, PlotSpec, SampleInterpolation,
-    Trace, XScale, fmt_si_significant, fmt_significant,
+    Trace, XScale, fmt_si_significant,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{IconButton, chip, section_header};
+use crate::ui::widgets::{IconButton, chip};
 use crate::workbench::AppState;
-use crate::workbench::{
-    ComplexNumberDisplay, CursorInterpolation, LargeDatasetDisplay, ResultPresentationPolicy,
-};
+use crate::workbench::{ComplexNumberDisplay, LargeDatasetDisplay};
 use rspice_results::family_projection::{FamilyTraceStyle, SourceSampleSelection};
 
 use super::frame_work::{self, FrameSampleRead};
@@ -532,14 +532,6 @@ pub(super) fn drop_marker_at_cursor_a(state: &mut AppState, t: &Tokens) {
     };
     if let Some(selector) = super::place_marker(state, placement) {
         marker_dialog::open(state, selector);
-    }
-}
-
-const fn cursor_interpolation(policy: CursorInterpolation) -> SampleInterpolation {
-    match policy {
-        CursorInterpolation::MonotoneCubicWhereValid => SampleInterpolation::MonotoneCubic,
-        CursorInterpolation::Linear => SampleInterpolation::Linear,
-        CursorInterpolation::NearestAcceptedPoint => SampleInterpolation::Nearest,
     }
 }
 

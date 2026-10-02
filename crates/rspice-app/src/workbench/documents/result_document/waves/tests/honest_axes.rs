@@ -242,7 +242,7 @@ fn an_overlay_row_names_the_run_it_came_from() {
             a: Some(0.5),
             b: None,
         },
-        presentation,
+        presentation.readout(),
         quantity_policy,
     );
 

@@ -14,7 +14,12 @@ use rspice_ui_kit::plot::{XScale, fmt_si_significant, fmt_significant};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+mod policy;
 mod projection;
+pub mod readout;
+pub use policy::{
+    CursorInterpolation, DisplayedSignificantDigits, ReadoutPolicy, cursor_interpolation,
+};
 mod units;
 pub use projection::{ProjectionOptions, build_models, family_color};
 use units::signal_unit;
