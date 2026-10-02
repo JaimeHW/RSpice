@@ -1,28 +1,23 @@
 //! Symbol view surface.
 
+mod interaction;
+
 #[cfg(test)]
 mod tests;
 
-use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
+use egui::{Align2, Color32, Rect, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::state::{
-    PinSummary, Point, PortSpec, SYMBOL_TERMINAL_GRID, SymbolAttributeKind, SymbolDocument,
-    SymbolEditorMetadata, SymbolShape, SymbolTextAlign, SymbolTextSize,
-};
+use crate::state::{PinSummary, PortSpec, SymbolDocument, SymbolEditorMetadata};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
 use crate::workbench::AppState;
-use crate::workbench::{SymbolSelection, SymbolTool};
 use rspice_design::symbol::publication::SymbolSaveCheck;
 pub(crate) use rspice_schematic_editor::symbol_editor::draw_document_preview;
-use rspice_schematic_editor::symbol_editor::{
-    SymbolViewport, draw_canvas, hit_label, hit_origin, hit_pin, hit_shape, snap_point,
-    snap_to_terminal_grid, update_viewport,
-};
+use rspice_schematic_editor::symbol_editor::{draw_canvas, update_viewport};
 
 fn symbol_canvas_accessibility_label(
     document: &SymbolDocument,
@@ -107,6 +102,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         }
     }
 
+    interaction::bind_active_canvas(state);
     // The stage is full-bleed: tools live in the workspace toolbar, the pin
     // contract in the left panel, and object editing in the inspector, so
     // the canvas keeps the whole document area.
@@ -116,10 +112,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         ui.spacing_mut().item_spacing.x = 0.0;
         let canvas_size = vec2(ui.available_width().max(180.0), height);
         let (rect, response) = ui.allocate_exact_size(canvas_size, Sense::click_and_drag());
-        let mut changed = false;
         let viewport = update_viewport(ui, &mut state.ui.symbol.editor, rect, &document, &response);
-        changed |=
-            handle_canvas_interaction(state, &mut document, &mut editor, viewport, &response);
+        interaction::handle_canvas(state, &mut document, &mut editor, viewport, &response);
         draw_canvas(
             ui,
             viewport,
@@ -155,9 +149,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             &response,
             state.workspace.content.active_view_type(),
         );
-        if changed && let Err(error) = state.store_active_symbol_editor_bundle(&document, &editor) {
-            state.push_user_message(ConsoleMessage::warning(error));
-        }
     });
     canvas_breadcrumb(ui.ctx(), state, stage);
     canvas_check_note(ui.ctx(), &document, &ports, stage);
@@ -570,400 +561,6 @@ fn empty_generate_state(ui: &mut Ui, state: &mut AppState, ports: &[PortSpec]) -
     requested
 }
 
-fn handle_canvas_interaction(
-    state: &mut AppState,
-    document: &mut SymbolDocument,
-    editor: &mut SymbolEditorMetadata,
-    viewport: SymbolViewport,
-    response: &egui::Response,
-) -> bool {
-    let center = viewport.screen_to_world(viewport.rect.center());
-    state.ui.canvas_view_center = Some((center.x as f64, center.y as f64));
-    if let Some(pos) = response.hover_pos() {
-        let world = viewport.screen_to_world(pos);
-        state.ui.canvas_hover = Some((world.x as f64, world.y as f64));
-    } else {
-        state.ui.canvas_hover = None;
-    }
-
-    let Some(pointer) = response.interact_pointer_pos() else {
-        return false;
-    };
-    let raw_point = viewport.screen_to_world(pointer);
-    let body_point = if state.ui.symbol.editor.snap_to_grid {
-        snap_point(raw_point, state.ui.symbol.editor.grid_spacing)
-    } else {
-        raw_point
-    };
-    // A terminal is the wiring contract, not artwork: it snaps to the
-    // terminal pitch whatever the display grid shows and whether or not the
-    // author has body snapping on. A pin dropped between grid points is a
-    // pin no parent schematic can reach.
-    let terminal_point = snap_to_terminal_grid(raw_point);
-
-    if response.secondary_clicked()
-        && matches!(
-            state.ui.symbol.editor.tool,
-            SymbolTool::Line | SymbolTool::Polygon
-        )
-        && finish_pending_polyline(state, document)
-    {
-        return true;
-    }
-
-    if response.drag_started_by(egui::PointerButton::Primary) {
-        // Grabbing something that is already part of a multi-object
-        // selection moves the whole selection. Grabbing anything else
-        // reduces the selection to it first, which is what makes a
-        // mis-grab recoverable rather than a silent group move.
-        if grab_belongs_to_group(state, document, editor, viewport, pointer) {
-            state.ui.symbol.editor.dragging_group = Some(body_point);
-            state.ui.symbol.editor.drag_undo_recorded = false;
-        } else if let Some(pin) = hit_pin(document, viewport, pointer) {
-            state.ui.symbol.editor.select_pin(pin.clone());
-            state.ui.symbol.editor.dragging_pin = Some(pin);
-            state.ui.symbol.editor.drag_undo_recorded = false;
-        } else if let Some(kind) = hit_label(editor, viewport, pointer) {
-            state.ui.symbol.editor.select_attribute(kind);
-            state.ui.symbol.editor.dragging_label = Some(kind);
-            state.ui.symbol.editor.drag_undo_recorded = false;
-        } else if hit_origin(document, viewport, pointer) {
-            state.ui.symbol.editor.clear_selection();
-            state.ui.symbol.editor.dragging_origin = true;
-            state.ui.symbol.editor.drag_undo_recorded = false;
-        } else if let Some(shape_index) = hit_shape(document, viewport, pointer) {
-            state.ui.symbol.editor.select_shape(shape_index);
-            state.ui.symbol.editor.dragging_shape = Some((shape_index, body_point));
-            state.ui.symbol.editor.drag_undo_recorded = false;
-        } else if matches!(state.ui.symbol.editor.tool, SymbolTool::Select) {
-            state.ui.symbol.editor.marquee_start = Some(body_point);
-            state.ui.symbol.editor.marquee_current = Some(body_point);
-        }
-    }
-
-    if response.dragged_by(egui::PointerButton::Primary)
-        && let Some(last_point) = state.ui.symbol.editor.dragging_group
-    {
-        if state.deny_read_only_edit() {
-            state.ui.symbol.editor.clear_drag_state();
-            return false;
-        }
-        let delta = body_point - last_point;
-        if delta == Point::origin() {
-            return false;
-        }
-        record_drag_symbol_edit(state, document);
-        translate_selection(state, document, editor, delta);
-        state.ui.symbol.editor.dragging_group = Some(body_point);
-        return true;
-    }
-    if response.dragged_by(egui::PointerButton::Primary)
-        && let Some(name) = state.ui.symbol.editor.dragging_pin.clone()
-    {
-        if state.deny_read_only_edit() {
-            state.ui.symbol.editor.clear_drag_state();
-            return false;
-        }
-        if document.pin(&name).and_then(|pin| pin.position) != Some(terminal_point) {
-            record_drag_symbol_edit(state, document);
-            let bounds = document.body_bounds();
-            if let Some(pin) = document.pin_mut(&name) {
-                let side = inferred_side_from_point(terminal_point, bounds);
-                let offset = match side {
-                    crate::state::SymbolPinSide::Left | crate::state::SymbolPinSide::Right => {
-                        terminal_point.y
-                    }
-                    crate::state::SymbolPinSide::Top | crate::state::SymbolPinSide::Bottom => {
-                        terminal_point.x
-                    }
-                };
-                pin.set_side_and_offset(side, offset, bounds);
-                return true;
-            }
-        }
-    }
-    if response.dragged_by(egui::PointerButton::Primary)
-        && let Some(kind) = state.ui.symbol.editor.dragging_label
-    {
-        if state.deny_read_only_edit() {
-            state.ui.symbol.editor.clear_drag_state();
-            return false;
-        }
-        if editor
-            .attribute(kind)
-            .is_some_and(|attribute| attribute.position != body_point)
-        {
-            record_drag_symbol_edit(state, document);
-            if let Some(attribute) = editor.attribute_mut(kind) {
-                attribute.position = body_point;
-            }
-            sync_legacy_attribute_anchor(document, kind, body_point);
-            state.ui.symbol.editor.select_attribute(kind);
-            return true;
-        }
-    }
-    if response.dragged_by(egui::PointerButton::Primary) && state.ui.symbol.editor.dragging_origin {
-        if state.deny_read_only_edit() {
-            state.ui.symbol.editor.clear_drag_state();
-            return false;
-        }
-        if document.origin != body_point {
-            record_drag_symbol_edit(state, document);
-            document.origin = body_point;
-            return true;
-        }
-    }
-    if response.dragged_by(egui::PointerButton::Primary)
-        && let Some((shape_index, last_point)) = state.ui.symbol.editor.dragging_shape
-    {
-        if state.deny_read_only_edit() {
-            state.ui.symbol.editor.clear_drag_state();
-            return false;
-        }
-        let delta = body_point - last_point;
-        if delta != Point::origin() && shape_index < document.body.len() {
-            record_drag_symbol_edit(state, document);
-            if let Some(shape) = document.body.get_mut(shape_index) {
-                shape.translate(delta);
-                state.ui.symbol.editor.dragging_shape = Some((shape_index, body_point));
-                return true;
-            }
-        }
-    }
-    if response.dragged_by(egui::PointerButton::Primary)
-        && state.ui.symbol.editor.marquee_start.is_some()
-    {
-        state.ui.symbol.editor.marquee_current = Some(body_point);
-    }
-
-    if response.drag_stopped_by(egui::PointerButton::Primary) {
-        if let Some(start) = state.ui.symbol.editor.marquee_start.take() {
-            let end = state
-                .ui
-                .symbol
-                .editor
-                .marquee_current
-                .take()
-                .unwrap_or(body_point);
-            state
-                .ui
-                .symbol
-                .editor
-                .set_selection(SymbolSelection::in_rect(document, editor, start, end));
-        }
-        state.ui.symbol.editor.clear_drag_state();
-    }
-
-    if !response.clicked_by(egui::PointerButton::Primary) {
-        return false;
-    }
-
-    match state.ui.symbol.editor.tool {
-        SymbolTool::Select => {
-            let extend = response.ctx.input(|input| input.modifiers.shift);
-            if let Some(pin) = hit_pin(document, viewport, pointer) {
-                toggle_or_select(
-                    state,
-                    extend,
-                    |selection| selection.toggle_pin(&pin),
-                    || SymbolSelection::single_pin(pin.clone()),
-                );
-            } else if let Some(kind) = hit_label(editor, viewport, pointer) {
-                toggle_or_select(
-                    state,
-                    extend,
-                    |selection| selection.toggle_attribute(kind),
-                    || SymbolSelection::single_attribute(kind),
-                );
-            } else if let Some(shape) = hit_shape(document, viewport, pointer) {
-                toggle_or_select(
-                    state,
-                    extend,
-                    |selection| selection.toggle_shape(shape),
-                    || SymbolSelection::single_shape(shape),
-                );
-            } else if !extend {
-                state.ui.symbol.editor.clear_selection();
-            }
-            false
-        }
-        SymbolTool::PlacePin => place_selected_pin(state, document, terminal_point),
-        SymbolTool::Line | SymbolTool::Polygon => add_polyline_point(state, body_point),
-        SymbolTool::Rectangle => add_rectangle(state, document, body_point),
-        SymbolTool::Circle => add_round_shape(state, document, body_point, false),
-        SymbolTool::Arc => add_round_shape(state, document, body_point, true),
-        SymbolTool::Text => add_text(state, document, body_point),
-    }
-}
-
-fn record_drag_symbol_edit(state: &mut AppState, document: &SymbolDocument) {
-    if state.ui.symbol.editor.drag_undo_recorded {
-        return;
-    }
-    state.record_symbol_edit(document);
-    state.ui.symbol.editor.drag_undo_recorded = true;
-}
-
-/// Shift-click grows the selection; a plain click replaces it.
-fn toggle_or_select(
-    state: &mut AppState,
-    extend: bool,
-    toggle: impl FnOnce(&mut SymbolSelection),
-    replace: impl FnOnce() -> SymbolSelection,
-) {
-    if extend {
-        let mut selection = state.ui.symbol.editor.effective_selection();
-        toggle(&mut selection);
-        state.ui.symbol.editor.set_selection(selection);
-        return;
-    }
-    state.ui.symbol.editor.set_selection(replace());
-}
-
-/// Whether the object under `pointer` is one of several already selected.
-///
-/// A single-object selection is not a group: dragging it must keep the
-/// established single-object behaviour, including its side/offset snapping.
-fn grab_belongs_to_group(
-    state: &AppState,
-    document: &SymbolDocument,
-    editor: &SymbolEditorMetadata,
-    viewport: SymbolViewport,
-    pointer: Pos2,
-) -> bool {
-    let selection = state.ui.symbol.editor.effective_selection();
-    if selection.len() < 2 {
-        return false;
-    }
-    if let Some(pin) = hit_pin(document, viewport, pointer) {
-        return selection.contains_pin(&pin);
-    }
-    if let Some(kind) = hit_label(editor, viewport, pointer) {
-        return selection.attributes.contains(&kind);
-    }
-    hit_shape(document, viewport, pointer).is_some_and(|index| selection.shapes.contains(&index))
-}
-
-/// Move every selected object by `delta` as one edit.
-///
-/// Terminals travel by the same delta rounded to the terminal pitch, so a
-/// group moved on a fine display grid arrives with its pins still on the
-/// lattice a parent schematic wires to. Each pin keeps the side it was
-/// authored on: a group move is a translation, and re-deriving the edge from
-/// the new coordinates would turn a lead through ninety degrees whenever the
-/// selection carried the body past it.
-fn translate_selection(
-    state: &mut AppState,
-    document: &mut SymbolDocument,
-    editor: &mut SymbolEditorMetadata,
-    delta: Point,
-) {
-    let selection = state.ui.symbol.editor.effective_selection();
-    let pin_delta = snap_to_terminal_grid(delta);
-    for name in &selection.pins {
-        let Some(position) = document.pin(name).and_then(|pin| pin.position) else {
-            continue;
-        };
-        let moved = position + pin_delta;
-        let Some(pin) = document.pin_mut(name) else {
-            continue;
-        };
-        let side = pin.side();
-        pin.side = Some(side);
-        pin.position = Some(moved);
-        pin.offset = match side {
-            crate::state::SymbolPinSide::Left | crate::state::SymbolPinSide::Right => moved.y,
-            crate::state::SymbolPinSide::Top | crate::state::SymbolPinSide::Bottom => moved.x,
-        };
-    }
-    for index in &selection.shapes {
-        if let Some(shape) = document.body.get_mut(*index) {
-            shape.translate(delta);
-        }
-    }
-    for kind in &selection.attributes {
-        let Some(attribute) = editor.attribute_mut(*kind) else {
-            continue;
-        };
-        attribute.position = attribute.position + delta;
-        let position = attribute.position;
-        sync_legacy_attribute_anchor(document, *kind, position);
-    }
-}
-
-fn place_selected_pin(state: &mut AppState, document: &mut SymbolDocument, point: Point) -> bool {
-    let selected = state
-        .ui
-        .symbol
-        .editor
-        .selected_pin
-        .clone()
-        .or_else(|| next_unplaced_pin(document));
-    let Some(name) = selected else {
-        return false;
-    };
-    if state.deny_read_only_edit() {
-        return false;
-    }
-    if document.pin(&name).is_none() {
-        return false;
-    }
-    let changed = document.pin(&name).and_then(|pin| pin.position) != Some(point);
-    if changed {
-        state.record_symbol_edit(document);
-    }
-    let bounds = document.body_bounds();
-    if let Some(pin) = document.pin_mut(&name) {
-        let side = inferred_side_from_point(point, bounds);
-        let offset = match side {
-            crate::state::SymbolPinSide::Left | crate::state::SymbolPinSide::Right => point.y,
-            crate::state::SymbolPinSide::Top | crate::state::SymbolPinSide::Bottom => point.x,
-        };
-        pin.set_side_and_offset(side, offset, bounds);
-        state.ui.symbol.editor.select_pin(name);
-        state.ui.symbol.editor.tool = SymbolTool::Select;
-        return changed;
-    }
-    false
-}
-
-fn add_polyline_point(state: &mut AppState, point: Point) -> bool {
-    if state.deny_read_only_edit() {
-        return false;
-    }
-    state.ui.symbol.editor.pending_polyline.push(point);
-    false
-}
-
-fn finish_pending_polyline(state: &mut AppState, document: &mut SymbolDocument) -> bool {
-    if state.ui.symbol.editor.pending_polyline.len() < 2 {
-        return false;
-    }
-    if state.deny_read_only_edit() {
-        return false;
-    }
-    state.record_symbol_edit(document);
-    let points = std::mem::take(&mut state.ui.symbol.editor.pending_polyline);
-    document.body.push(SymbolShape::Polyline {
-        points,
-        closed: matches!(state.ui.symbol.editor.tool, SymbolTool::Polygon),
-    });
-    if let Some(index) = document.body.len().checked_sub(1) {
-        state.ui.symbol.editor.select_shape(index);
-    }
-    state.ui.symbol.editor.tool = SymbolTool::Select;
-    true
-}
-
-/// The edge a dropped terminal belongs to.
-///
-/// A terminal placed clear of the body belongs to the edge it stands off
-/// from — not merely the edge whose coordinate it happens to sit closest to,
-/// which on a tall body reads an outer left pin as a rail.
-fn inferred_side_from_point(point: Point, bounds: (Point, Point)) -> crate::state::SymbolPinSide {
-    crate::state::pin_side_against_body(point, crate::state::PortDirection::InOut, Some(bounds))
-}
-
 pub(crate) fn rotate_selected_pin(state: &mut AppState) {
     transform_selected_pin_geometry(state, |side, offset| {
         let side = match side {
@@ -1023,108 +620,4 @@ fn transform_selected_pin_geometry(
     if let Err(error) = state.store_active_symbol_editor_bundle(&document, &metadata) {
         state.push_user_message(ConsoleMessage::warning(error));
     }
-}
-
-fn add_rectangle(state: &mut AppState, document: &mut SymbolDocument, point: Point) -> bool {
-    if state.deny_read_only_edit() {
-        return false;
-    }
-    let Some(start) = state.ui.symbol.editor.shape_start.take() else {
-        state.ui.symbol.editor.shape_start = Some(point);
-        return false;
-    };
-    if start == point {
-        state.ui.symbol.editor.shape_start = Some(start);
-        return false;
-    }
-    state.record_symbol_edit(document);
-    document.body.push(SymbolShape::Polyline {
-        points: vec![
-            start,
-            Point::new(point.x, start.y),
-            point,
-            Point::new(start.x, point.y),
-        ],
-        closed: true,
-    });
-    if let Some(index) = document.body.len().checked_sub(1) {
-        state.ui.symbol.editor.select_shape(index);
-    }
-    state.ui.symbol.editor.tool = SymbolTool::Select;
-    true
-}
-
-fn add_text(state: &mut AppState, document: &mut SymbolDocument, point: Point) -> bool {
-    if state.deny_read_only_edit() {
-        return false;
-    }
-    state.record_symbol_edit(document);
-    document.body.push(SymbolShape::Text {
-        anchor: point,
-        text: "Text".to_owned(),
-        size: SymbolTextSize::default(),
-        align: SymbolTextAlign::default(),
-    });
-    if let Some(index) = document.body.len().checked_sub(1) {
-        state.ui.symbol.editor.select_shape(index);
-    }
-    state.ui.symbol.editor.tool = SymbolTool::Select;
-    true
-}
-
-fn add_round_shape(
-    state: &mut AppState,
-    document: &mut SymbolDocument,
-    point: Point,
-    arc: bool,
-) -> bool {
-    if state.deny_read_only_edit() {
-        return false;
-    }
-    if let Some(center) = state.ui.symbol.editor.shape_start.take() {
-        state.record_symbol_edit(document);
-        let radius = center
-            .distance_squared(point)
-            .isqrt()
-            .max(SYMBOL_TERMINAL_GRID);
-        let shape = if arc {
-            SymbolShape::Arc {
-                center,
-                radius,
-                start_degrees: 0,
-                sweep_degrees: 180,
-            }
-        } else {
-            SymbolShape::Circle { center, radius }
-        };
-        document.body.push(shape);
-        if let Some(index) = document.body.len().checked_sub(1) {
-            state.ui.symbol.editor.select_shape(index);
-        }
-        state.ui.symbol.editor.tool = SymbolTool::Select;
-        true
-    } else {
-        state.ui.symbol.editor.shape_start = Some(point);
-        false
-    }
-}
-
-fn sync_legacy_attribute_anchor(
-    document: &mut SymbolDocument,
-    kind: SymbolAttributeKind,
-    position: Point,
-) {
-    match kind {
-        SymbolAttributeKind::Reference => document.name_anchor = position,
-        SymbolAttributeKind::Value => document.value_anchor = position,
-        SymbolAttributeKind::Model => {}
-    }
-}
-
-fn next_unplaced_pin(document: &SymbolDocument) -> Option<String> {
-    document
-        .pins
-        .iter()
-        .find(|pin| pin.position.is_none())
-        .map(|pin| pin.name.clone())
 }

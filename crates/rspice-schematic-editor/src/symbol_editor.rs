@@ -1,5 +1,6 @@
 //! Symbol canvas geometry, viewport and painting over explicit editor inputs.
 
+pub mod interaction;
 pub mod session;
 
 use crate::view::resolved_symbol_render::draw_resolved_symbol;
@@ -36,7 +37,7 @@ const PREVIEW_TILE_MARGIN: f32 = 12.0;
 const PREVIEW_TILE_HEADER: f32 = 26.0;
 const PREVIEW_FIT_PADDING: f32 = 10.0;
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct SymbolViewport {
     pub rect: Rect,
     pub zoom: f32,

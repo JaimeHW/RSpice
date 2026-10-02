@@ -219,6 +219,7 @@ impl SymbolClipboard {
 
 #[derive(Debug, Clone)]
 pub struct SymbolEditorSession {
+    pub canvas_source: Option<super::interaction::SymbolRequestSource>,
     pub tool: SymbolTool,
     pub selection: SymbolSelection,
     pub selected_pin: Option<String>,
@@ -254,6 +255,7 @@ pub struct SymbolEditorSession {
 impl Default for SymbolEditorSession {
     fn default() -> Self {
         Self {
+            canvas_source: None,
             tool: SymbolTool::Select,
             selection: SymbolSelection::default(),
             selected_pin: None,
