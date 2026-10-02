@@ -301,3 +301,83 @@ fn symbol_gesture_cannot_follow_the_same_master_into_another_occurrence() {
     assert_eq!(state.load_active_symbol_document().unwrap(), before);
     assert!(!state.can_undo_active_symbol_document());
 }
+
+#[test]
+fn retained_symbol_drafts_require_the_same_open_view_revision_and_window() {
+    use crate::workbench::state::WorkspaceDocumentId;
+
+    for change in ["navigation", "revision", "replacement", "close", "window"] {
+        let mut state = open_symbol();
+        state.project_lifecycle.authority.open_session();
+        let symbol = state.workspace.content.active_view.clone();
+        let before = state.load_active_symbol_document().unwrap();
+        let points = vec![Point::origin(), Point::new(20, 10)];
+        state.ui.symbol.editor.tool = SymbolTool::Line;
+        state.ui.symbol.editor.pending_polyline = points.clone();
+        state.ui.symbol.editor.dragging_origin = true;
+        state.ui.symbol.editor.marquee_start = Some(Point::origin());
+        let pending = request(
+            &state,
+            SymbolCanvasInput {
+                clicked: true,
+                ..Default::default()
+            },
+        );
+        if change == "revision" {
+            let mut metadata = state.load_active_symbol_editor_metadata(&before).unwrap();
+            metadata.revision += 1;
+            state
+                .store_active_symbol_editor_bundle(&before, &metadata)
+                .unwrap();
+        }
+        if change == "close" {
+            crate::workbench::lifecycle::project_lifecycle::close_active_document(&mut state)
+                .unwrap();
+            assert!(
+                !state
+                    .workspace
+                    .session
+                    .symbol_sessions
+                    .contains_key(&symbol.key())
+            );
+        } else {
+            state.open_workspace_view(CellViewRef::new("work", "amp", "schematic"));
+        }
+        if change == "replacement" {
+            state.design_execution_epoch += 1;
+        }
+        if change == "window" {
+            let layout = state.workbench.current_workspace_layout();
+            let window = state
+                .workbench
+                .window_session
+                .detach_document(
+                    WorkspaceDocumentId::CellView(symbol.clone()),
+                    "Symbol",
+                    layout,
+                    false,
+                )
+                .unwrap();
+            state.workbench.window_session.set_current(window).unwrap();
+        }
+        state.open_workspace_view(symbol);
+        bind_active_canvas(&mut state);
+        assert!(!state.ui.symbol.editor.dragging_origin, "{change}");
+        assert!(state.ui.symbol.editor.marquee_start.is_none(), "{change}");
+        if change == "navigation" {
+            assert_eq!(state.ui.symbol.editor.pending_polyline, points);
+        } else {
+            assert!(
+                state.ui.symbol.editor.pending_polyline.is_empty(),
+                "{change}"
+            );
+        }
+        apply(&mut state, pending);
+        assert_eq!(
+            state.load_active_symbol_document().unwrap(),
+            before,
+            "{change}"
+        );
+        assert!(!state.can_undo_active_symbol_document(), "{change}");
+    }
+}

@@ -12,6 +12,191 @@ struct Fixture {
     time: f64,
 }
 
+#[test]
+fn symbol_draft_survives_passive_window_projection() {
+    use crate::state::{
+        Cell, CellViewRef, SymbolDocument, SymbolEditorMetadata, SymbolShape, View, ViewType,
+    };
+    use crate::workbench::{SymbolTool, state::WorkspaceDocumentId};
+
+    let mut failures = Vec::new();
+    for other_is_symbol in [false, true] {
+        let mut fixture = Fixture::new(false);
+        let library = fixture
+            .app
+            .state
+            .workspace
+            .content
+            .active_view
+            .library
+            .clone();
+        let document = SymbolDocument {
+            body: vec![SymbolShape::Circle {
+                center: Point::origin(),
+                radius: 10,
+            }],
+            ..Default::default()
+        };
+        let mut add_symbol = |name: &str| {
+            let reference = CellViewRef::new(&library, name, "symbol");
+            let mut cell = Cell::new(name);
+            cell.add_view(View::new("symbol", ViewType::Symbol));
+            fixture
+                .app
+                .state
+                .library_manager
+                .get_library_mut(&library)
+                .unwrap()
+                .add_cell(cell);
+            fixture.app.state.open_workspace_view(reference.clone());
+            fixture
+                .app
+                .state
+                .store_active_symbol_editor_bundle(
+                    &document,
+                    &SymbolEditorMetadata::for_document(&document),
+                )
+                .unwrap();
+            reference
+        };
+        let primary_view = add_symbol("symbol-owner");
+        let other = if other_is_symbol {
+            add_symbol("symbol-other")
+        } else {
+            fixture.second_document()
+        };
+        fixture.app.state.open_workspace_view(primary_view.clone());
+        fixture.frame(vec![], true);
+        let points = vec![Point::origin(), Point::new(20, 10)];
+        fixture.app.state.ui.symbol.editor.tool = SymbolTool::Line;
+        fixture.app.state.ui.symbol.editor.pending_polyline = points.clone();
+        fixture.app.state.ui.symbol.editor.select_shape(0);
+        fixture.app.state.ui.symbol.editor.dragging_origin = true;
+        fixture.app.state.ui.symbol.editor.save_revision_note = "Owner draft".into();
+        fixture.app.state.ui.symbol.editor.clipboard.shapes = document.body.clone();
+        let primary = fixture.app.state.workbench.window_session.primary();
+        let layout = fixture.app.state.workbench.current_workspace_layout();
+        let secondary = fixture
+            .app
+            .state
+            .workbench
+            .window_session
+            .detach_document(WorkspaceDocumentId::CellView(other), "Other", layout, false)
+            .unwrap();
+        fixture.app.capture_application_window_projection(primary);
+        assert!(fixture.app.project_application_window(secondary, layout));
+        fixture.frame(vec![], true);
+        if other_is_symbol {
+            assert!(
+                fixture
+                    .app
+                    .state
+                    .ui
+                    .symbol
+                    .editor
+                    .pending_polyline
+                    .is_empty()
+            );
+            assert!(
+                fixture
+                    .app
+                    .state
+                    .ui
+                    .symbol
+                    .editor
+                    .save_revision_note
+                    .is_empty()
+            );
+            assert_eq!(
+                fixture.app.state.ui.symbol.editor.clipboard.shapes,
+                document.body
+            );
+            fixture.app.state.ui.symbol.editor.shape_start = Some(Point::new(30, 40));
+        }
+        assert!(fixture.app.project_application_window(primary, layout));
+        fixture.frame(vec![], true);
+        if fixture.app.state.ui.symbol.editor.pending_polyline != points
+            || !fixture
+                .app
+                .state
+                .ui
+                .symbol
+                .editor
+                .effective_selection()
+                .shapes
+                .contains(&0)
+        {
+            failures.push(if other_is_symbol {
+                "symbol"
+            } else {
+                "schematic"
+            });
+        }
+        assert_eq!(
+            fixture.app.state.workspace.content.active_view,
+            primary_view
+        );
+        assert_eq!(
+            fixture.app.state.load_active_symbol_document().unwrap(),
+            document
+        );
+        assert_eq!(
+            fixture
+                .app
+                .state
+                .ui
+                .symbol
+                .history
+                .undo_depth(&primary_view.key()),
+            0
+        );
+        assert_eq!(
+            fixture.app.state.ui.symbol.editor.save_revision_note,
+            "Owner draft"
+        );
+        assert!(fixture.app.state.ui.symbol.editor.dragging_origin);
+        if other_is_symbol {
+            assert!(fixture.app.project_application_window(secondary, layout));
+            fixture.frame(vec![], true);
+            assert_eq!(
+                fixture.app.state.ui.symbol.editor.shape_start,
+                Some(Point::new(30, 40))
+            );
+            assert!(fixture.app.project_application_window(primary, layout));
+            fixture.frame(vec![], true);
+        }
+        fixture
+            .app
+            .execute_shortcut_command(crate::workbench::commands::vocabulary::Command::Cancel);
+        let edited = fixture.app.state.load_active_symbol_document().unwrap();
+        assert_eq!(edited.body.len(), document.body.len() + 1);
+        assert_eq!(
+            fixture
+                .app
+                .state
+                .ui
+                .symbol
+                .history
+                .undo_depth(&primary_view.key()),
+            1
+        );
+        assert!(fixture.app.state.undo_active_symbol_document().unwrap());
+        assert_eq!(
+            fixture.app.state.load_active_symbol_document().unwrap(),
+            document
+        );
+        assert!(fixture.app.state.redo_active_symbol_document().unwrap());
+        assert_eq!(
+            fixture.app.state.load_active_symbol_document().unwrap(),
+            edited
+        );
+    }
+    assert!(
+        failures.is_empty(),
+        "Passive projections discarded the symbol draft: {failures:?}"
+    );
+}
+
 impl Fixture {
     fn new(wires: bool) -> Self {
         let ctx = Context::default();
@@ -69,7 +254,12 @@ impl Fixture {
                 app.state.reconcile_schematic_drag(ui.ctx(), false);
                 app.handle_shortcuts(ui.ctx());
                 *origin = ui.available_rect_before_wrap().min;
-                crate::schematic::view::render_schematic_view(ui, &mut app.state, None);
+                if app.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol
+                {
+                    crate::schematic::symbol_editor::show(ui, &mut app.state);
+                } else {
+                    crate::schematic::view::render_schematic_view(ui, &mut app.state, None);
+                }
                 app.state.reconcile_schematic_drag(ui.ctx(), true);
             },
         );

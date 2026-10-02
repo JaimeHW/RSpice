@@ -173,9 +173,6 @@ pub use rspice_schematic_editor::symbol_editor::session::{
 #[derive(Debug, Clone, Default)]
 pub struct SymbolUiState {
     pub editor: SymbolEditorSession,
-    pub save_dialog_open: bool,
-    pub save_revision_note: String,
-    pub save_error: Option<String>,
     pub history: SymbolHistory,
 }
 

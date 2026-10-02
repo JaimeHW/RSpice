@@ -1936,6 +1936,7 @@ impl AppState {
 
     pub(crate) fn bump_active_schematic_epoch(&mut self) {
         self.active_schematic_epoch = self.active_schematic_epoch.wrapping_add(1);
+        self.project_active_symbol_session();
     }
 
     /// Return the exact schematic master of one hierarchy instance.

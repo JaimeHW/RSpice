@@ -58,6 +58,7 @@ fn generation_button_returns_its_source_only_when_enabled() {
         design_epoch: 3,
         document_epoch: 4,
         library_revision: 5,
+        window: 1,
     };
     let ports = [PortSpec {
         name: "IN".to_owned(),

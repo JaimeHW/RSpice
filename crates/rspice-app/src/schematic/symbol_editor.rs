@@ -158,7 +158,7 @@ fn show_save_symbol_dialog(
     editor: &mut SymbolEditorMetadata,
     ports: &[PortSpec],
 ) {
-    if !state.ui.symbol.save_dialog_open {
+    if !state.ui.symbol.editor.save_dialog_open {
         return;
     }
     let checks = state.active_symbol_save_checks(document, ports);
@@ -167,28 +167,28 @@ fn show_save_symbol_dialog(
         ctx,
         &checks,
         editor.revision,
-        &mut state.ui.symbol.save_revision_note,
-        state.ui.symbol.save_error.as_deref(),
+        &mut state.ui.symbol.editor.save_revision_note,
+        state.ui.symbol.editor.save_error.as_deref(),
         can_publish,
     );
     match choice {
         DialogChoice::Primary => {
-            let note = state.ui.symbol.save_revision_note.clone();
+            let note = state.ui.symbol.editor.save_revision_note.clone();
             match state.publish_active_symbol_revision(document, editor, &note) {
                 Ok(revision) => {
-                    state.ui.symbol.save_dialog_open = false;
-                    state.ui.symbol.save_revision_note.clear();
-                    state.ui.symbol.save_error = None;
+                    state.ui.symbol.editor.save_dialog_open = false;
+                    state.ui.symbol.editor.save_revision_note.clear();
+                    state.ui.symbol.editor.save_error = None;
                     state.push_user_message(ConsoleMessage::info(format!(
                         "Saved symbol revision {revision}"
                     )));
                 }
-                Err(error) => state.ui.symbol.save_error = Some(error),
+                Err(error) => state.ui.symbol.editor.save_error = Some(error),
             }
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => {
-            state.ui.symbol.save_dialog_open = false;
-            state.ui.symbol.save_error = None;
+            state.ui.symbol.editor.save_dialog_open = false;
+            state.ui.symbol.editor.save_error = None;
         }
         DialogChoice::Secondary | DialogChoice::None => {}
     }

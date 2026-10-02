@@ -234,7 +234,7 @@ fn queued_symbol_commands_recheck_source_selection_tool_clipboard_and_authority(
 }
 
 #[test]
-fn cancel_finishes_open_geometry_without_materializing_metadata_or_crossing_views() {
+fn cancel_finishes_open_geometry_without_materializing_metadata_and_rejects_stale_requests() {
     let mut app = open_symbol();
     let before = app.state.load_active_symbol_document().unwrap();
     assert!(metadata_encoding(&app.state).is_none());
@@ -257,13 +257,20 @@ fn cancel_finishes_open_geometry_without_materializing_metadata_or_crossing_view
 
     let source = app.state.symbol_editor_request_source();
     bind_canvas_source(&mut app.state.ui.symbol.editor, source);
-    app.state.ui.symbol.editor.pending_polyline = points;
+    app.state.ui.symbol.editor.tool = SymbolTool::Polygon;
+    app.state.ui.symbol.editor.pending_polyline = points.clone();
+    let pending = edit_request(
+        &app.state,
+        SymbolEditAction::FinishPolyline {
+            points: points.clone(),
+        },
+    );
     app.state
         .open_workspace_view(CellViewRef::new("work", "amp", "schematic"));
     app.state
         .open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
-    app.execute_symbol_shortcut_command(Command::Cancel);
+    apply_edit_request(&mut app.state, pending);
     assert_eq!(app.state.load_active_symbol_document().unwrap(), before);
-    assert!(app.state.ui.symbol.editor.pending_polyline.is_empty());
+    assert_eq!(app.state.ui.symbol.editor.pending_polyline, points);
     assert!(!app.state.can_undo_active_symbol_document());
 }

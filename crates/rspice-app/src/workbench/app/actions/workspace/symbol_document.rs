@@ -40,6 +40,72 @@ impl AppState {
             design_epoch: self.design_execution_epoch,
             document_epoch: self.active_schematic_epoch,
             library_revision: self.library_manager.revision(),
+            window: self.workbench.window_session.current().value(),
+        }
+    }
+
+    /// Project one retained view session into the active editor slot. Navigation
+    /// advances request authority; it does not turn passive rendering into an edit.
+    pub(crate) fn project_active_symbol_session(&mut self) {
+        use rspice_schematic_editor::symbol_editor::interaction::{
+            bind_canvas_source, resume_canvas_source,
+        };
+
+        let source = self.symbol_editor_request_source();
+        let is_symbol = self.workspace.content.active_view_type() == crate::state::ViewType::Symbol;
+        let open_views = &self.workspace.content.open_views;
+        let retained = &mut self.workspace.session.symbol_sessions;
+        let still_open = |previous: &SymbolRequestSource| {
+            previous.project == source.project
+                && previous.design_epoch == source.design_epoch
+                && open_views
+                    .iter()
+                    .any(|open| open.reference == previous.document)
+        };
+        retained.retain(|_, session| session.canvas_source.as_ref().is_some_and(still_open));
+        let same_document = self
+            .ui
+            .symbol
+            .editor
+            .canvas_source
+            .as_ref()
+            .is_some_and(|previous| {
+                previous.project == source.project
+                    && previous.design_epoch == source.design_epoch
+                    && previous.document == source.document
+            });
+        if !is_symbol || !same_document {
+            if self
+                .ui
+                .symbol
+                .editor
+                .canvas_source
+                .as_ref()
+                .is_some_and(|previous| previous.window == source.window)
+            {
+                // User navigation ends active input. Projecting a different
+                // window keeps it with the window that still owns it.
+                self.ui.symbol.editor.clear_drag_state();
+                self.ui.symbol.editor.marquee_start = None;
+                self.ui.symbol.editor.marquee_current = None;
+                self.ui.symbol.editor.inspector.end_field_edit();
+            }
+            // Clipboard contents travel across views; every other field is view-local.
+            let clipboard = std::mem::take(&mut self.ui.symbol.editor.clipboard);
+            let previous = std::mem::take(&mut self.ui.symbol.editor);
+            if let Some(previous_source) = &previous.canvas_source
+                && still_open(previous_source)
+            {
+                retained.insert(previous_source.document.key(), previous);
+            }
+            if is_symbol && let Some(mut session) = retained.remove(&source.document.key()) {
+                resume_canvas_source(&mut session, source.clone());
+                self.ui.symbol.editor = session;
+            }
+            self.ui.symbol.editor.clipboard = clipboard;
+        }
+        if is_symbol {
+            bind_canvas_source(&mut self.ui.symbol.editor, source);
         }
     }
 

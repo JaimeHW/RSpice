@@ -858,7 +858,7 @@ fn saving_a_symbol_that_fails_its_checks_refuses_before_the_dialog_opens() {
     Command::SymbolSave.execute(&mut app);
 
     assert!(
-        !app.state.ui.symbol.save_dialog_open,
+        !app.state.ui.symbol.editor.save_dialog_open,
         "a refused save must not open a transaction it cannot complete"
     );
 }

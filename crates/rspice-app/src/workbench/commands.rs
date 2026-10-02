@@ -1609,8 +1609,8 @@ impl Command {
                     .state
                     .push_user_message(crate::diagnostics::ConsoleMessage::warning(refusal)),
                 None => {
-                    app.state.ui.symbol.save_dialog_open = true;
-                    app.state.ui.symbol.save_error = None;
+                    app.state.ui.symbol.editor.save_dialog_open = true;
+                    app.state.ui.symbol.editor.save_error = None;
                 }
             },
             Self::Place(ComponentType::Port) => Self::PlacePin.execute(app),

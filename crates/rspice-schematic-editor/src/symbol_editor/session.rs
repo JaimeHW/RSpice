@@ -220,6 +220,9 @@ impl SymbolClipboard {
 #[derive(Debug, Clone)]
 pub struct SymbolEditorSession {
     pub canvas_source: Option<super::interaction::SymbolRequestSource>,
+    pub save_dialog_open: bool,
+    pub save_revision_note: String,
+    pub save_error: Option<String>,
     pub tool: SymbolTool,
     pub selection: SymbolSelection,
     pub selected_pin: Option<String>,
@@ -254,6 +257,9 @@ impl Default for SymbolEditorSession {
     fn default() -> Self {
         Self {
             canvas_source: None,
+            save_dialog_open: false,
+            save_revision_note: String::new(),
+            save_error: None,
             tool: SymbolTool::Select,
             selection: SymbolSelection::default(),
             selected_pin: None,

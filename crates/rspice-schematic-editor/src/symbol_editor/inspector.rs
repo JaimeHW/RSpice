@@ -27,6 +27,7 @@ use rspice_ui_kit::widgets::TreeRow;
 pub struct SymbolInspectorSession {
     source: Option<SymbolRequestSource>,
     selection: SymbolSelection,
+    scope: Option<egui::Id>,
     generation: u64,
     undo_recorded: bool,
 }
@@ -34,6 +35,13 @@ pub struct SymbolInspectorSession {
 impl SymbolInspectorSession {
     fn bind(&mut self, source: &SymbolRequestSource, selection: &SymbolSelection) {
         if self.source.as_ref() != Some(source) || &self.selection != selection {
+            self.scope = Some(egui::Id::new((
+                source.project,
+                &source.document,
+                source.design_epoch,
+                source.document_epoch,
+                source.window,
+            )));
             self.generation = self.generation.wrapping_add(1);
             self.undo_recorded = false;
             self.source = Some(source.clone());
@@ -44,6 +52,22 @@ impl SymbolInspectorSession {
     /// A successful host commit advances this field's source without splitting its undo group.
     pub fn accept_source(&mut self, source: SymbolRequestSource) {
         self.source = Some(source);
+    }
+
+    /// User navigation ends a field's focus lifetime and its undo group.
+    pub fn end_field_edit(&mut self) {
+        self.source = None;
+        self.undo_recorded = false;
+    }
+
+    pub(super) fn resume_source(&mut self, source: &SymbolRequestSource) {
+        if let Some(previous) = &self.source {
+            let mut resumed = previous.clone();
+            resumed.document_epoch = source.document_epoch;
+            if &resumed == source {
+                self.source = Some(resumed);
+            }
+        }
     }
 }
 
@@ -81,7 +105,12 @@ pub fn show(
     edit.session.bind(&source, &expected_selection);
     let mut changed = false;
     let mut intent = SymbolCommitIntent::default();
-    ui.push_id(("symbol-inspector", edit.session.generation), |ui| {
+    let field_id = (
+        "symbol-inspector",
+        edit.session.scope,
+        edit.session.generation,
+    );
+    ui.push_id(field_id, |ui| {
         hero(ui, &source.document, &document, ports);
         ui.add_enabled_ui(capabilities.edit, |ui| {
             let selection = edit.selection.clone();

@@ -25,15 +25,21 @@ pub struct SymbolRequestSource {
     pub design_epoch: u64,
     pub document_epoch: u64,
     pub library_revision: u64,
+    /// Host window identity, including embedded windows sharing one native viewport.
+    pub window: u64,
 }
 
 impl SymbolRequestSource {
-    fn same_view(&self, other: &Self) -> bool {
+    fn same_owner(&self, other: &Self) -> bool {
         self.project == other.project
             && self.document == other.document
             && self.occurrence == other.occurrence
             && self.design_epoch == other.design_epoch
-            && self.document_epoch == other.document_epoch
+            && self.window == other.window
+    }
+
+    fn same_view(&self, other: &Self) -> bool {
+        self.same_owner(other) && self.document_epoch == other.document_epoch
     }
 }
 
@@ -102,11 +108,26 @@ pub fn bind_canvas_source(session: &mut SymbolEditorSession, source: SymbolReque
         session.marquee_current = None;
         session.pending_polyline.clear();
         session.shape_start = None;
+        session.save_dialog_open = false;
+        session.save_revision_note.clear();
+        session.save_error = None;
         if !same_view {
             session.clear_selection();
         }
     }
     session.canvas_source = Some(source);
+}
+
+/// Resume a retained view after the host projects it back into the active slot.
+/// Queued requests keep their old epoch. Real owner or revision changes still retire drafts.
+pub fn resume_canvas_source(session: &mut SymbolEditorSession, source: SymbolRequestSource) {
+    if let Some(previous) = &mut session.canvas_source
+        && previous.same_owner(&source)
+    {
+        previous.document_epoch = source.document_epoch;
+        session.inspector.resume_source(&source);
+    }
+    bind_canvas_source(session, source);
 }
 
 #[derive(Debug, Clone, Copy)]

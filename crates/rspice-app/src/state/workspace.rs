@@ -114,6 +114,8 @@ pub struct ProjectWorkspace {
 pub(crate) struct WorkspaceSession {
     annotation_restoration_error: Option<String>,
     pub(crate) schematic_sessions: HashMap<String, crate::state::schematic::SchematicSession>,
+    pub(crate) symbol_sessions:
+        HashMap<String, rspice_schematic_editor::symbol_editor::session::SymbolEditorSession>,
     design_projection_cache: rspice_design::projection::DesignProjectionCache,
 }
 
