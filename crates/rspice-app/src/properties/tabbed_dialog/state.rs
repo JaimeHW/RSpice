@@ -10,6 +10,7 @@ use crate::state::property_types::{
     PropertyDefinition, PropertySheet, PropertyType, PropertyValue,
 };
 use crate::state::{Component, ComponentType};
+use rspice_schematic_editor::requests::EditorRequestSource;
 use std::collections::{HashMap, HashSet};
 
 /// Transaction state for the schematic component editor.
@@ -76,8 +77,7 @@ pub struct TabbedPropertyDialogState {
 
     /// Complete durable baseline and document authority captured at open.
     pub component_baseline: Option<Component>,
-    pub design_execution_epoch: u64,
-    pub active_schematic_epoch: u64,
+    pub source: Option<EditorRequestSource>,
     pub view_path: String,
 
     /// Validated field delta prepared for the host's next atomic component
@@ -105,13 +105,11 @@ pub struct TabbedPropertyDialogState {
 }
 
 /// Durable document authority captured when a component property transaction
-/// opens. Grouping these values keeps the editor boundary explicit and makes
-/// it impossible for call sites to accidentally swap generation counters.
+/// opens. Detached validation uses the same draft without document authority.
 #[derive(Debug, Clone)]
 pub struct ComponentPropertySession {
     component_baseline: Component,
-    design_execution_epoch: u64,
-    active_schematic_epoch: u64,
+    source: Option<EditorRequestSource>,
     view_path: String,
     data_root: Option<std::path::PathBuf>,
     preview_timing: crate::simulation::stimulus_realize::PreviewTiming,
@@ -120,15 +118,22 @@ pub struct ComponentPropertySession {
 impl ComponentPropertySession {
     pub fn new(
         component_baseline: Component,
-        design_execution_epoch: u64,
-        active_schematic_epoch: u64,
+        source: EditorRequestSource,
         view_path: String,
     ) -> Self {
         Self {
-            component_baseline,
-            design_execution_epoch,
-            active_schematic_epoch,
+            source: Some(source),
             view_path,
+            ..Self::detached(component_baseline)
+        }
+    }
+
+    /// Validate a component without authorizing publication to a live document.
+    pub(crate) fn detached(component_baseline: Component) -> Self {
+        Self {
+            component_baseline,
+            source: None,
+            view_path: String::new(),
             data_root: None,
             preview_timing: crate::simulation::stimulus_realize::PreviewTiming::default(),
         }
@@ -289,8 +294,7 @@ impl TabbedPropertyDialogState {
     ) {
         let ComponentPropertySession {
             component_baseline,
-            design_execution_epoch,
-            active_schematic_epoch,
+            source,
             view_path,
             data_root,
             preview_timing,
@@ -311,8 +315,7 @@ impl TabbedPropertyDialogState {
         self.commit_error = None;
         self.session_error = None;
         self.component_baseline = Some(component_baseline);
-        self.design_execution_epoch = design_execution_epoch;
-        self.active_schematic_epoch = active_schematic_epoch;
+        self.source = source;
         self.view_path = view_path;
         self.prepared_commit.clear();
         self.show_advanced = false;
@@ -354,8 +357,7 @@ impl TabbedPropertyDialogState {
         self.commit_error = None;
         self.session_error = None;
         self.component_baseline = None;
-        self.design_execution_epoch = 0;
-        self.active_schematic_epoch = 0;
+        self.source = None;
         self.view_path.clear();
         self.prepared_commit.clear();
         self.pwl_editor = PwlEditorState::default();
@@ -384,8 +386,7 @@ impl TabbedPropertyDialogState {
         self.commit_error = None;
         self.session_error = None;
         self.component_baseline = None;
-        self.design_execution_epoch = 0;
-        self.active_schematic_epoch = 0;
+        self.source = None;
         self.view_path.clear();
         self.prepared_commit.clear();
         self.pwl_editor = PwlEditorState::default();
@@ -900,12 +901,11 @@ mod tests {
             ComponentType::Resistor,
             sheet,
             values,
-            ComponentPropertySession::new(
-                Component::new(7, ComponentType::Resistor, crate::state::Point::origin()),
-                4,
-                9,
-                "user/top/schematic".to_owned(),
-            ),
+            ComponentPropertySession::detached(Component::new(
+                7,
+                ComponentType::Resistor,
+                crate::state::Point::origin(),
+            )),
         );
         state.set_value("gain", numeric(2.0));
         state.set_value("offset", numeric(3.0));
@@ -971,7 +971,7 @@ mod tests {
             component.kind,
             sheet,
             values,
-            ComponentPropertySession::new(component, 4, 9, "user/top/schematic".to_owned()),
+            ComponentPropertySession::detached(component),
         );
         state.sync_pwl_validation_error();
 
@@ -997,16 +997,11 @@ mod tests {
             ComponentType::VoltageSourcePwl,
             &sheet,
             values,
-            ComponentPropertySession::new(
-                Component::new(
-                    9,
-                    ComponentType::VoltageSourcePwl,
-                    crate::state::Point::origin(),
-                ),
-                4,
+            ComponentPropertySession::detached(Component::new(
                 9,
-                "user/top/schematic".to_owned(),
-            ),
+                ComponentType::VoltageSourcePwl,
+                crate::state::Point::origin(),
+            )),
         );
         state.sync_pwl_validation_error();
 
@@ -1030,16 +1025,11 @@ mod tests {
             ComponentType::VoltageSourcePwl,
             &sheet,
             values,
-            ComponentPropertySession::new(
-                Component::new(
-                    9,
-                    ComponentType::VoltageSourcePwl,
-                    crate::state::Point::origin(),
-                ),
-                4,
+            ComponentPropertySession::detached(Component::new(
                 9,
-                "user/top/schematic".to_owned(),
-            ),
+                ComponentType::VoltageSourcePwl,
+                crate::state::Point::origin(),
+            )),
         );
 
         state.pwl_editor.edit_buffers[1].1 = "1e".to_owned();
@@ -1074,16 +1064,11 @@ mod tests {
             ComponentType::VoltageSourcePwl,
             &sheet,
             values,
-            ComponentPropertySession::new(
-                Component::new(
-                    9,
-                    ComponentType::VoltageSourcePwl,
-                    crate::state::Point::origin(),
-                ),
-                4,
+            ComponentPropertySession::detached(Component::new(
                 9,
-                "user/top/schematic".to_owned(),
-            ),
+                ComponentType::VoltageSourcePwl,
+                crate::state::Point::origin(),
+            )),
         );
 
         state.pwl_editor.edit_buffers[1].1 = "1e".to_owned();
@@ -1232,7 +1217,7 @@ mod tests {
             component.kind,
             sheet,
             values,
-            ComponentPropertySession::new(component, 4, 9, "user/top/schematic".to_owned()),
+            ComponentPropertySession::detached(component),
         );
 
         let expected = format!("{} deg", stored);

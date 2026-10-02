@@ -76,12 +76,7 @@ pub(crate) fn validate_component_properties(
         component.kind,
         sheet,
         values,
-        crate::properties::ComponentPropertySession::new(
-            component.clone(),
-            0,
-            0,
-            "detached property validation".to_owned(),
-        ),
+        crate::properties::ComponentPropertySession::detached(component.clone()),
     );
     validator.validate_all(sheet);
     let mut errors = validator.validation_errors.into_iter().collect::<Vec<_>>();

@@ -1805,7 +1805,7 @@ mod tests {
             kind,
             &sheet,
             values,
-            ComponentPropertySession::new(component, 0, 0, "top".to_owned()).with_preview_timing(
+            ComponentPropertySession::detached(component).with_preview_timing(
                 stimulus_realize::PreviewTiming {
                     tstep: 1e-9,
                     tstop: 4e-6,

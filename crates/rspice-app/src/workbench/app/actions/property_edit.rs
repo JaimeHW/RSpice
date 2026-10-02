@@ -573,8 +573,7 @@ pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
             properties,
             crate::properties::ComponentPropertySession::new(
                 component,
-                state.design_execution_epoch,
-                state.active_schematic_epoch,
+                crate::workbench::app::schematic_editor_request_source(state),
                 state.workspace.content.active_view.display_path(),
             )
             .with_data_root(

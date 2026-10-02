@@ -159,7 +159,9 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
             );
             state.tabbed_property_dialog.component_baseline = Some(component.clone());
             state.tabbed_property_dialog.component_name = Some(component.name.clone());
-            state.tabbed_property_dialog.design_execution_epoch = state.design_execution_epoch;
+            state.tabbed_property_dialog.source = Some(
+                crate::workbench::app::schematic_editor_request_source(state),
+            );
             state
                 .tabbed_property_dialog
                 .mark_fields_applied(committed_names);
@@ -978,16 +980,22 @@ fn component_terminal_direction(component: &Component, index: usize, pin: &str) 
 
 fn component_property_session_error(state: &AppState) -> Option<String> {
     let dialog = &state.tabbed_property_dialog;
-    if state.schematic.session.read_only || state.active_view_read_only() {
+    if state.schematic_edit_read_only() {
         return Some("The active schematic is read-only; no properties can be applied.".to_owned());
     }
-    if dialog.design_execution_epoch != state.design_execution_epoch {
+    let Some(source) = dialog.source.as_ref() else {
+        return Some(
+            "The property editor document context is unavailable. Close and reopen Object properties."
+                .to_owned(),
+        );
+    };
+    if source.design_epoch != state.design_execution_epoch {
         return Some(
             "The design document changed while properties were open. Close and reopen the current object."
                 .to_owned(),
         );
     }
-    if dialog.active_schematic_epoch != state.active_schematic_epoch {
+    if source.document_epoch != state.active_schematic_epoch {
         return Some(
             "The active schematic buffer changed while properties were open. Close and reopen the current object."
                 .to_owned(),
@@ -1019,6 +1027,12 @@ fn component_property_session_error(state: &AppState) -> Option<String> {
     };
     if current != baseline {
         return Some("The selected component changed while properties were open. Close and reopen the current object.".to_owned());
+    }
+    if source != &crate::workbench::app::schematic_editor_request_source(state) {
+        return Some(
+            "The schematic source or editing scope changed while properties were open. Close and reopen the current object."
+                .to_owned(),
+        );
     }
     crate::state::params_string::validate_parameter_text(&current.params)
         .err()
@@ -1171,21 +1185,192 @@ mod tests {
     }
 
     #[test]
-    fn session_guard_rejects_read_only_stale_view_epoch_and_object() {
-        let mut state = state_with_resistor();
-        open_property_editor(&mut state, 44);
-        assert!(component_property_session_error(&state).is_none());
-
-        state.schematic.session.read_only = true;
-        assert!(component_property_session_error(&state).is_some());
-        state.schematic.session.read_only = false;
-
-        state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
-        assert!(component_property_session_error(&state).is_some());
-        state.design_execution_epoch = state.tabbed_property_dialog.design_execution_epoch;
-
-        state.schematic.document_mut_for_test().components[0].name = "R2".to_owned();
-        assert!(component_property_session_error(&state).is_some());
+    fn retained_component_properties_reject_changed_context_without_committing() {
+        for change in [
+            "project",
+            "view",
+            "symbol-tab",
+            "design",
+            "buffer",
+            "occurrence",
+            "sheet",
+            "sheet-revision",
+            "content",
+            "topology",
+            "symbol-context",
+            "read-only",
+            "safe-mode",
+            "missing",
+            "object",
+        ] {
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            let mut state = state_with_resistor();
+            let master = CellViewRef::new("work", "property_parent", "schematic");
+            state.workspace.descend_into(
+                "X1".to_owned(),
+                master.clone(),
+                crate::state::ViewType::Schematic,
+            );
+            let first = state
+                .workspace
+                .content
+                .design_management
+                .bootstrap_for_cell_view(&master.key(), "Sheet 1", [])
+                .unwrap();
+            let note = crate::state::DesignNote::new(
+                99,
+                Point::new(0, 20),
+                crate::state::DesignNoteKind::PlainText,
+                "Original note",
+            )
+            .unwrap();
+            state
+                .schematic
+                .document_mut_for_test()
+                .design_notes
+                .push(note.clone());
+            state.schematic.init_undo_history();
+            open_property_editor(&mut state, 44);
+            assert_eq!(
+                state.tabbed_property_dialog.source,
+                Some(crate::workbench::app::schematic_editor_request_source(
+                    &state
+                ))
+            );
+            assert!(component_property_session_error(&state).is_none());
+            state
+                .tabbed_property_dialog
+                .set_value("r", PropertyValue::Expression("2k".to_owned()));
+            let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
+                render_property_dialog(ctx, &mut state);
+            });
+            assert!(state.tabbed_property_dialog.session_error.is_none());
+            match change {
+                "project" => state.workspace.content.project = Default::default(),
+                "view" => {
+                    state.workspace.content.active_view =
+                        CellViewRef::new("work", "replacement", "schematic")
+                }
+                "symbol-tab" => {
+                    state.workspace.content.active_view =
+                        CellViewRef::new("work", "property_parent", "symbol")
+                }
+                "design" => state.design_execution_epoch += 1,
+                "buffer" => state.active_schematic_epoch += 1,
+                "occurrence" => {
+                    state.workspace.ascend_one().unwrap();
+                    state.workspace.descend_into(
+                        "X2".to_owned(),
+                        master.clone(),
+                        crate::state::ViewType::Schematic,
+                    );
+                }
+                "sheet" | "sheet-revision" => {
+                    let catalog = state
+                        .workspace
+                        .content
+                        .design_management
+                        .sheet_catalog_mut(&master.key())
+                        .unwrap();
+                    let second = catalog
+                        .create_sheet(
+                            crate::state::SheetDefinition {
+                                name: "Sheet 2".to_owned(),
+                                template: crate::state::SheetTemplate::AnalogSchematic,
+                                port_policy: crate::state::SheetPortPolicy::TypedOffSheetPorts,
+                                explicit_page_number: Some(2),
+                            },
+                            Some(first),
+                        )
+                        .unwrap();
+                    if change == "sheet" {
+                        catalog.set_active(second).unwrap();
+                    }
+                }
+                "content" => {
+                    let topology = state.schematic.topology_version();
+                    assert!(
+                        state
+                            .schematic
+                            .edit_design_note_properties(
+                                note,
+                                crate::state::DesignNoteKind::PlainText,
+                                "Changed note".to_owned(),
+                                None,
+                            )
+                            .unwrap()
+                    );
+                    assert_eq!(state.schematic.topology_version(), topology);
+                }
+                "topology" => state.schematic.bump_topology_version(),
+                "symbol-context" => {
+                    state
+                        .workspace
+                        .content
+                        .schematic_buffers
+                        .insert("work/other/schematic".to_owned(), Default::default());
+                }
+                "read-only" => state.schematic.session.read_only = true,
+                "safe-mode" => state.workbench.safe_mode.activate(
+                    crate::workbench::state::LocalSafeModeOptions {
+                        open_project_read_only: true,
+                        ..Default::default()
+                    },
+                    "component-properties test".to_owned(),
+                ),
+                "missing" => state.tabbed_property_dialog.source = None,
+                "object" => {
+                    state.schematic.document_mut_for_test().components[0].name = "R2".to_owned()
+                }
+                _ => unreachable!(),
+            }
+            assert!(
+                component_property_session_error(&state).is_some(),
+                "{change}"
+            );
+            let source = state.tabbed_property_dialog.source.clone();
+            let before = crate::state::SchematicSnapshot::capture(&state.schematic.document());
+            let versions = (
+                state.schematic.content_version(),
+                state.schematic.topology_version(),
+            );
+            let undo = state.schematic.undo_description().map(str::to_owned);
+            let project_undo = state.project_undo_sequence();
+            let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
+                render_property_dialog(ctx, &mut state);
+            });
+            assert!(state.tabbed_property_dialog.open, "{change}");
+            assert!(
+                state.tabbed_property_dialog.session_error.is_some(),
+                "{change}"
+            );
+            assert_eq!(state.tabbed_property_dialog.source, source, "{change}");
+            assert_eq!(
+                state.tabbed_property_dialog.values["r"],
+                PropertyValue::Expression("2k".to_owned()),
+                "{change}"
+            );
+            assert!(state.tabbed_property_dialog.is_modified("r"), "{change}");
+            assert!(
+                before.is_equal_document(&state.schematic.document()),
+                "{change}"
+            );
+            assert_eq!(
+                (
+                    state.schematic.content_version(),
+                    state.schematic.topology_version()
+                ),
+                versions,
+                "{change}"
+            );
+            assert_eq!(
+                state.schematic.undo_description(),
+                undo.as_deref(),
+                "{change}"
+            );
+            assert_eq!(state.project_undo_sequence(), project_undo, "{change}");
+        }
     }
 
     #[test]
@@ -1210,6 +1395,7 @@ mod tests {
         });
 
         assert!(!state.tabbed_property_dialog.open);
+        assert!(state.tabbed_property_dialog.source.is_none());
         assert_eq!(state.schematic.document().components[0].name, "R99");
         assert_eq!(state.schematic.document().components[0].value, "2k");
         assert_eq!(
@@ -1271,6 +1457,7 @@ mod tests {
         let before = crate::state::SchematicSnapshot::capture(&state.schematic.document());
         let payloads = state.workspace.content.simulation_plan_payloads.clone();
         open_property_editor(&mut state, 44);
+        let opened_source = state.tabbed_property_dialog.source.clone();
         state
             .tabbed_property_dialog
             .set_value("name", PropertyValue::String("R99".to_owned()));
@@ -1287,6 +1474,7 @@ mod tests {
         assert_eq!(state.workspace.content.simulation_plan_payloads, payloads);
         assert!(state.tabbed_property_dialog.open);
         assert!(state.tabbed_property_dialog.commit_error.is_some());
+        assert_eq!(state.tabbed_property_dialog.source, opened_source);
         assert!(state.tabbed_property_dialog.is_modified("name"));
         assert!(state.tabbed_property_dialog.is_modified("r"));
         assert_eq!(
@@ -1356,6 +1544,7 @@ mod tests {
             render_property_dialog(ctx, &mut state);
         });
         assert!(!state.tabbed_property_dialog.open);
+        assert!(state.tabbed_property_dialog.source.is_none());
         assert_eq!(state.schematic.document().components[0].name, "R1");
     }
 
@@ -1363,7 +1552,12 @@ mod tests {
     fn returning_to_the_same_view_cannot_reauthorize_an_old_dialog() {
         let mut state = state_with_resistor();
         open_property_editor(&mut state, 44);
-        let captured_epoch = state.tabbed_property_dialog.active_schematic_epoch;
+        let captured_epoch = state
+            .tabbed_property_dialog
+            .source
+            .as_ref()
+            .unwrap()
+            .document_epoch;
         let original_view = state.workspace.content.active_view.clone();
 
         state.open_workspace_view(CellViewRef::new("work", "detour", "schematic"));
@@ -1458,6 +1652,7 @@ mod tests {
             .document_policy
             .property_commit = PropertyCommitPolicy::ApplyValidFields;
         open_property_editor(&mut state, 44);
+        let opened_source = state.tabbed_property_dialog.source.clone();
         state
             .tabbed_property_dialog
             .set_value("name", PropertyValue::String(" R99 ".to_owned()));
@@ -1480,6 +1675,13 @@ mod tests {
         assert_eq!(state.schematic.history().undo_count(), 0);
         assert!(state.project_undo_sequence().is_some());
         assert!(component_property_session_error(&state).is_none());
+        assert_ne!(state.tabbed_property_dialog.source, opened_source);
+        assert_eq!(
+            state.tabbed_property_dialog.source,
+            Some(crate::workbench::app::schematic_editor_request_source(
+                &state
+            ))
+        );
         assert_eq!(
             state.tabbed_property_dialog.values["name"],
             PropertyValue::String("R99".to_owned())
@@ -1509,6 +1711,7 @@ mod tests {
         });
 
         assert!(!state.tabbed_property_dialog.open);
+        assert!(state.tabbed_property_dialog.source.is_none());
         assert_eq!(state.schematic.document().components[0].name, "R99");
         assert_eq!(state.schematic.document().components[0].params, "m=2");
         assert_eq!(state.schematic.history().undo_count(), 1);
