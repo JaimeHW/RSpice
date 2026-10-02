@@ -2112,7 +2112,7 @@ pub struct ResultsState {
     pub(crate) scatter: rspice_results_ui::scatter::ScatterSheetState,
     /// Box/violin sheet controls: the grouping, the margin scale, the body
     /// and the whisker rule.
-    pub(crate) box_violin: box_violin::BoxViolinSheetState,
+    pub(crate) box_violin: rspice_results_ui::box_violin::BoxViolinSheetState,
     /// The marker tool.
     pub marker_tool: MarkerTool,
     /// Primary plot pointer tool shown in the 31 px instrument strip.
@@ -4319,7 +4319,7 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         ResultViewer::Scatter | ResultViewer::BoxViolin => {
             if active_run.is_some_and(|run| {
                 state.simulation.active_analysis().is_some_and(|analysis| {
-                    population::is_a_population(analysis)
+                    rspice_results::population::is_a_population(analysis)
                         && analysis_evidence_is_valid(state, run.dataset_id, analysis)
                 })
             }) {

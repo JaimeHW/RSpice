@@ -5,12 +5,7 @@ use crate::state::{
     AnalysisResult, PreparedSpecification, ProjectWorkspace, RunHistoryRevision, SpecEntry,
     SpecPointScope,
 };
-pub(crate) use rspice_results::population::Whiskers;
 use rspice_results::population::{self as projection, PopulationData, PopulationRequirements};
-pub(super) use rspice_results::population::{
-    BoxStatistics, ColumnKind, PopulationColumn, PopulationLimit, TrialStatus, box_statistics, cpk,
-    is_a_population, kernel_density, silverman_bandwidth, sorted, std_dev, wilson_interval,
-};
 use std::ops::Deref;
 use std::sync::Arc;
 

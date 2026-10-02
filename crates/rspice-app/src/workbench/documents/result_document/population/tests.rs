@@ -7,6 +7,7 @@ use crate::state::{
     AnalysisResultFamilyMetadata, AnalysisType, FamilyMeasurementEvidence, FamilyMemberId,
     FamilyMemberMeasurements, MonteCarloVariableMetadata, SpecPointScope,
 };
+use rspice_results::population::{TrialStatus, cpk};
 
 fn variable(name: &str, samples: Vec<f64>) -> MonteCarloVariableMetadata {
     let count = samples.len() as f64;

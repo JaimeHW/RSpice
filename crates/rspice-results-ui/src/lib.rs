@@ -6,6 +6,7 @@
 //! owners in `rspice-results` and `rspice-core`.
 
 pub mod bode;
+pub mod box_violin;
 pub mod derived;
 pub mod eye_diagram;
 pub mod fft;
