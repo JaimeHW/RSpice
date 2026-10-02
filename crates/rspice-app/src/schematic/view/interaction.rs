@@ -22,24 +22,20 @@ use rspice_schematic_editor::view::documentation_shape_input::{
 use super::SchematicSymbolContext;
 use super::array_interaction::handle_armed_array_selection;
 use super::bus_interaction::{BusTapCandidateError, resolve_bus_tap_candidate_on_active_sheet};
-use super::coordinates::screen_to_schematic;
-use super::drawing::WireScreenHit;
 use super::move_interaction::handle_armed_move_selection;
 use super::navigation::primary_pan_gesture_active;
 use super::selection_drag::handle_select_dragging;
 use super::sheet_visibility::{
     active_junction_at, active_wire_at, objects_on_active_sheet, retain_selection_on_active_sheet,
 };
-use super::snap_resolution::{
-    nearest_active_wire_screen_hit, resolve_grid_pointer, resolve_target_pointer,
-    target_acquisition_radius,
-};
+use super::snap_resolution::resolve_grid_pointer;
 use super::stretch_interaction::handle_armed_stretch_selection;
 use super::viewport::Viewport;
 #[cfg(test)]
 use rspice_schematic_editor::view::selection_drag::{
     select_drag_can_start, select_drag_is_authorized,
 };
+use rspice_schematic_editor::view::tool_input::{ToolInput, ToolPointerAction, ToolPointerView};
 
 mod pin_placement;
 mod pointer_target;
@@ -89,17 +85,14 @@ pub(super) fn handle_tool_interactions(
         state.schematic.cancel_tool();
         return;
     }
-    let shape_double_click = current_tool == Tool::DocumentationShape
-        && response.double_clicked_by(egui::PointerButton::Primary);
-    let route_double_click = matches!(current_tool, Tool::Wire | Tool::Bus)
-        && response.double_clicked_by(egui::PointerButton::Primary)
-        && (state.schematic.session.editor.wire_drawing.active
-            || state.schematic.session.editor.bus_drawing.active);
-    let route_enter = response.has_focus()
-        && (state.schematic.session.editor.wire_drawing.active
-            || state.schematic.session.editor.bus_drawing.active)
-        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-    if route_double_click || route_enter {
+    let input = ToolInput::read(
+        ui,
+        response,
+        current_tool,
+        state.schematic.session.editor.wire_drawing.active
+            || state.schematic.session.editor.bus_drawing.active,
+    );
+    if input.finish_route {
         finish_active_route(ui, state);
         return;
     }
@@ -126,53 +119,36 @@ pub(super) fn handle_tool_interactions(
         handle_armed_array_selection(ui, response, state, viewport, grid_size, symbol_context);
     }
 
-    if shape_double_click && let Some(pos) = response.interact_pointer_pos() {
+    if let Some(pos) = input.shape_double_click {
         let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
         handle_documentation_shape_click(ui, state, position, true);
     }
 
-    if response.clicked_by(egui::PointerButton::Primary)
-        && !shape_double_click
-        && !route_double_click
-        && let Some(pos) = response.interact_pointer_pos()
+    if let Some(pos) = input.primary_click
+        && let Some(action) =
+            tool_pointer_view(state).action(current_tool, viewport, symbol_context, pos)
     {
-        match current_tool {
-            // Read-only views take no edits; the console names the library.
-            Tool::Place(_)
-            | Tool::Wire
-            | Tool::Bus
-            | Tool::BusTap
-            | Tool::Junction
-            | Tool::DesignNote
-            | Tool::DocumentationShape
-            | Tool::Label
-            | Tool::OffSheetConnector
-            | Tool::Probe
-                if state.schematic_edit_read_only() =>
-            {
+        match action {
+            ToolPointerAction::ReadOnly => {
                 state.deny_read_only_edit();
             }
-            Tool::Place(component_type) => {
-                let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
+            ToolPointerAction::Place(component_type, position) => {
                 place_component(state, component_type, position);
             }
-            Tool::Wire => {
-                let conductor_hit = nearest_active_wire_screen_hit(state, viewport, pos);
-                let fallback =
-                    resolve_target_pointer(state, symbol_context, viewport, pos).snapped_position;
-                match resolved_wire_attachment(conductor_hit, fallback) {
-                    Some(wire_pos) if state.schematic.session.editor.wire_drawing.active => {
-                        state.schematic.extend_wire(wire_pos);
-                        if conductor_hit.is_some() {
-                            let _ = state.schematic.finish_wire();
-                        }
+            ToolPointerAction::Wire {
+                position,
+                finish_on_conductor,
+            } => match position {
+                Some(wire_pos) if state.schematic.session.editor.wire_drawing.active => {
+                    state.schematic.extend_wire(wire_pos);
+                    if finish_on_conductor {
+                        let _ = state.schematic.finish_wire();
                     }
-                    Some(wire_pos) => state.start_canvas_wire(ui.ctx(), wire_pos),
-                    None => report_unrepresentable_conductor_attachment(ui, state),
                 }
-            }
-            Tool::Bus => {
-                let bus_pos = resolve_grid_pointer(state, viewport, pos).snapped_position;
+                Some(wire_pos) => state.start_canvas_wire(ui.ctx(), wire_pos),
+                None => report_unrepresentable_conductor_attachment(ui, state),
+            },
+            ToolPointerAction::Bus(bus_pos) => {
                 if state.schematic.session.editor.bus_drawing.active {
                     state.schematic.extend_bus(bus_pos);
                 } else {
@@ -188,61 +164,40 @@ pub(super) fn handle_tool_interactions(
                     }
                 }
             }
-            Tool::BusTap => {
-                let requested = screen_to_schematic(viewport, pos);
-                let hit_radius = target_acquisition_radius(viewport);
-                handle_bus_tap_click(ui, state, requested, hit_radius);
+            ToolPointerAction::BusTap { position, radius } => {
+                handle_bus_tap_click(ui, state, position, radius);
             }
-            Tool::Junction => {
-                let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
-                handle_junction_click(ui, state, position);
-            }
-            Tool::DesignNote => {
-                let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
-                place_pending_design_note(state, position);
-            }
-            Tool::DocumentationShape => {
-                let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
+            ToolPointerAction::Junction(position) => handle_junction_click(ui, state, position),
+            ToolPointerAction::DesignNote(position) => place_pending_design_note(state, position),
+            ToolPointerAction::DocumentationShape(position) => {
                 handle_documentation_shape_click(ui, state, position, false);
             }
-            Tool::Select => {
-                let grid_pos = resolve_grid_pointer(state, viewport, pos).snapped_position;
-                let hit_pos = screen_to_schematic(viewport, pos);
-                let hit_radius = target_acquisition_radius(viewport);
+            ToolPointerAction::Select(query) => {
                 handle_select_click(
                     ui,
                     state,
-                    PointerHit::new(grid_pos, hit_pos),
-                    hit_radius,
+                    query.hit,
+                    query.radius,
                     symbol_context,
                     viewport,
-                    pos,
+                    query.position,
                 );
             }
-            Tool::MoveSelection | Tool::StretchSelection | Tool::ArraySelection => {}
-            Tool::Probe => {
-                let position =
-                    resolve_target_pointer(state, symbol_context, viewport, pos).snapped_position;
+            ToolPointerAction::Probe(position) => {
                 handle_probe_click(ui, state, position, symbol_context);
             }
-            // Both naming tools capture the same snapped anchor; the armed
-            // tool is what tells the placement transaction which label it is.
-            Tool::Label | Tool::OffSheetConnector => {
-                let anchor =
-                    resolve_target_pointer(state, symbol_context, viewport, pos).snapped_position;
+            // The armed tool determines whether the naming transaction makes
+            // a local label or an off-sheet connector at this shared anchor.
+            ToolPointerAction::NetLabel(anchor) => {
                 crate::workbench::app::open_net_label_placement(state, anchor);
             }
         }
     }
 
-    if matches!(current_tool, Tool::Select)
-        && response.double_clicked_by(egui::PointerButton::Primary)
-        && let Some(pos) = response.interact_pointer_pos()
-    {
-        let grid_pos = resolve_grid_pointer(state, viewport, pos).snapped_position;
-        let hit_pos = screen_to_schematic(viewport, pos);
-        let hit_radius = target_acquisition_radius(viewport);
-        let hit = PointerHit::new(grid_pos, hit_pos);
+    if let Some(pos) = input.select_double_click {
+        let query = tool_pointer_view(state).selection_query(viewport, pos);
+        let hit = query.hit;
+        let hit_radius = query.radius;
         let target = pointer_target(
             state,
             hit,
@@ -321,6 +276,14 @@ pub(super) fn handle_tool_interactions(
 
     if state.schematic.session.editor.tool == Tool::DocumentationShape && response.has_focus() {
         handle_documentation_shape_keyboard(ui, response, state, viewport, grid_size);
+    }
+}
+
+fn tool_pointer_view(state: &AppState) -> ToolPointerView<'_> {
+    ToolPointerView {
+        design: super::schematic_design_view(state),
+        snap_engine: &state.schematic.session.editor.snap_engine,
+        can_edit: !state.schematic_edit_read_only(),
     }
 }
 
@@ -483,13 +446,6 @@ fn report_bus_error(ui: &Ui, state: &mut AppState, title: &str, message: String)
         .toasts
         .warn_with_title(ui.ctx(), title, message.clone());
     state.push_user_message(ConsoleMessage::warning(message));
-}
-
-/// A visual conductor acquisition owns the click. If no exact integer
-/// attachment can be represented, fail closed instead of silently falling
-/// back to a nearby grid point and creating a disconnected route.
-fn resolved_wire_attachment(hit: Option<WireScreenHit>, fallback: Point) -> Option<Point> {
-    hit.map_or(Some(fallback), |hit| hit.attachment)
 }
 
 fn report_unrepresentable_conductor_attachment(ui: &Ui, state: &mut AppState) {
