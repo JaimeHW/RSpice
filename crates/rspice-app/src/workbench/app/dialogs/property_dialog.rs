@@ -54,12 +54,12 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
             state.tabbed_property_dialog.session_error = Some(error);
             return TabbedDialogResult::None;
         }
-        let committed = state.tabbed_property_dialog.take_prepared_commit();
+        let committed = state.tabbed_property_dialog.draft.take_prepared_commit();
         let committed_names: Vec<String> = committed.keys().cloned().collect();
         // The bridge serializes the full component property map. Merge the
         // validated delta onto the last committed baseline so a rejected
         // partial field cannot erase an unrelated existing parameter.
-        let mut values = state.tabbed_property_dialog.original_values.clone();
+        let mut values = state.tabbed_property_dialog.draft.original_values.clone();
         values.extend(committed);
         let Some(component) = state
             .schematic
@@ -82,7 +82,7 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
             &state.property_registry,
         ) {
             state.tabbed_property_dialog.open = true;
-            state.tabbed_property_dialog.commit_error = Some(format!(
+            state.tabbed_property_dialog.draft.commit_error = Some(format!(
                 "The component was not changed: {error} Correct its Parameters text in the inspector."
             ));
             return TabbedDialogResult::None;
@@ -91,21 +91,22 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
             state.tabbed_property_dialog.open = true;
             state
                 .tabbed_property_dialog
+                .draft
                 .validation_errors
                 .insert("name".to_owned(), error);
-            state.tabbed_property_dialog.commit_error =
+            state.tabbed_property_dialog.draft.commit_error =
                 Some("Correct the instance reference before applying.".to_owned());
             return TabbedDialogResult::None;
         }
         if let Err(error) = validate_model_binding_authority(state, &candidate, &values) {
             state.tabbed_property_dialog.open = true;
-            state.tabbed_property_dialog.commit_error =
+            state.tabbed_property_dialog.draft.commit_error =
                 Some(format!("The model binding was not changed: {error}"));
             return TabbedDialogResult::None;
         }
         let Some(property_sheet) = state.property_registry.get(candidate.kind) else {
             state.tabbed_property_dialog.open = true;
-            state.tabbed_property_dialog.commit_error = Some(
+            state.tabbed_property_dialog.draft.commit_error = Some(
                 "The component was not changed because its property schema is unavailable."
                     .to_owned(),
             );
@@ -113,7 +114,7 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
         };
         if let Err(error) = validate_component_contract(&candidate, &values, property_sheet) {
             state.tabbed_property_dialog.open = true;
-            state.tabbed_property_dialog.commit_error =
+            state.tabbed_property_dialog.draft.commit_error =
                 Some(format!("The component was not changed: {error}"));
             return TabbedDialogResult::None;
         }
@@ -123,7 +124,7 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
                 .validate_edited_port_contract(comp_id, &candidate)
         {
             state.tabbed_property_dialog.open = true;
-            state.tabbed_property_dialog.commit_error =
+            state.tabbed_property_dialog.draft.commit_error =
                 Some(format!("The interface contract was not changed: {error}."));
             return TabbedDialogResult::None;
         }
@@ -134,7 +135,7 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
             state.edit_component_transaction(&expected, candidate, "edit properties")
         {
             state.tabbed_property_dialog.open = true;
-            state.tabbed_property_dialog.commit_error =
+            state.tabbed_property_dialog.draft.commit_error =
                 Some(format!("The component was not changed: {error}"));
             return TabbedDialogResult::None;
         }
@@ -144,7 +145,7 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
 
         // The mockup primary closes after the exact transaction completes.
         if close_after_commit {
-            state.tabbed_property_dialog.clear_after_apply();
+            state.tabbed_property_dialog.close();
         } else if state.tabbed_property_dialog.open {
             let component = state
                 .schematic
@@ -164,8 +165,9 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
             );
             state
                 .tabbed_property_dialog
+                .draft
                 .mark_fields_applied(committed_names);
-            state.tabbed_property_dialog.rebase_applied_values(
+            state.tabbed_property_dialog.draft.rebase_applied_values(
                 values,
                 state
                     .property_registry
@@ -250,7 +252,7 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
                         crate::workbench::app::open_property_editor(state, component_id);
                     }
                     Err(refusal) => {
-                        state.tabbed_property_dialog.commit_error = Some(refusal);
+                        state.tabbed_property_dialog.draft.commit_error = Some(refusal);
                     }
                 }
             }
@@ -452,7 +454,7 @@ fn refresh_source_contract_advisories(state: &mut AppState) {
             Some(
                 crate::properties::property_bridge::component_source_contract(
                     component,
-                    &state.tabbed_property_dialog.values,
+                    &state.tabbed_property_dialog.draft.values,
                     sheet,
                 )
                 .into_iter()
@@ -1241,6 +1243,7 @@ mod tests {
             assert!(component_property_session_error(&state).is_none());
             state
                 .tabbed_property_dialog
+                .draft
                 .set_value("r", PropertyValue::Expression("2k".to_owned()));
             let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
                 render_property_dialog(ctx, &mut state);
@@ -1347,11 +1350,14 @@ mod tests {
             );
             assert_eq!(state.tabbed_property_dialog.source, source, "{change}");
             assert_eq!(
-                state.tabbed_property_dialog.values["r"],
+                state.tabbed_property_dialog.draft.values["r"],
                 PropertyValue::Expression("2k".to_owned()),
                 "{change}"
             );
-            assert!(state.tabbed_property_dialog.is_modified("r"), "{change}");
+            assert!(
+                state.tabbed_property_dialog.draft.is_modified("r"),
+                "{change}"
+            );
             assert!(
                 before.is_equal_document(&state.schematic.document()),
                 "{change}"
@@ -1382,9 +1388,11 @@ mod tests {
         open_property_editor(&mut state, 44);
         state
             .tabbed_property_dialog
+            .draft
             .set_value("name", PropertyValue::String("R99".to_owned()));
         state
             .tabbed_property_dialog
+            .draft
             .set_value("r", PropertyValue::Expression("2k".to_owned()));
 
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
@@ -1460,9 +1468,11 @@ mod tests {
         let opened_source = state.tabbed_property_dialog.source.clone();
         state
             .tabbed_property_dialog
+            .draft
             .set_value("name", PropertyValue::String("R99".to_owned()));
         state
             .tabbed_property_dialog
+            .draft
             .set_value("r", PropertyValue::Expression("2k".to_owned()));
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             render_property_dialog(ctx, &mut state);
@@ -1473,12 +1483,12 @@ mod tests {
         assert!(before.is_equal_document(&state.schematic.document()));
         assert_eq!(state.workspace.content.simulation_plan_payloads, payloads);
         assert!(state.tabbed_property_dialog.open);
-        assert!(state.tabbed_property_dialog.commit_error.is_some());
+        assert!(state.tabbed_property_dialog.draft.commit_error.is_some());
         assert_eq!(state.tabbed_property_dialog.source, opened_source);
-        assert!(state.tabbed_property_dialog.is_modified("name"));
-        assert!(state.tabbed_property_dialog.is_modified("r"));
+        assert!(state.tabbed_property_dialog.draft.is_modified("name"));
+        assert!(state.tabbed_property_dialog.draft.is_modified("r"));
         assert_eq!(
-            state.tabbed_property_dialog.values["name"],
+            state.tabbed_property_dialog.draft.values["name"],
             PropertyValue::String("R99".to_owned())
         );
         assert!(!state.schematic.can_undo());
@@ -1498,9 +1508,11 @@ mod tests {
             open_property_editor(&mut state, 44);
             state
                 .tabbed_property_dialog
+                .draft
                 .set_value("name", PropertyValue::String("R99".to_owned()));
             state
                 .tabbed_property_dialog
+                .draft
                 .set_value("r", PropertyValue::Expression("2k".to_owned()));
             let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
                 render_property_dialog(ctx, &mut state);
@@ -1514,14 +1526,15 @@ mod tests {
             assert!(
                 state
                     .tabbed_property_dialog
+                    .draft
                     .commit_error
                     .as_ref()
                     .or(state.tabbed_property_dialog.session_error.as_ref())
                     .unwrap()
                     .contains("Parameters")
             );
-            assert!(state.tabbed_property_dialog.is_modified("name"));
-            assert!(state.tabbed_property_dialog.is_modified("r"));
+            assert!(state.tabbed_property_dialog.draft.is_modified("name"));
+            assert!(state.tabbed_property_dialog.draft.is_modified("r"));
             assert!(!state.schematic.can_undo());
             assert!(state.project_undo_sequence().is_none());
         }
@@ -1535,6 +1548,7 @@ mod tests {
         open_property_editor(&mut state, 44);
         state
             .tabbed_property_dialog
+            .draft
             .set_value("name", PropertyValue::String("R99".to_owned()));
 
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
@@ -1576,6 +1590,7 @@ mod tests {
         open_property_editor(&mut state, 44);
         state
             .tabbed_property_dialog
+            .draft
             .set_value("name", PropertyValue::String("R99".to_owned()));
         state.tabbed_property_dialog.model_browser.open = true;
 
@@ -1599,6 +1614,7 @@ mod tests {
         open_property_editor(&mut state, 44);
         let original = state
             .tabbed_property_dialog
+            .draft
             .numeric_text_draft("r")
             .expect("resistance source")
             .to_owned();
@@ -1622,12 +1638,13 @@ mod tests {
         );
         let expected = format!("{original}1e");
         assert_eq!(
-            state.tabbed_property_dialog.numeric_text_draft("r"),
+            state.tabbed_property_dialog.draft.numeric_text_draft("r"),
             Some(expected.as_str())
         );
         assert!(
             state
                 .tabbed_property_dialog
+                .draft
                 .validation_errors
                 .contains_key("r")
         );
@@ -1636,7 +1653,7 @@ mod tests {
             render_property_dialog(ctx, &mut state);
         });
         assert_eq!(
-            state.tabbed_property_dialog.numeric_text_draft("r"),
+            state.tabbed_property_dialog.draft.numeric_text_draft("r"),
             Some(expected.as_str())
         );
     }
@@ -1655,12 +1672,16 @@ mod tests {
         let opened_source = state.tabbed_property_dialog.source.clone();
         state
             .tabbed_property_dialog
+            .draft
             .set_value("name", PropertyValue::String(" R99 ".to_owned()));
-        state.tabbed_property_dialog.update_numeric_text_draft(
-            "m",
-            "0".to_owned(),
-            Some("Multiplier must be at least 1".to_owned()),
-        );
+        state
+            .tabbed_property_dialog
+            .draft
+            .update_numeric_text_draft(
+                "m",
+                "0".to_owned(),
+                Some("Multiplier must be at least 1".to_owned()),
+            );
 
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             render_property_dialog(ctx, &mut state);
@@ -1683,25 +1704,27 @@ mod tests {
             ))
         );
         assert_eq!(
-            state.tabbed_property_dialog.values["name"],
+            state.tabbed_property_dialog.draft.values["name"],
             PropertyValue::String("R99".to_owned())
         );
         assert_eq!(
-            state.tabbed_property_dialog.original_values["name"],
+            state.tabbed_property_dialog.draft.original_values["name"],
             PropertyValue::String("R99".to_owned())
         );
         assert_eq!(
-            state.tabbed_property_dialog.numeric_text_draft("m"),
+            state.tabbed_property_dialog.draft.numeric_text_draft("m"),
             Some("0")
         );
-        assert!(state.tabbed_property_dialog.is_modified("m"));
-        assert!(!state.tabbed_property_dialog.is_modified("name"));
+        assert!(state.tabbed_property_dialog.draft.is_modified("m"));
+        assert!(!state.tabbed_property_dialog.draft.is_modified("name"));
 
         state
             .tabbed_property_dialog
+            .draft
             .update_numeric_text_draft("m", "2".to_owned(), None);
         state
             .tabbed_property_dialog
+            .draft
             .set_value("m", PropertyValue::number(2.0));
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             render_property_dialog(ctx, &mut state);

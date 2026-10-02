@@ -4,6 +4,7 @@ pub mod annotations;
 pub mod bus_geometry;
 pub mod bus_tap_placement;
 mod component_palette;
+pub mod component_properties;
 pub mod export;
 pub mod net_label_placement;
 pub mod object_properties;

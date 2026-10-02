@@ -43,7 +43,7 @@ pub fn render_tabbed_property_dialog(
     if !state.open {
         return result;
     }
-    let Some(component_type) = state.component_type else {
+    let Some(component_type) = state.draft.component_type else {
         state.close();
         return TabbedDialogResult::Cancelled;
     };
@@ -52,9 +52,9 @@ pub fn render_tabbed_property_dialog(
         return TabbedDialogResult::Cancelled;
     };
 
-    state.sync_pwl_validation_error();
+    state.draft.sync_pwl_validation_error();
     let session_error = state.session_error.clone();
-    let dirty = state.has_modifications();
+    let dirty = state.draft.has_modifications();
     let footer_hint = session_error
         .clone()
         .or_else(|| dirty.then(|| "Unapplied changes".to_owned()));
@@ -68,8 +68,10 @@ pub fn render_tabbed_property_dialog(
         .manual_body_scroll()
         .ghost("Cancel")
         .secondary("Apply")
-        .secondary_enabled(dirty && state.can_apply(commit_policy) && session_error.is_none())
-        .primary_enabled(session_error.is_none() && (!dirty || state.can_apply(commit_policy)))
+        .secondary_enabled(dirty && state.draft.can_apply(commit_policy) && session_error.is_none())
+        .primary_enabled(
+            session_error.is_none() && (!dirty || state.draft.can_apply(commit_policy)),
+        )
         .interaction_enabled(!state.model_browser.open)
         .initial_focus(DialogInitialFocus::BodyControl);
     if let Some(hint) = footer_hint.as_deref() {
@@ -166,7 +168,7 @@ pub fn render_tabbed_property_dialog(
         first_parameter
     });
 
-    let dirty_after_render = state.has_modifications();
+    let dirty_after_render = state.draft.has_modifications();
     if side_action != TabbedDialogResult::None {
         result = side_action;
     } else {
@@ -175,8 +177,8 @@ pub fn render_tabbed_property_dialog(
                 if !dirty_after_render {
                     state.close();
                     result = TabbedDialogResult::Cancelled;
-                } else if state.prepare_commit(sheet, commit_policy) {
-                    result = if state.validation_errors.is_empty() {
+                } else if state.draft.prepare_commit(sheet, commit_policy) {
+                    result = if state.draft.validation_errors.is_empty() {
                         TabbedDialogResult::AppliedAndClose
                     } else {
                         TabbedDialogResult::Applied
@@ -184,7 +186,7 @@ pub fn render_tabbed_property_dialog(
                 }
             }
             DialogChoice::Secondary => {
-                if dirty_after_render && state.prepare_commit(sheet, commit_policy) {
+                if dirty_after_render && state.draft.prepare_commit(sheet, commit_policy) {
                     result = TabbedDialogResult::Applied;
                 }
             }
@@ -260,6 +262,7 @@ fn component_identity_header(
                                     .color(c.text_dim),
                             );
                             let mut name = state
+                                .draft
                                 .get_value("name")
                                 .map(PropertyValue::display_string)
                                 .or_else(|| state.component_name.clone())
@@ -270,7 +273,7 @@ fn component_identity_header(
                                     .desired_width(88.0),
                             );
                             if response.changed() {
-                                state.set_value("name", PropertyValue::String(name));
+                                state.draft.set_value("name", PropertyValue::String(name));
                             }
                             ui.label(
                                 egui::RichText::new(&context.library_cell)
@@ -389,7 +392,9 @@ fn parameters_contents(
     quantity_policy: QuantityPresentationPolicy,
     number_locale: UiNumberLocale,
 ) -> Option<Id> {
-    state.present_numeric_drafts(sheet, quantity_policy, number_locale);
+    state
+        .draft
+        .present_numeric_drafts(sheet, quantity_policy, number_locale);
     section_band(ui, "Parameters", "typed · unit-checked");
     let properties = sheet
         .iter()
@@ -397,7 +402,7 @@ fn parameters_contents(
         .filter(|definition| !(component_type.is_pwl_source() && definition.name == "pwl_data"))
         .filter(|definition| match definition.display_mode {
             DisplayMode::Hidden => false,
-            DisplayMode::Advanced if !state.show_advanced => false,
+            DisplayMode::Advanced if !state.draft.show_advanced => false,
             _ => true,
         })
         .filter(|definition| property_is_visible(definition, state))
@@ -429,18 +434,18 @@ fn parameters_contents(
                 property_group_heading(ui, "Piecewise-linear waveform");
                 let pwl_result = rspice_schematic_editor::pwl_editor::render_pwl_editor(
                     ui,
-                    &mut state.pwl_editor,
+                    &mut state.draft.pwl_editor,
                     quantity_policy,
                     number_locale,
                 );
                 if pwl_result == rspice_schematic_editor::pwl_editor::PwlEditorResult::Modified {
-                    state.pwl_editor.is_modified = true;
-                    state.set_value(
+                    state.draft.pwl_editor.is_modified = true;
+                    state.draft.set_value(
                         "pwl_data",
-                        PropertyValue::String(state.pwl_editor.to_string()),
+                        PropertyValue::String(state.draft.pwl_editor.to_string()),
                     );
                 }
-                state.sync_pwl_validation_error();
+                state.draft.sync_pwl_validation_error();
             }
 
             let has_advanced = sheet
@@ -451,15 +456,16 @@ fn parameters_contents(
                 crate::ui::widgets::switch_row(
                     ui,
                     "Show advanced properties",
-                    &mut state.show_advanced,
+                    &mut state.draft.show_advanced,
                 );
             }
 
             let t = Tokens::get(ui.ctx());
             let message = state
+                .draft
                 .commit_error
                 .as_deref()
-                .or(state.global_error.as_deref());
+                .or(state.draft.global_error.as_deref());
             ui.add_space(6.0);
             let (rect, _) =
                 ui.allocate_exact_size(vec2(ui.available_width(), 16.0), Sense::hover());
@@ -645,7 +651,7 @@ fn field_block_height(
 /// field is for, which the reader can already see from its label, while the
 /// advisory states what will actually happen to the value in front of them.
 fn field_hint(definition: &PropertyDefinition, state: &TabbedPropertyDialogState) -> String {
-    if let Some(error) = state.validation_errors.get(&definition.name) {
+    if let Some(error) = state.draft.validation_errors.get(&definition.name) {
         return error.clone();
     }
     let advisories = state
@@ -685,12 +691,15 @@ fn property_is_visible(definition: &PropertyDefinition, state: &TabbedPropertyDi
     match &definition.visibility_condition {
         VisibilityCondition::Always => true,
         VisibilityCondition::WhenNonDefault => state
+            .draft
             .get_value(&definition.name)
             .is_some_and(|value| value != &definition.default_value),
         VisibilityCondition::WhenPropertyEquals { property, value } => state
+            .draft
             .get_value(property)
             .is_some_and(|current| current.display_string().eq_ignore_ascii_case(value)),
         VisibilityCondition::WhenPropertySet(property) => state
+            .draft
             .get_value(property)
             .is_some_and(|current| !current.display_string().trim().is_empty()),
     }
@@ -791,6 +800,7 @@ fn stimulus_library_card(
         return;
     };
     let unapplied = state
+        .draft
         .has_modifications()
         .then_some("Apply or cancel this editor's edits first");
     let held = stimulus
@@ -1020,10 +1030,12 @@ fn model_binding_card(
     action: &mut TabbedDialogResult,
 ) {
     let draft_model = state
+        .draft
         .get_value("model")
         .map(PropertyValue::display_string)
         .filter(|model| !model.trim().is_empty());
     let draft_library = state
+        .draft
         .get_value("model_library")
         .map(PropertyValue::display_string)
         .filter(|library| !library.trim().is_empty());
@@ -1339,7 +1351,7 @@ fn preview_component(
     component.kind = kind;
     crate::properties::property_bridge::apply_properties_to_component(
         &mut component,
-        &state.values,
+        &state.draft.values,
         registry,
     )
     .ok()?;
@@ -1496,12 +1508,16 @@ fn render_model_browser(
                 model,
                 corner: _,
             } => {
-                state.set_value("model", PropertyValue::String(model));
-                state.set_value("model_library", PropertyValue::String(library));
+                state.draft.set_value("model", PropertyValue::String(model));
+                state
+                    .draft
+                    .set_value("model_library", PropertyValue::String(library));
                 // Process corner is owned by the simulation plan. Clear any
                 // legacy per-instance hint rather than presenting it as an
                 // executable component property.
-                state.set_value("model_corner", PropertyValue::String(String::new()));
+                state
+                    .draft
+                    .set_value("model_corner", PropertyValue::String(String::new()));
                 state.model_browser.open = false;
             }
             ModelBrowserResult::Cancelled => {
@@ -1528,15 +1544,17 @@ fn render_property_field(
     let c = t.color;
     ui.spacing_mut().item_spacing.y = TRACK_GAP;
     let width = ui.available_width();
-    let is_modified = state.is_modified(&def.name);
-    let error = state.validation_errors.get(&def.name).cloned();
+    let is_modified = state.draft.is_modified(&def.name);
+    let error = state.draft.validation_errors.get(&def.name).cloned();
     let current_value = state
+        .draft
         .get_value(&def.name)
         .cloned()
         .unwrap_or_else(|| def.default_value.clone());
-    let numeric_text_draft = state.numeric_text_draft(&def.name).map(str::to_owned);
+    let numeric_text_draft = state.draft.numeric_text_draft(&def.name).map(str::to_owned);
     let picks_data_file = def.name == "file"
         && state
+            .draft
             .component_type
             .is_some_and(|kind| kind.is_pwl_file_source());
     let browse = def.name == "model" || picks_data_file;
@@ -1598,37 +1616,50 @@ fn render_property_field(
         }
     }
     if let Some(text) = numeric_text {
-        state.update_numeric_text_draft(&def.name, text, numeric_parse_error);
+        state
+            .draft
+            .update_numeric_text_draft(&def.name, text, numeric_parse_error);
     }
     if let Some(value) = changed_value {
         if def.name == "model" {
-            state.set_value(&def.name, value);
+            state.draft.set_value(&def.name, value);
             // A manually typed name has no proven catalog identity. Clear the
             // prior exact binding so a duplicate name cannot silently retain
             // the wrong library or process corner.
-            state.set_value("model_library", PropertyValue::String(String::new()));
-            state.set_value("model_corner", PropertyValue::String(String::new()));
+            state
+                .draft
+                .set_value("model_library", PropertyValue::String(String::new()));
+            state
+                .draft
+                .set_value("model_corner", PropertyValue::String(String::new()));
         } else {
-            state.set_value(&def.name, value);
+            state.draft.set_value(&def.name, value);
         }
     }
     if browse_clicked && picks_data_file {
         match attach_data_file(state.data_root.as_deref()) {
             Ok(Some(reference)) => {
-                state.set_value(&def.name, PropertyValue::String(reference));
+                state
+                    .draft
+                    .set_value(&def.name, PropertyValue::String(reference));
                 state.session_error = None;
             }
             Ok(None) => {}
             Err(error) => state.session_error = Some(error),
         }
     } else if browse_clicked {
-        state.model_browser.type_filter = state.component_type.and_then(model_type_for_component);
+        state.model_browser.type_filter = state
+            .draft
+            .component_type
+            .and_then(model_type_for_component);
         state.model_browser.allow_corner_selection = false;
         state.model_browser.selected_library = state
+            .draft
             .get_value("model_library")
             .map(PropertyValue::display_string)
             .filter(|value| !value.trim().is_empty());
         state.model_browser.selected_model = state
+            .draft
             .get_value("model")
             .map(PropertyValue::display_string)
             .filter(|value| !value.trim().is_empty());
@@ -1851,7 +1882,7 @@ mod tests {
     fn the_preview_follows_the_draft_rather_than_the_baseline() {
         let (mut state, registry) = editor(ComponentType::VoltageSourceSin);
         let before = trace_of(&state, ComponentType::VoltageSourceSin, &registry);
-        state.set_value("va", PropertyValue::number(9.0));
+        state.draft.set_value("va", PropertyValue::number(9.0));
         let after = trace_of(&state, ComponentType::VoltageSourceSin, &registry);
 
         let peak =
@@ -1868,9 +1899,11 @@ mod tests {
     #[test]
     fn the_preview_reads_a_period_authored_with_its_unit() {
         let (mut typed, registry) = editor(ComponentType::VoltageSourcePulse);
-        typed.set_value("per", PropertyValue::String("1ms".to_owned()));
+        typed
+            .draft
+            .set_value("per", PropertyValue::String("1ms".to_owned()));
         let (mut numeric, _) = editor(ComponentType::VoltageSourcePulse);
-        numeric.set_value("per", PropertyValue::number(1e-3));
+        numeric.draft.set_value("per", PropertyValue::number(1e-3));
 
         assert_eq!(
             trace_of(&typed, ComponentType::VoltageSourcePulse, &registry),
@@ -1969,8 +2002,10 @@ mod tests {
             );
         }
 
-        state.set_value("freq", crate::state::PropertyValue::string("2k"));
-        assert!(state.has_modifications());
+        state
+            .draft
+            .set_value("freq", crate::state::PropertyValue::string("2k"));
+        assert!(state.draft.has_modifications());
         let dirty = stimulus_verbs(&state, &context);
         for verb in [
             "Adopt definition…",

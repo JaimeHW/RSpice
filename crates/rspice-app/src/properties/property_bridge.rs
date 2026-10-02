@@ -69,15 +69,9 @@ pub(crate) fn validate_component_properties(
         )];
     };
     let values = collect_properties_with_sheet(component, Some(sheet));
-    let mut validator = crate::properties::TabbedPropertyDialogState::default();
-    validator.open_for_component(
-        component.id,
-        component.name.clone(),
-        component.kind,
-        sheet,
-        values,
-        crate::properties::ComponentPropertySession::detached(component.clone()),
-    );
+    let mut validator =
+        rspice_schematic_editor::component_properties::ComponentPropertyDraft::default();
+    validator.reset(component.kind, sheet, values);
     validator.validate_all(sheet);
     let mut errors = validator.validation_errors.into_iter().collect::<Vec<_>>();
     errors.sort_by(|left, right| left.0.cmp(&right.0));

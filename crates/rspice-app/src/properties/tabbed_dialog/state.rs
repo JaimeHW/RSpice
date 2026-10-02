@@ -1,26 +1,13 @@
-//! Schematic component-editor transaction state.
-//!
-//! Owns typed drafts, validation, nested model/PWL workflows, and the
-//! authority snapshot required to publish one isolated component mutation.
+//! Component-property dialog lifecycle, document authority, and host services.
 
 use crate::properties::model_browser::ModelBrowserState;
-use crate::quantity::{QuantityPresentationPolicy, UiNumberLocale};
-use crate::state::property_types::{
-    PropertyDefinition, PropertySheet, PropertyType, PropertyValue,
-};
+use crate::state::property_types::{PropertySheet, PropertyValue};
 use crate::state::{Component, ComponentType};
-use rspice_schematic_editor::property_values::{editor_source_text, numeric_source_text};
-use rspice_schematic_editor::pwl_editor::PwlEditorState;
+use rspice_schematic_editor::component_properties::ComponentPropertyDraft;
 use rspice_schematic_editor::requests::EditorRequestSource;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-/// Transaction state for the schematic component editor.
-///
-/// Manages the complete lifecycle of property editing including:
-/// - Opening for a specific component
-/// - Tracking modifications
-/// - Validation and error reporting
-/// - Apply/cancel/revert operations
+/// Host transaction containing one reusable property draft.
 #[derive(Debug, Clone, Default)]
 pub struct TabbedPropertyDialogState {
     /// Whether the dialog is currently open
@@ -32,45 +19,11 @@ pub struct TabbedPropertyDialogState {
     /// Name of the component being edited (e.g., "R1", "V1")
     pub component_name: Option<String>,
 
-    /// Type of the component being edited
-    pub component_type: Option<ComponentType>,
-
-    /// Current property values being edited
-    pub values: HashMap<String, PropertyValue>,
-
-    /// Original values (for revert)
-    pub original_values: HashMap<String, PropertyValue>,
-
-    /// Set of property names that have been modified
-    pub modified: HashSet<String>,
-
-    /// Validation errors by property name
-    pub validation_errors: HashMap<String, String>,
-
     /// What the engine will do with this source's fields that their labels do
     /// not say. Advisories never block a commit — a refusal is reported through
-    /// `commit_error` like any other contract failure — so they are kept apart
-    /// from `validation_errors` rather than sharing its map.
+    /// `draft.commit_error` like any other contract failure — so they are kept apart
+    /// from `draft.validation_errors` rather than sharing its map.
     pub source_advisories: Vec<crate::state::SourceContractFinding>,
-
-    /// Lossless text drafts for numeric and expression-capable editors. These
-    /// are intentionally separate from typed values so intermediate or
-    /// invalid input survives repaint and remains isolated until valid.
-    numeric_text_drafts: HashMap<String, String>,
-    original_numeric_text_drafts: HashMap<String, String>,
-    /// Whether `present_numeric_drafts` has already run for this open.
-    numeric_drafts_presented: bool,
-    numeric_draft_errors: HashMap<String, String>,
-
-    /// Whether to show advanced properties
-    pub show_advanced: bool,
-
-    /// Global error message (e.g., "Cannot apply changes")
-    pub global_error: Option<String>,
-
-    /// Host-level cross-field or topology validation failure from the most
-    /// recent Apply/OK attempt. It remains visible until the draft changes.
-    pub commit_error: Option<String>,
 
     /// Retained transaction-level failure that disables publication without
     /// erasing the user's draft (read-only, stale target, or document swap).
@@ -81,13 +34,8 @@ pub struct TabbedPropertyDialogState {
     pub source: Option<EditorRequestSource>,
     pub view_path: String,
 
-    /// Validated field delta prepared for the host's next atomic component
-    /// mutation. Kept private so unvalidated draft values can never be
-    /// mistaken for an authorized commit.
-    prepared_commit: HashMap<String, PropertyValue>,
-
-    /// PWL editor state (for PWL sources)
-    pub pwl_editor: PwlEditorState,
+    /// Retained field values, invalid text, validation, and prepared edits.
+    pub draft: ComponentPropertyDraft,
 
     /// Model browser state (for semiconductor components)
     pub model_browser: ModelBrowserState,
@@ -106,7 +54,7 @@ pub struct TabbedPropertyDialogState {
 }
 
 /// Durable document authority captured when a component property transaction
-/// opens. Detached validation uses the same draft without document authority.
+/// opens. Isolated render tests can construct a session without document authority.
 #[derive(Debug, Clone)]
 pub struct ComponentPropertySession {
     component_baseline: Component,
@@ -125,11 +73,14 @@ impl ComponentPropertySession {
         Self {
             source: Some(source),
             view_path,
-            ..Self::detached(component_baseline)
+            component_baseline,
+            data_root: None,
+            preview_timing: crate::simulation::stimulus_realize::PreviewTiming::default(),
         }
     }
 
-    /// Validate a component without authorizing publication to a live document.
+    /// Render a test fixture without authorizing publication to a live document.
+    #[cfg(test)]
     pub(crate) fn detached(component_baseline: Component) -> Self {
         Self {
             component_baseline,
@@ -305,511 +256,45 @@ impl TabbedPropertyDialogState {
         self.open = true;
         self.component_id = Some(component_id);
         self.component_name = Some(component_name.into());
-        self.component_type = Some(component_type);
-        self.values = current_values.clone();
-        self.original_values = current_values;
-        self.initialize_numeric_text_drafts(sheet);
-        self.numeric_drafts_presented = false;
-        self.modified.clear();
-        self.validation_errors.clear();
-        self.global_error = None;
-        self.commit_error = None;
+        self.draft.reset(component_type, sheet, current_values);
         self.session_error = None;
         self.component_baseline = Some(component_baseline);
         self.source = source;
         self.view_path = view_path;
-        self.prepared_commit.clear();
-        self.show_advanced = false;
         self.model_browser = ModelBrowserState::default();
-
-        self.pwl_editor = if component_type.is_pwl_source() {
-            let source = self
-                .values
-                .get("pwl_data")
-                .map(PropertyValue::display_string)
-                .unwrap_or_default();
-            PwlEditorState::from_string(
-                &source,
-                if component_type == ComponentType::CurrentSourcePwl {
-                    "A"
-                } else {
-                    "V"
-                },
-            )
-        } else {
-            PwlEditorState::default()
-        };
     }
 
-    /// Close the dialog AND clear all state (for Cancel)
+    /// Close the dialog and discard the isolated transaction.
     pub fn close(&mut self) {
-        self.close_visual();
+        self.open = false;
         self.component_id = None;
         self.component_name = None;
-        self.component_type = None;
-        self.values.clear();
-        self.original_values.clear();
-        self.modified.clear();
-        self.validation_errors.clear();
-        self.numeric_text_drafts.clear();
-        self.original_numeric_text_drafts.clear();
-        self.numeric_draft_errors.clear();
-        self.global_error = None;
-        self.commit_error = None;
+        self.draft.clear();
         self.session_error = None;
         self.component_baseline = None;
         self.source = None;
         self.view_path.clear();
-        self.prepared_commit.clear();
-        self.pwl_editor = PwlEditorState::default();
-        self.model_browser = ModelBrowserState::default();
-    }
-
-    /// Close the dialog visually but KEEP values for caller to apply.
-    pub fn close_visual(&mut self) {
-        self.open = false;
-    }
-
-    /// Clear dialog state after values have been applied.
-    pub fn clear_after_apply(&mut self) {
-        self.open = false;
-        self.component_id = None;
-        self.component_name = None;
-        self.component_type = None;
-        self.values.clear();
-        self.original_values.clear();
-        self.modified.clear();
-        self.validation_errors.clear();
-        self.numeric_text_drafts.clear();
-        self.original_numeric_text_drafts.clear();
-        self.numeric_draft_errors.clear();
-        self.global_error = None;
-        self.commit_error = None;
-        self.session_error = None;
-        self.component_baseline = None;
-        self.source = None;
-        self.view_path.clear();
-        self.prepared_commit.clear();
-        self.pwl_editor = PwlEditorState::default();
         self.model_browser = ModelBrowserState::default();
     }
 
     /// Close and discard the isolated draft immediately.
     ///
-    /// The component-editor mockup has a direct Cancel contract rather than
-    /// a secondary discard-confirmation state.
+    /// Cancel discards the draft without a secondary confirmation.
     pub fn attempt_close(&mut self) -> bool {
         self.close();
         true
     }
 
-    /// Mark only the fields from a partial commit as the new baseline. Draft
-    /// fields that failed validation remain modified and visible for repair.
-    pub fn mark_fields_applied(&mut self, names: impl IntoIterator<Item = String>) {
-        for name in names {
-            if let Some(value) = self.values.get(&name).cloned() {
-                self.original_values.insert(name.clone(), value);
-            }
-            self.modified.remove(&name);
-            self.validation_errors.remove(&name);
-            self.numeric_draft_errors.remove(&name);
-            if let Some(text) = self.numeric_text_drafts.get(&name).cloned() {
-                self.original_numeric_text_drafts.insert(name.clone(), text);
-            }
-            if name == "pwl_data" {
-                self.pwl_editor.is_modified = false;
-            }
-        }
-        self.prepared_commit.clear();
-        self.refresh_validation_summary();
-    }
-
-    /// Rebase the accepted fields on what the host actually published, including
-    /// normalized names and rewritten references. Rejected drafts stay isolated.
-    pub(crate) fn rebase_applied_values(
-        &mut self,
-        values: HashMap<String, PropertyValue>,
-        sheet: &PropertySheet,
-        quantity_policy: QuantityPresentationPolicy,
-        number_locale: UiNumberLocale,
-    ) {
-        let prior = std::mem::replace(&mut self.original_values, values);
-        self.values.retain(|name, _| self.modified.contains(name));
-        for (name, value) in &self.original_values {
-            if !self.modified.contains(name) {
-                self.values.insert(name.clone(), value.clone());
-            }
-        }
-        for def in sheet.iter().filter(|def| {
-            matches!(
-                def.prop_type,
-                PropertyType::Number | PropertyType::Expression
-            ) && prior.get(&def.name) != self.original_values.get(&def.name)
-        }) {
-            let value = self
-                .original_values
-                .get(&def.name)
-                .unwrap_or(&def.default_value);
-            let text = editor_source_text(def, value, quantity_policy, number_locale);
-            self.original_numeric_text_drafts
-                .insert(def.name.clone(), text.clone());
-            if !self.modified.contains(&def.name) {
-                self.numeric_text_drafts.insert(def.name.clone(), text);
-            }
-        }
-    }
-
-    /// Revert all changes to original values
-    #[cfg(test)]
-    pub fn revert(&mut self) {
-        self.values = self.original_values.clone();
-        self.numeric_text_drafts = self.original_numeric_text_drafts.clone();
-        self.numeric_draft_errors.clear();
-        self.modified.clear();
-        self.validation_errors.clear();
-        self.global_error = None;
-        self.commit_error = None;
-        self.prepared_commit.clear();
-        if self.component_type.is_some_and(|kind| kind.is_pwl_source()) {
-            let source = self
-                .values
-                .get("pwl_data")
-                .map(PropertyValue::display_string)
-                .unwrap_or_default();
-            self.pwl_editor = PwlEditorState::from_string(
-                &source,
-                if self.component_type == Some(ComponentType::CurrentSourcePwl) {
-                    "A"
-                } else {
-                    "V"
-                },
-            );
-        }
-    }
-
-    /// Set a property value.
-    ///
-    /// Tracks modification status and validates the value.
-    pub fn set_value(&mut self, name: &str, value: PropertyValue) {
-        let is_modified = self
-            .original_values
-            .get(name)
-            .map(|orig| orig != &value)
-            .unwrap_or(true);
-
-        if is_modified {
-            self.modified.insert(name.to_string());
-        } else {
-            self.modified.remove(name);
-        }
-
-        self.values.insert(name.to_string(), value);
-        self.validation_errors.remove(name);
-        self.commit_error = None;
-        self.refresh_validation_summary();
-    }
-
-    /// Return retained source text for a numeric or expression editor.
-    pub fn numeric_text_draft(&self, name: &str) -> Option<&str> {
-        self.numeric_text_drafts.get(name).map(String::as_str)
-    }
-
-    /// Publish the latest source text and parse status from one numeric or
-    /// expression editor. Invalid source stays dirty without contaminating
-    /// typed values.
-    pub fn update_numeric_text_draft(
-        &mut self,
-        name: &str,
-        text: String,
-        parse_error: Option<String>,
-    ) {
-        let source_changed = self
-            .numeric_text_drafts
-            .get(name)
-            .is_none_or(|current| current != &text);
-        self.numeric_text_drafts.insert(name.to_owned(), text);
-
-        if let Some(error) = parse_error {
-            self.numeric_draft_errors
-                .insert(name.to_owned(), error.clone());
-            self.validation_errors.insert(name.to_owned(), error);
-            self.modified.insert(name.to_owned());
-        } else {
-            self.numeric_draft_errors.remove(name);
-            self.validation_errors.remove(name);
-            // A parameter the instance never authored is absent from both
-            // maps. That is the schema default, not an edit: treating the
-            // missing pair as a difference marked every unauthored field
-            // modified the instant the editor opened.
-            let is_modified = match (self.values.get(name), self.original_values.get(name)) {
-                (None, None) => false,
-                (value, original) => value != original,
-            };
-            if is_modified {
-                self.modified.insert(name.to_owned());
-            } else {
-                self.modified.remove(name);
-            }
-        }
-
-        if source_changed {
-            self.commit_error = None;
-        }
-        self.refresh_validation_summary();
-    }
-
-    /// Get the current value of a property
     /// The transient the stimulus preview evaluates this source against.
     #[must_use]
     pub(super) fn preview_timing(&self) -> crate::simulation::stimulus_realize::PreviewTiming {
         self.preview_timing
     }
-
-    pub fn get_value(&self, name: &str) -> Option<&PropertyValue> {
-        self.values.get(name)
-    }
-
-    /// Check if a property has been modified
-    pub fn is_modified(&self, name: &str) -> bool {
-        self.modified.contains(name)
-    }
-
-    /// Check if any properties have been modified
-    pub fn has_modifications(&self) -> bool {
-        !self.modified.is_empty()
-    }
-
-    /// Mirror the PWL editor's live validity into the parent transaction.
-    ///
-    /// The point editor retains invalid raw drafts independently of the typed
-    /// property map, so the dialog must publish that status after every PWL
-    /// interaction rather than waiting for an Apply attempt.
-    pub(super) fn sync_pwl_validation_error(&mut self) {
-        if !self.component_type.is_some_and(|kind| kind.is_pwl_source()) {
-            return;
-        }
-        if self.pwl_editor.is_valid() {
-            self.validation_errors.remove("pwl_data");
-        } else {
-            self.validation_errors.insert(
-                "pwl_data".to_owned(),
-                self.pwl_editor
-                    .validation_error
-                    .clone()
-                    .unwrap_or_else(|| "PWL waveform data is invalid".to_owned()),
-            );
-        }
-        self.refresh_validation_summary();
-    }
-
-    /// Whether the document's commit policy has at least one publishable
-    /// action. Atomic mode blocks on every known invalid draft; partial mode
-    /// remains available only when a distinct valid modified field exists.
-    pub fn can_apply(&self, policy: crate::state::PropertyCommitPolicy) -> bool {
-        if self.modified.is_empty() {
-            return false;
-        }
-        match policy {
-            crate::state::PropertyCommitPolicy::Atomic => self.validation_errors.is_empty(),
-            crate::state::PropertyCommitPolicy::ApplyValidFields => self
-                .modified
-                .iter()
-                .any(|name| !self.validation_errors.contains_key(name)),
-        }
-    }
-
-    /// Validate all properties against the sheet definitions.
-    ///
-    /// Returns true if all validations pass.
-    pub fn validate_all(&mut self, sheet: &PropertySheet) -> bool {
-        self.validation_errors.clear();
-        self.global_error = None;
-
-        for def in sheet.iter() {
-            let value = self.values.get(&def.name).unwrap_or(&def.default_value);
-            if let Err(error) = def
-                .validate(value)
-                .and_then(|()| validate_property_expression(def, value))
-            {
-                self.validation_errors.insert(def.name.clone(), error);
-            }
-        }
-        self.validation_errors.extend(
-            self.numeric_draft_errors
-                .iter()
-                .map(|(name, error)| (name.clone(), error.clone())),
-        );
-        if self.component_type.is_some_and(|kind| kind.is_pwl_source())
-            && !self.pwl_editor.is_valid()
-        {
-            self.validation_errors.insert(
-                "pwl_data".to_owned(),
-                self.pwl_editor
-                    .validation_error
-                    .clone()
-                    .unwrap_or_else(|| "PWL waveform data is invalid".to_owned()),
-            );
-        }
-
-        self.refresh_validation_summary();
-        self.validation_errors.is_empty()
-    }
-
-    /// Validate the draft and prepare exactly the delta authorized by the
-    /// document's commit policy.
-    ///
-    /// Atomic mode prepares nothing unless every field is valid. Partial mode
-    /// prepares only valid modified fields; invalid draft values remain
-    /// isolated in this dialog and are never passed to the component bridge.
-    pub fn prepare_commit(
-        &mut self,
-        sheet: &PropertySheet,
-        policy: crate::state::PropertyCommitPolicy,
-    ) -> bool {
-        self.commit_error = None;
-        self.prepared_commit.clear();
-        let all_valid = self.validate_all(sheet);
-        if !all_valid && policy == crate::state::PropertyCommitPolicy::Atomic {
-            return false;
-        }
-
-        for name in &self.modified {
-            if self.validation_errors.contains_key(name) {
-                continue;
-            }
-            if let Some(value) = self.values.get(name) {
-                self.prepared_commit.insert(name.clone(), value.clone());
-            }
-        }
-
-        if self.prepared_commit.is_empty() {
-            if all_valid {
-                self.global_error = Some("No modified properties to apply".to_owned());
-            }
-            return false;
-        }
-
-        if !all_valid {
-            self.global_error = Some(format!(
-                "{} invalid field(s) retained; {} valid field(s) will be applied",
-                self.validation_errors.len(),
-                self.prepared_commit.len()
-            ));
-        }
-        true
-    }
-
-    /// Transfer the already validated field delta to the component host.
-    pub fn take_prepared_commit(&mut self) -> HashMap<String, PropertyValue> {
-        std::mem::take(&mut self.prepared_commit)
-    }
-
-    /// Re-present the untouched drafts in engineering notation, once, as soon
-    /// as a render pass supplies the presentation policy.
-    ///
-    /// `open_for_component` runs before any policy is in hand, so it seeds the
-    /// exact decimal — correct but unreadable for a rise time
-    /// (`0.000000001 s`). This cannot run every frame: it would snap a user
-    /// who is deliberately typing that exact form back to `1ns` mid-edit.
-    pub(super) fn present_numeric_drafts(
-        &mut self,
-        sheet: &PropertySheet,
-        quantity_policy: QuantityPresentationPolicy,
-        number_locale: UiNumberLocale,
-    ) {
-        if self.numeric_drafts_presented {
-            return;
-        }
-        self.numeric_drafts_presented = true;
-        let presented = sheet
-            .iter()
-            .filter(|def| {
-                matches!(
-                    def.prop_type,
-                    PropertyType::Number | PropertyType::Expression
-                )
-            })
-            .filter(|def| {
-                // Only re-present a draft nobody has touched. A caller can
-                // write a draft between `open_for_component` and the first
-                // paint — a retained invalid entry, for instance — and
-                // rewriting that would silently discard their edit.
-                self.numeric_text_drafts.get(&def.name)
-                    == self.original_numeric_text_drafts.get(&def.name)
-            })
-            .map(|def| {
-                let value = self.values.get(&def.name).unwrap_or(&def.default_value);
-                (
-                    def.name.clone(),
-                    editor_source_text(def, value, quantity_policy, number_locale),
-                )
-            })
-            .collect::<Vec<_>>();
-        for (name, text) in presented {
-            self.numeric_text_drafts.insert(name.clone(), text.clone());
-            self.original_numeric_text_drafts.insert(name, text);
-        }
-    }
-
-    fn initialize_numeric_text_drafts(&mut self, sheet: &PropertySheet) {
-        self.numeric_text_drafts.clear();
-        self.original_numeric_text_drafts.clear();
-        self.numeric_draft_errors.clear();
-        for def in sheet.iter().filter(|def| {
-            matches!(
-                def.prop_type,
-                PropertyType::Number | PropertyType::Expression
-            )
-        }) {
-            let value = self.values.get(&def.name).unwrap_or(&def.default_value);
-            let text = numeric_source_text(def, value);
-            self.numeric_text_drafts
-                .insert(def.name.clone(), text.clone());
-            self.original_numeric_text_drafts
-                .insert(def.name.clone(), text);
-        }
-    }
-
-    fn refresh_validation_summary(&mut self) {
-        self.global_error = (!self.validation_errors.is_empty())
-            .then(|| format!("{} validation error(s)", self.validation_errors.len()));
-    }
-}
-
-fn validate_property_expression(
-    definition: &PropertyDefinition,
-    value: &PropertyValue,
-) -> Result<(), String> {
-    let PropertyValue::Expression(source) = value else {
-        return Ok(());
-    };
-    if !matches!(
-        definition.prop_type,
-        PropertyType::Number | PropertyType::Expression
-    ) {
-        return Ok(());
-    }
-    let trimmed = source.trim();
-    if trimmed.is_empty() {
-        return if definition.prop_type == PropertyType::Expression && !definition.required {
-            Ok(())
-        } else {
-            Err(format!("{} expression is empty", definition.display_name))
-        };
-    }
-    rspice_design::properties::value::parse_expression_source(
-        definition,
-        source,
-        crate::quantity::QuantityPresentationPolicy::default(),
-        crate::quantity::UiNumberLocale::default(),
-    )
-    .map(drop)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::PropertyCommitPolicy;
     use crate::state::property_types::{PropertyDefinition, PropertyType};
 
     fn numeric(value: f64) -> PropertyValue {
@@ -861,36 +346,9 @@ mod tests {
                 crate::state::Point::origin(),
             )),
         );
-        state.set_value("gain", numeric(2.0));
-        state.set_value("offset", numeric(3.0));
+        state.draft.set_value("gain", numeric(2.0));
+        state.draft.set_value("offset", numeric(3.0));
         state
-    }
-
-    #[test]
-    fn atomic_policy_never_prepares_a_partial_invalid_draft() {
-        let sheet = constrained_sheet();
-        let mut state = edited_dialog(&sheet);
-
-        assert!(!state.prepare_commit(&sheet, PropertyCommitPolicy::Atomic));
-        assert!(state.take_prepared_commit().is_empty());
-        assert!(state.validation_errors.contains_key("offset"));
-        assert!(state.is_modified("gain"));
-    }
-
-    #[test]
-    fn partial_policy_prepares_only_valid_modified_fields() {
-        let sheet = constrained_sheet();
-        let mut state = edited_dialog(&sheet);
-
-        assert!(state.prepare_commit(&sheet, PropertyCommitPolicy::ApplyValidFields));
-        let prepared = state.take_prepared_commit();
-        assert_eq!(prepared.get("gain"), Some(&numeric(2.0)));
-        assert!(!prepared.contains_key("offset"));
-
-        state.mark_fields_applied(prepared.into_keys());
-        assert!(!state.is_modified("gain"));
-        assert!(state.is_modified("offset"));
-        assert!(state.validation_errors.contains_key("offset"));
     }
 
     #[test]
@@ -902,66 +360,10 @@ mod tests {
         state.close();
         assert!(!state.open);
         assert!(!state.model_browser.open);
+        assert!(state.component_id.is_none());
         assert!(state.component_baseline.is_none());
-    }
-
-    #[test]
-    fn new_pwl_component_opens_on_registry_default_as_a_clean_valid_transaction() {
-        let registry = crate::properties::PropertyEditorSchema::new();
-        let component = Component::new(
-            9,
-            ComponentType::VoltageSourcePwl,
-            crate::state::Point::origin(),
-        );
-        let values = crate::properties::property_bridge::collect_properties_from_component(
-            &component, &registry,
-        );
-        let sheet = registry.get(ComponentType::VoltageSourcePwl).unwrap();
-        let mut state = TabbedPropertyDialogState::default();
-
-        state.open_for_component(
-            component.id,
-            "V9",
-            component.kind,
-            sheet,
-            values,
-            ComponentPropertySession::detached(component),
-        );
-        state.sync_pwl_validation_error();
-
-        assert_eq!(
-            state.get_value("pwl_data"),
-            Some(&PropertyValue::String("0 0 1u 1 2u 0".to_owned()))
-        );
-        assert!(state.pwl_editor.is_valid());
-        assert!(state.validation_errors.is_empty());
-        assert!(!state.has_modifications());
-    }
-
-    #[test]
-    fn explicitly_authored_empty_pwl_transaction_is_invalid() {
-        let sheet = pwl_sheet();
-        let mut values = HashMap::new();
-        values.insert("pwl_data".to_owned(), PropertyValue::String(String::new()));
-        let mut state = TabbedPropertyDialogState::default();
-
-        state.open_for_component(
-            9,
-            "V9",
-            ComponentType::VoltageSourcePwl,
-            &sheet,
-            values,
-            ComponentPropertySession::detached(Component::new(
-                9,
-                ComponentType::VoltageSourcePwl,
-                crate::state::Point::origin(),
-            )),
-        );
-        state.sync_pwl_validation_error();
-
-        assert_eq!(state.pwl_editor.raw_source_draft(), Some(""));
-        assert!(state.validation_errors.contains_key("pwl_data"));
-        assert!(!state.pwl_editor.is_valid());
+        assert!(state.draft.values.is_empty());
+        assert!(state.draft.modified.is_empty());
     }
 
     #[test]
@@ -986,209 +388,20 @@ mod tests {
             )),
         );
 
-        state.pwl_editor.edit_buffers[1].1 = "1e".to_owned();
-        assert!(state.pwl_editor.apply_buffer_edits().is_err());
-        state.set_value(
+        state.draft.pwl_editor.edit_buffers[1].1 = "1e".to_owned();
+        assert!(state.draft.pwl_editor.apply_buffer_edits().is_err());
+        state.draft.set_value(
             "pwl_data",
-            PropertyValue::String(state.pwl_editor.to_string()),
+            PropertyValue::String(state.draft.pwl_editor.to_string()),
         );
-        state.sync_pwl_validation_error();
+        state.draft.sync_pwl_validation_error();
 
         assert_eq!(
-            state.get_value("pwl_data"),
+            state.draft.get_value("pwl_data"),
             Some(&PropertyValue::String("0 0 1n 1e".to_owned()))
         );
-        assert!(state.has_modifications());
+        assert!(state.draft.has_modifications());
         state.close();
         assert!(!state.open);
-    }
-
-    #[test]
-    fn live_pwl_validation_blocks_apply_and_repair_clears_parent_error() {
-        let sheet = pwl_sheet();
-        let mut values = HashMap::new();
-        values.insert(
-            "pwl_data".to_owned(),
-            PropertyValue::String("0 0 1n 1".to_owned()),
-        );
-        let mut state = TabbedPropertyDialogState::default();
-        state.open_for_component(
-            9,
-            "V9",
-            ComponentType::VoltageSourcePwl,
-            &sheet,
-            values,
-            ComponentPropertySession::detached(Component::new(
-                9,
-                ComponentType::VoltageSourcePwl,
-                crate::state::Point::origin(),
-            )),
-        );
-
-        state.pwl_editor.edit_buffers[1].1 = "1e".to_owned();
-        assert!(state.pwl_editor.apply_buffer_edits().is_err());
-        state.set_value(
-            "pwl_data",
-            PropertyValue::String(state.pwl_editor.to_string()),
-        );
-        state.sync_pwl_validation_error();
-        assert!(state.validation_errors.contains_key("pwl_data"));
-        assert!(!state.can_apply(PropertyCommitPolicy::Atomic));
-
-        state.pwl_editor.edit_buffers[1].1 = "2".to_owned();
-        state.pwl_editor.apply_buffer_edits().unwrap();
-        state.set_value(
-            "pwl_data",
-            PropertyValue::String(state.pwl_editor.to_string()),
-        );
-        state.sync_pwl_validation_error();
-        assert!(!state.validation_errors.contains_key("pwl_data"));
-        assert!(state.can_apply(PropertyCommitPolicy::Atomic));
-    }
-
-    #[test]
-    fn invalid_numeric_source_is_retained_until_repaired() {
-        let sheet = constrained_sheet();
-        let mut state = edited_dialog(&sheet);
-        state.revert();
-
-        state.update_numeric_text_draft(
-            "gain",
-            "1e".to_owned(),
-            Some("invalid number: 1e".to_owned()),
-        );
-
-        assert_eq!(state.numeric_text_draft("gain"), Some("1e"));
-        assert_eq!(state.get_value("gain"), Some(&numeric(1.0)));
-        assert!(state.is_modified("gain"));
-        assert!(!state.can_apply(PropertyCommitPolicy::Atomic));
-        assert!(!state.can_apply(PropertyCommitPolicy::ApplyValidFields));
-        assert!(!state.prepare_commit(&sheet, PropertyCommitPolicy::Atomic));
-        assert_eq!(state.numeric_text_draft("gain"), Some("1e"));
-        assert!(state.validation_errors.contains_key("gain"));
-
-        state.update_numeric_text_draft("gain", "2".to_owned(), None);
-        state.set_value("gain", numeric(2.0));
-        assert!(state.prepare_commit(&sheet, PropertyCommitPolicy::Atomic));
-        assert_eq!(
-            state.take_prepared_commit().get("gain"),
-            Some(&numeric(2.0))
-        );
-    }
-
-    #[test]
-    fn partial_commit_preserves_invalid_numeric_source_and_revert_restores_baseline() {
-        let sheet = constrained_sheet();
-        let mut state = edited_dialog(&sheet);
-        state.revert();
-        state.update_numeric_text_draft("gain", "2".to_owned(), None);
-        state.set_value("gain", numeric(2.0));
-        state.update_numeric_text_draft(
-            "offset",
-            "-".to_owned(),
-            Some("invalid number: -".to_owned()),
-        );
-
-        assert!(!state.can_apply(PropertyCommitPolicy::Atomic));
-        assert!(state.can_apply(PropertyCommitPolicy::ApplyValidFields));
-        assert!(state.prepare_commit(&sheet, PropertyCommitPolicy::ApplyValidFields));
-        let prepared = state.take_prepared_commit();
-        assert_eq!(prepared.get("gain"), Some(&numeric(2.0)));
-        assert!(!prepared.contains_key("offset"));
-        state.mark_fields_applied(prepared.into_keys());
-        assert_eq!(state.numeric_text_draft("offset"), Some("-"));
-        assert!(state.is_modified("offset"));
-
-        state.revert();
-        assert_eq!(state.numeric_text_draft("gain"), Some("2"));
-        assert_eq!(state.numeric_text_draft("offset"), Some("0"));
-        assert!(!state.has_modifications());
-    }
-
-    #[test]
-    fn expression_drafts_are_syntax_checked_before_publication() {
-        let definition = PropertyDefinition::new("value")
-            .with_display_name("Value")
-            .with_type(PropertyType::Expression)
-            .with_default(PropertyValue::expression("gain"))
-            .required();
-        assert!(
-            validate_property_expression(
-                &definition,
-                &PropertyValue::Expression("gain +".to_owned())
-            )
-            .is_err()
-        );
-        assert!(
-            validate_property_expression(
-                &definition,
-                &PropertyValue::Expression("gain * 2".to_owned())
-            )
-            .is_ok()
-        );
-
-        let optional = PropertyDefinition::new("leakage")
-            .with_type(PropertyType::Expression)
-            .with_default(PropertyValue::expression(""));
-        assert!(validate_property_expression(&optional, &PropertyValue::expression("")).is_ok());
-    }
-
-    #[test]
-    fn real_registry_phase_expression_cannot_bypass_units_or_range() {
-        let registry = crate::properties::PropertyEditorSchema::new();
-        let phase = registry
-            .get(ComponentType::VoltageSource)
-            .and_then(|sheet| sheet.get("acphase"))
-            .expect("voltage-source AC phase definition");
-
-        assert!(validate_property_expression(phase, &PropertyValue::expression("90")).is_err());
-        assert!(
-            validate_property_expression(phase, &PropertyValue::expression("400 deg")).is_err()
-        );
-        assert!(validate_property_expression(phase, &PropertyValue::expression("90 deg")).is_ok());
-        assert!(
-            validate_property_expression(phase, &PropertyValue::expression("phase_parameter"))
-                .is_ok()
-        );
-    }
-
-    #[test]
-    fn expression_capable_fields_initialize_a_lossless_retained_draft() {
-        let registry = crate::properties::PropertyEditorSchema::new();
-        let sheet = registry.get(ComponentType::VoltageSource).unwrap();
-        let stored = 89.123_456_789_012_3;
-        let values = HashMap::from([("acphase".to_owned(), PropertyValue::number(stored))]);
-        let component = Component::new(
-            12,
-            ComponentType::VoltageSource,
-            crate::state::Point::origin(),
-        );
-        let mut state = TabbedPropertyDialogState::default();
-
-        state.open_for_component(
-            component.id,
-            "V12",
-            component.kind,
-            sheet,
-            values,
-            ComponentPropertySession::detached(component),
-        );
-
-        let expected = format!("{} deg", stored);
-        assert_eq!(state.numeric_text_draft("acphase"), Some(expected.as_str()));
-    }
-
-    #[test]
-    fn successful_ok_cleanup_closes_and_clears_the_editor_transaction() {
-        let sheet = constrained_sheet();
-        let mut state = edited_dialog(&sheet);
-
-        state.clear_after_apply();
-
-        assert!(!state.open);
-        assert!(state.component_id.is_none());
-        assert!(state.component_baseline.is_none());
-        assert!(state.values.is_empty());
-        assert!(state.modified.is_empty());
     }
 }

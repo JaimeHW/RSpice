@@ -976,7 +976,7 @@ mod tests {
                     assert!(state.tabbed_property_dialog.open);
                 }
                 let original = state.schematic.document().components.clone();
-                let draft = state.tabbed_property_dialog.values.clone();
+                let draft = state.tabbed_property_dialog.draft.values.clone();
                 let report = CheckAndSaveValidationReport::collect(&state).unwrap();
                 let errors = report
                     .blockers()
@@ -991,7 +991,7 @@ mod tests {
                     assert!(errors.is_empty(), "owner {owner:?}: {errors:?}");
                 }
                 assert_eq!(state.schematic.document().components, original);
-                assert_eq!(state.tabbed_property_dialog.values, draft);
+                assert_eq!(state.tabbed_property_dialog.draft.values, draft);
             }
         }
 
@@ -1165,7 +1165,7 @@ mod tests {
         assert!(state.tabbed_property_dialog.open);
         assert!(!state.dialogs.object_properties.open);
         assert_eq!(
-            state.tabbed_property_dialog.component_type,
+            state.tabbed_property_dialog.draft.component_type,
             Some(ComponentType::Port)
         );
     }
@@ -1342,7 +1342,7 @@ mod tests {
 
         assert!(state.tabbed_property_dialog.open);
         assert_eq!(
-            state.tabbed_property_dialog.component_type,
+            state.tabbed_property_dialog.draft.component_type,
             Some(ComponentType::CellInstance)
         );
         let sheet = state
@@ -1358,14 +1358,14 @@ mod tests {
             Some(PropertyType::Number)
         );
         assert_eq!(
-            state.tabbed_property_dialog.values.get("w"),
+            state.tabbed_property_dialog.draft.values.get("w"),
             Some(&PropertyValue::Number {
                 value: 2e-6,
                 unit: Some("m".to_owned()),
             })
         );
         assert!(matches!(
-            state.tabbed_property_dialog.values.get("name"),
+            state.tabbed_property_dialog.draft.values.get("name"),
             Some(PropertyValue::String(name)) if name == "M44"
         ));
     }
@@ -1452,7 +1452,10 @@ mod tests {
                 "{} did not open a component editor",
                 kind.display_name()
             );
-            assert_eq!(state.tabbed_property_dialog.component_type, Some(kind));
+            assert_eq!(
+                state.tabbed_property_dialog.draft.component_type,
+                Some(kind)
+            );
         }
     }
 
