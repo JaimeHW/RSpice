@@ -1,6 +1,7 @@
 //! Canvas painting and coordinate conversion.
 
 pub mod array_interaction;
+pub mod bus_interaction;
 pub mod context_menu;
 pub mod coordinates;
 pub mod documentation_shapes;
