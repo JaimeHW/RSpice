@@ -656,6 +656,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
         open_property_editor(state, component_id);
         return state.tabbed_property_dialog.open;
     }
+    let source = crate::workbench::app::schematic_editor_request_source(state);
     if let Some(label_id) = state.schematic.session.editor.selection.single_net_label()
         && let Some(label) = state
             .schematic
@@ -666,9 +667,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     {
         state.dialogs.object_properties.open_net_label(
             label,
-            state.design_execution_epoch,
-            state.active_schematic_epoch,
-            state.schematic.topology_version(),
+            source,
             state.workspace.content.active_view.display_path(),
         );
         return true;
@@ -683,9 +682,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     {
         state.dialogs.object_properties.open_named_net(
             target,
-            state.design_execution_epoch,
-            state.active_schematic_epoch,
-            state.schematic.topology_version(),
+            source,
             state.workspace.content.active_view.display_path(),
         );
         return true;
@@ -705,9 +702,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     {
         state.dialogs.object_properties.open_design_note(
             note,
-            state.design_execution_epoch,
-            state.active_schematic_epoch,
-            state.schematic.topology_version(),
+            source,
             state.workspace.content.active_view.display_path(),
         );
         return true;
@@ -727,9 +722,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     {
         state.dialogs.object_properties.open_documentation_shape(
             shape,
-            state.design_execution_epoch,
-            state.active_schematic_epoch,
-            state.schematic.topology_version(),
+            source,
             state.workspace.content.active_view.display_path(),
         );
         return true;
@@ -744,9 +737,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     {
         state.dialogs.object_properties.open_bus_tap(
             tap,
-            state.design_execution_epoch,
-            state.active_schematic_epoch,
-            state.schematic.topology_version(),
+            source,
             state.workspace.content.active_view.display_path(),
         );
         return true;
@@ -761,9 +752,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     {
         state.dialogs.object_properties.open_bus(
             bus,
-            state.design_execution_epoch,
-            state.active_schematic_epoch,
-            state.schematic.topology_version(),
+            source,
             state.workspace.content.active_view.display_path(),
         );
         return true;
@@ -1053,6 +1042,12 @@ mod tests {
 
         state.schematic.session.editor.selection.select_only_bus(41);
         assert!(open_selected_object_properties(&mut state));
+        assert_eq!(
+            state.dialogs.object_properties.source,
+            Some(crate::workbench::app::schematic_editor_request_source(
+                &state
+            ))
+        );
         assert!(matches!(
             state.dialogs.object_properties.draft,
             Some(crate::workbench::app::ObjectPropertiesDraft::Bus(_))
@@ -1066,6 +1061,12 @@ mod tests {
             .selection
             .select_only_bus_tap(42);
         assert!(open_selected_object_properties(&mut state));
+        assert_eq!(
+            state.dialogs.object_properties.source,
+            Some(crate::workbench::app::schematic_editor_request_source(
+                &state
+            ))
+        );
         assert!(matches!(
             state.dialogs.object_properties.draft,
             Some(crate::workbench::app::ObjectPropertiesDraft::BusTap(_))
@@ -1089,6 +1090,12 @@ mod tests {
             .select_only_net_label(label.id);
 
         assert!(open_selected_object_properties(&mut state));
+        assert_eq!(
+            state.dialogs.object_properties.source,
+            Some(crate::workbench::app::schematic_editor_request_source(
+                &state
+            ))
+        );
         assert!(matches!(
             state.dialogs.object_properties.draft,
             Some(crate::workbench::app::ObjectPropertiesDraft::NetLabel(ref draft))
@@ -1121,6 +1128,12 @@ mod tests {
 
         assert!(selected_object_properties_available(&state));
         assert!(open_selected_object_properties(&mut state));
+        assert_eq!(
+            state.dialogs.object_properties.source,
+            Some(crate::workbench::app::schematic_editor_request_source(
+                &state
+            ))
+        );
         assert!(matches!(
             state.dialogs.object_properties.draft,
             Some(crate::workbench::app::ObjectPropertiesDraft::NamedNet(ref draft))
@@ -1181,6 +1194,12 @@ mod tests {
             .select_only_design_note(note.id);
 
         assert!(open_selected_object_properties(&mut state));
+        assert_eq!(
+            state.dialogs.object_properties.source,
+            Some(crate::workbench::app::schematic_editor_request_source(
+                &state
+            ))
+        );
         assert!(matches!(
             state.dialogs.object_properties.draft,
             Some(crate::workbench::app::ObjectPropertiesDraft::DesignNote(ref draft))

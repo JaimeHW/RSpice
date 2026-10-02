@@ -6,6 +6,7 @@
 //! primary action publishes exactly one guarded undo transaction.
 
 use egui::{Context, Frame, Response, Stroke, TextEdit, Ui, Vec2};
+use rspice_schematic_editor::requests::EditorRequestSource;
 
 use crate::diagnostics::ConsoleMessage;
 use crate::state::{
@@ -144,9 +145,7 @@ struct CachedDraftResolution {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DraftResolutionKey {
-    design_execution_epoch: u64,
-    active_schematic_epoch: u64,
-    topology_version: u64,
+    source: EditorRequestSource,
     view_path: String,
     target_matches_baseline: bool,
     draft_source: DraftResolutionSource,
@@ -468,9 +467,7 @@ fn draft_resolution_key(
         ),
     };
     DraftResolutionKey {
-        design_execution_epoch: state.design_execution_epoch,
-        active_schematic_epoch: state.active_schematic_epoch,
-        topology_version: state.schematic.topology_version(),
+        source: crate::workbench::app::schematic_editor_request_source(state),
         view_path: state.workspace.content.active_view.display_path(),
         target_matches_baseline,
         draft_source,
@@ -482,26 +479,39 @@ fn object_property_session_error(state: &crate::workbench::app_state::AppState) 
     if state.schematic_edit_read_only() {
         return Some("The active schematic is read-only; no properties can be applied.".to_owned());
     }
-    if dialog.design_execution_epoch != state.design_execution_epoch {
+    let Some(source) = dialog.source.as_ref() else {
+        return Some(
+            "The object-properties context is unavailable. Close and reopen the current object."
+                .to_owned(),
+        );
+    };
+    let current = crate::workbench::app::schematic_editor_request_source(state);
+    if source.design_epoch != current.design_epoch {
         return Some(
             "The design document changed while properties were open. Close and reopen the current object."
                 .to_owned(),
         );
     }
-    if dialog.active_schematic_epoch != state.active_schematic_epoch {
+    if source.document_epoch != current.document_epoch {
         return Some(
             "The active schematic buffer changed while properties were open. Close and reopen the current object."
                 .to_owned(),
         );
     }
-    if dialog.topology_version != state.schematic.topology_version() {
+    if source.topology_version != current.topology_version {
         return Some(
             "Schematic connectivity changed while properties were open. Close and reopen the current object."
                 .to_owned(),
         );
     }
-    (dialog.view_path != state.workspace.content.active_view.display_path()).then(|| {
-        "The active cell/view changed while properties were open. Close and reopen the current object."
+    if dialog.view_path != state.workspace.content.active_view.display_path() {
+        return Some(
+            "The active cell/view changed while properties were open. Close and reopen the current object."
+                .to_owned(),
+        );
+    }
+    (source != &current).then(|| {
+        "The schematic source or editing scope changed while properties were open. Close and reopen the current object."
             .to_owned()
     })
 }
@@ -1710,22 +1720,8 @@ mod tests {
     fn open_bus_dialog(app: &mut RSpiceApp, bus: &Bus) {
         app.state.dialogs.object_properties.open_bus(
             bus,
-            app.state.design_execution_epoch,
-            app.state.active_schematic_epoch,
-            app.state.schematic.topology_version(),
+            crate::workbench::app::schematic_editor_request_source(&app.state),
             app.state.workspace.content.active_view.display_path(),
-        );
-    }
-
-    #[test]
-    fn mockup_shell_contract_is_exact() {
-        assert_eq!(TITLE, "Object properties");
-        assert_eq!(EYEBROW, "EDIT · TYPED PARAMETERS");
-        assert_eq!(PRIMARY, "Apply object properties");
-        assert_eq!(DIALOG_SIZE, DialogSize::SimulationWorkflow);
-        assert_eq!(
-            BODY,
-            "Edit identity, model, parameters, orientation, connectivity, display, constraints, and review metadata."
         );
     }
 
@@ -2112,24 +2108,182 @@ mod tests {
     }
 
     #[test]
-    fn dialog_session_guard_rejects_replaced_document_and_view() {
-        let mut app = RSpiceApp::test_instance();
-        let bus = declared_bus(1, 0, "DATA[7:0]");
-        app.state
-            .schematic
-            .document_mut_for_test()
-            .buses
-            .push(bus.clone());
-        open_bus_dialog(&mut app, &bus);
-        assert!(object_property_session_error(&app.state).is_none());
-
-        app.state.design_execution_epoch = app.state.design_execution_epoch.wrapping_add(1);
-        assert!(object_property_session_error(&app.state).is_some());
-        app.state.design_execution_epoch =
-            app.state.dialogs.object_properties.design_execution_epoch;
-
-        app.state.dialogs.object_properties.view_path = "replacement/view".to_owned();
-        assert!(object_property_session_error(&app.state).is_some());
+    fn retained_properties_reject_changed_context_without_committing() {
+        for change in [
+            "project",
+            "view",
+            "design",
+            "buffer",
+            "occurrence",
+            "sheet",
+            "sheet-revision",
+            "content",
+            "topology",
+            "symbol-context",
+            "read-only",
+            "safe-mode",
+            "missing",
+        ] {
+            let ctx = Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            let mut app = RSpiceApp::test_instance();
+            let master = crate::state::CellViewRef::new("work", "property_parent", "schematic");
+            app.state.workspace.descend_into(
+                "X1".to_owned(),
+                master.clone(),
+                crate::state::ViewType::Schematic,
+            );
+            let first = app
+                .state
+                .workspace
+                .content
+                .design_management
+                .bootstrap_for_cell_view(&master.key(), "Sheet 1", [])
+                .unwrap();
+            let bus = declared_bus(1, 0, "DATA[7:0]");
+            let note = DesignNote::new(
+                99,
+                Point::new(0, 20),
+                DesignNoteKind::PlainText,
+                "Original note",
+            )
+            .unwrap();
+            app.state
+                .schematic
+                .document_mut_for_test()
+                .buses
+                .push(bus.clone());
+            app.state
+                .schematic
+                .document_mut_for_test()
+                .design_notes
+                .push(note.clone());
+            app.state.schematic.init_undo_history();
+            open_bus_dialog(&mut app, &bus);
+            assert!(object_property_session_error(&app.state).is_none());
+            let Some(ObjectPropertiesDraft::Bus(draft)) =
+                app.state.dialogs.object_properties.draft.as_mut()
+            else {
+                panic!("bus draft")
+            };
+            draft.declaration = "ADDR[7:0]".to_owned();
+            app.state.dialogs.object_properties.mark_edited();
+            let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
+                app.render_object_properties_dialog(ctx)
+            });
+            let cached = ctx
+                .data(|data| {
+                    data.get_temp::<CachedDraftResolution>(egui::Id::new(
+                        "object-properties-draft-resolution-cache",
+                    ))
+                })
+                .expect("valid initial draft warms the repaint cache");
+            assert!(cached.validation.can_commit());
+            match change {
+                "project" => app.state.workspace.content.project = Default::default(),
+                "view" => {
+                    app.state.workspace.content.active_view =
+                        crate::state::CellViewRef::new("work", "replacement", "schematic")
+                }
+                "design" => app.state.design_execution_epoch += 1,
+                "buffer" => app.state.active_schematic_epoch += 1,
+                "occurrence" => {
+                    app.state.workspace.ascend_one().unwrap();
+                    app.state.workspace.descend_into(
+                        "X2".to_owned(),
+                        master.clone(),
+                        crate::state::ViewType::Schematic,
+                    );
+                }
+                "sheet" | "sheet-revision" => {
+                    let catalog = app
+                        .state
+                        .workspace
+                        .content
+                        .design_management
+                        .sheet_catalog_mut(&master.key())
+                        .unwrap();
+                    let second = catalog
+                        .create_sheet(
+                            crate::state::SheetDefinition {
+                                name: "Sheet 2".to_owned(),
+                                template: crate::state::SheetTemplate::AnalogSchematic,
+                                port_policy: crate::state::SheetPortPolicy::TypedOffSheetPorts,
+                                explicit_page_number: Some(2),
+                            },
+                            Some(first),
+                        )
+                        .unwrap();
+                    if change == "sheet" {
+                        catalog.set_active(second).unwrap();
+                    }
+                }
+                "content" => {
+                    let topology = app.state.schematic.topology_version();
+                    assert!(
+                        app.state
+                            .schematic
+                            .edit_design_note_properties(
+                                note,
+                                DesignNoteKind::PlainText,
+                                "Changed note".to_owned(),
+                                None,
+                            )
+                            .unwrap()
+                    );
+                    assert_eq!(app.state.schematic.topology_version(), topology);
+                }
+                "topology" => app.state.schematic.bump_topology_version(),
+                "symbol-context" => {
+                    app.state
+                        .workspace
+                        .content
+                        .schematic_buffers
+                        .insert("work/other/schematic".to_owned(), Default::default());
+                }
+                "read-only" => app.state.schematic.session.read_only = true,
+                "safe-mode" => app.state.workbench.safe_mode.activate(
+                    crate::workbench::state::LocalSafeModeOptions {
+                        open_project_read_only: true,
+                        ..Default::default()
+                    },
+                    "object-properties test".to_owned(),
+                ),
+                "missing" => app.state.dialogs.object_properties.source = None,
+                _ => unreachable!(),
+            }
+            assert!(
+                object_property_session_error(&app.state).is_some(),
+                "{change}"
+            );
+            if !matches!(change, "read-only" | "safe-mode" | "missing") {
+                let draft = app.state.dialogs.object_properties.draft.as_ref().unwrap();
+                assert_ne!(
+                    draft_resolution_key(&app.state, draft),
+                    cached.key,
+                    "{change}"
+                );
+            }
+            let before = crate::state::SchematicSnapshot::capture(&app.state.schematic.document());
+            let content = app.state.schematic.content_version();
+            let topology = app.state.schematic.topology_version();
+            let undo = app.state.schematic.undo_description().map(str::to_owned);
+            let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
+                app.render_object_properties_dialog(ctx)
+            });
+            assert!(app.state.dialogs.object_properties.open, "{change}");
+            assert!(
+                before.is_equal_document(&app.state.schematic.document()),
+                "{change}"
+            );
+            assert_eq!(app.state.schematic.content_version(), content, "{change}");
+            assert_eq!(app.state.schematic.topology_version(), topology, "{change}");
+            assert_eq!(
+                app.state.schematic.undo_description(),
+                undo.as_deref(),
+                "{change}"
+            );
+        }
     }
 
     #[test]
@@ -2161,12 +2315,15 @@ mod tests {
         });
 
         assert!(!app.state.dialogs.object_properties.open);
+        assert!(app.state.dialogs.object_properties.source.is_none());
         assert_eq!(
             app.state.schematic.document().buses[0].declaration,
             Some(BusDeclaration::parse("ADDR<0:15>").unwrap())
         );
         assert!(app.state.schematic.undo());
         assert_eq!(app.state.schematic.document().buses[0], bus);
+        open_bus_dialog(&mut app, &bus);
+        assert!(object_property_session_error(&app.state).is_none());
     }
 
     #[test]

@@ -149,7 +149,7 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
         .unwrap();
         dialogs
             .object_properties
-            .open_bus(&bus, 0, 0, 0, String::new());
+            .open_bus(&bus, edit_authority().source, String::new());
     });
     assert_blocks_shortcuts(|dialogs| dialogs.selection_bulk_edit.open = true);
     assert_blocks_shortcuts(|dialogs| dialogs.technology_attachment.open = true);
@@ -183,7 +183,11 @@ fn generic_property_dirty_state_clears_after_semantic_revert() {
     )
     .unwrap();
     let mut dialog = ObjectPropertiesDialogState::default();
-    dialog.open_bus(&bus, 1, 2, 3, "work/top/schematic".to_owned());
+    dialog.open_bus(
+        &bus,
+        edit_authority().source,
+        "work/top/schematic".to_owned(),
+    );
 
     let Some(ObjectPropertiesDraft::Bus(draft)) = dialog.draft.as_mut() else {
         unreachable!()

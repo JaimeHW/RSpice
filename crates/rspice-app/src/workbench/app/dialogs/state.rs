@@ -1400,14 +1400,9 @@ pub(crate) enum ObjectPropertiesDraft {
 pub(crate) struct ObjectPropertiesDialogState {
     pub(crate) open: bool,
     pub(crate) draft: Option<ObjectPropertiesDraft>,
-    /// Document generation captured when the isolated editor opened. This
-    /// prevents a matching object id in a replacement document from being
-    /// mistaken for the original transaction target.
-    pub(crate) design_execution_epoch: u64,
-    pub(crate) active_schematic_epoch: u64,
-    /// Scoped dependency generation captured with the bus/tap draft.
-    pub(crate) topology_version: u64,
-    /// Exact cell/view identity captured with the draft.
+    /// Canonical source captured with the isolated draft.
+    pub(crate) source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
+    /// Actual tab identity; a symbol tab can resolve to its paired schematic.
     pub(crate) view_path: String,
     pub(crate) dirty: bool,
     pub(crate) discard_confirm: bool,
@@ -1489,9 +1484,7 @@ impl ObjectPropertiesDialogState {
     pub(crate) fn open_bus(
         &mut self,
         bus: &crate::state::Bus,
-        design_execution_epoch: u64,
-        active_schematic_epoch: u64,
-        topology_version: u64,
+        source: rspice_schematic_editor::requests::EditorRequestSource,
         view_path: String,
     ) {
         *self = Self {
@@ -1503,9 +1496,7 @@ impl ObjectPropertiesDialogState {
                     .as_ref()
                     .map_or_else(String::new, ToString::to_string),
             })),
-            design_execution_epoch,
-            active_schematic_epoch,
-            topology_version,
+            source: Some(source),
             view_path,
             dirty: false,
             discard_confirm: false,
@@ -1516,9 +1507,7 @@ impl ObjectPropertiesDialogState {
     pub(crate) fn open_bus_tap(
         &mut self,
         tap: &crate::state::BusTap,
-        design_execution_epoch: u64,
-        active_schematic_epoch: u64,
-        topology_version: u64,
+        source: rspice_schematic_editor::requests::EditorRequestSource,
         view_path: String,
     ) {
         *self = Self {
@@ -1529,9 +1518,7 @@ impl ObjectPropertiesDialogState {
                 slice: tap.slice.to_string(),
                 orientation: tap.orientation,
             })),
-            design_execution_epoch,
-            active_schematic_epoch,
-            topology_version,
+            source: Some(source),
             view_path,
             dirty: false,
             discard_confirm: false,
@@ -1542,9 +1529,7 @@ impl ObjectPropertiesDialogState {
     pub(crate) fn open_net_label(
         &mut self,
         label: &crate::state::NetLabel,
-        design_execution_epoch: u64,
-        active_schematic_epoch: u64,
-        topology_version: u64,
+        source: rspice_schematic_editor::requests::EditorRequestSource,
         view_path: String,
     ) {
         *self = Self {
@@ -1557,9 +1542,7 @@ impl ObjectPropertiesDialogState {
                     y: label.pos.y.to_string(),
                 },
             )),
-            design_execution_epoch,
-            active_schematic_epoch,
-            topology_version,
+            source: Some(source),
             view_path,
             dirty: false,
             discard_confirm: false,
@@ -1570,9 +1553,7 @@ impl ObjectPropertiesDialogState {
     pub(crate) fn open_named_net(
         &mut self,
         target: crate::workbench::app::NamedNetTarget,
-        design_execution_epoch: u64,
-        active_schematic_epoch: u64,
-        topology_version: u64,
+        source: rspice_schematic_editor::requests::EditorRequestSource,
         view_path: String,
     ) {
         let name = target.name.clone();
@@ -1584,9 +1565,7 @@ impl ObjectPropertiesDialogState {
                     name,
                 },
             )),
-            design_execution_epoch,
-            active_schematic_epoch,
-            topology_version,
+            source: Some(source),
             view_path,
             dirty: false,
             discard_confirm: false,
@@ -1597,9 +1576,7 @@ impl ObjectPropertiesDialogState {
     pub(crate) fn open_design_note(
         &mut self,
         note: &crate::state::DesignNote,
-        design_execution_epoch: u64,
-        active_schematic_epoch: u64,
-        topology_version: u64,
+        source: rspice_schematic_editor::requests::EditorRequestSource,
         view_path: String,
     ) {
         *self = Self {
@@ -1612,9 +1589,7 @@ impl ObjectPropertiesDialogState {
                     review_state: note.review.as_ref().map(|review| review.state),
                 },
             )),
-            design_execution_epoch,
-            active_schematic_epoch,
-            topology_version,
+            source: Some(source),
             view_path,
             dirty: false,
             discard_confirm: false,
@@ -1625,9 +1600,7 @@ impl ObjectPropertiesDialogState {
     pub(crate) fn open_documentation_shape(
         &mut self,
         shape: &crate::state::DocumentationShape,
-        design_execution_epoch: u64,
-        active_schematic_epoch: u64,
-        topology_version: u64,
+        source: rspice_schematic_editor::requests::EditorRequestSource,
         view_path: String,
     ) {
         *self = Self {
@@ -1643,9 +1616,7 @@ impl ObjectPropertiesDialogState {
                         .collect(),
                 },
             )),
-            design_execution_epoch,
-            active_schematic_epoch,
-            topology_version,
+            source: Some(source),
             view_path,
             dirty: false,
             discard_confirm: false,
