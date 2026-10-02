@@ -507,11 +507,10 @@ fn terminal_table_row(
     );
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     /// The stimulus library block, as a screen reader receives it.
-    #[cfg(not(target_arch = "wasm32"))]
     fn stimulus_verbs(
         draft: &ComponentPropertyDraft,
         context: &ComponentEditorContext,
@@ -539,7 +538,6 @@ mod tests {
 
     /// One source that has adopted `sensor_drive`, with the library one
     /// revision past it so every verb is offered at once.
-    #[cfg(not(target_arch = "wasm32"))]
     fn adopted_context() -> ComponentEditorContext {
         use rspice_design::stimulus_library::provenance::ProvenanceState;
 
@@ -566,7 +564,6 @@ mod tests {
     /// from, with the edit discarded and nothing said. Opening the definition
     /// reads nothing of the draft, so it stays available — which is the rule
     /// `Open model detail…` already keeps for the model binding.
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_card_verbs_are_withheld_while_the_editor_holds_unapplied_edits() {
         let mut draft = ComponentPropertyDraft::default();
