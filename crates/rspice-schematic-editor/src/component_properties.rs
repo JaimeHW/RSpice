@@ -1,7 +1,10 @@
-//! Retained component-property drafts over canonical schemas and values.
+//! Component-property drafts and parameter forms over canonical schemas and values.
 //!
 //! Document authority, component publication, and external services belong to
 //! the host. This draft prepares a validated field delta without mutating a design.
+
+mod form;
+pub use form::{PropertyBrowseRequest, render_component_parameters, section_band};
 
 use rspice_app_types::property::{PropertyDefinition, PropertySheet, PropertyType, PropertyValue};
 use rspice_app_types::quantity::{QuantityPresentationPolicy, UiNumberLocale};
