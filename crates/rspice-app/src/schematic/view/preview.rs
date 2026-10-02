@@ -339,12 +339,19 @@ fn draw_stretch_selection_preview(
     {
         return;
     }
-    let delta = state.dialogs.stretch_selection.preview_delta;
-    let Some(target) = state.dialogs.stretch_selection.target else {
+    let delta = state.dialogs.stretch_selection.canvas.gesture.preview_delta;
+    let Some(target) = state.dialogs.stretch_selection.canvas.target else {
         return;
     };
     if delta == Point::origin() {
-        if let Some(detail) = state.dialogs.stretch_selection.preview_error.clone() {
+        if let Some(detail) = state
+            .dialogs
+            .stretch_selection
+            .canvas
+            .gesture
+            .preview_error
+            .clone()
+        {
             draw_transform_feedback(painter, response, false, detail);
         }
         return;
@@ -358,12 +365,12 @@ fn draw_stretch_selection_preview(
         |component| symbol_context.component_bounds_tuple(component),
     ) {
         Ok(Some(candidate)) => {
-            state.dialogs.stretch_selection.preview_error = None;
+            state.dialogs.stretch_selection.canvas.gesture.preview_error = None;
             candidate
         }
         Ok(None) => return,
         Err(error) => {
-            state.dialogs.stretch_selection.preview_error = Some(error.to_string());
+            state.dialogs.stretch_selection.canvas.gesture.preview_error = Some(error.to_string());
             let detail = error.to_string();
             draw_transform_feedback(painter, response, false, detail);
             return;
@@ -422,6 +429,8 @@ fn draw_stretch_selection_preview(
     let detail = state
         .dialogs
         .stretch_selection
+        .canvas
+        .gesture
         .preview_error
         .as_deref()
         .map(str::to_owned)

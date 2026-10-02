@@ -7,7 +7,7 @@
 use egui::{Context, Ui};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::state::{Point, StretchOrthogonalPolicy, StretchTarget, Tool};
+use crate::state::{StretchOrthogonalPolicy, StretchTarget, Tool};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
@@ -152,7 +152,7 @@ fn validate_draft(state: &AppState) -> DraftValidation {
     if let Err(message) = authority.validate(state, TITLE) {
         return DraftValidation::Invalid(message);
     }
-    let Some(target) = draft.target else {
+    let Some(target) = draft.canvas.target else {
         return DraftValidation::Invalid(
             "No stretch target is retained. Close and reopen Stretch selection.".to_owned(),
         );
@@ -254,7 +254,7 @@ fn workflow_body(
 }
 
 fn target_summary(state: &AppState) -> String {
-    match state.dialogs.stretch_selection.target {
+    match state.dialogs.stretch_selection.canvas.target {
         Some(StretchTarget::WireSegment {
             wire_id,
             segment_index,
@@ -283,62 +283,10 @@ fn target_summary(state: &AppState) -> String {
     }
 }
 
-pub(crate) fn stretch_delta_for_policy(
-    delta: Point,
-    target: StretchTarget,
-    policy: StretchOrthogonalPolicy,
-    state: &AppState,
-) -> Point {
-    if policy == StretchOrthogonalPolicy::AllowDiagonal {
-        return delta;
-    }
-    let segment_end = match target {
-        StretchTarget::WireSegment { segment_index, .. }
-        | StretchTarget::BusSegment { segment_index, .. } => segment_index.checked_add(1),
-        StretchTarget::DocumentationShapePoint { .. } => return delta,
-    };
-    let Some(segment_end) = segment_end else {
-        return delta;
-    };
-    let segment = match target {
-        StretchTarget::WireSegment {
-            wire_id,
-            segment_index,
-        } => state
-            .schematic
-            .document()
-            .wires
-            .iter()
-            .find(|wire| wire.id == wire_id)
-            .and_then(|wire| wire.points.get(segment_index..=segment_end)),
-        StretchTarget::BusSegment {
-            bus_id,
-            segment_index,
-        } => state
-            .schematic
-            .document()
-            .buses
-            .iter()
-            .find(|bus| bus.id == bus_id)
-            .and_then(|bus| bus.points.get(segment_index..=segment_end)),
-        StretchTarget::DocumentationShapePoint { .. } => return delta,
-    };
-    let Some(segment) = segment else {
-        return delta;
-    };
-    if segment[0].x == segment[1].x {
-        Point::new(delta.x, 0)
-    } else if segment[0].y == segment[1].y {
-        Point::new(0, delta.y)
-    } else {
-        delta
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{SchematicGridPitch, Wire};
+    use crate::state::{Point, Wire};
 
     #[test]
     fn open_freezes_authority_and_exact_default_policy() {
@@ -353,41 +301,13 @@ mod tests {
         assert!(draft.open);
         assert_eq!(draft.policy, StretchOrthogonalPolicy::PreserveOrthogonal);
         assert_eq!(
-            draft.target,
+            draft.canvas.target,
             Some(StretchTarget::WireSegment {
                 wire_id: 7,
                 segment_index: 0,
             })
         );
         assert!(draft.authority.is_some());
-    }
-
-    #[test]
-    fn preserve_orthogonal_projects_motion_perpendicular_to_segment() {
-        let mut state = AppState::default();
-        state
-            .schematic
-            .document_mut_for_test()
-            .wires
-            .push(Wire::new(7, vec![Point::new(0, 0), Point::new(20, 0)]));
-        let target = StretchTarget::WireSegment {
-            wire_id: 7,
-            segment_index: 0,
-        };
-        assert_eq!(
-            stretch_delta_for_policy(
-                Point::new(30, 40),
-                target,
-                StretchOrthogonalPolicy::PreserveOrthogonal,
-                &state,
-            ),
-            Point::new(0, 40)
-        );
-        assert_eq!(
-            snap_label(SchematicGridPitch::Mil50),
-            "50 mil",
-            "shared mockup snap copy remains exact"
-        );
     }
 
     #[test]

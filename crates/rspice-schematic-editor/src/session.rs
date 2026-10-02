@@ -5,6 +5,7 @@ pub mod drag;
 pub mod net_highlight;
 pub mod selection;
 pub mod snap;
+pub mod stretch;
 pub mod tool;
 pub mod transform;
 pub mod visibility;

@@ -972,11 +972,8 @@ pub(crate) struct StretchSelectionDialogState {
     pub(crate) armed: bool,
     pub(crate) policy: crate::state::StretchOrthogonalPolicy,
     pub(crate) authority: Option<SchematicEditAuthority>,
-    pub(crate) target: Option<crate::state::StretchTarget>,
-    pub(crate) anchor: Option<crate::state::Point>,
-    pub(crate) preview_delta: crate::state::Point,
-    pub(crate) pointer_drag: bool,
-    pub(crate) preview_error: Option<String>,
+    pub(crate) canvas: rspice_schematic_editor::session::stretch::StretchCanvasSession,
+    pub(crate) generation: u64,
     pub(crate) dirty: bool,
     pub(crate) discard_confirm: bool,
 }
@@ -992,11 +989,11 @@ impl StretchSelectionDialogState {
             armed: false,
             policy: crate::state::StretchOrthogonalPolicy::default(),
             authority: Some(authority),
-            target: Some(target),
-            anchor: None,
-            preview_delta: crate::state::Point::origin(),
-            pointer_drag: false,
-            preview_error: None,
+            canvas: rspice_schematic_editor::session::stretch::StretchCanvasSession {
+                target: Some(target),
+                gesture: Default::default(),
+            },
+            generation: self.generation.wrapping_add(1),
             dirty: false,
             discard_confirm: false,
         };
@@ -1005,16 +1002,17 @@ impl StretchSelectionDialogState {
     pub(crate) fn arm(&mut self) {
         self.open = false;
         self.armed = true;
-        self.anchor = None;
-        self.preview_delta = crate::state::Point::origin();
-        self.pointer_drag = false;
-        self.preview_error = None;
+        self.canvas.gesture = Default::default();
+        self.generation = self.generation.wrapping_add(1);
         self.dirty = false;
         self.discard_confirm = false;
     }
 
     pub(crate) fn close(&mut self) {
-        *self = Self::default();
+        *self = Self {
+            generation: self.generation.wrapping_add(1),
+            ..Self::default()
+        };
     }
 
     pub(crate) fn mark_edited(&mut self) {

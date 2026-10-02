@@ -5,9 +5,9 @@ use egui::{Response, Ui};
 use rspice_design_model::Point;
 
 #[derive(Debug, Clone)]
-pub struct TransformInputTransition {
-    pub expected: TransformCanvasSession,
-    pub next: TransformCanvasSession,
+pub struct TransformInputTransition<T = TransformCanvasSession> {
+    pub expected: T,
+    pub next: T,
     pub commit: bool,
 }
 

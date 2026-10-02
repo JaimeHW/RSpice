@@ -27,3 +27,5 @@ pub mod snap_resolution;
 
 pub mod move_interaction;
 pub mod transform_input;
+
+pub mod stretch_interaction;

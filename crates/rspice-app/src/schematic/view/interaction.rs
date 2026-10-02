@@ -113,7 +113,7 @@ pub(super) fn handle_tool_interactions(
     } else if current_tool == Tool::MoveSelection {
         handle_armed_move_selection(ui, response, state, viewport, symbol_context);
     } else if current_tool == Tool::StretchSelection {
-        handle_armed_stretch_selection(ui, response, state, viewport, grid_size, symbol_context);
+        handle_armed_stretch_selection(ui, response, state, viewport, symbol_context);
     } else if current_tool == Tool::ArraySelection {
         handle_armed_array_selection(ui, response, state, viewport, grid_size, symbol_context);
     }

@@ -6,131 +6,28 @@
 
 use super::super::*;
 use rspice_design::schematic::stretch;
+use rspice_schematic_editor::session::stretch as editor_stretch;
 
 impl SchematicState {
     /// Whether the current selection contains at least one live stretch handle.
     pub fn has_live_stretch_selection(&self) -> bool {
-        self.design.document().wires.iter().any(|wire| {
-            self.session.editor.selection.has_wire(wire.id) && wire.segment_count() != 0
-                || self
-                    .session
-                    .editor
-                    .selection
-                    .wire_segments
-                    .iter()
-                    .any(|selected| {
-                        selected.wire_id == wire.id && selected.segment_index < wire.segment_count()
-                    })
-                || self
-                    .session
-                    .editor
-                    .selection
-                    .wire_vertices
-                    .iter()
-                    .any(|selected| {
-                        selected.wire_id == wire.id
-                            && selected.vertex_index < wire.vertex_count()
-                            && wire.segment_count() != 0
-                    })
-        }) || self
-            .design
-            .document()
-            .buses
-            .iter()
-            .any(|bus| self.session.editor.selection.has_bus(bus.id) && bus.points.len() >= 2)
-            || self
-                .design
-                .document()
-                .documentation_shapes
-                .iter()
-                .any(|shape| {
-                    self.session
-                        .editor
-                        .selection
-                        .has_documentation_shape(shape.id)
-                        && stretch::documentation_shape_point_count(&shape.geometry) != 0
-                })
+        editor_stretch::has_live_selection(&self.design.document(), &self.session.editor.selection)
     }
 
     /// Resolve an unambiguous default handle from the current frozen selection.
     /// Pointer-driven callers may instead construct an exact target and validate
     /// it with [`Self::is_stretch_target_eligible`].
     pub fn default_stretch_target(&self) -> Option<StretchTarget> {
-        let mut targets = Vec::new();
-        for selected in &self.session.editor.selection.wire_segments {
-            push_unique_target(
-                &mut targets,
-                StretchTarget::WireSegment {
-                    wire_id: selected.wire_id,
-                    segment_index: selected.segment_index,
-                },
-                self,
-            );
-        }
-        for selected in &self.session.editor.selection.wire_vertices {
-            let Some(wire) = self
-                .design
-                .document()
-                .wires
-                .iter()
-                .find(|wire| wire.id == selected.wire_id)
-            else {
-                continue;
-            };
-            let segment_index = if selected.vertex_index < wire.segment_count() {
-                selected.vertex_index
-            } else if selected.vertex_index != 0 && selected.vertex_index - 1 < wire.segment_count()
-            {
-                selected.vertex_index - 1
-            } else {
-                continue;
-            };
-            push_unique_target(
-                &mut targets,
-                StretchTarget::WireSegment {
-                    wire_id: wire.id,
-                    segment_index,
-                },
-                self,
-            );
-        }
-        for &wire_id in &self.session.editor.selection.wires {
-            push_unique_target(
-                &mut targets,
-                StretchTarget::WireSegment {
-                    wire_id,
-                    segment_index: 0,
-                },
-                self,
-            );
-        }
-        for &bus_id in &self.session.editor.selection.buses {
-            push_unique_target(
-                &mut targets,
-                StretchTarget::BusSegment {
-                    bus_id,
-                    segment_index: 0,
-                },
-                self,
-            );
-        }
-        for &shape_id in &self.session.editor.selection.documentation_shapes {
-            push_unique_target(
-                &mut targets,
-                StretchTarget::DocumentationShapePoint {
-                    shape_id,
-                    point_index: 0,
-                },
-                self,
-            );
-        }
-        (targets.len() == 1).then(|| targets[0])
+        editor_stretch::default_target(&self.design.document(), &self.session.editor.selection)
     }
 
     /// Prove that an exact live handle belongs to the current frozen selection.
     pub fn is_stretch_target_eligible(&self, target: StretchTarget) -> bool {
-        stretch::target_is_live(&self.design.document(), target)
-            && selection_authorizes_target(self, target)
+        editor_stretch::target_is_eligible(
+            &self.design.document(),
+            &self.session.editor.selection,
+            target,
+        )
     }
 
     /// Stretch one exact selected segment or typed shape control point.
@@ -197,7 +94,10 @@ impl SchematicState {
         if !stretch::target_is_live(&self.design.document(), target) {
             return Err(StretchSelectionError::StaleTarget);
         }
-        Ok(selection_authorizes_target(self, target))
+        Ok(editor_stretch::selection_authorizes_target(
+            &self.session.editor.selection,
+            target,
+        ))
     }
 
     /// Stretch using caller-resolved component geometry.
@@ -245,48 +145,6 @@ impl SchematicState {
             terminal_points_for,
             component_bounds_for,
         )
-    }
-}
-
-fn push_unique_target(
-    targets: &mut Vec<StretchTarget>,
-    target: StretchTarget,
-    state: &SchematicState,
-) {
-    if state.is_stretch_target_eligible(target) && !targets.contains(&target) {
-        targets.push(target);
-    }
-}
-
-fn selection_authorizes_target(state: &SchematicState, target: StretchTarget) -> bool {
-    match target {
-        StretchTarget::WireSegment {
-            wire_id,
-            segment_index,
-        } => {
-            state.session.editor.selection.has_wire(wire_id)
-                || state
-                    .session
-                    .editor
-                    .selection
-                    .has_wire_segment(wire_id, segment_index)
-                || state
-                    .session
-                    .editor
-                    .selection
-                    .has_wire_vertex(wire_id, segment_index)
-                || state
-                    .session
-                    .editor
-                    .selection
-                    .has_wire_vertex(wire_id, segment_index + 1)
-        }
-        StretchTarget::BusSegment { bus_id, .. } => state.session.editor.selection.has_bus(bus_id),
-        StretchTarget::DocumentationShapePoint { shape_id, .. } => state
-            .session
-            .editor
-            .selection
-            .has_documentation_shape(shape_id),
     }
 }
 
