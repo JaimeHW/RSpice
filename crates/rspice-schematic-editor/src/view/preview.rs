@@ -317,3 +317,26 @@ pub fn draw_selection_rect(painter: &Painter, view: &PreviewView<'_>, tool_viewp
         );
     }
 }
+
+mod transform;
+pub use transform::{
+    TransformPreviewStyle, draw_array_candidate, draw_move_candidate, draw_stretch_candidate,
+    draw_transform_feedback,
+};
+
+pub fn draw_placement_badge(
+    painter: &Painter,
+    hover: egui::Pos2,
+    label: String,
+    color: egui::Color32,
+) {
+    let galley = painter.layout_no_wrap(
+        label,
+        rspice_ui_kit::theme::mono(
+            rspice_ui_kit::tokens::FS_0,
+            rspice_ui_kit::theme::FontWeight::Regular,
+        ),
+        color,
+    );
+    painter.galley(hover + egui::vec2(12.0, 12.0), galley, color);
+}
