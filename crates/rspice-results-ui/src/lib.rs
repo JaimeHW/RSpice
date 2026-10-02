@@ -12,6 +12,7 @@ pub mod fft;
 pub mod histogram;
 pub mod network_matrix;
 pub mod nyquist;
+pub mod polar;
 pub mod presentation;
 pub mod smith_chart;
 pub mod strip;

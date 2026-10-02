@@ -2104,7 +2104,7 @@ pub struct ResultsState {
     pub cursor_tool: CursorTool,
     /// Polar sheet controls: the network term, the radius ruling, the decade
     /// marks and the normalization.
-    pub(crate) polar: polar::PolarSheetState,
+    pub(crate) polar: rspice_results_ui::polar::PolarSheetState,
     /// Contribution sheet control: the frequency a swept study is read at.
     pub(crate) study: sensitivity::SensitivitySheetState,
     network_matrix: network_matrix::NetworkMatrixState,
