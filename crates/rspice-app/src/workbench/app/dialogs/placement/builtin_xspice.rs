@@ -1,12 +1,11 @@
 //! Exact vector-interface configuration before built-in XSPICE placement.
 
-use egui::{Context, DragValue, Grid, RichText, Ui};
+use egui::Context;
+use rspice_schematic_editor::xspice_placement;
 
 use crate::state::{
     Tool, builtin_xspice_library_binding_with_vector_widths, engine_only_xspice_devices,
 };
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
@@ -49,11 +48,18 @@ impl RSpiceApp {
         }
 
         let mut response = dialog.show_transaction(ctx, |ui| {
-            vector_width_form(
+            let draft = &mut self.state.dialogs.builtin_xspice_placement;
+            let (focus, edited) = xspice_placement::show(
                 ui,
-                &mut self.state.dialogs.builtin_xspice_placement,
+                &draft.vector_ports,
+                &mut draft.widths,
                 validation_error.as_deref(),
-            )
+                draft.validation_error.as_deref(),
+            );
+            if edited {
+                draft.mark_edited();
+            }
+            focus
         });
         match response.choice {
             DialogChoice::Primary => match validate_draft(self) {
@@ -116,79 +122,6 @@ fn materialize_draft(app: &RSpiceApp) -> Result<crate::state::LibraryCellInstanc
             )
         })?;
     builtin_xspice_library_binding_with_vector_widths(descriptor, &draft.widths)
-}
-
-fn vector_width_form(
-    ui: &mut Ui,
-    draft: &mut crate::workbench::app::BuiltinXspicePlacementDialogState,
-    validation_error: Option<&str>,
-) -> Option<egui::Id> {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        RichText::new("Vector interface")
-            .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
-            .color(t.color.text),
-    );
-    ui.add_space(6.0);
-
-    let mut first = None;
-    let mut edited = false;
-    Grid::new("builtin-xspice-vector-widths")
-        .num_columns(3)
-        .spacing(egui::vec2(12.0, 8.0))
-        .show(ui, |ui| {
-            ui.strong("Port");
-            ui.strong("Width");
-            ui.strong("Executable range");
-            ui.end_row();
-            for port in &draft.vector_ports {
-                ui.label(&port.name);
-                let width = draft
-                    .widths
-                    .entry(port.name.clone())
-                    .or_insert(port.default_width);
-                let maximum = port.maximum.unwrap_or(usize::MAX);
-                let fixed = port.minimum == maximum;
-                let response = ui.add_enabled(
-                    !fixed,
-                    DragValue::new(width)
-                        .range(port.minimum..=maximum)
-                        .speed(1.0),
-                );
-                first.get_or_insert(response.id);
-                edited |= response.changed();
-                let range = if fixed {
-                    format!("fixed at {}", port.minimum)
-                } else if port.null_allowed && port.minimum == 0 {
-                    format!("0–{maximum} · 0 omits/nulls the port")
-                } else {
-                    format!("{}–{maximum}", port.minimum)
-                };
-                ui.label(RichText::new(range).color(t.color.text_dim));
-                ui.end_row();
-            }
-        });
-    if edited {
-        draft.mark_edited();
-    }
-
-    ui.add_space(10.0);
-    ui.label(
-        RichText::new(
-            "Every materialized vector element (and each side of a differential element) remains a distinct connectable schematic terminal.",
-        )
-        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-        .color(t.color.text_dim),
-    );
-    if let Some(error) = validation_error.or(draft.validation_error.as_deref()) {
-        ui.add_space(6.0);
-        ui.label(
-            RichText::new(error)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.err),
-        );
-    }
-    first
 }
 
 #[cfg(test)]

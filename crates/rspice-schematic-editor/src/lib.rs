@@ -13,6 +13,7 @@ pub mod source_labels;
 pub mod symbol_editor;
 pub mod symbols;
 pub mod view;
+pub mod xspice_placement;
 
 pub use component_palette::{ComponentPaletteEntry, ComponentPaletteSection, component_palette};
 pub use symbols::SymbolLibrary;
