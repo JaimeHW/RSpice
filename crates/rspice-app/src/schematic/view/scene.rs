@@ -17,6 +17,7 @@ use crate::workbench::app_state::{AppState, SchematicKeyboardFocus};
 use egui::{Painter, Rect};
 use rspice_design::connectivity::summary::projection_nets;
 use rspice_schematic_editor::view::{
+    cross_probe::wrapped_signal_name,
     design_view::DesignView,
     scene::{
         self, OperatingPointCanvasAnnotation, named_net_class_color, normalized_probe_expression,
@@ -326,22 +327,6 @@ fn device_op_annotation_label(entry: &rspice_core::circuit::DeviceOpEntry) -> St
     } else {
         format!("{identity} · {values}")
     }
-}
-
-/// The name inside a `V(...)` or `I(...)` wrapper, or `None` when the text
-/// is anything else.
-///
-/// An expression such as `V(out)-V(in)` is deliberately rejected: it wraps
-/// two signals, not one, and treating its interior as a net name would name
-/// a conductor that does not exist.
-pub(crate) fn wrapped_signal_name(name: &str, prefix: char) -> Option<&str> {
-    let name = name.trim();
-    let (head, tail) = name.split_once('(')?;
-    if !head.eq_ignore_ascii_case(&prefix.to_string()) || !tail.ends_with(')') {
-        return None;
-    }
-    let inner = tail[..tail.len() - 1].trim();
-    (!inner.is_empty() && !inner.contains(['(', ')'])).then_some(inner)
 }
 
 /// The run's own statement of which occurrences it emitted, joined onto the

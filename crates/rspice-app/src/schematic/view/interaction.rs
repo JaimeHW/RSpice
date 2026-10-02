@@ -1203,7 +1203,8 @@ fn probe_spelling_for(
     display: &str,
 ) -> Result<OccurrenceProbeSpelling, String> {
     let Some(quantity) = ['V', 'I'].into_iter().find(|quantity| {
-        super::wrapped_signal_name(display, *quantity).is_some_and(|leaf| leaf == name)
+        rspice_schematic_editor::view::cross_probe::wrapped_signal_name(display, *quantity)
+            .is_some_and(|leaf| leaf == name)
     }) else {
         return Ok(OccurrenceProbeSpelling::verbatim(display));
     };

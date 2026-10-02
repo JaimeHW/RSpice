@@ -33,7 +33,11 @@ mod snap_resolution;
 mod stretch_interaction;
 pub(crate) mod violations;
 
-use rspice_schematic_editor::view::{coordinates, drawing, navigation, viewport};
+use rspice_schematic_editor::view::{
+    coordinates,
+    cross_probe::{self, FailureSiteSelection, LocateSignalError},
+    drawing, navigation, viewport,
+};
 
 use self::coordinates::viewport_from_camera;
 use self::drawing_sheet::resolve_active_drawing_sheet;
@@ -51,7 +55,6 @@ pub(crate) use self::interaction::{
     toggle_probe_with_feedback,
 };
 pub(crate) use self::mobile_controls::show as show_mobile_canvas_controls;
-pub(crate) use self::scene::wrapped_signal_name;
 pub(crate) use self::sheet_visibility::retain_selection_on_active_sheet;
 pub(crate) use self::shelf_drag::{
     SchematicShelfDragPayload, handle_pre_render_placement_transform,
@@ -380,155 +383,36 @@ fn schematic_keyboard_focus_label(
     }
 }
 
-/// Why a result signal could not be located on the schematic.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum LocateSignalError {
-    /// The signal is an expression or a device current, not a node voltage,
-    /// so no single conductor carries it.
-    NotANet,
-    /// No retained cross-probe map matches the drawing as it stands, so the
-    /// net's geometry is unknown.
-    NoCurrentMap,
-    /// The map is current but knows no conductor by that name.
-    UnknownNet(String),
-    /// The signal is read inside another instance than the one this tab is
-    /// editing, so no conductor on screen carries it.
-    OtherOccurrence(String),
-}
-
-impl LocateSignalError {
-    pub(crate) fn message(&self, signal: &str) -> String {
-        match self {
-            Self::NotANet => {
-                format!("{signal} is derived, not a node voltage — no single conductor carries it.")
-            }
-            Self::NoCurrentMap => {
-                "The schematic changed since this result was produced; run again to cross-probe it."
-                    .to_owned()
-            }
-            Self::UnknownNet(net) => {
-                format!("The open sheet has no conductor named {net}.")
-            }
-            Self::OtherOccurrence(occurrence) => {
-                format!(
-                    "{signal} is read inside {occurrence}; descend into that instance to see it."
-                )
-            }
-        }
-    }
-}
-
-/// Select the conductor a result signal names, closing the probe loop from
-/// the results workspace back to the drawing.
-///
-/// Fails closed rather than guessing: the retained cross-probe map must
-/// belong to the open cell at its current topology, or the geometry it
-/// holds describes a different drawing.
-///
-/// A trace name is an address, not a string: `V(x1.n1)` names the leaf `n1`
-/// inside `/X1`, and only the leaf is drawn on a sheet. The scope is therefore
-/// resolved against the tab's own occurrence and the leaf is what the geometry
-/// is looked up by, so a node read in another instance says so instead of
-/// selecting a same-named conductor here.
+/// Select a result signal only through the map belonging to the active drawing.
 pub(crate) fn select_signal_conductor(
     state: &mut AppState,
     signal: &str,
 ) -> Result<String, LocateSignalError> {
-    let (net, points) = locate_signal_conductor(state, signal)?;
-
-    let wires: Vec<u64> = wires_touching(state, &points);
-    state.schematic.session.editor.selection.clear();
-    for wire in &wires {
-        state.schematic.session.editor.selection.select_wire(*wire);
-    }
-    state
-        .schematic
-        .session
-        .editor
-        .net_highlight
-        .highlight_wires(wires.into_iter().collect());
-    state.schematic.session.editor.center_request = points
-        .iter()
-        .copied()
-        .min_by_key(|point| (point.y, point.x));
-    Ok(net)
-}
-
-/// Resolve one signal to the conductor geometry the open sheet draws for it.
-///
-/// The address rules live here so every caller reads the same map the same
-/// way, whether it is locating one probed node or every node a failed run
-/// named.
-fn locate_signal_conductor(
-    state: &AppState,
-    signal: &str,
-) -> Result<(String, Vec<crate::state::Point>), LocateSignalError> {
-    let (name, points) = borrow_signal_conductor(state, signal)?;
-    Ok((name.to_owned(), points.to_vec()))
-}
-
-/// [`locate_signal_conductor`] without the copy.
-///
-/// The address rules are here rather than in the owning form because a caller
-/// that only needs to know *whether* a name resolves runs every frame a row
-/// carrying it is on screen. Cloning a net's whole point list to answer a
-/// yes/no question would put that cost in the paint path.
-fn borrow_signal_conductor<'a>(
-    state: &'a AppState,
-    signal: &str,
-) -> Result<(&'a str, &'a [crate::state::Point]), LocateSignalError> {
-    let wrapped = wrapped_signal_name(signal, 'V').ok_or(LocateSignalError::NotANet)?;
-    let target =
-        crate::state::ProbeTarget::parse_legacy(wrapped).map_err(|_| LocateSignalError::NotANet)?;
-    if !result_mapping_is_current(state) {
-        return Err(LocateSignalError::NoCurrentMap);
-    }
+    let current = result_mapping_is_current(state);
     let occurrence = state.workspace.content.occurrence_path();
-    if target.scope.fold_key() != occurrence.fold_key() {
-        return Err(LocateSignalError::OtherOccurrence(target.scope.to_string()));
-    }
-    // Report the net as the design spells it, not as the trace happened to.
-    state
-        .simulation
-        .cross_probe
-        .net_to_points
-        .iter()
-        .find(|(name, points)| name.eq_ignore_ascii_case(&target.leaf) && !points.is_empty())
-        .map(|(name, points)| (name.as_str(), points.as_slice()))
-        .ok_or(LocateSignalError::UnknownNet(target.leaf.clone()))
+    let (document, editor) = state.schematic.document_and_editor();
+    let view = cross_probe::CrossProbeView {
+        document,
+        occurrence: &occurrence,
+        net_to_points: current.then_some(&state.simulation.cross_probe.net_to_points),
+    };
+    cross_probe::select_signal_conductor(&view, editor, signal)
 }
 
-/// How many of the objects a failed run named this sheet currently draws.
-///
-/// The question [`select_failure_sites`] answers by doing it. A surface that
-/// offers the jump has to know before the click, or it offers an affordance
-/// that refuses — so this reads the same map by the same rules and marks
-/// nothing. `Err` is the whole-request refusal; `Ok(0)` means the map is
-/// current and draws none of these names.
+/// Query the same host-authorized geometry that selection uses.
 pub(crate) fn drawn_failure_site_count(
     state: &AppState,
     nets: &[String],
     devices: &[String],
 ) -> Result<usize, LocateSignalError> {
-    if !result_mapping_is_current(state) {
-        return Err(LocateSignalError::NoCurrentMap);
-    }
-    let drawn_nets = nets
-        .iter()
-        .filter(|net| borrow_signal_conductor(state, &format!("V({net})")).is_ok())
-        .count();
-    let drawn_devices = devices
-        .iter()
-        .filter(|device| {
-            state
-                .schematic
-                .document()
-                .components
-                .iter()
-                .any(|component| component.spice_instance_name().eq_ignore_ascii_case(device))
-        })
-        .count();
-    Ok(drawn_nets + drawn_devices)
+    let occurrence = state.workspace.content.occurrence_path();
+    let view = cross_probe::CrossProbeView {
+        document: state.schematic.document(),
+        occurrence: &occurrence,
+        net_to_points: result_mapping_is_current(state)
+            .then_some(&state.simulation.cross_probe.net_to_points),
+    };
+    cross_probe::drawn_failure_site_count(&view, nets, devices)
 }
 
 /// Whether the retained cross-probe map belongs to the open cell as it is
@@ -540,114 +424,21 @@ fn result_mapping_is_current(state: &AppState) -> bool {
     )
 }
 
-fn wires_touching(state: &AppState, points: &[crate::state::Point]) -> Vec<u64> {
-    state
-        .schematic
-        .document()
-        .wires
-        .iter()
-        .filter(|wire| points.iter().any(|point| wire.contains_point(*point)))
-        .map(|wire| wire.id)
-        .collect()
-}
-
-/// What a request to mark a failed run's objects could actually mark.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub(crate) struct FailureSiteSelection {
-    /// Nets marked, spelled as the design spells them.
-    pub(crate) nets: Vec<String>,
-    /// Devices marked, spelled as the schematic spells them.
-    pub(crate) devices: Vec<String>,
-    /// Names the run attributed that this sheet does not draw — a node in
-    /// another occurrence, or one the current drawing no longer carries.
-    pub(crate) unlocated: Vec<String>,
-}
-
-impl FailureSiteSelection {
-    pub(crate) fn is_empty(&self) -> bool {
-        self.nets.is_empty() && self.devices.is_empty()
-    }
-}
-
-/// Mark every design object a failed run named, and centre on the set.
-///
-/// Multi-object by construction. A convergence failure names the nodes it
-/// could not settle; marking only the first would say the failure was about
-/// that node, which is a different and false claim.
-///
-/// One refusal governs the whole request, because currency is a property of
-/// the map and not of any one name in it. Names the current sheet does not
-/// draw are reported rather than refused, so the caller can say how much of
-/// the set it was able to show.
+/// Mark a failed run's objects while retaining app ownership of map freshness.
 pub(crate) fn select_failure_sites(
     state: &mut AppState,
     nets: &[String],
     devices: &[String],
 ) -> Result<FailureSiteSelection, LocateSignalError> {
-    if !result_mapping_is_current(state) {
-        return Err(LocateSignalError::NoCurrentMap);
-    }
-
-    let mut selection = FailureSiteSelection::default();
-    let mut wires: Vec<u64> = Vec::new();
-    let mut points: Vec<crate::state::Point> = Vec::new();
-    for net in nets {
-        let signal = format!("V({net})");
-        match locate_signal_conductor(state, &signal) {
-            Ok((name, net_points)) => {
-                wires.extend(wires_touching(state, &net_points));
-                points.extend(net_points);
-                selection.nets.push(name);
-            }
-            // The map is current — that was settled above — so a name that
-            // does not resolve is one this sheet does not draw, not a reason
-            // to abandon the names that do.
-            Err(_) => selection.unlocated.push(net.clone()),
-        }
-    }
-
-    let components: Vec<(u64, String, crate::state::Point)> = devices
-        .iter()
-        .filter_map(|device| {
-            state
-                .schematic
-                .document()
-                .components
-                .iter()
-                .find(|component| component.spice_instance_name().eq_ignore_ascii_case(device))
-                .map(|component| (component.id, component.spice_instance_name(), component.pos))
-                .or_else(|| {
-                    selection.unlocated.push(device.clone());
-                    None
-                })
-        })
-        .collect();
-
-    state.schematic.session.editor.selection.clear();
-    for wire in &wires {
-        state.schematic.session.editor.selection.select_wire(*wire);
-    }
-    for (id, name, position) in components {
-        state
-            .schematic
-            .session
-            .editor
-            .selection
-            .select_component(id);
-        selection.devices.push(name);
-        points.push(position);
-    }
-    state
-        .schematic
-        .session
-        .editor
-        .net_highlight
-        .highlight_wires(wires.into_iter().collect());
-    state.schematic.session.editor.center_request = points
-        .iter()
-        .copied()
-        .min_by_key(|point| (point.y, point.x));
-    Ok(selection)
+    let current = result_mapping_is_current(state);
+    let occurrence = state.workspace.content.occurrence_path();
+    let (document, editor) = state.schematic.document_and_editor();
+    let view = cross_probe::CrossProbeView {
+        document,
+        occurrence: &occurrence,
+        net_to_points: current.then_some(&state.simulation.cross_probe.net_to_points),
+    };
+    cross_probe::select_failure_sites(&view, editor, nets, devices)
 }
 
 /// Render the schematic view (central canvas)
@@ -1041,40 +832,6 @@ mod tests {
     }
 
     #[test]
-    fn locating_a_node_voltage_selects_and_highlights_its_conductor() {
-        let mut state = state_with_probed_wire();
-
-        let net = select_signal_conductor(&mut state, "V(out)").expect("net resolves");
-
-        assert_eq!(net, "OUT");
-        assert!(state.schematic.session.editor.selection.wires.contains(&1));
-        assert!(
-            state
-                .schematic
-                .session
-                .editor
-                .net_highlight
-                .is_wire_highlighted(1)
-        );
-        assert_eq!(
-            state.schematic.session.editor.center_request,
-            Some(Point::new(0, 0))
-        );
-    }
-
-    #[test]
-    fn a_derived_signal_explains_itself_instead_of_selecting_geometry() {
-        let mut state = state_with_probed_wire();
-
-        let error = select_signal_conductor(&mut state, "V(out)-V(in)")
-            .expect_err("an expression is not a net");
-
-        assert_eq!(error, LocateSignalError::NotANet);
-        assert!(error.message("V(out)-V(in)").contains("derived"));
-        assert!(state.schematic.session.editor.selection.is_empty());
-    }
-
-    #[test]
     fn a_result_from_a_different_drawing_never_selects_stale_geometry() {
         let mut state = state_with_probed_wire();
         // Any structural edit invalidates the retained point map.
@@ -1127,17 +884,6 @@ mod tests {
         assert_eq!(error, LocateSignalError::OtherOccurrence("/x1".to_owned()));
         assert!(error.message("V(x1.out)").contains("/x1"));
         assert!(state.schematic.session.editor.selection.is_empty());
-    }
-
-    #[test]
-    fn an_unknown_net_is_reported_by_name() {
-        let mut state = state_with_probed_wire();
-
-        let error = select_signal_conductor(&mut state, "V(missing)")
-            .expect_err("no conductor carries this net");
-
-        assert_eq!(error, LocateSignalError::UnknownNet("missing".to_owned()));
-        assert!(error.message("V(missing)").contains("missing"));
     }
 
     #[test]

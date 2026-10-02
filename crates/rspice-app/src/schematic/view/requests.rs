@@ -24,8 +24,8 @@ pub(super) fn apply_editor_request(state: &mut AppState, request: EditorRequest)
             }
         }
         EditorAction::Focus(object) => {
-            let (document, selection) = state.schematic.document_and_selection();
-            keyboard_navigation::focus_keyboard_object(document, selection, object);
+            let (document, editor) = state.schematic.document_and_editor();
+            keyboard_navigation::focus_keyboard_object(document, &mut editor.selection, object);
             state.dialogs.interaction.schematic_keyboard_focus = Some(object);
             state.schematic.session.editor.net_highlight.clear();
         }

@@ -1874,7 +1874,8 @@ fn schematic_cross_probe_unavailability(
     selected: &crate::workbench::documents::result_document::SelectedResultTrace,
     signal: &str,
 ) -> Option<String> {
-    let Some(net) = crate::schematic::view::wrapped_signal_name(signal, 'V') else {
+    let Some(net) = rspice_schematic_editor::view::cross_probe::wrapped_signal_name(signal, 'V')
+    else {
         return Some(format!(
             "{signal} is a device current or derived quantity; no single schematic net carries it."
         ));

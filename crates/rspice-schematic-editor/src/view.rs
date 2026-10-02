@@ -37,3 +37,5 @@ pub mod preview;
 pub mod scene;
 
 pub mod selection_layout;
+
+pub mod cross_probe;

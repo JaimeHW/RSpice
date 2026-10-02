@@ -202,8 +202,8 @@ impl SchematicState {
         self.design.document()
     }
 
-    pub(crate) fn document_and_selection(&mut self) -> (&SchematicDocument, &mut Selection) {
-        (self.design.document(), &mut self.session.editor.selection)
+    pub(crate) fn document_and_editor(&mut self) -> (&SchematicDocument, &mut EditorSession) {
+        (self.design.document(), &mut self.session.editor)
     }
 
     /// Fixtures can model invalid or externally changed content without a
