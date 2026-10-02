@@ -24,3 +24,6 @@ pub mod design_view;
 pub mod pointer_target;
 pub mod selection_drag;
 pub mod snap_resolution;
+
+pub mod move_interaction;
+pub mod transform_input;

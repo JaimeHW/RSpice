@@ -34,29 +34,6 @@ fn with_test_ui(mut body: impl FnMut(&egui::Ui)) {
     });
 }
 
-fn arm_test_move(state: &mut AppState, mode: crate::state::MoveSelectionMode) {
-    crate::workbench::app::open_move_selection_dialog(state);
-    state.dialogs.move_selection.mode = mode;
-    state.dialogs.move_selection.arm();
-    state.schematic.arm_tool(Tool::MoveSelection);
-}
-
-fn move_keyboard_input() -> egui::RawInput {
-    egui::RawInput {
-        events: [egui::Key::ArrowRight, egui::Key::Enter]
-            .into_iter()
-            .map(|key| egui::Event::Key {
-                key,
-                physical_key: None,
-                pressed: true,
-                repeat: false,
-                modifiers: egui::Modifiers::NONE,
-            })
-            .collect(),
-        ..Default::default()
-    }
-}
-
 fn saved_outputs(state: &AppState) -> &[SavedOutput] {
     let plan_id = state
         .sim_setup
@@ -737,159 +714,11 @@ fn unrelated_output_name_collision_gets_a_deterministic_probe_name() {
 }
 
 #[test]
-fn armed_move_keyboard_leaves_keys_unconsumed_without_canvas_focus() {
-    let ctx = egui::Context::default();
-    let mut intent = None;
-    let mut keys_remain = None;
-
-    let _ = ctx.run_ui(move_keyboard_input(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            // accessibility-pointer-shim: test-only canvas focus harness.
-            let response = ui.interact(
-                ui.max_rect(),
-                egui::Id::new("unfocused-move-canvas"),
-                egui::Sense::click_and_drag(),
-            );
-            assert!(!response.has_focus());
-            intent = Some(consume_armed_move_keyboard(ui, response.has_focus(), 10));
-            keys_remain = Some(ui.input(|input| {
-                (
-                    input.key_pressed(egui::Key::ArrowRight),
-                    input.key_pressed(egui::Key::Enter),
-                )
-            }));
-        });
-    });
-
-    assert_eq!(intent, Some((Point::origin(), false)));
-    assert_eq!(keys_remain, Some((true, true)));
-}
-
-#[test]
-fn armed_move_keyboard_consumes_keys_when_canvas_has_focus() {
-    let ctx = egui::Context::default();
-    let mut intent = None;
-    let mut keys_remain = None;
-
-    let _ = ctx.run_ui(move_keyboard_input(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            // accessibility-pointer-shim: test-only canvas focus harness.
-            let response = ui.interact(
-                ui.max_rect(),
-                egui::Id::new("focused-move-canvas"),
-                egui::Sense::click_and_drag(),
-            );
-            response.request_focus();
-            assert!(response.has_focus());
-            intent = Some(consume_armed_move_keyboard(ui, response.has_focus(), 10));
-            keys_remain = Some(ui.input(|input| {
-                (
-                    input.key_pressed(egui::Key::ArrowRight),
-                    input.key_pressed(egui::Key::Enter),
-                )
-            }));
-        });
-    });
-
-    assert_eq!(intent, Some((Point::new(10, 0), true)));
-    assert_eq!(keys_remain, Some((false, false)));
-}
-
-#[test]
 fn armed_move_exclusively_owns_selection_drag_routing() {
     assert!(select_drag_is_authorized(Tool::Select, false));
     assert!(!select_drag_is_authorized(Tool::Select, true));
     assert!(!select_drag_is_authorized(Tool::MoveSelection, true));
     assert!(!select_drag_is_authorized(Tool::MoveSelection, false));
-}
-
-#[test]
-fn armed_move_commits_once_syncs_workspace_and_retains_selection() {
-    let mut state = AppState::default();
-    state
-        .schematic
-        .document_mut_for_test()
-        .components
-        .push(Component::new(1, ComponentType::Resistor, Point::origin()));
-    let terminal = state.schematic.document().components[0].terminal_positions()[0].1;
-    state
-        .schematic
-        .document_mut_for_test()
-        .wires
-        .push(Wire::segment(2, terminal, Point::new(20, 0)));
-    state
-        .schematic
-        .session
-        .editor
-        .selection
-        .select_only_component(1);
-    state.schematic.init_undo_history();
-    arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
-    state.dialogs.move_selection.preview_delta = Point::new(0, 10);
-    let symbols = schematic_symbol_context(&state);
-
-    commit_armed_move_selection(&mut state, &symbols);
-
-    assert_eq!(
-        state.schematic.document().components[0].pos,
-        Point::new(0, 10)
-    );
-    assert_eq!(
-        state.schematic.document().wires[0].points[0],
-        Point::new(terminal.x, terminal.y + 10)
-    );
-    assert_eq!(state.schematic.undo_description(), Some("move selection"));
-    assert!(state.schematic.session.editor.selection.has_component(1));
-    assert_eq!(state.schematic.session.editor.tool, Tool::Select);
-    assert!(!state.dialogs.move_selection.armed);
-    assert_eq!(
-        state
-            .workspace
-            .active_schematic()
-            .expect("active workspace buffer")
-            .document()
-            .components[0]
-            .pos,
-        Point::new(0, 10)
-    );
-    assert!(state.schematic.undo());
-    assert_eq!(
-        state.schematic.document().components[0].pos,
-        Point::origin()
-    );
-    assert!(
-        !state.schematic.can_undo(),
-        "the gesture owns one undo record"
-    );
-}
-
-#[test]
-fn cancelling_armed_move_preserves_geometry_selection_and_history() {
-    let mut state = AppState::default();
-    state
-        .schematic
-        .document_mut_for_test()
-        .components
-        .push(Component::new(1, ComponentType::Resistor, Point::origin()));
-    state
-        .schematic
-        .session
-        .editor
-        .selection
-        .select_only_component(1);
-    state.schematic.init_undo_history();
-    arm_test_move(&mut state, crate::state::MoveSelectionMode::Shove);
-    state.dialogs.move_selection.preview_delta = Point::new(40, 10);
-
-    crate::workbench::app::cancel_armed_move_selection(&mut state);
-
-    assert_eq!(
-        state.schematic.document().components[0].pos,
-        Point::origin()
-    );
-    assert!(state.schematic.session.editor.selection.has_component(1));
-    assert_eq!(state.schematic.session.editor.tool, Tool::Select);
-    assert!(!state.schematic.can_undo());
 }
 
 /// Arm a sequence of `names` on `state`, for the document `state` is in.

@@ -5,9 +5,8 @@ use crate::diagnostics::ConsoleMessage;
 use crate::state::{SchematicArrayPlacement, Tool};
 use crate::workbench::{app::armed_array_selection_authority, app_state::AppState};
 use egui::{Response, Ui};
-use rspice_schematic_editor::view::array_interaction::{
-    self, ArrayInputRequest, ArrayInputTransition, ArrayInputView,
-};
+use rspice_schematic_editor::view::array_interaction::{self, ArrayInputRequest, ArrayInputView};
+use rspice_schematic_editor::view::transform_input::TransformInputTransition;
 
 pub(super) fn handle_armed_array_selection(
     ui: &Ui,
@@ -46,7 +45,7 @@ pub(super) fn handle_armed_array_selection(
     }
 }
 
-fn capture(state: &AppState, transition: ArrayInputTransition) -> ArrayInputRequest {
+fn capture(state: &AppState, transition: TransformInputTransition) -> ArrayInputRequest {
     let draft = &state.dialogs.array_selection;
     ArrayInputRequest {
         source: editor_request_source(state),
@@ -286,7 +285,7 @@ mod tests {
             next.preview_delta = Point::new(100, 0);
             let request = capture(
                 &state,
-                ArrayInputTransition {
+                TransformInputTransition {
                     expected,
                     next,
                     commit: true,

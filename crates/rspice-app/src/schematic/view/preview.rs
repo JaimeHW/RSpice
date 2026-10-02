@@ -144,7 +144,7 @@ fn draw_move_selection_preview(
     {
         return;
     }
-    let delta = state.dialogs.move_selection.preview_delta;
+    let delta = state.dialogs.move_selection.canvas.preview_delta;
     if delta == Point::origin() {
         return;
     }
@@ -155,12 +155,12 @@ fn draw_move_selection_preview(
     });
     let valid = match result {
         Ok(true) => {
-            state.dialogs.move_selection.preview_error = None;
+            state.dialogs.move_selection.canvas.preview_error = None;
             true
         }
         Ok(false) => return,
         Err(error) => {
-            state.dialogs.move_selection.preview_error = Some(error.to_string());
+            state.dialogs.move_selection.canvas.preview_error = Some(error.to_string());
             false
         }
     };
@@ -318,6 +318,7 @@ fn draw_move_selection_preview(
     let detail = state
         .dialogs
         .move_selection
+        .canvas
         .preview_error
         .as_deref()
         .map(str::to_owned)

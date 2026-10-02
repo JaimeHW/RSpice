@@ -1,12 +1,12 @@
 //! Interaction state and geometry for per-document schematic editor sessions.
 
-pub mod array;
 pub mod bus;
 pub mod drag;
 pub mod net_highlight;
 pub mod selection;
 pub mod snap;
 pub mod tool;
+pub mod transform;
 pub mod visibility;
 pub mod wire;
 

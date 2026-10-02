@@ -1,9 +1,12 @@
 //! Array gesture interpretation over a borrowed canvas draft and snap policy.
 
+use super::transform_input::{
+    TransformInputTransition, consume_keyboard, retain_canvas_focus_from_pointer,
+};
 use super::{snap_resolution::resolve_grid_pointer, viewport::Viewport};
 use crate::{
     requests::EditorRequestSource,
-    session::{array::ArrayCanvasSession, snap::SnapEngine},
+    session::{snap::SnapEngine, transform::TransformCanvasSession},
 };
 use egui::{Response, Ui};
 use rspice_design::schematic::{
@@ -15,13 +18,6 @@ use rspice_design_model::Point;
 const DELTA_OVERFLOW: &str =
     "The requested array placement exceeds the schematic coordinate range.";
 
-#[derive(Debug, Clone)]
-pub struct ArrayInputTransition {
-    pub expected: ArrayCanvasSession,
-    pub next: ArrayCanvasSession,
-    pub commit: bool,
-}
-
 /// The app rechecks the operation, its source and its draft before applying input.
 #[derive(Debug, Clone)]
 pub struct ArrayInputRequest {
@@ -31,11 +27,11 @@ pub struct ArrayInputRequest {
     pub kind: SchematicArrayKind,
     pub count: String,
     pub naming: String,
-    pub transition: ArrayInputTransition,
+    pub transition: TransformInputTransition,
 }
 
 pub struct ArrayInputView<'a> {
-    pub canvas: &'a ArrayCanvasSession,
+    pub canvas: &'a TransformCanvasSession,
     pub kind: SchematicArrayKind,
     pub grid_size: i32,
     pub snap_engine: &'a SnapEngine,
@@ -46,7 +42,7 @@ pub fn input(
     response: &Response,
     viewport: &Viewport,
     view: ArrayInputView<'_>,
-) -> Option<ArrayInputTransition> {
+) -> Option<TransformInputTransition> {
     let mut next = view.canvas.clone();
     let commit = apply_input(
         ui,
@@ -57,7 +53,7 @@ pub fn input(
         view.grid_size,
         view.snap_engine,
     );
-    (commit || next != *view.canvas).then(|| ArrayInputTransition {
+    (commit || next != *view.canvas).then(|| TransformInputTransition {
         expected: view.canvas.clone(),
         next,
         commit,
@@ -68,7 +64,7 @@ fn apply_input(
     ui: &Ui,
     response: &Response,
     viewport: &Viewport,
-    draft: &mut ArrayCanvasSession,
+    draft: &mut TransformCanvasSession,
     kind: SchematicArrayKind,
     grid_size: i32,
     snap_engine: &SnapEngine,
@@ -179,7 +175,7 @@ fn checked_pointer_delta(anchor: Point, destination: Point) -> Result<Point, &'s
 
 pub fn array_placement(
     kind: SchematicArrayKind,
-    draft: &ArrayCanvasSession,
+    draft: &TransformCanvasSession,
 ) -> Result<SchematicArrayPlacement, &'static str> {
     match kind {
         SchematicArrayKind::RadialDocumentation => {
@@ -198,7 +194,10 @@ pub fn array_placement(
     }
 }
 
-fn update_preview_delta(draft: &mut ArrayCanvasSession, requested: Result<Point, &'static str>) {
+fn update_preview_delta(
+    draft: &mut TransformCanvasSession,
+    requested: Result<Point, &'static str>,
+) {
     let requested = match requested {
         Ok(requested) => requested,
         Err(message) => {
@@ -212,37 +211,6 @@ fn update_preview_delta(draft: &mut ArrayCanvasSession, requested: Result<Point,
     // Commit independently rebuilds the exact final candidate, so a prior
     // plan's cached error can never reject a newly valid pointer position.
     draft.preview_error = None;
-}
-
-fn retain_canvas_focus_from_pointer(response: &Response) {
-    if response.clicked_by(egui::PointerButton::Primary)
-        || response.drag_started_by(egui::PointerButton::Primary)
-    {
-        response.request_focus();
-    }
-}
-
-fn consume_keyboard(ui: &Ui, canvas_has_focus: bool, grid_size: i32) -> (Point, bool) {
-    if !canvas_has_focus {
-        return (Point::origin(), false);
-    }
-    ui.input_mut(|input| {
-        let mut step = Point::origin();
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft) {
-            step.x = -grid_size;
-        }
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight) {
-            step.x = grid_size;
-        }
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
-            step.y = -grid_size;
-        }
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
-            step.y = grid_size;
-        }
-        let commit = input.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
-        (step, commit)
-    })
 }
 
 #[cfg(test)]
@@ -261,7 +229,7 @@ mod tests {
     }
     struct Canvas {
         ctx: egui::Context,
-        draft: ArrayCanvasSession,
+        draft: TransformCanvasSession,
         kind: SchematicArrayKind,
         snap: SnapEngine,
     }
@@ -336,7 +304,7 @@ mod tests {
         ] {
             let mut canvas = Canvas {
                 ctx: egui::Context::default(),
-                draft: ArrayCanvasSession::default(),
+                draft: TransformCanvasSession::default(),
                 kind,
                 snap: SnapEngine::default(),
             };

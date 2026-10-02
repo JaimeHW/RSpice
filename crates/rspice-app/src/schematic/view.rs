@@ -19,6 +19,7 @@ pub(crate) mod drawing_sheet;
 mod interaction;
 mod keyboard_navigation;
 mod mobile_controls;
+mod move_interaction;
 mod preview;
 mod requests;
 pub(crate) use rspice_schematic_editor::view::resolved_symbol_render;
