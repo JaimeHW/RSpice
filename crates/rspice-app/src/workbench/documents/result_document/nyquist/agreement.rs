@@ -14,10 +14,10 @@
 //! −180° crossing with the **smallest |dB| distance to unity** — the smallest
 //! gain change that reaches instability, which is the crossing MATLAB's
 //! `margin` names — reported signed, ties inside
-//! [`crate::results::stability::GAIN_MARGIN_TIE_DECIBELS`] going to the
+//! [`rspice_results::stability::GAIN_MARGIN_TIE_DECIBELS`] going to the
 //! crossing nearest the unity-gain frequency; the phase margin is the
 //! unity-gain crossing with the smallest `|PM|`, also signed, folded into one
-//! turn by [`crate::results::stability::phase_margin_deg`].
+//! turn by [`rspice_results::stability::phase_margin_deg`].
 //!
 //! Each card was aligned to that convention separately, and separately is how
 //! they drifted: both rules were implemented twice, and both pairs disagreed
@@ -271,7 +271,7 @@ impl<L: Fn(f64) -> Complex64> LoopFixture<L> {
             let loop_phase = continued_phase_deg((self.transmission)(frequency), reference);
             out.push(Crossing {
                 frequency,
-                value: crate::results::stability::phase_margin_deg(loop_phase),
+                value: rspice_results::stability::phase_margin_deg(loop_phase),
                 phase_deg: Some(loop_phase),
             });
         }
@@ -585,7 +585,7 @@ fn a_wound_loop_folds_to_the_same_margin_on_both_cards() {
         "the fixture must actually wind: ∠L is {loop_phase}° at crossover"
     );
     assert!(
-        crate::results::stability::phase_margin_is_folded(loop_phase),
+        rspice_results::stability::phase_margin_is_folded(loop_phase),
         "a wound loop's margin has to be reported as folded"
     );
     // The fold is one whole turn, and it moves the reading from unstable-
@@ -628,7 +628,7 @@ fn an_unwound_loop_is_not_reported_as_folded() {
         loop_phase > -360.0 && loop_phase < 0.0,
         "the control loop must not wind: ∠L is {loop_phase}°"
     );
-    assert!(!crate::results::stability::phase_margin_is_folded(
+    assert!(!rspice_results::stability::phase_margin_is_folded(
         loop_phase
     ));
 
@@ -640,7 +640,7 @@ fn an_unwound_loop_is_not_reported_as_folded() {
             .phase_deg
             .expect("the card carries the angle");
         assert!(
-            !crate::results::stability::phase_margin_is_folded(phase),
+            !rspice_results::stability::phase_margin_is_folded(phase),
             "the {card} card called an ordinary margin folded (∠L = {phase}°)"
         );
     }
@@ -688,7 +688,7 @@ fn a_dead_heat_between_two_inversions_binds_the_same_way_on_both_cards() {
     );
     let separation = (crossings[0].value.abs() - crossings[1].value.abs()).abs();
     assert!(
-        separation <= crate::results::stability::GAIN_MARGIN_TIE_DECIBELS,
+        separation <= rspice_results::stability::GAIN_MARGIN_TIE_DECIBELS,
         "the fixture has to be a tie: {separation} dB apart in |GM|"
     );
     assert!(

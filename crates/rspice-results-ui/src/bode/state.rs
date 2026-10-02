@@ -1,14 +1,5 @@
-//! Bode viewer state: the loaded frequency responses.
-//!
-//! `result_document::bode` builds its display model from the AC Bode summary
-//! in `state::simulation::ac_bode`, not from here — it owns the axis ranges,
-//! the cursor, and the margin annotations. What this type provides is whether
-//! a Bode result is present at all, which is what the viewer-capability check
-//! and the run lifecycle ask.
-//!
-//! The display-mode and phase-wrap enums, the grid / margin / cursor toggles,
-//! the manual and auto magnitude and phase ranges, trace selection, and a
-//! `margins()` accessor lived here for a controls row that was never built.
+//! Bode availability state used by run lifecycle and viewer-capability checks.
+//! Inspectors consume the selected retained response through the sibling `inspector` module.
 
 use super::data::BodeData;
 

@@ -2446,34 +2446,13 @@ pub(crate) struct ExprSeries {
     pub series: ExpressionSeriesResult,
 }
 
-/// Stability numbers and axis extremes computed from the active AC curves.
-/// BODE's center view and right panel share one cached compute, keyed on
-/// the data version and the resolved magnitude waveform.
+/// Memoized stability metrics for the selected AC waveform.
 #[derive(Debug, Clone, Copy)]
 pub struct BodeDerived {
     pub(crate) version: u64,
     pub(crate) analysis_index: usize,
     pub(crate) mag_index: usize,
-    /// DC (lowest-frequency) gain in dB.
-    pub(crate) adc_db: Option<f64>,
-    /// Whether the sweep provably starts below every pole, so `adc_db` may be
-    /// presented as the DC gain rather than as `A(f_min)`. Memoized with the
-    /// margins because it is the same measurement of the same curves: read
-    /// off the summary instead, the card resolved the whole response on every
-    /// frame to ask one question the memo beside it already answered.
-    pub(crate) adc_is_dc: bool,
-    /// Unity-gain frequency (Hz).
-    pub(crate) ugf: Option<f64>,
-    /// Phase margin (deg) at the UGF, folded into one turn.
-    pub(crate) pm_deg: Option<f64>,
-    /// Unwrapped ∠L (deg) at the UGF — what `pm_deg` was folded from.
-    pub(crate) pm_phase_deg: Option<f64>,
-    /// Frequency where phase crosses −180° (Hz).
-    pub(crate) f180: Option<f64>,
-    /// Gain margin (dB) at f180.
-    pub(crate) gm_db: Option<f64>,
-    /// −3 dB bandwidth (Hz).
-    pub(crate) f3db: Option<f64>,
+    pub(crate) metrics: rspice_results::bode::AcBodeMetrics,
 }
 
 /// Finite (min, max) of a slice, if any finite values exist.

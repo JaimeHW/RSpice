@@ -8,38 +8,20 @@ use std::sync::Arc;
 
 use egui::Ui;
 
-use crate::quantity::QuantityPresentationPolicy;
-use crate::state::{
-    AnalysisResult, AnalysisType, SharedWaveformValues, ac_bode_shape_for_selection,
-};
-use crate::ui::widgets::section_header;
+use crate::state::{AnalysisResult, AnalysisType, ac_bode_shape_for_selection};
 use crate::workbench::AppState;
+use rspice_results_ui::bode::inspector::{self, BodeInspector, NoiseSpectrumModel};
 
 use super::BodeDerived;
 
 /// The selected frequency-response signal pair's computed stability numbers.
 struct BodeModel {
-    /// The phase trace as *displayed*: the retained ±180°-wrapped samples, or
-    /// the unwrapped series when the continuous toggle is on. This is a
-    /// presentation choice only — the margins are always measured on the
-    /// unwrapped branch, whichever trace is painted.
-    phase_deg: Option<SharedWaveformValues>,
+    /// Whether the selected response retained a phase trace.
+    phase_available: bool,
     /// The measured response, including whether the sweep proves its
     /// lowest-frequency gain is the DC gain — the card's labels depend on it,
     /// and an unproven claim of DC gain is a wrong reading of a right number.
     margins: BodeDerived,
-}
-
-/// Summary facts of the selected retained ordinary-noise spectrum for the
-/// right panel's card. The spectrum itself renders through the waves
-/// pane-stack's nV/√Hz projection.
-struct NoiseSpectrumModel {
-    frequency: SharedWaveformValues,
-    trace_count: usize,
-    total_rms: Option<f64>,
-    input_rms: Option<f64>,
-    input_rms_unit: &'static str,
-    band: Option<(f64, f64)>,
 }
 
 pub(super) use rspice_results::noise_spectrum::NoiseSpectrumShape;
@@ -143,12 +125,9 @@ fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
         return Err(NoMargins::AnalysisFailed(analysis.error_message.clone()));
     }
 
-    let phase = shape.phase_index.and_then(|phase_index| {
-        analysis
-            .waveforms
-            .get(phase_index)
-            .map(|waveform| (phase_index, Arc::clone(&waveform.y)))
-    });
+    let phase_available = shape
+        .phase_index
+        .is_some_and(|index| analysis.waveforms.get(index).is_some());
 
     // Margins + extremes from the curves, cached on (data version, resolved
     // magnitude waveform) — the crossings and folds are O(points) and both
@@ -172,33 +151,17 @@ fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
                 version,
                 analysis_index: shape.analysis_index,
                 mag_index: shape.mag_index,
-                adc_db: metrics.adc_db,
-                adc_is_dc: metrics.adc_is_dc,
-                ugf: metrics.ugf,
-                pm_deg: metrics.pm_deg,
-                pm_phase_deg: metrics.pm_phase_deg,
-                f180: metrics.f180,
-                gm_db: metrics.gm_db,
-                f3db: metrics.f3db,
+                metrics,
             };
             state.ui.results.bode = Some(d);
             d
         }
     };
 
-    // Displayed phase: optionally unwrapped into a continuous curve. This
-    // toggle moves the painted trace and nothing else — the margins above
-    // are measured on the unwrapped branch either way.
-    let phase_deg = match &phase {
-        Some((phase_index, raw)) if state.ui.results.phase_continuous => {
-            let key = (shape.analysis_index as u64) << 32 | *phase_index as u64;
-            Some(state.ui.results.derived.unwrapped(key, raw))
-        }
-        Some((_, raw)) => Some(Arc::clone(raw)),
-        None => None,
-    };
-
-    Ok(BodeModel { phase_deg, margins })
+    Ok(BodeModel {
+        phase_available,
+        margins,
+    })
 }
 
 /// Analyses whose selection states which noise result the reader means. A
@@ -299,251 +262,43 @@ fn build_noise_model(state: &AppState) -> Option<NoiseSpectrumModel> {
 }
 
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    if let Some(analysis) = state.simulation.active_analysis()
-        && analysis.analysis_type == crate::state::AnalysisType::Qpxf
-    {
-        section_header(ui, "QPXF unit transfers", None);
-        rspice_results_ui::presentation::panel_note(
-            ui,
-            "The horizontal axis is physical output frequency. Each curve is the output per unit excitation of its named input source and signed tone tuple. Finite sampled group delays are shown in seconds; undefined intervals are omitted from the curves and retained in the CSV table.",
-        );
-        if let Some(crate::state::AnalysisResultPayload::Qpxf { response }) =
-            &analysis.result_payload
-        {
-            let m = &response.metadata;
-            rspice_results_ui::presentation::panel_note(
-                ui,
-                &format!(
-                    "{} sources × {} input tuples. Output {:?} at tuple {:?}. Authored axis: {:?}; tones {:?} Hz.",
-                    m.input_sources.len(),
-                    m.input_lattices.len(),
-                    m.request.output,
-                    m.request.output_lattice,
-                    m.request.frequency_axis,
-                    m.grid.frequencies_hz
-                ),
-            );
-            if m.request.group_delay {
-                let undefined = response
-                    .transfers
-                    .iter()
-                    .filter_map(|t| t.group_delay.as_ref())
-                    .flatten()
-                    .filter(|d| !matches!(d, rspice_core::engine::QpxfGroupDelay::Finite(_)))
-                    .count();
-                rspice_results_ui::presentation::panel_note(
-                    ui,
-                    &format!(
-                        "Group-delay magnitude floor: {}. {} undefined delay samples. Delay uses sampled phase differences on the selected frequency grid.",
-                        m.request.group_delay_magnitude_floor, undefined
-                    ),
-                );
-            }
-        }
-        return;
-    }
-
-    if let Some(analysis) = state.simulation.active_analysis()
-        && analysis.analysis_type == crate::state::AnalysisType::Qpac
-    {
-        section_header(ui, "QPAC conversion response", None);
-        rspice_results_ui::presentation::panel_note(
-            ui,
-            "The horizontal axis is the signed probe offset. Physical input and output frequencies equal offset plus their tone tuple dotted with the QPSS tones. Full signed-tuple responses are available in the result table and CSV export.",
-        );
-        if let Some(crate::state::AnalysisResultPayload::Qpac { response }) =
-            &analysis.result_payload
-        {
-            let m = &response.metadata;
-            rspice_results_ui::presentation::panel_note(
-                ui,
-                &format!(
-                    "Source: {} ({:?}), magnitude {}, phase {}°. Input tuple {:?}; output tuple {:?}. Tones: {:?} Hz.",
-                    m.request.input_source,
-                    m.input_quantity,
-                    m.request.magnitude,
-                    m.request.phase_degrees,
-                    m.request.input_lattice,
-                    m.request.output_lattice,
-                    m.tone_frequencies_hz
-                ),
-            );
-        }
-        return;
-    }
-
-    if state
-        .simulation
-        .active_analysis()
-        .is_some_and(|analysis| analysis.analysis_type.is_raw_frequency_curve())
-    {
-        section_header(ui, "Distortion curves", None);
-        rspice_results_ui::presentation::panel_note(
-            ui,
-            "Fundamental response and Volterra product ratios are retained as exact complex phasors; the plot projects their magnitude to dB and dBc without changing zero into a finite floor.",
-        );
-        return;
-    }
-    section_header(ui, "Stability", None);
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
-    let model = match build_model(state) {
-        Ok(model) => model,
-        Err(NoMargins::NoResponse) => {
-            rspice_results_ui::presentation::panel_note(
-                ui,
-                "No usable frequency response in the active run.",
-            );
+    if let Some(analysis) = state.simulation.active_analysis() {
+        let specialized = match analysis.analysis_type {
+            AnalysisType::Qpxf => Some(BodeInspector::Qpxf(match &analysis.result_payload {
+                Some(crate::state::AnalysisResultPayload::Qpxf { response }) => Some(response),
+                _ => None,
+            })),
+            AnalysisType::Qpac => Some(BodeInspector::Qpac(match &analysis.result_payload {
+                Some(crate::state::AnalysisResultPayload::Qpac { response }) => Some(response),
+                _ => None,
+            })),
+            kind if kind.is_raw_frequency_curve() => Some(BodeInspector::Distortion),
+            _ => None,
+        };
+        if let Some(model) = specialized {
+            inspector::right_panel(ui, model, &quantity_policy);
             return;
         }
-        Err(NoMargins::AnalysisFailed(reason)) => {
-            rspice_results_ui::presentation::panel_note(
-                ui,
-                &match reason {
-                    Some(reason) => format!(
-                        "The selected frequency response did not converge, so no margins are reported: {reason}"
-                    ),
-                    None => "The selected frequency response did not converge, so no margins are reported. Its retained vectors are what the engine emitted before it stopped, not a measured response.".to_owned(),
-                },
-            );
-            return;
-        }
+    }
+    let model = build_model(state);
+    let inspector = match &model {
+        Ok(model) => BodeInspector::Stability {
+            metrics: model.margins.metrics,
+            phase_available: model.phase_available,
+        },
+        Err(NoMargins::NoResponse) => BodeInspector::NoResponse,
+        Err(NoMargins::AnalysisFailed(reason)) => BodeInspector::AnalysisFailed(reason.as_deref()),
     };
-    let rows = margin_rows(model.margins, &quantity_policy);
-    rspice_results_ui::presentation::stat_table(ui, &rows);
-
-    // A folded phase margin reads like a verdict and is not one. It goes above
-    // the sweep-provenance notes because it is the stronger claim: the others
-    // qualify what the number is referenced to, this one says the number alone
-    // cannot settle the question it looks like it answers.
-    if let Some(loop_phase) = model.margins.pm_phase_deg
-        && crate::results::stability::phase_margin_is_folded(loop_phase)
-    {
-        rspice_results_ui::presentation::panel_note(
-            ui,
-            &crate::results::stability::folded_phase_margin_note(loop_phase),
-        );
-    }
-
-    if model.phase_deg.is_none() {
-        rspice_results_ui::presentation::panel_note(
-            ui,
-            "Phase data unavailable for this response — re-run the analysis to compute margins.",
-        );
-    } else if model.margins.adc_is_dc {
-        rspice_results_ui::presentation::panel_note(
-            ui,
-            "Margins measured on the simulated curves; the plot markers show the same values.",
-        );
-    } else {
-        rspice_results_ui::presentation::panel_note(
-            ui,
-            "Margins measured on the simulated curves; the plot markers show the same values. The sweep does not open flat, so the gain shown is the one at its lowest frequency — not the DC gain — and f₋₃dB is referenced to that.",
-        );
-    }
-}
-
-/// The stability card's rows.
-///
-/// Split out because the low-frequency labels are a claim about the sweep,
-/// not decoration: `gain_db.first()` is the gain at `f_min`, and calling it
-/// `A_dc` on a sweep opened above the dominant pole reports mid-rolloff gain
-/// as DC gain — and puts `f₋₃dB` 3 dB below a figure that was never the DC
-/// gain either. The label says which quantity it is, and `f₋₃dB` names the
-/// same reference.
-fn margin_rows(
-    m: BodeDerived,
-    quantity_policy: &QuantityPresentationPolicy,
-) -> [(&'static str, String, bool); 6] {
-    let adc_is_dc = m.adc_is_dc;
-    let fmt_opt =
-        |v: Option<f64>, f: &dyn Fn(f64) -> String| -> String { v.map_or("—".to_owned(), f) };
-    [
-        (
-            "Phase margin",
-            fmt_opt(m.pm_deg, &|v| {
-                quantity_policy.format_angle(v.to_radians(), 1)
-            }),
-            true,
-        ),
-        (
-            "Gain margin",
-            fmt_opt(m.gm_db, &|v| format!("{v:.1} dB")),
-            true,
-        ),
-        (
-            "Unity-gain freq",
-            fmt_opt(m.ugf, &|v| quantity_policy.format_frequency(v, 1)),
-            false,
-        ),
-        (
-            "f₁₈₀",
-            fmt_opt(m.f180, &|v| quantity_policy.format_frequency(v, 0)),
-            false,
-        ),
-        (
-            if adc_is_dc { "A_dc" } else { "A(f_min)" },
-            fmt_opt(m.adc_db, &|v| format!("{v:.1} dB")),
-            false,
-        ),
-        (
-            if adc_is_dc {
-                "f₋₃dB"
-            } else {
-                "f₋₃dB re A(f_min)"
-            },
-            fmt_opt(m.f3db, &|v| quantity_policy.format_frequency(v, 0)),
-            false,
-        ),
-    ]
+    inspector::right_panel(ui, inspector, &quantity_policy);
 }
 
 pub(super) fn noise_spectrum_right_panel(ui: &mut Ui, state: &mut AppState) {
-    section_header(ui, "Noise spectrum", None);
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
-    let Some(model) = build_noise_model(state) else {
-        rspice_results_ui::presentation::panel_note(
-            ui,
-            "No valid ordinary noise spectrum is selected.",
-        );
-        return;
-    };
-    let band = model.band.unwrap_or_else(|| {
-        (
-            model.frequency.first().copied().unwrap_or_default(),
-            model.frequency.last().copied().unwrap_or_default(),
-        )
-    });
-    let rows = [
-        (
-            "Band",
-            format!(
-                "{} – {}",
-                quantity_policy.format_frequency(band.0, 2),
-                quantity_policy.format_frequency(band.1, 2)
-            ),
-            false,
-        ),
-        ("Traces", model.trace_count.to_string(), false),
-        (
-            "Output integrated",
-            model
-                .total_rms
-                .map_or_else(|| "—".to_owned(), |value| format!("{value:.6e} V rms")),
-            model.total_rms.is_some(),
-        ),
-        (
-            "Input referred",
-            model.input_rms.map_or_else(
-                || "—".to_owned(),
-                |value| format!("{value:.6e} {}", model.input_rms_unit),
-            ),
-            model.input_rms.is_some(),
-        ),
-    ];
-    rspice_results_ui::presentation::stat_table(ui, &rows);
-    rspice_results_ui::presentation::panel_note(
+    let model = build_noise_model(state);
+    inspector::noise_spectrum_right_panel(
         ui,
-        "The plot takes the square root of retained power spectral density and displays nV/√Hz for voltage or nA/√Hz for current, or ns/√Hz for timing, without altering source samples.",
+        model.as_ref(),
+        &state.ui.preferences.quantity_presentation_policy(),
     );
 }
 
@@ -593,12 +348,12 @@ mod tests {
         assert!(state.simulation.select_analysis(0));
         let first = build_model(&mut state).expect("first model");
         assert_eq!(first.margins.analysis_index, 0);
-        assert_eq!(first.margins.adc_db, Some(20.0));
+        assert_eq!(first.margins.metrics.adc_db, Some(20.0));
 
         assert!(state.simulation.select_analysis(1));
         let second = build_model(&mut state).expect("second model");
         assert_eq!(second.margins.analysis_index, 1);
-        assert_eq!(second.margins.adc_db, Some(40.0));
+        assert_eq!(second.margins.metrics.adc_db, Some(40.0));
     }
 
     fn noise_result(analysis_type: AnalysisType, label: &str, name: &str) -> AnalysisResult {
@@ -608,43 +363,6 @@ mod tests {
             vec![1.0e-18, 1.0e-16],
             "#fff",
         )])
-    }
-
-    /// A sweep that opens above the dominant pole has no DC gain in it. The
-    /// card must not label mid-rolloff gain `A_dc`, and `f₋₃dB` has to name
-    /// the reference it was actually measured from.
-    #[test]
-    fn the_low_frequency_gain_is_labelled_by_what_the_sweep_proves() {
-        let margins = BodeDerived {
-            version: 0,
-            analysis_index: 0,
-            mag_index: 0,
-            adc_db: Some(20.0),
-            adc_is_dc: false,
-            ugf: Some(1.0e4),
-            pm_deg: Some(45.0),
-            pm_phase_deg: Some(-135.0),
-            f180: Some(3.0e4),
-            gm_db: Some(12.0),
-            f3db: Some(1.0e2),
-        };
-        let policy = QuantityPresentationPolicy::default();
-
-        let labels = |adc_is_dc| {
-            margin_rows(
-                BodeDerived {
-                    adc_is_dc,
-                    ..margins
-                },
-                &policy,
-            )
-            .map(|(label, _, _)| label)
-        };
-
-        assert_eq!(labels(true)[4], "A_dc");
-        assert_eq!(labels(true)[5], "f₋₃dB");
-        assert_eq!(labels(false)[4], "A(f_min)");
-        assert_eq!(labels(false)[5], "f₋₃dB re A(f_min)");
     }
 
     /// The whole sheet, end to end: a sweep opened two decades above the
@@ -672,9 +390,37 @@ mod tests {
         assert!(state.simulation.select_run(0));
         let model = build_model(&mut state).expect("Bode model");
 
-        assert!(!model.margins.adc_is_dc);
-        let policy = QuantityPresentationPolicy::default();
-        assert_eq!(margin_rows(model.margins, &policy)[4].0, "A(f_min)");
+        assert!(!model.margins.metrics.adc_is_dc);
+        fn collect(shape: &egui::Shape, text: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(value) => text.push(value.galley.text().to_owned()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| collect(shape, text)),
+                _ => {}
+            }
+        }
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| right_panel(ui, &mut state));
+            },
+        );
+        let mut text = Vec::new();
+        for shape in output.shapes {
+            collect(&shape.shape, &mut text);
+        }
+        assert!(text.iter().any(|label| label == "A(f_min)"), "{text:?}");
+        assert!(
+            text.iter().any(|label| label == "f₋₃dB re A(f_min)"),
+            "{text:?}"
+        );
     }
 
     /// A diverged AC run still carries whatever partial vectors the engine

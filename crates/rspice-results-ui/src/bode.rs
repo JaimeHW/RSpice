@@ -1,25 +1,8 @@
-//! Bode Plot Viewer
-//!
-//! Commercial-grade Bode plot visualization for frequency response analysis.
-//!
-//! # Features
-//!
-//! - Magnitude (dB) and phase plots
-//! - Log frequency axis
-//! - Gain/phase margin calculation
-//! - Cursor readout with interpolation
-//! - Multiple transfer function overlay
-//!
-//! # Architecture
-//!
-//! Follows Cadence-style AC analysis visualization.
+//! Frequency-response viewer availability and inspectors for retained evidence.
 
 pub(crate) mod data;
+pub mod inspector;
 pub mod state;
 
 pub use data::BodeData;
 pub use state::BodePlotState;
-
-// =============================================================================
-// Tests
-// =============================================================================
