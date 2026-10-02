@@ -18,6 +18,8 @@ use crate::state::{
 };
 use rspice_design::connectivity::extract_with_hierarchy as extract;
 
+mod bus_tap;
+
 fn pointer_viewport() -> Viewport {
     Viewport {
         offset: egui::Pos2::ZERO,

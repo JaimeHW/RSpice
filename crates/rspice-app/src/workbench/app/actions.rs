@@ -171,7 +171,7 @@ impl RSpiceApp {
                 self.state.schematic.arm_tool(Tool::Bus);
             }
             ShortcutCommand::PlaceBusTap => {
-                self.state.dialogs.bus_tap.open();
+                crate::workbench::app::open_bus_tap(&mut self.state);
             }
             ShortcutCommand::PlaceJunction => {
                 self.state.schematic.arm_tool(Tool::Junction);

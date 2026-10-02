@@ -403,6 +403,29 @@ fn activate_requirement_link(state: &mut AppState, note_id: u64, ctx: &egui::Con
 }
 
 fn handle_bus_tap_click(ui: &Ui, state: &mut AppState, requested: Point, hit_radius: i32) {
+    if state.schematic_edit_read_only() {
+        state.deny_read_only_edit();
+        state.schematic.cancel_tool();
+        return;
+    }
+    let Some(placement) = state.schematic.session.editor.pending_bus_tap.as_ref() else {
+        report_bus_candidate_error(ui, state, BusTapCandidateError::MissingConfiguration);
+        return;
+    };
+    if state.schematic.session.editor.tool != Tool::BusTap
+        || !placement
+            .authority
+            .matches(&super::requests::editor_request_source(state))
+    {
+        report_bus_error(
+            ui,
+            state,
+            "Bus tap rejected",
+            "The active schematic context changed. Reopen Place bus tap.".to_owned(),
+        );
+        state.schematic.cancel_tool();
+        return;
+    }
     let candidate = match resolve_bus_tap_candidate_on_active_sheet(state, requested, hit_radius) {
         Ok(candidate) => candidate,
         Err(error) => {
@@ -410,10 +433,7 @@ fn handle_bus_tap_click(ui: &Ui, state: &mut AppState, requested: Point, hit_rad
             return;
         }
     };
-    let Some(pending) = state.schematic.session.editor.pending_bus_tap.clone() else {
-        report_bus_candidate_error(ui, state, BusTapCandidateError::MissingConfiguration);
-        return;
-    };
+    let pending = placement.configuration.clone();
     let configured = crate::state::PendingBusTap {
         orientation: candidate.orientation,
         ..pending.clone()

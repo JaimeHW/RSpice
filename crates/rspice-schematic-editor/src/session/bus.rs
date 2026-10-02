@@ -1,6 +1,8 @@
 //! Uncommitted bus routing and tap placement state.
 
+use super::placement_authority::PlacementAuthority;
 use super::wire::WireRoutingMode;
+use crate::requests::EditorRequestSource;
 use rspice_design::schematic::bus::{BusDeclaration, BusParseError, BusSlice, BusTapOrientation};
 use rspice_design_model::Point;
 
@@ -24,6 +26,22 @@ impl PendingBusTap {
             slice,
             orientation,
         })
+    }
+}
+
+/// A tap configuration and the document context that owns its placement batch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingBusTapPlacement {
+    pub configuration: PendingBusTap,
+    pub authority: PlacementAuthority,
+}
+
+impl PendingBusTapPlacement {
+    pub fn new(configuration: PendingBusTap, source: EditorRequestSource) -> Self {
+        Self {
+            configuration,
+            authority: PlacementAuthority::new(source),
+        }
     }
 }
 

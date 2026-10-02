@@ -1479,7 +1479,7 @@ impl Command {
             Self::PlaceBus => set_tool(app, Tool::Bus),
             Self::PlaceBusTap => {
                 activate_workspace(app, Workspace::Design);
-                app.state.dialogs.bus_tap.open();
+                crate::workbench::app::open_bus_tap(&mut app.state);
             }
             Self::PlaceJunction => set_tool(app, Tool::Junction),
             Self::PlaceLabel => set_tool(app, Tool::Label),

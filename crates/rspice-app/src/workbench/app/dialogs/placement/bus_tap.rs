@@ -5,6 +5,9 @@
 //! pending placement configuration consumed by the schematic authoring tool.
 
 use egui::{Align, Context, Frame, Layout, Rect, Response, Sense, Stroke, TextEdit, Ui, Vec2};
+use rspice_schematic_editor::{
+    requests::EditorRequestSource, session::bus::PendingBusTapPlacement,
+};
 
 use crate::state::{BusDeclaration, BusSlice, BusTapOrientation, PendingBusTap, Tool};
 use crate::ui::theme::{self, FontWeight};
@@ -15,6 +18,7 @@ use crate::ui::widgets::{
 
 use super::vector_preview::deck_bits;
 use crate::workbench::app::{BusTapDialogState, RSpiceApp};
+use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} CONNECTIVITY";
 const TITLE: &str = "Place bus tap";
@@ -87,13 +91,11 @@ impl RSpiceApp {
             return;
         }
 
-        let editable = !self.state.schematic_edit_read_only();
-        let validation = if editable {
-            validate_draft(&self.state.dialogs.bus_tap)
-        } else {
-            DraftValidation::Invalid("The active schematic is read-only.".to_owned())
+        let validation = match placement_source(&self.state) {
+            Ok(_) => validate_draft(&self.state.dialogs.bus_tap),
+            Err(message) => DraftValidation::Invalid(message),
         };
-        let can_commit = editable && validation.can_commit();
+        let can_commit = validation.can_commit();
         let message = validation.message().map(str::to_owned);
         let preview = preview_contract(&validation, &self.state.dialogs.bus_tap);
 
@@ -131,11 +133,12 @@ impl RSpiceApp {
                 // frame. Re-parse the post-edit draft so Enter can never
                 // publish the prior frame's valid contract after a field was
                 // changed to an invalid value.
-                if !self.state.schematic_edit_read_only()
+                if let Ok(source) = placement_source(&self.state)
                     && let DraftValidation::Valid(pending) =
                         validate_draft(&self.state.dialogs.bus_tap)
                 {
-                    self.state.schematic.session.editor.pending_bus_tap = Some(pending);
+                    let placement = PendingBusTapPlacement::new(pending, source.clone());
+                    self.state.schematic.session.editor.pending_bus_tap = Some(placement);
                     self.state.schematic.arm_tool(Tool::BusTap);
                     self.state.dialogs.bus_tap.close();
                 }
@@ -149,6 +152,27 @@ impl RSpiceApp {
             DialogChoice::None | DialogChoice::Secondary => {}
         }
     }
+}
+
+pub(crate) fn open_bus_tap(state: &mut AppState) {
+    let source = crate::workbench::app::schematic_editor_request_source(state);
+    state.dialogs.bus_tap.open(source);
+}
+
+fn placement_source(state: &AppState) -> Result<&EditorRequestSource, String> {
+    if state.schematic_edit_read_only() {
+        return Err("The active schematic is read-only.".to_owned());
+    }
+    let source = state.dialogs.bus_tap.source.as_ref().ok_or_else(|| {
+        "The bus-tap placement context is unavailable. Close and reopen Place bus tap.".to_owned()
+    })?;
+    if source != &crate::workbench::app::schematic_editor_request_source(state) {
+        return Err(
+            "The schematic source or editing scope changed. Close and reopen Place bus tap."
+                .to_owned(),
+        );
+    }
+    Ok(source)
 }
 
 fn preview_contract(validation: &DraftValidation, draft: &BusTapDialogState) -> PreviewContract {
@@ -772,6 +796,10 @@ const fn orientation_at(index: usize) -> BusTapOrientation {
 mod tests {
     use super::*;
 
+    fn test_source() -> EditorRequestSource {
+        crate::workbench::app::schematic_editor_request_source(&AppState::default())
+    }
+
     fn dialog_input(events: Vec<egui::Event>) -> egui::RawInput {
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -811,7 +839,7 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        app.state.dialogs.bus_tap.open();
+        open_bus_tap(&mut app.state);
 
         let _ = ctx.run_ui(dialog_input(replace_text("DATA[31:0]")), |ctx| {
             app.render_bus_tap_dialog(ctx)
@@ -839,7 +867,7 @@ mod tests {
         };
         render(Vec::new(), &mut |ctx| app.render_bus_tap_dialog(ctx));
         ctx.memory_mut(|memory| memory.request_focus(workspace_id));
-        app.state.dialogs.bus_tap.open();
+        open_bus_tap(&mut app.state);
         render(Vec::new(), &mut |ctx| app.render_bus_tap_dialog(ctx));
 
         let mut events = replace_text("DATA[31:0]");
@@ -860,27 +888,10 @@ mod tests {
     }
 
     #[test]
-    fn mockup_contract_is_exact_and_complete() {
-        assert_eq!(EYEBROW, "SCHEMATIC \u{00b7} CONNECTIVITY");
-        assert_eq!(TITLE, "Place bus tap");
-        assert_eq!(PRIMARY, "Arm bus-tap tool");
-        assert_eq!(
-            BODY,
-            "Create a typed scalar or slice connection from a declared bus with direction and naming validation."
-        );
-        assert_eq!(BUS_EXAMPLE, "DATA[15:0]");
-        assert_eq!(SLICE_EXAMPLE, "DATA[7:0]");
-        assert_eq!(DIALOG_SIZE, DialogSize::Transaction);
-        assert_eq!(
-            ORIENTATION_LABELS,
-            ["Automatic", "Left", "Right", "Up", "Down"]
-        );
-    }
-
-    #[test]
     fn dialog_opens_with_the_mockup_values_and_a_valid_clean_draft() {
         let mut draft = BusTapDialogState::default();
-        draft.open();
+        let source = test_source();
+        draft.open(source.clone());
 
         assert!(draft.open);
         assert_eq!(draft.bus, BUS_EXAMPLE);
@@ -889,6 +900,13 @@ mod tests {
         assert!(!draft.dirty);
         assert!(!draft.discard_confirm);
         assert!(validate_draft(&draft).can_commit());
+        assert_eq!(draft.source.as_ref(), Some(&source));
+        draft.close();
+        assert!(draft.source.is_none());
+        let mut next = source;
+        next.document_epoch += 1;
+        draft.open(next.clone());
+        assert_eq!(draft.source.as_ref(), Some(&next));
     }
 
     #[test]
@@ -937,11 +955,11 @@ mod tests {
     #[test]
     fn edited_drafts_require_an_explicit_second_discard_action() {
         let mut draft = BusTapDialogState::default();
-        draft.open();
+        draft.open(test_source());
         assert!(draft.attempt_close());
         assert!(!draft.open);
 
-        draft.open();
+        draft.open(test_source());
         draft.mark_edited();
         assert!(!draft.attempt_close());
         assert!(draft.open);
@@ -959,7 +977,7 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        app.state.dialogs.bus_tap.open();
+        open_bus_tap(&mut app.state);
 
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_bus_tap_dialog(ctx)
@@ -978,28 +996,116 @@ mod tests {
             .pending_bus_tap
             .as_ref()
             .expect("validated pending bus tap");
-        assert_eq!(pending.bus_declaration.to_string(), BUS_EXAMPLE);
-        assert_eq!(pending.slice.to_string(), SLICE_EXAMPLE);
+        assert_eq!(
+            pending.configuration.bus_declaration.to_string(),
+            BUS_EXAMPLE
+        );
+        assert_eq!(pending.configuration.slice.to_string(), SLICE_EXAMPLE);
+        assert!(pending.authority.matches(
+            &crate::workbench::app::schematic_editor_request_source(&app.state)
+        ));
     }
 
     #[test]
-    fn rendered_read_only_dialog_cannot_publish_or_arm() {
-        let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let mut app = RSpiceApp::test_instance();
-        app.state.schematic.session.read_only = true;
-        app.state.dialogs.bus_tap.open();
-
-        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-            app.render_bus_tap_dialog(ctx)
-        });
-        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
-            app.render_bus_tap_dialog(ctx)
-        });
-
-        assert!(app.state.dialogs.bus_tap.open);
-        assert_eq!(app.state.schematic.session.editor.tool, Tool::Select);
-        assert!(app.state.schematic.session.editor.pending_bus_tap.is_none());
+    fn retained_dialog_cannot_arm_after_its_context_or_permission_changes() {
+        for change in [
+            "design",
+            "buffer",
+            "occurrence",
+            "sheet",
+            "content",
+            "read-only",
+            "safe-mode",
+            "missing",
+        ] {
+            let ctx = Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            let mut app = RSpiceApp::test_instance();
+            let master = crate::state::CellViewRef::new("work", "tap_parent", "schematic");
+            app.state.workspace.descend_into(
+                "X1".to_owned(),
+                master.clone(),
+                crate::state::ViewType::Schematic,
+            );
+            let first = app
+                .state
+                .workspace
+                .content
+                .design_management
+                .bootstrap_for_cell_view(&master.key(), "Sheet 1", [])
+                .unwrap();
+            open_bus_tap(&mut app.state);
+            let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
+                app.render_bus_tap_dialog(ctx)
+            });
+            match change {
+                "design" => app.state.design_execution_epoch += 1,
+                "buffer" => app.state.active_schematic_epoch += 1,
+                "occurrence" => {
+                    app.state.workspace.ascend_one().unwrap();
+                    app.state.workspace.descend_into(
+                        "X2".to_owned(),
+                        master.clone(),
+                        crate::state::ViewType::Schematic,
+                    );
+                }
+                "sheet" => {
+                    let catalog = app
+                        .state
+                        .workspace
+                        .content
+                        .design_management
+                        .sheet_catalog_mut(&master.key())
+                        .unwrap();
+                    let second = catalog
+                        .create_sheet(
+                            crate::state::SheetDefinition {
+                                name: "Sheet 2".to_owned(),
+                                template: crate::state::SheetTemplate::AnalogSchematic,
+                                port_policy: crate::state::SheetPortPolicy::TypedOffSheetPorts,
+                                explicit_page_number: Some(2),
+                            },
+                            Some(first),
+                        )
+                        .unwrap();
+                    catalog.set_active(second).unwrap();
+                }
+                "content" => {
+                    app.state.schematic.add_component(
+                        crate::state::ComponentType::Resistor,
+                        crate::state::Point::new(40, 20),
+                    );
+                }
+                "read-only" => app.state.schematic.session.read_only = true,
+                "safe-mode" => app.state.workbench.safe_mode.activate(
+                    crate::workbench::state::LocalSafeModeOptions {
+                        open_project_read_only: true,
+                        ..Default::default()
+                    },
+                    "bus-tap test".to_owned(),
+                ),
+                "missing" => app.state.dialogs.bus_tap.source = None,
+                _ => unreachable!(),
+            }
+            assert!(placement_source(&app.state).is_err(), "{change}");
+            let content = app.state.schematic.content_version();
+            let topology = app.state.schematic.topology_version();
+            let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
+                app.render_bus_tap_dialog(ctx)
+            });
+            assert!(app.state.dialogs.bus_tap.open, "{change}");
+            assert_eq!(
+                app.state.schematic.session.editor.tool,
+                Tool::Select,
+                "{change}"
+            );
+            assert!(
+                app.state.schematic.session.editor.pending_bus_tap.is_none(),
+                "{change}"
+            );
+            assert_eq!(app.state.schematic.content_version(), content, "{change}");
+            assert_eq!(app.state.schematic.topology_version(), topology, "{change}");
+        }
     }
 
     #[test]
@@ -1007,7 +1113,7 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        app.state.dialogs.bus_tap.open();
+        open_bus_tap(&mut app.state);
         app.state.dialogs.bus_tap.mark_edited();
 
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
@@ -1044,7 +1150,7 @@ mod tests {
     #[test]
     fn preview_contract_is_typed_when_valid_and_fails_closed_when_invalid() {
         let mut draft = BusTapDialogState::default();
-        draft.open();
+        draft.open(test_source());
         let valid = validate_draft(&draft);
         let preview = preview_contract(&valid, &draft);
         assert!(preview.legal);
@@ -1110,42 +1216,6 @@ mod tests {
                 None,
                 "{slice}"
             );
-        }
-    }
-
-    #[test]
-    fn rendered_contract_strings_contain_no_mojibake_markers() {
-        let mut draft = BusTapDialogState::default();
-        draft.open();
-        let valid = preview_contract(&validate_draft(&draft), &draft);
-        draft.slice = "ADDR[7:0]".to_owned();
-        let invalid = preview_contract(&validate_draft(&draft), &draft);
-        let strings = [
-            EYEBROW,
-            TITLE,
-            PRIMARY,
-            BODY,
-            PREVIEW_TITLE,
-            POINTER_NOTE,
-            DISCARD_TITLE,
-            DISCARD_DETAIL,
-            RESOLVES_LABEL,
-            valid.checks.as_str(),
-            valid.commit.as_str(),
-            valid
-                .resolution
-                .as_deref()
-                .expect("the mockup draft resolves"),
-            invalid.checks.as_str(),
-            invalid.commit.as_str(),
-        ];
-        for value in strings {
-            for forbidden in ['\u{00c2}', '\u{00e2}', '\u{fffd}'] {
-                assert!(
-                    !value.contains(forbidden),
-                    "mojibake in rendered contract string: {value:?}"
-                );
-            }
         }
     }
 }

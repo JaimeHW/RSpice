@@ -11,7 +11,13 @@ pub(super) fn resolve_bus_tap_candidate_on_active_sheet(
 ) -> Result<BusTapCandidate, BusTapCandidateError> {
     bus_interaction::resolve_bus_tap_candidate(
         &super::schematic_design_view(state),
-        state.schematic.session.editor.pending_bus_tap.as_ref(),
+        state
+            .schematic
+            .session
+            .editor
+            .pending_bus_tap
+            .as_ref()
+            .map(|placement| &placement.configuration),
         requested,
         source_hit_radius,
     )
@@ -45,7 +51,12 @@ mod tests {
             BusTapOrientation::Automatic,
         )
         .unwrap();
-        state.schematic.session.editor.pending_bus_tap = Some(pending.clone());
+        state.schematic.session.editor.pending_bus_tap = Some(
+            rspice_schematic_editor::session::bus::PendingBusTapPlacement::new(
+                pending.clone(),
+                crate::workbench::app::schematic_editor_request_source(&state),
+            ),
+        );
 
         let candidate =
             resolve_bus_tap_candidate_on_active_sheet(&state, Point::new(5, 2), 6).unwrap();

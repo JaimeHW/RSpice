@@ -22,7 +22,7 @@ pub mod port;
 pub mod stimulus_placement;
 
 use self::{
-    bus::{BusDrawing, PendingBusTap},
+    bus::{BusDrawing, PendingBusTapPlacement},
     design_note::PendingDesignNotePlacement,
     documentation_shape::{DocumentationShapeDrawing, PendingDocumentationShapePlacement},
     placement::{PendingLibraryCellPlacement, PendingPartModel},
@@ -97,8 +97,8 @@ pub struct EditorSession {
     /// [`PendingPartModel`] does, and for the same reason.
     pub pending_stimulus: Option<PendingStimulusPlacement>,
 
-    /// Validated configuration used while `Tool::BusTap` is armed.
-    pub pending_bus_tap: Option<PendingBusTap>,
+    /// Validated tap configuration and owning document context while `Tool::BusTap` is armed.
+    pub pending_bus_tap: Option<PendingBusTapPlacement>,
 
     /// Names still to place, and the contract they share, while the port tool
     /// is armed.

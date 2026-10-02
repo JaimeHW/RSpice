@@ -267,7 +267,10 @@ pub fn draw_bus_tap_preview(
     let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
     match resolve_bus_tap_candidate(
         &view.design,
-        view.editor.pending_bus_tap.as_ref(),
+        view.editor
+            .pending_bus_tap
+            .as_ref()
+            .map(|placement| &placement.configuration),
         requested,
         hit_radius,
     ) {
@@ -280,7 +283,7 @@ pub fn draw_bus_tap_preview(
                 bus_id: candidate.bus_id,
                 bus_point: candidate.bus_point,
                 connection_point: candidate.connection_point,
-                slice: pending.slice.clone(),
+                slice: pending.configuration.slice.clone(),
                 orientation: candidate.orientation,
             };
             draw_bus_tap(painter, viewport, &tap, true);

@@ -106,6 +106,12 @@ fn draw_bus_arms_directly_but_bus_tap_waits_for_its_validated_dialog() {
     app.state.schematic.session.editor.tool = Tool::Select;
     Command::PlaceBusTap.execute(&mut app);
     assert!(app.state.dialogs.bus_tap.open);
+    assert_eq!(
+        app.state.dialogs.bus_tap.source,
+        Some(crate::workbench::app::schematic_editor_request_source(
+            &app.state
+        ))
+    );
     assert_eq!(app.state.schematic.session.editor.tool, Tool::Select);
     assert!(app.state.schematic.session.editor.pending_bus_tap.is_none());
 }

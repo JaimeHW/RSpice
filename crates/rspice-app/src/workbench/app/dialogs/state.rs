@@ -347,6 +347,7 @@ pub(crate) struct BusTapDialogState {
     pub(crate) bus: String,
     pub(crate) slice: String,
     pub(crate) orientation: crate::state::BusTapOrientation,
+    pub(crate) source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
     pub(crate) dirty: bool,
     pub(crate) discard_confirm: bool,
 }
@@ -358,6 +359,7 @@ impl Default for BusTapDialogState {
             bus: String::new(),
             slice: String::new(),
             orientation: crate::state::BusTapOrientation::Automatic,
+            source: None,
             dirty: false,
             discard_confirm: false,
         }
@@ -365,12 +367,13 @@ impl Default for BusTapDialogState {
 }
 
 impl BusTapDialogState {
-    pub(crate) fn open(&mut self) {
+    pub(crate) fn open(&mut self, source: rspice_schematic_editor::requests::EditorRequestSource) {
         *self = Self {
             open: true,
             bus: "DATA[15:0]".to_owned(),
             slice: "DATA[7:0]".to_owned(),
             orientation: crate::state::BusTapOrientation::Automatic,
+            source: Some(source),
             dirty: false,
             discard_confirm: false,
         };

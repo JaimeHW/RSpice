@@ -81,7 +81,7 @@ impl EditorSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::bus::PendingBusTap;
+    use crate::session::bus::{PendingBusTap, PendingBusTapPlacement};
     use rspice_design::schematic::bus::{BusDeclaration, BusSlice, BusTapOrientation};
     use rspice_design_model::Point;
 
@@ -98,14 +98,29 @@ mod tests {
         schematic.bus_drawing.start(Point::new(2, 3), None);
         assert!(schematic.bus_drawing.active);
 
-        schematic.pending_bus_tap = Some(
+        schematic.pending_bus_tap = Some(PendingBusTapPlacement::new(
             PendingBusTap::new(
                 BusDeclaration::parse("DATA[15:0]").unwrap(),
                 BusSlice::parse("DATA[7:0]").unwrap(),
                 BusTapOrientation::Automatic,
             )
             .unwrap(),
-        );
+            crate::requests::EditorRequestSource {
+                project: rspice_app_types::product::ProjectId::new(),
+                document: rspice_design_model::cell_view::CellViewRef::new(
+                    "work",
+                    "cell",
+                    "schematic",
+                ),
+                occurrence: None,
+                design_epoch: 0,
+                document_epoch: 0,
+                content_version: 0,
+                topology_version: 0,
+                symbol_revision: 0,
+                sheet: None,
+            },
+        ));
         schematic.arm_tool(Tool::BusTap);
         assert!(!schematic.bus_drawing.active);
         assert!(schematic.pending_bus_tap.is_some());
