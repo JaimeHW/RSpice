@@ -9,8 +9,8 @@ use super::super::pipeline::{
 };
 use super::*;
 impl FftState {
-    /// Load FFT data and analyze
-    #[cfg(test)]
+    /// Load and analyze calibrated spectrum fixtures for viewer integration tests.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn load_data(&mut self, mut data: FftData) {
         data.convert_normalization(self.normalization)
             .expect("finite imported FFT fixture normalization");
@@ -210,7 +210,7 @@ impl FftState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::fft::data::SpectrumNormalization;
+    use crate::fft::data::SpectrumNormalization;
 
     #[test]
     fn normalization_change_recomputes_spectrum_metrics_and_revision() {
@@ -372,29 +372,31 @@ mod tests {
 
     #[test]
     fn readiness_requires_a_complete_error_free_transaction() {
-        let data = crate::analysis::fft::spectrum_fixture(
+        let data = crate::fft::spectrum_fixture(
             "fixture",
             &[0.0, 1.0, 2.0],
             &[0.0, 1.0, 0.0],
             &[0.0, 0.0, 0.0],
             4.0,
-            crate::analysis::fft::data::SpectrumNormalization::Peak,
+            crate::fft::data::SpectrumNormalization::Peak,
         );
-        let mut state = FftState::default();
-        state.data = Some(data);
+        let mut state = FftState {
+            data: Some(data),
+            ..Default::default()
+        };
         assert!(!state.has_data(), "a curve without metrics is not ready");
 
         state.data = None;
         state.analysis = Some(SpectrumAnalysis::default());
         assert!(!state.has_data(), "metrics without a curve are not ready");
 
-        state.data = Some(crate::analysis::fft::spectrum_fixture(
+        state.data = Some(crate::fft::spectrum_fixture(
             "fixture",
             &[0.0, 1.0, 2.0],
             &[0.0, 1.0, 0.0],
             &[0.0, 0.0, 0.0],
             4.0,
-            crate::analysis::fft::data::SpectrumNormalization::Peak,
+            crate::fft::data::SpectrumNormalization::Peak,
         ));
         state.last_error = Some(FftFailure::WorkerDisconnected);
         assert!(!state.has_data(), "a retained failure revokes readiness");

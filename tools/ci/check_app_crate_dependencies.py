@@ -63,7 +63,7 @@ ENGINE_PACKAGES = {
     "rspice-core", "rspice-matrix", "rspice-veriloga",
     "rspice-veriloga-runtime", "rspice-veriloga-models",
 }
-INCLUDE_DEV = {"rspice-worker", "rspice-ui-kit", "rspice-schematic-editor"}
+INCLUDE_DEV = {"rspice-worker", "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui"}
 PACKAGE_LINE = re.compile(r"^([A-Za-z0-9_-]+) v\d")
 
 
@@ -94,13 +94,13 @@ def violations(
                 if dep in ENGINE_PACKAGES or dep.startswith("rspice-veriloga-model-")
             ):
                 issues.append(f"{name} reaches simulator package {dep}")
-        if name == "rspice-schematic-editor":
+        if name in {"rspice-schematic-editor", "rspice-results-ui"}:
             forbidden = {
                 "rspice-app", "rspice-project", "rspice-project-contract",
                 "rspice-worker", "rspice-simulation",
             } | GUI_PACKAGES
             for dep in sorted(closure & forbidden):
-                issues.append(f"rspice-schematic-editor reaches application service or host package {dep}")
+                issues.append(f"{name} reaches application service or host package {dep}")
         if name == "rspice-ui-kit":
             forbidden = (
                 application_names - {name, "rspice-units"} - ALLOWED[name]

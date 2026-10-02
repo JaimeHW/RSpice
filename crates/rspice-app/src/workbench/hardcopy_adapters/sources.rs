@@ -74,9 +74,9 @@ use crate::workbench::documents::visualization_studio::VisualizationStudioState;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use rspice_results::studio_presentation::VisualizationPane as StudioPane;
 #[cfg(test)]
-use rspice_schematic_editor::symbol_editor::session::SymbolSelection;
-#[cfg(test)]
 use rspice_results::studio_presentation::VisualizationStudioPresentation;
+#[cfg(test)]
+use rspice_schematic_editor::symbol_editor::session::SymbolSelection;
 
 /// Cheap, semantic-free descriptor used by command enablement and the
 /// hardcopy dialog's document/scope selectors. Building this value never
@@ -948,7 +948,7 @@ fn quick_result_availability(
     let available = match viewer {
         ResultViewer::Waves | ResultViewer::DcSweep | ResultViewer::Bode => has_waveform(),
         ResultViewer::Fft => visible_waveforms().any(|waveform| {
-            waveform.x.len() >= crate::analysis::fft::MIN_FFT_SAMPLES
+            waveform.x.len() >= rspice_results_ui::fft::MIN_FFT_SAMPLES
                 && waveform.x.len() == waveform.y.len()
         }),
         ResultViewer::HarmonicBalance => {
@@ -966,7 +966,7 @@ fn quick_result_availability(
         ResultViewer::Hist => matches!(
             analysis.family_metadata.as_ref(),
             Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. })
-                if crate::analysis::histogram::state::measurement_index(
+                if rspice_results_ui::histogram::state::measurement_index(
                     state.analysis.histogram_state.selected.as_deref(), 0,
                     &variables.iter().map(|variable| variable.name.as_str()).collect::<Vec<_>>(),
                 ).and_then(|index| variables.get(index))

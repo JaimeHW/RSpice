@@ -445,7 +445,7 @@ fn large_state() -> AppState {
     state.simulation.runs = vec![run].into();
     assert!(state.simulation.select_run(0));
 
-    let mut eye = crate::analysis::eye_diagram::EyeData::new(1.0e-9, 2);
+    let mut eye = rspice_results_ui::eye_diagram::EyeData::new(1.0e-9, 2);
     for trace in 0..EYE_TRACES {
         let time: Vec<f64> = (0..EYE_SAMPLES)
             .map(|index| index as f64 * 2.0 / EYE_SAMPLES as f64)
@@ -453,7 +453,9 @@ fn large_state() -> AppState {
         let amplitude: Vec<f64> = (0..EYE_SAMPLES)
             .map(|index| ((index + trace) as f64 * 0.05).sin())
             .collect();
-        eye.add_trace(crate::analysis::eye_diagram::EyeTrace::new(time, amplitude));
+        eye.add_trace(rspice_results_ui::eye_diagram::EyeTrace::new(
+            time, amplitude,
+        ));
     }
     state.analysis.eye_diagram_state.load_data(eye);
 
@@ -465,12 +467,12 @@ fn large_state() -> AppState {
         })
         .collect();
     state.analysis.fft_state.load_data(
-        crate::analysis::fft::FftData::from_time_domain_with_normalization(
+        rspice_results_ui::fft::FftData::from_time_domain_with_normalization(
             "V(n0)",
             &samples,
             FFT_SAMPLES as f64,
-            crate::analysis::fft::WindowFunction::Hanning,
-            crate::analysis::fft::data::SpectrumNormalization::Peak,
+            rspice_results_ui::fft::WindowFunction::Hanning,
+            rspice_results_ui::fft::data::SpectrumNormalization::Peak,
         )
         .expect("finite qualified FFT frame fixture"),
     );
@@ -492,7 +494,7 @@ fn large_state() -> AppState {
     state
         .analysis
         .nyquist_state
-        .load_data(crate::analysis::nyquist::NyquistData::from_arrays(
+        .load_data(rspice_results_ui::nyquist::NyquistData::from_arrays(
             "Loop gain",
             &frequency,
             &real,

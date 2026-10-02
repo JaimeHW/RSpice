@@ -9,12 +9,12 @@
 use super::*;
 #[cfg(not(target_arch = "wasm32"))]
 mod marker_history;
-use crate::analysis::bode::BodeData;
-use crate::analysis::eye_diagram::{EyeData, EyeTrace};
-use crate::analysis::fft::{FftData, window::WindowFunction};
-use crate::analysis::nyquist::NyquistData;
 use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
 use crate::workbench::app_state::ActiveViewer;
+use rspice_results_ui::bode::BodeData;
+use rspice_results_ui::eye_diagram::{EyeData, EyeTrace};
+use rspice_results_ui::fft::{FftData, window::WindowFunction};
+use rspice_results_ui::nyquist::NyquistData;
 
 fn seal_legacy_unattributed(run: &mut crate::state::SimulationRun) {
     run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
@@ -340,7 +340,7 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
             ],
             16.0,
             WindowFunction::Rectangular,
-            crate::analysis::fft::data::SpectrumNormalization::Peak,
+            rspice_results_ui::fft::data::SpectrumNormalization::Peak,
         )
         .expect("finite qualified prior FFT fixture"),
     );

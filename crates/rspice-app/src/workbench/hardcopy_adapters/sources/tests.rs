@@ -1646,7 +1646,7 @@ fn nyquist_and_smith_require_active_retained_complex_samples() {
     stale
         .analysis
         .nyquist_state
-        .load_data(crate::analysis::NyquistData::from_arrays(
+        .load_data(rspice_results_ui::nyquist::NyquistData::from_arrays(
             "stale",
             &[1.0, 2.0],
             &[9_999.0, 8_888.0],

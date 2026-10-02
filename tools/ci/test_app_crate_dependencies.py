@@ -24,6 +24,7 @@ class DependencyPolicyTests(unittest.TestCase):
                     "rspice-hardcopy": {"rspice-project-contract"},
                     "rspice-ui-kit": {"egui", "rspice-results"},
                     "rspice-schematic-editor": {"egui", "rspice-ui-kit", "rspice-design"},
+                    "rspice-results-ui": {"rspice-results", "rspice-core", "rspice-app-types"},
                 },
                 {
                     "rspice-formats": {
@@ -34,6 +35,9 @@ class DependencyPolicyTests(unittest.TestCase):
                     "rspice-ui-kit": {"egui", "rspice-results", "rspice-app-types", "rspice-units"},
                     "rspice-schematic-editor": {
                         "egui", "rspice-ui-kit", "rspice-design", "rspice-core", "rspice-model-library",
+                    },
+                    "rspice-results-ui": {
+                        "rspice-results", "rspice-core", "rspice-app-types", "rspice-design-model",
                     },
                 },
                 {"rspice-formats", "csv", "serde"},
@@ -71,6 +75,18 @@ class DependencyPolicyTests(unittest.TestCase):
                 "rspice-ui-kit reaches non-presentation package eframe",
                 "rspice-ui-kit reaches non-presentation package rspice-core",
                 "rspice-ui-kit reaches non-presentation package rspice-project",
+            ],
+        )
+
+        self.assertEqual(
+            violations({}, {"rspice-results-ui": {
+                "rspice-results", "rspice-app", "rspice-project-contract", "rspice-worker", "winit",
+            }}),
+            [
+                "rspice-results-ui reaches application service or host package rspice-app",
+                "rspice-results-ui reaches application service or host package rspice-project-contract",
+                "rspice-results-ui reaches application service or host package rspice-worker",
+                "rspice-results-ui reaches application service or host package winit",
             ],
         )
 

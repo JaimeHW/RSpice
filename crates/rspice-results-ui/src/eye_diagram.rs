@@ -3,9 +3,8 @@
 //! Core owns waveform folding and eye measurements; results owns retained mask
 //! geometry and compliance calculations. This module coordinates viewer state.
 
-pub(crate) mod state;
+pub mod state;
 
-#[cfg(test)]
 pub use rspice_core::analysis::signal_integrity::EyeTrace;
 pub use rspice_core::analysis::signal_integrity::{
     EyeData, EyeDataBuilder, EyeMeasurements, UiEstimateRejection, calculate_eye_measurements,
@@ -23,7 +22,7 @@ pub use state::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::eye_diagram::state::EyeMask;
+    use crate::eye_diagram::state::EyeMask;
 
     /// Trapezoidal NRZ, one bit per unit interval, 20–80 % edge of 50 ps.
     ///

@@ -4,13 +4,13 @@
 //! viewers after a run does not re-derive the same traces.
 
 use super::*;
-use crate::analysis::eye_diagram::{
+use crate::state::{AnalysisType, SharedWaveformValues};
+use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCacheProvenance};
+use rspice_results_ui::eye_diagram::{
     EyeData, EyeDataBuilder, EyeTimebase, EyeTimebaseProvenance, crossing_phase_at,
     estimate_unit_interval, fold_anchor,
 };
-use crate::analysis::fft::{FftInputError, FftInputOptions, PreparedFftInput};
-use crate::state::{AnalysisType, SharedWaveformValues};
-use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCacheProvenance};
+use rspice_results_ui::fft::{FftInputError, FftInputOptions, PreparedFftInput};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 
@@ -593,7 +593,7 @@ fn build_eye_diagram_data(source: &DerivedWaveformSource) -> EyeBuild {
 fn build_fft_prepared_input(
     source: &DerivedWaveformSource,
 ) -> Result<PreparedFftInput, FftInputError> {
-    crate::analysis::fft::prepare_fft_input_with_options(
+    rspice_results_ui::fft::prepare_fft_input_with_options(
         &source.source_name,
         &source.time,
         &source.values,
@@ -604,12 +604,12 @@ fn build_fft_prepared_input(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::fft::{
+    use crate::product::{AnalysisInstanceId, DatasetId};
+    use crate::state::{AnalysisResult, SimulationRun};
+    use rspice_results_ui::fft::{
         FftFailure, WindowFunction,
         data::{FftBuildError, SpectrumAnalysisError},
     };
-    use crate::product::{AnalysisInstanceId, DatasetId};
-    use crate::state::{AnalysisResult, SimulationRun};
 
     /// Trapezoidal 1010 clock at 1 ns, 20-80 % edge of 50 ps.
     fn clock(bits: usize, t_start: f64) -> (Vec<f64>, Vec<f64>) {

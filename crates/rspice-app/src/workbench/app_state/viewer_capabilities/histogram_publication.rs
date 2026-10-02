@@ -2,8 +2,6 @@
 
 use super::AppState;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::analysis::HistogramDisplayMode;
-#[cfg(not(target_arch = "wasm32"))]
 use crate::hardcopy::HardcopyPlan;
 use crate::hardcopy::{
     BackgroundMode, ColorMapping, FontPolicy, HardcopyScope, HardcopySetup, OutputFormat,
@@ -24,6 +22,8 @@ use crate::workbench::hardcopy_adapters::sources::{
     PreparedRetainedHardcopyResolution, SemanticAxisKind,
 };
 use crate::workbench::state::WorkspaceDocumentId;
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_results::histogram::HistogramDisplayMode;
 
 fn distribution() -> (AppState, String) {
     let mut state = AppState::default();

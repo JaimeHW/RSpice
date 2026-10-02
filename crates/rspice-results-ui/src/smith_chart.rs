@@ -11,6 +11,6 @@
 //! particular duplicated `num_complex`, which the rest of the crate already
 //! uses; the survivors here are on `Complex64` now.
 
-pub(crate) mod state;
+pub mod state;
 
 pub use state::SmithChartState;

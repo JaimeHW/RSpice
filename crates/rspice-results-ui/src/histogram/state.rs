@@ -39,4 +39,4 @@ impl HistogramState {
     }
 }
 
-pub(crate) use rspice_results::histogram::measurement_index;
+pub use rspice_results::histogram::measurement_index;

@@ -80,8 +80,8 @@ fn malformed_eager_fft_input_clears_the_prior_spectrum_and_keeps_the_typed_failu
     }));
     assert!(matches!(
         state.analysis.fft_state.last_error,
-        Some(crate::analysis::fft::FftFailure::Input(
-            crate::analysis::fft::FftInputError::LengthMismatch {
+        Some(rspice_results_ui::fft::FftFailure::Input(
+            rspice_results_ui::fft::FftInputError::LengthMismatch {
                 time_count: 17,
                 value_count: 16
             }

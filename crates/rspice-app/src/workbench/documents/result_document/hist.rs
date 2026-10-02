@@ -7,8 +7,6 @@ mod source_tests;
 use egui::Ui;
 use std::sync::Arc;
 
-use crate::analysis::histogram::display::{HistogramDisplay, hist_axis};
-use crate::analysis::{HistogramBuilder, HistogramDisplayMode};
 use crate::product::DatasetId;
 use crate::source_revision::SourceRevision;
 use crate::state::{
@@ -19,7 +17,9 @@ use crate::ui::tokens::Tokens;
 use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
 use rspice_results::histogram::Histogram;
+use rspice_results::histogram::{HistogramBuilder, HistogramDisplayMode};
 use rspice_results::yield_analysis::{SpecLimitType, YieldResult};
+use rspice_results_ui::histogram::display::{HistogramDisplay, hist_axis};
 
 use super::frame_work::{self, DatasetWalk};
 use super::strip::{self, LegendChip};
@@ -531,7 +531,7 @@ fn binning_label(histogram: &rspice_results::histogram::Histogram) -> String {
 /// The distribution the reader has selected, by name.
 fn selected_histogram_name(state: &AppState) -> Option<String> {
     let names = histogram_names(state);
-    let index = crate::analysis::histogram::state::measurement_index(
+    let index = rspice_results_ui::histogram::state::measurement_index(
         state.analysis.histogram_state.selected.as_deref(),
         0,
         &names,

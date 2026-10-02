@@ -7,7 +7,6 @@ mod numpy;
 mod typed_csv;
 mod vcd;
 
-use crate::analysis::eye_diagram::EyeTimebaseProvenance;
 use crate::workbench::EngineeringExportFormat;
 use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
@@ -15,6 +14,7 @@ use rspice_formats::table::csv_to_tsv;
 use rspice_formats::waveform_io::result::{
     WaveformProjectionError, project_waveforms as prepare_single_analysis_dataset,
 };
+use rspice_results_ui::eye_diagram::EyeTimebaseProvenance;
 use typed_csv::prepare_typed_result_csv;
 
 const NO_ACTIVE_ANALYSIS_MESSAGE: &str = "No active result analysis is selected for export.";

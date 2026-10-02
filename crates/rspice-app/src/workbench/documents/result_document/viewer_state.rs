@@ -656,8 +656,8 @@ impl ResultsState {
             .retain(|key, _| live(key.analysis()));
         self.hidden_family_traces.retain(|key| live(key.analysis()));
         self.eye_timebase.retain(|key, _| match key {
-            crate::analysis::eye_diagram::EyeTimebaseKey::Prepared(_) => true,
-            crate::analysis::eye_diagram::EyeTimebaseKey::Legacy(dataset, _) => {
+            rspice_results_ui::eye_diagram::EyeTimebaseKey::Prepared(_) => true,
+            rspice_results_ui::eye_diagram::EyeTimebaseKey::Legacy(dataset, _) => {
                 retained.contains(dataset)
             }
         });

@@ -400,8 +400,8 @@ pub struct UiSessionStateSer {
     /// restored onto whichever result inherits the number.
     #[serde(default)]
     eye_timebase: Vec<(
-        crate::analysis::eye_diagram::EyeTimebaseKey,
-        crate::analysis::eye_diagram::EyeTimebase,
+        rspice_results_ui::eye_diagram::EyeTimebaseKey,
+        rspice_results_ui::eye_diagram::EyeTimebase,
     )>,
 }
 

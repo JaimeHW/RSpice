@@ -9,14 +9,14 @@
 
 use egui::Ui;
 
-use crate::analysis::eye_diagram::{
-    EyeData, EyeRateEditor, EyeTimebase, EyeTimebaseProvenance, parse_eye_timebase,
-};
 use crate::ui::plot::{self, Axis, PlotSpec, XScale, fmt_si};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, section_header};
 use crate::workbench::AppState;
+use rspice_results_ui::eye_diagram::{
+    EyeData, EyeRateEditor, EyeTimebase, EyeTimebaseProvenance, parse_eye_timebase,
+};
 
 use super::frame_work::{self, DatasetWalk};
 use super::strip::{self, LegendChip};
@@ -642,7 +642,7 @@ fn or_unmeasured(value: Option<f64>, format: impl FnOnce(f64) -> String) -> Stri
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::eye_diagram::EyeTrace;
+    use rspice_results_ui::eye_diagram::EyeTrace;
 
     #[test]
     fn density_raster_respects_the_current_viewport() {

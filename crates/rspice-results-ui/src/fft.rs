@@ -16,23 +16,21 @@
 //!
 //! Follows Cadence Spectre's spectral analysis approach.
 
-pub(crate) use rspice_results::fft::{data, pipeline, window};
-pub(crate) mod state;
+pub use rspice_results::fft::{data, pipeline, window};
+pub mod state;
 
-#[cfg(test)]
 pub use data::FftData;
 pub use pipeline::{
     FftInputError, FftInputOptions, MIN_FFT_SAMPLES, PreparedFftInput,
     prepare_fft_input_with_options,
 };
-#[cfg(test)]
 pub use state::FftFailure;
 pub use state::FftState;
 pub use window::WindowFunction;
 
 /// Build arbitrary spectrum fixtures while retaining calibrated rectangular metadata.
-#[cfg(test)]
-pub(crate) fn spectrum_fixture(
+#[cfg(any(test, feature = "test-support"))]
+pub fn spectrum_fixture(
     name: &str,
     frequencies: &[f64],
     magnitudes: &[f64],

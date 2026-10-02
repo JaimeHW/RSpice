@@ -7,10 +7,10 @@
 #[cfg(test)]
 mod histogram_publication;
 
-use crate::analysis::eye_diagram::{EyeTimebase, EyeTimebaseKey};
 use crate::workbench::app_state::{
     ActiveViewer, AppState, SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
 };
+use rspice_results_ui::eye_diagram::{EyeTimebase, EyeTimebaseKey};
 
 /// Availability metadata for a specialized viewer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,7 +91,7 @@ impl AppState {
         self.analysis.fft_state.clear();
         self.analysis
             .eye_diagram_state
-            .load_data(crate::analysis::eye_diagram::EyeData::default());
+            .load_data(rspice_results_ui::eye_diagram::EyeData::default());
         self.analysis.cache_authority.fft = None;
         self.analysis.cache_authority.eye = None;
     }
@@ -105,7 +105,7 @@ impl AppState {
         self.analysis.histogram_state.clear_selection();
         self.analysis
             .bode_plot_state
-            .load_data(crate::analysis::bode::BodeData::new());
+            .load_data(rspice_results_ui::bode::BodeData::new());
         self.analysis.nyquist_state.clear();
         self.analysis.smith_chart_state.clear_traces();
         self.analysis.cache_authority = Default::default();
@@ -216,14 +216,14 @@ impl AppState {
             ActiveViewer::BodePlot => self
                 .analysis
                 .bode_plot_state
-                .load_data(crate::analysis::bode::BodeData::new()),
+                .load_data(rspice_results_ui::bode::BodeData::new()),
             ActiveViewer::Nyquist => self.analysis.nyquist_state.clear(),
             ActiveViewer::SmithChart => self.analysis.smith_chart_state.clear_traces(),
             ActiveViewer::Fft => self.analysis.fft_state.clear(),
             ActiveViewer::EyeDiagram => self
                 .analysis
                 .eye_diagram_state
-                .load_data(crate::analysis::eye_diagram::EyeData::default()),
+                .load_data(rspice_results_ui::eye_diagram::EyeData::default()),
             ActiveViewer::Waveform | ActiveViewer::PoleZero | ActiveViewer::Histogram => return,
         }
         self.clear_specialized_viewer_cache_authority(viewer);
@@ -389,7 +389,7 @@ impl AppState {
 
     fn active_analysis_supports_fft(&self) -> bool {
         self.active_time_domain_waveform_len()
-            .map(|len| len >= crate::analysis::fft::MIN_FFT_SAMPLES)
+            .map(|len| len >= rspice_results_ui::fft::MIN_FFT_SAMPLES)
             .unwrap_or(false)
     }
 
@@ -421,10 +421,15 @@ fn eye_timebase_key(provenance: SpecializedViewerCacheProvenance) -> EyeTimebase
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::{BodeData, EyeData, EyeTrace, FftData, NyquistData, WindowFunction};
     use crate::diagnostics::{LogSeverity, LogSource};
     use crate::workbench::app_state::SpecializedViewerCacheAuthority;
     use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
+    use rspice_results_ui::{
+        bode::BodeData,
+        eye_diagram::{EyeData, EyeTrace},
+        fft::{FftData, WindowFunction},
+        nyquist::NyquistData,
+    };
 
     fn retained_analysis(
         id: u64,
@@ -481,7 +486,7 @@ mod tests {
                 ],
                 16.0,
                 WindowFunction::Rectangular,
-                crate::analysis::fft::data::SpectrumNormalization::Peak,
+                rspice_results_ui::fft::data::SpectrumNormalization::Peak,
             )
             .expect("finite qualified prior FFT fixture"),
         );

@@ -47,12 +47,12 @@ pub(crate) fn restore_session_model_library_manager(
 
 pub(in crate::workbench) fn default_analysis_viewers() -> AnalysisWorkspaceState {
     AnalysisWorkspaceState {
-        bode_plot_state: crate::analysis::bode::BodePlotState::default(),
-        nyquist_state: crate::analysis::nyquist::NyquistState::default(),
-        eye_diagram_state: crate::analysis::eye_diagram::EyeDiagramState::default(),
-        fft_state: crate::analysis::fft::FftState::default(),
-        smith_chart_state: crate::analysis::smith_chart::SmithChartState::default(),
-        histogram_state: crate::analysis::histogram::HistogramState::default(),
+        bode_plot_state: rspice_results_ui::bode::BodePlotState::default(),
+        nyquist_state: rspice_results_ui::nyquist::NyquistState::default(),
+        eye_diagram_state: rspice_results_ui::eye_diagram::EyeDiagramState::default(),
+        fft_state: rspice_results_ui::fft::FftState::default(),
+        smith_chart_state: rspice_results_ui::smith_chart::SmithChartState::default(),
+        histogram_state: rspice_results_ui::histogram::HistogramState::default(),
         cache_authority: Default::default(),
     }
 }

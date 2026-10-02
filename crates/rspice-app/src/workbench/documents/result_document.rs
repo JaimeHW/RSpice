@@ -254,7 +254,6 @@ pub use crate::state::result_presentation::{
 use crate::state::result_presentation::{ResultExpressionGroup, ResultPresentation};
 
 use super::visualization_family::SourceSampleSelection;
-use crate::analysis::eye_diagram::EyeTimebase;
 use crate::product::{AnalysisInstanceId, DatasetId, ResultDocumentId};
 use crate::results::visualization_document::{MarkerId, PaneId};
 use crate::simulation::SimulationController;
@@ -271,6 +270,7 @@ use crate::workbench::app_state::ActiveViewer;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_results_ui::eye_diagram::EyeTimebase;
 
 /// One axis interval, low then high, in data space.
 pub(crate) type AxisExtent = (f64, f64);
@@ -2043,7 +2043,7 @@ pub(crate) fn active_histogram(
 
 pub(crate) fn active_histogram_display(
     state: &AppState,
-) -> Option<std::sync::Arc<crate::analysis::histogram::display::HistogramDisplay>> {
+) -> Option<std::sync::Arc<rspice_results_ui::histogram::display::HistogramDisplay>> {
     hist::active_histogram_display(state)
 }
 
@@ -2311,7 +2311,7 @@ pub struct ResultsState {
     /// result is not a statement about the next project's, and
     /// `clear_project_scoped_state` resets it with the rest of the document.
     pub(crate) eye_timebase:
-        std::collections::HashMap<crate::analysis::eye_diagram::EyeTimebaseKey, EyeTimebase>,
+        std::collections::HashMap<rspice_results_ui::eye_diagram::EyeTimebaseKey, EyeTimebase>,
     /// Identity map behind the ordinal compatibility projection.
     expr_projection_keys: std::collections::HashMap<usize, AnalysisPresentationKey>,
     /// The inline expression editor, when open (one strip at a time).

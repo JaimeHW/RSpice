@@ -4,13 +4,16 @@
 //! Built on the plot grammar like every other viewer: token grid and frame,
 //! decimated token traces, bordered marker tags — no private palette.
 
+#[cfg(test)]
+mod agreement;
+
 use egui::Ui;
 
-use crate::analysis::nyquist::{EncirclementCount, NyquistData, NyquistMargin};
 use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
+use rspice_results_ui::nyquist::{EncirclementCount, NyquistData, NyquistMargin};
 
 use super::strip::{self, LegendChip};
 use super::well_hint;
@@ -115,7 +118,7 @@ fn criterion_note(count: EncirclementCount) -> String {
              the loop does not close."
         );
     }
-    let z = crate::analysis::nyquist::closed_loop_rhp_poles(n, 0);
+    let z = rspice_results_ui::nyquist::closed_loop_rhp_poles(n, 0);
     let verdict = if z == 0 { "stable" } else { "unstable" };
     format!("{criterion} With P = 0 the loop is {verdict} (Z = {z}).")
 }
@@ -420,7 +423,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::nyquist::NyquistData;
+    use rspice_results_ui::nyquist::NyquistData;
 
     /// The derived numbers are cached on the retained data version, so a new
     /// result replaces them instead of serving the previous locus's stability.

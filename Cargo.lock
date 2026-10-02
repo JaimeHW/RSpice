@@ -5259,6 +5259,7 @@ dependencies = [
  "rspice-project",
  "rspice-publication-contract",
  "rspice-results",
+ "rspice-results-ui",
  "rspice-schematic-editor",
  "rspice-simulation",
  "rspice-simulation-contract",
@@ -5744,6 +5745,18 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.20",
  "uuid",
+]
+
+[[package]]
+name = "rspice-results-ui"
+version = "0.1.0"
+dependencies = [
+ "num-complex",
+ "rspice-app-types",
+ "rspice-core",
+ "rspice-results",
+ "serde",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

@@ -9,8 +9,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::eye_diagram::UiEstimateRejection;
-use crate::product::{AnalysisInstanceId, DatasetId};
+use crate::eye_diagram::UiEstimateRejection;
+use rspice_app_types::product::{AnalysisInstanceId, DatasetId};
 
 /// Where the eye's unit interval comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
@@ -121,7 +121,7 @@ pub fn parse_eye_timebase(input: &str) -> Result<f64, String> {
         }
     }
 
-    let value = crate::quantity::parse_engineering_value(magnitude.trim())?;
+    let value = rspice_app_types::quantity::parse_engineering_value(magnitude.trim())?;
     if !(value.is_finite() && value > 0.0) {
         return Err("The unit interval must be a positive time".to_owned());
     }

@@ -215,13 +215,13 @@ fn fft_quick_view_ignores_stale_cache_and_global_data_version() {
         ]);
     let mut state = quick_view_state(analysis, ResultViewer::Fft);
     state.analysis.fft_state.selected_source = Some("V(active)".to_owned());
-    state.analysis.fft_state.data = Some(crate::analysis::fft::spectrum_fixture(
+    state.analysis.fft_state.data = Some(rspice_results_ui::fft::spectrum_fixture(
         "stale",
         &[9_999.0, 10_000.0],
         &[8_888.0, 7_777.0],
         &[0.0, 0.0],
         20_000.0,
-        crate::analysis::fft::data::SpectrumNormalization::Peak,
+        rspice_results_ui::fft::data::SpectrumNormalization::Peak,
     ));
     state.simulation.data_version = 9;
 
@@ -238,13 +238,13 @@ fn fft_quick_view_ignores_stale_cache_and_global_data_version() {
     );
 
     state.simulation.data_version = 10_000;
-    state.analysis.fft_state.data = Some(crate::analysis::fft::spectrum_fixture(
+    state.analysis.fft_state.data = Some(rspice_results_ui::fft::spectrum_fixture(
         "different stale cache",
         &[123_456.0],
         &[654_321.0],
         &[0.0],
         1.0,
-        crate::analysis::fft::data::SpectrumNormalization::Peak,
+        rspice_results_ui::fft::data::SpectrumNormalization::Peak,
     ));
     let second = resolve_quick_view(&state).unwrap();
     assert_eq!(
@@ -294,8 +294,8 @@ fn eye_quick_view_reconstructs_the_interactive_source_contract() {
         ]);
     let mut state = quick_view_state(analysis, ResultViewer::Eye);
     state.analysis.fft_state.selected_source = Some("|V(selected)|".to_owned());
-    let mut stale_eye = crate::analysis::EyeData::new(99.0, 7);
-    stale_eye.add_trace(crate::analysis::EyeTrace::new(
+    let mut stale_eye = rspice_results_ui::eye_diagram::EyeData::new(99.0, 7);
+    stale_eye.add_trace(rspice_results_ui::eye_diagram::EyeTrace::new(
         vec![0.0, 1.0],
         vec![9_999.0, 9_999.0],
     ));
@@ -303,7 +303,7 @@ fn eye_quick_view_reconstructs_the_interactive_source_contract() {
 
     // This alternating stimulus has successive rising edges two time units apart.
     let period = 2.0;
-    let expected = crate::analysis::eye_diagram::EyeDataBuilder::new()
+    let expected = rspice_results_ui::eye_diagram::EyeDataBuilder::new()
         .bit_period(period)
         .ui_count(2)
         .skip_initial(2)
@@ -413,9 +413,9 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
         plot.traces[0].paths[0].last()
     );
 
-    for mode in crate::analysis::HistogramDisplayMode::ALL {
+    for mode in rspice_results::histogram::HistogramDisplayMode::ALL {
         state.analysis.histogram_state.mode = mode;
-        if mode == crate::analysis::HistogramDisplayMode::Pdf {
+        if mode == rspice_results::histogram::HistogramDisplayMode::Pdf {
             assert!(resolve_quick_view(&state).is_err());
             state.analysis.histogram_state.custom_range = true;
             state.analysis.histogram_state.custom_min = 0.0;

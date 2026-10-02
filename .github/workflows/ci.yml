@@ -49,7 +49,7 @@ jobs:
             checked=$((checked + 1))
           done
           echo "rustfmt checked $checked workspace member(s)"
-          test "$checked" -ge 36
+          test "$checked" -ge 41
       - name: Lint GitHub workflows
         run: |
           export GOBIN="$RUNNER_TEMP/actionlint-bin"

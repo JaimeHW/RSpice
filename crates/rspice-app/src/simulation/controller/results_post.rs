@@ -81,7 +81,7 @@ impl SimulationController {
             state.bind_specialized_viewer_cache(ActiveViewer::EyeDiagram, provenance);
         }
 
-        let availability = match crate::analysis::fft::prepare_fft_input_with_options(
+        let availability = match rspice_results_ui::fft::prepare_fft_input_with_options(
             &waveform_key,
             time,
             values,
@@ -143,7 +143,7 @@ impl SimulationController {
         frequencies: &[f64],
         waveforms: &std::collections::HashMap<String, crate::simulation::WaveformData>,
     ) {
-        let mut bode_data = crate::analysis::bode::BodeData::new();
+        let mut bode_data = rspice_results_ui::bode::BodeData::new();
         state.clear_specialized_viewer_cache_authority(ActiveViewer::BodePlot);
         state.clear_specialized_viewer_cache_authority(ActiveViewer::Nyquist);
         state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
@@ -178,7 +178,7 @@ impl SimulationController {
 
             if loop_gain == Some(name.as_str()) {
                 state.analysis.nyquist_state.load_data(
-                    crate::analysis::nyquist::NyquistData::from_arrays(
+                    rspice_results_ui::nyquist::NyquistData::from_arrays(
                         LOOP_GAIN_LOCUS_LABEL,
                         frequencies,
                         &waveform.y_values,
@@ -196,7 +196,7 @@ impl SimulationController {
             state
                 .analysis
                 .bode_plot_state
-                .load_data(crate::analysis::bode::BodeData::new());
+                .load_data(rspice_results_ui::bode::BodeData::new());
         }
 
         if let Some(provenance) = self.in_flight_specialized_viewer_provenance(state) {

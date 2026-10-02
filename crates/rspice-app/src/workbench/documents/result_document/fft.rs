@@ -20,10 +20,10 @@ struct FftModel {
     revision: u64,
     subtitle: String,
     source: String,
-    window: crate::analysis::fft::WindowFunction,
+    window: rspice_results_ui::fft::WindowFunction,
     fft_size: usize,
     resolution_bandwidth: Option<f64>,
-    normalization: crate::analysis::fft::data::SpectrumNormalization,
+    normalization: rspice_results_ui::fft::data::SpectrumNormalization,
     frequency: Arc<[f64]>,
     magnitude_db: Arc<[f64]>,
     fundamental: Option<(f64, f64)>,
@@ -101,7 +101,7 @@ fn build_model(state: &mut AppState) -> Option<FftModel> {
 /// making a false voltage assertion.
 fn spectrum_level_unit(
     source: &str,
-    normalization: crate::analysis::fft::data::SpectrumNormalization,
+    normalization: rspice_results_ui::fft::data::SpectrumNormalization,
 ) -> &'static str {
     let source = source.trim();
     let quantity = if source
@@ -118,15 +118,15 @@ fn spectrum_level_unit(
         ""
     };
     match (quantity, normalization) {
-        ("V", crate::analysis::fft::data::SpectrumNormalization::Peak) => "dBV pk",
-        ("V", crate::analysis::fft::data::SpectrumNormalization::Rms) => "dBV rms",
+        ("V", rspice_results_ui::fft::data::SpectrumNormalization::Peak) => "dBV pk",
+        ("V", rspice_results_ui::fft::data::SpectrumNormalization::Rms) => "dBV rms",
         // Not "dBA": in every other instrument that prints it, dBA is an
         // A-weighted sound level. A current spectrum referenced to one ampere
         // has to say so.
-        ("A", crate::analysis::fft::data::SpectrumNormalization::Peak) => "dB re 1 A pk",
-        ("A", crate::analysis::fft::data::SpectrumNormalization::Rms) => "dB re 1 A rms",
-        (_, crate::analysis::fft::data::SpectrumNormalization::Peak) => "dB pk",
-        (_, crate::analysis::fft::data::SpectrumNormalization::Rms) => "dB rms",
+        ("A", rspice_results_ui::fft::data::SpectrumNormalization::Peak) => "dB re 1 A pk",
+        ("A", rspice_results_ui::fft::data::SpectrumNormalization::Rms) => "dB re 1 A rms",
+        (_, rspice_results_ui::fft::data::SpectrumNormalization::Peak) => "dB pk",
+        (_, rspice_results_ui::fft::data::SpectrumNormalization::Rms) => "dB rms",
     }
 }
 
@@ -146,7 +146,7 @@ const NO_FINITE_LEVEL: &str = "No finite level in view — every magnitude in th
 /// a plotted spectrum invited exactly the reading it is not.
 fn spectrum_subtitle(
     source: &str,
-    window: crate::analysis::fft::WindowFunction,
+    window: rspice_results_ui::fft::WindowFunction,
     fft_size: usize,
 ) -> String {
     format!(
@@ -164,7 +164,7 @@ fn trace_cache_key(revision: u64) -> u64 {
     0x0FF7_0001_0000_0000_u64 ^ revision.rotate_left(17)
 }
 
-fn resolution_bandwidth(data: &crate::analysis::fft::data::FftData) -> Option<f64> {
+fn resolution_bandwidth(data: &rspice_results_ui::fft::data::FftData) -> Option<f64> {
     let bandwidth = data.resolution_bandwidth();
     (bandwidth.is_finite() && bandwidth > 0.0).then_some(bandwidth)
 }
@@ -226,7 +226,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             egui::ComboBox::from_id_salt("rspice.fft.window")
                 .selected_text(current.display_name())
                 .show_ui(ui, |ui| {
-                    for &window in crate::analysis::fft::WindowFunction::all() {
+                    for &window in rspice_results_ui::fft::WindowFunction::all() {
                         if ui
                             .selectable_label(window == current, window.display_name())
                             .clicked()
@@ -250,7 +250,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         egui::ComboBox::from_id_salt("rspice.fft.normalization")
             .selected_text(current.display_name())
             .show_ui(ui, |ui| {
-                for &normalization in crate::analysis::fft::data::SpectrumNormalization::all() {
+                for &normalization in rspice_results_ui::fft::data::SpectrumNormalization::all() {
                     if ui
                         .selectable_label(normalization == current, normalization.display_name())
                         .clicked()
@@ -398,16 +398,16 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         .map(|sinad| format!("{:.1} bit", (sinad - 1.76) / 6.02));
     let thd = analysis.thd_percent.map_or_else(
         || match analysis.harmonic_coverage {
-            crate::analysis::fft::data::HarmonicCoverage::InsufficientBandwidth {
+            rspice_results_ui::fft::data::HarmonicCoverage::InsufficientBandwidth {
                 analyzed_through,
                 ..
             } => format!("— · bandwidth through HD{analyzed_through}"),
-            crate::analysis::fft::data::HarmonicCoverage::InsufficientResolution {
+            rspice_results_ui::fft::data::HarmonicCoverage::InsufficientResolution {
                 failed_order,
                 ..
             } => format!("— · HD{failed_order} is not independently resolvable"),
-            crate::analysis::fft::data::HarmonicCoverage::NoFundamental { .. }
-            | crate::analysis::fft::data::HarmonicCoverage::Complete { .. } => "—".to_owned(),
+            rspice_results_ui::fft::data::HarmonicCoverage::NoFundamental { .. }
+            | rspice_results_ui::fft::data::HarmonicCoverage::Complete { .. } => "—".to_owned(),
         },
         |value| format!("{value:.3} % · {} harmonics", analysis.harmonics.len()),
     );
@@ -479,8 +479,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::fft::WindowFunction;
-    use crate::analysis::fft::data::{FftData, SpectrumNormalization};
+    use rspice_results_ui::fft::WindowFunction;
+    use rspice_results_ui::fft::data::{FftData, SpectrumNormalization};
 
     #[test]
     fn rectangular_resolution_bandwidth_equals_bin_width() {
@@ -583,9 +583,9 @@ mod tests {
     /// its trace, and `well_hint` publishes a refusal as a live status — so
     /// the tree is where what the sheet *said* can be read back without
     /// rasterizing it.
-    fn announced(points: Vec<crate::analysis::fft::data::FftPoint>, name: &str) -> Vec<String> {
+    fn announced(points: Vec<rspice_results_ui::fft::data::FftPoint>, name: &str) -> Vec<String> {
         let mut state = AppState::default();
-        let mut data = crate::analysis::fft::spectrum_fixture(
+        let mut data = rspice_results_ui::fft::spectrum_fixture(
             name,
             &[],
             &[],
@@ -602,7 +602,7 @@ mod tests {
         // rendering fixture must provide both halves even though these tests
         // exercise only the curve-level empty-state diagnostics.
         state.analysis.fft_state.analysis =
-            Some(crate::analysis::fft::data::SpectrumAnalysis::default());
+            Some(rspice_results_ui::fft::data::SpectrumAnalysis::default());
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
@@ -636,12 +636,12 @@ mod tests {
     fn the_legend_names_the_transformed_signal_rather_than_repeating_the_axis() {
         let announced = announced(
             vec![
-                crate::analysis::fft::data::FftPoint {
+                rspice_results_ui::fft::data::FftPoint {
                     frequency: 1.0,
                     magnitude: 1.0,
                     phase: 0.0,
                 },
-                crate::analysis::fft::data::FftPoint {
+                rspice_results_ui::fft::data::FftPoint {
                     frequency: 2.0,
                     magnitude: 0.5,
                     phase: 0.0,
@@ -676,7 +676,7 @@ mod tests {
     fn the_two_degenerate_spectra_are_told_apart() {
         // Every bin sits at zero, so the abscissa has no positive extent.
         let no_span = announced(
-            vec![crate::analysis::fft::data::FftPoint {
+            vec![rspice_results_ui::fft::data::FftPoint {
                 frequency: 0.0,
                 magnitude: 1.0,
                 phase: 0.0,
@@ -695,12 +695,12 @@ mod tests {
         // A real band, with no finite level anywhere in it.
         let no_level = announced(
             vec![
-                crate::analysis::fft::data::FftPoint {
+                rspice_results_ui::fft::data::FftPoint {
                     frequency: 1.0,
                     magnitude: f64::NAN,
                     phase: 0.0,
                 },
-                crate::analysis::fft::data::FftPoint {
+                rspice_results_ui::fft::data::FftPoint {
                     frequency: 2.0,
                     magnitude: f64::NAN,
                     phase: 0.0,

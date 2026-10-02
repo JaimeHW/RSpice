@@ -115,17 +115,17 @@ pub(crate) struct SpecializedViewerCacheAuthority {
 #[derive(Clone, Default)]
 pub struct AnalysisWorkspaceState {
     /// Bode viewer state
-    pub(crate) bode_plot_state: crate::analysis::bode::BodePlotState,
+    pub(crate) bode_plot_state: rspice_results_ui::bode::BodePlotState,
     /// Nyquist viewer state
-    pub(crate) nyquist_state: crate::analysis::nyquist::NyquistState,
+    pub(crate) nyquist_state: rspice_results_ui::nyquist::NyquistState,
     /// Eye diagram viewer state
-    pub(crate) eye_diagram_state: crate::analysis::eye_diagram::EyeDiagramState,
+    pub(crate) eye_diagram_state: rspice_results_ui::eye_diagram::EyeDiagramState,
     /// FFT viewer state
-    pub(crate) fft_state: crate::analysis::fft::FftState,
+    pub(crate) fft_state: rspice_results_ui::fft::FftState,
     /// Smith chart viewer state
-    pub(crate) smith_chart_state: crate::analysis::smith_chart::SmithChartState,
+    pub(crate) smith_chart_state: rspice_results_ui::smith_chart::SmithChartState,
     /// Histogram viewer state
-    pub(crate) histogram_state: crate::analysis::histogram::HistogramState,
+    pub(crate) histogram_state: rspice_results_ui::histogram::HistogramState,
     /// Exact immutable result that owns each mutable viewer cache.
     pub(crate) cache_authority: SpecializedViewerCacheAuthority,
 }
