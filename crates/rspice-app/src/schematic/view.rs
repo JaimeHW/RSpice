@@ -34,7 +34,7 @@ mod stretch_interaction;
 pub(crate) mod violations;
 
 use rspice_schematic_editor::view::{
-    coordinates, design_notes, documentation_shapes, drawing, navigation, net_labels, viewport,
+    coordinates, design_notes, documentation_shapes, drawing, navigation, viewport,
 };
 
 use self::coordinates::viewport_from_camera;

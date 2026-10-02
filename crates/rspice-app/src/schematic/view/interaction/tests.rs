@@ -1546,7 +1546,7 @@ fn net_label_text_bounds_are_a_first_class_pointer_target() {
     crate::ui::Theme::default().apply(&ctx);
     let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
     let viewport = pointer_viewport();
-    let hit = super::super::net_labels::hit_bounds(&ctx, &viewport, &label)
+    let hit = rspice_schematic_editor::view::net_labels::hit_bounds(&ctx, &viewport, &label)
         .expect("visible label")
         .center();
 
