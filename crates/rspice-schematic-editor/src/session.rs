@@ -1,5 +1,6 @@
 //! Interaction state and geometry for per-document schematic editor sessions.
 
+pub mod array;
 pub mod bus;
 pub mod drag;
 pub mod net_highlight;

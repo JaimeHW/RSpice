@@ -1057,10 +1057,8 @@ pub(crate) struct ArraySelectionDialogState {
     pub(crate) count: String,
     pub(crate) naming: String,
     pub(crate) authority: Option<SchematicEditAuthority>,
-    pub(crate) anchor: Option<crate::state::Point>,
-    pub(crate) preview_delta: crate::state::Point,
-    pub(crate) pointer_drag: bool,
-    pub(crate) preview_error: Option<String>,
+    pub(crate) canvas: rspice_schematic_editor::session::array::ArrayCanvasSession,
+    pub(crate) generation: u64,
     pub(crate) preview_cache: Option<ArraySelectionPreviewCache>,
     pub(crate) initial_kind: crate::state::SchematicArrayKind,
     pub(crate) initial_count: String,
@@ -1086,10 +1084,8 @@ impl ArraySelectionDialogState {
             count,
             naming,
             authority: Some(authority),
-            anchor: None,
-            preview_delta: crate::state::Point::origin(),
-            pointer_drag: false,
-            preview_error: None,
+            canvas: Default::default(),
+            generation: self.generation.wrapping_add(1),
             preview_cache: None,
             initial_kind: crate::state::SchematicArrayKind::default(),
             initial_count,
@@ -1103,17 +1099,18 @@ impl ArraySelectionDialogState {
     pub(crate) fn arm(&mut self) {
         self.open = false;
         self.armed = true;
-        self.anchor = None;
-        self.preview_delta = crate::state::Point::origin();
-        self.pointer_drag = false;
-        self.preview_error = None;
+        self.canvas = Default::default();
+        self.generation = self.generation.wrapping_add(1);
         self.preview_cache = None;
         self.dirty = false;
         self.discard_confirm = false;
     }
 
     pub(crate) fn close(&mut self) {
-        *self = Self::default();
+        *self = Self {
+            generation: self.generation.wrapping_add(1),
+            ..Self::default()
+        };
     }
 
     pub(crate) fn mark_edited(&mut self) {

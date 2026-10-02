@@ -252,7 +252,7 @@ impl RSpiceApp {
                         None
                     };
                     self.state.dialogs.array_selection.arm();
-                    self.state.dialogs.array_selection.anchor = radial_center;
+                    self.state.dialogs.array_selection.canvas.anchor = radial_center;
                     self.state.schematic.arm_tool(Tool::ArraySelection);
                     crate::schematic::view::request_schematic_canvas_focus(ctx);
                     self.state.push_user_message(ConsoleMessage::info(

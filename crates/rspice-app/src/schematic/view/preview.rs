@@ -451,9 +451,9 @@ fn draw_array_selection_preview(
     }
     let draft = &state.dialogs.array_selection;
     if draft.kind != SchematicArrayKind::RadialDocumentation
-        && draft.preview_delta == Point::origin()
+        && draft.canvas.preview_delta == Point::origin()
     {
-        if let Some(detail) = draft.preview_error.clone() {
+        if let Some(detail) = draft.canvas.preview_error.clone() {
             draw_transform_feedback(painter, response, false, detail);
         }
         return;
@@ -461,7 +461,7 @@ fn draw_array_selection_preview(
     let placement = match array_placement(state) {
         Ok(placement) => placement,
         Err(message) => {
-            state.dialogs.array_selection.preview_error = Some(message.to_owned());
+            state.dialogs.array_selection.canvas.preview_error = Some(message.to_owned());
             draw_transform_feedback(painter, response, false, message.to_owned());
             return;
         }
@@ -469,7 +469,7 @@ fn draw_array_selection_preview(
     let plan = match crate::workbench::app::armed_array_selection_plan(state, placement) {
         Ok(plan) => plan,
         Err(message) => {
-            state.dialogs.array_selection.preview_error = Some(message.clone());
+            state.dialogs.array_selection.canvas.preview_error = Some(message.clone());
             draw_transform_feedback(painter, response, false, message);
             return;
         }
@@ -504,12 +504,12 @@ fn draw_array_selection_preview(
     let cache = cache.expect("array preview cache was populated");
     let preview = match &cache.preview {
         Ok(preview) => {
-            state.dialogs.array_selection.preview_error = None;
+            state.dialogs.array_selection.canvas.preview_error = None;
             preview
         }
         Err(detail) => {
             let detail = detail.clone();
-            state.dialogs.array_selection.preview_error = Some(detail.clone());
+            state.dialogs.array_selection.canvas.preview_error = Some(detail.clone());
             state.dialogs.array_selection.preview_cache = Some(cache);
             draw_transform_feedback(painter, response, false, detail);
             return;
