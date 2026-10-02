@@ -7,6 +7,7 @@
 //! because a difference across two domains is not a measurement.
 
 use super::*;
+use rspice_results_ui::derived::{DerivedSeries, WindowStats};
 
 /// Height of the cursor readout strip's header row.
 pub(super) const READOUT_HEADER_H: f32 = 26.0;
@@ -1119,7 +1120,7 @@ pub(super) fn trace_interval_statistics(
     trace: &StripTrace,
     window: Option<(f64, f64)>,
     branch: Option<usize>,
-) -> super::super::WindowStats {
+) -> WindowStats {
     use crate::analysis::measurements::{MeasurementError, measure_interval};
 
     if window.is_some_and(|(a, b)| !a.is_finite() || !b.is_finite()) {

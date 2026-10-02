@@ -260,7 +260,7 @@ fn measurement_cache_keeps_only_the_latest_window_per_trace_branch() {
             assert!((stats.mean - expected).abs() < 1e-14);
         }
     }
-    assert_eq!(state.ui.results.derived.stats.len(), 2);
+    assert_eq!(state.ui.results.derived.window_stats_count(), 2);
     let last = state
         .ui
         .results

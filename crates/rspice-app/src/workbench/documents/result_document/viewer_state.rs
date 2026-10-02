@@ -1,6 +1,7 @@
 //! Result viewer interaction state and retained presentation mutations.
 
 use super::*;
+use rspice_results_ui::derived::DerivedSeries;
 
 impl ResultsState {
     /// Return the selection only while it resolves to the exact active

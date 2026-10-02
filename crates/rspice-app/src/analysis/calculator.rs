@@ -9,7 +9,7 @@
 //! - Automatic interpolation for mismatched time bases
 
 pub(crate) use rspice_results::calculator::spice_parser as parser;
-pub(crate) use rspice_results::calculator::{ast, evaluator, functions, value};
+pub(crate) use rspice_results::calculator::{ast, evaluator, value};
 
 use rspice_results::calculator::retained::{
     canonical_ground_value, find_waveform, reject_unbound_dataset,

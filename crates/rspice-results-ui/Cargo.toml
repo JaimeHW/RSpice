@@ -12,7 +12,7 @@ rust-version.workspace = true
 workspace = true
 
 [features]
-# Shared calibrated spectra for viewer and application integration tests.
+# Fixtures and cache observations for viewer and application integration tests.
 test-support = []
 
 [dependencies]
