@@ -107,6 +107,7 @@ pub use rspice_results::soa_evidence::{
 pub use rspice_results::soa_evidence::{SoaViolationEvidence, SoaViolationSeverityEvidence};
 #[cfg(test)]
 pub use rspice_results::soa_source::{SoaSourceHistory, SoaSourceWaveform};
+#[cfg(test)]
 pub use rspice_results::transfer_function::{
     TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
     TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,

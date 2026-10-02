@@ -14,5 +14,6 @@ pub mod nyquist;
 pub mod presentation;
 pub mod smith_chart;
 pub mod strip;
+pub mod transfer_function;
 pub mod waveform;
 pub mod waves;

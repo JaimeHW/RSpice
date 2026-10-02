@@ -154,10 +154,9 @@ pub use simulation::{
     SensitivityResultMode, SensitivityResultRow, SharedWaveformValues, SignOffStanding,
     SimulationCampaignMembership, SimulationRun, SimulationRunIntent, SimulationRunLifecycle,
     SimulationRunProvenance, SimulationState, SoaEvaluationEvidence, SoaParameterEvidence,
-    SoaRuleVerdictEvidence, SpecificationVerdictStatus, TransferFunctionAccuracyEvidence,
-    TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
-    TransferFunctionScalarEvidence, WaveformData, absent_deck_reason, ac_bode_shape_for_analysis,
-    ac_bode_shape_for_selection, ac_bode_summary_for_analysis, ac_bode_summary_for_selection,
+    SoaRuleVerdictEvidence, SpecificationVerdictStatus, WaveformData, absent_deck_reason,
+    ac_bode_shape_for_analysis, ac_bode_shape_for_selection, ac_bode_summary_for_analysis,
+    ac_bode_summary_for_selection,
 };
 #[cfg(test)]
 pub use simulation::{
@@ -165,6 +164,8 @@ pub use simulation::{
     NoiseContributorRow, PeriodicNoiseConversionEvidence, PoleZeroSpectrumCertificate,
     PreparedModelSourceIdentity, PreparedRunReceiptInput, PreparedRunTaskReceipt,
     PreparedSourceCheckReceipt, PreparedSpecificationPolicy, SoaSourceHistory, SoaSourceWaveform,
+    TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
+    TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
 };
 pub use simulation::{ConvergenceReport, PeriodicInitializationMethod};
 pub use simulation::{DcCurveSelection, DcSweepFamily};
