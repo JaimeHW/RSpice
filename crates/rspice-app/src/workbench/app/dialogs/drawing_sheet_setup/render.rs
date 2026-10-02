@@ -1766,7 +1766,7 @@ fn prospective_overflow_count(
     format: Option<crate::state::SchematicSheetFormat>,
 ) -> Option<usize> {
     let format = format?;
-    let current = crate::schematic::view::drawing_sheet::ActiveDrawingSheet::resolve(state);
+    let current = crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet(state);
     let prospective = crate::schematic::view::drawing_sheet::ActiveDrawingSheet {
         geometry: crate::schematic::view::drawing_sheet::DrawingSheetGeometry::from_format(&format),
         format,

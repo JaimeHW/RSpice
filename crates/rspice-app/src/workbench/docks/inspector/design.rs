@@ -19,6 +19,7 @@ use egui::{Color32, RichText, Ui};
 use crate::schematic::view::{
     drawing_sheet::{
         ActiveDrawingSheet, DrawingSheetOverflowSummary, drawing_sheet_overflow_summary,
+        resolve_active_drawing_sheet,
     },
     schematic_symbol_context,
     sheet_visibility::{self, SheetScope},
@@ -960,7 +961,7 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
 }
 
 fn drawing_sheet_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
-    let sheet = ActiveDrawingSheet::resolve(&app.state);
+    let sheet = resolve_active_drawing_sheet(&app.state);
     let symbol_context = schematic_symbol_context(&app.state);
     let overflow = drawing_sheet_overflow_summary(&app.state, &symbol_context, &sheet);
     let source = drawing_sheet_source_label(sheet.format.inheritance);

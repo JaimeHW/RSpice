@@ -85,7 +85,8 @@ pub(crate) fn open_drawing_sheet_setup_for_state(state: &mut AppState) -> bool {
         return false;
     }
     let cell_view_key = state.workspace.content.active_key();
-    let resolved_active = crate::schematic::view::drawing_sheet::ActiveDrawingSheet::resolve(state);
+    let resolved_active =
+        crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet(state);
     let governed = state
         .workspace
         .content
@@ -2015,7 +2016,7 @@ mod tests {
             crate::state::SchematicPageOrientation::Portrait
         );
         assert_eq!(
-            crate::schematic::view::drawing_sheet::ActiveDrawingSheet::resolve(&app.state)
+            crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet(&app.state)
                 .format
                 .orientation,
             crate::state::SchematicPageOrientation::Portrait

@@ -35,12 +35,11 @@ pub(crate) mod violations;
 
 use rspice_schematic_editor::view::geometry::segment_intersects_rect;
 use rspice_schematic_editor::view::{
-    coordinates, design_notes, documentation_shapes, drawing, grid, navigation, net_labels,
-    viewport,
+    coordinates, design_notes, documentation_shapes, drawing, navigation, net_labels, viewport,
 };
 
 use self::coordinates::viewport_from_camera;
-use self::drawing_sheet::ActiveDrawingSheet;
+use self::drawing_sheet::resolve_active_drawing_sheet;
 use self::interaction::handle_tool_interactions;
 use self::keyboard_navigation::handle_keyboard_object_navigation;
 use self::navigation::handle_viewport_navigation;
@@ -680,15 +679,16 @@ pub fn render_schematic_view(
 ) {
     let available = ui.available_rect_before_wrap();
     let mut symbol_context = schematic_symbol_context(state);
-    let drawing_sheet = ActiveDrawingSheet::resolve(state);
+    let drawing_sheet = resolve_active_drawing_sheet(state);
 
     if state.schematic.session.editor.needs_drawing_sheet_fit {
         state.schematic.session.editor.needs_drawing_sheet_fit = false;
         state.schematic.session.editor.needs_fit = false;
-        drawing_sheet.geometry.fit_view(
-            &mut state.schematic,
+        state.schematic.zoom_to_fit_world_rect(
+            drawing_sheet.geometry.paper.as_tuple(),
             available.width() as f64,
             available.height() as f64,
+            drawing_sheet::FIT_SCREEN_INSET,
         );
     } else if state.schematic.session.editor.needs_fit {
         state.schematic.session.editor.needs_fit = false;

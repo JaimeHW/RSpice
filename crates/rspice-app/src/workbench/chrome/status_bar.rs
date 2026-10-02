@@ -526,12 +526,12 @@ fn schematic_cursor_summary(
     grid_y: f64,
 ) -> String {
     let grid = f64::from(state.schematic.document().grid_size.max(1));
-    let sheet = crate::schematic::view::drawing_sheet::ActiveDrawingSheet::resolve(state);
+    let sheet = crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet(state);
     sheet.cursor_status(grid_x * grid, grid_y * grid)
 }
 
 fn empty_schematic_cursor_summary(state: &crate::workbench::app_state::AppState) -> String {
-    let unit = crate::schematic::view::drawing_sheet::ActiveDrawingSheet::resolve(state)
+    let unit = crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet(state)
         .format
         .display_unit;
     format!("x — · y — {}", unit.suffix())

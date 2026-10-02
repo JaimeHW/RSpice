@@ -1324,7 +1324,7 @@ fn terminal_rows_start_at_the_panel_inset_with_no_empty_caret_column() {
 #[test]
 fn drawing_sheet_inspector_uses_resolved_geometry_and_canonical_labels() {
     let state = AppState::default();
-    let sheet = ActiveDrawingSheet::resolve(&state);
+    let sheet = resolve_active_drawing_sheet(&state);
 
     assert_eq!(
         drawing_sheet_source_label(sheet.format.inheritance),

@@ -14,6 +14,7 @@ pub mod violations;
 
 pub mod design_notes;
 pub mod drawing;
+pub mod drawing_sheet;
 pub mod symbol_context;
 
 pub mod keyboard_navigation;
