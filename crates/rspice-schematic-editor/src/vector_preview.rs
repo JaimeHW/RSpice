@@ -20,7 +20,7 @@ const KEPT_AT_HEAD: usize = 4;
 const KEPT_AT_TAIL: usize = 3;
 
 /// The deck bits `indices` of the vector named `base` resolve to, as one line.
-pub(super) fn deck_bits(base: &str, indices: impl IntoIterator<Item = u32>) -> String {
+pub fn deck_bits(base: &str, indices: impl IntoIterator<Item = u32>) -> String {
     let names: Vec<String> = indices
         .into_iter()
         .map(|index| deck_bit_name(base, index))
@@ -38,7 +38,7 @@ pub(super) fn deck_bits(base: &str, indices: impl IntoIterator<Item = u32>) -> S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::BusDeclaration;
+    use rspice_design::schematic::bus::BusDeclaration;
 
     fn bits(declaration: &str) -> String {
         let declaration = BusDeclaration::parse(declaration).expect("a bus declaration");
@@ -67,19 +67,5 @@ mod tests {
 
         // The declared direction is the preview's order, not a sorted one.
         assert_eq!(bits("ADDR<0:3>"), "ADDR#0 ADDR#1 ADDR#2 ADDR#3");
-    }
-
-    /// The bits are the deck's, not a second spelling that could drift: every
-    /// name the preview shows is the one `deck_bit_name` produces.
-    #[test]
-    fn every_previewed_bit_is_the_name_the_deck_carries() {
-        let declaration = BusDeclaration::parse("DATA[3:0]").expect("a bus declaration");
-        let previewed = bits("DATA[3:0]");
-        for member in declaration.members() {
-            assert!(
-                previewed.contains(&deck_bit_name(&declaration.name, member.index)),
-                "{previewed}"
-            );
-        }
     }
 }

@@ -17,9 +17,9 @@ use crate::state::{
 };
 use crate::ui::widgets::{CommandForm, DialogChoice};
 
-use super::vector_preview::deck_bits;
 use crate::workbench::app::{RSpiceApp, schematic_editor_request_source};
 use crate::workbench::app_state::AppState;
+use rspice_schematic_editor::vector_preview::deck_bits;
 
 const TITLE: &str = "Create pins";
 const PRIMARY: &str = "Place";
