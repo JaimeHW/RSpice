@@ -1,5 +1,6 @@
 //! Canvas painting and coordinate conversion.
 
+pub mod context_menu;
 pub mod coordinates;
 pub mod documentation_shapes;
 pub mod geometry;

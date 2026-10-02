@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::schematic::view::schematic_symbol_context;
+use egui::{Context, Key, Modifiers, Rect, Ui, pos2, vec2};
 
 use crate::state::{
     Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, ComponentType, DesignNote,
@@ -201,6 +202,7 @@ fn a_placed_source_gets_the_stimulus_verbs_its_standing_calls_for() {
             assert!(!labels.contains(&master_row), "{labels:?}");
         }
         assert_eq!(separators_in(&entries), 5);
+        assert!(labels.len() <= 16);
         assert!(
             !matches!(entries.first(), Some(ContextEntry::Separator))
                 && !matches!(entries.last(), Some(ContextEntry::Separator))
@@ -268,88 +270,6 @@ fn header_summary_uses_the_selected_instance_identity_and_master() {
 }
 
 #[test]
-fn surface_geometry_matches_desktop_and_touch_contracts() {
-    let catalog = menu_entries(&AppState::default());
-    let desktop =
-        SurfaceGeometry::for_viewport(vec2(1440.0, 900.0), ContextInvocation::Pointer, &catalog);
-    assert_eq!(desktop.width, 286.0);
-    assert_eq!(desktop.max_height, 528.0);
-    assert_eq!(desktop.row_height, 27.0);
-    assert_eq!(desktop.radius, 3);
-    // Sixteen rows and four separators on the mockup's 27 px row measure
-    // 517 px: 47 header + 432 rows + 36 separators + 2 border.
-    assert_eq!(desktop.outer_height(), 517.0);
-    // `outer_height` clamps to `max_height`, so measuring strictly under
-    // the ceiling is the same statement as "no row is below the fold".
-    // A future entry that would turn the menu into a scroller fails here
-    // rather than silently hiding the entries it pushed past the edge.
-    assert!(
-        desktop.outer_height() < desktop.max_height,
-        "the desktop context menu must fit without scrolling"
-    );
-    // The tallest menu there is: a placed source whose standing calls for
-    // three stimulus verbs, at sixteen rows and a fifth separator.
-    for state in [
-        state_with_selected_source(0, true),
-        state_with_selected_source(1, true),
-    ] {
-        let source = SurfaceGeometry::for_viewport(
-            vec2(1440.0, 900.0),
-            ContextInvocation::Pointer,
-            &menu_entries(&state),
-        );
-        assert_eq!(source.outer_height(), 526.0);
-        assert!(
-            source.outer_height() < source.max_height,
-            "a placed source's context menu must fit without scrolling"
-        );
-    }
-
-    let touch =
-        SurfaceGeometry::for_viewport(vec2(390.0, 844.0), ContextInvocation::TouchSheet, &catalog);
-    assert_eq!(touch.width, 374.0);
-    assert_eq!(touch.max_height, 560.0);
-    assert_eq!(touch.row_height, 44.0);
-    assert_eq!(touch.radius, 7);
-    assert_eq!(touch.outer_height(), 560.0);
-
-    let short_touch =
-        SurfaceGeometry::for_viewport(vec2(1024.0, 500.0), ContextInvocation::TouchSheet, &catalog);
-    assert_eq!(short_touch.width, 420.0);
-    assert_eq!(short_touch.max_height, 350.0);
-    assert_eq!(short_touch.outer_height(), 350.0);
-}
-
-#[test]
-fn desktop_origin_and_keyboard_anchor_match_the_mockup_contract() {
-    let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0));
-    let desktop = SurfaceGeometry::for_viewport(
-        screen.size(),
-        ContextInvocation::Pointer,
-        &menu_entries(&AppState::default()),
-    );
-
-    assert_eq!(
-        clamp_desktop_surface_origin(screen, pos2(-20.0, -10.0), desktop),
-        pos2(6.0, 6.0)
-    );
-    // A click near the bottom edge lifts the whole 517 px surface so it
-    // hangs off neither the right edge nor the bottom: 600 - 517 - 6.
-    assert_eq!(
-        clamp_desktop_surface_origin(screen, pos2(790.0, 590.0), desktop),
-        pos2(508.0, 77.0)
-    );
-    assert_eq!(
-        keyboard_surface_anchor(Rect::from_min_size(pos2(100.0, 200.0), vec2(1000.0, 500.0),)),
-        pos2(124.0, 224.0)
-    );
-    assert_eq!(
-        keyboard_surface_anchor(Rect::from_min_size(pos2(100.0, 200.0), vec2(20.0, 10.0),)),
-        pos2(110.0, 205.0)
-    );
-}
-
-#[test]
 fn focused_keyboard_context_row_activates_with_enter_or_space() {
     for key in [Key::Enter, Key::Space] {
         let ctx = Context::default();
@@ -372,14 +292,14 @@ fn focused_keyboard_context_row_activates_with_enter_or_space() {
 
         let _ = ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                render_context_contents(ui, &mut state, &symbol_context, DESKTOP_ROW_HEIGHT, true);
+                render_context_contents(ui, &mut state, &symbol_context, 27.0, true);
             });
         });
 
         let mut key_still_available = true;
         let _ = ctx.run_ui(context_key_input(key), |root| {
             egui::CentralPanel::default().show(root, |ui| {
-                render_context_contents(ui, &mut state, &symbol_context, DESKTOP_ROW_HEIGHT, false);
+                render_context_contents(ui, &mut state, &symbol_context, 27.0, false);
                 key_still_available = ui
                     .ctx()
                     .input_mut(|input| input.consume_key(Modifiers::NONE, key));
@@ -395,39 +315,6 @@ fn focused_keyboard_context_row_activates_with_enter_or_space() {
             "{key:?} should be owned by the focused context-menu row"
         );
     }
-}
-
-#[test]
-fn context_shadow_matches_dark_and_light_mockup_tokens() {
-    let dark = Tokens::new(
-        tokens::Direction::Instrument,
-        tokens::Mode::Dark,
-        tokens::Density::default(),
-    );
-    let light = Tokens::new(
-        tokens::Direction::Instrument,
-        tokens::Mode::Light,
-        tokens::Density::default(),
-    );
-
-    assert_eq!(
-        context_shadow(&dark),
-        Shadow {
-            offset: [0, 16],
-            blur: 40,
-            spread: 0,
-            color: Color32::from_rgba_premultiplied(0, 0, 0, 97),
-        }
-    );
-    assert_eq!(
-        context_shadow(&light),
-        Shadow {
-            offset: [0, 16],
-            blur: 40,
-            spread: 0,
-            color: Color32::from_rgba_premultiplied(9, 10, 11, 56),
-        }
-    );
 }
 
 #[test]
@@ -565,20 +452,13 @@ fn net_label_context_exposes_the_complete_object_lifecycle() {
     assert!(action_availability(ContextAction::Delete, &state).0);
     assert!(selection_summary(&state, ContextTarget::Canvas).contains("net label · afe_out"));
 
-    let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
     let symbol_context = schematic_symbol_context(&state);
-    let _ = ctx.run_ui(Default::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            execute_context_action(
-                ContextAction::Properties,
-                ui,
-                &mut state,
-                label.pos,
-                &symbol_context,
-            );
-        });
-    });
+    execute_context_action(
+        ContextAction::Properties,
+        &mut state,
+        label.pos,
+        &symbol_context,
+    );
     assert!(state.dialogs.object_properties.open);
     assert!(!state.dialogs.rename_selection.open);
     assert!(matches!(
@@ -620,20 +500,13 @@ fn design_note_context_exposes_only_compatible_object_lifecycle_actions() {
     assert!(summary.contains("Review note"));
     assert!(summary.contains("Review bias path"));
 
-    let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
     let symbol_context = schematic_symbol_context(&state);
-    let _ = ctx.run_ui(Default::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            execute_context_action(
-                ContextAction::Properties,
-                ui,
-                &mut state,
-                note.pos,
-                &symbol_context,
-            );
-        });
-    });
+    execute_context_action(
+        ContextAction::Properties,
+        &mut state,
+        note.pos,
+        &symbol_context,
+    );
     assert!(matches!(
         state.dialogs.object_properties.draft,
         Some(crate::workbench::app::ObjectPropertiesDraft::DesignNote(ref draft))
@@ -673,20 +546,13 @@ fn documentation_shape_context_exposes_the_complete_non_electrical_lifecycle() {
     assert!(!action_availability(ContextAction::Mirror, &state).0);
     assert!(selection_summary(&state, ContextTarget::Canvas).contains("Callout"));
 
-    let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
     let symbol_context = schematic_symbol_context(&state);
-    let _ = ctx.run_ui(Default::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            execute_context_action(
-                ContextAction::Properties,
-                ui,
-                &mut state,
-                Point::new(30, 20),
-                &symbol_context,
-            );
-        });
-    });
+    execute_context_action(
+        ContextAction::Properties,
+        &mut state,
+        Point::new(30, 20),
+        &symbol_context,
+    );
     assert!(matches!(
         state.dialogs.object_properties.draft,
         Some(crate::workbench::app::ObjectPropertiesDraft::DocumentationShape(ref draft))
@@ -815,20 +681,13 @@ fn the_interface_repair_row_is_offered_and_runs_only_for_a_stale_instance() {
 
     assert!(action_availability(ContextAction::UpdateInstanceInterface, &state).0);
 
-    let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
     let symbol_context = schematic_symbol_context(&state);
-    let _ = ctx.run_ui(Default::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            execute_context_action(
-                ContextAction::UpdateInstanceInterface,
-                ui,
-                &mut state,
-                Point::origin(),
-                &symbol_context,
-            );
-        });
-    });
+    execute_context_action(
+        ContextAction::UpdateInstanceInterface,
+        &mut state,
+        Point::origin(),
+        &symbol_context,
+    );
 
     assert_eq!(
         state.schematic.document().components[0]
@@ -888,20 +747,13 @@ fn the_replace_instance_row_is_offered_and_runs_only_for_one_replaceable_instanc
         .editor
         .selection
         .select_only_component(first);
-    let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
     let symbol_context = schematic_symbol_context(&state);
-    let _ = ctx.run_ui(Default::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            execute_context_action(
-                ContextAction::ReplaceInstance,
-                ui,
-                &mut state,
-                Point::origin(),
-                &symbol_context,
-            );
-        });
-    });
+    execute_context_action(
+        ContextAction::ReplaceInstance,
+        &mut state,
+        Point::origin(),
+        &symbol_context,
+    );
 
     assert!(state.dialogs.replace_instance.open);
     assert_eq!(state.dialogs.replace_instance.source_component_id, first);
@@ -1031,4 +883,97 @@ fn operating_point_hop_selects_the_operating_point_analysis() {
         "the hop must select the result its viewer can render"
     );
     assert_eq!(state.ui.results.op_filter, "M1");
+}
+
+fn render_context_contents(
+    ui: &mut Ui,
+    state: &mut AppState,
+    symbol_context: &SchematicSymbolContext,
+    row_height: f32,
+    focus_first: bool,
+) {
+    let view = context_menu_view(state, ui.ctx()).expect("context target");
+    if let Some(request) =
+        context_surface::render_context_contents(ui, &view, row_height, focus_first)
+    {
+        apply_context_request(state, request, symbol_context);
+    }
+}
+
+#[test]
+fn context_requests_recheck_the_opening_selection_source_and_authority() {
+    for change in [
+        "source",
+        "selection",
+        "target",
+        "tool",
+        "read-only",
+        "modal",
+        "none",
+    ] {
+        let mut state = AppState::default();
+        state.schematic.document_mut_for_test().components.clear();
+        for id in [7, 8] {
+            state
+                .schematic
+                .document_mut_for_test()
+                .components
+                .push(Component::new(
+                    id,
+                    ComponentType::Resistor,
+                    Point::new(id as i32 * 10, 0),
+                ));
+        }
+        state.schematic.init_undo_history();
+        state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(7);
+        state.dialogs.interaction.context_target = Some((ContextTarget::Component(7), (70, 0)));
+        let request = ContextMenuRequest {
+            binding: context_menu_binding(&state).unwrap(),
+            action: ContextAction::Delete,
+        };
+        match change {
+            "source" => state.bump_active_schematic_epoch(),
+            "selection" => state
+                .schematic
+                .session
+                .editor
+                .selection
+                .select_only_component(8),
+            "target" => {
+                state.dialogs.interaction.context_target =
+                    Some((ContextTarget::Component(8), (80, 0)))
+            }
+            "tool" => state.schematic.session.editor.tool = Tool::Wire,
+            "read-only" => state.schematic.session.read_only = true,
+            "modal" => state.dialogs.preferences_open = true,
+            "none" => {}
+            _ => unreachable!(),
+        }
+        let before = state.schematic.document().clone();
+        let selection = state.schematic.session.editor.selection.clone();
+        let symbol_context = schematic_symbol_context(&state);
+        apply_context_request(&mut state, request, &symbol_context);
+        if change == "none" {
+            assert_eq!(state.schematic.document().components.len(), 1);
+            assert_eq!(state.schematic.document().components[0].id, 8);
+            assert!(state.schematic.undo());
+            assert_eq!(state.schematic.document().components, before.components);
+        } else {
+            assert_eq!(
+                state.schematic.document().components,
+                before.components,
+                "{change}"
+            );
+            assert_eq!(
+                state.schematic.session.editor.selection, selection,
+                "{change}"
+            );
+            assert!(!state.schematic.can_undo(), "{change}");
+        }
+    }
 }

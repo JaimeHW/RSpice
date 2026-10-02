@@ -46,16 +46,7 @@ pub struct InteractionState {
     pub(crate) schematic_keyboard_focus: Option<SchematicKeyboardFocus>,
 }
 
-/// What sits under a canvas right-click.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ContextTarget {
-    /// A component instance (by id).
-    Component(u64),
-    /// A wire segment (by id).
-    Wire(u64),
-    /// Empty canvas.
-    Canvas,
-}
+pub use rspice_schematic_editor::view::context_menu::ContextTarget;
 
 impl InteractionState {
     /// Clear all transient state
