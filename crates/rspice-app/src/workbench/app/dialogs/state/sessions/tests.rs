@@ -70,7 +70,9 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
     assert_blocks_shortcuts(|dialogs| {
         dialogs
             .design_note
-            .open(0, 0, 0, "user/top/schematic".to_owned());
+            .open(crate::workbench::app::schematic_editor_request_source(
+                &crate::workbench::app_state::AppState::default(),
+            ));
     });
     assert_blocks_shortcuts(|dialogs| {
         dialogs.documentation_shape.open(

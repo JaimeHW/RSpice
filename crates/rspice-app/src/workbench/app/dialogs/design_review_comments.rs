@@ -276,13 +276,8 @@ impl RSpiceApp {
             }
             ReviewAction::NewComment => {
                 self.state.dialogs.design_review_comments.close();
-                let view_path = self.state.workspace.content.active_view.display_path();
-                self.state.dialogs.design_note.open(
-                    self.state.design_execution_epoch,
-                    self.state.active_schematic_epoch,
-                    self.state.schematic.topology_version(),
-                    view_path,
-                );
+                let source = crate::workbench::app::schematic_editor_request_source(&self.state);
+                self.state.dialogs.design_note.open(source);
                 self.state.dialogs.design_note.kind = DesignNoteKind::ReviewNote;
                 self.state.dialogs.design_note.text = "Review comment".to_owned();
                 self.state.dialogs.design_note.dirty = false;

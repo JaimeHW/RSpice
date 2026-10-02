@@ -795,30 +795,18 @@ pub(crate) struct DesignNoteDialogState {
     pub(crate) open: bool,
     pub(crate) kind: crate::state::DesignNoteKind,
     pub(crate) text: String,
-    pub(crate) design_execution_epoch: u64,
-    pub(crate) active_schematic_epoch: u64,
-    pub(crate) topology_version: u64,
-    pub(crate) view_path: String,
+    pub(crate) source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
     pub(crate) dirty: bool,
     pub(crate) discard_confirm: bool,
 }
 
 impl DesignNoteDialogState {
-    pub(crate) fn open(
-        &mut self,
-        design_execution_epoch: u64,
-        active_schematic_epoch: u64,
-        topology_version: u64,
-        view_path: String,
-    ) {
+    pub(crate) fn open(&mut self, source: rspice_schematic_editor::requests::EditorRequestSource) {
         *self = Self {
             open: true,
             kind: crate::state::DesignNoteKind::PlainText,
             text: "Bias network".to_owned(),
-            design_execution_epoch,
-            active_schematic_epoch,
-            topology_version,
-            view_path,
+            source: Some(source),
             dirty: false,
             discard_confirm: false,
         };

@@ -522,13 +522,9 @@ fn place_pending_design_note(state: &mut AppState, grid_pos: Point) {
         return;
     };
     let authority_matches = pending
-        .document_authority
+        .source
         .as_ref()
-        .is_some_and(|authority| {
-            authority.design_execution_epoch == state.design_execution_epoch
-                && authority.active_schematic_epoch == state.active_schematic_epoch
-                && authority.view_path == state.workspace.content.active_view.display_path()
-        });
+        .is_some_and(|source| *source == super::requests::editor_request_source(state));
     if state.schematic_edit_read_only() || !authority_matches {
         state.push_user_message(ConsoleMessage::warning(
             "Design note was not placed: the active schematic authority changed; reopen Place text or note."

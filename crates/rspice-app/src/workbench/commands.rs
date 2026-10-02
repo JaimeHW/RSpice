@@ -1491,16 +1491,8 @@ impl Command {
             }
             Self::PlaceText => {
                 activate_workspace(app, Workspace::Design);
-                let design_execution_epoch = app.state.design_execution_epoch;
-                let active_schematic_epoch = app.state.active_schematic_epoch;
-                let topology_version = app.state.schematic.topology_version();
-                let view_path = app.state.workspace.content.active_view.display_path();
-                app.state.dialogs.design_note.open(
-                    design_execution_epoch,
-                    active_schematic_epoch,
-                    topology_version,
-                    view_path,
-                );
+                let source = crate::workbench::app::schematic_editor_request_source(&app.state);
+                app.state.dialogs.design_note.open(source);
             }
             Self::PlaceShape => {
                 activate_workspace(app, Workspace::Design);

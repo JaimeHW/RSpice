@@ -1,13 +1,14 @@
 //! Armed design-note placement data and its expected document identity.
 
+use crate::requests::EditorRequestSource;
+
 use rspice_design::schematic::design_note::{
     DesignNote, DesignNoteError, DesignNoteKind, DesignNoteLayer, normalize_design_note_text,
     validate_kind_text,
 };
 
 /// Frozen, validated one-shot placement payload. The UI also binds the
-/// application epochs and active cell/view so a delayed click cannot mutate a
-/// different document.
+/// canonical source so a delayed click cannot mutate a different document or occurrence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingDesignNotePlacement {
     pub kind: DesignNoteKind,
@@ -18,14 +19,7 @@ pub struct PendingDesignNotePlacement {
     /// Topology versioning deliberately ignores notes, so this closes the
     /// concurrent note-edit gap without treating documentation as electrical.
     pub expected_design_notes: Vec<DesignNote>,
-    pub document_authority: Option<DesignNotePlacementAuthority>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DesignNotePlacementAuthority {
-    pub design_execution_epoch: u64,
-    pub active_schematic_epoch: u64,
-    pub view_path: String,
+    pub source: Option<EditorRequestSource>,
 }
 
 impl PendingDesignNotePlacement {
@@ -43,21 +37,12 @@ impl PendingDesignNotePlacement {
             layer: DesignNoteLayer::DrawingAnnotation,
             topology_version,
             expected_design_notes: expected_design_notes.to_vec(),
-            document_authority: None,
+            source: None,
         })
     }
 
-    pub fn with_document_authority(
-        mut self,
-        design_execution_epoch: u64,
-        active_schematic_epoch: u64,
-        view_path: String,
-    ) -> Self {
-        self.document_authority = Some(DesignNotePlacementAuthority {
-            design_execution_epoch,
-            active_schematic_epoch,
-            view_path,
-        });
+    pub fn with_source(mut self, source: EditorRequestSource) -> Self {
+        self.source = Some(source);
         self
     }
 }

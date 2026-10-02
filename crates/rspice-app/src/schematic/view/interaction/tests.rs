@@ -901,11 +901,7 @@ fn validated_design_note_contract_places_once_without_changing_topology() {
         &state.schematic.document().design_notes,
     )
     .unwrap()
-    .with_document_authority(
-        state.design_execution_epoch,
-        state.active_schematic_epoch,
-        state.workspace.content.active_view.display_path(),
-    );
+    .with_source(super::super::requests::editor_request_source(&state));
     let topology = state.schematic.topology_version();
     state.schematic.session.editor.pending_design_note = Some(pending);
     state.schematic.session.editor.tool = Tool::DesignNote;
@@ -1367,29 +1363,110 @@ fn focused_keyboard_cursor_places_exact_grid_resolved_shape_points() {
 
 #[test]
 fn stale_design_note_authority_is_consumed_without_document_mutation() {
-    let mut state = AppState::default();
-    let pending = PendingDesignNotePlacement::new(
-        DesignNoteKind::ReviewNote,
-        "Review bias path",
-        state.schematic.topology_version(),
-        &state.schematic.document().design_notes,
-    )
-    .unwrap()
-    .with_document_authority(
-        state.design_execution_epoch,
-        state.active_schematic_epoch,
-        state.workspace.content.active_view.display_path(),
-    );
-    state.schematic.session.editor.pending_design_note = Some(pending);
-    state.schematic.session.editor.tool = Tool::DesignNote;
-    state.active_schematic_epoch = state.active_schematic_epoch.wrapping_add(1);
+    for change in [
+        "document",
+        "occurrence",
+        "sheet",
+        "content",
+        "read-only",
+        "safe-mode",
+    ] {
+        let mut state = AppState::default();
+        let master = crate::state::CellViewRef::new("work", "note_child", "schematic");
+        state
+            .workspace
+            .descend_into("X1".to_owned(), master.clone(), ViewType::Schematic);
+        let first = state
+            .workspace
+            .content
+            .design_management
+            .bootstrap_for_cell_view(&master.key(), "Sheet 1", [])
+            .unwrap();
+        let source = super::super::requests::editor_request_source(&state);
+        let pending = PendingDesignNotePlacement::new(
+            DesignNoteKind::ReviewNote,
+            "Review bias path",
+            state.schematic.topology_version(),
+            &state.schematic.document().design_notes,
+        )
+        .unwrap()
+        .with_source(source.clone());
+        state.schematic.session.editor.pending_design_note = Some(pending);
+        state.schematic.session.editor.tool = Tool::DesignNote;
+        match change {
+            "document" => state.active_schematic_epoch += 1,
+            "occurrence" => {
+                state.workspace.ascend_one().unwrap();
+                state
+                    .workspace
+                    .descend_into("X2".to_owned(), master, ViewType::Schematic);
+            }
+            "sheet" => {
+                let catalog = state
+                    .workspace
+                    .content
+                    .design_management
+                    .sheet_catalog_mut(&master.key())
+                    .unwrap();
+                let second = catalog
+                    .create_sheet(
+                        SheetDefinition {
+                            name: "Sheet 2".to_owned(),
+                            template: SheetTemplate::AnalogSchematic,
+                            port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                            explicit_page_number: Some(2),
+                        },
+                        Some(first),
+                    )
+                    .unwrap();
+                catalog.set_active(second).unwrap();
+            }
+            "content" => {
+                let topology = state.schematic.topology_version();
+                let shape = PendingDocumentationShapePlacement::new(
+                    DocumentationShapeKind::Line,
+                    topology,
+                    &[],
+                );
+                state
+                    .schematic
+                    .commit_documentation_shape(
+                        shape,
+                        crate::state::DocumentationShapeGeometry::Line {
+                            start: Point::origin(),
+                            end: Point::new(10, 10),
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(state.schematic.topology_version(), topology);
+                assert_ne!(state.schematic.content_version(), source.content_version);
+                state.schematic.init_undo_history();
+            }
+            "read-only" => state.schematic.session.read_only = true,
+            "safe-mode" => state.workbench.safe_mode.activate(
+                crate::workbench::state::LocalSafeModeOptions {
+                    open_project_read_only: true,
+                    ..Default::default()
+                },
+                "note gesture test".to_owned(),
+            ),
+            _ => unreachable!(),
+        }
+        let content = state.schematic.content_version();
+        let shapes = state.schematic.document().documentation_shapes.clone();
 
-    place_pending_design_note(&mut state, Point::new(20, 30));
+        place_pending_design_note(&mut state, Point::new(20, 30));
 
-    assert!(state.schematic.document().design_notes.is_empty());
-    assert!(state.schematic.session.editor.pending_design_note.is_none());
-    assert_eq!(state.schematic.session.editor.tool, Tool::Select);
-    assert!(!state.schematic.can_undo());
+        assert!(
+            state.schematic.document().design_notes.is_empty(),
+            "{change}"
+        );
+        assert_eq!(state.schematic.content_version(), content);
+        assert_eq!(state.schematic.document().documentation_shapes, shapes);
+        assert!(state.schematic.session.editor.pending_design_note.is_none());
+        assert_eq!(state.schematic.session.editor.tool, Tool::Select);
+        assert!(!state.schematic.can_undo());
+    }
 }
 
 #[test]
