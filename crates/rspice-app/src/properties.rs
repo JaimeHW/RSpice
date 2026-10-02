@@ -8,11 +8,9 @@
 //! - `tabbed_dialog` - The schema-driven schematic component editor
 //! - `model_browser` - Model library browser
 //! - `property_bridge` - Bidirectional property synchronization
-//! - `pwl_editor` - Piecewise-linear waveform editor
 
 pub(crate) mod model_browser;
 pub(crate) mod property_bridge;
-pub(crate) mod pwl_editor;
 mod schema;
 pub(crate) mod source_preview;
 pub use schema::PropertyEditorSchema;

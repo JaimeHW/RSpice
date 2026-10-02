@@ -430,13 +430,13 @@ fn parameters_contents(
             if component_type.is_pwl_source() {
                 ui.add_space(12.0);
                 property_group_heading(ui, "Piecewise-linear waveform");
-                let pwl_result = crate::properties::pwl_editor::render_pwl_editor(
+                let pwl_result = rspice_schematic_editor::pwl_editor::render_pwl_editor(
                     ui,
                     &mut state.pwl_editor,
                     quantity_policy,
                     number_locale,
                 );
-                if pwl_result == crate::properties::pwl_editor::PwlEditorResult::Modified {
+                if pwl_result == rspice_schematic_editor::pwl_editor::PwlEditorResult::Modified {
                     state.pwl_editor.is_modified = true;
                     state.set_value(
                         "pwl_data",

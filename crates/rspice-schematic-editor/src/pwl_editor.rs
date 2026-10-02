@@ -1,7 +1,6 @@
 //! PWL (Piecewise Linear) Editor Module
 //!
-//! Commercial-grade graphical editor for PWL time-value pairs.
-//! Matches Cadence Spectre's PWL source editing capabilities.
+//! Retained point drafts and table controls shared by source-property surfaces.
 
 mod data;
 mod render;

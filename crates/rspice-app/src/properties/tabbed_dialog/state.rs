@@ -4,12 +4,12 @@
 //! authority snapshot required to publish one isolated component mutation.
 
 use crate::properties::model_browser::ModelBrowserState;
-use crate::properties::pwl_editor::PwlEditorState;
 use crate::quantity::{QuantityPresentationPolicy, UiNumberLocale};
 use crate::state::property_types::{
     PropertyDefinition, PropertySheet, PropertyType, PropertyValue,
 };
 use crate::state::{Component, ComponentType};
+use rspice_schematic_editor::pwl_editor::PwlEditorState;
 use rspice_schematic_editor::requests::EditorRequestSource;
 use std::collections::{HashMap, HashSet};
 

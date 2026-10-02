@@ -1,6 +1,6 @@
 //! PWL editor state.
 
-use crate::quantity::parse_engineering_value;
+use rspice_app_types::quantity::parse_engineering_value;
 use std::fmt;
 
 use super::data::{PwlData, PwlPoint, PwlValidationError, format_spice_number_lossless};

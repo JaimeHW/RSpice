@@ -11,5 +11,5 @@ pub(crate) use rspice_app_types::quantity::engineering;
 pub use rspice_app_types::quantity::{
     AngleDisplay, EngineeringPrecision, LayoutDatabaseUnit, QuantityInputKind,
     QuantityPresentationPolicy, UiNumberLocale, UnitsPreferences, format_engineering_value,
-    format_engineering_value_with, parse_engineering_value, parse_ui_quantity,
+    parse_engineering_value, parse_ui_quantity,
 };

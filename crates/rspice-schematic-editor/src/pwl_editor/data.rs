@@ -4,7 +4,7 @@
 //! increasing, so the point list enforces ordering rather than leaving a
 //! non-monotonic source to be rejected by the engine.
 
-use crate::quantity::{EngineeringPrecision, parse_engineering_value};
+use rspice_app_types::quantity::{EngineeringPrecision, parse_engineering_value};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -247,7 +247,6 @@ impl PwlData {
     }
 
     /// Check if empty.
-    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.points.is_empty()
     }
@@ -316,7 +315,7 @@ impl PwlData {
 /// was typed. This text is read, never written: the deck takes the digits
 /// [`format_spice_number_lossless`] produces.
 pub(super) fn format_engineering_summary(value: f64) -> String {
-    crate::quantity::format_engineering_value_with(value, EngineeringPrecision::UpTo(6))
+    rspice_app_types::quantity::format_engineering_value_with(value, EngineeringPrecision::UpTo(6))
 }
 
 /// Format one finite SPICE number without losing any `f64` information.

@@ -9,6 +9,7 @@ pub mod net_label_placement;
 pub mod object_properties;
 pub mod pin_placement;
 pub mod port_overlay;
+pub mod pwl_editor;
 pub mod selection_forms;
 pub mod session;
 pub mod source_labels;

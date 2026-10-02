@@ -16,13 +16,13 @@
 
 use egui::{Rect, Ui};
 
-use crate::properties::pwl_editor::PwlData;
 use crate::state::stimulus_library::definition::StimulusKind;
 use crate::state::{PropertySheet, format_engineering_display};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::state::read_field;
 use crate::workbench::{AppState, MessageId};
+use rspice_schematic_editor::pwl_editor::PwlData;
 
 use super::super::super::design_system::{
     WorkbenchIcon, labeled_icon_button_sized, property_row_height, property_row_input_with_hint,
