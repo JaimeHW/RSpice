@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 pub mod navigation;
+pub mod pane;
 mod policy;
 mod projection;
 pub mod readout;

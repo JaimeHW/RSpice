@@ -7,9 +7,11 @@ mod locale;
 pub(crate) use rspice_simulation_contract::spice_value;
 
 pub use locale::platform_number_locale;
+#[cfg(test)]
+pub use rspice_app_types::quantity::AngleDisplay;
 pub(crate) use rspice_app_types::quantity::engineering;
 pub use rspice_app_types::quantity::{
-    AngleDisplay, EngineeringPrecision, LayoutDatabaseUnit, QuantityInputKind,
-    QuantityPresentationPolicy, UiNumberLocale, UnitsPreferences, format_engineering_value,
-    parse_engineering_value, parse_ui_quantity,
+    EngineeringPrecision, LayoutDatabaseUnit, QuantityInputKind, QuantityPresentationPolicy,
+    UiNumberLocale, UnitsPreferences, format_engineering_value, parse_engineering_value,
+    parse_ui_quantity,
 };

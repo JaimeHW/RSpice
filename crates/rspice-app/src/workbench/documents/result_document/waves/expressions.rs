@@ -394,19 +394,7 @@ pub(super) fn expression_version(
         }
 }
 
-/// One expression trace resolved for plotting.
-pub(super) struct ResolvedExpr {
-    pub(super) x: SharedWaveformValues,
-    pub(super) y: SharedWaveformValues,
-    /// What the expression's abscissa is, on the same terms as a waveform
-    /// trace's: an expression over a reverse sweep is still a reverse sweep.
-    pub(super) shape: Arc<SweepShape>,
-    pub(super) color: egui::Color32,
-    pub(super) cache_key: u64,
-    pub(super) label: String,
-    pub(super) y_extremes: Option<(f64, f64)>,
-    pub(super) family_style: Option<FamilyTraceStyle>,
-}
+pub(super) use rspice_results_ui::waves::pane::ResolvedExpr;
 
 /// Refresh the expression cache for a strip at the current data version and
 /// hand back plottable series (visible expressions, successful evaluations).

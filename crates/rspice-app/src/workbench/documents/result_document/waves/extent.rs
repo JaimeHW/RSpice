@@ -68,15 +68,7 @@ fn x_range(model: &StripModel) -> Option<(f64, f64)> {
     }
 }
 
-#[derive(Debug)]
-pub(super) struct FamilyEnvelopeSeries {
-    pub(super) x: Vec<f64>,
-    pub(super) minimum: Vec<f64>,
-    pub(super) maximum: Vec<f64>,
-    pub(super) color: egui::Color32,
-    pub(super) minimum_cache_key: u64,
-    pub(super) maximum_cache_key: u64,
-}
+pub(super) use rspice_results_ui::waves::pane::FamilyEnvelopeSeries;
 
 /// One pane's family envelopes.
 #[derive(Debug)]

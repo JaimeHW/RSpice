@@ -7,12 +7,13 @@
 //! because a difference across two domains is not a measurement.
 
 use super::*;
-pub(super) use rspice_results_ui::waves::readout::{
-    MAX_READOUT_BRANCHES, READOUT_PAD_X, READOUT_ROW_H, branch_tag, readout_rows, x_separation,
-};
 #[cfg(test)]
 pub(super) use rspice_results_ui::waves::readout::{
-    READOUT_ABSENT, ReadoutRow, measurement_values, readout_branch_note, trace_interval_statistics,
+    MAX_READOUT_BRANCHES, READOUT_ABSENT, ReadoutRow, measurement_values, readout_branch_note,
+    trace_interval_statistics,
+};
+pub(super) use rspice_results_ui::waves::readout::{
+    READOUT_PAD_X, READOUT_ROW_H, readout_rows, x_separation,
 };
 
 /// Height of the cursor readout strip's header row.

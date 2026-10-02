@@ -14,9 +14,11 @@ use rspice_results_ui::derived::DerivedSeries;
 use rspice_results_ui::presentation::well_hint;
 use rspice_results_ui::waves::cursor_interpolation;
 use rspice_results_ui::waves::navigation::{
-    self, WAVE_SHARED_RIGHT_MARGIN, WAVE_SHARED_X_HEIGHT, model_x_axis,
-    shared_axis_viewport_fraction,
+    self, WAVE_SHARED_X_HEIGHT, shared_axis_viewport_fraction,
 };
+use rspice_results_ui::waves::pane::{self as pane_view, pane_auto_y};
+#[cfg(test)]
+use rspice_results_ui::waves::pane::{apply_family_trace_style, nearest_drawn_trace};
 use rspice_results_ui::waves::{
     CursorDomain, NOISE_DENSITY_UNIT, StripTrace, TraceKind, anchor_key, family_color, fmt_in_unit,
     stable_hash, trace_key,
@@ -41,27 +43,29 @@ pub(crate) use readout::*;
 pub(crate) use viewport::*;
 
 use std::collections::{HashMap, HashSet};
+#[cfg(test)]
 use std::sync::Arc;
 
 use egui::Ui;
 
 use crate::analysis::calculator;
 use crate::schematic::bus_notations;
-use crate::state::{AnalysisResult, AnalysisType, SharedWaveformValues, SimulationState};
+use crate::state::{AnalysisResult, AnalysisType, SimulationState};
 use crate::ui::icons::Icon;
-use crate::ui::plot::sample::{
-    BranchSample, SweepShape, sample_at_with_shape, sample_branches_into,
-};
+#[cfg(test)]
+use crate::ui::plot::Trace;
+use crate::ui::plot::sample::{SweepShape, sample_at_with_shape};
 use crate::ui::plot::{
-    self, Axis, CursorPair, DisplayDecimation, MAX_AXIS_TICKS, PlotSpec, SampleInterpolation,
-    Trace, XScale, fmt_si_significant,
+    self, CursorPair, DisplayDecimation, SampleInterpolation, XScale, fmt_si_significant,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{IconButton, chip};
 use crate::workbench::AppState;
 use crate::workbench::{ComplexNumberDisplay, LargeDatasetDisplay};
-use rspice_results::family_projection::{FamilyTraceStyle, SourceSampleSelection};
+use rspice_results::family_projection::SourceSampleSelection;
+#[cfg(test)]
+use rspice_results_ui::waves::navigation::model_x_axis;
 
 use super::frame_work::{self, FrameSampleRead};
 use super::{
@@ -120,26 +124,6 @@ fn apply_waveform_visibility(
                     .is_none_or(|key| !hidden_family_traces.contains(&key));
         }
     }
-}
-
-fn apply_family_trace_style<'a>(
-    mut trace: Trace<'a>,
-    style: Option<FamilyTraceStyle>,
-) -> Trace<'a> {
-    let Some(style) = style else {
-        return trace;
-    };
-    trace = trace.show_single_point();
-    if let Some(ordinal) = style.dash_ordinal {
-        trace = trace.dash_style(ordinal);
-    }
-    if let Some(ordinal) = style.marker_ordinal {
-        trace = trace.marker_style(ordinal);
-    }
-    if let Some(width) = style.width_points {
-        trace = trace.width(width);
-    }
-    trace
 }
 
 /// Project the host-selected retained sources into the shared waveform model.
@@ -1694,43 +1678,6 @@ fn show_strip_plot(
     );
 }
 
-/// The Y interval a pane fits itself to when the reader has not pinned one.
-///
-/// Everything the pane draws widens it: the traces, whatever expressions the
-/// strip carries, and the specification limits — a bound drawn off the top of
-/// the axis is a bound the reader cannot check against.
-fn pane_auto_y(
-    pane_range: Option<(f64, f64)>,
-    exprs: &[ResolvedExpr],
-    limits: &[plot::LimitLine],
-) -> Option<(f64, f64)> {
-    let mut lo = f64::INFINITY;
-    let mut hi = f64::NEG_INFINITY;
-    if let Some((a, b)) = pane_range {
-        lo = a;
-        hi = b;
-    }
-    for expr in exprs {
-        if let Some((a, b)) = expr.y_extremes {
-            lo = lo.min(a);
-            hi = hi.max(b);
-        }
-    }
-    for limit in limits {
-        lo = lo.min(limit.y);
-        hi = hi.max(limit.y);
-    }
-    if !lo.is_finite() || !hi.is_finite() {
-        None
-    } else if lo == hi && lo > 0.0 {
-        Some((lo / 1.1, hi * 1.1))
-    } else if lo == hi {
-        Some((lo - 1.0, hi + 1.0))
-    } else {
-        Some((lo, hi))
-    }
-}
-
 /// The Y interval one pane of a strip is showing right now, automatic fit
 /// included.
 ///
@@ -1761,68 +1708,6 @@ pub(super) fn displayed_pane_auto_y(
     pane_auto_y(pane_range, &exprs, &limits)
 }
 
-/// The active-run trace whose drawn curve passes closest to the pointer.
-///
-/// Two things make this the trace the reader is pointing at rather than an
-/// approximation of it. The value is mapped to the screen through the pane's
-/// own scale, which is the mapping the painter used — a linear guess on a
-/// decade pane picks a curve the pointer is nowhere near. And a loop is
-/// measured on every branch that reaches this abscissa, so clicking the return
-/// leg of a hysteresis curve anchors to that curve rather than to whichever
-/// neighbour happened to sit near its forward leg.
-fn nearest_drawn_trace<'a>(
-    pane_traces: &[(usize, &'a StripTrace)],
-    x: f64,
-    pointer_y: Option<f32>,
-    plot_rect: egui::Rect,
-    y_scale: XScale,
-    (y0, y1): (f64, f64),
-    interpolation: SampleInterpolation,
-) -> Option<&'a StripTrace> {
-    let screen_y = |value: f64| -> Option<f32> {
-        let fraction = y_scale.normalize(value, y0, y1);
-        (value.is_finite() && fraction.is_finite())
-            .then(|| plot_rect.bottom() - fraction as f32 * plot_rect.height())
-    };
-    let mut samples: Vec<BranchSample> = Vec::new();
-    let mut best: Option<(&StripTrace, f32)> = None;
-    for (_, trace) in pane_traces.iter().filter(|(_, trace)| !trace.overlay) {
-        // The ordinary sweep has one answer here and is spared the branch
-        // walk; anything else is measured on every leg that reaches this
-        // abscissa, so clicking the return leg of a loop finds that curve.
-        let mut values: Vec<f64> = if trace.shape.is_single_ascending() {
-            Vec::new()
-        } else {
-            sample_branches_into(
-                &trace.x,
-                &trace.y,
-                &trace.shape,
-                x,
-                interpolation,
-                &mut samples,
-            );
-            samples.iter().map(|sample| sample.value).collect()
-        };
-        if values.is_empty() {
-            values.push(sample_at_with_shape(
-                &trace.x,
-                &trace.y,
-                &trace.shape,
-                x,
-                interpolation,
-            ));
-        }
-        for value in values {
-            let Some(y) = screen_y(value) else { continue };
-            let distance = pointer_y.map_or(0.0, |pointer| (pointer - y).abs());
-            if best.is_none_or(|(_, closest)| distance < closest) {
-                best = Some((trace, distance));
-            }
-        }
-    }
-    best.map(|(trace, _)| trace)
-}
-
 fn show_unit_pane(
     ui: &mut Ui,
     state: &mut AppState,
@@ -1837,7 +1722,6 @@ fn show_unit_pane(
     let t = Tokens::get(ui.ctx());
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
-    let significant_digits = usize::from(presentation.displayed_significant_digits().get());
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
     let (x0, x1) = x_domain;
     // The pane's own top edge, kept so the active rail can span header and
@@ -1895,12 +1779,6 @@ fn show_unit_pane(
     );
     let (x0, x1) =
         shared_x_view(&state.ui.results, model.analysis_key, pane_count).unwrap_or((x0, x1));
-    let (mut y0, mut y1) = pane_view
-        .y
-        .filter(|(minimum, maximum)| !log_y || (*minimum > 0.0 && *maximum > 0.0))
-        .unwrap_or((auto_y0, auto_y1));
-
-    let x_axis = model_x_axis(model, x0, x1, quantity_policy);
     let family_envelopes = state.ui.results.show_family_envelope.then(|| {
         let generation = state.ui.results.models.generation();
         extent::family_envelopes(&mut state.ui.results, generation, model, pane)
@@ -1908,265 +1786,60 @@ fn show_unit_pane(
     let family_envelopes: &[extent::FamilyEnvelopeSeries] = family_envelopes
         .as_deref()
         .map_or(&[], FamilyEnvelopePlan::series);
-    let y_axis = if log_y {
-        Axis::log_decades(y0, y1, pane.unit)
-    } else if pane.unit == "°" && pane_view.y.is_none() {
-        // An unzoomed degree pane keeps the 45° lattice a Bode phase
-        // reading expects; arbitrary zoom depths fall back to plain linear
-        // ticks, which stay legible where the lattice would crowd.
-        y0 = (y0 / 45.0).floor() * 45.0;
-        y1 = (y1 / 45.0).ceil() * 45.0;
-        // Continuous phase does not stay inside one turn: an unwrapped loop
-        // response walks thousands of degrees, and 45° steps across it are
-        // thousands of labels stacked into an unreadable band — and thousands
-        // of galleys laid out every frame. The lattice thins by whole 45°
-        // multiples so what is left still falls on the values a phase reading
-        // is taken at.
-        let steps = ((y1 - y0) / 45.0).round().max(0.0) as usize;
-        let stride = (steps + 1).div_ceil(MAX_AXIS_TICKS).max(1);
-        let ticks: Vec<f64> = (0..=steps)
-            .step_by(stride)
-            .map(|index| 45.0f64.mul_add(index as f64, y0))
-            .collect();
-        Axis::with_ticks(y0, y1, "°", &ticks)
-    } else {
-        Axis::linear(y0, y1, pane.unit)
-    };
-    let y_axis = if pane.unit == "rad" {
-        match quantity_policy.angle_display {
-            crate::quantity::AngleDisplay::Degrees => {
-                y_axis.with_display_transform(180.0 / std::f64::consts::PI, 0.0, "°")
-            }
-            crate::quantity::AngleDisplay::Radians => y_axis,
-        }
-    } else if pane.unit == "°" {
-        let (scale, offset, unit) = quantity_policy.degree_axis_transform();
-        y_axis.with_display_transform(scale, offset, unit)
-    } else {
-        y_axis
-    };
-    // The scale the pane is actually drawn on. Every hit test below maps
-    // through it rather than assuming a linear ordinate, because "nearest"
-    // has to mean nearest on screen — and on a decade pane a linear guess is
-    // wrong by most of the window.
-    let y_scale = if log_y { XScale::Log10 } else { XScale::Linear };
-    // The plot's own description is where the caution has to live as words.
-    // The kind tag carries it as colour and a glyph, and neither of those
-    // reaches a reader who cannot see the strip.
-    let mut spec = PlotSpec::new(x_axis, model.x_scale, y_axis)
-        .accessible_name("Waveform plot")
-        .without_x_axis_chrome()
-        .with_right_margin(WAVE_SHARED_RIGHT_MARGIN);
-    if let Some(reason) = model.incomplete {
-        spec = spec.accessible_detail(reason);
-    }
-    spec.left_margin = wave_left_margin(&state.ui.results);
-    if log_y {
-        spec = spec.with_log_y();
-    }
-    spec.display_decimation = display_decimation(presentation.large_dataset_display());
-    spec.limit_lines = specification_limits;
-    spec.minor_grid = state.ui.results.show_minor_grid;
     let pane_key = WavePanePresentationKey {
         analysis: model.analysis_key,
         unit: pane.unit.to_owned(),
     };
-    spec.horizontal_cursor = state
-        .ui
-        .results
-        .horizontal_cursor
-        .as_ref()
-        .filter(|cursor| cursor.pane == pane_key)
-        .map(|cursor| cursor.y);
-    spec.horizontal_cursor_interactive = state.ui.results.horizontal_cursor_placement_enabled();
-
-    // 0 dB reference on a log-magnitude pane.
-    if pane.unit == "dB" && y0 < 0.0 && y1 > 0.0 {
-        spec.ref_lines.push(plot::RefLine { y: 0.0 });
-    }
-
-    // Family envelopes are derived only from exact shared X coordinates.
-    // They draw behind source curves and never interpolate missing family
-    // samples into evidence that was not retained.
-    for envelope in family_envelopes {
-        let mut minimum = Trace::new(&envelope.x, &envelope.minimum, envelope.color)
-            .thin()
-            .dashed()
-            .cache_key(envelope.minimum_cache_key);
-        let mut maximum = Trace::new(&envelope.x, &envelope.maximum, envelope.color)
-            .thin()
-            .dashed()
-            .cache_key(envelope.maximum_cache_key);
-        if envelope.x.len() == 1 {
-            minimum = minimum.show_single_point();
-            maximum = maximum.show_single_point();
-        }
-        spec.traces.push(minimum);
-        spec.traces.push(maximum);
-    }
-
-    // Run owns weight: overlay traces keep the signal hue at reduced alpha
-    // and stroke, painted first so the active run draws at full strength
-    // on top.
-    let pane_traces: Vec<(usize, &StripTrace)> = pane
-        .traces
-        .iter()
-        .copied()
-        .filter_map(|index| model.traces.get(index).map(|trace| (index, trace)))
-        .collect();
-    let draw_order = pane_traces
-        .iter()
-        .filter(|(_, trace)| trace.overlay)
-        .chain(pane_traces.iter().filter(|(_, trace)| !trace.overlay));
-    for (_, trace) in draw_order {
-        let color = if trace.overlay {
-            trace.color.gamma_multiply(0.40)
-        } else {
-            trace.color
-        };
-        // The reduction has to be told what the abscissa is. Without it a
-        // reverse sweep vanished the moment it was zoomed — every window it
-        // was asked for came back empty — and a hysteresis loop lost whichever
-        // branch fell outside one contiguous index window.
-        let mut plot_trace = apply_family_trace_style(
-            Trace::new(&trace.x, &trace.y, color)
-                .cache_key(trace_key(model, trace))
-                .shape(&trace.shape),
-            trace.family_style,
-        );
-        if trace.overlay {
-            plot_trace = plot_trace.thin();
-        }
-        spec.traces.push(plot_trace);
-    }
-    for expr in exprs {
-        spec.traces.push(apply_family_trace_style(
-            Trace::new(&expr.x, &expr.y, expr.color)
-                .thin()
-                .cache_key(expr.cache_key)
-                .shape(&expr.shape),
-            expr.family_style,
-        ));
-    }
-
-    // Markers ride their anchored trace: Y is resampled here rather than
-    // stored, so zoom, pan, and a re-run all leave the tag on the curve.
-    for marker in state.ui.results.strip_markers(model.analysis_key) {
-        let color = marker_color(marker.kind(), &t);
-        let label = marker_label(marker);
-        if marker.kind() == MarkerKind::Spec {
-            // A spec constrains the X position, which every pane of the
-            // strip shares — so it draws on all of them.
-            spec.markers
-                .push(plot::Marker::limit_line(marker.x(), color, label));
-            continue;
-        }
-        // A marker belongs to the pane that owns its trace's unit; the
-        // other panes are a different scale and would misplace it.
-        let anchored = pane_traces
-            .iter()
-            .find(|(_, trace)| !trace.overlay && anchor_key(model, trace) == *marker.anchor());
-        let Some((_, trace)) = anchored else {
-            continue;
-        };
-        // A loop has a value on each branch that reaches this X, and a tag on
-        // only one of them points at half the evidence.
-        let mut samples = Vec::new();
-        sample_branches_into(
-            &trace.x,
-            &trace.y,
-            &trace.shape,
-            marker.x(),
-            interpolation,
-            &mut samples,
-        );
-        if trace.shape.branch_count() <= 1 || samples.is_empty() {
-            let y =
-                sample_at_with_shape(&trace.x, &trace.y, &trace.shape, marker.x(), interpolation);
-            if y.is_finite() {
-                spec.markers
-                    .push(plot::Marker::point(marker.x(), y, color, label));
-            }
-            continue;
-        }
-        for sample in &samples {
-            if !sample.value.is_finite() {
-                continue;
-            }
-            spec.markers.push(plot::Marker::point(
-                marker.x(),
-                sample.value,
-                color,
-                format!("{label} {}", branch_tag(&trace.shape, sample.run)),
-            ));
-        }
-    }
-
     let model_cursor_domain = model.cursor_domain();
     let cursor_domain_matches = linked_cursor_domain == Some(&model_cursor_domain);
     let cursors = (state.ui.results.cursor_strip == Some(model.analysis_index)
         || (state.ui.results.linked_cursors && cursor_domain_matches))
         .then_some(state.ui.results.cursors);
-
-    let readout = |x: f64| -> Vec<(String, String)> {
-        let mut rows = vec![(
-            model.x_label().to_owned(),
-            model.format_x(x, significant_digits, quantity_policy),
-        )];
-        let mut samples: Vec<BranchSample> = Vec::new();
-        for (_, trace) in pane_traces.iter().take(6) {
-            sample_branches_into(
-                &trace.x,
-                &trace.y,
-                &trace.shape,
-                x,
-                interpolation,
-                &mut samples,
-            );
-            // A sweep with one answer at this X keeps its single unlabelled
-            // row. A loop reports each branch that reaches here, because one
-            // of the two numbers is not the reading.
-            if trace.shape.branch_count() <= 1
-                || samples.is_empty()
-                || samples.len() > MAX_READOUT_BRANCHES
-            {
-                let value =
-                    sample_at_with_shape(&trace.x, &trace.y, &trace.shape, x, interpolation);
-                rows.push((
-                    trace.name.clone(),
-                    model.format_trace_value(trace, value, significant_digits, quantity_policy),
-                ));
-                continue;
-            }
-            for sample in &samples {
-                rows.push((
-                    format!("{} {}", trace.name, branch_tag(&trace.shape, sample.run)),
-                    model.format_trace_value(
-                        trace,
-                        sample.value,
-                        significant_digits,
-                        quantity_policy,
-                    ),
-                ));
-            }
-        }
-        for expr in exprs.iter().take(3) {
-            let value = sample_at_with_shape(&expr.x, &expr.y, &expr.shape, x, interpolation);
-            rows.push((
-                expr.label.clone(),
-                fmt_si_significant(value, "", significant_digits),
-            ));
-        }
-        rows
-    };
-
-    let response = plot::show(
-        ui,
-        &spec,
-        &mut state.ui.results.cache,
-        cursors.as_ref(),
-        Some(&readout),
+    let markers = pane_view::plot_markers(
+        model,
+        pane,
+        interpolation,
+        state
+            .ui
+            .results
+            .strip_markers(model.analysis_key)
+            .into_iter()
+            .map(|marker| pane_view::MarkerPresentation {
+                anchor: marker.anchor(),
+                x: marker.x(),
+                kind: marker.kind(),
+                color: marker_color(marker.kind(), &t),
+                label: marker_label(marker),
+            }),
     );
+    let input = pane_view::PanePlot {
+        x_range: (x0, x1),
+        auto_y: (auto_y0, auto_y1),
+        y_view: pane_view.y,
+        log_y,
+        left_margin: wave_left_margin(&state.ui.results),
+        readout: presentation.readout(),
+        quantity: quantity_policy,
+        display_decimation: display_decimation(presentation.large_dataset_display()),
+        minor_grid: state.ui.results.show_minor_grid,
+        horizontal_cursor: state
+            .ui
+            .results
+            .horizontal_cursor
+            .as_ref()
+            .filter(|cursor| cursor.pane == pane_key)
+            .map(|cursor| cursor.y),
+        horizontal_cursor_interactive: state.ui.results.horizontal_cursor_placement_enabled(),
+        cursors,
+        specification_limits,
+        markers,
+        expressions: exprs,
+        family_envelopes,
+        find_nearest: state.ui.results.marker_tool.is_armed()
+            || (state.ui.results.cursor_placement_enabled() && state.ui.results.cursor_a_is_next()),
+    };
+    let drawn = pane_view::show_plot(ui, &mut state.ui.results.cache, model, pane, input);
+    let response = drawn.response;
     if response.response.hovered()
         || response.response.dragged()
         || response.clicked_x.is_some()
@@ -2183,17 +1856,7 @@ fn show_unit_pane(
     if let Some(clicked_x) = response.clicked_x
         && state.ui.results.marker_tool.is_armed()
     {
-        let pointer_y = response.response.interact_pointer_pos().map(|pos| pos.y);
-        let plot_rect = response.plot_rect;
-        let nearest = nearest_drawn_trace(
-            &pane_traces,
-            clicked_x,
-            pointer_y,
-            plot_rect,
-            y_scale,
-            (y0, y1),
-            interpolation,
-        );
+        let nearest = drawn.nearest_trace;
         if let Some(trace) = nearest {
             // The pane being drawn owns the marker, and placing one is the
             // first half of saying what it means, so the dialog opens on it.
@@ -2212,22 +1875,8 @@ fn show_unit_pane(
         && state.ui.results.cursor_placement_enabled()
     {
         let placing_cursor_a = state.ui.results.cursor_a_is_next();
-        let pointer_y = response
-            .response
-            .interact_pointer_pos()
-            .map(|position| position.y);
-        let nearest_anchor = placing_cursor_a.then(|| {
-            nearest_drawn_trace(
-                &pane_traces,
-                clicked_x,
-                pointer_y,
-                response.plot_rect,
-                y_scale,
-                (y0, y1),
-                interpolation,
-            )
-            .map(|trace| anchor_key(model, trace))
-        });
+        let nearest_anchor =
+            placing_cursor_a.then(|| drawn.nearest_trace.map(|trace| anchor_key(model, trace)));
         let results = &mut state.ui.results;
         if results.cursor_strip != Some(model.analysis_index)
             && (!results.linked_cursors || !cursor_domain_matches)
