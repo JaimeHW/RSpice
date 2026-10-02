@@ -120,7 +120,7 @@ pub(super) fn session_block_reason(state: &AppState, route: &PlaceRoute) -> Opti
 /// Hub performs when a retention lands, one operation later.
 pub(super) fn arm(state: &mut AppState, ctx: &egui::Context, placement: PartPlacement) {
     let armed = crate::workbench::app::arm_pack_part(state, placement);
-    crate::schematic::view::request_schematic_canvas_focus(ctx);
+    rspice_schematic_editor::view::canvas::request_focus(ctx);
     state.ui.toasts.success(
         ctx,
         "Component placement armed",

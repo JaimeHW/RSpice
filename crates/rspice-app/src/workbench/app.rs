@@ -1610,7 +1610,7 @@ mod tests {
             fixture.frame(Vec::new());
             let output = fixture.frame(Vec::new());
             if via_keyboard {
-                crate::schematic::view::request_schematic_canvas_focus(&fixture.ctx);
+                rspice_schematic_editor::view::canvas::request_focus(&fixture.ctx);
                 let press = egui::Event::Key {
                     key: egui::Key::I,
                     physical_key: None,
@@ -1669,7 +1669,7 @@ mod tests {
             assert_eq!(fixture.app.state.schematic.document().components.len(), 1);
 
             // A new modal task supersedes a still-pending placement focus request.
-            crate::schematic::view::request_schematic_canvas_focus(&fixture.ctx);
+            rspice_schematic_editor::view::canvas::request_focus(&fixture.ctx);
             Command::CommandPalette.execute(&mut fixture.app);
             fixture.frame(Vec::new());
             fixture.frame(Vec::new());

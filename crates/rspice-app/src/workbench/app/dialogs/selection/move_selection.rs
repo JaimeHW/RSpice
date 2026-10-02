@@ -119,7 +119,7 @@ impl RSpiceApp {
                 if validate_draft(&self.state).can_commit() {
                     self.state.dialogs.move_selection.arm();
                     self.state.schematic.arm_tool(Tool::MoveSelection);
-                    crate::schematic::view::request_schematic_canvas_focus(ctx);
+                    rspice_schematic_editor::view::canvas::request_focus(ctx);
                     let snap =
                         snap_label(self.state.schematic.document().document_policy.grid_pitch);
                     self.state.push_user_message(ConsoleMessage::info(format!(

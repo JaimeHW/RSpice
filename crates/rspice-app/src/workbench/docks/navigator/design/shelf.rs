@@ -1985,7 +1985,7 @@ fn finish_shelf_placement(state: &mut AppState, ctx: &egui::Context, label: &str
         "Component placement armed",
         format!("{label} will snap to the schematic grid."),
     );
-    crate::schematic::view::request_schematic_canvas_focus(ctx);
+    rspice_schematic_editor::view::canvas::request_focus(ctx);
 }
 
 pub(super) fn primitive_entries(section_names: &[&str]) -> Vec<ComponentPaletteEntry> {

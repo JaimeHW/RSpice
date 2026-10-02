@@ -39,3 +39,5 @@ pub mod scene;
 pub mod selection_layout;
 
 pub mod cross_probe;
+
+pub mod canvas;

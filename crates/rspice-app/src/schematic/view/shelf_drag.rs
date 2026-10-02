@@ -185,7 +185,7 @@ pub(crate) fn handle_pre_render_placement_transform(
     state: &mut AppState,
     canvas_has_focus: bool,
 ) -> bool {
-    let pointer_over_canvas = super::schematic_canvas_contains_pointer(ctx);
+    let pointer_over_canvas = rspice_schematic_editor::view::canvas::contains_pointer(ctx);
     let click_placement_active = state.schematic.session.editor.tool.is_place_tool()
         && (canvas_has_focus || pointer_over_canvas);
     let shelf_drag_over_canvas = super::shelf_drag_over_schematic_canvas(ctx);

@@ -122,7 +122,7 @@ impl RSpiceApp {
                 if validate_draft(&self.state).can_commit() {
                     self.state.dialogs.stretch_selection.arm();
                     self.state.schematic.arm_tool(Tool::StretchSelection);
-                    crate::schematic::view::request_schematic_canvas_focus(ctx);
+                    rspice_schematic_editor::view::canvas::request_focus(ctx);
                     self.state.push_user_message(ConsoleMessage::info(format!(
                         "Stretch selection armed with {}; choose an anchor and destination on the {snap} grid.",
                         self.state.dialogs.stretch_selection.policy.label()

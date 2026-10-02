@@ -255,7 +255,7 @@ impl RSpiceApp {
             .schematic
             .arm_tool(Tool::Place(ComponentType::Port));
         self.state.schematic.session.editor.pending_port_sequence = Some(sequence);
-        crate::schematic::view::request_schematic_canvas_focus(ctx);
+        rspice_schematic_editor::view::canvas::request_focus(ctx);
         let form = &mut self.state.dialogs.pin_port;
         form.last_name = last_name;
         form.close();

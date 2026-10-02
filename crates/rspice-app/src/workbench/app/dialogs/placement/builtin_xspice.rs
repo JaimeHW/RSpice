@@ -70,7 +70,7 @@ impl RSpiceApp {
                         "Component placement armed",
                         format!("{label} will snap to the schematic grid."),
                     );
-                    crate::schematic::view::request_schematic_canvas_focus(ctx);
+                    rspice_schematic_editor::view::canvas::request_focus(ctx);
                 }
                 Err(error) => {
                     self.state.dialogs.builtin_xspice_placement.validation_error = Some(error);

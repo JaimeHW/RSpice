@@ -13,7 +13,7 @@ use crate::state::{
     CellViewRef, CrossProbeIndex, Point, SchematicAnnotationVisibility,
     SchematicBackAnnotationContent, SchematicHierarchyVisibility, SchematicNetHighlighting,
 };
-use crate::workbench::app_state::{AppState, SchematicKeyboardFocus};
+use crate::workbench::app_state::AppState;
 use egui::{Painter, Rect};
 use rspice_design::connectivity::summary::projection_nets;
 use rspice_schematic_editor::view::{
@@ -627,17 +627,6 @@ fn draw_parent_context(painter: &Painter, viewport: &Viewport, state: &AppState)
                 review_markers: Default::default(),
             }),
     );
-}
-
-pub(super) fn keyboard_focus_matches_selection(
-    state: &AppState,
-    focus: SchematicKeyboardFocus,
-) -> bool {
-    scene::keyboard_focus_matches_selection(
-        &super::schematic_design_view(state),
-        &state.schematic.session.editor.selection,
-        focus,
-    )
 }
 
 #[cfg(test)]

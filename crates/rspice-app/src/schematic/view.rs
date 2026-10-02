@@ -5,7 +5,7 @@
 
 use crate::workbench::app::symbol_context_revision;
 
-use egui::{Sense, Ui, WidgetInfo, WidgetType};
+use egui::Ui;
 
 use crate::state::ComponentType;
 use crate::workbench::app_state::AppState;
@@ -34,7 +34,7 @@ mod stretch_interaction;
 pub(crate) mod violations;
 
 use rspice_schematic_editor::view::{
-    coordinates,
+    canvas, coordinates,
     cross_probe::{self, FailureSiteSelection, LocateSignalError},
     drawing, navigation, viewport,
 };
@@ -60,8 +60,6 @@ pub(crate) use self::shelf_drag::{
     SchematicShelfDragPayload, handle_pre_render_placement_transform,
 };
 
-const SCHEMATIC_CANVAS_INTERACTION_ID: &str = "rspice-schematic-canvas-interaction";
-
 /// Whether the typed component-shelf payload is currently over the schematic
 /// canvas rectangle captured during the previous settled frame.
 ///
@@ -71,62 +69,7 @@ const SCHEMATIC_CANVAS_INTERACTION_ID: &str = "rspice-schematic-canvas-interacti
 /// transforms without accepting a drop outside the canvas.
 pub(crate) fn shelf_drag_over_schematic_canvas(ctx: &egui::Context) -> bool {
     egui::DragAndDrop::has_payload_of_type::<SchematicShelfDragPayload>(ctx)
-        && schematic_canvas_contains_pointer(ctx)
-}
-
-pub(super) fn schematic_canvas_contains_pointer(ctx: &egui::Context) -> bool {
-    ctx.pointer_hover_pos().is_some_and(|pointer| {
-        ctx.read_response(egui::Id::new(SCHEMATIC_CANVAS_INTERACTION_ID))
-            .is_some_and(|response| response.rect.contains(pointer))
-    })
-}
-
-/// Transfer keyboard ownership to the single active schematic canvas. Modal
-/// schematic commands call this when they arm so arrow/Enter entry is
-/// immediately available without consuming keys from unrelated controls.
-pub(crate) fn request_schematic_canvas_focus(ctx: &egui::Context) {
-    ctx.memory_mut(|memory| {
-        memory.request_focus(egui::Id::new(SCHEMATIC_CANVAS_INTERACTION_ID));
-    });
-    let key = schematic_canvas_focus_request_id(ctx);
-    let frame = ctx.cumulative_frame_nr();
-    ctx.data_mut(|data| data.insert_temp(key, frame));
-    ctx.request_repaint();
-}
-
-fn schematic_canvas_focus_request_id(ctx: &egui::Context) -> egui::Id {
-    egui::Id::new((
-        SCHEMATIC_CANVAS_INTERACTION_ID,
-        "focus-request",
-        ctx.viewport_id(),
-    ))
-}
-
-fn apply_schematic_canvas_focus_request(ui: &Ui, state: &AppState) {
-    let ctx = ui.ctx();
-    let key = schematic_canvas_focus_request_id(ctx);
-    let Some(requested_frame) = ctx.data(|data| data.get_temp::<u64>(key)) else {
-        return;
-    };
-    // egui retains the dismissed modal's input floor for one more frame.
-    // Retry through its retirement, without retaining a request across tasks
-    // or taking focus from a new dialog or drawer.
-    let cancelled = ctx.cumulative_frame_nr().saturating_sub(requested_frame) > 2
-        || state.application_modal_open()
-        || state.workbench.drawer.is_some();
-    let available = ui.is_visible()
-        && ui.is_enabled()
-        && ui.memory(|memory| memory.is_above_modal_layer(ui.layer_id()));
-    if cancelled || available {
-        ctx.data_mut(|data| data.remove::<u64>(key));
-        if !cancelled {
-            ctx.memory_mut(|memory| {
-                memory.request_focus(egui::Id::new(SCHEMATIC_CANVAS_INTERACTION_ID))
-            });
-        }
-    } else {
-        ctx.request_repaint();
-    }
+        && canvas::contains_pointer(ctx)
 }
 
 pub(super) fn schematic_design_view(
@@ -177,24 +120,26 @@ fn refresh_symbol_context_after_interactions(
     true
 }
 
-fn schematic_accessibility_label() -> &'static str {
-    "Schematic canvas"
+fn canvas_accessibility_view(state: &AppState) -> canvas::CanvasAccessibilityView<'_> {
+    canvas::CanvasAccessibilityView {
+        design: schematic_design_view(state),
+        editor: &state.schematic.session.editor,
+        keyboard_focus: state.dialogs.interaction.schematic_keyboard_focus,
+        filter: state.ui.schematic_selection_filter,
+        traversal_enabled: state
+            .ui
+            .preferences
+            .toggle(crate::workbench::TogglePreference::CanvasKeyboardNavigation),
+    }
 }
 
-fn schematic_accessibility_description(
+fn schematic_accessibility_shortcuts(
     state: &AppState,
     platform: crate::workbench::commands::vocabulary::CommandPlatform,
     operating_system: egui::os::OperatingSystem,
 ) -> String {
-    use crate::ui::accessibility::counted;
     use crate::workbench::commands::vocabulary::Command;
-    let schematic = &state.schematic;
-    let tool = if schematic.session.editor.tool.is_place_tool() {
-        format!("Place {}", schematic.session.editor.tool.display_name())
-    } else {
-        schematic.session.editor.tool.display_name().to_owned()
-    };
-    let shortcuts = crate::workbench::app_state::accessibility_shortcut_summary(
+    crate::workbench::app_state::accessibility_shortcut_summary(
         state.ui.preferences.shortcuts(),
         platform,
         operating_system,
@@ -214,173 +159,7 @@ fn schematic_accessibility_description(
             Command::ZoomFit,
             Command::Cancel,
         ],
-    );
-    let traversal_instruction = if schematic.session.editor.tool
-        == crate::state::Tool::DocumentationShape
-    {
-        " Arrow keys move the exact shape cursor. Space places a point. Enter completes a legal polygon or places the current point. Backspace removes the last point. Escape cancels."
-    } else if !state
-        .ui
-        .preferences
-        .toggle(crate::workbench::TogglePreference::CanvasKeyboardNavigation)
-        || !schematic_keyboard_navigation_has_objects(state)
-    {
-        ""
-    } else {
-        " Arrow keys select the nearest eligible schematic object in each direction."
-    };
-    format!(
-        "{}, {}, {}, {}, {}, {}, {}, {}, {}.{traversal_instruction} Active tool: {}.{shortcuts}",
-        counted(
-            schematic.document().components.len(),
-            "component",
-            "components"
-        ),
-        counted(schematic.document().wires.len(), "wire", "wires"),
-        counted(schematic.document().buses.len(), "bus", "buses"),
-        counted(schematic.document().bus_taps.len(), "bus tap", "bus taps"),
-        counted(
-            schematic.document().junctions.len(),
-            "junction",
-            "junctions"
-        ),
-        counted(
-            schematic.document().net_labels.len(),
-            "net label",
-            "net labels"
-        ),
-        counted(
-            schematic.document().design_notes.len(),
-            "design note",
-            "design notes"
-        ),
-        counted(
-            schematic.document().documentation_shapes.len(),
-            "documentation shape",
-            "documentation shapes"
-        ),
-        counted(
-            schematic.document().probes.len(),
-            "probe flag",
-            "probe flags"
-        ),
-        tool,
     )
-}
-
-fn schematic_selection_accessibility_status(state: &AppState) -> String {
-    if let Some(component) = state
-        .schematic
-        .session
-        .editor
-        .selection
-        .single_component()
-        .and_then(|id| {
-            state
-                .schematic
-                .document()
-                .components
-                .iter()
-                .find(|component| component.id == id)
-        })
-    {
-        let name = component.name.trim();
-        let name = if name.is_empty() { "unnamed" } else { name };
-        let value = component.value.trim();
-        let value = if !value.is_empty() {
-            value
-        } else {
-            component.library_cell.as_ref().map_or_else(
-                || component.kind.display_name(),
-                |binding| {
-                    binding
-                        .module_name
-                        .as_deref()
-                        .unwrap_or(binding.cell.as_str())
-                },
-            )
-        };
-        return format!("Selected instance {name}, {value}.");
-    }
-
-    if let Some(focus) = state
-        .dialogs
-        .interaction
-        .schematic_keyboard_focus
-        .filter(|focus| scene::keyboard_focus_matches_selection(state, *focus))
-    {
-        return format!("Selected {}.", schematic_keyboard_focus_label(state, focus));
-    }
-
-    match state.schematic.session.editor.selection.count() {
-        0 => "No schematic object selected.".to_owned(),
-        1 => "One schematic object selected.".to_owned(),
-        count => format!("{count} schematic objects selected."),
-    }
-}
-
-fn schematic_keyboard_navigation_has_objects(state: &AppState) -> bool {
-    let filter = state.ui.schematic_selection_filter;
-    (filter.instances && !state.schematic.document().components.is_empty())
-        || (filter.wires
-            && (!state.schematic.document().wires.is_empty()
-                || !state.schematic.document().buses.is_empty()
-                || !state.schematic.document().bus_taps.is_empty()
-                || !state.schematic.document().junctions.is_empty()))
-        || (filter.labels && !state.schematic.document().net_labels.is_empty())
-        || (filter.annotations
-            && (!state.schematic.document().design_notes.is_empty()
-                || !state.schematic.document().documentation_shapes.is_empty()
-                || !state.schematic.document().probes.is_empty()))
-}
-
-fn schematic_keyboard_focus_label(
-    state: &AppState,
-    focus: crate::workbench::app_state::SchematicKeyboardFocus,
-) -> String {
-    use crate::workbench::app_state::SchematicKeyboardFocus;
-    let id = match focus {
-        SchematicKeyboardFocus::Component(id)
-        | SchematicKeyboardFocus::Wire(id)
-        | SchematicKeyboardFocus::Bus(id)
-        | SchematicKeyboardFocus::BusTap(id)
-        | SchematicKeyboardFocus::Junction(id)
-        | SchematicKeyboardFocus::NetLabel(id)
-        | SchematicKeyboardFocus::Probe(id)
-        | SchematicKeyboardFocus::DesignNote(id)
-        | SchematicKeyboardFocus::DocumentationShape(id) => id,
-    };
-    match focus {
-        SchematicKeyboardFocus::Component(_) => format!("component {id}"),
-        SchematicKeyboardFocus::Wire(_) => format!("wire {id}"),
-        SchematicKeyboardFocus::Bus(_) => format!("bus {id}"),
-        SchematicKeyboardFocus::BusTap(_) => format!("bus tap {id}"),
-        SchematicKeyboardFocus::Junction(_) => format!("junction {id}"),
-        SchematicKeyboardFocus::NetLabel(_) => state
-            .schematic
-            .document()
-            .net_labels
-            .iter()
-            .find(|label| label.id == id)
-            .map_or_else(
-                || format!("net label {id}"),
-                |label| format!("net label {}", label.name),
-            ),
-        SchematicKeyboardFocus::Probe(_) => state
-            .schematic
-            .document()
-            .probes
-            .iter()
-            .find(|probe| probe.id == id)
-            .map_or_else(
-                || format!("probe {id}"),
-                |probe| format!("probe {}", probe.reference),
-            ),
-        SchematicKeyboardFocus::DesignNote(_) => format!("design note {id}"),
-        SchematicKeyboardFocus::DocumentationShape(_) => {
-            format!("documentation shape {id}")
-        }
-    }
 }
 
 /// Select a result signal only through the map belonging to the active drawing.
@@ -475,12 +254,9 @@ pub fn render_schematic_view(
             .center_view_on(target, available.width() as f64, available.height() as f64);
     }
 
-    apply_schematic_canvas_focus_request(ui, state);
-    let response = ui.interact(
-        available,
-        egui::Id::new(SCHEMATIC_CANVAS_INTERACTION_ID),
-        Sense::click_and_drag(),
-    );
+    let response = canvas::interact(ui, available, || {
+        state.application_modal_open() || state.workbench.drawer.is_some()
+    });
     if response.clicked() || response.secondary_clicked() || response.drag_started() {
         state.dialogs.interaction.schematic_keyboard_focus = None;
     }
@@ -638,33 +414,14 @@ pub fn render_schematic_view(
 
     let shortcut_platform = crate::workbench::app_state::runtime_command_platform(ui.ctx());
     let operating_system = ui.ctx().os();
-    let accessibility_label = schematic_accessibility_label();
-    let accessibility_description =
-        schematic_accessibility_description(state, shortcut_platform, operating_system);
-    response.widget_info(|| {
-        WidgetInfo::labeled(WidgetType::Image, ui.is_enabled(), accessibility_label)
-    });
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::Canvas);
-        node.set_label(accessibility_label);
-        node.set_description(accessibility_description);
-    });
-    let selection_status = schematic_selection_accessibility_status(state);
-    let selection_status_response = ui.interact(
-        egui::Rect::from_min_size(available.min, egui::Vec2::splat(1.0)),
-        response.id.with("selection-status"),
-        egui::Sense::hover(),
+    let shortcuts = schematic_accessibility_shortcuts(state, shortcut_platform, operating_system);
+    canvas::finish(
+        ui,
+        &response,
+        available,
+        &canvas_accessibility_view(state),
+        &shortcuts,
     );
-    ui.ctx()
-        .accesskit_node_builder(selection_status_response.id, |node| {
-            node.set_role(egui::accesskit::Role::Status);
-            node.set_label(selection_status);
-            node.set_live(egui::accesskit::Live::Polite);
-        });
-    // The canvas takes keyboard focus for tool, nudge, and routing shortcuts,
-    // so it owes a visible focus ring like every other custom click target.
-    // Painted last so the schematic artwork does not cover it.
-    crate::ui::theme::paint_focus_ring(ui, &response, available);
     crate::workbench::app_state::report_engineering_canvas_focus(
         &response,
         state.workspace.content.active_view_type(),
@@ -1030,10 +787,13 @@ mod tests {
         state.schematic.session.editor.selection.select_component(1);
         state.schematic.session.editor.tool = crate::state::Tool::Wire;
 
-        let description = schematic_accessibility_description(
-            &state,
-            crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
-            egui::os::OperatingSystem::Windows,
+        let description = canvas::accessibility_description(
+            &canvas_accessibility_view(&state),
+            &schematic_accessibility_shortcuts(
+                &state,
+                crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
+                egui::os::OperatingSystem::Windows,
+            ),
         );
 
         assert!(description.starts_with(
@@ -1049,20 +809,23 @@ mod tests {
         assert!(description.contains("Shift+T: Place text or note"));
         assert!(description.contains("S: Stretch selection"));
         assert_eq!(
-            schematic_selection_accessibility_status(&state),
+            canvas::selection_accessibility_status(&canvas_accessibility_view(&state)),
             "Selected instance unnamed, Resistor."
         );
         state.schematic.session.editor.selection.clear();
         assert_eq!(
-            schematic_accessibility_description(
-                &state,
-                crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
-                egui::os::OperatingSystem::Windows,
+            canvas::accessibility_description(
+                &canvas_accessibility_view(&state),
+                &schematic_accessibility_shortcuts(
+                    &state,
+                    crate::workbench::commands::vocabulary::CommandPlatform::Desktop,
+                    egui::os::OperatingSystem::Windows,
+                )
             ),
             description
         );
         assert_eq!(
-            schematic_selection_accessibility_status(&state),
+            canvas::selection_accessibility_status(&canvas_accessibility_view(&state)),
             "No schematic object selected."
         );
     }
@@ -1132,12 +895,5 @@ mod tests {
             .map(|(_, node)| node)
             .expect("concise schematic selection status node");
         assert_eq!(status.live(), Some(egui::accesskit::Live::Polite));
-    }
-
-    #[test]
-    fn schematic_canvas_has_no_static_shortcut_prose() {
-        let source = include_str!("view.rs");
-        assert!(!source.contains(concat!("Use S", " for select")));
-        assert!(!source.contains(concat!("Escape", " to cancel")));
     }
 }

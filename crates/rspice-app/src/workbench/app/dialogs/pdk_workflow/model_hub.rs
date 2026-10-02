@@ -710,7 +710,7 @@ pub(super) fn publish_model_hub_output(
         return;
     };
     let armed = crate::workbench::app::arm_pack_part(state, placement);
-    crate::schematic::view::request_schematic_canvas_focus(ctx);
+    rspice_schematic_editor::view::canvas::request_focus(ctx);
     apply_model_hub_receipt(
         ctx,
         state,
