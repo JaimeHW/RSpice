@@ -1,15 +1,17 @@
-//! Workbench-specific visual primitives.
+//! Shared engineering panel controls, typography and icon painting.
 //!
 //! These controls are intentionally small and stateless.  They render from
 //! the shared palette and typography assets, but none of the retired layout's
 //! layout or widget implementations are reused.
 
+pub mod inspector;
+
 use egui::{Align2, Color32, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2};
 use std::hash::Hash;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::theme::{self, FontWeight};
+use crate::tokens::{self, Tokens};
 
 // The chrome bars size themselves from their own content and tokens, so the
 // fixed heights that used to sit here (title 35, toolbar 45, document bar 34,
@@ -104,10 +106,10 @@ pub enum WorkbenchIcon {
 /// The kit's status marks, under the name every workbench surface already
 /// imports them by.
 ///
-/// They moved down to [`crate::ui::widgets`] when a painter below the shell
+/// They moved down to [`crate::widgets`] when a painter below the shell
 /// needed the same warning triangle: a mini that cannot draw the engine's
 /// refusal has to say so with the mark the row beside it uses.
-pub use crate::ui::widgets::{StatusMark, paint_status_mark};
+pub use crate::widgets::{StatusMark, paint_status_mark};
 
 impl WorkbenchIcon {
     pub fn paint(self, painter: &egui::Painter, rect: Rect, color: Color32) {
@@ -335,8 +337,8 @@ impl WorkbenchIcon {
             // Selection transforms share their art with the design-system
             // icon set so the toolbar, the inspector action stack, and the
             // context menu can never drift apart.
-            Self::Rotate => crate::ui::icons::Icon::Rotate.paint(painter, rect, color),
-            Self::Mirror => crate::ui::icons::Icon::Mirror.paint(painter, rect, color),
+            Self::Rotate => crate::icons::Icon::Rotate.paint(painter, rect, color),
+            Self::Mirror => crate::icons::Icon::Mirror.paint(painter, rect, color),
             Self::MirrorVertical => {
                 line(&[(3.0, 12.0), (21.0, 12.0)]);
                 closed(&[(8.0, 9.0), (12.0, 4.0), (16.0, 9.0)]);
@@ -1265,7 +1267,7 @@ pub fn property_row_input_with_hint_labelled(
 }
 
 /// Editable property row with caller-owned identity and single-line editor options.
-pub(crate) fn property_row_text_edit(
+pub fn property_row_text_edit(
     ui: &mut Ui,
     label: &str,
     edit: egui::TextEdit<'_>,
@@ -1339,6 +1341,15 @@ fn property_row_text_edit_in(
     response
 }
 
+/// The named action beside an editable property value.
+#[derive(Debug, Clone, Copy)]
+pub struct PropertyRowAction<'a> {
+    pub icon: WorkbenchIcon,
+    pub label: &'a str,
+    pub enabled: bool,
+    pub disabled_reason: Option<&'a str>,
+}
+
 /// Editable property row with one compact trailing action, used by instance
 /// values that can open a non-destructive engineering workflow such as the
 /// parameter-tuning sandbox. The action owns fixed width so focusing or
@@ -1348,11 +1359,14 @@ pub fn property_row_input_action(
     label: &str,
     value: &mut String,
     invalid: bool,
-    action_icon: WorkbenchIcon,
-    action_label: &str,
-    action_enabled: bool,
-    action_disabled_reason: Option<&str>,
+    action: PropertyRowAction<'_>,
 ) -> (Response, Response) {
+    let PropertyRowAction {
+        icon: action_icon,
+        label: action_label,
+        enabled: action_enabled,
+        disabled_reason: action_disabled_reason,
+    } = action;
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
     let (label_column, gap, value_column) = property_row_columns(width);
@@ -1696,7 +1710,7 @@ pub fn card_well(ui: &mut Ui, text: &str, color: Color32, trailing_inset: f32) -
 /// paints them.
 pub const CARD_WELL_HEIGHT: f32 = 18.0;
 
-pub(crate) fn elide_text(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> String {
+pub fn elide_text(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> String {
     if max_width <= 0.0 {
         return String::new();
     }
@@ -1734,7 +1748,7 @@ pub(crate) fn elide_text(ui: &Ui, text: &str, font: &egui::FontId, max_width: f3
 ///
 /// The end of a path is the part that names what it points at, so the
 /// end-truncation [`elide_text`] applies to a label would cut exactly that.
-pub(crate) fn elide_path(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> String {
+pub fn elide_path(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> String {
     let fits = |candidate: &str| {
         ui.painter()
             .layout_no_wrap(candidate.to_owned(), font.clone(), Color32::WHITE)
@@ -2036,7 +2050,7 @@ const ACTION_ROW_HEIGHT: f32 = 51.0;
 /// the control never sees the click. This claims the label's own slot with a
 /// hover sense, which the hit test passes over, and paints the galley into it.
 /// Text the slot elides stays one hover away, as a truncated label's does.
-pub(crate) fn painted_label(
+pub fn painted_label(
     ui: &mut Ui,
     text: impl Into<egui::WidgetText>,
     wrap_mode: egui::TextWrapMode,

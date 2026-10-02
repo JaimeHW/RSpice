@@ -755,10 +755,12 @@ pub(super) fn edit_row_with_hint(
                     label,
                     &mut buffer,
                     rejection.is_some(),
-                    WorkbenchIcon::Sliders,
-                    &format!("Scrub-tune {} in the parameter sandbox", component.name),
-                    tuning_block_reason.is_none(),
-                    tuning_block_reason.as_deref(),
+                    crate::workbench::design_system::PropertyRowAction {
+                        icon: WorkbenchIcon::Sliders,
+                        label: &format!("Scrub-tune {} in the parameter sandbox", component.name),
+                        enabled: tuning_block_reason.is_none(),
+                        disabled_reason: tuning_block_reason.as_deref(),
+                    },
                 );
                 (edit, Some(action))
             } else {

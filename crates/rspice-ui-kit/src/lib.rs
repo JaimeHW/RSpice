@@ -8,6 +8,7 @@ pub mod fonts;
 pub mod icons;
 pub mod input;
 pub mod palette;
+pub mod panels;
 #[cfg(feature = "plot")]
 pub mod plot;
 #[cfg(any(test, feature = "test-support"))]

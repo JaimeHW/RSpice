@@ -21,6 +21,7 @@ test-support = ["dep:sha2"]
 [dependencies]
 egui = { version = "0.35.0", default-features = false }
 serde.workspace = true
+unicode-segmentation = "1.12"
 rspice-app-types = { workspace = true, optional = true }
 rspice-results = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }

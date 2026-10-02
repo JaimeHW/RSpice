@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn workspace_title_row_uses_visible_pane_not_offscreen_content_extent() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     let mut measured_width = f32::INFINITY;
     let _ = ctx.run_ui(
         egui::RawInput {
@@ -52,7 +52,7 @@ fn painted_text_rect(shape: &Shape, wanted: &str) -> Option<Rect> {
 #[test]
 fn an_action_row_takes_a_click_that_lands_on_its_title() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     let mut title = Rect::NOTHING;
     let mut clicked = false;
     // Two passes to lay the row out against the fonts, then one that
@@ -119,7 +119,7 @@ fn an_action_row_takes_a_click_that_lands_on_its_title() {
 fn a_truncated_painted_label_shows_its_full_text_on_hover() {
     const FULL: &str = "//lab-server/projects/analog/precision-afe-front-end.rspiceproj";
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     ctx.all_styles_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
         style.interaction.show_tooltips_only_when_still = false;
@@ -253,7 +253,7 @@ fn overconstrained_section_header_wraps_instead_of_eliding_both_columns() {
 #[test]
 fn property_controls_and_section_headers_expose_their_full_accessible_names() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut value = "R1".to_owned();
     let mut tunable_value = "1k".to_owned();
@@ -279,10 +279,12 @@ fn property_controls_and_section_headers_expose_their_full_accessible_names() {
                     "Value",
                     &mut tunable_value,
                     false,
-                    WorkbenchIcon::Sliders,
-                    "Tune value",
-                    true,
-                    None,
+                    PropertyRowAction {
+                        icon: WorkbenchIcon::Sliders,
+                        label: "Tune value",
+                        enabled: true,
+                        disabled_reason: None,
+                    },
                 );
                 property_row_combo(
                     ui,
@@ -325,7 +327,7 @@ fn property_controls_and_section_headers_expose_their_full_accessible_names() {
 #[test]
 fn empty_state_recovery_actions_are_exposed_as_named_buttons() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
 
     let nodes = ctx
@@ -364,7 +366,7 @@ fn empty_state_recovery_actions_are_exposed_as_named_buttons() {
 #[test]
 fn empty_state_recovery_action_group_is_centered_under_the_copy() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     let mut content_center = 0.0;
     let mut first = Rect::NOTHING;
     let mut second = Rect::NOTHING;
@@ -401,7 +403,7 @@ fn empty_state_recovery_action_group_is_centered_under_the_copy() {
 #[test]
 fn long_read_only_cells_do_not_reflow_property_rows() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     let mut short_height = 0.0;
     let mut long_value_height = 0.0;
     let mut long_label_height = 0.0;
@@ -471,7 +473,7 @@ fn the_label_column_cap_clears_the_widest_label_the_workbench_ships() {
     // manager's aside. The cap has to clear it, or capping the column would
     // trade a layout gap for newly elided labels on wide rows.
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     let mut widest = f32::INFINITY;
     let _ = ctx.run_ui(Default::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -503,7 +505,7 @@ fn schematic_section_heading_uses_the_mockup_tracking() {
 #[test]
 fn card_content_remains_vertical_inside_a_horizontal_parent() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     let mut first = egui::Rect::NOTHING;
     let mut second = egui::Rect::NOTHING;
 
@@ -524,9 +526,9 @@ fn card_content_remains_vertical_inside_a_horizontal_parent() {
 #[test]
 fn a_long_path_keeps_its_root_and_the_folder_it_names() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     let path = r"C:\Users\Example\AppData\Local\RSpice\.rspice-recovery";
-    let font = crate::ui::theme::mono(tokens::FS_0, FontWeight::Regular);
+    let font = crate::theme::mono(tokens::FS_0, FontWeight::Regular);
     let mut shortened = Vec::new();
     let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -554,7 +556,7 @@ fn a_long_path_keeps_its_root_and_the_folder_it_names() {
 #[test]
 fn a_wrapped_section_header_sets_its_metadata_under_the_title() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    crate::Theme::default().apply(&ctx);
     let meta = "inherited \u{b7} project default";
     let mut header = Rect::NOTHING;
     let mut shapes = Vec::new();
