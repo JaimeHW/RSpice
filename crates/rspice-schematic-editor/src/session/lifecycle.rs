@@ -39,9 +39,10 @@ impl EditorSession {
     }
 
     /// Retire both conductor drafts without changing document geometry.
-    fn cancel_routing_gestures(&mut self) {
+    pub(super) fn cancel_routing_gestures(&mut self) {
         self.wire_drawing.clear();
         self.bus_drawing.cancel();
+        self.conductor_source = None;
     }
 
     /// Cancel the tool and every unfinished route, including hidden stale routes.

@@ -57,6 +57,9 @@ pub(super) fn handle_tool_interactions(
     if state.reconcile_schematic_drag(ui.ctx(), false) {
         return;
     }
+    if state.reconcile_conductor_route(ui.ctx()) {
+        return;
+    }
     retain_selection_on_active_sheet(state);
     if primary_pan_gesture_active(ui, response) {
         return;
@@ -164,7 +167,7 @@ pub(super) fn handle_tool_interactions(
                             let _ = state.schematic.finish_wire();
                         }
                     }
-                    Some(wire_pos) => state.schematic.start_wire(wire_pos),
+                    Some(wire_pos) => state.start_canvas_wire(ui.ctx(), wire_pos),
                     None => report_unrepresentable_conductor_attachment(ui, state),
                 }
             }
@@ -180,7 +183,7 @@ pub(super) fn handle_tool_interactions(
                         .bus_drawing
                         .declaration
                         .clone();
-                    if let Err(error) = state.schematic.start_bus(bus_pos, declaration) {
+                    if let Err(error) = state.start_canvas_bus(ui.ctx(), bus_pos, declaration) {
                         report_bus_error(ui, state, "Bus could not be started", error.to_string());
                     }
                 }
@@ -322,6 +325,9 @@ pub(super) fn handle_tool_interactions(
 }
 
 fn finish_active_route(ui: &Ui, state: &mut AppState) -> bool {
+    if state.reconcile_conductor_route(ui.ctx()) {
+        return false;
+    }
     if state.schematic.session.editor.wire_drawing.active {
         return state.schematic.finish_wire().is_some();
     }

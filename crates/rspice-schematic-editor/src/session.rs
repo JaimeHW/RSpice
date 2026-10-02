@@ -14,6 +14,7 @@ pub mod visibility;
 pub mod wire;
 
 pub mod canvas_cache;
+pub mod conductor;
 pub mod design_note;
 pub mod documentation_shape;
 pub mod placement;
@@ -51,6 +52,9 @@ pub struct EditorSession {
 
     /// Bus drawing state (runtime only; unfinished gestures never persist).
     pub bus_drawing: BusDrawing,
+
+    /// Source of the current conductor draft; never persisted with the design.
+    conductor_source: Option<conductor::ConductorSource>,
 
     /// Zoom level (1.0 = 100%) - not part of undo history or saved files
     /// Uses default of 1.0 when deserializing to prevent black screen
@@ -152,6 +156,7 @@ impl Default for EditorSession {
             tool: Default::default(),
             wire_drawing: Default::default(),
             bus_drawing: Default::default(),
+            conductor_source: None,
             zoom: 1.0,
             pan: Default::default(),
             clipboard: Default::default(),

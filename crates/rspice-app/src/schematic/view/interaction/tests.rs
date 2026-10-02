@@ -774,21 +774,27 @@ fn late_safe_mode_activation_rejects_probe_marker_without_mutation() {
 #[test]
 fn route_finish_helper_commits_wire_and_bus_without_secondary_click() {
     let mut state = AppState::default();
-    state.schematic.start_wire(Point::origin());
-    state.schematic.extend_wire(Point::new(20, 0));
-    with_test_ui(|ui| assert!(finish_active_route(ui, &mut state)));
+    state.schematic.arm_tool(Tool::Wire);
+    with_test_ui(|ui| {
+        state.start_canvas_wire(ui.ctx(), Point::origin());
+        state.schematic.extend_wire(Point::new(20, 0));
+        assert!(finish_active_route(ui, &mut state));
+    });
     assert!(!state.schematic.session.editor.wire_drawing.active);
     assert_eq!(state.schematic.document().wires.len(), 1);
 
-    state
-        .schematic
-        .start_bus(
-            Point::new(0, 20),
-            Some(BusDeclaration::parse("DATA[7:0]").unwrap()),
-        )
-        .unwrap();
-    state.schematic.extend_bus(Point::new(20, 20));
-    with_test_ui(|ui| assert!(finish_active_route(ui, &mut state)));
+    state.schematic.arm_tool(Tool::Bus);
+    with_test_ui(|ui| {
+        state
+            .start_canvas_bus(
+                ui.ctx(),
+                Point::new(0, 20),
+                Some(BusDeclaration::parse("DATA[7:0]").unwrap()),
+            )
+            .unwrap();
+        state.schematic.extend_bus(Point::new(20, 20));
+        assert!(finish_active_route(ui, &mut state));
+    });
     assert!(!state.schematic.session.editor.bus_drawing.active);
     assert_eq!(state.schematic.document().buses.len(), 1);
 }

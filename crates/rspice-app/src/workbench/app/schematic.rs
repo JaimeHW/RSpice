@@ -1,5 +1,6 @@
 //! Schematic-domain services shared by the app's edit workflows.
 
+mod conductor_routes;
 pub(in crate::workbench) mod edit_authority;
 pub(in crate::workbench) mod hierarchy_reference_impact;
 pub(in crate::workbench) mod instance_catalog;

@@ -137,6 +137,27 @@ impl Fixture {
             .insert_schematic_editor(reference.key(), SchematicState::default());
         reference
     }
+    fn enter_reused_master(&mut self) -> crate::state::CellViewRef {
+        use crate::state::LibraryCellInstance;
+        let master = self.second_document();
+        let child = self.app.state.schematic.clone();
+        self.app.state.schematic = SchematicState::default();
+        for x in [0, 200] {
+            self.app.state.schematic.add_library_cell_component(
+                Point::new(x, 0),
+                LibraryCellInstance::new(&master.library, &master.cell, &master.view),
+            );
+        }
+        self.app.state.sync_active_schematic_to_workspace();
+        self.app
+            .state
+            .workspace
+            .insert_schematic_editor(master.key(), child);
+        self.app
+            .state
+            .descend_into_instance(Some("X1".into()), master.clone());
+        master
+    }
 }
 
 #[test]
@@ -549,30 +570,10 @@ fn gesture_window_projection_preserves_ownership_and_inactive_save_baselines() {
 
 #[test]
 fn gesture_occurrence_and_sheet_changes_cancel_the_original_transaction() {
-    use crate::state::{
-        LibraryCellInstance, SheetDefinition, SheetPortPolicy, SheetTemplate, ViewType,
-    };
+    use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate, ViewType};
     for occurrence_change in [false, true] {
         let mut fixture = Fixture::new(false);
-        let master = fixture.second_document();
-        let child = fixture.app.state.schematic.clone();
-        fixture.app.state.schematic = SchematicState::default();
-        for x in [0, 200] {
-            fixture.app.state.schematic.add_library_cell_component(
-                Point::new(x, 0),
-                LibraryCellInstance::new(&master.library, &master.cell, &master.view),
-            );
-        }
-        fixture.app.state.sync_active_schematic_to_workspace();
-        fixture
-            .app
-            .state
-            .workspace
-            .insert_schematic_editor(master.key(), child);
-        fixture
-            .app
-            .state
-            .descend_into_instance(Some("X1".into()), master.clone());
+        let master = fixture.enter_reused_master();
         let id = fixture.app.state.schematic.document().components[0].id;
         let first = fixture
             .app
@@ -630,6 +631,160 @@ fn gesture_occurrence_and_sheet_changes_cancel_the_original_transaction() {
         );
         assert!(!fixture.app.state.schematic.has_pending_operation());
         assert!(!fixture.app.state.schematic.can_undo());
+    }
+}
+
+#[test]
+fn conductor_routes_validate_source_before_finishing() {
+    use crate::workbench::state::WorkspaceDocumentId;
+
+    for tool in [Tool::Wire, Tool::Bus] {
+        for change in [
+            "unchanged",
+            "occurrence",
+            "sheet",
+            "topology",
+            "read-only",
+            "replacement",
+            "document round trip",
+            "passive window",
+            "window transfer",
+        ] {
+            let mut fixture = Fixture::new(false);
+            let root = fixture.app.state.workspace.content.active_view.clone();
+            let master = fixture.enter_reused_master();
+            fixture.app.state.schematic.arm_tool(tool);
+            for x in [300.0, 400.0] {
+                fixture.frame(
+                    vec![
+                        egui::Event::PointerMoved(fixture.origin + egui::vec2(x, 100.0)),
+                        fixture.button(x, true),
+                    ],
+                    true,
+                );
+                fixture.frame(vec![fixture.button(x, false)], true);
+            }
+            let editor = &fixture.app.state.schematic.session.editor;
+            assert!(if tool == Tool::Wire {
+                editor.wire_drawing.active && editor.wire_drawing.points.len() >= 2
+            } else {
+                editor.bus_drawing.active && editor.bus_drawing.points.len() >= 2
+            });
+
+            match change {
+                "unchanged" => {}
+                "occurrence" => {
+                    fixture.app.state.focus_workspace_breadcrumb(0);
+                    fixture
+                        .app
+                        .state
+                        .descend_into_instance(Some("X2".into()), master);
+                }
+                "sheet" => {
+                    let id = fixture.app.state.schematic.document().components[0].id;
+                    fixture
+                        .app
+                        .state
+                        .workspace
+                        .content
+                        .design_management
+                        .bootstrap_for_cell_view(&master.key(), "Sheet 1", [id])
+                        .unwrap();
+                }
+                "topology" => fixture.app.state.schematic.bump_topology_version(),
+                "read-only" => fixture.app.state.schematic.session.read_only = true,
+                "replacement" => {
+                    let document = fixture.app.state.schematic.document().clone();
+                    fixture.app.state.schematic = SchematicState::from_document(document);
+                    fixture.app.state.bump_active_schematic_epoch();
+                }
+                "document round trip" => {
+                    fixture.app.state.open_workspace_view(root);
+                    fixture.app.state.open_workspace_view(master);
+                }
+                "passive window" | "window transfer" => {
+                    let primary = fixture.app.state.workbench.window_session.primary();
+                    let layout = fixture.app.state.workbench.current_workspace_layout();
+                    fixture.app.capture_application_window_projection(primary);
+                    let secondary = fixture
+                        .app
+                        .state
+                        .workbench
+                        .window_session
+                        .detach_document(
+                            WorkspaceDocumentId::CellView(if change == "passive window" {
+                                root
+                            } else {
+                                master
+                            }),
+                            "Second",
+                            layout,
+                            false,
+                        )
+                        .unwrap();
+                    assert!(fixture.app.project_application_window(secondary, layout));
+                    if change == "passive window" {
+                        fixture.frame(vec![], true);
+                        fixture.app.state.sync_active_schematic_to_workspace();
+                        assert!(fixture.app.project_application_window(primary, layout));
+                    }
+                }
+                _ => unreachable!(),
+            }
+            rspice_schematic_editor::view::canvas::request_focus(&fixture.ctx);
+            fixture.frame(
+                vec![egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                true,
+            );
+            let document = fixture.app.state.schematic.document();
+            let count = if tool == Tool::Wire {
+                document.wires.len()
+            } else {
+                document.buses.len()
+            };
+            let can_finish = matches!(
+                change,
+                "unchanged" | "document round trip" | "passive window"
+            );
+            assert_eq!(count, usize::from(can_finish), "{tool:?}: {change}");
+            assert!(
+                !fixture
+                    .app
+                    .state
+                    .schematic
+                    .session
+                    .editor
+                    .wire_drawing
+                    .active
+            );
+            assert!(
+                !fixture
+                    .app
+                    .state
+                    .schematic
+                    .session
+                    .editor
+                    .bus_drawing
+                    .active
+            );
+            assert_eq!(
+                fixture.app.state.schematic.can_undo(),
+                can_finish,
+                "{tool:?}: {change}"
+            );
+            if can_finish {
+                assert!(fixture.app.state.schematic.undo());
+                assert!(fixture.app.state.schematic.document().wires.is_empty());
+                assert!(fixture.app.state.schematic.document().buses.is_empty());
+                assert!(!fixture.app.state.schematic.can_undo());
+            }
+        }
     }
 }
 

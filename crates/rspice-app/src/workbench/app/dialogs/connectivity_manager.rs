@@ -1019,7 +1019,7 @@ impl RSpiceApp {
             None
         });
         self.state.dialogs.connectivity_manager.body_scroll_offset = body_scroll_offset;
-        self.handle_connectivity_body_action(action);
+        self.handle_connectivity_body_action(ctx, action);
 
         match choice {
             DialogChoice::Primary => match page {
@@ -1047,7 +1047,7 @@ impl RSpiceApp {
         }
     }
 
-    fn handle_connectivity_body_action(&mut self, action: ConnectivityBodyAction) {
+    fn handle_connectivity_body_action(&mut self, ctx: &Context, action: ConnectivityBodyAction) {
         match action {
             ConnectivityBodyAction::None => {}
             ConnectivityBodyAction::Refresh => {
@@ -1103,7 +1103,7 @@ impl RSpiceApp {
             }
             ConnectivityBodyAction::Reveal(target) => self.reveal_connectivity_target(target),
             ConnectivityBodyAction::RouteRepair(repair_id) => {
-                if let Err(error) = self.arm_explicit_endpoint_route(&repair_id) {
+                if let Err(error) = self.arm_explicit_endpoint_route(ctx, &repair_id) {
                     self.state.dialogs.connectivity_manager.error = Some(error);
                 }
             }
@@ -1304,7 +1304,11 @@ impl RSpiceApp {
         Ok(())
     }
 
-    fn arm_explicit_endpoint_route(&mut self, repair_id: &str) -> Result<(), String> {
+    fn arm_explicit_endpoint_route(
+        &mut self,
+        ctx: &Context,
+        repair_id: &str,
+    ) -> Result<(), String> {
         connectivity_authority_error(&self.state).map_or(Ok(()), Err)?;
         if self.state.schematic.session.read_only
             || self.state.active_view_read_only()
@@ -1336,8 +1340,8 @@ impl RSpiceApp {
         }
         self.state.dialogs.connectivity_manager.close();
         self.state.workbench.workspace = crate::workbench::state::Workspace::Design;
-        self.state.schematic.session.editor.tool = Tool::Wire;
-        self.state.schematic.start_wire(choice.start);
+        self.state.schematic.arm_tool(Tool::Wire);
+        self.state.start_canvas_wire(ctx, choice.start);
         self.state.schematic.session.editor.center_request = Some(choice.destination);
         self.state.push_user_message(ConsoleMessage::info(format!(
             "Wire routing armed from {}, {} to {}. The destination is centered; route deliberately and finish on that exact endpoint.",
