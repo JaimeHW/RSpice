@@ -4,6 +4,7 @@ pub mod array_interaction;
 pub mod bus_interaction;
 pub mod context_menu;
 pub mod coordinates;
+pub mod documentation_shape_input;
 pub mod documentation_shapes;
 pub mod geometry;
 pub mod grid;

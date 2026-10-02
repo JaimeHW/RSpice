@@ -1186,6 +1186,101 @@ fn stale_documentation_shape_authority_is_consumed_without_document_mutation() {
 }
 
 #[test]
+fn queued_shape_input_cannot_edit_a_replaced_gesture_or_changed_context() {
+    for change in [
+        "none", "rearmed", "document", "draft", "kind", "tool", "modal",
+    ] {
+        let mut state = AppState::default();
+        state.schematic.session.editor.pending_documentation_shape = Some(
+            PendingDocumentationShapePlacement::new(
+                DocumentationShapeKind::Line,
+                state.schematic.topology_version(),
+                &[],
+            )
+            .with_source(super::super::requests::editor_request_source(&state)),
+        );
+        state.schematic.session.editor.tool = Tool::DocumentationShape;
+        let drawing = &mut state.schematic.session.editor.documentation_shape_drawing;
+        drawing.points.push(Point::origin());
+        drawing.keyboard_cursor = Some(Point::origin());
+        let expected = drawing.clone();
+        let mut next = expected.clone();
+        next.keyboard_cursor = Some(Point::new(10, 0));
+        next.keyboard_active = true;
+        let request = capture_shape_input(
+            &state,
+            ShapeInputTransition {
+                expected,
+                next,
+                action: Some(ShapeInputAction::PlacePoint(Point::new(10, 0))),
+            },
+        );
+        match change {
+            "none" => {}
+            "rearmed" => {
+                // Same source, kind and visible draft, but a different gesture lifetime.
+                let drawing = &mut state.schematic.session.editor.documentation_shape_drawing;
+                drawing.clear();
+                drawing.points.push(Point::origin());
+                drawing.keyboard_cursor = Some(Point::origin());
+            }
+            "document" => state.active_schematic_epoch += 1,
+            "draft" => state
+                .schematic
+                .session
+                .editor
+                .documentation_shape_drawing
+                .points
+                .push(Point::new(20, 20)),
+            "kind" => {
+                state
+                    .schematic
+                    .session
+                    .editor
+                    .pending_documentation_shape
+                    .as_mut()
+                    .unwrap()
+                    .kind = DocumentationShapeKind::Rectangle
+            }
+            "tool" => state.schematic.session.editor.tool = Tool::Select,
+            "modal" => state.dialogs.about = true,
+            _ => unreachable!(),
+        }
+        let drawing_before = state
+            .schematic
+            .session
+            .editor
+            .documentation_shape_drawing
+            .clone();
+        let pending_before = state
+            .schematic
+            .session
+            .editor
+            .pending_documentation_shape
+            .clone();
+        with_test_ui(|ui| apply_shape_input(ui, &mut state, request.clone()));
+        if change == "none" {
+            assert_eq!(state.schematic.document().documentation_shapes.len(), 1);
+            assert!(state.schematic.undo());
+        } else {
+            assert_eq!(
+                state.schematic.session.editor.documentation_shape_drawing, drawing_before,
+                "{change}"
+            );
+            assert_eq!(
+                state.schematic.session.editor.pending_documentation_shape, pending_before,
+                "{change}"
+            );
+        }
+        assert!(
+            state.schematic.document().documentation_shapes.is_empty(),
+            "{change}"
+        );
+        assert!(!state.schematic.can_undo(), "{change}");
+    }
+}
+
+#[test]
 fn focused_keyboard_cursor_places_exact_grid_resolved_shape_points() {
     let mut state = AppState::default();
     let grid = state.schematic.document().grid_size;

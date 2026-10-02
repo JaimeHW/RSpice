@@ -41,6 +41,8 @@ impl PendingDocumentationShapePlacement {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DocumentationShapeDrawing {
+    // Included in transition equality so a cleared/rearmed gesture cannot accept old input.
+    generation: u64,
     pub points: Vec<Point>,
     /// Grid-resolved placement cursor used when the focused canvas is driven
     /// without a pointing device.
@@ -50,6 +52,7 @@ pub struct DocumentationShapeDrawing {
 
 impl DocumentationShapeDrawing {
     pub fn clear(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
         self.points.clear();
         self.keyboard_cursor = None;
         self.keyboard_active = false;

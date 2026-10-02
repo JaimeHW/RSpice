@@ -15,6 +15,9 @@ use crate::state::{
 };
 use crate::workbench::app_state::AppState;
 use rspice_design::connectivity::summary::{DesignNet, projection_nets};
+use rspice_schematic_editor::view::documentation_shape_input::{
+    self, ShapeInputAction, ShapeInputRequest, ShapeInputTransition, ShapeInputView,
+};
 
 use super::SchematicSymbolContext;
 use super::array_interaction::handle_armed_array_selection;
@@ -99,13 +102,15 @@ pub(super) fn handle_tool_interactions(
     }
 
     if current_tool == Tool::DocumentationShape
-        && ui.input(|input| input.pointer.delta() != egui::Vec2::ZERO)
-        && let Some(pos) = response.hover_pos()
+        && let Some(transition) = documentation_shape_input::pointer_motion(
+            ui,
+            response,
+            viewport,
+            shape_input_view(state),
+        )
     {
-        let position = resolve_grid_pointer(state, viewport, pos).snapped_position;
-        let drawing = &mut state.schematic.session.editor.documentation_shape_drawing;
-        drawing.keyboard_cursor = Some(position);
-        drawing.keyboard_active = false;
+        let request = capture_shape_input(state, transition);
+        apply_shape_input(ui, state, request);
     }
 
     if matches!(current_tool, Tool::Select) {
@@ -610,6 +615,21 @@ fn handle_documentation_shape_click(
     }
 }
 
+fn shape_input_view(state: &AppState) -> ShapeInputView<'_> {
+    ShapeInputView {
+        drawing: &state.schematic.session.editor.documentation_shape_drawing,
+        kind: state
+            .schematic
+            .session
+            .editor
+            .pending_documentation_shape
+            .as_ref()
+            .map(|pending| pending.kind),
+        snap_engine: &state.schematic.session.editor.snap_engine,
+        grid_size: state.schematic.document().grid_size,
+    }
+}
+
 fn handle_documentation_shape_keyboard(
     ui: &Ui,
     response: &Response,
@@ -617,124 +637,51 @@ fn handle_documentation_shape_keyboard(
     viewport: &Viewport,
     grid_size: i32,
 ) {
-    let (left, right, up, down, place, finish, backspace) = ui.input_mut(|input| {
-        (
-            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft),
-            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight),
-            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
-            input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
-            input.consume_key(egui::Modifiers::NONE, egui::Key::Space),
-            input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
-            input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
-        )
-    });
-    let directional = left || right || up || down;
-    if directional {
-        let fallback = response
-            .hover_pos()
-            .map(|position| resolve_grid_pointer(state, viewport, position).snapped_position)
-            .or_else(|| {
-                state
-                    .schematic
-                    .session
-                    .editor
-                    .documentation_shape_drawing
-                    .points
-                    .last()
-                    .copied()
-            })
-            .unwrap_or_else(Point::origin);
-        let step = if state.schematic.session.editor.snap_engine.enabled
-            && state.schematic.session.editor.snap_engine.snap_to_grid
-        {
-            grid_size.max(1)
-        } else {
-            1
-        };
-        let drawing = &mut state.schematic.session.editor.documentation_shape_drawing;
-        let mut cursor = drawing.keyboard_cursor.unwrap_or(fallback);
-        if left {
-            cursor.x = cursor.x.saturating_sub(step);
-        }
-        if right {
-            cursor.x = cursor.x.saturating_add(step);
-        }
-        if up {
-            cursor.y = cursor.y.saturating_sub(step);
-        }
-        if down {
-            cursor.y = cursor.y.saturating_add(step);
-        }
-        drawing.keyboard_cursor = Some(cursor);
-        drawing.keyboard_active = true;
+    if let Some(transition) = documentation_shape_input::keyboard(
+        ui,
+        response,
+        viewport,
+        shape_input_view(state),
+        grid_size,
+    ) {
+        let request = capture_shape_input(state, transition);
+        apply_shape_input(ui, state, request);
     }
-    if backspace {
-        state
-            .schematic
-            .session
-            .editor
-            .documentation_shape_drawing
-            .points
-            .pop();
-    }
+}
 
-    let Some(cursor) = state
-        .schematic
-        .session
-        .editor
-        .documentation_shape_drawing
-        .keyboard_cursor
-        .or_else(|| {
-            response
-                .hover_pos()
-                .map(|position| resolve_grid_pointer(state, viewport, position).snapped_position)
-        })
-    else {
-        return;
-    };
-    if place {
-        state
-            .schematic
-            .session
-            .editor
-            .documentation_shape_drawing
-            .keyboard_active = true;
-        handle_documentation_shape_click(ui, state, cursor, false);
-        if state.schematic.session.editor.tool == Tool::DocumentationShape {
-            state
-                .schematic
-                .session
-                .editor
-                .documentation_shape_drawing
-                .keyboard_active = true;
-        }
-    } else if finish {
-        let can_finish_polygon = state
+fn capture_shape_input(state: &AppState, transition: ShapeInputTransition) -> ShapeInputRequest {
+    ShapeInputRequest {
+        source: super::requests::editor_request_source(state),
+        kind: state
             .schematic
             .session
             .editor
             .pending_documentation_shape
             .as_ref()
-            .is_some_and(|pending| {
-                pending.kind == crate::state::DocumentationShapeKind::Polygon
-                    && state
-                        .schematic
-                        .session
-                        .editor
-                        .documentation_shape_drawing
-                        .points
-                        .len()
-                        >= 3
-            });
-        if can_finish_polygon {
-            finish_documentation_polygon(ui, state);
-        } else {
-            state
+            .map(|pending| pending.kind),
+        transition,
+    }
+}
+
+fn apply_shape_input(ui: &Ui, state: &mut AppState, request: ShapeInputRequest) {
+    if request.source != super::requests::editor_request_source(state)
+        || request.kind
+            != state
                 .schematic
                 .session
                 .editor
-                .documentation_shape_drawing
-                .keyboard_active = true;
+                .pending_documentation_shape
+                .as_ref()
+                .map(|pending| pending.kind)
+        || request.transition.expected != state.schematic.session.editor.documentation_shape_drawing
+        || state.schematic.session.editor.tool != Tool::DocumentationShape
+        || state.application_modal_open()
+    {
+        return;
+    }
+    state.schematic.session.editor.documentation_shape_drawing = request.transition.next;
+    match request.transition.action {
+        Some(ShapeInputAction::PlacePoint(cursor)) => {
             handle_documentation_shape_click(ui, state, cursor, false);
             if state.schematic.session.editor.tool == Tool::DocumentationShape {
                 state
@@ -745,6 +692,8 @@ fn handle_documentation_shape_keyboard(
                     .keyboard_active = true;
             }
         }
+        Some(ShapeInputAction::FinishPolygon) => finish_documentation_polygon(ui, state),
+        None => {}
     }
 }
 
