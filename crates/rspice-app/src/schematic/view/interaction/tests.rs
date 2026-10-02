@@ -963,11 +963,7 @@ fn every_documentation_shape_gesture_commits_once_and_remains_non_electrical() {
                 topology,
                 &state.schematic.document().documentation_shapes,
             )
-            .with_document_authority(
-                state.design_execution_epoch,
-                state.active_schematic_epoch,
-                state.workspace.content.active_view.display_path(),
-            ),
+            .with_source(super::super::requests::editor_request_source(&state)),
         );
         state.schematic.session.editor.tool = Tool::DocumentationShape;
 
@@ -1021,44 +1017,172 @@ fn every_documentation_shape_gesture_commits_once_and_remains_non_electrical() {
 
 #[test]
 fn stale_documentation_shape_authority_is_consumed_without_document_mutation() {
-    let mut state = AppState::default();
-    state.schematic.session.editor.pending_documentation_shape = Some(
-        PendingDocumentationShapePlacement::new(
-            DocumentationShapeKind::Line,
-            state.schematic.topology_version(),
-            &state.schematic.document().documentation_shapes,
-        )
-        .with_document_authority(
-            state.design_execution_epoch,
-            state.active_schematic_epoch,
-            state.workspace.content.active_view.display_path(),
-        ),
-    );
-    state.schematic.session.editor.tool = Tool::DocumentationShape;
-    state.active_schematic_epoch = state.active_schematic_epoch.wrapping_add(1);
+    for finish_polygon in [false, true] {
+        for change in [
+            "document",
+            "occurrence",
+            "sheet",
+            "content",
+            "read-only",
+            "safe-mode",
+        ] {
+            let mut state = AppState::default();
+            let master = crate::state::CellViewRef::new("work", "shape_child", "schematic");
+            state
+                .workspace
+                .descend_into("X1".to_owned(), master.clone(), ViewType::Schematic);
+            let first = state
+                .workspace
+                .content
+                .design_management
+                .bootstrap_for_cell_view(&master.key(), "Sheet 1", [])
+                .unwrap();
+            state.schematic.session.editor.pending_documentation_shape = Some(
+                PendingDocumentationShapePlacement::new(
+                    DocumentationShapeKind::Polygon,
+                    state.schematic.topology_version(),
+                    &state.schematic.document().documentation_shapes,
+                )
+                .with_source(super::super::requests::editor_request_source(&state)),
+            );
+            state.schematic.session.editor.tool = Tool::DocumentationShape;
+            state
+                .schematic
+                .session
+                .editor
+                .documentation_shape_drawing
+                .points = vec![Point::origin(), Point::new(20, 0), Point::new(10, 10)];
+            state
+                .schematic
+                .session
+                .editor
+                .documentation_shape_drawing
+                .keyboard_cursor = Some(Point::new(10, 10));
+            match change {
+                "document" => state.active_schematic_epoch += 1,
+                "occurrence" => {
+                    state.workspace.ascend_one().unwrap();
+                    state
+                        .workspace
+                        .descend_into("X2".to_owned(), master, ViewType::Schematic);
+                }
+                "sheet" => {
+                    let catalog = state
+                        .workspace
+                        .content
+                        .design_management
+                        .sheet_catalog_mut(&master.key())
+                        .unwrap();
+                    let second = catalog
+                        .create_sheet(
+                            SheetDefinition {
+                                name: "Sheet 2".to_owned(),
+                                template: SheetTemplate::AnalogSchematic,
+                                port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                                explicit_page_number: Some(2),
+                            },
+                            Some(first),
+                        )
+                        .unwrap();
+                    catalog.set_active(second).unwrap();
+                }
+                "content" => {
+                    let topology = state.schematic.topology_version();
+                    let content = state.schematic.content_version();
+                    let note = PendingDesignNotePlacement::new(
+                        DesignNoteKind::PlainText,
+                        "Changed context",
+                        topology,
+                        &[],
+                    )
+                    .unwrap();
+                    state
+                        .schematic
+                        .place_pending_design_note(Point::origin(), note)
+                        .unwrap();
+                    assert_eq!(state.schematic.topology_version(), topology);
+                    assert_ne!(state.schematic.content_version(), content);
+                    state.schematic.init_undo_history();
+                }
+                "read-only" => state.schematic.session.read_only = true,
+                "safe-mode" => state.workbench.safe_mode.activate(
+                    crate::workbench::state::LocalSafeModeOptions {
+                        open_project_read_only: true,
+                        ..Default::default()
+                    },
+                    "shape gesture test".to_owned(),
+                ),
+                _ => unreachable!(),
+            }
+            let content = state.schematic.content_version();
+            let notes = state.schematic.document().design_notes.clone();
 
-    with_test_ui(|ui| handle_documentation_shape_click(ui, &mut state, Point::new(0, 0), false));
+            if finish_polygon {
+                // Enter completes a polygon without going through the pointer-click gate.
+                let ctx = egui::Context::default();
+                let _ = ctx.run_ui(
+                    egui::RawInput {
+                        events: vec![egui::Event::Key {
+                            key: egui::Key::Enter,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::NONE,
+                        }],
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            // accessibility-pointer-shim: test-only canvas event harness.
+                            let response = ui.interact(
+                                ui.max_rect(),
+                                egui::Id::new("stale-shape"),
+                                egui::Sense::click_and_drag(),
+                            );
+                            let grid = state.schematic.document().grid_size;
+                            handle_documentation_shape_keyboard(
+                                ui,
+                                &response,
+                                &mut state,
+                                &pointer_viewport(),
+                                grid,
+                            );
+                        });
+                    },
+                );
+            } else {
+                with_test_ui(|ui| {
+                    handle_documentation_shape_click(ui, &mut state, Point::new(0, 0), true)
+                });
+            }
 
-    assert!(state.schematic.document().documentation_shapes.is_empty());
-    assert!(
-        state
-            .schematic
-            .session
-            .editor
-            .pending_documentation_shape
-            .is_none()
-    );
-    assert!(
-        state
-            .schematic
-            .session
-            .editor
-            .documentation_shape_drawing
-            .points
-            .is_empty()
-    );
-    assert_eq!(state.schematic.session.editor.tool, Tool::Select);
-    assert!(!state.schematic.can_undo());
+            assert!(
+                state.schematic.document().documentation_shapes.is_empty(),
+                "{change}, Enter={finish_polygon}"
+            );
+            assert_eq!(state.schematic.content_version(), content);
+            assert_eq!(state.schematic.document().design_notes, notes);
+            assert!(
+                state
+                    .schematic
+                    .session
+                    .editor
+                    .pending_documentation_shape
+                    .is_none()
+            );
+            assert!(
+                state
+                    .schematic
+                    .session
+                    .editor
+                    .documentation_shape_drawing
+                    .points
+                    .is_empty()
+            );
+            assert_eq!(state.schematic.session.editor.tool, Tool::Select);
+            assert!(!state.schematic.can_undo());
+        }
+    }
 }
 
 #[test]
@@ -1071,11 +1195,7 @@ fn focused_keyboard_cursor_places_exact_grid_resolved_shape_points() {
             state.schematic.topology_version(),
             &state.schematic.document().documentation_shapes,
         )
-        .with_document_authority(
-            state.design_execution_epoch,
-            state.active_schematic_epoch,
-            state.workspace.content.active_view.display_path(),
-        ),
+        .with_source(super::super::requests::editor_request_source(&state)),
     );
     state.schematic.session.editor.tool = Tool::DocumentationShape;
     let ctx = egui::Context::default();

@@ -583,13 +583,9 @@ fn handle_documentation_shape_click(
         return;
     };
     let authority_matches = pending
-        .document_authority
+        .source
         .as_ref()
-        .is_some_and(|authority| {
-            authority.design_execution_epoch == state.design_execution_epoch
-                && authority.active_schematic_epoch == state.active_schematic_epoch
-                && authority.view_path == state.workspace.content.active_view.display_path()
-        });
+        .is_some_and(|source| *source == super::requests::editor_request_source(state));
     if state.schematic_edit_read_only() || !authority_matches {
         state.push_user_message(ConsoleMessage::warning(
             "Documentation shape was not placed: the active schematic authority changed; reopen Draw documentation shape."
@@ -795,6 +791,18 @@ fn finish_documentation_shape(
     else {
         return;
     };
+    let authority_error = if state.schematic_edit_read_only() {
+        Some(crate::state::DocumentationShapeError::ReadOnly)
+    } else if pending.source.as_ref() != Some(&super::requests::editor_request_source(state)) {
+        Some(crate::state::DocumentationShapeError::StaleDocument)
+    } else {
+        None
+    };
+    if let Some(error) = authority_error {
+        report_documentation_shape_error(ui, state, error);
+        state.schematic.cancel_tool();
+        return;
+    }
     match state
         .schematic
         .commit_documentation_shape(pending, geometry)

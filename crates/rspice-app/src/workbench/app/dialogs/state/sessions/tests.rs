@@ -73,9 +73,12 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
             .open(0, 0, 0, "user/top/schematic".to_owned());
     });
     assert_blocks_shortcuts(|dialogs| {
-        dialogs
-            .documentation_shape
-            .open(0, 0, 0, "user/top/schematic".to_owned(), Vec::new());
+        dialogs.documentation_shape.open(
+            crate::workbench::app::schematic_editor_request_source(
+                &crate::workbench::app_state::AppState::default(),
+            ),
+            Vec::new(),
+        );
     });
     assert_blocks_shortcuts(|dialogs| {
         dialogs.move_selection.open(edit_authority());

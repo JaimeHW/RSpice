@@ -1,5 +1,7 @@
 //! Armed documentation-shape placement and unfinished drawing gestures.
 
+use crate::requests::EditorRequestSource;
+
 use rspice_design::schematic::documentation_shape::{
     DocumentationShape, DocumentationShapeError, DocumentationShapeGeometry,
     DocumentationShapeKind, DocumentationShapeLayer, MAX_DOCUMENTATION_POLYGON_POINTS,
@@ -8,19 +10,12 @@ use rspice_design::schematic::documentation_shape::{
 use rspice_design_model::Point;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DocumentationShapePlacementAuthority {
-    pub design_execution_epoch: u64,
-    pub active_schematic_epoch: u64,
-    pub view_path: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingDocumentationShapePlacement {
     pub kind: DocumentationShapeKind,
     pub layer: DocumentationShapeLayer,
     pub topology_version: u64,
     pub expected_shapes: Vec<DocumentationShape>,
-    pub document_authority: Option<DocumentationShapePlacementAuthority>,
+    pub source: Option<EditorRequestSource>,
 }
 
 impl PendingDocumentationShapePlacement {
@@ -34,21 +29,12 @@ impl PendingDocumentationShapePlacement {
             layer: DocumentationShapeLayer::DrawingDocumentation,
             topology_version,
             expected_shapes: expected_shapes.to_vec(),
-            document_authority: None,
+            source: None,
         }
     }
 
-    pub fn with_document_authority(
-        mut self,
-        design_execution_epoch: u64,
-        active_schematic_epoch: u64,
-        view_path: String,
-    ) -> Self {
-        self.document_authority = Some(DocumentationShapePlacementAuthority {
-            design_execution_epoch,
-            active_schematic_epoch,
-            view_path,
-        });
+    pub fn with_source(mut self, source: EditorRequestSource) -> Self {
+        self.source = Some(source);
         self
     }
 }

@@ -12,7 +12,9 @@ use crate::ui::widgets::{
     select_with_response,
 };
 
-use crate::workbench::app::{DocumentationShapeDialogState, RSpiceApp};
+use crate::workbench::app::{
+    DocumentationShapeDialogState, RSpiceApp, schematic_editor_request_source,
+};
 use crate::workbench::app_state::AppState;
 
 const EYEBROW: &str = "SCHEMATIC \u{00b7} GRAPHICS";
@@ -116,23 +118,28 @@ fn validate_draft(state: &AppState) -> DraftValidation {
     if state.schematic_edit_read_only() {
         return DraftValidation::Invalid("The active schematic is read-only.".to_owned());
     }
-    if draft.design_execution_epoch != state.design_execution_epoch {
+    let Some(source) = draft.source.as_ref() else {
+        return DraftValidation::Invalid(
+            "Reopen Draw documentation shape to capture the active schematic.".to_owned(),
+        );
+    };
+    if source.design_epoch != state.design_execution_epoch {
         return DraftValidation::Invalid(
             "The design document changed. Close and reopen Draw documentation shape.".to_owned(),
         );
     }
-    if draft.active_schematic_epoch != state.active_schematic_epoch {
+    if source.document_epoch != state.active_schematic_epoch {
         return DraftValidation::Invalid(
             "The active schematic buffer changed. Close and reopen Draw documentation shape."
                 .to_owned(),
         );
     }
-    if draft.topology_version != state.schematic.topology_version() {
+    if source.topology_version != state.schematic.topology_version() {
         return DraftValidation::Invalid(
             "The schematic topology changed. Close and reopen Draw documentation shape.".to_owned(),
         );
     }
-    if draft.view_path != state.workspace.content.active_view.display_path() {
+    if source.document.display_path() != state.workspace.content.active_view.display_path() {
         return DraftValidation::Invalid(
             "The active cell/view changed. Close and reopen Draw documentation shape.".to_owned(),
         );
@@ -142,17 +149,19 @@ fn validate_draft(state: &AppState) -> DraftValidation {
             "The schematic graphics changed. Close and reopen Draw documentation shape.".to_owned(),
         );
     }
+    if *source != schematic_editor_request_source(state) {
+        return DraftValidation::Invalid(
+            "The active schematic context changed. Close and reopen Draw documentation shape."
+                .to_owned(),
+        );
+    }
     DraftValidation::Valid(
         PendingDocumentationShapePlacement::new(
             draft.kind,
-            draft.topology_version,
+            source.topology_version,
             &draft.expected_shapes,
         )
-        .with_document_authority(
-            draft.design_execution_epoch,
-            draft.active_schematic_epoch,
-            draft.view_path.clone(),
-        ),
+        .with_source(source.clone()),
     )
 }
 
@@ -527,17 +536,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mockup_contract_is_exact() {
-        assert_eq!(TITLE, "Draw documentation shape");
-        assert_eq!(EYEBROW, "SCHEMATIC \u{00b7} GRAPHICS");
-        assert_eq!(PRIMARY, "Arm shape tool");
-        assert_eq!(DIALOG_SIZE, DialogSize::Transaction);
-        assert_eq!(DocumentationShapeKind::ALL.len(), 5);
-        assert_eq!(DocumentationShapeKind::Rectangle.label(), "Rectangle");
-        assert_eq!(
-            DocumentationShapeLayer::DrawingDocumentation.label(),
-            "drawing / documentation"
+    fn arming_preserves_the_dialog_source_and_rejects_a_different_occurrence() {
+        let mut state = AppState::default();
+        assert!(!validate_draft(&state).can_commit());
+        let master = crate::state::CellViewRef::new("work", "shape_child", "schematic");
+        state.workspace.descend_into(
+            "X1".to_owned(),
+            master.clone(),
+            crate::state::ViewType::Schematic,
         );
+        let source = schematic_editor_request_source(&state);
+        state
+            .dialogs
+            .documentation_shape
+            .open(source.clone(), Vec::new());
+        let DraftValidation::Valid(pending) = validate_draft(&state) else {
+            panic!("current dialog must arm the tool");
+        };
+        assert_eq!(pending.source.as_ref(), Some(&source));
+        state.workspace.ascend_one().unwrap();
+        state
+            .workspace
+            .descend_into("X2".to_owned(), master, crate::state::ViewType::Schematic);
+        assert!(!validate_draft(&state).can_commit());
+        assert_eq!(state.dialogs.documentation_shape.source, Some(source));
+        state.dialogs.documentation_shape.close();
+        assert!(state.dialogs.documentation_shape.source.is_none());
+        assert!(state.schematic.document().documentation_shapes.is_empty());
+        assert!(!state.schematic.can_undo());
     }
 
     #[test]

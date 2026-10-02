@@ -1504,18 +1504,12 @@ impl Command {
             }
             Self::PlaceShape => {
                 activate_workspace(app, Workspace::Design);
-                let design_execution_epoch = app.state.design_execution_epoch;
-                let active_schematic_epoch = app.state.active_schematic_epoch;
-                let topology_version = app.state.schematic.topology_version();
-                let view_path = app.state.workspace.content.active_view.display_path();
+                let source = crate::workbench::app::schematic_editor_request_source(&app.state);
                 let expected_shapes = app.state.schematic.document().documentation_shapes.clone();
-                app.state.dialogs.documentation_shape.open(
-                    design_execution_epoch,
-                    active_schematic_epoch,
-                    topology_version,
-                    view_path,
-                    expected_shapes,
-                );
+                app.state
+                    .dialogs
+                    .documentation_shape
+                    .open(source, expected_shapes);
             }
             Self::MoveSelection => {
                 crate::workbench::app::open_move_selection_dialog(&mut app.state);

@@ -849,10 +849,7 @@ impl DesignNoteDialogState {
 pub(crate) struct DocumentationShapeDialogState {
     pub(crate) open: bool,
     pub(crate) kind: crate::state::DocumentationShapeKind,
-    pub(crate) design_execution_epoch: u64,
-    pub(crate) active_schematic_epoch: u64,
-    pub(crate) topology_version: u64,
-    pub(crate) view_path: String,
+    pub(crate) source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
     pub(crate) expected_shapes: Vec<crate::state::DocumentationShape>,
     pub(crate) dirty: bool,
     pub(crate) discard_confirm: bool,
@@ -861,19 +858,13 @@ pub(crate) struct DocumentationShapeDialogState {
 impl DocumentationShapeDialogState {
     pub(crate) fn open(
         &mut self,
-        design_execution_epoch: u64,
-        active_schematic_epoch: u64,
-        topology_version: u64,
-        view_path: String,
+        source: rspice_schematic_editor::requests::EditorRequestSource,
         expected_shapes: Vec<crate::state::DocumentationShape>,
     ) {
         *self = Self {
             open: true,
             kind: crate::state::DocumentationShapeKind::Rectangle,
-            design_execution_epoch,
-            active_schematic_epoch,
-            topology_version,
-            view_path,
+            source: Some(source),
             expected_shapes,
             dirty: false,
             discard_confirm: false,
