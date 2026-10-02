@@ -723,11 +723,7 @@ fn armed_move_exclusively_owns_selection_drag_routing() {
 
 /// Arm a sequence of `names` on `state`, for the document `state` is in.
 fn arm_pins(state: &mut AppState, names: &[&str], direction: PortDirection) {
-    let authority = PlacementAuthority::new(
-        state.design_execution_epoch,
-        state.active_schematic_epoch,
-        state.workspace.content.active_view.display_path(),
-    );
+    let authority = PlacementAuthority::new(super::super::requests::editor_request_source(state));
     state.schematic.session.editor.pending_port_sequence = Some(
         PendingPortSequence::new(
             names.iter().map(|name| (*name).to_owned()),
@@ -783,6 +779,13 @@ fn validated_port_contract_places_once_and_undo_redo_is_exact() {
 #[test]
 fn each_click_places_the_next_name_with_the_next_interface_order() {
     let mut state = AppState::default();
+    let document = state.workspace.content.active_schematic_reference();
+    state
+        .workspace
+        .content
+        .design_management
+        .bootstrap_for_cell_view(&document.key(), "Sheet 1", [])
+        .unwrap();
     arm_pins(&mut state, &["INP", "INN", "OUT"], PortDirection::In);
 
     for (index, expected) in ["INP", "INN", "OUT"].into_iter().enumerate() {
@@ -856,17 +859,18 @@ fn rotation_and_mirror_of_the_ghost_land_on_the_placed_pin() {
 fn a_name_taken_after_arming_is_refused_at_the_click_and_the_sequence_survives() {
     let mut state = AppState::default();
     arm_pins(&mut state, &["EN", "OUT"], PortDirection::Out);
-    let taken = state
-        .schematic
-        .add_component(ComponentType::Port, Point::origin());
+    let taken = crate::state::PendingPortPlacement::from_contract(
+        "en",
+        PortDirection::In,
+        PortSignalType::Logic,
+        PortDiscipline::Logic,
+        state.schematic.topology_version(),
+        state.schematic.next_interface_order(),
+    );
     state
         .schematic
-        .document_mut_for_test()
-        .components
-        .iter_mut()
-        .find(|component| component.id == taken)
-        .expect("the placed port exists")
-        .value = "en".to_owned();
+        .place_pending_port(Point::origin(), taken)
+        .unwrap();
 
     place_component(&mut state, ComponentType::Port, Point::new(20, 30));
 
@@ -889,6 +893,14 @@ fn a_name_taken_after_arming_is_refused_at_the_click_and_the_sequence_survives()
             .and_then(PendingPortSequence::next_name),
         Some("EN")
     );
+    assert!(state.schematic.undo(), "free the conflicting name");
+    place_component(&mut state, ComponentType::Port, Point::new(20, 30));
+    assert_eq!(state.schematic.document().components.len(), 1);
+    assert_eq!(state.schematic.document().components[0].value, "EN");
+    place_component(&mut state, ComponentType::Port, Point::new(40, 30));
+    assert_eq!(state.schematic.document().components.len(), 2);
+    assert_eq!(state.schematic.document().components[1].value, "OUT");
+    assert_eq!(state.schematic.session.editor.tool, Tool::Select);
 }
 
 #[test]
@@ -1497,6 +1509,17 @@ fn a_topology_change_alone_does_not_end_the_sequence() {
     let mut state = AppState::default();
     arm_pins(&mut state, &["OUT", "OUT_N"], PortDirection::Out);
     state.schematic.bump_topology_version();
+    let note = PendingDesignNotePlacement::new(
+        DesignNoteKind::PlainText,
+        "Pin context",
+        state.schematic.topology_version(),
+        &[],
+    )
+    .unwrap();
+    state
+        .schematic
+        .place_pending_design_note(Point::origin(), note)
+        .unwrap();
 
     place_component(&mut state, ComponentType::Port, Point::new(40, 10));
 
@@ -1512,23 +1535,92 @@ fn a_topology_change_alone_does_not_end_the_sequence() {
 /// screen, the batch ends rather than placing its pins somewhere else.
 #[test]
 fn a_changed_document_ends_the_sequence_without_placing() {
-    let mut state = AppState::default();
-    arm_pins(&mut state, &["OUT"], PortDirection::Out);
-    state.active_schematic_epoch = state.active_schematic_epoch.wrapping_add(1);
-
-    place_component(&mut state, ComponentType::Port, Point::new(40, 10));
-
-    assert!(state.schematic.document().components.is_empty());
-    assert!(!state.schematic.can_undo());
-    assert_eq!(state.schematic.session.editor.tool, Tool::Select);
-    assert!(
+    for change in [
+        "document",
+        "design",
+        "occurrence",
+        "sheet",
+        "missing",
+        "read-only",
+        "safe-mode",
+    ] {
+        let mut state = AppState::default();
+        let master = crate::state::CellViewRef::new("work", "pin_child", "schematic");
         state
-            .schematic
-            .session
-            .editor
-            .pending_port_sequence
-            .is_none()
-    );
+            .workspace
+            .descend_into("X1".to_owned(), master.clone(), ViewType::Schematic);
+        let first = state
+            .workspace
+            .content
+            .design_management
+            .bootstrap_for_cell_view(&master.key(), "Sheet 1", [])
+            .unwrap();
+        arm_pins(&mut state, &["OUT"], PortDirection::Out);
+        match change {
+            "document" => state.active_schematic_epoch += 1,
+            "design" => state.design_execution_epoch += 1,
+            "occurrence" => {
+                state.workspace.ascend_one().unwrap();
+                state
+                    .workspace
+                    .descend_into("X2".to_owned(), master, ViewType::Schematic);
+            }
+            "sheet" => {
+                let catalog = state
+                    .workspace
+                    .content
+                    .design_management
+                    .sheet_catalog_mut(&master.key())
+                    .unwrap();
+                let second = catalog
+                    .create_sheet(
+                        SheetDefinition {
+                            name: "Sheet 2".to_owned(),
+                            template: SheetTemplate::AnalogSchematic,
+                            port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                            explicit_page_number: Some(2),
+                        },
+                        Some(first),
+                    )
+                    .unwrap();
+                catalog.set_active(second).unwrap();
+            }
+            "missing" => {
+                state
+                    .schematic
+                    .session
+                    .editor
+                    .pending_port_sequence
+                    .as_mut()
+                    .unwrap()
+                    .authority = None
+            }
+            "read-only" => state.schematic.session.read_only = true,
+            "safe-mode" => state.workbench.safe_mode.activate(
+                crate::workbench::state::LocalSafeModeOptions {
+                    open_project_read_only: true,
+                    ..Default::default()
+                },
+                "pin placement test".to_owned(),
+            ),
+            _ => unreachable!(),
+        }
+        let content = state.schematic.content_version();
+        place_component(&mut state, ComponentType::Port, Point::new(40, 10));
+
+        assert!(state.schematic.document().components.is_empty(), "{change}");
+        assert_eq!(state.schematic.content_version(), content);
+        assert!(!state.schematic.can_undo());
+        assert_eq!(state.schematic.session.editor.tool, Tool::Select);
+        assert!(
+            state
+                .schematic
+                .session
+                .editor
+                .pending_port_sequence
+                .is_none()
+        );
+    }
 }
 
 #[test]

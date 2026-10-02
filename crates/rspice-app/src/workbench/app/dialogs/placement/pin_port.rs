@@ -19,7 +19,7 @@ use crate::state::{
 use crate::ui::widgets::{CommandForm, DialogChoice};
 
 use super::vector_preview::deck_bits;
-use crate::workbench::app::RSpiceApp;
+use crate::workbench::app::{RSpiceApp, schematic_editor_request_source};
 use crate::workbench::app_state::AppState;
 
 const TITLE: &str = "Create pins";
@@ -65,11 +65,7 @@ fn names_field_id() -> egui::Id {
 /// under the contract it was armed with, so the reader can correct a typo in
 /// name four without replacing the three already on the sheet.
 pub(crate) fn open_create_pins(state: &mut AppState) {
-    let authority = PlacementAuthority::new(
-        state.design_execution_epoch,
-        state.active_schematic_epoch,
-        state.workspace.content.active_view.display_path(),
-    );
+    let authority = PlacementAuthority::new(schematic_editor_request_source(state));
     let armed = state
         .schematic
         .session
@@ -139,13 +135,10 @@ fn draft(state: &AppState) -> Draft {
     if state.schematic_edit_read_only() {
         return Draft::Blocked(READ_ONLY);
     }
-    let current = form.authority.as_ref().is_some_and(|authority| {
-        authority.matches(
-            state.design_execution_epoch,
-            state.active_schematic_epoch,
-            &state.workspace.content.active_view.display_path(),
-        )
-    });
+    let current = form
+        .authority
+        .as_ref()
+        .is_some_and(|authority| authority.matches(&schematic_editor_request_source(state)));
     if !current {
         return Draft::Blocked(DOCUMENT_CHANGED);
     }

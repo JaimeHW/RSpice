@@ -64,7 +64,11 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
     assert_blocks_shortcuts(|dialogs| {
         dialogs.pin_port.open(
             "EN".to_owned(),
-            crate::state::PlacementAuthority::new(0, 0, "user/top/schematic"),
+            crate::state::PlacementAuthority::new(
+                crate::workbench::app::schematic_editor_request_source(
+                    &crate::workbench::app_state::AppState::default(),
+                ),
+            ),
         );
     });
     assert_blocks_shortcuts(|dialogs| {

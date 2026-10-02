@@ -63,10 +63,6 @@ pub(super) fn place_pending_port(state: &mut AppState, grid_pos: Point) {
 /// `true` when the armed sequence names the document the click landed in.
 fn placement_authority_matches(state: &AppState, sequence: &PendingPortSequence) -> bool {
     sequence.authority.as_ref().is_some_and(|authority| {
-        authority.matches(
-            state.design_execution_epoch,
-            state.active_schematic_epoch,
-            &state.workspace.content.active_view.display_path(),
-        )
+        authority.matches(&super::super::requests::editor_request_source(state))
     })
 }

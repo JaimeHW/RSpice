@@ -1,50 +1,31 @@
-//! Which document an armed placement was configured for.
-//!
-//! An armed tool outlives the form that filled it: the reader types a pin name,
-//! presses Enter, and the click that places it happens some frames later, in
-//! whatever document is active then. The three values here are what identify
-//! that document — the design's execution epoch, the active schematic buffer's
-//! epoch, and the path of the cell/view on screen — and the click compares them
-//! before it touches anything.
-//!
-//! What this deliberately does *not* carry is the schematic's topology version.
-//! A form that asks for a name is not invalidated by someone else moving a
-//! wire, and a placement that bumped the version would invalidate its own
-//! successor, which is what made every one of these tools single-shot. Whatever
-//! genuinely conflicts — a name now taken, an interface order now used — is
-//! re-validated by the model at the click, in the model's own words.
+//! Document context retained from a pin form through its placement sequence.
+
+use crate::requests::EditorRequestSource;
 
 /// The document an armed placement belongs to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlacementAuthority {
-    pub design_execution_epoch: u64,
-    pub active_schematic_epoch: u64,
-    pub view_path: String,
+    source: EditorRequestSource,
 }
 
 impl PlacementAuthority {
-    pub fn new(
-        design_execution_epoch: u64,
-        active_schematic_epoch: u64,
-        view_path: impl Into<String>,
-    ) -> Self {
-        Self {
-            design_execution_epoch,
-            active_schematic_epoch,
-            view_path: view_path.into(),
-        }
+    pub fn new(source: EditorRequestSource) -> Self {
+        Self { source }
     }
 
-    /// `true` when the live application values name the same document.
-    pub fn matches(
-        &self,
-        design_execution_epoch: u64,
-        active_schematic_epoch: u64,
-        view_path: &str,
-    ) -> bool {
-        self.design_execution_epoch == design_execution_epoch
-            && self.active_schematic_epoch == active_schematic_epoch
-            && self.view_path == view_path
+    /// Match the project, document, occurrence and sheet that own the batch.
+    /// Revisions may advance within that context: each click validates its
+    /// name, contract, topology and interface order against the live design.
+    /// Requiring frozen content or sheet-catalog revisions here would reject
+    /// a batch's own subsequent placements and same-document conflict retries.
+    /// This context check does not grant edit permission.
+    pub fn matches(&self, current: &EditorRequestSource) -> bool {
+        self.source.project == current.project
+            && self.source.document == current.document
+            && self.source.occurrence == current.occurrence
+            && self.source.design_epoch == current.design_epoch
+            && self.source.document_epoch == current.document_epoch
+            && self.source.sheet.map(|(id, _)| id) == current.sheet.map(|(id, _)| id)
     }
 }
 
@@ -54,10 +35,55 @@ mod tests {
 
     #[test]
     fn an_authority_matches_only_its_own_document() {
-        let authority = PlacementAuthority::new(7, 3, "work/ota_5t/schematic");
-        assert!(authority.matches(7, 3, "work/ota_5t/schematic"));
-        assert!(!authority.matches(8, 3, "work/ota_5t/schematic"));
-        assert!(!authority.matches(7, 4, "work/ota_5t/schematic"));
-        assert!(!authority.matches(7, 3, "work/ota_5t/symbol"));
+        use rspice_app_types::product::ProjectId;
+        use rspice_design::occurrence::DocumentOccurrence;
+        use rspice_design_model::{cell_view::CellViewRef, design_management::SheetId};
+
+        let document = CellViewRef::new("work", "ota_5t", "schematic");
+        let source = EditorRequestSource {
+            project: ProjectId::new(),
+            occurrence: Some(DocumentOccurrence::rooted(document.clone())),
+            document,
+            design_epoch: 7,
+            document_epoch: 3,
+            content_version: 11,
+            topology_version: 5,
+            symbol_revision: 2,
+            sheet: Some((Some(SheetId::new()), 4)),
+        };
+        let authority = PlacementAuthority::new(source.clone());
+        assert!(authority.matches(&source));
+        for change in [
+            "project",
+            "document",
+            "occurrence",
+            "design",
+            "buffer",
+            "sheet",
+            "catalog",
+        ] {
+            let mut current = source.clone();
+            match change {
+                "project" => current.project = ProjectId::new(),
+                "document" => current.document.view = "symbol".to_owned(),
+                "occurrence" => current
+                    .occurrence
+                    .as_mut()
+                    .unwrap()
+                    .descend("X1".to_owned(), source.document.clone()),
+                "design" => current.design_epoch += 1,
+                "buffer" => current.document_epoch += 1,
+                "sheet" => current.sheet.as_mut().unwrap().0 = Some(SheetId::new()),
+                "catalog" => current.sheet = None,
+                _ => unreachable!(),
+            }
+            assert!(!authority.matches(&current), "{change}");
+        }
+        let mut revised = source;
+        revised.content_version += 1;
+        revised.topology_version += 1;
+        revised.symbol_revision += 1;
+        revised.sheet.as_mut().unwrap().1 += 1;
+        assert!(authority.matches(&revised));
     }
 }

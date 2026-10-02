@@ -229,6 +229,7 @@ fn enter_arms_the_whole_sequence_without_touching_the_document() {
     crate::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     open_with(&mut app.state, "INP INN OUT VDD");
+    let authority = app.state.dialogs.pin_port.authority.clone();
     app.state.dialogs.pin_port.signal_type = PortSignalType::Logic;
     app.state.dialogs.pin_port.discipline = PortDiscipline::Logic;
 
@@ -260,7 +261,8 @@ fn enter_arms_the_whole_sequence_without_touching_the_document() {
     assert_eq!(sequence.direction, PortDirection::In);
     assert_eq!(sequence.signal_type, PortSignalType::Logic);
     assert_eq!(sequence.discipline, PortDiscipline::Logic);
-    assert!(sequence.authority.is_some());
+    assert_eq!(sequence.authority, authority);
+    assert!(app.state.dialogs.pin_port.authority.is_none());
 
     assert!(app.state.schematic.document().components.is_empty());
     assert!(!app.state.schematic.session.is_dirty);
@@ -337,6 +339,11 @@ fn the_prefill_is_empty_until_a_batch_has_been_armed() {
 fn a_read_only_or_changed_document_blocks_the_form_and_says_so() {
     let mut app = RSpiceApp::test_instance();
     open_with(&mut app.state, "EN");
+    // Same-document edits are allowed; names and interface order are read live.
+    app.state
+        .schematic
+        .add_component(ComponentType::Resistor, Point::origin());
+    assert_eq!(draft(&app.state), Draft::Ready(vec!["EN".to_owned()]));
     app.state.schematic.session.read_only = true;
     assert_eq!(draft(&app.state), Draft::Blocked(READ_ONLY));
 
@@ -348,20 +355,82 @@ fn a_read_only_or_changed_document_blocks_the_form_and_says_so() {
 
 #[test]
 fn a_blocked_form_never_arms_on_enter() {
-    for blocked in [0, 1] {
+    use crate::state::{CellViewRef, SheetDefinition, SheetPortPolicy, SheetTemplate, ViewType};
+
+    for change in [
+        "document",
+        "design",
+        "occurrence",
+        "sheet",
+        "missing",
+        "read-only",
+        "safe-mode",
+    ] {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
+        let master = CellViewRef::new("work", "pin_child", "schematic");
+        app.state
+            .workspace
+            .descend_into("X1".to_owned(), master.clone(), ViewType::Schematic);
+        let first = app
+            .state
+            .workspace
+            .content
+            .design_management
+            .bootstrap_for_cell_view(&master.key(), "Sheet 1", [])
+            .unwrap();
         open_with(&mut app.state, "EN");
-        if blocked == 0 {
-            app.state.schematic.session.read_only = true;
-        } else {
-            app.state.active_schematic_epoch = app.state.active_schematic_epoch.wrapping_add(1);
-        }
-
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_pin_port_dialog(ctx)
         });
+        match change {
+            "document" => app.state.active_schematic_epoch += 1,
+            "design" => app.state.design_execution_epoch += 1,
+            "occurrence" => {
+                app.state.workspace.ascend_one().unwrap();
+                app.state
+                    .workspace
+                    .descend_into("X2".to_owned(), master, ViewType::Schematic);
+            }
+            "sheet" => {
+                let catalog = app
+                    .state
+                    .workspace
+                    .content
+                    .design_management
+                    .sheet_catalog_mut(&master.key())
+                    .unwrap();
+                let second = catalog
+                    .create_sheet(
+                        SheetDefinition {
+                            name: "Sheet 2".to_owned(),
+                            template: SheetTemplate::AnalogSchematic,
+                            port_policy: SheetPortPolicy::TypedOffSheetPorts,
+                            explicit_page_number: Some(2),
+                        },
+                        Some(first),
+                    )
+                    .unwrap();
+                catalog.set_active(second).unwrap();
+            }
+            "missing" => app.state.dialogs.pin_port.authority = None,
+            "read-only" => app.state.schematic.session.read_only = true,
+            "safe-mode" => app.state.workbench.safe_mode.activate(
+                crate::workbench::state::LocalSafeModeOptions {
+                    open_project_read_only: true,
+                    ..Default::default()
+                },
+                "pin form test".to_owned(),
+            ),
+            _ => unreachable!(),
+        }
+        let expected = if matches!(change, "read-only" | "safe-mode") {
+            READ_ONLY
+        } else {
+            DOCUMENT_CHANGED
+        };
+        assert_eq!(draft(&app.state), Draft::Blocked(expected), "{change}");
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
             app.render_pin_port_dialog(ctx)
         });
@@ -377,6 +446,12 @@ fn a_blocked_form_never_arms_on_enter() {
                 .is_none()
         );
         assert!(app.state.schematic.document().components.is_empty());
+        assert!(!app.state.schematic.can_undo());
+        if !matches!(change, "read-only" | "safe-mode") {
+            app.state.dialogs.pin_port.close();
+            open_with(&mut app.state, "EN");
+            assert_eq!(draft(&app.state), Draft::Ready(vec!["EN".to_owned()]));
+        }
     }
 }
 
