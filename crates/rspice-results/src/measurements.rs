@@ -7,3 +7,16 @@
 mod interval;
 
 pub use interval::{IntervalStatistics, MeasurementError, measure_interval};
+
+/// Finite (minimum, maximum) of retained samples, or `None` without finite values.
+pub fn finite_extremes(values: &[f64]) -> Option<(f64, f64)> {
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    for &v in values {
+        if v.is_finite() {
+            lo = lo.min(v);
+            hi = hi.max(v);
+        }
+    }
+    (lo <= hi).then_some((lo, hi))
+}

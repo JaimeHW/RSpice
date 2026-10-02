@@ -18,6 +18,7 @@
 
 pub use rspice_results::fft::{data, pipeline, window};
 pub mod state;
+pub mod view;
 
 pub use data::FftData;
 pub use pipeline::{

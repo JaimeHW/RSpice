@@ -3,6 +3,8 @@
 //! Retained projection accepts the application's magnitude preference; run selection
 //! remains with the application adapter.
 
+use crate::measurements::finite_extremes;
+
 pub mod retained;
 
 /// Stability numbers derived from one magnitude/phase pair.
@@ -414,18 +416,6 @@ pub fn metrics_from_curves(
     }
 
     metrics
-}
-
-fn finite_extremes(values: &[f64]) -> Option<(f64, f64)> {
-    let mut lo = f64::INFINITY;
-    let mut hi = f64::NEG_INFINITY;
-    for &value in values {
-        if value.is_finite() {
-            lo = lo.min(value);
-            hi = hi.max(value);
-        }
-    }
-    (lo <= hi).then_some((lo, hi))
 }
 
 #[cfg(test)]

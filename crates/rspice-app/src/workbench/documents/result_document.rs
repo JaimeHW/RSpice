@@ -269,6 +269,7 @@ use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_results_ui::derived::DerivedSeries;
 use rspice_results_ui::eye_diagram::EyeTimebase;
+use rspice_results_ui::fft::view::FftSeries;
 use rspice_results_ui::presentation::{PlotView, trace_color, well_hint};
 
 /// One axis interval, low then high, in data space.
@@ -2444,19 +2445,6 @@ pub(crate) struct ExprSeries {
     pub series: ExpressionSeriesResult,
 }
 
-/// Frequency/magnitude-dB arrays derived from the active FFT, keyed on the
-/// FFT state's spectrum revision — the FFT can be recomputed (window, size,
-/// source) without a simulation data-version bump, and keying on the data's
-/// allocation address could serve stale arrays after a reallocation.
-#[derive(Debug, Clone)]
-pub struct FftSeries {
-    pub(crate) revision: u64,
-    pub(crate) frequency: std::sync::Arc<[f64]>,
-    pub(crate) magnitude_db: std::sync::Arc<[f64]>,
-    /// Cached finite (lo, hi) of the magnitude within view: (x1 bits, lo, hi).
-    pub(crate) y_extremes: Option<(u64, f64, f64)>,
-}
-
 /// GPU density image for the EYE viewer, baked once per (data revision,
 /// plot size, trace color) — per frame the eye then costs one textured
 /// quad instead of restroking every folded acquisition.
@@ -2514,15 +2502,7 @@ pub struct BodeDerived {
 /// Finite (min, max) of a slice, if any finite values exist.
 pub(super) fn finite_extremes(values: &[f64]) -> Option<(f64, f64)> {
     frame_work::note_samples(frame_work::FrameSampleRead::TraceExtremes, values.len());
-    let mut lo = f64::INFINITY;
-    let mut hi = f64::NEG_INFINITY;
-    for &v in values {
-        if v.is_finite() {
-            lo = lo.min(v);
-            hi = hi.max(v);
-        }
-    }
-    (lo <= hi).then_some((lo, hi))
+    rspice_results::measurements::finite_extremes(values)
 }
 
 // ---------------------------------------------------------------------------
