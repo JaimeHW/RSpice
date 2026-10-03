@@ -438,7 +438,7 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
             .results
             .selected_trace
             .as_ref()
-            .map(crate::workbench::documents::result_document::SelectedResultTrace::source_name),
+            .map(rspice_results_ui::selection::SelectedResultTrace::source_name),
         Some("V(out)"),
         "and the trace itself is selected, not merely the workspace opened"
     );
@@ -450,9 +450,8 @@ fn a_saved_output_dc_family_reveals_all_members_without_changing_retained_data()
         AnalysisResultPayload, DcCurveSelection, DcSweepDirection, DcSweepEvidence, DcSweepFamily,
         DcSweepQuantity, SavedOutputDcMember,
     };
-    use crate::workbench::documents::result_document::{
-        AnalysisPresentationKey, SourceWaveformPresentationKey,
-    };
+    use crate::workbench::documents::result_document::AnalysisPresentationKey;
+    use rspice_results_ui::selection::SourceWaveformPresentationKey;
     let mut app = RSpiceApp::test_instance();
     let output = saved_output();
     let evidence = DcSweepEvidence {

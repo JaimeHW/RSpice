@@ -21,11 +21,13 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
 use crate::workbench::documents::result_document::{
-    AnalysisPresentationKey, ResultArtifactPresentationKey, ResultBrowserSelectionKey,
-    ResultExpressionPresentationKey, SourceWaveformPresentationKey, analysis_default_unit,
-    browser_signal_unit, exact_result_artifact_text, exact_result_signal_last_sample,
-    exact_result_signal_tsv, result_artifact_stable_path, result_signal_stable_path,
-    retained_evidence_is_valid,
+    AnalysisPresentationKey, analysis_default_unit, browser_signal_unit,
+    exact_result_artifact_text, exact_result_signal_last_sample, exact_result_signal_tsv,
+    result_artifact_stable_path, result_signal_stable_path, retained_evidence_is_valid,
+};
+use rspice_results_ui::selection::{
+    ResultArtifactPresentationKey, ResultBrowserSelectionKey, ResultExpressionPresentationKey,
+    SourceWaveformPresentationKey,
 };
 
 use super::super::commands::result_navigation::reveal_producer_log;
@@ -3736,7 +3738,7 @@ fn show_virtualized_result_signals(
     runs: &[ResultRun],
     active_run: Option<usize>,
     active_analysis: Option<usize>,
-    selected_trace: Option<&crate::workbench::documents::result_document::SelectedResultTrace>,
+    selected_trace: Option<&rspice_results_ui::selection::SelectedResultTrace>,
     selected_artifact: Option<&ResultArtifactPresentationKey>,
     ordered_visible: &[ResultBrowserSelectionKey],
     query: &str,
@@ -4245,7 +4247,7 @@ fn result_browser_virtual_omission(ui: &mut Ui, text: &str, row_height: f32) {
 fn result_browser_selection_summary(
     ui: &mut Ui,
     app: &RSpiceApp,
-    selected: Option<&crate::workbench::documents::result_document::SelectedResultTrace>,
+    selected: Option<&rspice_results_ui::selection::SelectedResultTrace>,
     selected_artifact: Option<&ResultArtifactPresentationKey>,
 ) {
     if let Some(selected) = selected {
@@ -5612,13 +5614,11 @@ fn select_result_signal(
     let Some(run) = app.state.simulation.runs.get(run_index) else {
         return false;
     };
-    let Some(selected) =
-        crate::workbench::documents::result_document::SelectedResultTrace::from_run_indices(
-            run,
-            analysis_index,
-            waveform_index,
-        )
-    else {
+    let Some(selected) = rspice_results_ui::selection::SelectedResultTrace::from_run_indices(
+        run,
+        analysis_index,
+        waveform_index,
+    ) else {
         return false;
     };
     if !select_result_analysis(app, run_index, analysis_index) {

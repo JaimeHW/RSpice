@@ -1406,7 +1406,7 @@ fn inspector_disclosure(ui: &mut Ui, key: &str, title: &str, status: &str) -> bo
 fn selected_result_artifact(
     ui: &mut Ui,
     app: &mut RSpiceApp,
-    selected: &crate::workbench::documents::result_document::ResultArtifactPresentationKey,
+    selected: &rspice_results_ui::selection::ResultArtifactPresentationKey,
 ) {
     use crate::state::SimulationRunLifecycle;
 
@@ -1470,7 +1470,7 @@ fn selected_result_artifact(
 fn selected_result_trace(
     ui: &mut Ui,
     app: &mut RSpiceApp,
-    selected: &crate::workbench::documents::result_document::SelectedResultTrace,
+    selected: &rspice_results_ui::selection::SelectedResultTrace,
 ) {
     let Some(run) = app.state.simulation.active_run() else {
         return;
@@ -1592,7 +1592,7 @@ fn selected_result_trace(
 fn active_result_pane(
     ui: &mut Ui,
     app: &mut RSpiceApp,
-    selected: Option<&crate::workbench::documents::result_document::SelectedResultTrace>,
+    selected: Option<&rspice_results_ui::selection::SelectedResultTrace>,
 ) {
     let viewer = app.state.ui.results.viewer;
     // A pure evidence table — OP, specs, samples, events, the manifest — has
@@ -1826,7 +1826,7 @@ fn format_result_scalar(value: f64) -> String {
 
 fn set_selected_trace_color(
     state: &mut AppState,
-    selected: &crate::workbench::documents::result_document::SelectedResultTrace,
+    selected: &rspice_results_ui::selection::SelectedResultTrace,
     color: Color32,
 ) {
     let color = format!("#{:02x}{:02x}{:02x}", color.r(), color.g(), color.b());
@@ -1871,7 +1871,7 @@ fn is_schematic_cross_probe_candidate(signal: &str) -> bool {
 
 fn schematic_cross_probe_unavailability(
     state: &AppState,
-    selected: &crate::workbench::documents::result_document::SelectedResultTrace,
+    selected: &rspice_results_ui::selection::SelectedResultTrace,
     signal: &str,
 ) -> Option<String> {
     let Some(net) = rspice_schematic_editor::view::cross_probe::wrapped_signal_name(signal, 'V')

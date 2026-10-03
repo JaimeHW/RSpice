@@ -246,9 +246,10 @@ use std::collections::{HashMap, HashSet};
 
 use egui::{Ui, WidgetInfo, WidgetType};
 
+#[cfg(test)]
+pub(crate) use crate::state::result_presentation::TracePresentationKey;
 pub(crate) use crate::state::result_presentation::{
-    AnalysisPresentationKey, AnalysisPresentationSource, TracePresentationKey,
-    WaveformPresentationKey,
+    AnalysisPresentationKey, AnalysisPresentationSource, WaveformPresentationKey,
 };
 pub use crate::state::result_presentation::{
     ExprTrace, MarkerKind, ResultMarker, WavePanePresentationKey,
@@ -276,6 +277,10 @@ use rspice_results_ui::eye_diagram::EyeTimebase;
 use rspice_results_ui::eye_diagram::view::EyeTexture;
 use rspice_results_ui::fft::view::FftSeries;
 use rspice_results_ui::presentation::{PlotView, well_hint};
+use rspice_results_ui::selection::{
+    ResultArtifactPresentationKey, ResultBrowserSelectionKey, ResultExpressionPresentationKey,
+    SelectedResultTrace, SourceWaveformPresentationKey,
+};
 use rspice_results_ui::soa::{SoaRuleFilter, SoaRuleSelection};
 use rspice_results_ui::specs::editor::SpecDraft;
 
@@ -311,121 +316,6 @@ pub(crate) fn analysis_matches_authored_source(
     analysis
         .provenance()
         .is_some_and(|provenance| provenance.authored_source_instance_id() == authored_source_id)
-}
-
-/// Stable identity of one retained source waveform whose quick-view
-/// visibility has been overridden for this session.
-///
-/// The solver-owned [`WaveformData`](crate::state::WaveformData) remains an
-/// immutable result. A visibility click records presentation state against
-/// the dataset, authored analysis, and source name instead of rewriting the
-/// retained run (or its legacy live projection).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct SourceWaveformPresentationKey {
-    analysis: AnalysisPresentationKey,
-    source_name: String,
-}
-
-impl SourceWaveformPresentationKey {
-    pub(crate) fn new(analysis: AnalysisPresentationKey, source_name: impl Into<String>) -> Self {
-        Self {
-            analysis,
-            source_name: source_name.into(),
-        }
-    }
-
-    pub(crate) fn resolve<'a>(
-        &self,
-        runs: &'a [SimulationRun],
-    ) -> Option<(usize, usize, usize, &'a crate::state::WaveformData)> {
-        let (run_index, run) = runs
-            .iter()
-            .enumerate()
-            .find(|(_, run)| run.dataset_id == self.analysis.dataset_id())?;
-        let (analysis_index, analysis) = self.analysis.resolve(run)?;
-        let mut matches = analysis
-            .waveforms
-            .iter()
-            .enumerate()
-            .filter(|(_, waveform)| waveform.name == self.source_name);
-        let (waveform_index, waveform) = matches.next()?;
-        matches
-            .next()
-            .is_none()
-            .then_some((run_index, analysis_index, waveform_index, waveform))
-    }
-
-    pub(crate) const fn analysis(&self) -> AnalysisPresentationKey {
-        self.analysis
-    }
-}
-
-/// Stable identity of a non-waveform quantity retained by one immutable
-/// analysis: scalar evidence, an exact array, an event stream, a contribution
-/// table, or family metadata. `canonical_name` is producer-authored inventory
-/// identity, not a translated display label.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct ResultArtifactPresentationKey {
-    analysis: AnalysisPresentationKey,
-    canonical_name: String,
-}
-
-/// Stable identity of one user-authored expression within a retained
-/// analysis. Expression text is unique within its analysis and is also the
-/// calculator source, so it survives insertion/removal of neighboring rows.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct ResultExpressionPresentationKey {
-    analysis: AnalysisPresentationKey,
-    text: String,
-}
-
-impl ResultExpressionPresentationKey {
-    pub(crate) fn new(analysis: AnalysisPresentationKey, text: impl Into<String>) -> Self {
-        Self {
-            analysis,
-            text: text.into(),
-        }
-    }
-
-    pub(crate) const fn analysis(&self) -> AnalysisPresentationKey {
-        self.analysis
-    }
-
-    pub(crate) fn text(&self) -> &str {
-        &self.text
-    }
-}
-
-impl ResultArtifactPresentationKey {
-    pub(crate) fn new(
-        analysis: AnalysisPresentationKey,
-        canonical_name: impl Into<String>,
-    ) -> Self {
-        Self {
-            analysis,
-            canonical_name: canonical_name.into(),
-        }
-    }
-
-    pub(crate) fn analysis(&self) -> AnalysisPresentationKey {
-        self.analysis
-    }
-
-    pub(crate) fn canonical_name(&self) -> &str {
-        &self.canonical_name
-    }
-
-    pub(crate) fn resolve<'a>(
-        &self,
-        runs: &'a [SimulationRun],
-    ) -> Option<(usize, usize, &'a AnalysisResult)> {
-        let (run_index, run) = runs
-            .iter()
-            .enumerate()
-            .find(|(_, run)| run.dataset_id == self.analysis.dataset_id())?;
-        let (analysis_index, analysis) = self.analysis.resolve(run)?;
-        Some((run_index, analysis_index, analysis))
-    }
 }
 
 /// Resolve one typed Data Browser artifact to a durable, human-readable path.
@@ -824,41 +714,6 @@ fn append_operating_point_values(
 
 fn optional_exact_float(value: Option<f64>) -> String {
     value.map_or_else(String::new, |value| format!("{value:.17e}"))
-}
-
-/// One stable row identity in the mixed typed Data Browser inventory.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum ResultBrowserSelectionKey {
-    Waveform(SourceWaveformPresentationKey),
-    Artifact(ResultArtifactPresentationKey),
-}
-
-impl ResultBrowserSelectionKey {
-    pub(crate) fn waveform(&self) -> Option<&SourceWaveformPresentationKey> {
-        match self {
-            Self::Waveform(key) => Some(key),
-            Self::Artifact(_) => None,
-        }
-    }
-
-    pub(crate) fn dataset_id(&self) -> DatasetId {
-        match self {
-            Self::Waveform(key) => key.analysis().dataset_id(),
-            Self::Artifact(key) => key.analysis().dataset_id(),
-        }
-    }
-}
-
-impl From<SourceWaveformPresentationKey> for ResultBrowserSelectionKey {
-    fn from(value: SourceWaveformPresentationKey) -> Self {
-        Self::Waveform(value)
-    }
-}
-
-impl From<ResultArtifactPresentationKey> for ResultBrowserSelectionKey {
-    fn from(value: ResultArtifactPresentationKey) -> Self {
-        Self::Artifact(value)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -2276,80 +2131,6 @@ pub struct ResultsState {
     /// by the viewer so the docbar reports what is actually on screen
     /// rather than recomputing a second, possibly different, answer.
     pub table_status: Option<String>,
-}
-
-/// Stable session identity for a selected retained waveform.
-///
-/// The immutable dataset, prepared analysis identity, and source waveform
-/// name survive retained-result reordering. Duplicate source names fail
-/// closed instead of silently inheriting an old ordinal selection.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SelectedResultTrace {
-    waveform: WaveformPresentationKey,
-}
-
-impl SelectedResultTrace {
-    pub(crate) fn from_identity(
-        analysis: AnalysisPresentationKey,
-        source_name: impl Into<String>,
-    ) -> Self {
-        Self {
-            waveform: WaveformPresentationKey {
-                analysis,
-                trace: TracePresentationKey {
-                    source_name: source_name.into(),
-                    kind: 0,
-                    family_group: 0,
-                },
-            },
-        }
-    }
-
-    pub(crate) fn from_run_indices(
-        run: &SimulationRun,
-        analysis_index: usize,
-        waveform_index: usize,
-    ) -> Option<Self> {
-        let analysis = run.analyses.get(analysis_index)?;
-        let waveform = analysis.waveforms.get(waveform_index)?;
-        Some(Self::from_identity(
-            AnalysisPresentationKey::new(run.dataset_id, analysis),
-            waveform.name.clone(),
-        ))
-    }
-
-    pub(crate) const fn analysis_key(&self) -> AnalysisPresentationKey {
-        self.waveform.analysis
-    }
-
-    pub(crate) fn source_name(&self) -> &str {
-        &self.waveform.trace.source_name
-    }
-
-    pub(crate) fn table_binding(&self) -> (AnalysisPresentationKey, TracePresentationKey) {
-        (self.waveform.analysis, self.waveform.trace.clone())
-    }
-
-    pub(crate) const fn dataset_id(&self) -> DatasetId {
-        self.waveform.analysis.dataset_id()
-    }
-
-    pub(crate) fn resolve<'a>(
-        &self,
-        run: &'a SimulationRun,
-    ) -> Option<(usize, usize, &'a AnalysisResult, &'a WaveformData)> {
-        let (analysis_index, analysis) = self.waveform.analysis.resolve(run)?;
-        let mut matching = analysis
-            .waveforms
-            .iter()
-            .enumerate()
-            .filter(|(_, waveform)| waveform.name == self.waveform.trace.source_name);
-        let (waveform_index, waveform) = matching.next()?;
-        matching
-            .next()
-            .is_none()
-            .then_some((analysis_index, waveform_index, analysis, waveform))
-    }
 }
 
 /// State of the inline expression editor under a strip header.

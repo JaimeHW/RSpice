@@ -297,7 +297,7 @@ impl ResultsState {
         let unchanged = self
             .waveform_visibility
             .iter()
-            .filter(|(key, _)| key.analysis == analysis)
+            .filter(|(key, _)| key.analysis() == analysis)
             .count()
             == desired.len()
             && desired
@@ -307,7 +307,7 @@ impl ResultsState {
             return;
         }
         self.waveform_visibility
-            .retain(|key, _| key.analysis != analysis);
+            .retain(|key, _| key.analysis() != analysis);
         self.waveform_visibility.extend(desired);
         self.models.invalidate();
         self.cache.invalidate();
@@ -640,9 +640,9 @@ impl ResultsState {
         self.favorite_signals.retain(|key| live(key.analysis()));
         self.recent_signals.retain(|key| live(key.analysis()));
         self.favorite_result_artifacts
-            .retain(|key| live(key.analysis));
+            .retain(|key| live(key.analysis()));
         self.recent_result_artifacts
-            .retain(|key| live(key.analysis));
+            .retain(|key| live(key.analysis()));
         self.checked_result_quantities
             .retain(|key| retained.contains(&key.dataset_id()));
         self.browser_range_anchor = self
@@ -665,7 +665,7 @@ impl ResultsState {
         self.selected_result_artifact = self
             .selected_result_artifact
             .take()
-            .filter(|key| live(key.analysis));
+            .filter(|key| live(key.analysis()));
         self.plans = view_plans::ViewPlans::default();
     }
 

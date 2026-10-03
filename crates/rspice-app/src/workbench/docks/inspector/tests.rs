@@ -396,7 +396,7 @@ fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
             )]),
         );
     app.state.ui.results.selected_trace = Some(
-        crate::workbench::documents::result_document::SelectedResultTrace::from_run_indices(
+        rspice_results_ui::selection::SelectedResultTrace::from_run_indices(
             app.state.simulation.active_run().expect("retained run"),
             0,
             0,
@@ -641,7 +641,7 @@ fn historical_result_revision_cannot_cross_probe_current_geometry() {
     );
     app.state.simulation.runs[0] = stale_run;
     app.state.ui.results.selected_trace = Some(
-        crate::workbench::documents::result_document::SelectedResultTrace::from_run_indices(
+        rspice_results_ui::selection::SelectedResultTrace::from_run_indices(
             &app.state.simulation.runs[0],
             0,
             0,

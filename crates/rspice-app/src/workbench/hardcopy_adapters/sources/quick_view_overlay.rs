@@ -2,9 +2,10 @@
 
 use super::*;
 use crate::workbench::documents::result_document::{
-    AnalysisPresentationKey, MarkerKind, MarkerView, SourceWaveformPresentationKey,
+    AnalysisPresentationKey, MarkerKind, MarkerView,
 };
 use crate::workbench::preferences::CursorInterpolation;
+use rspice_results_ui::selection::SourceWaveformPresentationKey;
 
 pub(super) fn capture_quick_view_overlays(
     state: &AppState,

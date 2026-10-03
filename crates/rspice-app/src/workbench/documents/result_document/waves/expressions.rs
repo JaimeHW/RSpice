@@ -571,7 +571,7 @@ pub(crate) fn toggle_visibility(
         .ui
         .results
         .persistent_pane_context
-        .filter(|context| context.analysis == key.analysis)
+        .filter(|context| context.analysis == key.analysis())
     {
         let retained = state
             .workspace

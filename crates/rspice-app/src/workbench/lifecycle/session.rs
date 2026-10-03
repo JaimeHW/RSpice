@@ -278,7 +278,7 @@ pub struct UiSessionState {
     /// The key, rather than a copied payload, crosses the UI/IO boundary so
     /// the export adapter must re-resolve immutable evidence at publication.
     pub(crate) export_result_quantities_requested:
-        Option<Vec<crate::workbench::documents::result_document::ResultBrowserSelectionKey>>,
+        Option<Vec<rspice_results_ui::selection::ResultBrowserSelectionKey>>,
     /// One-shot request to export the active view as a publication figure.
     ///
     /// This used to capture the window and crop it, which handed the reader

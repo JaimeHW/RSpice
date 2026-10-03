@@ -416,9 +416,8 @@ fn the_task_deck_hop_is_refused_by_the_reason_it_would_have_failed() {
 #[test]
 fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
     use crate::state::AnalysisResultPayload;
-    use crate::workbench::documents::result_document::{
-        AnalysisPresentationKey, ResultArtifactPresentationKey, ResultBrowserSelectionKey,
-    };
+    use crate::workbench::documents::result_document::AnalysisPresentationKey;
+    use rspice_results_ui::selection::{ResultArtifactPresentationKey, ResultBrowserSelectionKey};
 
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.authority.open_session();

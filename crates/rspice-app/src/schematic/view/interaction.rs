@@ -980,7 +980,7 @@ fn select_materialized_probe_trace(state: &mut AppState, probe_name: &str) {
                 raw_output_expression_key(&waveform.name) == raw_output_expression_key(probe_name)
                     || waveform.name.eq_ignore_ascii_case(probe_name)
             })?;
-            crate::workbench::documents::result_document::SelectedResultTrace::from_run_indices(
+            rspice_results_ui::selection::SelectedResultTrace::from_run_indices(
                 run,
                 analysis_index,
                 waveform_index,

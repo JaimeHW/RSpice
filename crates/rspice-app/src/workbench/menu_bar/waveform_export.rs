@@ -134,7 +134,7 @@ enum TabularExportFormat {
 pub(crate) fn action_export_result_selection_with_io(
     state: &mut AppState,
     io: &(impl ExportWorkflowIo + ?Sized),
-    keys: &[crate::workbench::documents::result_document::ResultBrowserSelectionKey],
+    keys: &[rspice_results_ui::selection::ResultBrowserSelectionKey],
 ) {
     if keys.is_empty() {
         state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
@@ -1105,9 +1105,8 @@ fn exported_waveforms<'a>(
     dataset_id: crate::product::DatasetId,
     analysis: &'a crate::state::AnalysisResult,
 ) -> Vec<&'a crate::state::WaveformData> {
-    use crate::workbench::documents::result_document::{
-        AnalysisPresentationKey, SourceWaveformPresentationKey,
-    };
+    use crate::workbench::documents::result_document::AnalysisPresentationKey;
+    use rspice_results_ui::selection::SourceWaveformPresentationKey;
 
     let analysis_key = AnalysisPresentationKey::new(dataset_id, analysis);
     analysis

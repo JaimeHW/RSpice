@@ -12,8 +12,8 @@ use crate::product::ContentDigest;
 use crate::state::{GeneratedArtifact, GeneratedSourceMapEntry};
 use crate::workbench::AppState;
 use crate::workbench::TogglePreference;
-use crate::workbench::documents::result_document::SelectedResultTrace;
 use rspice_design::connectivity::summary::{DesignNet, projection_nets};
+use rspice_results_ui::selection::SelectedResultTrace;
 
 /// Stable logical subject selected in the active schematic document.
 #[derive(Debug, Clone, PartialEq, Eq)]

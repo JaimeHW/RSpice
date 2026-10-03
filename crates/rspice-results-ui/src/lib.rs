@@ -26,6 +26,7 @@ pub mod pole_zero;
 pub mod presentation;
 pub mod report;
 pub mod scatter;
+pub mod selection;
 pub mod sensitivity;
 pub mod smith_chart;
 pub mod soa;
