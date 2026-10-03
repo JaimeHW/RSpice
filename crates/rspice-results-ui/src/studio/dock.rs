@@ -1,5 +1,7 @@
 //! Studio dock identities and action-sheet presentation.
 
+pub mod layout;
+
 use super::widgets::section_heading;
 use egui::{ScrollArea, Ui};
 use rspice_results::studio_presentation::VisualizationSection;

@@ -83,8 +83,7 @@ pub use rspice_results::studio_presentation::{
     VisualizationSection, VisualizationStudioPresentation, VisualizationTouchPane,
 };
 use rspice_results::studio_presentation::{
-    MAX_DIFFERENCE_TRACE_NUMERIC_VALUES, MAX_DIFFERENCE_TRACE_SETS, MAX_REPORT_PAGE_TITLE_BYTES,
-    REPORT_PAGE_TEMPLATES,
+    MAX_DIFFERENCE_TRACE_NUMERIC_VALUES, MAX_DIFFERENCE_TRACE_SETS, REPORT_PAGE_TEMPLATES,
 };
 
 use super::result_document;
