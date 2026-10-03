@@ -550,6 +550,79 @@ fn inserting_result_document_binds_exact_revision_digest_and_dataset() {
         })
     );
     assert!(report_reference_resolves(&app.state, &figure.reference));
+
+    fn rendered_binding_states(app: &mut RSpiceApp) -> Vec<String> {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1600.0, 1500.0),
+                )),
+                ..Default::default()
+            },
+            |ui| show(ui, app),
+        );
+        let labels: Vec<_> = output
+            .platform_output
+            .accesskit_update
+            .unwrap()
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() != egui::accesskit::Role::TextRun)
+            .filter_map(|(_, node)| node.label().or_else(|| node.value()))
+            .map(str::to_owned)
+            .collect();
+        let states: Vec<_> = labels
+            .iter()
+            .filter(|label| matches!(label.as_str(), "bound" | "source missing" | "frozen"))
+            .cloned()
+            .collect();
+        assert!(
+            !states.is_empty(),
+            "report binding state is not visible: {labels:?}"
+        );
+        states
+    }
+
+    let reference = figure.reference.clone();
+    let retained_report = serde_json::to_vec(active_document(&app.state).unwrap()).unwrap();
+    assert_eq!(rendered_binding_states(&mut app), ["bound"]);
+    let original_source = app.state.workspace.content.visualization_documents[0].clone();
+    let changed_source = &mut app.state.workspace.content.visualization_documents[0];
+    changed_source
+        .transact(
+            changed_source.revision(),
+            vec![
+                crate::results::visualization_document::DocumentEdit::Rename {
+                    entity: crate::results::visualization_document::EntityRef::Page(
+                        changed_source.pages()[0].id,
+                    ),
+                    value: "Updated source page".to_owned(),
+                },
+            ],
+        )
+        .unwrap();
+    assert!(!report_reference_resolves(&app.state, &reference));
+    assert_eq!(rendered_binding_states(&mut app), ["source missing"]);
+
+    app.state.workspace.content.visualization_documents.clear();
+    assert!(!report_reference_resolves(&app.state, &reference));
+    assert_eq!(rendered_binding_states(&mut app), ["source missing"]);
+    app.state
+        .workspace
+        .content
+        .visualization_documents
+        .push(original_source);
+    assert!(report_reference_resolves(&app.state, &reference));
+    assert_eq!(rendered_binding_states(&mut app), ["bound"]);
+    assert_eq!(
+        serde_json::to_vec(active_document(&app.state).unwrap()).unwrap(),
+        retained_report,
+        "source changes and rendering must not silently refresh the report's pinned reference"
+    );
 }
 
 #[test]

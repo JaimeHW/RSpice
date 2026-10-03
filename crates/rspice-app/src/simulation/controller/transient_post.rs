@@ -753,6 +753,54 @@ mod tests {
     }
 
     #[test]
+    fn design_replacement_rejects_a_late_successful_fft_completion() {
+        let mut state = AppState::default();
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
+        state.simulation.runs = vec![run].into();
+        assert!(state.simulation.select_run(0));
+        let stale = state.active_specialized_viewer_cache_provenance().unwrap();
+        let mut controller = SimulationController::new();
+        let (sender, cancelled) = install_fft_task(&mut controller, stale);
+
+        state.clear_design_execution_context();
+        // Reuse the display indices and sequence numbers in the replacement design.
+        let mut replacement = SimulationRun::new(1);
+        replacement.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
+        state.simulation.runs = vec![replacement].into();
+        assert!(state.simulation.select_run(0));
+        let active = state.active_specialized_viewer_cache_provenance().unwrap();
+        assert_ne!(active, stale);
+        seed_fft(&mut state, active);
+        let retained = state.analysis.fft_state.source_cache.clone().unwrap();
+
+        sender
+            .send(DerivedViewTaskResult {
+                analysis: stale,
+                payload: DerivedViewResultPayload::Fft(Ok(PreparedFftInput {
+                    name: "previous design".to_owned(),
+                    samples: vec![1.0; 32],
+                    sample_rate: 32.0,
+                    original_count: 32,
+                    decimation_factor: 1,
+                })),
+            })
+            .expect("completion arrives before the next application poll");
+        controller.sync_transient_post_views(&mut state);
+
+        assert!(cancelled.load(Ordering::Relaxed));
+        assert!(controller.transient_post.fft_task.is_none());
+        assert!(controller.transient_post.fft_loaded.is_none());
+        assert_eq!(state.analysis.cache_authority.fft, Some(active));
+        assert!(state.analysis.fft_state.has_data());
+        assert!(state.analysis.fft_state.last_error.is_none());
+        let current = state.analysis.fft_state.source_cache.as_ref().unwrap();
+        assert_eq!(current.name, retained.name);
+        assert_eq!(current.sample_rate, retained.sample_rate);
+        assert!(Arc::ptr_eq(&current.samples, &retained.samples));
+    }
+
+    #[test]
     fn cancelling_an_fft_task_is_silent_and_drops_its_result_channel() {
         let analysis = owner();
         let mut state = AppState::default();
