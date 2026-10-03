@@ -6,7 +6,8 @@ use rspice_ui_kit::plot::{fmt_si_significant, fmt_significant};
 
 /// Case-insensitive prefix test for a signal-name accessor (`V(`, `i(`).
 fn starts_with_accessor(name: &str, accessor: &str) -> bool {
-    name.len() >= accessor.len() && name[..accessor.len()].eq_ignore_ascii_case(accessor)
+    name.get(..accessor.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(accessor))
 }
 
 /// Peel the derived-projection wrappers off a display name so the
@@ -223,6 +224,13 @@ mod tests {
             ("phase(V(OUT))", "°", false),
             ("phase(I(VIN))", "°", true),
             ("re(I(R1))", "A", true),
+            ("V(段.data#3)", "V", false),
+            ("I(段)", "A", true),
+            ("re(I(段))", "A", true),
+            ("phase(V(段))", "°", false),
+            ("v(µ)", "V", false),
+            ("段", "V^2/Hz", false),
+            ("🧪", "V^2/Hz", false),
             ("onoise", "V^2/Hz", false),
         ] {
             assert_eq!(browser_signal_unit(name, None, "V^2/Hz"), unit, "{name}");
