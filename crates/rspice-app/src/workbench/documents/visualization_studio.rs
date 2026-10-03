@@ -29,7 +29,6 @@ use dock::{active_family_sample_selection, dock_body};
 use rspice_results_ui::studio::{
     COMPACT_BREAKPOINT, TOUCH_DOCK_HEIGHT,
     chrome::{compact_section_picker, section_navigation, touch_dock},
-    widgets::empty_note,
 };
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -84,21 +83,6 @@ use rspice_results::studio_presentation::{
 
 use super::result_document;
 use rspice_results::family_projection::{FamilyManifest, FamilyValueKind, SourceSampleSelection};
-
-const NATIVE_VIEWERS: [ResultViewer; 12] = [
-    ResultViewer::Waves,
-    ResultViewer::DcSweep,
-    ResultViewer::Bode,
-    ResultViewer::Fft,
-    ResultViewer::HarmonicBalance,
-    ResultViewer::PhaseNoise,
-    ResultViewer::Eye,
-    ResultViewer::Hist,
-    ResultViewer::Contribution,
-    ResultViewer::Specs,
-    ResultViewer::Smith,
-    ResultViewer::PoleZero,
-];
 
 const fn document_pane_kind(art: ViewerArt) -> crate::results::visualization_document::PaneKind {
     use crate::results::visualization_document::PaneKind;

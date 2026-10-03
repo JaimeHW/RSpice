@@ -1,7 +1,9 @@
 //! Studio dock identities and action-sheet presentation.
 
 pub mod entities;
+pub mod family;
 pub mod layout;
+pub mod pane;
 
 use super::widgets::section_heading;
 use egui::{ScrollArea, Ui};
