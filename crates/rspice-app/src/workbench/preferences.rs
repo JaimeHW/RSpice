@@ -18,10 +18,10 @@ pub(crate) use drawing_sheet::DrawingSheetPersonalPreferences;
 use super::shortcuts::ShortcutProfileLibraryError;
 use super::shortcuts::{ShortcutPreferences, ShortcutProfileLibrary};
 #[cfg(test)]
-use crate::hardcopy::PrintMappingTable;
+use rspice_hardcopy_contract::PrintMappingTable;
 #[cfg(test)]
-use crate::hardcopy::mappings::PrintMappingSaveReceipt;
-use crate::hardcopy::mappings::{
+use rspice_hardcopy_contract::mappings::PrintMappingSaveReceipt;
+use rspice_hardcopy_contract::mappings::{
     PrintMappingCatalogOwner, PrintMappingPersistenceError, PrintMappingPresetCatalog,
 };
 
@@ -1838,7 +1838,7 @@ mod tests {
     fn personal_print_mapping_presets_route_to_user_preferences() {
         let mut preferences = UserPreferences::default();
         let mapping = PrintMappingTable::try_new(
-            crate::hardcopy::PrintMappingSaveScope::PortablePersonalPreset(
+            rspice_hardcopy_contract::PrintMappingSaveScope::PortablePersonalPreset(
                 "bench-printer".to_owned(),
             ),
             Vec::new(),
@@ -1849,7 +1849,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             receipt.disposition(),
-            crate::hardcopy::PrintMappingSaveDisposition::Created
+            rspice_hardcopy_contract::PrintMappingSaveDisposition::Created
         );
 
         let encoded = serde_json::to_string(&preferences).unwrap();

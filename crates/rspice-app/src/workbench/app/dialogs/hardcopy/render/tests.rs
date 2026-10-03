@@ -928,10 +928,10 @@ fn the_preview_toolbar_holds_one_row_at_the_tablet_width() {
 
 #[test]
 fn document_type_choice_prefers_active_extent_over_selection() {
-    use crate::hardcopy::{HardcopyDocumentKind, HardcopyScope};
     use crate::workbench::hardcopy_adapters::sources::{
         RetainedHardcopySourceAvailability, RetainedHardcopySourceDescriptor,
     };
+    use rspice_hardcopy_contract::{HardcopyDocumentKind, HardcopyScope};
 
     let candidate = RetainedHardcopySourceDescriptor {
         source_key: "project:test:schematic".to_owned(),

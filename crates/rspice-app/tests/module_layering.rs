@@ -83,13 +83,6 @@ const LAYERS: &[(&str, u32)] = &[
     // The twins share a layer because they are one module to the compiler.
     ("automation_runtime", 1),
     ("automation_runtime_browser", 1),
-    // What a project persists about printing: page setup, print mappings, and
-    // the digest-authenticated source-set records. Hardcopy *rendering* needs
-    // the schematic symbol library and the analysis viewers, so it stays up in
-    // `workbench`; only the persisted contract lives down here, where `state`
-    // can reach it. It sits above `results` because a source-set error can
-    // name an unauthenticated report block.
-    ("hardcopy", 2),
     // The persisted design and project model.
     ("state", 3),
     // Domain services over the persisted model.

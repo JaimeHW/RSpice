@@ -750,7 +750,7 @@ fn the_sheet_the_export_and_the_print_state_the_bound_the_run_was_judged_against
     let document = rspice_hardcopy::sources::resolve_results_specs_source(
         "specifications".to_owned(),
         crate::product::ProjectId::new(),
-        crate::hardcopy::HardcopyScope::ActivePlotDocument,
+        rspice_hardcopy_contract::HardcopyScope::ActivePlotDocument,
         run.as_ref(),
         &workspace_specs,
     )

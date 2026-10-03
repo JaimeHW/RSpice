@@ -58,18 +58,18 @@ use crate::state::{
 };
 use crate::workbench::AppState;
 
-use crate::hardcopy::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
 use crate::workbench::SurfaceId;
+use rspice_hardcopy_contract::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
 // The persisted source-set records and the validation they share with these
 // adapters are owned one layer down, where `state` can reach them.
+use crate::workbench::documents::result_document::ResultViewer;
+use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 #[cfg(test)]
-use crate::hardcopy::sources::canonical_digest;
-use crate::hardcopy::sources::{
+use rspice_hardcopy_contract::sources::canonical_digest;
+use rspice_hardcopy_contract::sources::{
     HardcopyPublicationIdentity, HardcopySourceError, HardcopySourceIdentity, HardcopySourceSet,
     MAX_HARDCOPY_SOURCE_SET_MEMBERS,
 };
-use crate::workbench::documents::result_document::ResultViewer;
-use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use rspice_results::studio_presentation::VisualizationPane as StudioPane;
 #[cfg(test)]
 use rspice_results::studio_presentation::VisualizationStudioPresentation;
@@ -1625,8 +1625,8 @@ pub(crate) use test_support::resolve_retained_hardcopy_source;
 mod tests;
 
 #[cfg(test)]
-use crate::hardcopy::PrintObjectKind;
-#[cfg(test)]
 use crate::results::report_document::FrozenReportArtifact;
 #[cfg(test)]
 use crate::state::{Point, SymbolShape};
+#[cfg(test)]
+use rspice_hardcopy_contract::PrintObjectKind;

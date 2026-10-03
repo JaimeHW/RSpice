@@ -18,7 +18,7 @@ thread_local! {
 
 struct PendingPageSetup {
     opened_source: std::sync::Arc<ResolvedHardcopyDocument>,
-    setup: crate::hardcopy::HardcopySetup,
+    setup: rspice_hardcopy_contract::HardcopySetup,
     staged_mapping: StagedPrintMappingPersistence,
     schematic_authority: Option<super::SchematicPageSetupAuthority>,
 }
@@ -32,12 +32,6 @@ fn repaint_context() -> egui::Context {
         .with(|slot| slot.borrow().clone())
         .unwrap_or_default()
 }
-#[cfg(target_arch = "wasm32")]
-use crate::hardcopy::HardcopyArtifactIdentity;
-use crate::hardcopy::{
-    DuplexMode, HardcopyFailureCode, HardcopyOutcome, HardcopyPlan, HardcopyReceipt, Orientation,
-    OutputFormat, PrinterJobSettings, PrinterMediaSource, ResolvedOrientation,
-};
 use crate::product::ContentDigest;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::hardcopy_adapters::print::discover_native_printers;
@@ -58,6 +52,12 @@ use crate::workbench::hardcopy_adapters::render::{
 use crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
 use crate::workbench::workflows::export_workflow::{
     ObservedExportDestination, SaveDialogConfig, export_completion_message,
+};
+#[cfg(target_arch = "wasm32")]
+use rspice_hardcopy_contract::HardcopyArtifactIdentity;
+use rspice_hardcopy_contract::{
+    DuplexMode, HardcopyFailureCode, HardcopyOutcome, HardcopyPlan, HardcopyReceipt, Orientation,
+    OutputFormat, PrinterJobSettings, PrinterMediaSource, ResolvedOrientation,
 };
 
 fn retain_hardcopy_receipt(app: &mut RSpiceApp, receipt: HardcopyReceipt) -> Result<(), String> {
@@ -93,7 +93,7 @@ struct ActiveBrowserSourceResolution {
     ticket: super::worker::HardcopyWorkerTicket,
     purpose: SourceResolutionPurpose,
     source_key: String,
-    scope: crate::hardcopy::HardcopyScope,
+    scope: rspice_hardcopy_contract::HardcopyScope,
     expected: Option<ResolvedHardcopyDocument>,
 }
 
@@ -202,7 +202,7 @@ struct ActiveSourceResolution {
     generation: u64,
     purpose: SourceResolutionPurpose,
     source_key: String,
-    scope: crate::hardcopy::HardcopyScope,
+    scope: rspice_hardcopy_contract::HardcopyScope,
     expected: Option<ResolvedHardcopyDocument>,
     cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
     receiver: std::sync::mpsc::Receiver<Result<ResolvedHardcopyDocument, String>>,
@@ -268,7 +268,7 @@ pub(crate) fn open_hardcopy_workflow(app: &mut RSpiceApp, workflow: HardcopyWork
 pub(super) fn select_retained_source(
     app: &mut RSpiceApp,
     source_key: &str,
-    scope: crate::hardcopy::HardcopyScope,
+    scope: rspice_hardcopy_contract::HardcopyScope,
 ) {
     let prepared =
         match crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution(
@@ -308,7 +308,7 @@ fn start_source_resolution(
     purpose: SourceResolutionPurpose,
     generation: u64,
     source_key: String,
-    scope: crate::hardcopy::HardcopyScope,
+    scope: rspice_hardcopy_contract::HardcopyScope,
     expected: Option<ResolvedHardcopyDocument>,
 ) -> Result<(), String> {
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
@@ -347,7 +347,7 @@ fn start_source_resolution(
     purpose: SourceResolutionPurpose,
     generation: u64,
     source_key: String,
-    scope: crate::hardcopy::HardcopyScope,
+    scope: rspice_hardcopy_contract::HardcopyScope,
     expected: Option<ResolvedHardcopyDocument>,
 ) -> Result<(), String> {
     let ticket = super::worker::start_source_resolution(
@@ -745,10 +745,10 @@ fn active_schematic_page_authority(
     app: &RSpiceApp,
     resolved: &ResolvedHardcopyDocument,
 ) -> Option<super::SchematicPageSetupAuthority> {
-    use crate::hardcopy::HardcopyScope;
     use crate::state::ViewType;
     use crate::workbench::SurfaceId;
     use crate::workbench::hardcopy_adapters::sources::HardcopySemanticDocument;
+    use rspice_hardcopy_contract::HardcopyScope;
 
     if app.state.workbench.current_route().surface_id() != SurfaceId::Design
         || !matches!(
@@ -879,12 +879,12 @@ fn authored_sheet_format(
 
 fn setup_seeded_from_sheet_format(
     format: crate::state::SchematicSheetFormat,
-) -> Result<crate::hardcopy::HardcopySetup, String> {
-    use crate::hardcopy::{
+) -> Result<rspice_hardcopy_contract::HardcopySetup, String> {
+    use crate::state::{SchematicPageOrientation, SchematicPageSize, SchematicSheetSize};
+    use rspice_hardcopy_contract::{
         CustomPaper, HardcopySetup, Length, LengthUnit, Orientation, PaperSize, PhysicalPageSetup,
         StandardPaper,
     };
-    use crate::state::{SchematicPageOrientation, SchematicPageSize, SchematicSheetSize};
 
     let default = HardcopySetup::default();
     let paper = match format.size {
@@ -932,9 +932,9 @@ fn setup_seeded_from_sheet_format(
 
 fn active_retained_source_selection(
     app: &RSpiceApp,
-) -> Result<(String, crate::hardcopy::HardcopyScope), String> {
-    use crate::hardcopy::HardcopyScope;
+) -> Result<(String, rspice_hardcopy_contract::HardcopyScope), String> {
     use crate::workbench::SurfaceId;
+    use rspice_hardcopy_contract::HardcopyScope;
 
     let candidates =
         crate::workbench::hardcopy_adapters::sources::enumerate_retained_hardcopy_sources(
@@ -1425,21 +1425,21 @@ enum PublicationCompletion {
 enum StagedPrintMappingPersistence {
     Document,
     Project {
-        catalog: crate::hardcopy::PrintMappingPresetCatalog,
+        catalog: rspice_hardcopy_contract::PrintMappingPresetCatalog,
         changed: bool,
     },
-    Personal(crate::hardcopy::PrintMappingPresetCatalog),
+    Personal(rspice_hardcopy_contract::PrintMappingPresetCatalog),
 }
 
 fn stage_print_mapping_persistence(
     app: &RSpiceApp,
-    mapping: &crate::hardcopy::PrintMappingTable,
+    mapping: &rspice_hardcopy_contract::PrintMappingTable,
 ) -> Result<StagedPrintMappingPersistence, String> {
     match mapping.save_scope() {
-        crate::hardcopy::PrintMappingSaveScope::Document => {
+        rspice_hardcopy_contract::PrintMappingSaveScope::Document => {
             Ok(StagedPrintMappingPersistence::Document)
         }
-        crate::hardcopy::PrintMappingSaveScope::ProjectPrintSet(_) => {
+        rspice_hardcopy_contract::PrintMappingSaveScope::ProjectPrintSet(_) => {
             let mut catalog = app.state.workspace.content.project_print_mappings.clone();
             let receipt = catalog
                 .save(mapping.clone())
@@ -1447,10 +1447,10 @@ fn stage_print_mapping_persistence(
             Ok(StagedPrintMappingPersistence::Project {
                 catalog,
                 changed: receipt.disposition()
-                    != crate::hardcopy::PrintMappingSaveDisposition::Unchanged,
+                    != rspice_hardcopy_contract::PrintMappingSaveDisposition::Unchanged,
             })
         }
-        crate::hardcopy::PrintMappingSaveScope::PortablePersonalPreset(_) => {
+        rspice_hardcopy_contract::PrintMappingSaveScope::PortablePersonalPreset(_) => {
             let mut catalog = app
                 .state
                 .ui
@@ -1774,15 +1774,15 @@ fn commit_authenticated_page_setup(
 
     commit_print_mapping_persistence(app, pending.staged_mapping)?;
     app.state.workspace.content.hardcopy_setups = staged_setups;
-    if outcome.disposition() != crate::hardcopy::SetupSaveDisposition::Unchanged {
+    if outcome.disposition() != rspice_hardcopy_contract::SetupSaveDisposition::Unchanged {
         app.state.workspace.content.hardcopy_setups_dirty = true;
     }
     Ok(format!(
         "Page setup {} for {}.",
         match outcome.disposition() {
-            crate::hardcopy::SetupSaveDisposition::Inserted => "saved",
-            crate::hardcopy::SetupSaveDisposition::Updated => "updated",
-            crate::hardcopy::SetupSaveDisposition::Unchanged => "already matched",
+            rspice_hardcopy_contract::SetupSaveDisposition::Inserted => "saved",
+            rspice_hardcopy_contract::SetupSaveDisposition::Updated => "updated",
+            rspice_hardcopy_contract::SetupSaveDisposition::Unchanged => "already matched",
         },
         source.authority().display_name()
     ))

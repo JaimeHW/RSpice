@@ -7,7 +7,7 @@
 
 use super::*;
 
-use crate::hardcopy::PrintMappingSaveScope;
+use rspice_hardcopy_contract::PrintMappingSaveScope;
 
 pub(super) fn printer_properties_body(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAction {
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -61,7 +61,7 @@ pub(super) fn printer_properties_body(ui: &mut Ui, draft: &mut HardcopyDialogSta
                             .show_ui(ui, |ui| {
                                 ui.selectable_value(
                                     &mut media,
-                                    crate::hardcopy::PrinterMediaSource::AutomaticCompatibleTray,
+                                    rspice_hardcopy_contract::PrinterMediaSource::AutomaticCompatibleTray,
                                     "Automatic compatible tray",
                                 );
                                 if capabilities
@@ -71,14 +71,14 @@ pub(super) fn printer_properties_body(ui: &mut Ui, draft: &mut HardcopyDialogSta
                                 {
                                     ui.selectable_value(
                                         &mut media,
-                                        crate::hardcopy::PrinterMediaSource::ManualFeed,
+                                        rspice_hardcopy_contract::PrinterMediaSource::ManualFeed,
                                         "Manual feed",
                                     );
                                 }
                                 for tray in capabilities.trays() {
                                     ui.selectable_value(
                                         &mut media,
-                                        crate::hardcopy::PrinterMediaSource::NamedTray(
+                                        rspice_hardcopy_contract::PrinterMediaSource::NamedTray(
                                             tray.display_name().to_owned(),
                                         ),
                                         tray.display_name(),

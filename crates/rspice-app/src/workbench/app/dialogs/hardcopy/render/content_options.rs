@@ -28,10 +28,10 @@ pub(super) fn source_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
                     .width(ui.available_width())
                     .show_ui(ui, |ui| {
                         for kind in [
-                            crate::hardcopy::HardcopyDocumentKind::SchematicOrSymbol,
-                            crate::hardcopy::HardcopyDocumentKind::LayoutWithLayerLegend,
-                            crate::hardcopy::HardcopyDocumentKind::PlotOrWorksheet,
-                            crate::hardcopy::HardcopyDocumentKind::Report,
+                            rspice_hardcopy_contract::HardcopyDocumentKind::SchematicOrSymbol,
+                            rspice_hardcopy_contract::HardcopyDocumentKind::LayoutWithLayerLegend,
+                            rspice_hardcopy_contract::HardcopyDocumentKind::PlotOrWorksheet,
+                            rspice_hardcopy_contract::HardcopyDocumentKind::Report,
                         ] {
                             let candidate = draft.source_candidates.iter().find(|candidate| {
                                 candidate.document_kind == kind
@@ -87,7 +87,7 @@ pub(super) fn source_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
                                 source_choice_for_scope(
                                     &draft.source_candidates,
                                     active_candidate,
-                                    crate::hardcopy::HardcopyScope::Selection,
+                                    rspice_hardcopy_contract::HardcopyScope::Selection,
                                 ),
                             ),
                             (
@@ -95,7 +95,7 @@ pub(super) fn source_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
                                 source_choice_for_scope(
                                     &draft.source_candidates,
                                     active_candidate,
-                                    crate::hardcopy::HardcopyScope::AllSheetsOrPanes,
+                                    rspice_hardcopy_contract::HardcopyScope::AllSheetsOrPanes,
                                 ),
                             ),
                         ];
@@ -1063,14 +1063,14 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use crate::hardcopy::sources::HardcopySourceIdentity;
-    use crate::hardcopy::{HardcopyDocumentId, HardcopyPlanId, HardcopyScope};
     use crate::product::ObjectRevision;
     use crate::state::SchematicSheetFormat;
     use crate::workbench::hardcopy_adapters::render::{
         HardcopyPublicationTimestamp, HardcopySceneMetadata,
     };
     use crate::workbench::hardcopy_adapters::sources::resolve_blank_schematic_sheet_with_format;
+    use rspice_hardcopy_contract::sources::HardcopySourceIdentity;
+    use rspice_hardcopy_contract::{HardcopyDocumentId, HardcopyPlanId, HardcopyScope};
 
     /// The save picker the export reaches once the plan is sealed. It refuses a
     /// destination so nothing is written, and counts the calls so a test can
@@ -1588,7 +1588,7 @@ mod tests {
         let extent = document
             .content_extent_for_setup(setup.schematic())
             .expect("resolved extent");
-        let plan = crate::hardcopy::HardcopyPlan::compile_with_id(
+        let plan = rspice_hardcopy_contract::HardcopyPlan::compile_with_id(
             HardcopyPlanId::try_from_uuid(uuid::Uuid::from_u128(0x4834_0102)).unwrap(),
             document.authority().clone(),
             setup,

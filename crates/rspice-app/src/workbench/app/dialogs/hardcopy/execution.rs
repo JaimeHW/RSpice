@@ -12,12 +12,12 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
-use crate::hardcopy::{HardcopyPlan, OutputFormat};
 use crate::product::ContentDigest;
 use crate::workbench::hardcopy_adapters::render::{
     HardcopyRenderer, HardcopySceneMetadata, RenderedHardcopyPublication, RenderedPrinterPages,
 };
 use crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
+use rspice_hardcopy_contract::{HardcopyPlan, OutputFormat};
 
 const NATIVE_EXECUTION_THREAD_NAME: &str = "rspice-hardcopy-render";
 const CANCELLED_MESSAGE: &str = "Native hardcopy rendering was cancelled.";

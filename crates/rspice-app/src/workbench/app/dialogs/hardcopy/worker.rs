@@ -64,7 +64,7 @@ mod browser {
     pub(crate) fn start_source_resolution(
         prepared: crate::workbench::hardcopy_adapters::sources::PreparedRetainedHardcopyResolution,
         source_key: String,
-        scope: crate::hardcopy::HardcopyScope,
+        scope: rspice_hardcopy_contract::HardcopyScope,
         epoch: u64,
         generation: u64,
         repaint: egui::Context,
@@ -82,7 +82,7 @@ mod browser {
     }
 
     pub(crate) fn start_preview(
-        plan: &crate::hardcopy::HardcopyPlan,
+        plan: &rspice_hardcopy_contract::HardcopyPlan,
         source: &crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument,
         metadata: crate::workbench::hardcopy_adapters::render::HardcopySceneMetadata,
         page_indices: Vec<usize>,
@@ -111,7 +111,7 @@ mod browser {
     }
 
     pub(crate) fn start_publication(
-        plan: &crate::hardcopy::HardcopyPlan,
+        plan: &rspice_hardcopy_contract::HardcopyPlan,
         source: &crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument,
         metadata: crate::workbench::hardcopy_adapters::render::HardcopySceneMetadata,
         package_multi_part: bool,
@@ -454,15 +454,6 @@ pub(crate) use browser::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hardcopy::{
-        BackgroundMode, Bleed, ColorMapping, DecorationSetup, FontPolicy,
-        OutsideSheetContentPolicy, PageMargins, PhysicalPageSetup, RenderSetup, RenderTarget,
-        ScaleMode, SchematicHardcopyExtent, SchematicHardcopySetup, TilingMode, TilingSetup,
-        Watermark,
-    };
-    use crate::hardcopy::{
-        HardcopyPlan, HardcopyPlanId, HardcopyScope, HardcopySetup, OutputFormat,
-    };
     use crate::state::{Point, Wire};
     use crate::workbench::AppState;
     use crate::workbench::hardcopy_adapters::render::{
@@ -477,6 +468,15 @@ mod tests {
     use rspice_formats::zip::deterministic_stored_zip;
     use rspice_hardcopy::render::{HardcopyRenderer, HardcopySceneMetadata};
     use rspice_hardcopy::sources::ResolvedHardcopyDocument;
+    use rspice_hardcopy_contract::{
+        BackgroundMode, Bleed, ColorMapping, DecorationSetup, FontPolicy,
+        OutsideSheetContentPolicy, PageMargins, PhysicalPageSetup, RenderSetup, RenderTarget,
+        ScaleMode, SchematicHardcopyExtent, SchematicHardcopySetup, TilingMode, TilingSetup,
+        Watermark,
+    };
+    use rspice_hardcopy_contract::{
+        HardcopyPlan, HardcopyPlanId, HardcopyScope, HardcopySetup, OutputFormat,
+    };
     use sha2::{Digest as _, Sha256};
 
     struct WorkerFixture {
@@ -528,7 +528,7 @@ mod tests {
         let defaults = HardcopySetup::default();
         let physical_page = PhysicalPageSetup::try_new(
             defaults.physical_page().paper().clone(),
-            PageMargins::uniform(crate::hardcopy::Length::ZERO),
+            PageMargins::uniform(rspice_hardcopy_contract::Length::ZERO),
             Bleed::None,
             defaults.physical_page().orientation(),
         )
@@ -590,9 +590,12 @@ mod tests {
 
     fn fixture_plan(source: &ResolvedHardcopyDocument, setup: HardcopySetup) -> HardcopyPlan {
         let plan_id = HardcopyPlanId::new();
-        let sections = source
-            .hardcopy_sections_for_setup(crate::hardcopy::SchematicHardcopySetup::default())
-            .expect("fixture sections resolve");
+        let sections =
+            source
+                .hardcopy_sections_for_setup(
+                    rspice_hardcopy_contract::SchematicHardcopySetup::default(),
+                )
+                .expect("fixture sections resolve");
         if sections.is_empty() {
             HardcopyPlan::compile_with_id(
                 plan_id,

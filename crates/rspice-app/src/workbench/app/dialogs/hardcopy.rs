@@ -4,7 +4,9 @@
 //! to the project. Preview and publication are resolved from the same sealed
 //! plan so the dialog cannot preview one layout and emit another.
 
-use crate::hardcopy::{
+use crate::workbench::hardcopy_adapters::render::HardcopyRenderError;
+use crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
+use rspice_hardcopy_contract::{
     ActiveHardcopySource, AuthoredSheetMedia, BackgroundMode, Bleed, ColorMapping, ContentExtent,
     CustomPaper, DecorationSetup, FontPolicy, HardcopyError, HardcopyPlan, HardcopyReceipt,
     HardcopySetup, Length, LengthUnit, Orientation, OutputFormat, OutsideSheetContentPolicy,
@@ -13,9 +15,7 @@ use crate::hardcopy::{
     SchematicHardcopySetup, StandardPaper, TilingMode, TilingSetup, Watermark,
 };
 #[cfg(test)]
-use crate::hardcopy::{DuplexMode, PrinterMediaSource, PrinterRasterGeometry};
-use crate::workbench::hardcopy_adapters::render::HardcopyRenderError;
-use crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
+use rspice_hardcopy_contract::{DuplexMode, PrinterMediaSource, PrinterRasterGeometry};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod execution;
@@ -1222,11 +1222,11 @@ fn format_length(value: Length, unit: LengthUnit) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hardcopy::{
+    use crate::product::{ContentDigest, ObjectRevision};
+    use rspice_hardcopy_contract::{
         HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope, HardcopySetupStore,
         SetupSaveDisposition,
     };
-    use crate::product::{ContentDigest, ObjectRevision};
 
     fn source() -> ActiveHardcopySource {
         ActiveHardcopySource::try_new(
@@ -1712,8 +1712,8 @@ mod tests {
         let pages = published.pagination().pages().len() as u32;
         let receipt = HardcopyReceipt::record(
             &published,
-            crate::hardcopy::HardcopyOutcome::ArtifactExported {
-                artifact: crate::hardcopy::HardcopyArtifactIdentity::try_new(
+            rspice_hardcopy_contract::HardcopyOutcome::ArtifactExported {
+                artifact: rspice_hardcopy_contract::HardcopyArtifactIdentity::try_new(
                     crate::product::ContentDigest::from_bytes([0x77; 32]),
                     4_096,
                     pages,
@@ -1743,7 +1743,7 @@ mod tests {
         );
         // The ledger re-derives every receipt's digest from its own material,
         // so a receipt that had been edited to name another plan is refused.
-        crate::hardcopy::HardcopyReceiptLedger::default()
+        rspice_hardcopy_contract::HardcopyReceiptLedger::default()
             .append(receipt)
             .expect("the receipt digests the plan it names");
     }
@@ -1767,8 +1767,8 @@ mod tests {
         let pages = plan.pagination().pages().len() as u32;
         let overclaimed = HardcopyReceipt::record(
             &plan,
-            crate::hardcopy::HardcopyOutcome::ArtifactExported {
-                artifact: crate::hardcopy::HardcopyArtifactIdentity::try_new(
+            rspice_hardcopy_contract::HardcopyOutcome::ArtifactExported {
+                artifact: rspice_hardcopy_contract::HardcopyArtifactIdentity::try_new(
                     crate::product::ContentDigest::from_bytes([0x78; 32]),
                     4_096,
                     pages + 1,

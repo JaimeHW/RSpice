@@ -28,14 +28,14 @@ mod tests {
         resolve_schematic_source, schematic_sheet_identity, source_set_member_from_resolved,
     };
     use super::*;
-    use crate::hardcopy::sources::{HardcopySourceIdentity, HardcopySourceSet};
-    use crate::hardcopy::{
-        HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope, SchematicHardcopySetup,
-    };
     use crate::product::ObjectRevision;
     use crate::state::{
         DrawingSheetTitleFieldId, SchematicState, SheetCatalog, SheetDefinition,
         SheetPageNumbering, SheetPortPolicy, SheetTemplate,
+    };
+    use rspice_hardcopy_contract::sources::{HardcopySourceIdentity, HardcopySourceSet};
+    use rspice_hardcopy_contract::{
+        HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope, SchematicHardcopySetup,
     };
 
     #[test]

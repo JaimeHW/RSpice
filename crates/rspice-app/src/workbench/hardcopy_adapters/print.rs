@@ -23,14 +23,14 @@ use std::time::{Duration, SystemTime};
 use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use crate::hardcopy::{
+use crate::product::ContentDigest;
+use crate::workbench::hardcopy_adapters::render::RenderedHardcopyPublication;
+use crate::workbench::hardcopy_adapters::render::RenderedPrinterPages;
+use rspice_hardcopy_contract::{
     CancellationPhase, DuplexMode, HardcopyFailureCode, HardcopyOutcome, HardcopyPlan,
     OutputFormat, PaperSize, PrinterJobSettings, PrinterMediaSource, PrinterRasterGeometry,
     RenderTarget, ResolvedOrientation,
 };
-use crate::product::ContentDigest;
-use crate::workbench::hardcopy_adapters::render::RenderedHardcopyPublication;
-use crate::workbench::hardcopy_adapters::render::RenderedPrinterPages;
 
 const CAPABILITY_SCHEMA_VERSION: u32 = 1;
 const MAX_PLATFORM_PRINTERS: usize = 4_096;
@@ -1729,16 +1729,16 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::hardcopy::{
+    use crate::product::ObjectRevision;
+    #[cfg(not(target_arch = "wasm32"))]
+    use crate::workbench::hardcopy_adapters::render::{HardcopyRenderer, HardcopySceneMetadata};
+    use rspice_hardcopy_contract::{
         ActiveHardcopySource, BackgroundMode, Bleed, ColorMapping, ContentExtent, DecorationSetup,
         FontPolicy, HardcopyDocumentId, HardcopyDocumentKind, HardcopyPlanId, HardcopyScope,
         HardcopySetup, Length, Orientation, PageMargins, PaperSize, PhysicalPageSetup,
         PrintMappingTable, PrinterRasterGeometry, RenderSetup, ScaleMode, StandardPaper,
         TilingMode, TilingSetup, Watermark,
     };
-    use crate::product::ObjectRevision;
-    #[cfg(not(target_arch = "wasm32"))]
-    use crate::workbench::hardcopy_adapters::render::{HardcopyRenderer, HardcopySceneMetadata};
 
     fn digest(value: u8) -> ContentDigest {
         ContentDigest::from_bytes([value; 32])
@@ -1885,7 +1885,7 @@ mod tests {
         use super::super::sources::{
             SemanticBounds, SemanticPoint, resolve_blank_schematic_sheet_with_format,
         };
-        use crate::hardcopy::sources::HardcopySourceIdentity;
+        use rspice_hardcopy_contract::sources::HardcopySourceIdentity;
         let authority = plan.source();
         let identity = HardcopySourceIdentity::try_new(
             "printer-test",

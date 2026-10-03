@@ -42,7 +42,6 @@ SUPPORTED_TARGETS = frozenset(
 )
 
 SHEET_SOURCE_SCOPES = (
-    "crates/rspice-app/src/hardcopy.rs",
     "crates/rspice-hardcopy-contract/src",
     "crates/rspice-hardcopy/src",
     "crates/rspice-design-model/src/design_management/drawing_sheet.rs",

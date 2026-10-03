@@ -18,17 +18,17 @@
 
 use super::*;
 
-use crate::hardcopy::sources::HardcopySourceIdentity;
-use crate::hardcopy::{
-    HardcopyDocumentId, HardcopyPlanId, HardcopyScope, PrintColor, PrintMappingEntry,
-    PrintRedundancy,
-};
 use crate::product::ObjectRevision;
 use crate::state::SchematicSheetFormat;
 use crate::workbench::hardcopy_adapters::render::{
     HardcopyPublicationTimestamp, HardcopyRenderer, HardcopySceneMetadata,
 };
 use crate::workbench::hardcopy_adapters::sources::resolve_blank_schematic_sheet_with_format;
+use rspice_hardcopy_contract::sources::HardcopySourceIdentity;
+use rspice_hardcopy_contract::{
+    HardcopyDocumentId, HardcopyPlanId, HardcopyScope, PrintColor, PrintMappingEntry,
+    PrintRedundancy,
+};
 
 /// Fixed so two publications differ only where a setting made them differ; a
 /// fresh plan identity per compile would make every comparison pass.

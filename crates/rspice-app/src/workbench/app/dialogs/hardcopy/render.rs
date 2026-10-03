@@ -15,12 +15,6 @@ use egui::{
     TextureOptions, Ui, Vec2, vec2,
 };
 
-use crate::hardcopy::{
-    AuthoredSheetMedia, BackgroundMode, ColorMapping, Length, LengthUnit, MAX_RASTER_DPI,
-    MIN_RASTER_DPI, Orientation, OutputFormat, OutsideSheetContentPolicy, PaperSize, PrintColor,
-    PrintMappingEntry, PrintMappingTable, PrintRedundancy, ScaleMode, SchematicHardcopyExtent,
-    StandardPaper, TilingMode, Watermark,
-};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -33,6 +27,15 @@ use crate::workbench::hardcopy_adapters::render::HardcopyRenderer;
 use crate::workbench::hardcopy_adapters::render::{
     HardcopyPreviewPage, HardcopyRenderError, max_raster_dpi,
 };
+use rspice_hardcopy_contract::{
+    AuthoredSheetMedia, BackgroundMode, ColorMapping, HardcopyDocumentKind, HardcopyScope, Length,
+    LengthUnit, MAX_RASTER_DPI, MIN_RASTER_DPI, Orientation, OutputFormat,
+    OutsideSheetContentPolicy, PaperSize, PrintColor, PrintMappingEntry, PrintMappingTable,
+    PrintRedundancy, PrinterJobSettings, ResolvedOrientation, ScaleMode, SchematicHardcopyExtent,
+    SchematicHardcopySetup, StandardPaper, TilingMode, Watermark,
+};
+#[cfg(target_os = "windows")]
+use rspice_hardcopy_contract::{DuplexMode, PrinterMediaSource};
 
 use super::{
     BlockedSetup, DEFAULT_RASTER_DPI, HardcopyDialogPage, HardcopyDialogState, HardcopyRegion,
@@ -118,7 +121,7 @@ enum BodyAction {
     DriverProperties,
     SelectSource {
         source_key: String,
-        scope: crate::hardcopy::HardcopyScope,
+        scope: HardcopyScope,
     },
 }
 
@@ -136,9 +139,9 @@ struct ContentInputs {
     manual_rows: String,
     overlap: String,
     registration_marks: bool,
-    schematic: crate::hardcopy::SchematicHardcopySetup,
+    schematic: SchematicHardcopySetup,
     printer_id: String,
-    printer_job: Option<crate::hardcopy::PrinterJobSettings>,
+    printer_job: Option<PrinterJobSettings>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2225,7 +2228,7 @@ fn content_inputs(draft: &HardcopyDialogState) -> ContentInputs {
         manual_rows: draft.manual_rows.clone(),
         overlap: draft.overlap.clone(),
         registration_marks: draft.registration_marks,
-        schematic: crate::hardcopy::SchematicHardcopySetup::new(
+        schematic: SchematicHardcopySetup::new(
             draft.schematic_extent,
             draft.outside_sheet_content,
             draft.crop_marks,
@@ -2544,18 +2547,17 @@ pub(super) fn standard_paper_label(paper: StandardPaper) -> &'static str {
     }
 }
 
-fn document_kind_label(kind: crate::hardcopy::HardcopyDocumentKind) -> &'static str {
+fn document_kind_label(kind: HardcopyDocumentKind) -> &'static str {
     match kind {
-        crate::hardcopy::HardcopyDocumentKind::SchematicOrSymbol => "Schematic / symbol",
-        crate::hardcopy::HardcopyDocumentKind::LayoutWithLayerLegend => "Layout + layer legend",
-        crate::hardcopy::HardcopyDocumentKind::PlotOrWorksheet => "Plot / worksheet",
-        crate::hardcopy::HardcopyDocumentKind::Report => "Report",
-        crate::hardcopy::HardcopyDocumentKind::EngineeringDocument => "Engineering document",
+        HardcopyDocumentKind::SchematicOrSymbol => "Schematic / symbol",
+        HardcopyDocumentKind::LayoutWithLayerLegend => "Layout + layer legend",
+        HardcopyDocumentKind::PlotOrWorksheet => "Plot / worksheet",
+        HardcopyDocumentKind::Report => "Report",
+        HardcopyDocumentKind::EngineeringDocument => "Engineering document",
     }
 }
 
-fn scope_label(scope: &crate::hardcopy::HardcopyScope) -> &'static str {
-    use crate::hardcopy::HardcopyScope;
+fn scope_label(scope: &HardcopyScope) -> &'static str {
     match scope {
         HardcopyScope::Selection => "Selection",
         HardcopyScope::CurrentSheet => "Current sheet",
@@ -2568,8 +2570,7 @@ fn scope_label(scope: &crate::hardcopy::HardcopyScope) -> &'static str {
     }
 }
 
-fn detailed_scope_label(scope: &crate::hardcopy::HardcopyScope) -> &str {
-    use crate::hardcopy::HardcopyScope;
+fn detailed_scope_label(scope: &HardcopyScope) -> &str {
     match scope {
         HardcopyScope::Selection => "Selection",
         HardcopyScope::CurrentSheet => "Current sheet",
@@ -2587,7 +2588,7 @@ fn source_choice_for_active_extent(
     candidate: Option<
         &crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor,
     >,
-) -> Option<(String, crate::hardcopy::HardcopyScope)> {
+) -> Option<(String, HardcopyScope)> {
     let active_kind = candidate.map(|candidate| candidate.document_kind);
     candidate
         .into_iter()
@@ -2603,11 +2604,11 @@ fn source_choice_for_active_extent(
                 .find(|scope| {
                     matches!(
                         scope,
-                        crate::hardcopy::HardcopyScope::CurrentSheet
-                            | crate::hardcopy::HardcopyScope::VisibleHierarchy
-                            | crate::hardcopy::HardcopyScope::ActivePlotDocument
-                            | crate::hardcopy::HardcopyScope::CompleteReport
-                            | crate::hardcopy::HardcopyScope::ActiveDocument
+                        HardcopyScope::CurrentSheet
+                            | HardcopyScope::VisibleHierarchy
+                            | HardcopyScope::ActivePlotDocument
+                            | HardcopyScope::CompleteReport
+                            | HardcopyScope::ActiveDocument
                     )
                 })
                 .cloned()
@@ -2620,8 +2621,8 @@ fn source_choice_for_scope(
     candidate: Option<
         &crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor,
     >,
-    scope: crate::hardcopy::HardcopyScope,
-) -> Option<(String, crate::hardcopy::HardcopyScope)> {
+    scope: HardcopyScope,
+) -> Option<(String, HardcopyScope)> {
     let active_kind = candidate.map(|candidate| candidate.document_kind);
     candidate
         .into_iter()
@@ -2638,7 +2639,7 @@ fn named_source_choices(
     candidate: Option<
         &crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor,
     >,
-) -> Vec<(String, crate::hardcopy::HardcopyScope, String)> {
+) -> Vec<(String, HardcopyScope, String)> {
     let active_kind = candidate.map(|candidate| candidate.document_kind);
     candidates
         .iter()
@@ -2647,7 +2648,7 @@ fn named_source_choices(
         })
         .flat_map(|choice| {
             choice.allowed_scopes.iter().filter_map(|scope| {
-                let crate::hardcopy::HardcopyScope::NamedPrintSet(name) = scope else {
+                let HardcopyScope::NamedPrintSet(name) = scope else {
                     return None;
                 };
                 Some((choice.source_key.clone(), scope.clone(), name.clone()))
@@ -2922,23 +2923,21 @@ fn format_millimetres(value: Length) -> String {
 }
 
 #[cfg(target_os = "windows")]
-fn duplex_label(value: crate::hardcopy::DuplexMode) -> &'static str {
+fn duplex_label(value: DuplexMode) -> &'static str {
     match value {
-        crate::hardcopy::DuplexMode::Off => "Off",
-        crate::hardcopy::DuplexMode::LongEdge => "Long edge",
-        crate::hardcopy::DuplexMode::ShortEdge => "Short edge",
+        DuplexMode::Off => "Off",
+        DuplexMode::LongEdge => "Long edge",
+        DuplexMode::ShortEdge => "Short edge",
     }
 }
 
 #[cfg(target_os = "windows")]
-fn media_label(value: &crate::hardcopy::PrinterMediaSource) -> String {
+fn media_label(value: &PrinterMediaSource) -> String {
     match value {
-        crate::hardcopy::PrinterMediaSource::AutomaticCompatibleTray => {
-            "Automatic compatible tray".to_owned()
-        }
-        crate::hardcopy::PrinterMediaSource::NamedTray(name) => name.clone(),
-        crate::hardcopy::PrinterMediaSource::ManualFeed => "Manual feed".to_owned(),
-        crate::hardcopy::PrinterMediaSource::Roll { width } => {
+        PrinterMediaSource::AutomaticCompatibleTray => "Automatic compatible tray".to_owned(),
+        PrinterMediaSource::NamedTray(name) => name.clone(),
+        PrinterMediaSource::ManualFeed => "Manual feed".to_owned(),
+        PrinterMediaSource::Roll { width } => {
             format!("Roll · {} μm", width.micrometres())
         }
     }
@@ -2949,23 +2948,23 @@ fn apply_printer_job(
     draft: &mut HardcopyDialogState,
     capabilities: &crate::workbench::hardcopy_adapters::print::PrinterCapabilitySnapshot,
     paper_id: &str,
-    media: crate::hardcopy::PrinterMediaSource,
+    media: PrinterMediaSource,
     dpi: u16,
-    duplex: crate::hardcopy::DuplexMode,
+    duplex: DuplexMode,
     copies: u16,
     collate: bool,
 ) {
     let orientation = match draft.orientation {
-        Orientation::Portrait => crate::hardcopy::ResolvedOrientation::Portrait,
-        Orientation::Landscape => crate::hardcopy::ResolvedOrientation::Landscape,
+        Orientation::Portrait => ResolvedOrientation::Portrait,
+        Orientation::Landscape => ResolvedOrientation::Landscape,
         Orientation::AutomaticPerPage => {
             if draft
                 .content_extent
                 .is_some_and(|extent| extent.width() > extent.height())
             {
-                crate::hardcopy::ResolvedOrientation::Landscape
+                ResolvedOrientation::Landscape
             } else {
-                crate::hardcopy::ResolvedOrientation::Portrait
+                ResolvedOrientation::Portrait
             }
         }
     };
@@ -2978,7 +2977,7 @@ fn apply_printer_job(
     let job = geometry
         .map_err(|error| error.to_string())
         .and_then(|geometry| {
-            crate::hardcopy::PrinterJobSettings::try_new(
+            PrinterJobSettings::try_new(
                 capabilities.content_digest(),
                 paper_id,
                 geometry,
@@ -3027,16 +3026,16 @@ fn reconcile_native_printer_job(draft: &mut HardcopyDialogState) -> bool {
         return false;
     };
     let orientation = match draft.orientation {
-        Orientation::Portrait => crate::hardcopy::ResolvedOrientation::Portrait,
-        Orientation::Landscape => crate::hardcopy::ResolvedOrientation::Landscape,
+        Orientation::Portrait => ResolvedOrientation::Portrait,
+        Orientation::Landscape => ResolvedOrientation::Landscape,
         Orientation::AutomaticPerPage => {
             if draft
                 .content_extent
                 .is_some_and(|extent| extent.width() > extent.height())
             {
-                crate::hardcopy::ResolvedOrientation::Landscape
+                ResolvedOrientation::Landscape
             } else {
-                crate::hardcopy::ResolvedOrientation::Portrait
+                ResolvedOrientation::Portrait
             }
         }
     };
@@ -3050,7 +3049,7 @@ fn reconcile_native_printer_job(draft: &mut HardcopyDialogState) -> bool {
         draft.printer_job = None;
         return false;
     };
-    let rebuilt = crate::hardcopy::PrinterJobSettings::try_new(
+    let rebuilt = PrinterJobSettings::try_new(
         capabilities.content_digest(),
         paper_id,
         geometry,

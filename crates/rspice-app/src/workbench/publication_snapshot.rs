@@ -20,7 +20,6 @@ use rspice_publication_contract::{
     Validate as _,
 };
 
-use crate::hardcopy::{ContentExtent, HardcopyScope};
 use crate::quantity::engineering::format_engineering_value;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SpecEntry};
 use crate::workbench::app_state::AppState;
@@ -37,6 +36,7 @@ use rspice_design::connectivity::summary::{
     component_pin_names_with_hierarchy, design_nets_with_hierarchy,
 };
 use rspice_design::hierarchy::HierarchySource;
+use rspice_hardcopy_contract::{ContentExtent, HardcopyScope};
 
 /// Everything the caller decides about the publication; the builder derives
 /// the rest from project state. `created_utc` is supplied here so the
@@ -795,10 +795,10 @@ fn verify_transform(candidate: &Trace, y_bits: &[u64]) -> Option<TraceTransform>
 /// is replaced with `ExtendOutput`: everything the author drew is retained
 /// and the sheet extent grows if content sits outside it. Crop marks and the
 /// editing grid are print apparatus and stay off.
-fn publication_schematic_setup() -> crate::hardcopy::SchematicHardcopySetup {
-    crate::hardcopy::SchematicHardcopySetup::new(
-        crate::hardcopy::SchematicHardcopyExtent::AuthoredDrawingSheet,
-        crate::hardcopy::OutsideSheetContentPolicy::ExtendOutput,
+fn publication_schematic_setup() -> rspice_hardcopy_contract::SchematicHardcopySetup {
+    rspice_hardcopy_contract::SchematicHardcopySetup::new(
+        rspice_hardcopy_contract::SchematicHardcopyExtent::AuthoredDrawingSheet,
+        rspice_hardcopy_contract::OutsideSheetContentPolicy::ExtendOutput,
         false,
         true,
         true,
@@ -1394,9 +1394,9 @@ fn effective_deck(state: &AppState) -> Option<NetlistSection> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hardcopy::{ContentExtent, Length};
     use crate::state::WaveformData;
     use crate::workbench::hardcopy_adapters::render::{ScenePrimitive, SceneRect};
+    use rspice_hardcopy_contract::{ContentExtent, Length};
     use std::sync::Arc;
 
     fn scene_point(x_um: u64, y_um: u64) -> ScenePoint {

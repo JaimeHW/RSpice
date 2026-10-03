@@ -20,7 +20,6 @@
 //! |-------|---------|------|
 //! | 0 | `product`, `quantity` | Framework-independent contracts, typed identities, unit-safe presentation policy |
 //! | 1 | `results`, `ui` | Versioned result documents; the design system (tokens, palette, widgets, plot engine) |
-//! | 2 | `hardcopy` | Persisted page setup, print mappings, and source-set records |
 //! | 3 | `state` | The persisted design, library, and project model |
 //! | 4 | `analysis`, `automation_workflow`, `diagnostics`, `io` | Viewer mathematics, the CI workflow language, console/log model, file formats |
 //! | 5 | `services` | DRC, licensing, and the per-analysis engine adapters |
@@ -125,11 +124,6 @@ pub(crate) mod properties;
 
 /// The RSpice design system - tokens, palettes, fonts, icons, widgets
 pub(crate) mod ui;
-
-/// Persisted page-setup contracts and deterministic pagination. Document
-/// adapters, scene rendering, the platform print boundary, and the dialogs
-/// live in `workbench::hardcopy`; this is the layer `state` can persist.
-pub(crate) mod hardcopy;
 
 /// The contract-driven application workbench. This is the only owner of
 /// application chrome, responsive composition, and top-level navigation.

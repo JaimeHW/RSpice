@@ -28,7 +28,7 @@ fn governed_design_print_selects_the_active_sheet_identity() {
     let (source_key, scope) = active_retained_source_selection(&app).unwrap();
 
     assert!(source_key.ends_with(&format!(":sheet:{sheet_id}")));
-    assert_eq!(scope, crate::hardcopy::HardcopyScope::CurrentSheet);
+    assert_eq!(scope, rspice_hardcopy_contract::HardcopyScope::CurrentSheet);
 }
 
 #[test]
@@ -88,15 +88,18 @@ fn results_export_selects_the_active_project_document_pane_authority() {
         ":result-document:{document_id}:pane:{}",
         pane_id.get()
     )));
-    assert_eq!(scope, crate::hardcopy::HardcopyScope::ActivePlotDocument);
+    assert_eq!(
+        scope,
+        rspice_hardcopy_contract::HardcopyScope::ActivePlotDocument
+    );
 }
 
 #[test]
 fn authored_sheet_formats_seed_output_media_without_reverse_coercion() {
-    use crate::hardcopy::{
+    use crate::state::{SchematicPageOrientation, SchematicPageSize, SchematicSheetFormat};
+    use rspice_hardcopy_contract::{
         HardcopySetup, Orientation, PaperSize, PhysicalPageSetup, StandardPaper,
     };
-    use crate::state::{SchematicPageOrientation, SchematicPageSize, SchematicSheetFormat};
 
     for size in [
         SchematicPageSize::A4,
@@ -134,8 +137,8 @@ fn authored_sheet_formats_seed_output_media_without_reverse_coercion() {
     assert_eq!(
         paper.dimensions(),
         (
-            crate::hardcopy::Length::from_micrometres(304_800),
-            crate::hardcopy::Length::from_micrometres(457_200),
+            rspice_hardcopy_contract::Length::from_micrometres(304_800),
+            rspice_hardcopy_contract::Length::from_micrometres(457_200),
         )
     );
 
@@ -481,9 +484,9 @@ fn publication_reuses_only_the_exact_sealed_preview_plan() {
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn app_state_clone_drops_runtime_hardcopy_authority_and_payloads() {
-    use crate::hardcopy::{HardcopyOutcome, PrinterRasterGeometry};
     use crate::state::{Point, Wire};
     use crate::workbench::state::WorkspaceDocumentId;
+    use rspice_hardcopy_contract::{HardcopyOutcome, PrinterRasterGeometry};
 
     let mut app = RSpiceApp::test_instance();
     app.state
@@ -592,7 +595,7 @@ fn file_contract_does_not_misrepresent_print_targets() {
 
 #[test]
 fn project_print_mapping_stage_is_transactional_until_publication_commit() {
-    use crate::hardcopy::{PrintMappingSaveScope, PrintMappingTable};
+    use rspice_hardcopy_contract::{PrintMappingSaveScope, PrintMappingTable};
 
     let mut app = RSpiceApp::test_instance();
     let before = app.state.workspace.content.project_print_mappings.clone();

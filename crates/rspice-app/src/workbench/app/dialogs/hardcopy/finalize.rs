@@ -15,10 +15,6 @@ use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
 use sha2::{Digest as _, Sha256};
 
-use crate::hardcopy::{
-    CancellationPhase, HardcopyArtifactIdentity, HardcopyFailureCode, HardcopyOutcome,
-    HardcopyPlan, OutputFormat, RenderTarget,
-};
 use crate::product::ContentDigest;
 use crate::workbench::hardcopy_adapters::print::{
     HardcopyCancellationToken, HardcopyPrintError, discover_native_printers,
@@ -29,6 +25,10 @@ use crate::workbench::hardcopy_adapters::render::{
 };
 use crate::workbench::workflows::export_workflow::{
     ExportWorkflowIo, NativeExportWorkflowIo, ObservedExportDestination, deterministic_stored_zip,
+};
+use rspice_hardcopy_contract::{
+    CancellationPhase, HardcopyArtifactIdentity, HardcopyFailureCode, HardcopyOutcome,
+    HardcopyPlan, OutputFormat, RenderTarget,
 };
 
 const NATIVE_FINALIZATION_THREAD_NAME: &str = "rspice-hardcopy-finalize";
@@ -922,11 +922,11 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::AtomicU64;
 
-    use crate::hardcopy::{
+    use crate::product::ObjectRevision;
+    use rspice_hardcopy_contract::{
         ActiveHardcopySource, ContentExtent, HardcopyDocumentId, HardcopyDocumentKind,
         HardcopyScope, HardcopySetup, Length,
     };
-    use crate::product::ObjectRevision;
 
     use super::*;
 

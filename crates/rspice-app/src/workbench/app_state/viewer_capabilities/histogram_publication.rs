@@ -1,12 +1,6 @@
 //! Distribution selection and publication through the actual worker and renderer.
 
 use super::AppState;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::hardcopy::HardcopyPlan;
-use crate::hardcopy::{
-    BackgroundMode, ColorMapping, FontPolicy, HardcopyScope, HardcopySetup, OutputFormat,
-    RenderSetup, RenderTarget,
-};
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType, MonteCarloVariableMetadata,
     SimulationRunLifecycle, SimulationRunProvenance,
@@ -22,6 +16,12 @@ use crate::workbench::hardcopy_adapters::sources::{
     PreparedRetainedHardcopyResolution, SemanticAxisKind,
 };
 use crate::workbench::state::WorkspaceDocumentId;
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_hardcopy_contract::HardcopyPlan;
+use rspice_hardcopy_contract::{
+    BackgroundMode, ColorMapping, FontPolicy, HardcopyScope, HardcopySetup, OutputFormat,
+    RenderSetup, RenderTarget,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_results::histogram::HistogramDisplayMode;
 
@@ -82,7 +82,10 @@ fn distribution() -> (AppState, String) {
     (state, key)
 }
 
-fn setup(format: OutputFormat, mapping: &crate::hardcopy::PrintMappingTable) -> HardcopySetup {
+fn setup(
+    format: OutputFormat,
+    mapping: &rspice_hardcopy_contract::PrintMappingTable,
+) -> HardcopySetup {
     let base = HardcopySetup::default();
     HardcopySetup::try_new_with_schematic(
         base.physical_page().clone(),

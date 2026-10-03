@@ -10,8 +10,6 @@ use super::{
     ReportHardcopySource, ResolvedHardcopyDocument, RetainedHardcopySourceAvailability,
     resolve_report_source,
 };
-use crate::hardcopy::HardcopyScope;
-use crate::hardcopy::sources::HardcopySourceError;
 use crate::product::DatasetBinding;
 use crate::results::report_document::{
     PlotFigureBlock, ReportBlockId, ReportBlockKind, ReportDocument, ReportReferenceFigureArtifact,
@@ -22,6 +20,8 @@ use crate::results::visualization_raster::{
     VisualizationRasterProfile, render_visualization_report_figure,
 };
 use crate::workbench::AppState;
+use rspice_hardcopy_contract::HardcopyScope;
+use rspice_hardcopy_contract::sources::HardcopySourceError;
 
 pub(super) fn availability(
     state: &AppState,
