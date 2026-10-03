@@ -1,5 +1,6 @@
 //! Studio dock identities and action-sheet presentation.
 
+pub mod comparison;
 pub mod entities;
 pub mod family;
 pub mod layout;

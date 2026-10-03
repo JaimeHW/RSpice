@@ -18,7 +18,7 @@ mod viewers;
 use viewers::show as viewers_section;
 
 use rspice_results_ui::studio::{
-    dock::VisualizationDock,
+    dock::{VisualizationDock, comparison::ComparisonAlignmentDraft},
     inspector::OperationState,
     stage::{ExactSourceRow, ResultEntityRow},
 };
@@ -60,13 +60,12 @@ use crate::state::{
     AnalysisResult, AnalysisResultPayload, AnalysisType, SensitivityResultMode,
     SensitivityResultRow, SimulationRun,
 };
-use crate::ui::{tokens::Tokens, widgets::Button};
+use crate::ui::tokens::Tokens;
 use crate::workbench::{AppState, RSpiceApp};
 
 use crate::workbench::{
     ChoicePreference, ResultViewer, RouteTransitionSource, ScalarPreference, SurfaceId,
     SurfaceRoute,
-    design_system::property_row,
     state::{Workspace, WorkspaceDocumentId},
 };
 
@@ -99,30 +98,6 @@ fn compact_dock_geometry(viewport_width: f32) -> (f32, f32) {
     let window_width = (viewport_width - 18.0).clamp(180.0, 520.0);
     let body_max_width = (window_width - 24.0).max(156.0);
     (window_width, body_max_width)
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-enum ComparisonAlignmentDraft {
-    #[default]
-    FirstThresholdCrossing,
-    AbsoluteXAxis,
-    CrossCorrelation,
-}
-
-impl ComparisonAlignmentDraft {
-    const ALL: [Self; 3] = [
-        Self::FirstThresholdCrossing,
-        Self::AbsoluteXAxis,
-        Self::CrossCorrelation,
-    ];
-
-    const fn label(self) -> &'static str {
-        match self {
-            Self::FirstThresholdCrossing => "First threshold crossing",
-            Self::AbsoluteXAxis => "Absolute X axis",
-            Self::CrossCorrelation => "Cross-correlation alignment",
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
