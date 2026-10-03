@@ -34,7 +34,7 @@ use rspice_results_ui::studio::{
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use egui::{Align, Id, Layout, RichText, Ui, vec2};
+use egui::{Align, Id, Layout, Ui, vec2};
 use serde::{Deserialize, Serialize};
 
 use crate::analysis::calculator;
@@ -61,11 +61,7 @@ use crate::state::{
     AnalysisResult, AnalysisResultPayload, AnalysisType, SensitivityResultMode,
     SensitivityResultRow, SimulationRun,
 };
-use crate::ui::{
-    theme::{self, FontWeight},
-    tokens::{self, Tokens},
-    widgets::Button,
-};
+use crate::ui::{tokens::Tokens, widgets::Button};
 use crate::workbench::{AppState, RSpiceApp};
 
 use crate::workbench::{

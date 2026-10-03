@@ -1,5 +1,6 @@
 //! Studio dock identities and action-sheet presentation.
 
+pub mod entities;
 pub mod layout;
 
 use super::widgets::section_heading;
