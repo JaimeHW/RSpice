@@ -13,6 +13,7 @@ pub mod eye_diagram;
 pub mod fft;
 pub mod harmonic_balance;
 pub mod histogram;
+pub mod manifest;
 pub mod network_matrix;
 pub mod noise_contrib;
 pub mod nyquist;

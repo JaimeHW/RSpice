@@ -153,13 +153,12 @@ pub use simulation::{
     OperatingPointInitialGuessEvidence, OperatingPointValue, PoleZeroRootSetEvidence,
     PreparedRunReceipt, PreparedSpecification, PstbStabilityClassificationEvidence,
     RealEventPointEvidence, RealEventTraceEvidence, ResultImportFormat, ResultImportSource,
-    RunHistory, RunRetention, SavedOutputMaterializationStatus, SavedOutputReceipt,
-    SensitivityResultMode, SensitivityResultRow, SharedWaveformValues, SignOffStanding,
-    SimulationCampaignMembership, SimulationRun, SimulationRunIntent, SimulationRunLifecycle,
-    SimulationRunProvenance, SimulationState, SoaEvaluationEvidence, SoaParameterEvidence,
-    SoaRuleVerdictEvidence, SpecificationVerdictStatus, WaveformData, absent_deck_reason,
-    ac_bode_shape_for_analysis, ac_bode_shape_for_selection, ac_bode_summary_for_analysis,
-    ac_bode_summary_for_selection,
+    RunHistory, RunRetention, SavedOutputMaterializationStatus, SensitivityResultMode,
+    SensitivityResultRow, SharedWaveformValues, SignOffStanding, SimulationCampaignMembership,
+    SimulationRun, SimulationRunIntent, SimulationRunLifecycle, SimulationRunProvenance,
+    SimulationState, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
+    SpecificationVerdictStatus, WaveformData, absent_deck_reason, ac_bode_shape_for_analysis,
+    ac_bode_shape_for_selection, ac_bode_summary_for_analysis, ac_bode_summary_for_selection,
 };
 #[cfg(test)]
 pub use simulation::{
@@ -167,7 +166,7 @@ pub use simulation::{
     NoiseContributorRow, OperatingPointDeviceDetailEvidence, PeriodicNoiseConversionEvidence,
     PoleZeroSpectrumCertificate, PreparedModelSourceIdentity, PreparedRunReceiptInput,
     PreparedRunTaskReceipt, PreparedSourceCheckReceipt, PreparedSpecificationPolicy,
-    SoaSourceHistory, SoaSourceWaveform, TransferFunctionAccuracyEvidence,
+    SavedOutputReceipt, SoaSourceHistory, SoaSourceWaveform, TransferFunctionAccuracyEvidence,
     TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
     TransferFunctionScalarEvidence,
 };

@@ -130,11 +130,13 @@ pub use rspice_results::run_receipt::{
 pub use rspice_results::run_receipt::{
     PreparedRunReceipt, SignOffStanding, SimulationRunProvenance,
 };
+pub use rspice_results::saved_output::SavedOutputMaterializationStatus;
+#[cfg(test)]
+pub use rspice_results::saved_output::SavedOutputReceipt;
 #[cfg(test)]
 pub use rspice_results::saved_output::{
     SavedOutputAxis, SavedOutputBoundSource, SavedOutputDcMember, SavedOutputSourceBindings,
 };
-pub use rspice_results::saved_output::{SavedOutputMaterializationStatus, SavedOutputReceipt};
 pub use rspice_results::specification::PreparedSpecification;
 #[cfg(test)]
 pub use rspice_results::specification::PreparedSpecificationPolicy;

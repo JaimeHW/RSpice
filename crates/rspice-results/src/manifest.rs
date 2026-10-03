@@ -817,3 +817,272 @@ const fn source_domain_label(domain: AnalysisResultSourceDomain) -> &'static str
 const fn plural_suffix(count: usize) -> &'static str {
     if count == 1 { "" } else { "s" }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::waveform::RetainedWaveform as WaveformData;
+    use crate::{
+        analysis_tag::CanonicalAnalysisKind,
+        provenance::{AnalysisResultProvenance, AnalysisResultSourceDomain},
+        run::{ExecutionTarget, SimulationRunLifecycle},
+        run_receipt::{
+            PreparedRunReceipt, PreparedRunReceiptInput, PreparedRunTaskReceipt,
+            PreparedSourceCheckReceipt,
+        },
+    };
+    use rspice_app_types::product::{
+        AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId,
+    };
+    type SimulationRun = crate::run::SimulationRun<AnalysisResult>;
+    fn digest(byte: u8) -> ContentDigest {
+        ContentDigest::from_bytes([byte; 32])
+    }
+    fn row_for_analysis(analysis: AnalysisResult) -> ManifestRow {
+        let mut run = SimulationRun::new(1, 0.0, ExecutionTarget::LocalDesktop);
+        run.add_analysis(analysis);
+        ManifestViewModel::from_run(&run, |analysis| analysis.is_live_partial())
+            .rows
+            .remove(0)
+    }
+    #[test]
+    fn legacy_manifest_is_digest_bound_and_fails_closed() {
+        let mut run = SimulationRun::new(7, 0.0, ExecutionTarget::LocalDesktop);
+        run.lifecycle = SimulationRunLifecycle::Completed;
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Transient", 0.0).with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0]),
+            ]),
+        );
+
+        let manifest = ManifestViewModel::from_run(&run, |analysis| analysis.is_live_partial());
+
+        assert_eq!(manifest.dataset_id, run.dataset_id.to_string());
+        assert_eq!(
+            manifest.dataset_digest,
+            run.dataset_content_digest_with_encoding(
+                crate::result_digest::ResultDigestEncoding::CURRENT
+            )
+            .to_string()
+        );
+        assert_eq!(manifest.rows.len(), 1);
+        assert_eq!(manifest.rows[0].domain_axis, "adaptive time");
+        assert!(manifest.rows[0].stored_values.contains("2 samples"));
+        assert_eq!(
+            manifest.rows[0].eligibility,
+            "legacy · no prepared receipt · sign-off unavailable"
+        );
+        assert_eq!(
+            manifest.qualification,
+            "unavailable · no retained qualification authority · non-sign-off"
+        );
+        assert_eq!(manifest.inventory_title, "Retained analysis inventory");
+    }
+    #[test]
+    fn active_manifest_never_claims_to_be_frozen_or_qualified() {
+        let run = SimulationRun::new(8, 0.0, ExecutionTarget::LocalDesktop);
+
+        let manifest = ManifestViewModel::from_run(&run, |analysis| analysis.is_live_partial());
+
+        assert_eq!(manifest.inventory_title, "Live analysis inventory");
+        assert!(manifest.inventory_status.starts_with("live manifest"));
+        assert_eq!(
+            manifest.qualification,
+            "unavailable · run is not terminal · non-sign-off"
+        );
+        assert!(!manifest.inventory_title.contains("Frozen"));
+    }
+    #[test]
+    fn legacy_unknown_manifest_does_not_claim_live_or_locked_authority() {
+        let mut run = SimulationRun::new(9, 0.0, ExecutionTarget::LocalDesktop);
+        run.lifecycle = SimulationRunLifecycle::LegacyUnknown;
+
+        let manifest = ManifestViewModel::from_run(&run, |analysis| analysis.is_live_partial());
+
+        assert_eq!(manifest.inventory_title, "Legacy analysis inventory");
+        assert!(manifest.inventory_status.starts_with("legacy manifest"));
+        assert_eq!(
+            manifest.qualification,
+            "unavailable · legacy lifecycle unknown · non-sign-off"
+        );
+    }
+    #[test]
+    fn a_preview_engine_run_is_blocked_in_the_words_the_receipt_uses() {
+        let instance_id = AnalysisInstanceId::new();
+        let revision = ObjectRevision::INITIAL;
+        let snapshot = digest(0x51);
+        let envelope_tag = CanonicalAnalysisKind::Envelope.tag();
+        let receipt = PreparedRunReceipt::new(PreparedRunReceiptInput {
+            source_domain: AnalysisResultSourceDomain::SimulationPlan,
+            simulation_plan_id: Some(SimulationPlanId::new()),
+            project_revision: revision,
+            prepared_snapshot_digest: snapshot,
+            source_content_digest: digest(0x52),
+            source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest(0x53)),
+            project_model_sources: Vec::new(),
+            specifications: Vec::new(),
+            specification_policy: crate::specification::PreparedSpecificationPolicy::default(),
+            tasks: vec![
+                PreparedRunTaskReceipt::new(
+                    instance_id,
+                    revision,
+                    Vec::new(),
+                    envelope_tag,
+                    digest(0x54),
+                )
+                .expect("valid task"),
+            ],
+        })
+        .expect("valid receipt");
+        let blocker = receipt
+            .sign_off_blocker()
+            .expect("a preview kind blocks sign-off");
+        let provenance = AnalysisResultProvenance::new(instance_id, revision, snapshot, Vec::new())
+            .expect("valid provenance");
+        let mut run = SimulationRun::new_prepared(11, 0.0, ExecutionTarget::LocalDesktop, receipt);
+        run.lifecycle = SimulationRunLifecycle::Completed;
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Envelope, "Envelope", 0.0)
+                .with_provenance(provenance),
+        );
+
+        let manifest = ManifestViewModel::from_run(&run, |analysis| analysis.is_live_partial());
+
+        assert_eq!(
+            manifest.qualification,
+            format!("blocked · {blocker} · non-sign-off")
+        );
+        assert!(
+            manifest.qualification.contains("Envelope"),
+            "the owner names the object, so this line does too: {}",
+            manifest.qualification
+        );
+        assert_eq!(
+            manifest.rows[0].eligibility,
+            "retained · preview engine · non-sign-off"
+        );
+    }
+    #[test]
+    fn an_eligible_receipt_is_called_eligible_in_the_words_both_surfaces_use() {
+        let instance_id = AnalysisInstanceId::new();
+        let revision = ObjectRevision::INITIAL;
+        let snapshot = digest(0x41);
+        let receipt = PreparedRunReceipt::new(PreparedRunReceiptInput {
+            source_domain: AnalysisResultSourceDomain::SimulationPlan,
+            simulation_plan_id: Some(SimulationPlanId::new()),
+            project_revision: revision,
+            prepared_snapshot_digest: snapshot,
+            source_content_digest: digest(0x42),
+            source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(digest(0x43)),
+            project_model_sources: Vec::new(),
+            specifications: Vec::new(),
+            specification_policy: crate::specification::PreparedSpecificationPolicy::default(),
+            tasks: vec![
+                PreparedRunTaskReceipt::new(instance_id, revision, Vec::new(), 5, digest(0x44))
+                    .expect("valid task"),
+            ],
+        })
+        .expect("valid receipt");
+        let provenance = AnalysisResultProvenance::new(instance_id, revision, snapshot, Vec::new())
+            .expect("valid provenance");
+        let mut run = SimulationRun::new_prepared(10, 0.0, ExecutionTarget::LocalDesktop, receipt);
+        run.lifecycle = SimulationRunLifecycle::Completed;
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Transient", 0.0)
+                .with_provenance(provenance),
+        );
+
+        let standing = run
+            .prepared_receipt()
+            .expect("the run carries its receipt")
+            .sign_off_standing();
+        let manifest = ManifestViewModel::from_run(&run, |analysis| analysis.is_live_partial());
+
+        // What Verify's tile stamps, and what this cell prints, for the one
+        // receipt.
+        assert_eq!(standing.verdict(), "Eligible");
+        assert_eq!(
+            manifest.qualification,
+            "eligible · every model released · every analysis production"
+        );
+        assert_eq!(manifest.qualification, standing.qualification());
+        assert!(
+            !manifest.qualification.contains("unavailable")
+                && !manifest.qualification.contains("blocked"),
+            "nothing disqualifies this run: {}",
+            manifest.qualification
+        );
+        assert_eq!(
+            manifest.rows[0].eligibility,
+            "retained · receipt matched · sign-off unavailable"
+        );
+    }
+    #[test]
+    fn every_analysis_kind_has_a_truthful_domain_contract() {
+        let kinds = [
+            AnalysisType::DcOp,
+            AnalysisType::DcSweep,
+            AnalysisType::Ac,
+            AnalysisType::Disto,
+            AnalysisType::Transient,
+            AnalysisType::Noise,
+            AnalysisType::PoleZero,
+            AnalysisType::Tf,
+            AnalysisType::Sensitivity,
+            AnalysisType::Pac,
+            AnalysisType::Pnoise,
+            AnalysisType::Pxf,
+            AnalysisType::Pstb,
+            AnalysisType::Stb,
+            AnalysisType::MonteCarlo,
+            AnalysisType::Parametric,
+            AnalysisType::Corner,
+            AnalysisType::Optimization,
+            AnalysisType::Soa,
+            AnalysisType::SParameter,
+            AnalysisType::Envelope,
+            AnalysisType::Fourier,
+            AnalysisType::HarmonicBalance,
+            AnalysisType::Pss,
+            AnalysisType::Qpss,
+            AnalysisType::Hbsp,
+            AnalysisType::Hbnoise,
+            AnalysisType::Psp,
+            AnalysisType::Qpac,
+            AnalysisType::Qpnoise,
+            AnalysisType::Qpxf,
+            AnalysisType::TransientNoise,
+            AnalysisType::DcMismatch,
+        ];
+        for kind in kinds {
+            let meta = row_for_analysis(AnalysisResult::new(1, kind, "domain", 0.0));
+            assert!(!meta.domain_axis.is_empty(), "{kind:?}");
+            assert!(!meta.precision.is_empty(), "{kind:?}");
+        }
+    }
+    #[test]
+    fn periodic_payload_manifest_uses_complete_floquet_semantics() {
+        let pss = AnalysisResult::new(1, AnalysisType::Pss, "PSS", 0.0).with_result_payload(
+            AnalysisResultPayload::legacy_periodic_marker(AnalysisType::Pss).unwrap(),
+        );
+        let pstb = AnalysisResult::new(2, AnalysisType::Pstb, "PSTB", 0.0).with_result_payload(
+            AnalysisResultPayload::legacy_periodic_marker(AnalysisType::Pstb).unwrap(),
+        );
+
+        let pss = row_for_analysis(pss);
+        let pstb = row_for_analysis(pstb);
+        assert_eq!(pstb.domain_axis, "Floquet mode index");
+        assert_eq!(pss.precision, "complex128");
+        assert_eq!(pstb.precision, "complex128");
+        assert!(
+            pss.stored_values.contains("retained PSS multipliers"),
+            "{}",
+            pss.stored_values
+        );
+        assert!(
+            pstb.stored_values.contains("retained PSTB modes"),
+            "{}",
+            pstb.stored_values
+        );
+    }
+}
