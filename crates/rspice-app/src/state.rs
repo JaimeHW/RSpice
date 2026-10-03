@@ -131,6 +131,8 @@ pub use schematic::*;
 pub use simulation::CanonicalAnalysisKind;
 
 pub use rspice_model_library::sealed_model_sources;
+#[cfg(test)]
+pub use rspice_results::noise::{NoiseFigureEvidence, NoiseSummary};
 pub use simulation::CurrentImpulseHistoryEvidence;
 pub use simulation::DcMismatchEvidence;
 pub(crate) use simulation::RunHistoryRevision;
@@ -145,18 +147,17 @@ pub use simulation::{
     DigitalBusSourceEvidence, DigitalEventPointEvidence, DigitalEventTraceEvidence, EvidenceDomain,
     ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, ExecutionTarget, FamilyMemberId,
     FloquetOrbitKindEvidence, FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence,
-    MonteCarloVariableMetadata, NoiseFigureEvidence, NoiseSummary, OccurrenceProbeSpelling,
-    OperatingPointAnnotationEvidence, OperatingPointDeviceDetailEvidence,
-    OperatingPointInitialGuessEvidence, OperatingPointValue, PoleZeroRootSetEvidence,
-    PreparedRunReceipt, PreparedSpecification, PstbStabilityClassificationEvidence,
-    RealEventPointEvidence, RealEventTraceEvidence, ResultImportFormat, ResultImportSource,
-    RunHistory, RunRetention, SavedOutputMaterializationStatus, SavedOutputReceipt,
-    SensitivityResultMode, SensitivityResultRow, SharedWaveformValues, SignOffStanding,
-    SimulationCampaignMembership, SimulationRun, SimulationRunIntent, SimulationRunLifecycle,
-    SimulationRunProvenance, SimulationState, SoaEvaluationEvidence, SoaParameterEvidence,
-    SoaRuleVerdictEvidence, SpecificationVerdictStatus, WaveformData, absent_deck_reason,
-    ac_bode_shape_for_analysis, ac_bode_shape_for_selection, ac_bode_summary_for_analysis,
-    ac_bode_summary_for_selection,
+    MonteCarloVariableMetadata, OccurrenceProbeSpelling, OperatingPointAnnotationEvidence,
+    OperatingPointDeviceDetailEvidence, OperatingPointInitialGuessEvidence, OperatingPointValue,
+    PoleZeroRootSetEvidence, PreparedRunReceipt, PreparedSpecification,
+    PstbStabilityClassificationEvidence, RealEventPointEvidence, RealEventTraceEvidence,
+    ResultImportFormat, ResultImportSource, RunHistory, RunRetention,
+    SavedOutputMaterializationStatus, SavedOutputReceipt, SensitivityResultMode,
+    SensitivityResultRow, SharedWaveformValues, SignOffStanding, SimulationCampaignMembership,
+    SimulationRun, SimulationRunIntent, SimulationRunLifecycle, SimulationRunProvenance,
+    SimulationState, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
+    SpecificationVerdictStatus, WaveformData, absent_deck_reason, ac_bode_shape_for_analysis,
+    ac_bode_shape_for_selection, ac_bode_summary_for_analysis, ac_bode_summary_for_selection,
 };
 #[cfg(test)]
 pub use simulation::{

@@ -1,10 +1,10 @@
 //! Noise-figure spectrum, source reference, and exact sampled values.
 
-use crate::state::NoiseFigureEvidence;
-use crate::ui::plot::{self, Axis, DecimationCache, PlotSpec, Trace, XScale};
-use crate::ui::tokens::Tokens;
-use crate::ui::widgets::{measurement_table, section_header};
 use egui::Ui;
+use rspice_results::noise::NoiseFigureEvidence;
+use rspice_ui_kit::plot::{self, Axis, DecimationCache, PlotSpec, Trace, XScale};
+use rspice_ui_kit::tokens::Tokens;
+use rspice_ui_kit::widgets::{measurement_table, section_header};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -38,7 +38,7 @@ pub(super) fn show(ui: &mut Ui, figure: &Arc<NoiseFigureEvidence>, cache: &mut D
         .map(|(name, value)| (*name, value.as_str()))
         .collect::<Vec<_>>(),
     );
-    rspice_results_ui::presentation::panel_note(
+    crate::presentation::panel_note(
         ui,
         "Signal uses the retained conversion channels (sideband zero for legacy results). Folded source thermal noise is evaluated at the reference temperature; all other device noise retains its circuit temperature.",
     );

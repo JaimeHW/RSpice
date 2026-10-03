@@ -1,407 +1,43 @@
-//! NOISE — amplitude-density instrument derived from retained power spectral
-//! density and its contributor
-//! evidence.
-//!
-//! The center surface owns the frequency spectrum. The right inspector keeps
-//! the complete band-integrated contributor table associated with the exact
-//! same noise analysis, so changing the active dataset or analysis cannot
-//! leave either surface reading stale evidence.
+//! Noise contributor source binding and CSV export at the application boundary.
 
-use egui::{Align2, Sense, Ui};
-
-use crate::state::{AnalysisResult, NoiseSummary};
-use crate::ui::plot::fmt_si;
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{measurement_table, section_header};
+use super::bode;
+use crate::state::SimulationState;
 use crate::workbench::AppState;
-
-mod figure;
-
-const RANK_W: f32 = 30.0;
-const SOURCE_W: f32 = 132.0;
-const POWER_W: f32 = 94.0;
-const SHARE_W: f32 = 70.0;
-const ROW_H: f32 = 31.0;
-const CELL_INSET: f32 = 6.0;
-
-fn contributor_table_width() -> f32 {
-    RANK_W + SOURCE_W + POWER_W + SHARE_W
-}
-
-fn selected_noise_analysis(state: &AppState) -> Option<&AnalysisResult> {
-    let run = state.simulation.active_run()?;
-    let index = super::bode::selected_noise_analysis_index(state)?;
-    run.analyses.get(index)
-}
-
-fn selected_summary(state: &AppState) -> Option<(&NoiseSummary, &str)> {
-    let analysis = selected_noise_analysis(state)?;
-    Some((analysis.noise_summary.as_ref()?, analysis.label.as_str()))
-}
-
-/// Why no contributor evidence is on screen. The table binds strictly to the
-/// selected noise analysis, so an empty table has two distinct causes and the
-/// reader is owed the one that applies.
-fn contributor_absence_reason(state: &AppState) -> &'static str {
-    if selected_noise_analysis(state).is_some() {
-        "This noise result contains a spectrum, but no band-integrated contributor evidence was retained."
-    } else {
-        "The selected analysis carries no usable ordinary-noise spectrum, so no contributor evidence is bound to it."
-    }
-}
+use egui::Ui;
+use rspice_results_ui::noise_contrib as view;
 
 mod csv;
 pub(crate) use csv::export_csv;
 
-/// Render spectrum provenance and the full contributor table for the exact
-/// analysis shown in the center instrument (the waves pane-stack).
+fn selected_evidence(
+    simulation: &SimulationState,
+    index: Option<usize>,
+) -> view::ContributorEvidence<'_> {
+    let analysis = index.and_then(|index| simulation.active_run()?.analyses.get(index));
+    let Some(analysis) = analysis else {
+        return view::ContributorEvidence::Unavailable;
+    };
+    match &analysis.noise_summary {
+        Some(summary) => view::ContributorEvidence::Retained {
+            summary,
+            label: &analysis.label,
+        },
+        None => view::ContributorEvidence::NotRetained,
+    }
+}
+
+/// Bind the contributor inspector to the same qualified analysis as the noise spectrum.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    super::bode::noise_spectrum_right_panel(ui, state);
-
-    let Some((summary, label)) = selected_summary(state) else {
-        ui.add_space(8.0);
-        section_header(ui, "Contributors", Some("not retained"));
-        rspice_results_ui::presentation::panel_note(ui, contributor_absence_reason(state));
-        return;
-    };
-    let summary = summary.clone();
-
-    ui.add_space(8.0);
-    section_header(ui, "Contributor evidence", None);
-    let band = format!(
-        "{} – {}",
-        fmt_si(summary.band.0, "Hz", 3),
-        fmt_si(summary.band.1, "Hz", 3)
-    );
-    let total = summary
-        .total_rms
-        .map(|value| fmt_si(value, "V rms", 3))
-        .unwrap_or_else(|| "Not retained".to_owned());
-    let input = summary
-        .input_rms
-        .map(|value| fmt_si(value, summary.input_rms_unit(), 3))
-        .unwrap_or_else(|| "Not retained".to_owned());
-    let count = summary.rows.len().to_string();
-    measurement_table(
-        ui,
-        &[
-            ("Analysis", label),
-            ("Band", band.as_str()),
-            ("Output integrated", total.as_str()),
-            ("Input integrated", input.as_str()),
-            ("Contributors", count.as_str()),
-        ],
-    );
-
-    if let Some(conversion) = &summary.conversion {
-        if let Some(sampling) = &conversion.sampling {
-            section_header(ui, "Sampling", None);
-            let mut rows = vec![
-                (
-                    "Output phase",
-                    format!("{:.9}°", sampling.output.phase_degrees),
-                ),
-                ("Output voltage", fmt_si(sampling.output.voltage, "V", 6)),
-                (
-                    "Output slew",
-                    fmt_si(sampling.output.slew_volts_per_second, "V/s", 6),
-                ),
-            ];
-            if let Some(reference) = &sampling.reference {
-                rows.push((
-                    "Reference signal",
-                    format!(
-                        "V({},{})",
-                        reference.node,
-                        reference.reference.as_deref().unwrap_or("0")
-                    ),
-                ));
-                rows.push((
-                    "Reference phase",
-                    format!("{:.9}°", reference.phase_degrees),
-                ));
-                rows.push((
-                    "Reference slew",
-                    fmt_si(reference.slew_volts_per_second, "V/s", 6),
-                ));
-            }
-            if let Some(delay) = sampling.nominal_delay_seconds {
-                rows.push(("Nominal delay", fmt_si(delay, "s", 6)));
-            }
-            measurement_table(
-                ui,
-                &rows
-                    .iter()
-                    .map(|(label, value)| (*label, value.as_str()))
-                    .collect::<Vec<_>>(),
-            );
-        }
-        section_header(ui, "Conversion channels", Some("offset axis"));
-        let rows = [
-            (
-                "Input source",
-                if conversion.input_source.is_empty() {
-                    "Not requested".into()
-                } else {
-                    conversion.input_source.clone()
-                },
-            ),
-            (
-                "Carrier fundamental",
-                fmt_si(conversion.carrier_hz, "Hz", 6),
-            ),
-            (
-                "Input sideband",
-                if conversion.input_source.is_empty() {
-                    "Not requested".into()
-                } else {
-                    conversion.input_sideband.to_string()
-                },
-            ),
-            ("Output sideband", conversion.output_sideband.to_string()),
-            (
-                "Folding window",
-                format!(
-                    "−{} … +{}",
-                    conversion.max_sideband, conversion.max_sideband
-                ),
-            ),
-            (
-                "Input frequency band",
-                if conversion.input_source.is_empty() {
-                    "Not requested".into()
-                } else {
-                    format!(
-                        "{:.6e} … {:.6e} Hz",
-                        conversion.input_frequency(summary.band.0),
-                        conversion.input_frequency(summary.band.1)
-                    )
-                },
-            ),
-            (
-                "Output frequency band",
-                format!(
-                    "{:.6e} … {:.6e} Hz",
-                    conversion.output_frequency(summary.band.0),
-                    conversion.output_frequency(summary.band.1)
-                ),
-            ),
-        ];
-        measurement_table(
-            ui,
-            &rows
-                .iter()
-                .map(|(label, value)| (*label, value.as_str()))
-                .collect::<Vec<_>>(),
-        );
-        rspice_results_ui::presentation::panel_note(
-            ui,
-            "The plot axis is offset Hz. Physical channel frequency = offset + sideband × fundamental. Negative frequencies denote conjugate channels.",
-        );
-    }
-    if let Some(figure) = &summary.noise_figure {
-        figure::show(ui, figure, &mut state.ui.results.cache);
-    }
-
-    ui.add_space(8.0);
-    section_header(
-        ui,
-        "Ranked contributors",
-        Some(&format!("integrated {}", summary.power_unit())),
-    );
-    if summary.rows.is_empty() {
-        rspice_results_ui::presentation::panel_note(
-            ui,
-            "No per-device contributor rows were retained.",
-        );
-        return;
-    }
-    contributor_table(ui, &summary);
-}
-
-fn contributor_table(ui: &mut Ui, summary: &NoiseSummary) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let viewport_width = ui.available_width().max(1.0);
-
-    let table = ui
-        .scope(|ui| {
-            egui::ScrollArea::horizontal()
-                .id_salt("rspice.results.noise.contributors")
-                .auto_shrink([false, true])
-                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
-                .show(ui, |ui| {
-                    let width = viewport_width.max(contributor_table_width());
-                    ui.set_min_width(width);
-                    contributor_header(ui, width);
-                    for (rank, row) in summary.rows.iter().enumerate() {
-                        let (rect, response) =
-                            ui.allocate_exact_size(egui::vec2(width, ROW_H), Sense::hover());
-                        response.widget_info(|| {
-                            egui::WidgetInfo::labeled(
-                                egui::WidgetType::Label,
-                                ui.is_enabled(),
-                                format!(
-                                    "Contributor rank {}, {} {}, integrated noise power {:.6e} {}, share {:.3} percent",
-                                    rank + 1,
-                                    row.device,
-                                    row.mechanism,
-                                    row.power,
-                                    summary.power_unit(),
-                                    row.share_pct
-                                ),
-                            )
-                        });
-                        ui.ctx().accesskit_node_builder(response.id, |node| {
-                            node.set_role(egui::accesskit::Role::Row);
-                        });
-                        if !ui.is_rect_visible(rect) {
-                            continue;
-                        }
-                        if response.hovered() {
-                            ui.painter().rect_filled(rect, 0.0, c.bg_hover);
-                        }
-                        ui.painter().hline(
-                            rect.x_range(),
-                            rect.bottom() - 0.5,
-                            egui::Stroke::new(1.0, c.border.gamma_multiply(0.6)),
-                        );
-                        paint_cell(
-                            ui,
-                            rect,
-                            0.0,
-                            RANK_W,
-                            rank + 1,
-                            Align2::LEFT_CENTER,
-                            c.text_faint,
-                        );
-                        let source = format!("{}\n{}", row.device, row.mechanism);
-                        paint_cell(ui, rect, RANK_W, SOURCE_W, source, Align2::LEFT_CENTER, c.text);
-                        paint_cell(
-                            ui,
-                            rect,
-                            RANK_W + SOURCE_W,
-                            POWER_W,
-                            format!("{:.3e}", row.power),
-                            Align2::RIGHT_CENTER,
-                            c.text_dim,
-                        );
-                        let share_offset = RANK_W + SOURCE_W + POWER_W;
-                        let share_cell = column_rect(rect, share_offset, width - share_offset);
-                        let fill_rect = share_cell.shrink2(egui::vec2(CELL_INSET, 8.0));
-                        let fill = fill_rect.width()
-                            * (row.share_pct as f32 / 100.0).clamp(0.0, 1.0);
-                        ui.painter().rect_filled(
-                            egui::Rect::from_min_size(
-                                fill_rect.min,
-                                egui::vec2(fill, fill_rect.height()),
-                            ),
-                            2.0,
-                            c.accent_dim,
-                        );
-                        paint_cell(
-                            ui,
-                            rect,
-                            share_offset,
-                            width - share_offset,
-                            format!("{:.1}%", row.share_pct),
-                            Align2::RIGHT_CENTER,
-                            c.text,
-                        );
-                    }
-                });
-        })
-        .response;
-    table.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Label,
-            ui.is_enabled(),
-            format!("Ranked noise contributors, {} rows", summary.rows.len()),
-        )
-    });
-    ui.ctx().accesskit_node_builder(table.id, |node| {
-        node.set_role(egui::accesskit::Role::Table);
-        node.set_row_count(summary.rows.len().saturating_add(1));
-        node.set_column_count(4);
-    });
-}
-
-fn contributor_header(ui: &mut Ui, width: f32) {
-    let c = Tokens::get(ui.ctx()).color;
-    let (rect, row) = ui.allocate_exact_size(egui::vec2(width, 23.0), Sense::hover());
-    ui.ctx().accesskit_node_builder(row.id, |node| {
-        node.set_role(egui::accesskit::Role::Row);
-    });
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom() - 0.5,
-        egui::Stroke::new(1.0, c.border),
-    );
-    for (index, (label, offset, column_width, align)) in [
-        ("#", 0.0, RANK_W, Align2::LEFT_CENTER),
-        ("SOURCE", RANK_W, SOURCE_W, Align2::LEFT_CENTER),
-        ("POWER", RANK_W + SOURCE_W, POWER_W, Align2::RIGHT_CENTER),
-        (
-            "SHARE",
-            RANK_W + SOURCE_W + POWER_W,
-            width - RANK_W - SOURCE_W - POWER_W,
-            Align2::RIGHT_CENTER,
-        ),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let cell = column_rect(rect, offset, column_width);
-        let response = ui.interact(cell, row.id.with(index), Sense::hover());
-        response.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label)
-        });
-        ui.ctx().accesskit_node_builder(response.id, |node| {
-            node.set_role(egui::accesskit::Role::ColumnHeader);
-            node.set_label(label);
-        });
-        paint_cell(ui, rect, offset, column_width, label, align, c.text_faint);
-    }
-}
-
-fn column_rect(row: egui::Rect, offset: f32, width: f32) -> egui::Rect {
-    egui::Rect::from_min_size(
-        egui::pos2(row.left() + offset, row.top()),
-        egui::vec2(width.max(0.0), row.height()),
-    )
-}
-
-fn paint_cell(
-    ui: &Ui,
-    row: egui::Rect,
-    offset: f32,
-    width: f32,
-    text: impl ToString,
-    align: Align2,
-    color: egui::Color32,
-) {
-    let cell = column_rect(row, offset, width);
-    let x = if align == Align2::RIGHT_CENTER {
-        cell.right() - CELL_INSET
-    } else {
-        cell.left() + CELL_INSET
-    };
-    ui.painter()
-        .with_clip_rect(cell.shrink2(egui::vec2(2.0, 0.0)))
-        .text(
-            egui::pos2(x, cell.center().y),
-            align,
-            text,
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            color,
-        );
+    bode::noise_spectrum_right_panel(ui, state);
+    let index = bode::selected_noise_analysis_index(state);
+    let evidence = selected_evidence(&state.simulation, index);
+    view::right_panel(ui, evidence, &mut state.ui.results.cache);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{AnalysisResult, AnalysisType, SimulationRun, WaveformData};
+    use crate::state::{AnalysisResult, AnalysisType, NoiseSummary, SimulationRun, WaveformData};
 
     #[test]
     fn hbnoise_csv_separates_decibels_from_density_and_retains_source_reference() {
@@ -498,13 +134,6 @@ mod tests {
     }
 
     #[test]
-    fn contributor_table_preserves_all_columns_at_narrow_inspector_width() {
-        assert_eq!(contributor_table_width(), 326.0);
-        assert!(SOURCE_W >= 120.0);
-        assert!(POWER_W >= 90.0);
-    }
-
-    #[test]
     fn selected_summary_is_bound_to_the_same_renderable_noise_analysis() {
         let mut first = AnalysisResult::new(1, AnalysisType::Noise, "first").with_waveforms(vec![
             WaveformData::new("inoise", vec![1.0, 10.0], vec![1.0e-9, 2.0e-9], "#fff"),
@@ -535,7 +164,12 @@ mod tests {
         assert!(state.simulation.select_run(0));
         assert!(state.simulation.select_analysis(1));
 
-        let (summary, label) = selected_summary(&state).expect("selected noise summary");
+        let view::ContributorEvidence::Retained { summary, label } = selected_evidence(
+            &state.simulation,
+            bode::selected_noise_analysis_index(&state),
+        ) else {
+            panic!("selected noise summary");
+        };
         assert_eq!(label, "second");
         assert_eq!(summary.band, (2.0, 20.0));
     }

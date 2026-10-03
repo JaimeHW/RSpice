@@ -12,6 +12,7 @@ pub mod eye_diagram;
 pub mod fft;
 pub mod histogram;
 pub mod network_matrix;
+pub mod noise_contrib;
 pub mod nyquist;
 pub mod optimization;
 pub mod polar;

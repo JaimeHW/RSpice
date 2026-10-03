@@ -18,9 +18,9 @@ pub use rspice_results::dc_sweep::{DcCurveSelection, DcSweepFamily};
 pub use rspice_results::dc_sweep::{DcSweepDirection, DcSweepQuantity};
 mod cross_probe;
 mod result_digest;
+pub use rspice_results::noise::NoiseSummary;
 #[cfg(test)]
 pub use rspice_results::noise::{NoiseContributorRow, PeriodicNoiseConversionEvidence};
-pub use rspice_results::noise::{NoiseFigureEvidence, NoiseSummary};
 mod run;
 #[cfg(test)]
 mod run_history;
