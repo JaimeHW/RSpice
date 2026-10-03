@@ -18,25 +18,23 @@ mod viewers;
 use viewers::show as viewers_section;
 
 use rspice_results_ui::studio::{
+    dock::VisualizationDock,
     inspector::OperationState,
     stage::{ExactSourceRow, ResultEntityRow},
 };
 use sections::*;
 use stage::*;
 
-use dock::{active_family_sample_selection, dock_action, dock_body};
+use dock::{active_family_sample_selection, dock_body};
 use rspice_results_ui::studio::{
     COMPACT_BREAKPOINT, TOUCH_DOCK_HEIGHT,
-    chrome::{compact_section_picker, engineering_count, section_navigation, touch_dock},
-    widgets::{
-        concept_banner, empty_note, labeled_combo, numeric_policy, policy_row, section_heading,
-        section_scroll, table_header,
-    },
+    chrome::{compact_section_picker, section_navigation, touch_dock},
+    widgets::empty_note,
 };
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use egui::{Align, Grid, Id, Layout, RichText, ScrollArea, Ui, vec2};
+use egui::{Align, Id, Layout, RichText, Ui, vec2};
 use serde::{Deserialize, Serialize};
 
 use crate::analysis::calculator;
@@ -122,24 +120,6 @@ fn compact_dock_geometry(viewport_width: f32) -> (f32, f32) {
     let window_width = (viewport_width - 18.0).clamp(180.0, 520.0);
     let body_max_width = (window_width - 24.0).max(156.0);
     (window_width, body_max_width)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum VisualizationDock {
-    AddPane,
-    TraceManager,
-    CursorManager,
-    DocumentProperties,
-    ReorderPanes,
-    LinkGroups,
-    PageEditor,
-    Measurement,
-    Annotation,
-    FamilySlice,
-    FamilyEncoding,
-    FamilyFilter,
-    Comparison,
-    Export,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

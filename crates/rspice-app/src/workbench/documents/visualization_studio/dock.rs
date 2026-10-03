@@ -11,27 +11,6 @@ use rspice_results_ui::studio::widgets::dock_intro;
 
 mod traces;
 
-impl VisualizationDock {
-    pub(super) const fn title(self) -> &'static str {
-        match self {
-            Self::AddPane => "Add visualization pane",
-            Self::TraceManager => "Trace and family manager",
-            Self::CursorManager => "Cursor and marker manager",
-            Self::DocumentProperties => "Document properties",
-            Self::ReorderPanes => "Reorder visualization panes",
-            Self::LinkGroups => "Axis and cursor link groups",
-            Self::PageEditor => "Assign pane to report page",
-            Self::Measurement => "Create result measurement",
-            Self::Annotation => "Create result annotation",
-            Self::FamilySlice => "Family slicing and pivot",
-            Self::FamilyEncoding => "Family visual encoding",
-            Self::FamilyFilter => "Advanced family filter",
-            Self::Comparison => "Plan explicit comparison",
-            Self::Export => "Export visualization document",
-        }
-    }
-}
-
 /// The shared coordinate axis, then the baseline and candidate series
 /// resampled onto it.
 type AlignedComparisonSeries = (Vec<f64>, Vec<Vec<f64>>, Vec<Vec<f64>>);
@@ -3375,15 +3354,4 @@ fn export_dock(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
         );
     }
     close
-}
-
-pub(super) fn dock_action(
-    ui: &mut Ui,
-    app: &mut RSpiceApp,
-    label: &'static str,
-    dock: VisualizationDock,
-) {
-    if Button::new(label).show(ui).clicked() {
-        open_dock(app, dock);
-    }
 }

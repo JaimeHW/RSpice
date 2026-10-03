@@ -1,12 +1,125 @@
-//! The section editors behind the studio's left navigation.
-//!
-//! Each section edits one part of the visualization document — document
-//! properties, axes, traces, cursors, markers, measurements — and every edit
-//! is committed through the document's transaction rather than mutating the
-//! displayed state directly, so a rejected edit leaves the studio showing
-//! exactly what it showed before.
+//! Studio section routing, retained-source views, and application effects.
 
 use super::*;
+
+use rspice_results_ui::studio::sections::{
+    self as presentation, AxisSource, FamilyRow, MeasurementsView, SectionAction, SectionHost,
+};
+
+struct Host<'a>(&'a mut RSpiceApp);
+
+impl SectionHost for Host<'_> {
+    fn panes(&self) -> &[VisualizationPane] {
+        &self.0.state.workbench.visualization_studio.panes
+    }
+    fn axes(&self) -> AxisSource<'_> {
+        let Some(analysis) = self.0.state.simulation.active_analysis() else {
+            return AxisSource::MissingAnalysis;
+        };
+        let Some(waveform) = analysis.waveforms.iter().find(|waveform| waveform.visible) else {
+            return AxisSource::NoVisibleWaveform;
+        };
+        AxisSource::Waveform {
+            name: &waveform.name,
+            x_range: waveform.x_range(),
+            y_range: waveform.y_range(),
+            frequency: matches!(
+                analysis.analysis_type,
+                AnalysisType::Ac | AnalysisType::Noise
+            ),
+            complex: waveform.complex.is_some(),
+        }
+    }
+    fn autoscale(&mut self) -> &mut VisualizationAutoscale {
+        &mut self.0.state.workbench.visualization_studio.autoscale
+    }
+    fn autoscale_available(&self, value: VisualizationAutoscale) -> bool {
+        match value {
+            VisualizationAutoscale::RobustVisible => true,
+            VisualizationAutoscale::ExactExtrema => {
+                self.0.state.ui.results.viewer == ResultViewer::Waves
+            }
+            VisualizationAutoscale::SpecificationBounds => {
+                specification_bound_fit(&self.0.state).is_some()
+            }
+        }
+    }
+    fn complex_projection(&mut self) -> &mut ComplexProjection {
+        &mut self
+            .0
+            .state
+            .workbench
+            .visualization_studio
+            .complex_projection
+    }
+    fn fit_block_reason(&self) -> Option<&'static str> {
+        fit_block_reason(&self.0.state)
+    }
+    fn families(&self) -> Vec<FamilyRow> {
+        let app = &self.0;
+        let active_dataset = app.state.simulation.active_run().map(|run| run.dataset_id);
+        app.state
+            .simulation
+            .runs
+            .iter()
+            .map(|run| {
+                let samples = run
+                    .analyses
+                    .iter()
+                    .flat_map(|analysis| &analysis.waveforms)
+                    .map(|waveform| waveform.x.len().min(waveform.y.len()))
+                    .sum::<usize>();
+                FamilyRow {
+                    dataset_id: run.dataset_id,
+                    label: run.label.clone(),
+                    analyses: run.analyses.len(),
+                    samples,
+                    active: Some(run.dataset_id) == active_dataset,
+                    overlaid: app.state.simulation.is_dataset_overlaid(run.dataset_id),
+                }
+            })
+            .collect()
+    }
+    fn measurements(&self) -> MeasurementsView<'_> {
+        let state = &self.0.state;
+        let expressions = active_analysis_expressions(state);
+        let studio = &state.workbench.visualization_studio;
+        MeasurementsView {
+            measurements: &studio.measurements,
+            expressions,
+            cursor_a: state.ui.results.cursors.a.is_some(),
+            cursor_b: state.ui.results.cursors.b.is_some(),
+            linked_cursors: state.ui.results.linked_cursors,
+            markers: &studio.markers,
+            annotations: &studio.annotations,
+        }
+    }
+    fn display_lod(&mut self) -> &mut DisplayLodPolicy {
+        &mut self.0.state.workbench.visualization_studio.display_lod
+    }
+    fn tile_memory_mib(&mut self) -> &mut u32 {
+        &mut self.0.state.workbench.visualization_studio.tile_memory_mib
+    }
+    fn exact_export_available(&self) -> bool {
+        active_studio_exact_export_available(&self.0.state)
+    }
+    fn figure_export_available(&self) -> bool {
+        active_studio_figure_export_available(&self.0.state)
+    }
+    fn request(&mut self, action: SectionAction) {
+        let app = &mut self.0;
+        match action {
+            SectionAction::OpenDock(dock) => open_dock(app, dock),
+            SectionAction::ToggleOverlay(dataset_id) => {
+                app.state.simulation.toggle_dataset_overlay(dataset_id);
+            }
+            SectionAction::Fit => fit_active_view(app),
+            SectionAction::ApplyLod => apply_lod_policy(app),
+            SectionAction::ExportData => app.state.ui.export_csv_requested = true,
+            SectionAction::ExportFigure => app.state.ui.export_figure_requested = true,
+        }
+    }
+}
 
 pub(super) fn show_active_section(ui: &mut Ui, app: &mut RSpiceApp, compact: bool) {
     if compact {
@@ -25,577 +138,16 @@ pub(super) fn show_active_section(ui: &mut Ui, app: &mut RSpiceApp, compact: boo
     }
 
     match app.state.workbench.visualization_studio.section {
-        VisualizationSection::Document => document_section(ui, app),
+        VisualizationSection::Document => presentation::document_section(ui, &mut Host(app)),
         VisualizationSection::Viewers => viewers_section(ui, app, compact),
-        VisualizationSection::Axes => axes_section(ui, app),
-        VisualizationSection::Families => families_section(ui, app),
-        VisualizationSection::Measurements => measurements_section(ui, app),
-        VisualizationSection::LargeData => large_data_section(ui, app),
-        VisualizationSection::ExportReport => export_section(ui, app),
-    }
-}
-
-pub(super) fn document_section(ui: &mut Ui, app: &mut RSpiceApp) {
-    section_heading(ui, VisualizationSection::Document);
-    section_scroll(ui, "visualization.document", |ui| {
-        Grid::new("visualization.document.table")
-            .num_columns(6)
-            .striped(true)
-            .spacing(vec2(18.0, 7.0))
-            .show(ui, |ui| {
-                for label in [
-                    "Pane",
-                    "Viewer",
-                    "Dataset",
-                    "X link",
-                    "Cursor group",
-                    "Page",
-                ] {
-                    table_header(ui, label);
-                }
-                ui.end_row();
-                if app.state.workbench.visualization_studio.panes.is_empty() {
-                    ui.label("—");
-                    ui.label("No panes in this result document");
-                    for _ in 0..4 {
-                        ui.label("—");
-                    }
-                    ui.end_row();
-                }
-                for pane in &app.state.workbench.visualization_studio.panes {
-                    ui.monospace(format!("{:02}", pane.id));
-                    ui.label(pane.viewer.label());
-                    ui.monospace(short_dataset(pane.dataset_id));
-                    ui.monospace(
-                        pane.x_link
-                            .map_or_else(|| "none".to_owned(), |id| format!("x-{id}")),
-                    );
-                    ui.monospace(
-                        pane.cursor_group
-                            .map_or_else(|| "none".to_owned(), |id| format!("cursor-{id}")),
-                    );
-                    ui.label(&pane.page);
-                    ui.end_row();
-                }
-            });
-        ui.add_space(10.0);
-        ui.horizontal_wrapped(|ui| {
-            dock_action(ui, app, "Add pane…", VisualizationDock::AddPane);
-            dock_action(ui, app, "Reorder panes…", VisualizationDock::ReorderPanes);
-            dock_action(ui, app, "Link groups…", VisualizationDock::LinkGroups);
-            dock_action(ui, app, "Page editor…", VisualizationDock::PageEditor);
-        });
-    });
-}
-
-pub(super) fn axes_section(ui: &mut Ui, app: &mut RSpiceApp) {
-    section_heading(ui, VisualizationSection::Axes);
-    section_scroll(ui, "visualization.axes", |ui| {
-        Grid::new("visualization.axes.table")
-            .num_columns(6)
-            .striped(true)
-            .spacing(vec2(18.0, 7.0))
-            .show(ui, |ui| {
-                for label in ["Axis", "Quantity", "Transform", "Range", "Ticks", "Unit"] {
-                    table_header(ui, label);
-                }
-                ui.end_row();
-                let Some(analysis) = app.state.simulation.active_analysis() else {
-                    ui.label("—");
-                    ui.label("No active result dataset");
-                    for _ in 0..4 {
-                        ui.label("—");
-                    }
-                    ui.end_row();
-                    return;
-                };
-                if let Some(waveform) = analysis.waveforms.iter().find(|waveform| waveform.visible)
-                {
-                    let (x0, x1) = waveform.x_range();
-                    let (y0, y1) = waveform.y_range();
-                    let frequency = matches!(
-                        analysis.analysis_type,
-                        crate::state::AnalysisType::Ac | crate::state::AnalysisType::Noise
-                    );
-                    axis_row(
-                        ui,
-                        "X1",
-                        if frequency {
-                            "frequency"
-                        } else {
-                            "time / sweep"
-                        },
-                        if frequency { "log10" } else { "linear" },
-                        (x0, x1),
-                        if frequency { "decade" } else { "engineering" },
-                        if frequency { "Hz" } else { "source" },
-                    );
-                    axis_row(
-                        ui,
-                        "Y1L",
-                        &waveform.name,
-                        "linear",
-                        (y0, y1),
-                        "engineering",
-                        "source",
-                    );
-                    if waveform.complex.is_some() {
-                        axis_row(
-                            ui,
-                            "Y1R",
-                            "complex projection",
-                            "phase",
-                            (-180.0, 180.0),
-                            "45°",
-                            "deg",
-                        );
-                    }
-                } else {
-                    ui.label("—");
-                    ui.label("Active analysis has no visible waveform");
-                    for _ in 0..4 {
-                        ui.label("—");
-                    }
-                    ui.end_row();
-                }
-            });
-        ui.add_space(12.0);
-        ui.horizontal_wrapped(|ui| {
-                labeled_combo(
-                    ui,
-                    "Autoscale",
-                    app.state.workbench.visualization_studio.autoscale.label(),
-                    |ui| {
-                        for value in VisualizationAutoscale::ALL {
-                            let configured = match value {
-                                VisualizationAutoscale::RobustVisible => true,
-                                VisualizationAutoscale::ExactExtrema => {
-                                    app.state.ui.results.viewer == ResultViewer::Waves
-                                }
-                                VisualizationAutoscale::SpecificationBounds => {
-                                    specification_bound_fit(&app.state).is_some()
-                                }
-                            };
-                            ui.add_enabled_ui(configured, |ui| {
-                                ui.selectable_value(
-                                    &mut app.state.workbench.visualization_studio.autoscale,
-                                    value,
-                                    value.label(),
-                                );
-                            })
-                            .response
-                            .on_disabled_hover_text(
-                                "This fit policy is unavailable for the active renderer or requires a quantity-mapped axis limit.",
-                            );
-                        }
-                    },
-                );
-                labeled_combo(
-                    ui,
-                    "Complex projection",
-                    app.state
-                        .workbench
-                        .visualization_studio
-                        .complex_projection
-                        .label(),
-                    |ui| {
-                        for value in ComplexProjection::ALL {
-                            ui.selectable_value(
-                                &mut app.state.workbench.visualization_studio.complex_projection,
-                                value,
-                                value.label(),
-                            );
-                        }
-                    },
-                );
-                let fit_blocker = fit_block_reason(&app.state);
-                let fit = Button::new("Fit active view")
-                    .enabled(fit_blocker.is_none())
-                    .show(ui);
-                let fit = if let Some(reason) = fit_blocker {
-                    fit.on_disabled_hover_text(reason)
-                } else {
-                    fit
-                };
-                if fit.clicked() {
-                    fit_active_view(app);
-                }
-            });
-    });
-}
-
-pub(super) fn axis_row(
-    ui: &mut Ui,
-    axis: &str,
-    quantity: &str,
-    transform: &str,
-    range: (f64, f64),
-    ticks: &str,
-    unit: &str,
-) {
-    ui.monospace(axis);
-    ui.label(quantity);
-    ui.monospace(transform);
-    ui.monospace(format!("{:.6e}…{:.6e}", range.0, range.1));
-    ui.label(ticks);
-    ui.monospace(unit);
-    ui.end_row();
-}
-
-pub(super) fn families_section(ui: &mut Ui, app: &mut RSpiceApp) {
-    section_heading(ui, VisualizationSection::Families);
-    let active_dataset = app.state.simulation.active_run().map(|run| run.dataset_id);
-    let rows: Vec<_> = app
-        .state
-        .simulation
-        .runs
-        .iter()
-        .map(|run| {
-            let samples = run
-                .analyses
-                .iter()
-                .flat_map(|analysis| &analysis.waveforms)
-                .map(|waveform| waveform.x.len().min(waveform.y.len()))
-                .sum::<usize>();
-            (
-                run.dataset_id,
-                run.label.clone(),
-                run.analyses.len(),
-                samples,
-                Some(run.dataset_id) == active_dataset,
-                app.state.simulation.is_dataset_overlaid(run.dataset_id),
-            )
-        })
-        .collect();
-    section_scroll(ui, "visualization.families", |ui| {
-        Grid::new("visualization.families.table")
-            .num_columns(6)
-            .striped(true)
-            .spacing(vec2(18.0, 7.0))
-            .show(ui, |ui| {
-                for label in ["Dataset", "Run", "Analyses", "Samples", "Role", "Display"] {
-                    table_header(ui, label);
-                }
-                ui.end_row();
-                if rows.is_empty() {
-                    ui.label("—");
-                    ui.label("No retained datasets");
-                    for _ in 0..4 {
-                        ui.label("—");
-                    }
-                    ui.end_row();
-                }
-                let mut overlay_change = None;
-                for (dataset_id, label, analyses, samples, active, overlaid) in &rows {
-                    ui.monospace(short_dataset(*dataset_id));
-                    ui.label(label);
-                    ui.monospace(analyses.to_string());
-                    ui.monospace(engineering_count(*samples));
-                    ui.label(if *active {
-                        "active family"
-                    } else {
-                        "retained family"
-                    });
-                    if *active {
-                        ui.label("always visible");
-                    } else if ui.checkbox(&mut overlaid.clone(), "Overlay").changed() {
-                        overlay_change = Some(*dataset_id);
-                    }
-                    ui.end_row();
-                }
-                if let Some(dataset_id) = overlay_change {
-                    app.state.simulation.toggle_dataset_overlay(dataset_id);
-                }
-            });
-        ui.add_space(10.0);
-        ui.horizontal_wrapped(|ui| {
-            dock_action(ui, app, "Slice and pivot…", VisualizationDock::FamilySlice);
-            dock_action(
-                ui,
-                app,
-                "Visual encoding…",
-                VisualizationDock::FamilyEncoding,
-            );
-            dock_action(ui, app, "Advanced filter…", VisualizationDock::FamilyFilter);
-        });
-        concept_banner(
-            ui,
-            "Dataset overlays use stable dataset identities. Missing analyses remain absent; the viewer never invents family points or generated trace indices.",
-        );
-    });
-}
-
-pub(super) fn measurements_section(ui: &mut Ui, app: &mut RSpiceApp) {
-    section_heading(ui, VisualizationSection::Measurements);
-    section_scroll(ui, "visualization.measurements", |ui| {
-        Grid::new("visualization.measurements.table")
-            .num_columns(6)
-            .striped(true)
-            .spacing(vec2(18.0, 7.0))
-            .show(ui, |ui| {
-                for label in ["Item", "Type", "Definition", "Unit", "Consumers", "Status"] {
-                    table_header(ui, label);
-                }
-                ui.end_row();
-                let expressions = active_analysis_expressions(&app.state);
-                for measurement in &app.state.workbench.visualization_studio.measurements {
-                    measurement_row(
-                        ui,
-                        &format!("M{}", measurement.id),
-                        "scalar measurement",
-                        &measurement.expression,
-                        "source-derived",
-                        &short_dataset(measurement.dataset_id),
-                        &format!("{:.9e}", measurement.value),
-                    );
-                }
-                for (index, expression) in expressions.iter().enumerate() {
-                    measurement_row(
-                        ui,
-                        &format!("expr-{}", index + 1),
-                        "expression",
-                        &expression.text,
-                        "source-derived",
-                        "active pane",
-                        if expression.visible {
-                            "visible"
-                        } else {
-                            "hidden"
-                        },
-                    );
-                }
-                if app.state.ui.results.cursors.a.is_some()
-                    || app.state.ui.results.cursors.b.is_some()
-                {
-                    measurement_row(
-                        ui,
-                        "A / B",
-                        "linked cursors",
-                        "exact source coordinates",
-                        "source",
-                        "compatible panes",
-                        if app.state.ui.results.linked_cursors {
-                            "linked"
-                        } else {
-                            "pane local"
-                        },
-                    );
-                }
-                for marker in &app.state.workbench.visualization_studio.markers {
-                    measurement_row(
-                        ui,
-                        &marker.label,
-                        "sample marker",
-                        &format!(
-                            "{}[{}] @ {:.9e}",
-                            marker.waveform_name, marker.sample_index, marker.x
-                        ),
-                        "source",
-                        "active pane",
-                        "exact",
-                    );
-                }
-                for annotation in &app.state.workbench.visualization_studio.annotations {
-                    measurement_row(
-                        ui,
-                        &format!("NOTE-{}", annotation.id),
-                        "review annotation",
-                        &annotation.text,
-                        "—",
-                        "result document",
-                        "open",
-                    );
-                }
-                if app
-                    .state
-                    .workbench
-                    .visualization_studio
-                    .measurements
-                    .is_empty()
-                    && expressions.is_empty()
-                    && app.state.ui.results.cursors.a.is_none()
-                    && app.state.workbench.visualization_studio.markers.is_empty()
-                    && app
-                        .state
-                        .workbench
-                        .visualization_studio
-                        .annotations
-                        .is_empty()
-                {
-                    ui.label("—");
-                    ui.label("No derived or review entities");
-                    for _ in 0..4 {
-                        ui.label("—");
-                    }
-                    ui.end_row();
-                }
-            });
-        ui.add_space(10.0);
-        ui.horizontal_wrapped(|ui| {
-            dock_action(ui, app, "New measurement…", VisualizationDock::Measurement);
-            dock_action(ui, app, "Cursor manager…", VisualizationDock::CursorManager);
-            dock_action(ui, app, "New annotation…", VisualizationDock::Annotation);
-        });
-    });
-}
-
-pub(super) fn measurement_row(
-    ui: &mut Ui,
-    item: &str,
-    kind: &str,
-    definition: &str,
-    unit: &str,
-    consumers: &str,
-    status: &str,
-) {
-    ui.monospace(item);
-    ui.label(kind);
-    ui.monospace(definition);
-    ui.monospace(unit);
-    ui.label(consumers);
-    ui.label(status);
-    ui.end_row();
-}
-
-pub(super) fn large_data_section(ui: &mut Ui, app: &mut RSpiceApp) {
-    section_heading(ui, VisualizationSection::LargeData);
-    section_scroll(ui, "visualization.large-data", |ui| {
-        let previous = app.state.workbench.visualization_studio.display_lod;
-        ui.horizontal_wrapped(|ui| {
-            labeled_combo(
-                ui,
-                "Display LOD",
-                app.state.workbench.visualization_studio.display_lod.label(),
-                |ui| {
-                    for value in DisplayLodPolicy::ALL {
-                        ui.selectable_value(
-                            &mut app.state.workbench.visualization_studio.display_lod,
-                            value,
-                            value.label(),
-                        );
-                    }
-                },
-            );
-            numeric_policy(
-                ui,
-                "Tile memory",
-                &mut app.state.workbench.visualization_studio.tile_memory_mib,
-                64..=16_384,
-                "MiB",
-            );
-        });
-        // A property row is a full-width label/value row with fixed columns,
-        // so the cache policy is stated under the two controls rather than
-        // claiming whatever is left of their wrapped row.
-        property_row(ui, "Disk cache", "Not configured · no filesystem writes");
-        ui.add_space(10.0);
-        Grid::new("visualization.large-data.policies")
-            .num_columns(2)
-            .striped(true)
-            .spacing(vec2(18.0, 7.0))
-            .show(ui, |ui| {
-                policy_row(
-                    ui,
-                    "Exact cursor query",
-                    "Read original f64/complex source samples on demand",
-                );
-                policy_row(
-                    ui,
-                    "Remote streaming",
-                    "Local immutable dataset registry; remote sources fail closed",
-                );
-                policy_row(
-                    ui,
-                    "Backpressure",
-                    "Preserve solver output · delay presentation cache",
-                );
-                policy_row(
-                    ui,
-                    "Source precision",
-                    "Measurements and exports bypass display LOD",
-                );
-            });
-        if previous != app.state.workbench.visualization_studio.display_lod {
-            apply_lod_policy(app);
+        VisualizationSection::Axes => presentation::axes_section(ui, &mut Host(app)),
+        VisualizationSection::Families => presentation::families_section(ui, &mut Host(app)),
+        VisualizationSection::Measurements => {
+            presentation::measurements_section(ui, &mut Host(app))
         }
-        concept_banner(
-            ui,
-            "Decimation and level-of-detail affect rendering only. Measurements, exports, and cursor exact-value requests operate on the immutable source dataset.",
-        );
-    });
-}
-
-pub(super) fn export_section(ui: &mut Ui, app: &mut RSpiceApp) {
-    section_heading(ui, VisualizationSection::ExportReport);
-    section_scroll(ui, "visualization.export", |ui| {
-        Grid::new("visualization.export.table")
-            .num_columns(5)
-            .striped(true)
-            .spacing(vec2(18.0, 7.0))
-            .show(ui, |ui| {
-                for label in ["Output", "Format", "Precision", "Layout", "Provenance"] {
-                    table_header(ui, label);
-                }
-                ui.end_row();
-                export_row(
-                    ui,
-                    "Active engineering viewer",
-                    "PNG",
-                    "rendered pixels",
-                    "active viewport",
-                    "dataset + revision in document",
-                );
-                export_row(
-                    ui,
-                    "Engineering dataset",
-                    "CSV",
-                    "full stored f64",
-                    "shared-axis table",
-                    "source analysis identity",
-                );
-            });
-        ui.add_space(10.0);
-        let exact_export_available = active_studio_exact_export_available(&app.state);
-        let figure_export_available = active_studio_figure_export_available(&app.state);
-        ui.horizontal_wrapped(|ui| {
-            dock_action(ui, app, "Edit report pages…", VisualizationDock::PageEditor);
-            if Button::new("Export exact data…")
-                .accent()
-                .enabled(exact_export_available)
-                .show(ui)
-                .clicked()
-            {
-                app.state.ui.export_csv_requested = true;
-            }
-            if Button::new("Export viewer figure…")
-                .enabled(figure_export_available)
-                .show(ui)
-                .clicked()
-            {
-                app.state.ui.export_figure_requested = true;
-            }
-        });
-        concept_banner(
-            ui,
-            "Every enabled export action is backed by a real writer. Formats without an installed writer are not offered and no placeholder artifact is created.",
-        );
-    });
-}
-
-pub(super) fn export_row(
-    ui: &mut Ui,
-    output: &str,
-    format: &str,
-    precision: &str,
-    layout: &str,
-    provenance: &str,
-) {
-    ui.label(output);
-    ui.monospace(format);
-    ui.label(precision);
-    ui.label(layout);
-    ui.label(provenance);
-    ui.end_row();
+        VisualizationSection::LargeData => presentation::large_data_section(ui, &mut Host(app)),
+        VisualizationSection::ExportReport => presentation::export_section(ui, &mut Host(app)),
+    }
 }
 
 /// Whether the toolbar's `+` and `−` can act on the sheet in the stage.

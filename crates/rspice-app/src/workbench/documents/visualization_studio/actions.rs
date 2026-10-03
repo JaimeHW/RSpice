@@ -124,28 +124,14 @@ pub(super) fn recover_source_integrity_scan(app: &mut RSpiceApp) -> Result<(), S
 }
 
 pub(super) fn actions_sheet(ui: &mut Ui, app: &mut RSpiceApp) {
-    section_heading(ui, app.state.workbench.visualization_studio.section);
-    ScrollArea::vertical()
-        .id_salt("visualization.actions-sheet")
-        .show(ui, |ui| {
-            let actions = [
-                ("Add visualization pane", VisualizationDock::AddPane),
-                ("Trace manager", VisualizationDock::TraceManager),
-                ("Cursor manager", VisualizationDock::CursorManager),
-                ("Document properties", VisualizationDock::DocumentProperties),
-                ("Export document", VisualizationDock::Export),
-            ];
-            for (label, dock) in actions {
-                if ui
-                    .add_sized([ui.available_width(), 44.0], egui::Button::new(label))
-                    .clicked()
-                {
-                    open_dock(app, dock);
-                    app.state.workbench.visualization_studio.touch_pane =
-                        VisualizationTouchPane::Stage;
-                }
-            }
-        });
+    rspice_results_ui::studio::dock::actions_sheet(
+        ui,
+        app.state.workbench.visualization_studio.section,
+        |dock| {
+            open_dock(app, dock);
+            app.state.workbench.visualization_studio.touch_pane = VisualizationTouchPane::Stage;
+        },
+    );
 }
 
 pub(super) fn add_cursor_at_midpoint(app: &mut RSpiceApp) {
