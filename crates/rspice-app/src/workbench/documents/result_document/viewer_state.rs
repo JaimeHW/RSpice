@@ -58,6 +58,7 @@ impl ResultsState {
 
     /// Arm or disarm the marker tool. Disarming keeps the markers — they are
     /// document content, not a transient readout like the A/B pair.
+    #[cfg(test)]
     pub fn toggle_marker_tool(&mut self) {
         self.marker_tool = MarkerTool(!self.marker_tool.is_armed());
     }
@@ -162,11 +163,6 @@ impl ResultsState {
         self.document_markers
             .iter()
             .find(|marker| marker.retained_id == marker_id)
-    }
-
-    /// How many markers the reader can currently act on, across both stores.
-    pub(crate) fn context_marker_count(&self) -> usize {
-        self.markers.len() + self.document_markers.len()
     }
 
     /// Markers on one strip, in placement order, from both stores.

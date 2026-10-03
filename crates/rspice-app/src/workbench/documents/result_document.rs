@@ -5,6 +5,7 @@
 //! (waveform strips, Bode, FFT, eye, histogram, and the
 //! Nyquist/Smith/pole-zero diagnostics), and a content-fit readout strip.
 
+mod bars;
 mod bode;
 mod box_violin;
 mod create_document;
@@ -239,6 +240,7 @@ pub(crate) use waves::{
 
 pub(crate) use waves::toggle_visibility;
 
+use bars::show as show_sheet_bar;
 use retained_memo::RetainedMemo;
 use std::collections::{HashMap, HashSet};
 
@@ -259,18 +261,16 @@ use crate::simulation::SimulationController;
 use crate::simulation::controller::DerivedViewerLoadState;
 use crate::state::{AnalysisResult, SimulationRun, WaveformData};
 use crate::ui::plot::{CursorPair, DecimationCache};
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{chip, docbar_at_height};
+use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::ActiveViewer;
-use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_results::family_projection::SourceSampleSelection;
+use rspice_results_ui::chrome;
+use rspice_results_ui::chrome::bars::viewer_has_sheet_bar;
+#[cfg(test)]
+use rspice_results_ui::chrome::bars::viewer_has_structured_strip;
 use rspice_results_ui::chrome::instrument::ResultPlotTool;
-use rspice_results_ui::chrome::{
-    ResultBarMetrics, viewer_picker, viewer_picker_separator, viewer_tab, viewer_tab_scroller,
-};
 use rspice_results_ui::derived::DerivedSeries;
 use rspice_results_ui::eye_diagram::EyeTimebase;
 use rspice_results_ui::eye_diagram::view::EyeTexture;
@@ -2676,20 +2676,6 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
 /// Plot and custom-canvas sheets use the 31 px instrument/purpose bar. OP,
 /// Specs, and Table use the mockup's 40 px structured-document strip. XF and
 /// Manifest own no controls there and therefore collapse the row completely.
-const fn viewer_has_sheet_bar(viewer: ResultViewer) -> bool {
-    !matches!(
-        viewer,
-        ResultViewer::TransferFunction | ResultViewer::Manifest
-    )
-}
-
-const fn viewer_has_structured_strip(viewer: ResultViewer) -> bool {
-    matches!(
-        viewer,
-        ResultViewer::Op | ResultViewer::Specs | ResultViewer::Table
-    )
-}
-
 fn result_stage_bar_visible(state: &AppState) -> bool {
     (state.ui.results.viewer == ResultViewer::Specs && state.ui.results.spec_drafts.is_some())
         || (state
@@ -3057,11 +3043,12 @@ const fn viewer_requires_retained_results(viewer: ResultViewer) -> bool {
 /// controls, result-document creation and properties remain owned by the full
 /// Results workspace; every compatible existing viewer stays reachable here.
 fn show_compact_docbar(ui: &mut Ui, state: &mut AppState) {
-    docbar_at_height(ui, ResultBarMetrics::of(ui).viewer_tabs, |ui| {
-        viewer_tab_scroller(ui, "rspice.results.split.viewer-tabs", |ui| {
-            viewer_tabs(ui, state);
-        });
-    });
+    let available =
+        ResultViewer::all().filter(|&viewer| viewer_availability(state, viewer).available);
+    if let Some(viewer) = chrome::bars::compact_document_bar(ui, state.ui.results.viewer, available)
+    {
+        state.ui.results.viewer = viewer;
+    }
 }
 
 fn show_docbar(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -3073,123 +3060,19 @@ pub(super) fn show_persistent_docbar(ui: &mut Ui, app: &mut RSpiceApp, family_la
 }
 
 fn show_docbar_for_family(ui: &mut Ui, app: &mut RSpiceApp, family_label: Option<&str>) {
-    let mut create_document = false;
-    let mut open_properties = false;
-    docbar_at_height(ui, ResultBarMetrics::of(ui).viewer_tabs, |ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            open_properties =
-                viewer_picker(ui, WorkbenchIcon::Sliders, "Properties…", "Plot properties");
-            create_document = viewer_picker(
-                ui,
-                WorkbenchIcon::Add,
-                "Create result document…",
-                "Create a dataset-bound result document",
-            );
-            viewer_picker_separator(ui);
-
-            let tabs_size = ui.available_size();
-            ui.allocate_ui_with_layout(
-                tabs_size,
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    viewer_tab_scroller(ui, "rspice.results.viewer-tabs", |ui| {
-                        viewer_tabs_filtered(ui, &mut app.state, |viewer| {
-                            family_label.is_none_or(|family| family_allows_viewer(family, viewer))
-                        });
-                    });
-                },
-            );
-        });
+    let available = ResultViewer::all().filter(|&viewer| {
+        family_label.is_none_or(|family| family_allows_viewer(family, viewer))
+            && viewer_availability(&app.state, viewer).available
     });
-
-    if create_document {
+    let actions = chrome::bars::document_bar(ui, app.state.ui.results.viewer, available);
+    if let Some(viewer) = actions.viewer {
+        app.state.ui.results.viewer = viewer;
+    }
+    if actions.create_document {
         create_document::open(app);
-    } else if open_properties {
+    } else if actions.open_properties {
         crate::workbench::documents::visualization_studio::open(app);
         crate::workbench::documents::visualization_studio::open_document_properties(app);
-    }
-}
-
-fn show_sheet_bar(ui: &mut Ui, state: &mut AppState) {
-    let t = Tokens::get(ui.ctx());
-    let viewer = state.ui.results.viewer;
-    let structured = viewer_has_structured_strip(viewer);
-    let metrics = ResultBarMetrics::resolve(&t);
-    let height = if structured {
-        metrics.structured_strip
-    } else {
-        metrics.sheet_bar
-    };
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), height),
-        egui::Sense::hover(),
-    );
-    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom() - 0.5,
-        egui::Stroke::new(1.0, t.color.border),
-    );
-    let accessible_label = if structured {
-        "Structured result controls"
-    } else if matches!(
-        viewer,
-        ResultViewer::Waves
-            | ResultViewer::DcSweep
-            | ResultViewer::Bode
-            | ResultViewer::NoiseContrib
-    ) {
-        "Plot instrument controls"
-    } else {
-        "Result sheet controls"
-    };
-    response
-        .widget_info(|| WidgetInfo::labeled(WidgetType::Other, ui.is_enabled(), accessible_label));
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::Toolbar);
-        node.set_label(accessible_label);
-    });
-
-    let content = rect.shrink2(egui::vec2(if structured { 12.0 } else { 8.0 }, 0.0));
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(content)
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-    );
-    child.spacing_mut().item_spacing.x = 4.0;
-    if structured {
-        show_structured_result_strip(&mut child, state);
-    } else if matches!(
-        viewer,
-        ResultViewer::Waves
-            | ResultViewer::DcSweep
-            | ResultViewer::Bode
-            | ResultViewer::NoiseContrib
-    ) {
-        instrument::show(&mut child, state);
-    } else {
-        child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // The evidence sheets exist to be recorded, so they carry the same
-            // export affordance the other tabular sheets do. The plotted
-            // sheets keep theirs on the instrument strip instead.
-            inline_result_actions(ui, state);
-            let remaining = ui.available_size();
-            ui.allocate_ui_with_layout(
-                remaining,
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    if sheet_domain_controls(ui, state) {
-                        return;
-                    }
-                    ui.label(
-                        egui::RichText::new(sheet_purpose(state))
-                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_dim),
-                    );
-                },
-            );
-        });
     }
 }
 
@@ -3211,42 +3094,6 @@ fn sheet_domain_controls(ui: &mut Ui, state: &mut AppState) -> bool {
         ResultViewer::Events => events::domain_bar(ui, &mut context),
         _ => false,
     }
-}
-
-fn show_structured_result_strip(ui: &mut Ui, state: &mut AppState) {
-    let t = Tokens::get(ui.ctx());
-    let title = match state.ui.results.viewer {
-        ResultViewer::Op => "Operating point · DC solution",
-        ResultViewer::Specs => "Specifications",
-        ResultViewer::Table => "Exact retained samples",
-        _ => return,
-    };
-
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        export_menu(ui, state);
-        let remaining = ui.available_size();
-        ui.allocate_ui_with_layout(
-            remaining,
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                egui::ScrollArea::horizontal()
-                    .id_salt(("rspice.results.structured-strip", state.ui.results.viewer))
-                    .auto_shrink([false, true])
-                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 10.0;
-                            ui.label(
-                                egui::RichText::new(title)
-                                    .font(theme::sans(tokens::FS_1, FontWeight::Medium))
-                                    .color(t.color.text),
-                            );
-                            result_viewer_actions(ui, state);
-                        });
-                    });
-            },
-        );
-    });
 }
 
 fn hidden_wave_strip_count(state: &AppState) -> usize {
@@ -3321,170 +3168,11 @@ fn sheet_purpose(state: &AppState) -> String {
     }
 }
 
-fn export_menu(ui: &mut Ui, state: &mut AppState) {
-    let requests = rspice_results_ui::chrome::export_menu(ui);
-    state.ui.export_csv_requested |= requests.csv;
-    state.ui.export_figure_requested |= requests.figure;
-}
-
-fn inline_result_actions(ui: &mut Ui, state: &mut AppState) {
-    export_menu(ui, state);
-    result_viewer_actions(ui, state);
-}
-
-fn result_viewer_actions(ui: &mut Ui, state: &mut AppState) {
-    match state.ui.results.viewer {
-        ResultViewer::Waves | ResultViewer::DcSweep => {
-            let linked_shortcut = state.ui.preferences.shortcuts().resolved_label(
-                crate::workbench::commands::vocabulary::Command::ToggleLinkedCursors,
-                crate::workbench::app_state::runtime_command_platform(ui.ctx()),
-                ui.ctx().os(),
-            );
-            let results = &mut state.ui.results;
-            // A│B is a tool, not a clear button: it arms plot clicks and
-            // owns whether the readout strip is on screen at all.
-            let armed = results.cursor_tool.is_armed();
-            let response = chip(ui, "A│B", armed).on_hover_text(if armed {
-                "Cursor tool armed — click a plot to place A, again for B; Esc clears"
-            } else {
-                "Cursor tool off — plots ignore cursor clicks"
-            });
-            response.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, armed, "A│B"));
-            if response.clicked() {
-                results.toggle_cursor_tool();
-            }
-            // Markers are annotation, not readout: the tool arms deliberately
-            // and the markers it placed outlive disarming it.
-            let marking = results.marker_tool.is_armed();
-            let marker_count = results.context_marker_count();
-            let marker_label = if marker_count == 0 {
-                "MARK".to_owned()
-            } else {
-                format!("MARK {marker_count}")
-            };
-            let response = chip(ui, &marker_label, marking).on_hover_text(if marking {
-                "Marker tool armed — click a plot to mark the nearest trace"
-            } else {
-                "Marker tool off — click to arm; existing markers stay on their plots"
-            });
-            response.widget_info(|| {
-                WidgetInfo::selected(WidgetType::Button, true, marking, marker_label.as_str())
-            });
-            if response.clicked() {
-                results.toggle_marker_tool();
-            }
-            let linked_label = "Linked A/B cursors";
-            let linked = results.linked_cursors;
-            let linked_tooltip = if linked {
-                "A/B positions are shared across plots with matching analysis and X-axis domains"
-            } else {
-                "A/B positions are scoped to the active plot"
-            };
-            let linked_tooltip = if linked_shortcut.is_empty() {
-                linked_tooltip.to_owned()
-            } else {
-                format!("{linked_tooltip} · {linked_shortcut}")
-            };
-            let response = chip(ui, linked_label, linked).on_hover_text(linked_tooltip);
-            response.widget_info(|| {
-                WidgetInfo::selected(WidgetType::Button, true, linked, linked_label)
-            });
-            if !linked_shortcut.is_empty() {
-                ui.ctx().accesskit_node_builder(response.id, |node| {
-                    node.set_keyboard_shortcut(linked_shortcut.as_str());
-                });
-            }
-            if response.clicked() {
-                results.toggle_linked_cursors();
-            }
-        }
-        ResultViewer::Fft => {
-            let label = state
-                .analysis
-                .fft_state
-                .data
-                .as_ref()
-                .map(|d| format!("{} · {}", d.window.display_name(), d.fft_size));
-            if let Some(label) = label {
-                ui.label(
-                    egui::RichText::new(label)
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(Tokens::get(ui.ctx()).color.text_faint),
-                );
-            }
-        }
-        ResultViewer::Eye => eye::inline_actions(ui, state),
-        ResultViewer::Op => {
-            let filter = &mut state.ui.results.op_filter;
-            if !filter.is_empty() && chip(ui, "clear", true).clicked() {
-                filter.clear();
-            }
-            ui.add(
-                egui::TextEdit::singleline(filter)
-                    .desired_width(150.0)
-                    .font(theme::mono(tokens::FS_1, FontWeight::Regular))
-                    .hint_text("filter devices…"),
-            );
-        }
-        ResultViewer::Specs => {
-            if state.ui.results.spec_drafts.is_some() {
-                if ui.button("Discard").clicked() {
-                    state.ui.results.spec_drafts = None;
-                    state.workbench.specification_editor_route_pending = false;
-                    // With no retained dataset there is no read-only Specs
-                    // evidence sheet to fall back to. Move to the ordinary
-                    // empty Results landing so the destination boundary does
-                    // not immediately reopen the editor the user dismissed.
-                    let selected_plan_dataset = state
-                        .sim_setup
-                        .stable_analysis_plan()
-                        .ok()
-                        .and_then(|plan| state.simulation.active_run_for_plan(plan.id()));
-                    if selected_plan_dataset.is_none() {
-                        state.ui.results.viewer = ResultViewer::Waves;
-                    }
-                }
-                if ui.button("Apply").clicked() && !specs::apply_drafts(state) {
-                    state.push_sim_message(crate::diagnostics::ConsoleMessage::warning(
-                        "Specs not applied — fix the invalid bound first",
-                    ));
-                }
-            } else if ui.button("Edit specs…").clicked() {
-                specs::open_editor(state);
-            }
-        }
-        ResultViewer::Table => table::inline_actions(ui, state),
-        _ => {}
-    }
-}
-
+#[cfg(test)]
 fn viewer_tabs(ui: &mut Ui, state: &mut AppState) {
-    viewer_tabs_filtered(ui, state, |_| true);
-}
-
-fn viewer_tabs_filtered(
-    ui: &mut Ui,
-    state: &mut AppState,
-    mut include: impl FnMut(ResultViewer) -> bool,
-) {
-    ui.spacing_mut().item_spacing.x = 0.0;
-
-    let current = state.ui.results.viewer;
-    let mut clicked: Option<ResultViewer> = None;
-
-    // The strip lists only the sheets this dataset can feed. With 22 viewers
-    // and a typical run feeding a handful, a full row of disabled tabs would
-    // bury the ones that work; the Visualization Studio catalog is where every
-    // viewer and its requirements are published.
-    for viewer in ResultViewer::all() {
-        if !include(viewer) || !viewer_availability(state, viewer).available {
-            continue;
-        }
-        if viewer_tab(ui, viewer, current == viewer) {
-            clicked = Some(viewer);
-        }
-    }
-    if let Some(viewer) = clicked {
+    let available =
+        ResultViewer::all().filter(|&viewer| viewer_availability(state, viewer).available);
+    if let Some(viewer) = chrome::bars::viewer_tabs(ui, state.ui.results.viewer, available) {
         state.ui.results.viewer = viewer;
     }
 }
@@ -3800,13 +3488,6 @@ fn specialized_availability(state: &AppState, viewer: ActiveViewer) -> ViewerAva
     }
 }
 
-/// One viewer tab, per the mockup: full-strip hit target, compact horizontal
-/// padding, hover fill, and a 2 px bottom rule when active.
-///
-/// Every tab drawn is a tab that can be opened. The strip lists only the
-/// sheets the active dataset can feed (see [`viewer_tabs_filtered`]), so there
-/// is no disabled state to paint here — the Visualization Studio catalog is
-/// where the full set of viewers and their requirements are published.
 /// Gate FFT/eye rendering on the controller's derived-data loader. Returns
 /// `true` when the viewer can render.
 fn ensure_derived(ui: &mut Ui, app: &mut RSpiceApp, viewer: ActiveViewer) -> bool {

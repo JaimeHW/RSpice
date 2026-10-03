@@ -1,5 +1,6 @@
 //! Results tab strips and instrument controls over caller-owned selection.
 
+pub mod bars;
 pub mod instrument;
 
 use egui::{Ui, WidgetInfo, WidgetType};
@@ -343,6 +344,13 @@ pub fn instrument_separator(ui: &mut Ui) {
     );
 }
 
+/// One viewer tab, per the mockup: full-strip hit target, compact horizontal
+/// padding, hover fill, and a 2 px bottom rule when active.
+///
+/// Every tab drawn is a tab that can be opened. The strip lists only the
+/// sheets the active dataset can feed (see [`bars::viewer_tabs`]), so there
+/// is no disabled state to paint here — the Visualization Studio catalog is
+/// where the full set of viewers and their requirements are published.
 pub fn viewer_tab(ui: &mut Ui, viewer: ResultViewer, active: bool) -> bool {
     use rspice_ui_kit::theme::mix;
 
