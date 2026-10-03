@@ -8,6 +8,7 @@
 pub mod bode;
 pub mod box_violin;
 pub mod derived;
+pub mod events;
 pub mod eye_diagram;
 pub mod fft;
 pub mod harmonic_balance;

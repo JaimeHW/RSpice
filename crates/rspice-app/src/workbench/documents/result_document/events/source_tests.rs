@@ -67,7 +67,7 @@ fn panel_text(state: &mut AppState) -> String {
 fn event_source_unattributed_codes_do_not_claim_native_drive_strength() {
     let mut state = state_with(
         AnalysisResult::new(1, AnalysisType::Transient, "events")
-            .with_result_payload(super::tests::committed_events(&[(0.0, 1)])),
+            .with_result_payload(viewer::test_support::committed_events(&[(0.0, 1)])),
     );
     pick(&mut state, EventSelectionSource::ExactDigital, "clk", 0);
     let text = panel_text(&mut state);
@@ -82,7 +82,7 @@ fn event_source_import_readout_survives_restoration_and_source_changes() {
     use crate::state::{ResultImportFormat, ResultImportSource};
     let mut state = state_with(
         AnalysisResult::new(1, AnalysisType::Transient, "events")
-            .with_result_payload(super::tests::committed_events(&[(0.0, 1)])),
+            .with_result_payload(viewer::test_support::committed_events(&[(0.0, 1)])),
     );
     pick(&mut state, EventSelectionSource::ExactDigital, "clk", 0);
     for format in [
@@ -150,7 +150,7 @@ fn event_source_native_receipt_keeps_the_retained_drive_strength() {
     let run = state.simulation.start_run();
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "events")
-            .with_result_payload(super::tests::committed_events(&[(0.0, 4)]))
+            .with_result_payload(viewer::test_support::committed_events(&[(0.0, 4)]))
             .with_provenance(
                 AnalysisResultProvenance::new(id, revision, digest, Vec::new()).unwrap(),
             ),
@@ -209,7 +209,9 @@ fn pick(
 
 #[test]
 fn event_source_restoration_refreshes_bus_order_and_raw_codes() {
-    let mut state = state_with(super::bus_tests::two_bit_counter());
+    let mut state = state_with(AnalysisResult {
+        data: viewer::test_support::two_bit_counter(),
+    });
     paint(&mut state, false);
     assert_eq!(
         state
@@ -247,7 +249,10 @@ fn scalar_state(source: EventSelectionSource) -> (AppState, &'static str) {
     let mut analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
     let name = match source {
         EventSelectionSource::ExactDigital => {
-            analysis.result_payload = Some(super::tests::committed_events(&[(0.0, 0), (1.0, 1)]));
+            analysis.result_payload = Some(viewer::test_support::committed_events(&[
+                (0.0, 0),
+                (1.0, 1),
+            ]));
             "clk"
         }
         EventSelectionSource::ExactReal => {
@@ -376,7 +381,9 @@ fn event_source_inspector_rejects_invalid_evidence_and_allows_repair() {
 
 #[test]
 fn event_source_bus_selection_detects_changed_members_before_a_frame() {
-    let mut state = state_with(super::bus_tests::two_bit_counter());
+    let mut state = state_with(AnalysisResult {
+        data: viewer::test_support::two_bit_counter(),
+    });
     let selection = pick(&mut state, EventSelectionSource::Bus, "count", 0);
     let Some(AnalysisResultPayload::TransientEvents { digital_buses, .. }) =
         state.simulation.runs[0].analyses[0].result_payload.as_mut()
@@ -399,7 +406,9 @@ fn event_source_bus_selection_detects_changed_members_before_a_frame() {
 
 #[test]
 fn event_source_appended_history_keeps_selection_and_refreshes_inspector_order() {
-    let mut state = state_with(super::bus_tests::two_bit_counter());
+    let mut state = state_with(AnalysisResult {
+        data: viewer::test_support::two_bit_counter(),
+    });
     let selection = pick(&mut state, EventSelectionSource::Bus, "count", 1);
     let Some(AnalysisResultPayload::TransientEvents { digital_traces, .. }) =
         state.simulation.runs[0].analyses[0].result_payload.as_mut()
@@ -440,9 +449,13 @@ fn event_source_appended_history_keeps_selection_and_refreshes_inspector_order()
 
 #[test]
 fn event_source_navigation_keeps_a_retained_selection() {
-    let mut state = state_with(super::bus_tests::two_bit_counter());
+    let mut state = state_with(AnalysisResult {
+        data: viewer::test_support::two_bit_counter(),
+    });
     let selection = pick(&mut state, EventSelectionSource::Bus, "count", 1);
-    let mut other = super::bus_tests::two_bit_counter();
+    let mut other = AnalysisResult {
+        data: viewer::test_support::two_bit_counter(),
+    };
     other.id = 2;
     state.simulation.runs[0].add_analysis(other);
     assert!(state.simulation.select_analysis(1));
@@ -459,9 +472,11 @@ fn event_source_navigation_keeps_a_retained_selection() {
         Some(&selection)
     );
 
-    let other_run = state_with(super::bus_tests::two_bit_counter())
-        .simulation
-        .runs[0]
+    let other_run = state_with(AnalysisResult {
+        data: viewer::test_support::two_bit_counter(),
+    })
+    .simulation
+    .runs[0]
         .clone();
     state.simulation.runs.push(other_run);
     assert!(state.simulation.select_run(1));
@@ -485,7 +500,8 @@ fn event_source_navigation_keeps_a_retained_selection() {
 
 #[test]
 fn event_source_same_time_selection_survives_trace_reordering() {
-    let mut payload = super::tests::committed_events(&[(0.0, 0), (1.0, 1), (1.0, 0), (1.0, 4)]);
+    let mut payload =
+        viewer::test_support::committed_events(&[(0.0, 0), (1.0, 1), (1.0, 0), (1.0, 4)]);
     let AnalysisResultPayload::TransientEvents { digital_traces, .. } = &mut payload else {
         unreachable!()
     };
@@ -519,7 +535,9 @@ fn event_source_same_time_selection_survives_trace_reordering() {
 #[test]
 fn event_source_bus_selection_detects_strength_and_range_changes() {
     for change_range in [false, true] {
-        let mut state = state_with(super::bus_tests::two_bit_counter());
+        let mut state = state_with(AnalysisResult {
+            data: viewer::test_support::two_bit_counter(),
+        });
         let selection = pick(&mut state, EventSelectionSource::Bus, "count", 1);
         let Some(AnalysisResultPayload::TransientEvents {
             digital_traces,
@@ -571,7 +589,7 @@ fn event_source_large_history_reuses_clones_and_survives_unchanged_restoration()
         .collect::<Vec<_>>();
     let mut state = state_with(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
-            .with_result_payload(super::tests::committed_events(&points)),
+            .with_result_payload(viewer::test_support::committed_events(&points)),
     );
     let selection = pick(
         &mut state,
@@ -608,7 +626,7 @@ fn event_source_large_history_reuses_clones_and_survives_unchanged_restoration()
 
 #[test]
 fn event_source_failed_analysis_is_unavailable_but_live_partial_can_be_inspected() {
-    let payload = super::tests::committed_events(&[(0.0, 0), (1.0, 1)]);
+    let payload = viewer::test_support::committed_events(&[(0.0, 0), (1.0, 1)]);
     let mut state = AppState::default();
     let run = state.simulation.start_run();
     run.add_analysis(
@@ -625,8 +643,10 @@ fn event_source_failed_analysis_is_unavailable_but_live_partial_can_be_inspected
         AnalysisResult::failed(1, AnalysisType::Transient, "TRAN", "convergence")
             .with_result_payload(payload);
     assert_eq!(
-        event_selection_block(&mut state, &selection).unwrap().note,
-        EVENT_SELECTION_INVALID_EVIDENCE
+        event_selection_block(&mut state, &selection)
+            .unwrap()
+            .reason,
+        SelectionAbsence::InvalidEvidence
     );
 }
 
@@ -705,8 +725,8 @@ fn event_source_real_projection_rejects_nan_and_preserves_a_late_initial_value()
         "E(level)",
         0,
     );
-    assert!(selection.initial);
-    assert_eq!(selection.time_bits, 99_999.0_f64.to_bits());
+    assert!(selection.initial());
+    assert_eq!(selection.time_bits(), 99_999.0_f64.to_bits());
     let work = WorkCounts::reset();
     for _ in 0..12 {
         assert!(event_selection_block(&mut state, &selection).is_none());

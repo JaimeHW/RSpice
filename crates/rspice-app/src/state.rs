@@ -133,7 +133,6 @@ pub use simulation::CanonicalAnalysisKind;
 pub use rspice_model_library::sealed_model_sources;
 #[cfg(test)]
 pub use rspice_results::noise::{NoiseFigureEvidence, NoiseSummary};
-pub use simulation::CurrentImpulseHistoryEvidence;
 #[cfg(test)]
 pub use simulation::DcMismatchEvidence;
 pub(crate) use simulation::RunHistoryRevision;

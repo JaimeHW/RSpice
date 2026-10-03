@@ -38,7 +38,6 @@ pub const MAX_RUN_HISTORY: usize = 20;
 mod current_impulses;
 #[cfg(test)]
 pub(crate) use current_impulses::current_impulse_history_fixture;
-pub use rspice_results::current_impulses::CurrentImpulseHistoryEvidence;
 
 #[cfg(test)]
 pub use rspice_results::sensitivity::SensitivityBasisEvidence;
