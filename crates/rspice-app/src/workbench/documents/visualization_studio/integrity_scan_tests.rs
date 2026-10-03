@@ -1,7 +1,7 @@
 //! Integrity-scan tests for exact visualization sources, comparisons, and saved properties.
 
 use super::dock::{
-    commit_comparison_execution, evaluate_scalar_measurement, execute_comparison_draft,
+    commit_comparison_execution, evaluate_scalar_measurement,
     execute_comparison_draft_with_differences, retain_difference_trace_sets,
     save_document_properties,
 };
@@ -10,6 +10,7 @@ use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SpecEntry, Wavef
 use crate::workbench::documents::result_document::{
     AnalysisPresentationKey, WavePanePresentationKey,
 };
+use rspice_results::visualization_document::ComparisonAlignmentMethod;
 
 fn app_with_exact_source() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
@@ -761,131 +762,6 @@ fn project_document_owns_comparison_receipts_and_studio_only_projects_them() {
             .difference_trace_sets
             .is_empty()
     );
-}
-
-#[test]
-fn comparison_records_threshold_and_cross_correlation_alignment_parameters() {
-    let mut threshold_app = app_with_exact_source();
-    threshold_app.state.simulation.runs[0].analyses[0].waveforms = vec![WaveformData::new(
-        "V(out)",
-        vec![0.0, 1.0, 2.0],
-        vec![-1.0, 1.0, 3.0],
-        "#00aaff",
-    )];
-    let mut threshold_baseline = SimulationRun::new(2);
-    threshold_baseline.add_analysis(
-        AnalysisResult::new(29, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new(
-                "V(out)",
-                vec![10.0, 11.0, 12.0],
-                vec![-2.0, 2.0, 4.0],
-                "#00aaff",
-            ),
-        ]),
-    );
-    let threshold_baseline_id = threshold_baseline.dataset_id;
-    threshold_app.state.simulation.runs.push(threshold_baseline);
-    let threshold_studio = &mut threshold_app.state.workbench.visualization_studio;
-    threshold_studio.draft_comparison_dataset = Some(threshold_baseline_id);
-    threshold_studio.draft_comparison_alignment = ComparisonAlignmentDraft::FirstThresholdCrossing;
-    threshold_studio.draft_comparison_alignment_signal = "V(out)".to_owned();
-    threshold_studio.draft_comparison_threshold = 0.0;
-    threshold_studio.draft_comparison_difference_trace = false;
-
-    let threshold_receipt =
-        execute_comparison_draft(&threshold_app).expect("threshold alignment must execute");
-    assert!(matches!(
-        threshold_receipt.policy.execution.alignment,
-        ComparisonAlignmentMethod::FirstThresholdCrossing {
-            signal_key,
-            threshold: 0.0,
-            baseline_crossing: 10.5,
-            candidate_crossing: 0.5,
-        } if signal_key == "signal:0"
-    ));
-    assert_eq!(
-        threshold_receipt.policy.execution.resampling,
-        ComparisonResamplingPolicy::BaselineOntoCandidateGrid
-    );
-
-    let mut correlation_app = app_with_exact_source();
-    correlation_app.state.simulation.runs[0].analyses[0].waveforms = vec![WaveformData::new(
-        "V(out)",
-        vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
-        vec![0.0, 0.0, 1.0, 0.0, -1.0, 0.0],
-        "#00aaff",
-    )];
-    let mut correlation_baseline = SimulationRun::new(2);
-    correlation_baseline.add_analysis(
-        AnalysisResult::new(29, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new(
-                "V(out)",
-                vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
-                vec![0.0, 1.0, 0.0, -1.0, 0.0, 0.0],
-                "#00aaff",
-            ),
-        ]),
-    );
-    let correlation_baseline_id = correlation_baseline.dataset_id;
-    correlation_app
-        .state
-        .simulation
-        .runs
-        .push(correlation_baseline);
-    let correlation_studio = &mut correlation_app.state.workbench.visualization_studio;
-    correlation_studio.draft_comparison_dataset = Some(correlation_baseline_id);
-    correlation_studio.draft_comparison_alignment = ComparisonAlignmentDraft::CrossCorrelation;
-    correlation_studio.draft_comparison_alignment_signal = "V(out)".to_owned();
-    correlation_studio.draft_comparison_maximum_lag_samples = 2;
-    correlation_studio.draft_comparison_difference_trace = false;
-
-    let correlation_receipt =
-        execute_comparison_draft(&correlation_app).expect("correlation alignment must execute");
-    assert!(matches!(
-        correlation_receipt.policy.execution.alignment,
-        ComparisonAlignmentMethod::CrossCorrelation {
-            selected_lag_samples: 1,
-            sample_interval: 1.0,
-            baseline_shift: 1.0,
-            ..
-        }
-    ));
-}
-
-#[test]
-fn comparison_fails_closed_for_nonmonotonic_source_coordinates() {
-    let mut app = app_with_exact_source();
-    app.state.simulation.runs[0].analyses[0].waveforms = vec![WaveformData::new(
-        "V(out)",
-        vec![0.0, 1.0, 2.0],
-        vec![0.0, 1.0, 2.0],
-        "#00aaff",
-    )];
-    let mut baseline = SimulationRun::new(2);
-    baseline.add_analysis(
-        AnalysisResult::new(29, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            WaveformData::new(
-                "V(out)",
-                vec![0.0, 1.0, 0.5],
-                vec![0.0, 1.0, 2.0],
-                "#00aaff",
-            ),
-        ]),
-    );
-    let baseline_id = baseline.dataset_id;
-    app.state.simulation.runs.push(baseline);
-    app.state
-        .workbench
-        .visualization_studio
-        .draft_comparison_dataset = Some(baseline_id);
-    app.state
-        .workbench
-        .visualization_studio
-        .draft_comparison_alignment = ComparisonAlignmentDraft::AbsoluteXAxis;
-
-    let error = execute_comparison_draft(&app)
-        .expect_err("nonmonotonic immutable data must never be resampled");
-    assert!(error.contains("nonmonotonic"));
 }
 
 #[test]

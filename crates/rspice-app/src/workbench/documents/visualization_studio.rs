@@ -18,7 +18,7 @@ mod viewers;
 use viewers::show as viewers_section;
 
 use rspice_results_ui::studio::{
-    dock::{VisualizationDock, comparison::ComparisonAlignmentDraft},
+    dock::VisualizationDock,
     inspector::OperationState,
     stage::{ExactSourceRow, ResultEntityRow},
 };
@@ -46,15 +46,11 @@ use crate::results::viewer_catalog::{
     viewer_compatibility, viewer_document,
 };
 use crate::results::visualization_document::{
-    AccessibleColorPalette, AxisOrientation, ColumnRole, ComparisonAlignmentMethod,
-    ComparisonExecutionContract, ComparisonExtrapolationPolicy, ComparisonInterpolationPolicy,
-    ComparisonPolicy, ComparisonPrecisionPolicy, ComparisonReceipt, ComparisonRequest,
-    ComparisonResamplingPolicy, CursorId, DocumentEdit, EntityRef, FamilyAggregationMethod,
-    FamilyAggregationPolicy, FamilyDimension as DocumentFamilyDimension, FamilyEncodingMap,
-    FamilyPresentationPolicy, FamilyXDimension, FamilyXOrdering, LinkKind, MissingPointPolicy,
-    NumericTolerance, PageUpdatePolicy, PaneId, RowAlignmentPolicy, SourceColumn, SourceDataset,
-    SourceRow, TypedValue, ValueType, VisualizationDocument, VisualizationTransactionReceipt,
-    compare_source_datasets,
+    AccessibleColorPalette, AxisOrientation, ComparisonReceipt, CursorId, DocumentEdit, EntityRef,
+    FamilyAggregationMethod, FamilyAggregationPolicy, FamilyDimension as DocumentFamilyDimension,
+    FamilyEncodingMap, FamilyPresentationPolicy, FamilyXDimension, FamilyXOrdering, LinkKind,
+    MissingPointPolicy, PageUpdatePolicy, PaneId, SourceDataset, TypedValue, ValueType,
+    VisualizationDocument, VisualizationTransactionReceipt,
 };
 use crate::state::{
     AnalysisResult, AnalysisResultPayload, AnalysisType, SensitivityResultMode,
@@ -69,15 +65,16 @@ use crate::workbench::{
     state::{Workspace, WorkspaceDocumentId},
 };
 
+use rspice_results::studio_presentation::{
+    ComparisonAlignmentDraft, MAX_DIFFERENCE_TRACE_NUMERIC_VALUES, MAX_DIFFERENCE_TRACE_SETS,
+    REPORT_PAGE_TEMPLATES,
+};
 pub use rspice_results::studio_presentation::{
     ComplexProjection, DisplayLodPolicy, ViewerTool, VisualizationAnnotation,
     VisualizationAutoscale, VisualizationDifferenceKind, VisualizationDifferenceSeries,
     VisualizationDifferenceTraceSet, VisualizationMarker, VisualizationMeasurement,
     VisualizationPane, VisualizationPanePlacement, VisualizationReportPagePolicy,
     VisualizationSection, VisualizationStudioPresentation, VisualizationTouchPane,
-};
-use rspice_results::studio_presentation::{
-    MAX_DIFFERENCE_TRACE_NUMERIC_VALUES, MAX_DIFFERENCE_TRACE_SETS, REPORT_PAGE_TEMPLATES,
 };
 
 use super::result_document;

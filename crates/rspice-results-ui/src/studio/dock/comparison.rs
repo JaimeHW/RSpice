@@ -4,29 +4,7 @@ use egui::Ui;
 use rspice_app_types::product::{DatasetId, short_identity as short_dataset};
 use rspice_ui_kit::{panels::property_row, widgets::Button};
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ComparisonAlignmentDraft {
-    #[default]
-    FirstThresholdCrossing,
-    AbsoluteXAxis,
-    CrossCorrelation,
-}
-
-impl ComparisonAlignmentDraft {
-    const ALL: [Self; 3] = [
-        Self::FirstThresholdCrossing,
-        Self::AbsoluteXAxis,
-        Self::CrossCorrelation,
-    ];
-
-    const fn label(self) -> &'static str {
-        match self {
-            Self::FirstThresholdCrossing => "First threshold crossing",
-            Self::AbsoluteXAxis => "Absolute X axis",
-            Self::CrossCorrelation => "Cross-correlation alignment",
-        }
-    }
-}
+use rspice_results::studio_presentation::ComparisonAlignmentDraft;
 
 pub struct ComparisonDraft<'a> {
     pub dataset: &'a mut Option<DatasetId>,

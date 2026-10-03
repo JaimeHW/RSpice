@@ -89,4 +89,6 @@ pub mod viewer_catalog;
 pub mod visualization_document;
 pub mod visualization_raster;
 pub mod waveform;
+#[cfg(feature = "engine-evidence")]
+pub mod waveform_comparison;
 pub mod yield_analysis;
