@@ -7,6 +7,7 @@
 
 pub mod bode;
 pub mod box_violin;
+pub mod chrome;
 pub mod derived;
 pub mod events;
 pub mod eye_diagram;
