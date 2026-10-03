@@ -1,27 +1,17 @@
-//! What the retained coefficient-spectrum sheet does differently for a
-//! recorded `.FFT`.
-//!
-//! Layer: Results document, viewer. Only three things differ, and each is
-//! here because the retained payload says something a harmonic-balance result
-//! does not: the ordinate is drawn in logarithmic decades over the engine's
-//! own linear magnitudes (the same picture as dB, with no derived array and
-//! no second cache), a short record states its sentence instead of showing an
-//! empty plot, and the inspector reads the transform the engine actually
-//! performed rather than "Not retained".
-//!
-//! Nothing here computes a transform, a window or a dB array. HB, Fourier and
-//! PSS-spectrum rendering is untouched: every entry point is gated on the
-//! recorded-FFT payload.
+//! Recorded FFT evidence, incomplete-history captions, logarithmic ordinate and inspector rows.
 
-use crate::state::{AnalysisResult, AnalysisResultPayload, FftSpectrumEvidence};
-use crate::ui::plot::{Axis, fmt_si};
+use rspice_results::{
+    analysis_payload::AnalysisResultPayload, analysis_result::AnalysisResult,
+    fft::spectrum::FftSpectrumEvidence,
+};
+use rspice_ui_kit::plot::{Axis, fmt_si};
 
 /// Stems are one painted segment per coefficient, so they are drawn only for
 /// a spectrum short enough that the cost is bounded.
 pub(super) const MAX_STEMMED_COEFFICIENTS: usize = 512;
 
 /// The recorded-FFT evidence of this result, if it carries any.
-pub(super) fn evidence(analysis: &AnalysisResult) -> Option<&FftSpectrumEvidence> {
+pub fn evidence<W>(analysis: &AnalysisResult<W>) -> Option<&FftSpectrumEvidence> {
     match analysis.result_payload.as_ref() {
         Some(AnalysisResultPayload::FftSpectrum { spectrum }) => Some(spectrum),
         _ => None,
@@ -32,9 +22,9 @@ pub(super) fn evidence(analysis: &AnalysisResult) -> Option<&FftSpectrumEvidence
 ///
 /// Never a generic "no data" hint: the engine treats an incomplete history as
 /// a typed outcome, and the reader needs the two numbers that say why.
-pub(super) fn incomplete_history_sentence(analysis: &AnalysisResult) -> Option<String> {
+pub fn incomplete_history_sentence<W>(analysis: &AnalysisResult<W>) -> Option<String> {
     let spectrum = evidence(analysis)?;
-    let crate::state::FftSpectrumStatusEvidence::IncompleteHistory {
+    let rspice_results::fft::spectrum::FftSpectrumStatusEvidence::IncompleteHistory {
         available_start_s,
         available_stop_s,
     } = spectrum.status
@@ -135,9 +125,13 @@ pub(super) fn inspector_rows(spectrum: &FftSpectrumEvidence) -> Vec<(&'static st
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::AnalysisType;
+    use rspice_results::analysis_type::AnalysisType;
+    type AnalysisResult =
+        rspice_results::analysis_result::AnalysisResult<crate::waveform::WaveformData>;
 
-    fn evidence_fixture(status: crate::state::FftSpectrumStatusEvidence) -> FftSpectrumEvidence {
+    fn evidence_fixture(
+        status: rspice_results::fft::spectrum::FftSpectrumStatusEvidence,
+    ) -> FftSpectrumEvidence {
         FftSpectrumEvidence {
             status,
             output: "V(OUT)".to_owned(),
@@ -148,7 +142,7 @@ mod tests {
             point_count: 256,
             accurate_sampling: true,
             format: rspice_results::fft::FftSpectrumFormatEvidence::Unnormalized,
-            mode: crate::state::FftSpectrumModeEvidence::HspiceCompatible,
+            mode: rspice_results::fft::spectrum::FftSpectrumModeEvidence::HspiceCompatible,
             window: "RECT".to_owned(),
             alpha: 3.0,
             coherent_gain: 1.0,
@@ -162,16 +156,16 @@ mod tests {
 
     #[test]
     fn an_incomplete_fft_history_is_stated_not_plotted() {
-        let spectrum =
-            evidence_fixture(crate::state::FftSpectrumStatusEvidence::IncompleteHistory {
+        let spectrum = evidence_fixture(
+            rspice_results::fft::spectrum::FftSpectrumStatusEvidence::IncompleteHistory {
                 available_start_s: 0.0,
                 available_stop_s: 2.0e-3,
-            });
-        let analysis = AnalysisResult::new(1, AnalysisType::Fourier, "FFT").with_result_payload(
-            AnalysisResultPayload::FftSpectrum {
-                spectrum: spectrum.clone(),
             },
         );
+        let analysis = AnalysisResult::new(1, AnalysisType::Fourier, "FFT", 0.0)
+            .with_result_payload(AnalysisResultPayload::FftSpectrum {
+                spectrum: spectrum.clone(),
+            });
         // A successful result with no waveform: the record is the fact, and
         // an empty plot would be the only dishonest way to show it.
         assert!(analysis.success);
@@ -183,23 +177,24 @@ mod tests {
         );
         assert!(sentence.contains("the transform needs samples through"));
 
-        let complete = AnalysisResult::new(1, AnalysisType::Fourier, "FFT").with_result_payload(
-            AnalysisResultPayload::FftSpectrum {
-                spectrum: evidence_fixture(crate::state::FftSpectrumStatusEvidence::Complete),
-            },
-        );
+        let complete = AnalysisResult::new(1, AnalysisType::Fourier, "FFT", 0.0)
+            .with_result_payload(AnalysisResultPayload::FftSpectrum {
+                spectrum: evidence_fixture(
+                    rspice_results::fft::spectrum::FftSpectrumStatusEvidence::Complete,
+                ),
+            });
         assert!(incomplete_history_sentence(&complete).is_none());
         assert_eq!(evidence(&complete).map(|e| e.point_count), Some(256));
     }
 
     #[test]
     fn the_retained_spectrum_sheet_draws_a_recorded_fft_on_decades() {
-        let spectrum = evidence_fixture(crate::state::FftSpectrumStatusEvidence::Complete);
-        let recorded = AnalysisResult::new(1, AnalysisType::Fourier, "FFT").with_result_payload(
-            AnalysisResultPayload::FftSpectrum {
+        let spectrum =
+            evidence_fixture(rspice_results::fft::spectrum::FftSpectrumStatusEvidence::Complete);
+        let recorded = AnalysisResult::new(1, AnalysisType::Fourier, "FFT", 0.0)
+            .with_result_payload(AnalysisResultPayload::FftSpectrum {
                 spectrum: spectrum.clone(),
-            },
-        );
+            });
         // The sheet asks the payload, so only a recorded FFT gets the
         // logarithmic ordinate and the transform's own inspector rows.
         assert!(evidence(&recorded).is_some());
@@ -210,16 +205,14 @@ mod tests {
 
         // Harmonic balance and `.FOUR` carry no such payload, so nothing here
         // reaches them and their rendering is exactly what it was.
-        let harmonic_balance = AnalysisResult::new(2, AnalysisType::HarmonicBalance, "HB");
-        let fourier = AnalysisResult::new(3, AnalysisType::Fourier, "FOURIER");
+        let harmonic_balance = AnalysisResult::new(2, AnalysisType::HarmonicBalance, "HB", 0.0);
+        let fourier = AnalysisResult::new(3, AnalysisType::Fourier, "FOURIER", 0.0);
         assert!(evidence(&harmonic_balance).is_none());
         assert!(evidence(&fourier).is_none());
         assert!(incomplete_history_sentence(&harmonic_balance).is_none());
         assert!(incomplete_history_sentence(&fourier).is_none());
-        // And a long spectrum draws no stems: one painted segment per
-        // coefficient is a per-frame cost, and half a million is not a plot.
+        // The retained fixture is short enough for coefficient stems.
         assert!(spectrum.bin_count() < MAX_STEMMED_COEFFICIENTS);
-        assert!(1_048_576 / 2 + 1 > MAX_STEMMED_COEFFICIENTS);
     }
 
     #[test]
@@ -235,7 +228,7 @@ mod tests {
     #[test]
     fn the_inspector_reads_the_transform_the_engine_performed() {
         let rows = inspector_rows(&evidence_fixture(
-            crate::state::FftSpectrumStatusEvidence::Complete,
+            rspice_results::fft::spectrum::FftSpectrumStatusEvidence::Complete,
         ));
         let labels = rows.iter().map(|(label, _, _)| *label).collect::<Vec<_>>();
         assert_eq!(

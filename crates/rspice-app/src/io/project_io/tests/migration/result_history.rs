@@ -1848,9 +1848,9 @@ fn a_results_history_saved_at_schema_27_restores_with_its_digests_unchanged() {
 /// A recorded FFT payload cannot be smuggled into an older schema.
 #[test]
 fn a_result_schema_before_28_cannot_carry_a_recorded_fft() {
-    use crate::state::{
-        AnalysisResultPayload, FftSpectrumEvidence, FftSpectrumModeEvidence,
-        FftSpectrumStatusEvidence,
+    use crate::state::AnalysisResultPayload;
+    use rspice_results::fft::spectrum::{
+        FftSpectrumEvidence, FftSpectrumModeEvidence, FftSpectrumStatusEvidence,
     };
 
     let spectrum = FftSpectrumEvidence {

@@ -176,7 +176,6 @@ pub use simulation::{DcMismatchContributorEvidence, DcMismatchScopeEvidence};
 pub use simulation::{DcSweepDirection, DcSweepQuantity};
 #[cfg(test)]
 pub use simulation::{DcSweepEvidence, SavedOutputDcMember};
-pub use simulation::{FftSpectrumEvidence, FftSpectrumStatusEvidence};
 #[cfg(test)]
 pub use simulation::{
     FloquetSpectrumCertificateEvidence, OperatingPointAccuracyEvidence,
@@ -186,14 +185,9 @@ pub use simulation::{
     PeriodicNoiseOutputQuantity, PssFloquetMultiplierEvidence, PstbFloquetModeEvidence,
     SoaViolationEvidence, SoaViolationSeverityEvidence,
 };
-pub use simulation::{SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow};
-// Test-only, like the attribution vocabulary above: outside tests the
-// compatibility mode of a recorded spectrum is only ever read through the
-// evidence's own field, never named as a type.
-#[cfg(test)]
-pub use simulation::FftSpectrumModeEvidence;
 #[cfg(test)]
 pub use simulation::{SavedOutputAxis, SavedOutputBoundSource, SavedOutputSourceBindings};
+pub use simulation::{SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow};
 // Only the two types the persisted model itself names are hoisted here. The
 // rest of the stimulus vocabulary — the definition record, the draft state
 // machine, the adoption verbs — is read through `state::stimulus_library::*`,

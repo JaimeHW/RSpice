@@ -10,6 +10,7 @@ pub mod box_violin;
 pub mod derived;
 pub mod eye_diagram;
 pub mod fft;
+pub mod harmonic_balance;
 pub mod histogram;
 pub mod network_matrix;
 pub mod noise_contrib;

@@ -45,13 +45,6 @@ pub use rspice_results::sensitivity::{
 };
 pub use rspice_results::simulation_values::ComplexResultValue;
 
-pub use rspice_results::fft::spectrum::{FftSpectrumEvidence, FftSpectrumStatusEvidence};
-// Test-only, like the attribution vocabulary in `state.rs`: outside tests the
-// compatibility mode a spectrum was computed under is only ever read through
-// the evidence's own field, never named as a type.
-#[cfg(test)]
-pub use rspice_results::fft::spectrum::FftSpectrumModeEvidence;
-
 pub use rspice_results::floquet::{
     FloquetOrbitKindEvidence, FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence,
     PstbStabilityClassificationEvidence,
