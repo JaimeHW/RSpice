@@ -32,8 +32,8 @@ use crate::workbench::AppState;
 
 use super::super::AnalysisPresentationKey;
 use super::super::frame_work::{self, DatasetWalk};
-use super::super::virtual_rows::RowOffsets;
 use rspice_results_ui::strip::StripHeader;
+use rspice_results_ui::virtual_rows::RowOffsets;
 
 use super::{
     CELL_INSET, HEADER_HEIGHT, NOT_RETAINED, PANEL_ROW_HEIGHT, PARAMETER_WIDTH, RANK_WIDTH,

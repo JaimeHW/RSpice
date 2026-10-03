@@ -23,5 +23,6 @@ pub mod scatter;
 pub mod smith_chart;
 pub mod strip;
 pub mod transfer_function;
+pub mod virtual_rows;
 pub mod waveform;
 pub mod waves;

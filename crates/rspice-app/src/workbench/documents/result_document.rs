@@ -38,7 +38,6 @@ mod transfer_function;
 pub(crate) mod view_context;
 mod view_plans;
 mod viewer_state;
-mod virtual_rows;
 
 /// Lossless CSV projection of the exact evidence rendered by a Results sheet.
 pub(crate) struct ResultSheetCsv {

@@ -18,8 +18,8 @@ use crate::workbench::AppState;
 use std::sync::Arc;
 
 use super::frame_work::{self, DatasetWalk};
-use super::virtual_rows::RowOffsets;
 use rspice_results_ui::presentation::well_hint;
+use rspice_results_ui::virtual_rows::RowOffsets;
 
 const MIN_TABLE_WIDTH: f32 = 1_030.0;
 const TABLE_HEAD_HEIGHT: f32 = 27.0;

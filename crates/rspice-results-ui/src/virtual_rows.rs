@@ -14,20 +14,20 @@
 
 /// Which rows a viewport covers, and the space standing in for the rest.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct RowPlan {
+pub struct RowPlan {
     /// First row to draw.
-    pub(super) first: usize,
+    pub first: usize,
     /// One past the last row to draw.
-    pub(super) end: usize,
+    pub end: usize,
     /// Height of the rows above `first`.
-    pub(super) leading: f32,
+    pub leading: f32,
     /// Height of the rows from `end` onward.
-    pub(super) trailing: f32,
+    pub trailing: f32,
 }
 
 impl RowPlan {
     /// Rows `first..end`, as a range.
-    pub(super) const fn range(self) -> std::ops::Range<usize> {
+    pub const fn range(self) -> std::ops::Range<usize> {
         self.first..self.end
     }
 }
@@ -36,12 +36,12 @@ impl RowPlan {
 /// element is the total height. Built once per (data, filter, sort) rather
 /// than per frame.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(super) struct RowOffsets {
+pub struct RowOffsets {
     offsets: Vec<f32>,
 }
 
 impl RowOffsets {
-    pub(super) fn from_heights(heights: impl IntoIterator<Item = f32>) -> Self {
+    pub fn from_heights(heights: impl IntoIterator<Item = f32>) -> Self {
         let mut offsets = vec![0.0];
         let mut total = 0.0;
         for height in heights {
@@ -51,17 +51,17 @@ impl RowOffsets {
         Self { offsets }
     }
 
-    pub(super) fn rows(&self) -> usize {
+    pub fn rows(&self) -> usize {
         self.offsets.len().saturating_sub(1)
     }
 
-    pub(super) fn total_height(&self) -> f32 {
+    pub fn total_height(&self) -> f32 {
         self.offsets.last().copied().unwrap_or(0.0)
     }
 
     /// The rows intersecting `viewport`, with one row of margin on each side
     /// so a partially scrolled row is drawn rather than popping in.
-    pub(super) fn plan(&self, viewport: egui::Rangef) -> RowPlan {
+    pub fn plan(&self, viewport: egui::Rangef) -> RowPlan {
         let rows = self.rows();
         if rows == 0 {
             return RowPlan {

@@ -38,8 +38,8 @@ pub(super) use study::{StudyPlan, domain_bar};
 
 use super::AnalysisPresentationKey;
 use super::frame_work::{self, DatasetWalk};
-use super::virtual_rows::RowOffsets;
 use rspice_results_ui::strip::StripHeader;
+use rspice_results_ui::virtual_rows::RowOffsets;
 
 const RANK_WIDTH: f32 = 44.0;
 const PARAMETER_WIDTH: f32 = 230.0;

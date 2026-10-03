@@ -26,8 +26,8 @@ use crate::workbench::AppState;
 
 use super::AnalysisPresentationKey;
 use super::frame_work::{self, DatasetWalk};
-use super::virtual_rows::RowOffsets;
 use rspice_results_ui::presentation::well_hint;
+use rspice_results_ui::virtual_rows::RowOffsets;
 
 const NAME_W: f32 = 146.0;
 const KIND_W: f32 = 82.0;
