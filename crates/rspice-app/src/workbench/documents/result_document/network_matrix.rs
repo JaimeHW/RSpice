@@ -21,7 +21,7 @@ use crate::state::AnalysisResult;
 #[cfg(test)]
 use crate::state::AnalysisType;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(super) struct NetworkMatrixState {
     source: Option<(
         AnalysisPresentationKey,
@@ -31,17 +31,6 @@ pub(super) struct NetworkMatrixState {
     controls: view::NetworkMatrixControls,
     open_trace: bool,
     layout: Option<Arc<NetworkLayout>>,
-}
-
-impl Default for NetworkMatrixState {
-    fn default() -> Self {
-        Self {
-            source: None,
-            controls: view::NetworkMatrixControls::default(),
-            open_trace: false,
-            layout: None,
-        }
-    }
 }
 
 impl NetworkMatrixState {

@@ -83,7 +83,7 @@ fn show_selected_result_artifact_table(ui: &mut Ui, state: &mut AppState) -> boo
     let Some(plan) = artifact_text(state, &key) else {
         return false;
     };
-    viewer::show_artifact(ui, &key.canonical_name(), &plan.text, &plan.lines);
+    viewer::show_artifact(ui, key.canonical_name(), &plan.text, &plan.lines);
     true
 }
 
