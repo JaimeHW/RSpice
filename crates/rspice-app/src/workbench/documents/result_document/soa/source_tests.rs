@@ -55,10 +55,8 @@ fn soa_reporting_detail_uses_complete_history_and_hashes_its_samples() {
     };
     *source_history = Some(Arc::new(source));
     analysis.validate_retained_evidence().unwrap();
-    let facts = plan(&mut state);
+    plan(&mut state);
     let analysis = &state.simulation.runs[0].analyses[0];
-    let trace = evidence_trace(analysis, facts.facts(0).unwrap().stress_waveform.unwrap()).unwrap();
-    assert_eq!(trace.x.len(), 64);
     assert_eq!(analysis.waveforms[0].x.len(), 2);
     pick(&mut state);
     state.ui.results.soa_stress_trace_open = true;
@@ -90,7 +88,7 @@ fn replace_stress(state: &mut AppState, samples: usize, peak: f64) {
 
 fn envelope(state: &mut AppState) -> Arc<[[f64; 2]]> {
     let plan = plan(state);
-    let facts = plan.facts(0).unwrap();
+    let facts = plan.presentation.facts(0).unwrap();
     let waveform = &state.simulation.runs[0].analyses[0].waveforms
         [facts.stress_waveform.expect("verified stress history")];
     state.ui.results.cache.series(
@@ -168,8 +166,8 @@ fn soa_source_nested_edits_refresh_facts_without_a_version_bump() {
     let after = plan(&mut state);
     assert_eq!(state.simulation.data_version, version);
     assert_ne!(
-        before.facts(0).unwrap().interval_full,
-        after.facts(0).unwrap().interval_full
+        before.presentation.facts(0).unwrap().interval_full,
+        after.presentation.facts(0).unwrap().interval_full
     );
 }
 

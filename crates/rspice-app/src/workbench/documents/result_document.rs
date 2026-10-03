@@ -256,7 +256,7 @@ use crate::product::{AnalysisInstanceId, DatasetId, ResultDocumentId};
 use crate::results::visualization_document::{MarkerId, PaneId};
 use crate::simulation::SimulationController;
 use crate::simulation::controller::DerivedViewerLoadState;
-use crate::state::{AnalysisResult, SimulationRun, SoaParameterEvidence, WaveformData};
+use crate::state::{AnalysisResult, SimulationRun, WaveformData};
 use crate::ui::icons::Icon;
 use crate::ui::plot::{CursorPair, DecimationCache, InteractionMode};
 use crate::ui::theme::{self, FontWeight};
@@ -272,6 +272,7 @@ use rspice_results_ui::eye_diagram::EyeTimebase;
 use rspice_results_ui::eye_diagram::view::EyeTexture;
 use rspice_results_ui::fft::view::FftSeries;
 use rspice_results_ui::presentation::{PlotView, well_hint};
+use rspice_results_ui::soa::{SoaRuleFilter, SoaRuleSelection};
 
 /// One axis interval, low then high, in data space.
 pub(crate) type AxisExtent = (f64, f64);
@@ -1748,29 +1749,6 @@ impl<'a> MarkerView<'a> {
 pub(super) struct HorizontalWaveCursor {
     pub pane: WavePanePresentationKey,
     pub y: f64,
-}
-
-/// Which safe-operating-area rules the SOA table lists.
-///
-/// Attention and passing are complements, so a rule is in exactly one of them
-/// and the two counts always sum to the evaluated total.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum SoaRuleFilter {
-    #[default]
-    All,
-    Violations,
-    Passing,
-}
-
-/// One SOA rule picked out of the evidence table.
-///
-/// A rule is identified by its device and the stressed parameter, never by row
-/// ordinal: the filter reorders the table and the analysis may be re-run.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SoaRuleSelection {
-    pub analysis: AnalysisPresentationKey,
-    pub device_id: String,
-    pub parameter: SoaParameterEvidence,
 }
 
 /// One optimizer candidate picked out of the iteration history.

@@ -1,27 +1,14 @@
-//! App-facing SOA compatibility imports and engine error/cancellation adapters.
-//!
-//! Rule policy, sampled evaluation, and retained evidence live in
-//! `rspice_results::safety`.
+//! Shared SOA fixtures and imports for application integration tests.
 
-// Existing app callers migrate to the portable owner as their modules move.
-#[cfg(test)]
 pub use rspice_results::safety::SoARuleVerdict;
-#[cfg(test)]
 pub use rspice_results::safety::SoaCumulativeDurationEvidence;
-#[cfg(test)]
+pub use rspice_results::safety::soa_stress_waveform_name;
 pub use rspice_results::safety::{SoAEvaluation, SoAParameter, SoaCurrentEnvelope};
-#[cfg(test)]
 pub use rspice_results::safety::{
     SoaDurationEvidence, SoaPowerDerating, SoaPulseCurve, SoaPulseInterpolation, SoaThresholds,
     SoaVoltageInterpolation,
 };
-pub use rspice_results::safety::{
-    SoaLimitTrace, compare_soa_stress, soa_derating_temperature_waveform_name,
-    soa_envelope_limit_waveform_name, soa_power_limit_waveform_name, soa_stress_waveform_name,
-};
-pub use rspice_simulation::soa_duration::qualify_soa_duration_with_mode;
 
-#[cfg(test)]
 pub(crate) fn soa_current_envelope_test_fixture() -> SoaCurrentEnvelope {
     SoaCurrentEnvelope {
         source: "Synthetic SOA fixture".into(),
