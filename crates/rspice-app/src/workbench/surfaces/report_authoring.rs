@@ -4,23 +4,24 @@
 //! [`ReportDocument`] graph. Route availability remains fail-closed until the
 //! complete report workflow is ready for production use.
 
+mod presentation;
 mod result_insert;
+use rspice_results_ui::report::inspector::DocumentPublicationEdit;
+use rspice_results_ui::report::preview::report_block_element_title;
+use rspice_results_ui::report::{
+    self, INITIAL_PAGES, PaneSeparators, page_marker, paint_pane_separators, report_template_label,
+};
 
-use std::borrow::Cow;
-
-use egui::{Align, Align2, Color32, Layout, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
-use egui_extras::{Column, TableBuilder};
+use egui::{Align, Align2, Layout, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::results::report_document::{
     DataTableBlock, DatasheetBlock, DatasheetField, EvidenceBlock, ProseBlock, ProseStyle,
-    ReportBlockId, ReportBlockKind, ReportBlockedGateTextPolicy, ReportDocument,
-    ReportDraftMarking, ReportEdit, ReportEntityRef, ReportOutputFormats,
-    ReportPageEvidenceBinding, ReportPageId, ReportPageInclusion, ReportPageNumbering,
-    ReportPageUpdatePolicy, ReportPublicationPageSize, ReportPublicationProfile,
-    ReportPublicationTemplate, ReportReferenceMode, ReportReferenceSnapshot, ReportSourceId,
-    ReportTablePrecision, ReportTemplate, RequirementDisposition, RequirementEntry,
-    RequirementsBlock, ReviewNoteBlock, ReviewNoteStatus, SpecificationDisposition,
-    SpecificationEntry, SpecificationsBlock, TableCell, TableColumn,
+    ReportBlockId, ReportBlockKind, ReportBlockedGateTextPolicy, ReportDocument, ReportEdit,
+    ReportEntityRef, ReportPageEvidenceBinding, ReportPageId, ReportPageInclusion,
+    ReportPageUpdatePolicy, ReportReferenceMode, ReportReferenceSnapshot, ReportSourceId,
+    ReportTemplate, RequirementDisposition, RequirementEntry, RequirementsBlock, ReviewNoteBlock,
+    ReviewNoteStatus, SpecificationDisposition, SpecificationEntry, SpecificationsBlock, TableCell,
+    TableColumn,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -29,8 +30,7 @@ use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
-    WorkbenchIcon, code_inspector_property_list, code_inspector_section, code_workspace_heading,
-    icon_button, property_row, workspace_title_row,
+    WorkbenchIcon, code_inspector_section, code_workspace_heading, icon_button, workspace_title_row,
 };
 use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
@@ -53,105 +53,6 @@ const OUTLINE_HEADER_HEIGHT: f32 = 39.0;
 const OUTLINE_ROW_HEIGHT: f32 = 34.0;
 const PREVIEW_MIN_HEIGHT: f32 = 420.0;
 const INSPECTOR_PUBLICATION_CONTENT_HEIGHT: f32 = 820.0;
-const PAPER: Color32 = Color32::from_rgb(255, 255, 255);
-const PAPER_PANEL: Color32 = Color32::from_rgb(246, 247, 247);
-const PAPER_TEXT: Color32 = Color32::from_rgb(32, 36, 40);
-const PAPER_MUTED: Color32 = Color32::from_rgb(82, 89, 94);
-const PAPER_FAINT: Color32 = Color32::from_rgb(98, 105, 110);
-const PAPER_BORDER: Color32 = Color32::from_rgb(205, 210, 213);
-const PAPER_ACCENT: Color32 = Color32::from_rgb(122, 93, 0);
-
-fn paper_switch(ui: &mut Ui, value: &mut bool) -> egui::Response {
-    const TRACK_SIZE: Vec2 = Vec2::new(32.0, 18.0);
-    const HIT_SIZE: Vec2 = Vec2::new(40.0, 28.0);
-    let (rect, mut response) = ui.allocate_exact_size(HIT_SIZE, Sense::click());
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::WidgetType::Checkbox,
-            ui.is_enabled(),
-            *value,
-            "Include report element",
-        )
-    });
-    if response.clicked() {
-        *value = !*value;
-        response.mark_changed();
-    }
-
-    let track = Rect::from_center_size(rect.center(), TRACK_SIZE);
-    let fill = if *value {
-        PAPER_ACCENT
-    } else if response.hovered() {
-        Color32::from_rgb(225, 228, 229)
-    } else {
-        PAPER_PANEL
-    };
-    ui.painter().rect(
-        track,
-        TRACK_SIZE.y * 0.5,
-        fill,
-        Stroke::new(1.0, if *value { PAPER_ACCENT } else { PAPER_BORDER }),
-        egui::StrokeKind::Inside,
-    );
-    let knob_x = if *value {
-        track.right() - 7.0
-    } else {
-        track.left() + 7.0
-    };
-    ui.painter().circle_filled(
-        egui::pos2(knob_x, track.center().y),
-        5.5,
-        if *value { PAPER } else { PAPER_MUTED },
-    );
-    theme::paint_focus_ring(ui, &response, rect);
-    response
-}
-
-fn paint_dashed_rect(ui: &Ui, rect: Rect, color: Color32) {
-    const DASH: f32 = 4.0;
-    const GAP: f32 = 3.0;
-    let stroke = Stroke::new(1.0, color);
-    let painter = ui.painter();
-
-    let mut x = rect.left();
-    while x < rect.right() {
-        let end = (x + DASH).min(rect.right());
-        painter.line_segment(
-            [egui::pos2(x, rect.top()), egui::pos2(end, rect.top())],
-            stroke,
-        );
-        painter.line_segment(
-            [egui::pos2(x, rect.bottom()), egui::pos2(end, rect.bottom())],
-            stroke,
-        );
-        x += DASH + GAP;
-    }
-
-    let mut y = rect.top();
-    while y < rect.bottom() {
-        let end = (y + DASH).min(rect.bottom());
-        painter.line_segment(
-            [egui::pos2(rect.left(), y), egui::pos2(rect.left(), end)],
-            stroke,
-        );
-        painter.line_segment(
-            [egui::pos2(rect.right(), y), egui::pos2(rect.right(), end)],
-            stroke,
-        );
-        y += DASH + GAP;
-    }
-}
-
-const INITIAL_PAGES: [(&str, &str); 7] = [
-    ("1", "Executive summary"),
-    ("2", "Design and configuration"),
-    ("3", "Nominal results"),
-    ("4", "PVT and yield"),
-    ("5", "SOA and regression"),
-    ("6", "Physical DRC and waivers"),
-    ("A", "Run manifests"),
-];
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ComposerLayout {
     ThreeColumn,
@@ -171,19 +72,6 @@ enum PageSettingEdit {
     Inclusion(ReportPageInclusion),
     EvidenceBinding(ReportPageEvidenceBinding),
     BlockedGateText(ReportBlockedGateTextPolicy),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DocumentPublicationEdit {
-    OutputFormats(ReportOutputFormats),
-    PublicationProfile(ReportPublicationProfile),
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct PaneSeparators {
-    top: bool,
-    right: bool,
-    bottom: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -808,12 +696,27 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     ui.allocate_ui_with_layout(
                         Vec2::new(preview_width, available.y),
                         egui::Layout::top_down(egui::Align::Min),
-                        |ui| preview(ui, app, &document, selected_page, preview_separators),
+                        |ui| {
+                            report::preview::show(
+                                ui,
+                                &mut presentation::ReportHost(app),
+                                &document,
+                                selected_page,
+                                preview_separators,
+                            )
+                        },
                     );
                     ui.allocate_ui_with_layout(
                         Vec2::new(INSPECTOR_WIDTH, available.y),
                         egui::Layout::top_down(egui::Align::Min),
-                        |ui| inspector(ui, app, &document, selected_page, inspector_separators),
+                        |ui| {
+                            report::inspector::show(
+                                ui,
+                                &mut presentation::ReportHost(app),
+                                &document,
+                                inspector_separators,
+                            )
+                        },
                     );
                 });
             }
@@ -835,13 +738,28 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                                     heights.preview,
                                 ),
                                 egui::Layout::top_down(egui::Align::Min),
-                                |ui| preview(ui, app, &document, selected_page, preview_separators),
+                                |ui| {
+                                    report::preview::show(
+                                        ui,
+                                        &mut presentation::ReportHost(app),
+                                        &document,
+                                        selected_page,
+                                        preview_separators,
+                                    )
+                                },
                             );
                         });
                         ui.allocate_ui_with_layout(
                             Vec2::new(local_width, heights.inspector),
                             egui::Layout::top_down(egui::Align::Min),
-                            |ui| inspector(ui, app, &document, selected_page, inspector_separators),
+                            |ui| {
+                                report::inspector::show(
+                                    ui,
+                                    &mut presentation::ReportHost(app),
+                                    &document,
+                                    inspector_separators,
+                                )
+                            },
                         );
                     });
             }
@@ -858,12 +776,27 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                         ui.allocate_ui_with_layout(
                             Vec2::new(local_width, heights.preview),
                             egui::Layout::top_down(egui::Align::Min),
-                            |ui| preview(ui, app, &document, selected_page, preview_separators),
+                            |ui| {
+                                report::preview::show(
+                                    ui,
+                                    &mut presentation::ReportHost(app),
+                                    &document,
+                                    selected_page,
+                                    preview_separators,
+                                )
+                            },
                         );
                         ui.allocate_ui_with_layout(
                             Vec2::new(local_width, heights.inspector),
                             egui::Layout::top_down(egui::Align::Min),
-                            |ui| inspector(ui, app, &document, selected_page, inspector_separators),
+                            |ui| {
+                                report::inspector::show(
+                                    ui,
+                                    &mut presentation::ReportHost(app),
+                                    &document,
+                                    inspector_separators,
+                                )
+                            },
                         );
                     });
             }
@@ -1363,151 +1296,6 @@ fn report_form_label(ui: &mut Ui, label: &str) {
     ui.add_space(4.0);
 }
 
-fn preview(
-    ui: &mut Ui,
-    app: &mut RSpiceApp,
-    document: &ReportDocument,
-    selected_page: Option<ReportPageId>,
-    separators: PaneSeparators,
-) {
-    let t = Tokens::get(ui.ctx());
-    let summary_metrics = ReportSummaryMetrics::from_state(&app.state);
-    let width = ui.available_width();
-    let height = ui.available_height();
-    let pane = egui::Frame::new()
-        .fill(PAPER_PANEL)
-        .show(ui, |ui| {
-            ui.set_min_size(Vec2::new(width.max(1.0), height.max(1.0)));
-            ScrollArea::vertical()
-                .id_salt("report-authoring.preview")
-                .show(ui, |ui| {
-                    let compact = ui.available_width() < 560.0;
-                    let horizontal_margin = if compact { 18.0 } else { 42.0 };
-                    let top_margin = if compact { 24.0 } else { 36.0 };
-                    egui::Frame::new()
-                        .inner_margin(egui::Margin {
-                            left: horizontal_margin as i8,
-                            right: horizontal_margin as i8,
-                            top: top_margin as i8,
-                            bottom: 36,
-                        })
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            paper_label(
-                                ui,
-                                "PROJECT REPORT DOCUMENT",
-                                theme::mono(tokens::FS_0, FontWeight::Medium),
-                                PAPER_MUTED,
-                            );
-                            ui.add_space(8.0);
-                            paper_label(
-                                ui,
-                                document.title(),
-                                theme::sans(26.0, FontWeight::SemiBold),
-                                PAPER_TEXT,
-                            );
-                            ui.add_space(4.0);
-                            paper_label(
-                                ui,
-                                &format!(
-                                    "Document revision {} · {}",
-                                    document.revision().get(),
-                                    report_template_label(document.template()),
-                                ),
-                                theme::sans(tokens::FS_1, FontWeight::Regular),
-                                PAPER_MUTED,
-                            );
-
-                            let page = selected_page.and_then(|id| document.page(id));
-                            let page_index = page.and_then(|page| {
-                                document
-                                    .pages()
-                                    .iter()
-                                    .position(|candidate| candidate.id() == page.id())
-                            });
-                            let marker = page_index
-                                .map(|index| page_marker(index, page.map_or("", |p| p.title())))
-                                .unwrap_or("—");
-                            let title = page.map_or("No report page selected", |page| page.title());
-                            let description = page.map_or_else(
-                                || "Select a page from the report outline.".to_owned(),
-                                |page| {
-                                    format!(
-                                        "Page revision {} · {}",
-                                        page.revision().get(),
-                                        page_update_policy_label(page.update_policy())
-                                    )
-                                },
-                            );
-                            ui.add_space(24.0);
-                            section_heading(ui, marker, title, &description);
-                            ui.add_space(28.0);
-                            summary_grid(ui, summary_metrics, compact);
-                            if let Some(page) = page {
-                                ui.add_space(28.0);
-                                page_elements(ui, app, document, page, compact);
-                            }
-                            ui.add_space(24.0);
-                            paper_label(
-                                ui,
-                                "Document source",
-                                theme::sans(tokens::FS_3, FontWeight::SemiBold),
-                                PAPER_TEXT,
-                            );
-                            ui.add_space(7.0);
-                            paper_label(
-                                ui,
-                                "This source is the canonical project-owned ReportDocument. Page and document changes are applied as validated, revision-checked transactions and persisted with the project.",
-                                theme::sans(tokens::FS_1, FontWeight::Regular),
-                                PAPER_MUTED,
-                            );
-                        });
-                });
-        });
-    paint_pane_separators(ui, pane.response.rect, separators, t.color.border);
-}
-
-fn section_heading(ui: &mut Ui, marker: &str, title: &str, description: &str) {
-    let (line, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
-    ui.painter().hline(
-        line.x_range(),
-        line.center().y,
-        Stroke::new(1.0, PAPER_BORDER),
-    );
-    ui.add_space(13.0);
-    ui.horizontal_top(|ui| {
-        ui.set_width(ui.available_width());
-        ui.allocate_ui_with_layout(
-            Vec2::new(34.0, 0.0),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                paper_label(
-                    ui,
-                    marker,
-                    theme::mono(tokens::FS_2, FontWeight::SemiBold),
-                    PAPER_ACCENT,
-                );
-            },
-        );
-        ui.add_space(10.0);
-        ui.vertical(|ui| {
-            paper_label(
-                ui,
-                title,
-                theme::sans(15.0, FontWeight::SemiBold),
-                PAPER_TEXT,
-            );
-            ui.add_space(4.0);
-            paper_label(
-                ui,
-                description,
-                theme::sans(tokens::FS_1, FontWeight::Regular),
-                PAPER_MUTED,
-            );
-        });
-    });
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ReportJointYield {
     passing: usize,
@@ -1607,329 +1395,6 @@ impl ReportSummaryMetrics {
     }
 }
 
-fn summary_grid(ui: &mut Ui, metrics: ReportSummaryMetrics, compact: bool) {
-    let yield_value = metrics.joint_yield.map_or_else(
-        || "not run".to_owned(),
-        |joint| format!("{:.1}%", joint.percent()),
-    );
-    let pvt_value = metrics.pvt_completed.zip(metrics.pvt_total).map_or_else(
-        || "not run".to_owned(),
-        |(completed, total)| format!("{completed} / {total}"),
-    );
-    let cells = [
-        (
-            format!("{} / {}", metrics.checks_passing, metrics.checks_total),
-            "configured checks passing",
-        ),
-        (yield_value, "Monte Carlo yield estimate"),
-        (pvt_value, "PVT points completed"),
-    ];
-    if compact {
-        for (value, label) in cells {
-            summary_cell(ui, &value, label);
-            ui.add_space(8.0);
-        }
-    } else {
-        let width = ui.available_width();
-        let cell_width = ((width - 16.0) / 3.0).max(1.0);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
-            for (value, label) in cells {
-                ui.allocate_ui_with_layout(
-                    Vec2::new(cell_width, 76.0),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| summary_cell(ui, &value, label),
-                );
-            }
-        });
-    }
-}
-
-fn summary_cell(ui: &mut Ui, value: &str, label: &str) {
-    egui::Frame::new()
-        .fill(PAPER)
-        .stroke(Stroke::new(1.0, PAPER_BORDER))
-        .inner_margin(egui::Margin::same(14))
-        .show(ui, |ui| {
-            ui.set_min_width((ui.available_width() - 28.0).max(1.0));
-            paper_label(
-                ui,
-                value,
-                theme::sans(20.0, FontWeight::SemiBold),
-                PAPER_TEXT,
-            );
-            ui.add_space(4.0);
-            paper_label(
-                ui,
-                label,
-                theme::sans(tokens::FS_0, FontWeight::Regular),
-                PAPER_FAINT,
-            );
-        });
-}
-
-fn page_elements(
-    ui: &mut Ui,
-    app: &mut RSpiceApp,
-    document: &ReportDocument,
-    page: &crate::results::report_document::ReportPage,
-    compact: bool,
-) {
-    paper_label(
-        ui,
-        "Page elements",
-        theme::sans(tokens::FS_3, FontWeight::SemiBold),
-        PAPER_TEXT,
-    );
-    ui.add_space(8.0);
-
-    let blocks = page
-        .sections()
-        .iter()
-        .flat_map(|section| section.blocks())
-        .collect::<Vec<_>>();
-    if blocks.is_empty() {
-        egui::Frame::new()
-            .fill(PAPER)
-            .stroke(Stroke::new(1.0, PAPER_BORDER))
-            .inner_margin(egui::Margin::same(14))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                paper_label(
-                    ui,
-                    "No page elements. Add authored content or insert an immutable result document.",
-                    theme::sans(tokens::FS_1, FontWeight::Regular),
-                    PAPER_MUTED,
-                );
-            });
-    } else {
-        ScrollArea::horizontal()
-            .id_salt(("report-page-elements", page.id()))
-            .show(ui, |ui| {
-                ui.set_min_width(if compact {
-                    680.0
-                } else {
-                    ui.available_width().max(680.0)
-                });
-                let previous_faint_background = ui.visuals().faint_bg_color;
-                ui.visuals_mut().faint_bg_color = Color32::from_rgb(249, 249, 247);
-                TableBuilder::new(ui)
-                    .id_salt(("report-page-elements-table", page.id()))
-                    .striped(true)
-                    .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                    .column(Column::remainder().at_least(150.0))
-                    .column(Column::initial(110.0).at_least(96.0))
-                    .column(Column::remainder().at_least(180.0))
-                    .column(Column::initial(104.0).at_least(90.0))
-                    .column(Column::initial(46.0).at_least(42.0))
-                    .header(27.0, |mut header| {
-                        for label in ["Element", "Type", "Bound source", "State", "On"] {
-                            header.col(|ui| {
-                                ui.painter().rect_filled(
-                                    ui.max_rect(),
-                                    0.0,
-                                    Color32::from_rgb(244, 243, 239),
-                                );
-                                ui.label(
-                                    egui::RichText::new(label)
-                                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                                        .color(PAPER_MUTED),
-                                );
-                            });
-                        }
-                    })
-                    .body(|mut body| {
-                        for block in blocks {
-                            body.row(24.0, |mut row| {
-                                row.col(|ui| {
-                                    let selected =
-                                        app.state.workbench.report_authoring.selected_report_block
-                                            == Some(block.id());
-                                    if ui
-                                        .selectable_label(
-                                            selected,
-                                            egui::RichText::new(report_block_element_title(
-                                                block.kind(),
-                                            ))
-                                            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                                            .color(PAPER_TEXT),
-                                        )
-                                        .clicked()
-                                    {
-                                        app.state
-                                            .workbench
-                                            .report_authoring
-                                            .selected_report_block = Some(block.id());
-                                    }
-                                });
-                                row.col(|ui| {
-                                    ui.label(
-                                        egui::RichText::new(report_block_kind_label(block.kind()))
-                                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                            .color(PAPER_MUTED),
-                                    );
-                                });
-                                row.col(|ui| {
-                                    ui.label(
-                                        egui::RichText::new(report_block_bound_source(
-                                            block.kind(),
-                                        ))
-                                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                        .color(PAPER_MUTED),
-                                    );
-                                });
-                                row.col(|ui| {
-                                    let (state, color) = report_block_state(&app.state, block);
-                                    ui.label(
-                                        egui::RichText::new(state)
-                                            .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                                            .color(color),
-                                    );
-                                });
-                                row.col(|ui| {
-                                    let mut enabled = block.enabled();
-                                    let response = ui
-                                        .add_enabled_ui(report_mutation_allowed(&app.state), |ui| {
-                                            paper_switch(ui, &mut enabled)
-                                        })
-                                        .inner
-                                        .on_disabled_hover_text(report_mutation_block_reason(
-                                            &app.state,
-                                        ));
-                                    if response.changed() {
-                                        set_report_block_enabled(
-                                            app,
-                                            document.id(),
-                                            block.id(),
-                                            enabled,
-                                        );
-                                    }
-                                });
-                            });
-                        }
-                    });
-                ui.visuals_mut().faint_bg_color = previous_faint_background;
-            });
-    }
-
-    ui.add_space(10.0);
-    let writable = report_mutation_allowed(&app.state);
-    let selected_block_exists = app
-        .state
-        .workbench
-        .report_authoring
-        .selected_report_block
-        .is_some_and(|block_id| document.block(block_id).is_some());
-    let retained_figure_available = !report_figure_options(&app.state).is_empty();
-    ui.horizontal_wrapped(|ui| {
-        let add = Button::new("Add element…")
-            .enabled(writable)
-            .show(ui)
-            .on_disabled_hover_text(report_mutation_block_reason(&app.state));
-        if add.clicked() {
-            open_add_report_element(app);
-        }
-        let remove = Button::new("Remove")
-            .enabled(writable && selected_block_exists)
-            .show(ui)
-            .on_disabled_hover_text(if writable {
-                "Select a page element to remove."
-            } else {
-                report_mutation_block_reason(&app.state)
-            });
-        if remove.clicked() {
-            app.state
-                .workbench
-                .report_authoring
-                .remove_report_block_open = true;
-            app.state.workbench.report_authoring.transaction_error = None;
-        }
-        let insert = Button::new("Insert result document…")
-            .enabled(writable && retained_figure_available)
-            .show(ui)
-            .on_disabled_hover_text(if writable {
-                "Create or retain a result document before inserting it into this report page."
-            } else {
-                report_mutation_block_reason(&app.state)
-            });
-        if insert.clicked() {
-            open_insert_result_document(app);
-        }
-    });
-    let banner = egui::Frame::new()
-        .fill(PAPER)
-        .outer_margin(egui::Margin::same(8))
-        .inner_margin(egui::Margin::same(8))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            paper_label(
-                ui,
-                "Release closure validates this artifact against exact immutable result revisions and dataset bindings before building a signed package. Report elements may state blocked gates but cannot change source-owned gate state.",
-                theme::sans(tokens::FS_1, FontWeight::Regular),
-                PAPER_TEXT,
-            );
-        });
-    paint_dashed_rect(ui, banner.response.rect, PAPER_BORDER);
-}
-
-fn report_block_element_title(kind: &ReportBlockKind) -> Cow<'_, str> {
-    match kind {
-        ReportBlockKind::PlotFigure(block) => Cow::Borrowed(&block.caption),
-        ReportBlockKind::DataTable(block) => Cow::Borrowed(&block.title),
-        ReportBlockKind::Datasheet(block) => Cow::Borrowed(&block.title),
-        ReportBlockKind::Requirements(block) => Cow::Borrowed(&block.title),
-        ReportBlockKind::Specifications(block) => Cow::Borrowed(&block.title),
-        ReportBlockKind::Prose(block) => {
-            let (text, _) = bounded_text_preview(&block.markdown, 56);
-            text
-        }
-        ReportBlockKind::ReviewNote(block) => Cow::Owned(format!("Review note · {}", block.author)),
-        ReportBlockKind::Evidence(block) => Cow::Borrowed(&block.title),
-    }
-}
-
-fn report_block_bound_source(kind: &ReportBlockKind) -> String {
-    kind.reference().map_or_else(
-        || "Authored report source".to_owned(),
-        |reference| {
-            format!(
-                "{} · {}",
-                report_source_label(&reference.snapshot().source),
-                if reference.is_frozen() {
-                    "frozen"
-                } else {
-                    "linked"
-                }
-            )
-        },
-    )
-}
-
-fn report_block_state(
-    state: &AppState,
-    block: &crate::results::report_document::ReportBlock,
-) -> (&'static str, Color32) {
-    if !block.enabled() {
-        ("excluded", PAPER_FAINT)
-    } else if block
-        .kind()
-        .reference()
-        .is_some_and(ReportReferenceMode::is_frozen)
-    {
-        ("frozen", Color32::from_rgb(72, 122, 78))
-    } else if block
-        .kind()
-        .reference()
-        .is_some_and(|reference| !report_reference_resolves(state, reference))
-    {
-        ("source missing", Color32::from_rgb(177, 64, 52))
-    } else if block.kind().reference().is_some() {
-        ("bound", Color32::from_rgb(72, 122, 78))
-    } else {
-        ("authored", PAPER_MUTED)
-    }
-}
-
 fn report_reference_resolves(state: &AppState, reference: &ReportReferenceMode) -> bool {
     let snapshot = reference.snapshot();
     match &snapshot.source {
@@ -1963,366 +1428,6 @@ fn report_reference_resolves(state: &AppState, reference: &ReportReferenceMode) 
         }
         ReportSourceId::ExternalRecord { .. } => true,
     }
-}
-
-fn bounded_text_preview(value: &str, maximum_characters: usize) -> (Cow<'_, str>, bool) {
-    value.char_indices().nth(maximum_characters).map_or_else(
-        || (Cow::Borrowed(value), false),
-        |(byte_index, _)| {
-            let mut preview = String::with_capacity(byte_index.saturating_add(1));
-            preview.push_str(&value[..byte_index]);
-            preview.push('…');
-            (Cow::Owned(preview), true)
-        },
-    )
-}
-
-fn report_source_label(source: &ReportSourceId) -> String {
-    match source {
-        ReportSourceId::VisualizationDocument { document_id } => {
-            format!("visualization {document_id}")
-        }
-        ReportSourceId::Dataset { dataset_id } => format!("dataset {dataset_id}"),
-        ReportSourceId::VerificationEvidence { evidence_id } => {
-            format!("verification evidence {evidence_id}")
-        }
-        ReportSourceId::ExternalRecord { namespace, key } => {
-            format!("external {namespace}:{key}")
-        }
-    }
-}
-
-fn report_block_kind_label(kind: &ReportBlockKind) -> &'static str {
-    match kind {
-        ReportBlockKind::PlotFigure(_) => "PLOT FIGURE",
-        ReportBlockKind::DataTable(_) => "DATA TABLE",
-        ReportBlockKind::Datasheet(_) => "DATASHEET",
-        ReportBlockKind::Requirements(_) => "REQUIREMENTS",
-        ReportBlockKind::Specifications(_) => "SPECIFICATIONS",
-        ReportBlockKind::Prose(_) => "PROSE",
-        ReportBlockKind::ReviewNote(_) => "REVIEW NOTE",
-        ReportBlockKind::Evidence(_) => "EVIDENCE",
-    }
-}
-
-fn paper_label(ui: &mut Ui, text: &str, font: egui::FontId, color: Color32) {
-    ui.add(
-        egui::Label::new(egui::RichText::new(text).font(font).color(color))
-            .wrap()
-            .selectable(true),
-    );
-}
-
-fn inspector(
-    ui: &mut Ui,
-    app: &mut RSpiceApp,
-    document: &ReportDocument,
-    _selected_page: Option<ReportPageId>,
-    separators: PaneSeparators,
-) {
-    let t = Tokens::get(ui.ctx());
-    let width = ui.available_width();
-    let height = ui.available_height();
-    let writable = report_mutation_allowed(&app.state);
-    let blocked_reason = report_mutation_block_reason(&app.state);
-    let mut pending_edit = None;
-    let mut open_release_owner = false;
-    let mut open_package_assembly = false;
-    let pane = egui::Frame::new().fill(t.color.bg_panel).show(ui, |ui| {
-        ui.set_min_size(Vec2::new(width.max(1.0), height.max(1.0)));
-        ScrollArea::vertical()
-            .id_salt("report-authoring.inspector")
-            .show(ui, |ui| {
-                code_inspector_section(ui, "Output formats", None, |ui| {
-                    code_inspector_property_list(ui, |ui| {
-                        let mut output_formats = document.output_formats();
-                        let enabled_count = [
-                            output_formats.pdf_a,
-                            output_formats.html_bundle,
-                            output_formats.canonical_json,
-                            output_formats.selected_csv,
-                        ]
-                        .into_iter()
-                        .filter(|enabled| *enabled)
-                        .count();
-                        let pdf_a_enabled = output_formats.pdf_a;
-                        let html_bundle_enabled = output_formats.html_bundle;
-                        let canonical_json_enabled = output_formats.canonical_json;
-                        let selected_csv_enabled = output_formats.selected_csv;
-                        let mut changed = false;
-                        changed |= inspector_switch_row(
-                            ui,
-                            "PDF/A",
-                            &mut output_formats.pdf_a,
-                            writable && (!pdf_a_enabled || enabled_count > 1),
-                            writable && pdf_a_enabled && enabled_count == 1,
-                            blocked_reason,
-                        );
-                        changed |= inspector_switch_row(
-                            ui,
-                            "HTML bundle",
-                            &mut output_formats.html_bundle,
-                            writable && (!html_bundle_enabled || enabled_count > 1),
-                            writable && html_bundle_enabled && enabled_count == 1,
-                            blocked_reason,
-                        );
-                        changed |= inspector_switch_row(
-                            ui,
-                            "Canonical JSON",
-                            &mut output_formats.canonical_json,
-                            writable && (!canonical_json_enabled || enabled_count > 1),
-                            writable && canonical_json_enabled && enabled_count == 1,
-                            blocked_reason,
-                        );
-                        changed |= inspector_switch_row(
-                            ui,
-                            "Selected CSV",
-                            &mut output_formats.selected_csv,
-                            writable && (!selected_csv_enabled || enabled_count > 1),
-                            writable && selected_csv_enabled && enabled_count == 1,
-                            blocked_reason,
-                        );
-                        if changed {
-                            pending_edit =
-                                Some(DocumentPublicationEdit::OutputFormats(output_formats));
-                        }
-                    });
-                });
-                code_inspector_section(ui, "Publication", None, |ui| {
-                    code_inspector_property_list(ui, |ui| {
-                        let mut profile = document.publication_profile();
-                        let mut changed = false;
-                        changed |= inspector_publication_select(
-                            ui,
-                            "report-publication-template",
-                            "Template",
-                            &mut profile.template,
-                            &[
-                                (
-                                    ReportPublicationTemplate::OrganizationVerificationReport,
-                                    "Organization verification report",
-                                ),
-                                (
-                                    ReportPublicationTemplate::CustomerDatasheet,
-                                    "Customer datasheet",
-                                ),
-                                (
-                                    ReportPublicationTemplate::InternalReviewMemo,
-                                    "Internal review memo",
-                                ),
-                            ],
-                            writable,
-                            blocked_reason,
-                        );
-                        changed |= inspector_publication_select(
-                            ui,
-                            "report-publication-page-size",
-                            "Page size",
-                            &mut profile.page_size,
-                            &[
-                                (ReportPublicationPageSize::A4Portrait, "A4 portrait"),
-                                (
-                                    ReportPublicationPageSize::UsLetterPortrait,
-                                    "US Letter portrait",
-                                ),
-                                (ReportPublicationPageSize::A3Landscape, "A3 landscape"),
-                            ],
-                            writable,
-                            blocked_reason,
-                        );
-                        changed |= inspector_publication_select(
-                            ui,
-                            "report-publication-draft-marking",
-                            "Draft marking",
-                            &mut profile.draft_marking,
-                            &[
-                                (
-                                    ReportDraftMarking::WatermarkWhileGatesOpen,
-                                    "Watermark while gates are open",
-                                ),
-                                (ReportDraftMarking::NeverWatermark, "Never watermark"),
-                            ],
-                            writable,
-                            blocked_reason,
-                        );
-                        changed |= inspector_publication_select(
-                            ui,
-                            "report-publication-numbering",
-                            "Numbering",
-                            &mut profile.numbering,
-                            &[
-                                (
-                                    ReportPageNumbering::SectionPageOfTotal,
-                                    "Section · page of total",
-                                ),
-                                (
-                                    ReportPageNumbering::ContinuousPageNumbers,
-                                    "Continuous page numbers",
-                                ),
-                            ],
-                            writable,
-                            blocked_reason,
-                        );
-                        changed |= inspector_publication_select(
-                            ui,
-                            "report-publication-precision",
-                            "Precision in tables",
-                            &mut profile.table_precision,
-                            &[
-                                (
-                                    ReportTablePrecision::SevenSignificantDigits,
-                                    "7 significant digits",
-                                ),
-                                (ReportTablePrecision::FullStoredF64, "Full stored f64"),
-                                (
-                                    ReportTablePrecision::MatchSourceDisplay,
-                                    "Match source display",
-                                ),
-                            ],
-                            writable,
-                            blocked_reason,
-                        );
-                        if changed {
-                            pending_edit =
-                                Some(DocumentPublicationEdit::PublicationProfile(profile));
-                        }
-                    });
-                });
-                code_inspector_section(ui, "Release handoff", None, |ui| {
-                    code_inspector_property_list(ui, |ui| {
-                        let (bound_result, exact_binding) =
-                            report_bound_result_label(&app.state, document);
-                        property_row(ui, "Artifact identity", &document.id().to_string());
-                        property_row(ui, "Bound result", &bound_result);
-                        property_row(ui, "Candidate", "Not attached");
-                        property_row(
-                            ui,
-                            "Compatibility",
-                            if exact_binding {
-                                "awaiting candidate review"
-                            } else {
-                                "result binding incomplete"
-                            },
-                        );
-                        property_row(ui, "Package owner", "Release closure");
-                        property_row(ui, "Physical DRC", "No retained DRC evidence");
-                    });
-                    release_handoff_card(
-                        ui,
-                        document,
-                        report_bound_result_label(&app.state, document).1,
-                        &mut open_release_owner,
-                    );
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        ui.add_space(10.0);
-                        if Button::new("Open package assembly").show(ui).clicked() {
-                            open_package_assembly = true;
-                        }
-                    });
-                    ui.add_space(8.0);
-                });
-                if let Some(error) = &app.state.workbench.report_authoring.transaction_error {
-                    ui.add_space(8.0);
-                    ui.colored_label(t.color.err, error);
-                    ui.add_space(8.0);
-                }
-            });
-    });
-    paint_pane_separators(ui, pane.response.rect, separators, t.color.border);
-    if let Some(setting) = pending_edit {
-        commit_document_publication_setting(app, document.id(), setting);
-    }
-    if open_release_owner || open_package_assembly {
-        open_release_cockpit(app);
-    }
-}
-
-fn inspector_switch_row(
-    ui: &mut Ui,
-    label: &str,
-    value: &mut bool,
-    enabled: bool,
-    protected_last_output: bool,
-    blocked_reason: &str,
-) -> bool {
-    let t = Tokens::get(ui.ctx());
-    let before = *value;
-    ui.horizontal(|ui| {
-        ui.set_width(ui.available_width());
-        ui.add_space(10.0);
-        ui.label(
-            egui::RichText::new(label)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text),
-        );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add_space(10.0);
-            let response = ui
-                .add_enabled_ui(enabled, |ui| paper_switch(ui, value))
-                .inner;
-            if !enabled {
-                response.on_disabled_hover_text(if protected_last_output {
-                    "At least one report output format must remain enabled."
-                } else {
-                    blocked_reason
-                });
-            }
-        });
-    });
-    *value != before
-}
-
-fn inspector_publication_select<T>(
-    ui: &mut Ui,
-    id: &'static str,
-    label: &str,
-    value: &mut T,
-    options: &[(T, &'static str)],
-    enabled: bool,
-    blocked_reason: &str,
-) -> bool
-where
-    T: Copy + PartialEq,
-{
-    let t = Tokens::get(ui.ctx());
-    let selected = options
-        .iter()
-        .position(|(candidate, _)| candidate == value)
-        .unwrap_or(0);
-    ui.horizontal(|ui| {
-        ui.add_space(10.0);
-        ui.label(
-            egui::RichText::new(label)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-        );
-    });
-    let labels = options
-        .iter()
-        .map(|(_, label)| (*label).to_owned())
-        .collect::<Vec<_>>();
-    let mut selected_index = None;
-    ui.horizontal(|ui| {
-        ui.add_space(10.0);
-        let width = (ui.available_width() - 20.0).max(80.0);
-        let output = ui.add_enabled_ui(enabled, |ui| {
-            select(ui, id, label, options[selected].1, &labels, width)
-        });
-        if !enabled {
-            output.response.on_disabled_hover_text(blocked_reason);
-        }
-        selected_index = output.inner;
-    });
-    ui.add_space(5.0);
-    if let Some(index) = selected_index.filter(|index| *index < options.len()) {
-        let next = options[index].0;
-        if *value != next {
-            *value = next;
-            return true;
-        }
-    }
-    false
 }
 
 fn report_bound_result_label(state: &AppState, document: &ReportDocument) -> (String, bool) {
@@ -2364,75 +1469,6 @@ fn report_bound_result_label(state: &AppState, document: &ReportDocument) -> (St
     (label, true)
 }
 
-fn release_handoff_card(
-    ui: &mut Ui,
-    document: &ReportDocument,
-    exact_result_binding: bool,
-    open_owner: &mut bool,
-) {
-    let t = Tokens::get(ui.ctx());
-    let shown = egui::Frame::new()
-        .fill(t.color.bg_panel_2)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .inner_margin(egui::Margin::symmetric(10, 8))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("OWNED BY RELEASE CLOSURE")
-                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                        .color(t.color.text_dim),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new(if exact_result_binding {
-                            "ready for candidate review"
-                        } else {
-                            "binding incomplete"
-                        })
-                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                        .color(if exact_result_binding {
-                            t.color.ok
-                        } else {
-                            t.color.err
-                        }),
-                    );
-                });
-            });
-            ui.add_space(5.0);
-            let id = document.id().to_string();
-            ui.label(
-                egui::RichText::new(format!(
-                    "Attach report {} to a release candidate",
-                    id.get(..8).unwrap_or(&id)
-                ))
-                .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
-                .color(t.color.text),
-            );
-            ui.label(
-                egui::RichText::new(
-                    "Compatibility review only; packaging and promotion remain external.",
-                )
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-            );
-            ui.add_space(6.0);
-            let button_width = ui.available_width();
-            if Button::new("Open owner →")
-                .min_width(button_width)
-                .show(ui)
-                .clicked()
-            {
-                *open_owner = true;
-            }
-        });
-    ui.painter().hline(
-        shown.response.rect.x_range(),
-        shown.response.rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-}
-
 fn open_release_cockpit(app: &mut RSpiceApp) {
     if let Err(error) = app.state.workbench.navigate(
         SurfaceRoute::surface(SurfaceId::ReleaseCockpit),
@@ -2442,31 +1478,6 @@ fn open_release_cockpit(app: &mut RSpiceApp) {
             .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                 "Cannot open release package assembly: {error}"
             )));
-    }
-}
-
-fn paint_pane_separators(ui: &Ui, rect: Rect, separators: PaneSeparators, color: Color32) {
-    let stroke = Stroke::new(1.0, color);
-    if separators.top {
-        let y = rect.top() + 0.5;
-        ui.painter().line_segment(
-            [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
-            stroke,
-        );
-    }
-    if separators.right {
-        let x = rect.right() - 0.5;
-        ui.painter().line_segment(
-            [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
-            stroke,
-        );
-    }
-    if separators.bottom {
-        let y = rect.bottom() - 0.5;
-        ui.painter().line_segment(
-            [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
-            stroke,
-        );
     }
 }
 
@@ -3847,14 +2858,6 @@ fn report_template_from_index(index: usize) -> ReportTemplate {
     }
 }
 
-fn report_template_label(template: ReportTemplate) -> &'static str {
-    match template {
-        ReportTemplate::ReleaseVerification42 => "Release verification 4.2",
-        ReportTemplate::DesignReview => "Design review",
-        ReportTemplate::ModelQualification => "Model qualification",
-    }
-}
-
 fn page_update_policy_index(policy: ReportPageUpdatePolicy) -> usize {
     match policy {
         ReportPageUpdatePolicy::RefreshLinkedAutomatically => 0,
@@ -3866,13 +2869,6 @@ fn page_update_policy_from_index(index: usize) -> ReportPageUpdatePolicy {
     match index {
         1 => ReportPageUpdatePolicy::FreezeSelectedRevision,
         _ => ReportPageUpdatePolicy::RefreshLinkedAutomatically,
-    }
-}
-
-fn page_update_policy_label(policy: ReportPageUpdatePolicy) -> &'static str {
-    match policy {
-        ReportPageUpdatePolicy::RefreshLinkedAutomatically => "Refresh linked automatically",
-        ReportPageUpdatePolicy::FreezeSelectedRevision => "Freeze selected revision",
     }
 }
 
@@ -3889,13 +2885,6 @@ fn report_blocked_gate_text_policy_label(policy: ReportBlockedGateTextPolicy) ->
         ReportBlockedGateTextPolicy::VerbatimFromSource => "State verbatim from source",
         ReportBlockedGateTextPolicy::SummarizeWithLink => "Summarize with link",
     }
-}
-
-fn page_marker(_index: usize, title: &str) -> &str {
-    INITIAL_PAGES
-        .iter()
-        .find(|(_, expected)| *expected == title)
-        .map_or("+", |(marker, _)| *marker)
 }
 
 fn timestamp_unix_ms() -> u64 {

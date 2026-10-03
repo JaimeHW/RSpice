@@ -7,6 +7,10 @@
 //! across two.
 
 use super::*;
+use rspice_results::report_document::{
+    ReportDraftMarking, ReportOutputFormats, ReportPageNumbering, ReportPublicationPageSize,
+    ReportPublicationProfile, ReportPublicationTemplate, ReportTablePrecision,
+};
 
 #[test]
 fn responsive_report_builder_matches_mockup_breakpoints() {
@@ -691,21 +695,6 @@ fn changing_active_run_does_not_mutate_the_project_report_document() {
     app.state.simulation.active_run_idx = Some(0);
     app.state.simulation.active_run_idx = Some(1);
     assert_eq!(active_document(&app.state), Some(&document));
-}
-
-#[test]
-fn prose_preview_is_unicode_safe_and_bounded() {
-    const MAXIMUM_CHARACTERS: usize = 4_096;
-    let exact = "a".repeat(MAXIMUM_CHARACTERS);
-    let (preview, truncated) = bounded_text_preview(&exact, MAXIMUM_CHARACTERS);
-    assert!(!truncated);
-    assert_eq!(preview, exact);
-
-    let oversized = format!("{}é-tail", exact);
-    let (preview, truncated) = bounded_text_preview(&oversized, MAXIMUM_CHARACTERS);
-    assert!(truncated);
-    assert_eq!(preview.chars().count(), MAXIMUM_CHARACTERS + 1);
-    assert!(preview.ends_with('…'));
 }
 
 #[test]
