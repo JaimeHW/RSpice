@@ -27,6 +27,7 @@ pub mod scatter;
 pub mod sensitivity;
 pub mod smith_chart;
 pub mod soa;
+pub mod specs;
 pub mod strip;
 pub mod table;
 pub mod transfer_function;
