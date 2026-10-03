@@ -81,15 +81,15 @@ pub use rspice_results::family_metadata::{
     AnalysisResultFamilyMetadata, MonteCarloVariableMetadata,
 };
 pub use rspice_results::operating_point::{
-    DcOpResult, OperatingPointAnnotationEvidence, OperatingPointInitialGuessEvidence,
-    OperatingPointValue,
+    DcOpResult, OperatingPointAnnotationEvidence, OperatingPointValue,
 };
 #[cfg(test)]
 pub use rspice_results::operating_point::{
     OperatingPointAccuracyEvidence, OperatingPointDeviceDetailEvidence,
-    OperatingPointHomotopyEvidence, OperatingPointNodeInitializationEvidence,
-    OperatingPointPreviousStateEvidence, OperatingPointProcessEvidence,
-    OperatingPointSaveDeviceEvidence, OperatingPointTemperatureEvidence,
+    OperatingPointHomotopyEvidence, OperatingPointInitialGuessEvidence,
+    OperatingPointNodeInitializationEvidence, OperatingPointPreviousStateEvidence,
+    OperatingPointProcessEvidence, OperatingPointSaveDeviceEvidence,
+    OperatingPointTemperatureEvidence,
 };
 #[cfg(test)]
 pub use rspice_results::provenance::AnalysisResultPvtPoint;

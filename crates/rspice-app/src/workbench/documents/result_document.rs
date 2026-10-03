@@ -2343,7 +2343,7 @@ pub struct ResultsState {
     /// Memoized viewer projections; see [`view_plans::ViewPlans`].
     plans: view_plans::ViewPlans,
     /// Row/column selection for the TABLE viewer.
-    pub table: table::TableView,
+    pub table: rspice_results_ui::table::TableView,
     /// Last row count the table rendered, as its footer states it. Written
     /// by the viewer so the docbar reports what is actually on screen
     /// rather than recomputing a second, possibly different, answer.

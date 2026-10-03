@@ -175,7 +175,7 @@ fn every_results_surface_paints_through_this_boundary() {
         ),
         (
             "workbench/documents/result_document/table.rs",
-            "notations.display(name)",
+            ".display(name)",
         ),
         (
             "workbench/documents/result_document/op_inspector.rs",
@@ -204,6 +204,7 @@ fn every_results_surface_paints_through_this_boundary() {
     let viewers = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-results-ui/src");
     for (path, site) in [
         ("waves/header.rs", "display_name(&trace.name)"),
+        ("table.rs", "display_name(name)"),
         ("op_inspector.rs", "source.mapping.display_node(&leaf)"),
         ("op_inspector.rs", "source.mapping.display_node(&row.name)"),
     ] {
