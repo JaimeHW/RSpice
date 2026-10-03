@@ -69,12 +69,12 @@ use crate::hardcopy::sources::{
     MAX_HARDCOPY_SOURCE_SET_MEMBERS,
 };
 use crate::workbench::documents::result_document::ResultViewer;
-#[cfg(test)]
-use crate::workbench::documents::visualization_studio::VisualizationStudioState;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use rspice_results::studio_presentation::VisualizationPane as StudioPane;
 #[cfg(test)]
 use rspice_results::studio_presentation::VisualizationStudioPresentation;
+#[cfg(test)]
+use rspice_results_ui::studio::session::VisualizationStudioState;
 #[cfg(test)]
 use rspice_schematic_editor::symbol_editor::session::SymbolSelection;
 

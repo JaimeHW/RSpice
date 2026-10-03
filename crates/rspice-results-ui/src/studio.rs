@@ -4,6 +4,7 @@ pub mod chrome;
 pub mod dock;
 pub mod inspector;
 pub mod sections;
+pub mod session;
 pub mod stage;
 pub mod viewers;
 pub mod widgets;

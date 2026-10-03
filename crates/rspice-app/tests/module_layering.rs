@@ -820,11 +820,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
         "documents/visualization_studio",
         2,
     ),
-    (
-        "hardcopy_adapters/sources",
-        "documents/visualization_studio",
-        1,
-    ),
     ("surfaces", "documents/visualization_studio", 1),
     ("feature_availability", "design_system", 1),
     // A route describing its own catalog and availability.

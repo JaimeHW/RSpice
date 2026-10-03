@@ -1394,8 +1394,7 @@ pub struct WorkbenchState {
     /// stable viewer composition and annotation identities only; immutable
     /// result samples remain owned by the result datasets.
     #[serde(default)]
-    pub visualization_studio:
-        crate::workbench::documents::visualization_studio::VisualizationStudioState,
+    pub visualization_studio: rspice_results_ui::studio::session::VisualizationStudioState,
     /// Runtime-only draft for the project-owned result-document transaction.
     #[serde(skip)]
     pub create_result_document: CreateResultDocumentDialogState,
@@ -1555,7 +1554,7 @@ impl Default for WorkbenchState {
             preflight: PreflightDialogState::default(),
             jobs_manager: JobsManagerState::default(),
             specialist_tool_browser: SpecialistToolBrowserState::default(),
-            visualization_studio: crate::workbench::documents::visualization_studio::VisualizationStudioState::default(),
+            visualization_studio: rspice_results_ui::studio::session::VisualizationStudioState::default(),
             create_result_document: CreateResultDocumentDialogState::default(),
             result_import: ResultImportDialogState::default(),
             report_authoring: ReportAuthoringState::default(),

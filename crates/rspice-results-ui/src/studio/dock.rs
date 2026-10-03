@@ -75,3 +75,22 @@ pub fn actions_sheet(
             }
         });
 }
+
+pub fn compact_dock_geometry(viewport_width: f32) -> (f32, f32) {
+    let window_width = (viewport_width - 18.0).clamp(180.0, 520.0);
+    let body_max_width = (window_width - 24.0).max(156.0);
+    (window_width, body_max_width)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn compact_dialog_body_stays_inside_phone_and_tablet_frames() {
+        assert_eq!(compact_dock_geometry(390.0), (372.0, 348.0));
+        assert_eq!(compact_dock_geometry(800.0), (520.0, 496.0));
+        let (window, body) = compact_dock_geometry(180.0);
+        assert!(window <= 180.0);
+        assert!(body < window);
+    }
+}

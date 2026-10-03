@@ -104,9 +104,9 @@ fn workbench_without_a_project_page_defaults_to_overview() {
 
 #[test]
 fn visualization_studio_presentation_round_trips_with_the_workbench() {
-    use crate::workbench::documents::visualization_studio::{
-        ViewerTool, VisualizationSection, VisualizationStudioState,
-    };
+    use crate::workbench::documents::visualization_studio::{ViewerTool, VisualizationSection};
+
+    use rspice_results_ui::studio::session::VisualizationStudioState;
 
     let mut state = WorkbenchState::default();
     state.visualization_studio.section = VisualizationSection::Axes;

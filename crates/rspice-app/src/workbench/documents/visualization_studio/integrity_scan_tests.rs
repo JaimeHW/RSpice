@@ -1394,12 +1394,3 @@ fn versioned_entity_projection_retains_exact_bindings_and_stable_identities() {
     assert!(rows[4].binding.starts_with(&dataset_prefix));
     assert!(rows[6].binding.starts_with(&dataset_prefix));
 }
-
-#[test]
-fn compact_dialog_body_stays_inside_phone_and_tablet_frames() {
-    assert_eq!(compact_dock_geometry(390.0), (372.0, 348.0));
-    assert_eq!(compact_dock_geometry(800.0), (520.0, 496.0));
-    let (window, body) = compact_dock_geometry(180.0);
-    assert!(window <= 180.0);
-    assert!(body < window);
-}
