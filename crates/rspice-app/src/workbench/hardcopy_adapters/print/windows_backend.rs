@@ -1054,7 +1054,7 @@ impl NativeSpoolBackend for WindowsGdiSpoolBackend {
 
     fn write_page(
         &mut self,
-        page: &crate::workbench::hardcopy_adapters::render::PrinterRasterPage,
+        page: &rspice_hardcopy::render::PrinterRasterPage,
     ) -> Result<(), HardcopyPrintError> {
         if page.width() != self.expected_width || page.height() != self.expected_height {
             return Err(HardcopyPrintError::PrinterPublicationMismatch(format!(

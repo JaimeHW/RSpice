@@ -23,11 +23,6 @@ use rspice_publication_contract::{
 use crate::quantity::engineering::format_engineering_value;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SpecEntry};
 use crate::workbench::app_state::AppState;
-use crate::workbench::hardcopy_adapters::render::{
-    HardcopySceneMetadata, SceneFill, SceneFont, ScenePoint, ScenePrimitive, SceneTextRotation,
-    SemanticColor, StrokePattern as SceneStrokePattern, StrokeStyle, TextAnchor as SceneTextAnchor,
-    scene_from_resolved,
-};
 use crate::workbench::hardcopy_adapters::sources::{
     HardcopySemanticDocument, enumerate_retained_hardcopy_sources,
     prepare_retained_hardcopy_resolution,
@@ -36,6 +31,11 @@ use rspice_design::connectivity::summary::{
     component_pin_names_with_hierarchy, design_nets_with_hierarchy,
 };
 use rspice_design::hierarchy::HierarchySource;
+use rspice_hardcopy::render::{
+    HardcopySceneMetadata, SceneFill, SceneFont, ScenePoint, ScenePrimitive, SceneTextRotation,
+    SemanticColor, StrokePattern as SceneStrokePattern, StrokeStyle, TextAnchor as SceneTextAnchor,
+    scene_from_resolved,
+};
 use rspice_hardcopy_contract::{ContentExtent, HardcopyScope};
 
 /// Everything the caller decides about the publication; the builder derives
@@ -82,16 +82,14 @@ impl Default for PublicationDraft {
 /// the hardcopy pipeline's exact civil-date transform.
 pub(crate) fn publication_timestamp_utc() -> String {
     let seconds = crate::time_compat::unix_epoch().as_secs();
-    crate::workbench::hardcopy_adapters::render::HardcopyPublicationTimestamp::from_unix_seconds(
-        seconds,
-    )
-    .map(|stamp| {
-        format!(
-            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-            stamp.year, stamp.month, stamp.day, stamp.hour, stamp.minute, stamp.second
-        )
-    })
-    .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+    rspice_hardcopy::render::HardcopyPublicationTimestamp::from_unix_seconds(seconds)
+        .map(|stamp| {
+            format!(
+                "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+                stamp.year, stamp.month, stamp.day, stamp.hour, stamp.minute, stamp.second
+            )
+        })
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
 /// Why a snapshot could not be built. Every variant names the boundary that
@@ -1395,7 +1393,7 @@ fn effective_deck(state: &AppState) -> Option<NetlistSection> {
 mod tests {
     use super::*;
     use crate::state::WaveformData;
-    use crate::workbench::hardcopy_adapters::render::{ScenePrimitive, SceneRect};
+    use rspice_hardcopy::render::{ScenePrimitive, SceneRect};
     use rspice_hardcopy_contract::{ContentExtent, Length};
     use std::sync::Arc;
 

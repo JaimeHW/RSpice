@@ -4,8 +4,8 @@
 //! to the project. Preview and publication are resolved from the same sealed
 //! plan so the dialog cannot preview one layout and emit another.
 
-use crate::workbench::hardcopy_adapters::render::HardcopyRenderError;
 use crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
+use rspice_hardcopy::render::HardcopyRenderError;
 use rspice_hardcopy_contract::{
     ActiveHardcopySource, AuthoredSheetMedia, BackgroundMode, Bleed, ColorMapping, ContentExtent,
     CustomPaper, DecorationSetup, FontPolicy, HardcopyError, HardcopyPlan, HardcopyReceipt,
@@ -460,11 +460,10 @@ pub(crate) struct HardcopyDialogState {
     pub(crate) preview_failed_generation: Option<u64>,
     pub(crate) source_resolution_generation: u64,
     pub(crate) preview_plan: Option<std::sync::Arc<HardcopyPlan>>,
-    pub(crate) preview:
-        Option<std::sync::Arc<crate::workbench::hardcopy_adapters::render::HardcopyPreviewPage>>,
+    pub(crate) preview: Option<std::sync::Arc<rspice_hardcopy::render::HardcopyPreviewPage>>,
     pub(crate) preview_adjacent:
-        Option<std::sync::Arc<crate::workbench::hardcopy_adapters::render::HardcopyPreviewPage>>,
-    pub(crate) metadata: Option<crate::workbench::hardcopy_adapters::render::HardcopySceneMetadata>,
+        Option<std::sync::Arc<rspice_hardcopy::render::HardcopyPreviewPage>>,
+    pub(crate) metadata: Option<rspice_hardcopy::render::HardcopySceneMetadata>,
     pub(crate) body_scroll_offset: f32,
     pub(crate) busy: bool,
     pub(crate) cancellation: crate::workbench::hardcopy_adapters::print::HardcopyCancellationToken,

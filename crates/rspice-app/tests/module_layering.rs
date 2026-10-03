@@ -597,9 +597,8 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "lifecycle/recovery_checkpoint",
     "shortcuts/library_persistence",
     "shortcuts/artifacts",
-    // Hardcopy adapters: resolve sources, then render, then print.
+    // Application hardcopy source resolution and host printing adapters.
     "hardcopy_adapters/sources",
-    "hardcopy_adapters/render",
     "hardcopy_adapters/print",
     // The session aggregate: the design, the simulation, the document engines'
     // session state, and the dialogs' visibility. It sits directly below the

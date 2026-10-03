@@ -13,10 +13,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
 use crate::product::ContentDigest;
-use crate::workbench::hardcopy_adapters::render::{
+use crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
+use rspice_hardcopy::render::{
     HardcopyRenderer, HardcopySceneMetadata, RenderedHardcopyPublication, RenderedPrinterPages,
 };
-use crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
 use rspice_hardcopy_contract::{HardcopyPlan, OutputFormat};
 
 const NATIVE_EXECUTION_THREAD_NAME: &str = "rspice-hardcopy-render";

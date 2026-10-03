@@ -1065,10 +1065,8 @@ mod tests {
 
     use crate::product::ObjectRevision;
     use crate::state::SchematicSheetFormat;
-    use crate::workbench::hardcopy_adapters::render::{
-        HardcopyPublicationTimestamp, HardcopySceneMetadata,
-    };
     use crate::workbench::hardcopy_adapters::sources::resolve_blank_schematic_sheet_with_format;
+    use rspice_hardcopy::render::{HardcopyPublicationTimestamp, HardcopySceneMetadata};
     use rspice_hardcopy_contract::sources::HardcopySourceIdentity;
     use rspice_hardcopy_contract::{HardcopyDocumentId, HardcopyPlanId, HardcopyScope};
 

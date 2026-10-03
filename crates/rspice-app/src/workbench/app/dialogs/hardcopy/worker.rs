@@ -84,7 +84,7 @@ mod browser {
     pub(crate) fn start_preview(
         plan: &rspice_hardcopy_contract::HardcopyPlan,
         source: &crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument,
-        metadata: crate::workbench::hardcopy_adapters::render::HardcopySceneMetadata,
+        metadata: rspice_hardcopy::render::HardcopySceneMetadata,
         page_indices: Vec<usize>,
         dpi: u16,
         epoch: u64,
@@ -113,7 +113,7 @@ mod browser {
     pub(crate) fn start_publication(
         plan: &rspice_hardcopy_contract::HardcopyPlan,
         source: &crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument,
-        metadata: crate::workbench::hardcopy_adapters::render::HardcopySceneMetadata,
+        metadata: rspice_hardcopy::render::HardcopySceneMetadata,
         package_multi_part: bool,
         epoch: u64,
         generation: u64,
@@ -456,9 +456,6 @@ mod tests {
     use super::*;
     use crate::state::{Point, Wire};
     use crate::workbench::AppState;
-    use crate::workbench::hardcopy_adapters::render::{
-        HardcopyPreviewPage, RenderedHardcopyPublication,
-    };
     use crate::workbench::hardcopy_adapters::sources::{
         PreparedRetainedHardcopyResolution, prepare_retained_hardcopy_resolution,
         resolve_retained_hardcopy_source,
@@ -466,6 +463,7 @@ mod tests {
     use crate::workbench::state::WorkspaceDocumentId;
     use rspice_app_types::product::ContentDigest;
     use rspice_formats::zip::deterministic_stored_zip;
+    use rspice_hardcopy::render::{HardcopyPreviewPage, RenderedHardcopyPublication};
     use rspice_hardcopy::render::{HardcopyRenderer, HardcopySceneMetadata};
     use rspice_hardcopy::sources::ResolvedHardcopyDocument;
     use rspice_hardcopy_contract::{
@@ -616,7 +614,7 @@ mod tests {
     }
 
     fn fixture_metadata(source: &ResolvedHardcopyDocument) -> HardcopySceneMetadata {
-        crate::workbench::hardcopy_adapters::render::source_metadata(source, "RSpice worker tests")
+        crate::workbench::hardcopy_adapters::tests::source_metadata(source, "RSpice worker tests")
             .expect("fixture metadata is valid")
     }
 

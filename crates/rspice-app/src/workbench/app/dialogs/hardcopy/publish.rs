@@ -42,17 +42,15 @@ use crate::workbench::hardcopy_adapters::print::{
 use crate::workbench::hardcopy_adapters::print::{
     HardcopyCancellationToken, PrinterCapabilitySnapshot,
 };
-#[cfg(test)]
-use crate::workbench::hardcopy_adapters::render::HardcopyRenderer;
-#[cfg(target_arch = "wasm32")]
-use crate::workbench::hardcopy_adapters::render::RenderedHardcopyPublication;
-use crate::workbench::hardcopy_adapters::render::{
-    HardcopyPublicationTimestamp, HardcopySceneMetadata,
-};
 use crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
 use crate::workbench::workflows::export_workflow::{
     ObservedExportDestination, SaveDialogConfig, export_completion_message,
 };
+#[cfg(test)]
+use rspice_hardcopy::render::HardcopyRenderer;
+#[cfg(target_arch = "wasm32")]
+use rspice_hardcopy::render::RenderedHardcopyPublication;
+use rspice_hardcopy::render::{HardcopyPublicationTimestamp, HardcopySceneMetadata};
 #[cfg(target_arch = "wasm32")]
 use rspice_hardcopy_contract::HardcopyArtifactIdentity;
 use rspice_hardcopy_contract::{
@@ -1044,8 +1042,7 @@ fn active_retained_source_selection(
 fn metadata_for(
     app: &RSpiceApp,
     resolved: &ResolvedHardcopyDocument,
-) -> Result<HardcopySceneMetadata, crate::workbench::hardcopy_adapters::render::HardcopyRenderError>
-{
+) -> Result<HardcopySceneMetadata, rspice_hardcopy::render::HardcopyRenderError> {
     let mut metadata =
         HardcopySceneMetadata::try_new(resolved.authority().display_name(), "RSpice")?;
     metadata.set_publication_timestamp(HardcopyPublicationTimestamp::from_unix_seconds(

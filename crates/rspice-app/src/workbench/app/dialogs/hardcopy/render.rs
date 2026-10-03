@@ -23,10 +23,8 @@ use crate::ui::widgets::{
 };
 use crate::workbench::app::RSpiceApp;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::workbench::hardcopy_adapters::render::HardcopyRenderer;
-use crate::workbench::hardcopy_adapters::render::{
-    HardcopyPreviewPage, HardcopyRenderError, max_raster_dpi,
-};
+use rspice_hardcopy::render::HardcopyRenderer;
+use rspice_hardcopy::render::{HardcopyPreviewPage, HardcopyRenderError, max_raster_dpi};
 use rspice_hardcopy_contract::{
     AuthoredSheetMedia, BackgroundMode, ColorMapping, HardcopyDocumentKind, HardcopyScope, Length,
     LengthUnit, MAX_RASTER_DPI, MIN_RASTER_DPI, Orientation, OutputFormat,

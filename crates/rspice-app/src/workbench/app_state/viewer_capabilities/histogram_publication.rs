@@ -6,8 +6,6 @@ use crate::state::{
     SimulationRunLifecycle, SimulationRunProvenance,
 };
 use crate::workbench::ResultViewer;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::workbench::hardcopy_adapters::render::{HardcopyPublicationTimestamp, HardcopyRenderer};
 use crate::workbench::hardcopy_adapters::sources::{
     HardcopySemanticDocument, prepare_retained_hardcopy_resolution,
 };
@@ -16,6 +14,8 @@ use crate::workbench::hardcopy_adapters::sources::{
     PreparedRetainedHardcopyResolution, SemanticAxisKind,
 };
 use crate::workbench::state::WorkspaceDocumentId;
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_hardcopy::render::{HardcopyPublicationTimestamp, HardcopyRenderer};
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_hardcopy_contract::HardcopyPlan;
 use rspice_hardcopy_contract::{
@@ -161,7 +161,7 @@ fn histogram_publication_renders_every_mode_after_worker_transfer() {
             )
             .unwrap();
             let mut metadata =
-                crate::workbench::hardcopy_adapters::render::source_metadata(&source, "RSpice")
+                crate::workbench::hardcopy_adapters::tests::source_metadata(&source, "RSpice")
                     .unwrap();
             metadata.set_publication_timestamp(
                 HardcopyPublicationTimestamp::from_unix_seconds(1_788_761_600).unwrap(),

@@ -20,12 +20,10 @@ use crate::workbench::hardcopy_adapters::print::{
     HardcopyCancellationToken, HardcopyPrintError, discover_native_printers,
     handoff_desktop_print_document, spool_native_hardcopy,
 };
-use crate::workbench::hardcopy_adapters::render::{
-    RenderedHardcopyPublication, RenderedPrinterPages,
-};
 use crate::workbench::workflows::export_workflow::{
     ExportWorkflowIo, NativeExportWorkflowIo, ObservedExportDestination, deterministic_stored_zip,
 };
+use rspice_hardcopy::render::{RenderedHardcopyPublication, RenderedPrinterPages};
 use rspice_hardcopy_contract::{
     CancellationPhase, HardcopyArtifactIdentity, HardcopyFailureCode, HardcopyOutcome,
     HardcopyPlan, OutputFormat, RenderTarget,

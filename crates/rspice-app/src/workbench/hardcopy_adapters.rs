@@ -4,5 +4,7 @@
 //! authenticated source contracts belong to `rspice-hardcopy-contract`.
 
 pub(crate) mod print;
-pub(crate) mod render;
 pub(crate) mod sources;
+
+#[cfg(test)]
+pub(crate) mod tests;

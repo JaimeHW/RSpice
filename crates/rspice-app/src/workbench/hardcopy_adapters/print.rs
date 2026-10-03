@@ -24,8 +24,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest as _, Sha256};
 
 use crate::product::ContentDigest;
-use crate::workbench::hardcopy_adapters::render::RenderedHardcopyPublication;
-use crate::workbench::hardcopy_adapters::render::RenderedPrinterPages;
+use rspice_hardcopy::render::RenderedHardcopyPublication;
+use rspice_hardcopy::render::RenderedPrinterPages;
 use rspice_hardcopy_contract::{
     CancellationPhase, DuplexMode, HardcopyFailureCode, HardcopyOutcome, HardcopyPlan,
     OutputFormat, PaperSize, PrinterJobSettings, PrinterMediaSource, PrinterRasterGeometry,
@@ -1372,7 +1372,7 @@ trait NativeSpoolBackend {
     fn start_page(&mut self) -> Result<(), HardcopyPrintError>;
     fn write_page(
         &mut self,
-        page: &crate::workbench::hardcopy_adapters::render::PrinterRasterPage,
+        page: &rspice_hardcopy::render::PrinterRasterPage,
     ) -> Result<(), HardcopyPrintError>;
     fn end_page(&mut self) -> Result<(), HardcopyPrintError>;
     fn finish_job(&mut self) -> Result<(), HardcopyPrintError>;
@@ -1731,7 +1731,7 @@ mod tests {
     use super::*;
     use crate::product::ObjectRevision;
     #[cfg(not(target_arch = "wasm32"))]
-    use crate::workbench::hardcopy_adapters::render::{HardcopyRenderer, HardcopySceneMetadata};
+    use rspice_hardcopy::render::{HardcopyRenderer, HardcopySceneMetadata};
     use rspice_hardcopy_contract::{
         ActiveHardcopySource, BackgroundMode, Bleed, ColorMapping, ContentExtent, DecorationSetup,
         FontPolicy, HardcopyDocumentId, HardcopyDocumentKind, HardcopyPlanId, HardcopyScope,
@@ -2265,7 +2265,7 @@ mod tests {
 
         fn write_page(
             &mut self,
-            _page: &crate::workbench::hardcopy_adapters::render::PrinterRasterPage,
+            _page: &rspice_hardcopy::render::PrinterRasterPage,
         ) -> Result<(), HardcopyPrintError> {
             let mut state = self.state.borrow_mut();
             state.pages_written += 1;
