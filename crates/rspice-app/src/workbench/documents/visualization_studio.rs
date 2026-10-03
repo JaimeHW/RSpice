@@ -18,10 +18,16 @@ mod stage;
 use sections::*;
 use stage::*;
 
-use dock::{
-    active_family_sample_selection, concept_banner, dock_action, dock_body, empty_note,
-    labeled_combo, numeric_policy, paint_bottom_rule, paint_top_rule, panel_heading, policy_row,
-    separator, table_header,
+use dock::{active_family_sample_selection, dock_action, dock_body};
+use rspice_results_ui::studio::{
+    COMPACT_BREAKPOINT, PANEL_HEADING_HEIGHT, TOUCH_DOCK_HEIGHT, bar_content_height,
+    chrome::{
+        compact_section_picker, engineering_count, section_navigation, status_label, touch_dock,
+    },
+    widgets::{
+        concept_banner, empty_note, labeled_combo, numeric_policy, paint_bottom_rule,
+        paint_top_rule, panel_heading, policy_row, separator, table_header,
+    },
 };
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -83,23 +89,13 @@ use rspice_results::studio_presentation::{
 use super::result_document;
 use rspice_results::family_projection::{FamilyManifest, FamilyValueKind, SourceSampleSelection};
 
-const SUMMARY: &str = "Compose waveform, tabular, statistical, RF, eye, field, and report-page views with family slicing, exact axes, annotations, measurements, and large-data policies.";
-const EVIDENCE: &str = "Implemented visualization entities retain dataset and analysis identities, viewer type, pane/page placement, links, exact markers, scalar measurements, and annotations without mutating source samples.";
-const OWNERSHIP: &str =
-    "Owns result-document presentation entities, not solver data or release decisions.";
-const COMPACT_BREAKPOINT: f32 = 820.0;
 const NARROW_VIEWER_BREAKPOINT: f32 = 1_100.0;
-const TOUCH_DOCK_HEIGHT: f32 = 52.0;
-const WORKSPACE_HEADER_HEIGHT: f32 = 58.0;
-const WORKSPACE_HEADER_VERTICAL_MARGIN: f32 = 7.0;
-const SECTION_NAVIGATION_HEIGHT: f32 = 36.0;
 const VIEWER_TOOLBAR_HEIGHT: f32 = 36.0;
 const VIEWER_TOOLBAR_VERTICAL_MARGIN: f32 = 5.0;
 const VIEWER_STAGE_HEADER_HEIGHT: f32 = 44.0;
 const VIEWER_STAGE_HEADER_VERTICAL_MARGIN: f32 = 6.0;
 const VIEWER_STAGE_STATUS_HEIGHT: f32 = 27.0;
 const VIEWER_STAGE_STATUS_VERTICAL_MARGIN: f32 = 4.0;
-const PANEL_HEADING_HEIGHT: f32 = 29.0;
 const EXACT_DATA_CARD_PADDING: f32 = 12.0;
 const EXACT_DATA_TABLE_HEIGHT: f32 = 102.0;
 const EXACT_DATA_DOCK_HEIGHT: f32 =
@@ -128,14 +124,6 @@ const fn document_pane_kind(art: ViewerArt) -> crate::results::visualization_doc
         ViewerArt::Table => PaneKind::Table,
         _ => PaneKind::Cartesian,
     }
-}
-
-const fn bar_content_height(target_height: f32, vertical_margin: f32) -> f32 {
-    target_height - vertical_margin * 2.0
-}
-
-const fn uses_horizontal_kpi_strip(width: f32, coarse_pointer: bool, touch_screen: bool) -> bool {
-    width <= COMPACT_BREAKPOINT || coarse_pointer || touch_screen
 }
 
 fn viewer_column_rects(rect: Rect, library_width: f32, inspector_width: f32) -> [Rect; 3] {
@@ -1413,7 +1401,7 @@ pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     workspace_header(ui, app);
     status_strip(ui, app);
     if !compact {
-        section_navigation(ui, app);
+        section_navigation(ui, &mut app.state.workbench.visualization_studio.section);
     }
 
     let dock_height = if compact { TOUCH_DOCK_HEIGHT } else { 0.0 };
@@ -1426,14 +1414,16 @@ pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 && app.state.workbench.visualization_studio.touch_pane
                     == VisualizationTouchPane::Sections
             {
-                compact_section_picker(ui, app);
+                let studio: &mut VisualizationStudioPresentation =
+                    &mut app.state.workbench.visualization_studio;
+                compact_section_picker(ui, &mut studio.section, &mut studio.touch_pane);
                 return;
             }
             show_active_section(ui, app, compact);
         },
     );
     if compact {
-        touch_dock(ui, app);
+        touch_dock(ui, &mut app.state.workbench.visualization_studio.touch_pane);
     }
     show_dock_if_open(ui, app, compact);
 }

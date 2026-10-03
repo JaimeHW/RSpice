@@ -30,6 +30,7 @@ pub mod smith_chart;
 pub mod soa;
 pub mod specs;
 pub mod strip;
+pub mod studio;
 pub mod table;
 pub mod transfer_function;
 pub mod virtual_rows;
