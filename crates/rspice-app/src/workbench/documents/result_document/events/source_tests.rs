@@ -623,6 +623,37 @@ fn event_source_large_history_reuses_clones_and_survives_unchanged_restoration()
     assert_eq!(state.simulation.data_version, version);
     assert!(event_selection_block(&mut state, &selection).is_none());
     assert!(!Arc::ptr_eq(&original, &event_order(&mut state).unwrap()));
+
+    // Retention must release a large event order without drawing EVENTS again.
+    let cached = Arc::downgrade(&event_order(&mut state).unwrap());
+    state
+        .simulation
+        .runs
+        .push(crate::state::SimulationRun::new(99));
+    state
+        .ui
+        .results
+        .reconcile_retained_datasets(&state.simulation);
+    state
+        .simulation
+        .runs
+        .retain(|run| run.dataset_id == selection.analysis.dataset_id());
+    state
+        .ui
+        .results
+        .reconcile_retained_datasets(&state.simulation);
+    assert!(cached.upgrade().is_some(), "a retained order stays cached");
+    state.ui.results.session.viewer = rspice_results::result_presentation::ResultViewer::Table;
+    state.simulation.runs.retain(|_| false);
+    state
+        .ui
+        .results
+        .reconcile_retained_datasets(&state.simulation);
+    assert_eq!(state.simulation.data_version, version);
+    assert!(
+        cached.upgrade().is_none(),
+        "discarding the dataset must release its event order without another event frame"
+    );
 }
 
 #[test]

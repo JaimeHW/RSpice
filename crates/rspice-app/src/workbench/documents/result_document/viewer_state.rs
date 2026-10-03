@@ -385,6 +385,14 @@ impl ResultsState {
         self.retained_history_revision = None;
         self.session.retain_datasets(retained);
         let live = |analysis: AnalysisPresentationKey| retained.contains(&analysis.dataset_id());
+        if self
+            .event_order_cache
+            .as_ref()
+            .is_some_and(|cache| !live(cache.analysis))
+        {
+            self.event_order_cache = None;
+        }
+        self.network_matrix.retain_datasets(retained);
         self.analysis_expr_cache
             .retain(|(analysis, _), _| live(*analysis));
         self.retained_evidence_validity

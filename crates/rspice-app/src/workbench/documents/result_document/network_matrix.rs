@@ -4,9 +4,11 @@
 //! cells, ambiguous names, and differing grids cannot become zero coefficients.
 
 use rspice_results_ui::presentation::well_hint;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use egui::Ui;
+use rspice_app_types::product::DatasetId;
 #[cfg(test)]
 use rspice_results::network_matrix::channel_reference;
 use rspice_results::network_matrix::{NetworkLayout, resolve};
@@ -43,6 +45,20 @@ impl Default for NetworkMatrixState {
 }
 
 impl NetworkMatrixState {
+    /// Release a discarded source even while its sheet is inactive.
+    pub(super) fn retain_datasets(&mut self, retained: &HashSet<DatasetId>) {
+        if self
+            .source
+            .as_ref()
+            .is_some_and(|(analysis, _, _)| !retained.contains(&analysis.dataset_id()))
+        {
+            self.source = None;
+            self.controls.reset_source();
+            self.open_trace = false;
+            self.layout = None;
+        }
+    }
+
     fn bind(&mut self, key: AnalysisPresentationKey, simulation: &crate::state::SimulationState) {
         let source = (key, simulation.runs.revision(), simulation.data_version);
         if self.source.as_ref() != Some(&source) {
@@ -409,6 +425,41 @@ pub(crate) mod tests {
                     .unwrap()
                     .result_data_digest()
             );
+
+            let cached = Arc::downgrade(app.ui.results.network_matrix.layout.as_ref().unwrap());
+            let discarded = app.simulation.runs[0].dataset_id;
+            let version = app.simulation.data_version;
+            let controls = &mut app.ui.results.network_matrix.controls;
+            controls.representation = 2;
+            controls.transpose = true;
+            controls.heatmap = false;
+            controls.floor_db = -120.0;
+            controls.diagnostic = Some((0, 0, "retained diagnostic".to_owned()));
+            app.simulation.runs.push(SimulationRun::new(2));
+            app.ui.results.reconcile_retained_datasets(&app.simulation);
+            assert!(cached.upgrade().is_some());
+            assert!(app.ui.results.network_matrix.open_trace);
+
+            // Prune while another viewer is active, without revisiting the matrix.
+            app.ui.results.session.viewer =
+                rspice_results::result_presentation::ResultViewer::Table;
+            app.simulation
+                .runs
+                .retain(|run| run.dataset_id != discarded);
+            app.ui.results.reconcile_retained_datasets(&app.simulation);
+            assert_eq!(app.simulation.data_version, version);
+            assert!(
+                cached.upgrade().is_none(),
+                "discarding the dataset must release its matrix layout without another matrix frame"
+            );
+            assert!(!app.ui.results.network_matrix.open_trace);
+            let controls = &app.ui.results.network_matrix.controls;
+            assert!(controls.diagnostic.is_none());
+            assert_eq!((controls.block, controls.sample), (0, 0));
+            assert_eq!(controls.representation, 2);
+            assert!(controls.transpose);
+            assert!(!controls.heatmap);
+            assert_eq!(controls.floor_db, -120.0);
         }
     }
 
