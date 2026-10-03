@@ -19,6 +19,7 @@ pub mod network_matrix;
 pub mod noise_contrib;
 pub mod nyquist;
 pub mod op_inspector;
+pub mod operational;
 pub mod optimization;
 pub mod phase_noise;
 pub mod polar;
