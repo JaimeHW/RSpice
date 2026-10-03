@@ -24,6 +24,7 @@ pub mod phase_noise;
 pub mod polar;
 pub mod pole_zero;
 pub mod presentation;
+pub mod qpnoise;
 pub mod report;
 pub mod scatter;
 pub mod selection;

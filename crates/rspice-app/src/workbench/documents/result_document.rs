@@ -28,7 +28,6 @@ mod phase_noise;
 mod polar;
 mod population;
 mod pz;
-mod qpnoise;
 mod retained_memo;
 mod scatter;
 mod sensitivity;
@@ -119,7 +118,7 @@ pub(crate) fn ordinary_noise_spectrum_is_renderable(analysis: &AnalysisResult) -
 
 pub(crate) fn qpnoise_spectrum_is_renderable(analysis: &AnalysisResult) -> bool {
     analysis.success
-        && qpnoise::is_renderable(analysis)
+        && rspice_results::noise_spectrum::qpnoise_is_renderable(analysis.as_ref())
         && analysis.validate_retained_evidence().is_ok()
 }
 
@@ -1797,7 +1796,7 @@ pub(crate) fn project_viewer_for_analysis(
             ResultViewer::HarmonicBalance
         }
         ResultViewer::Bode
-            if qpnoise::is_renderable(analysis)
+            if rspice_results::noise_spectrum::qpnoise_is_renderable(analysis.as_ref())
                 || bode::ordinary_noise_spectrum_is_renderable(analysis) =>
         {
             ResultViewer::NoiseContrib
@@ -2635,7 +2634,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         && let Some(crate::state::AnalysisResultPayload::Qpnoise { response }) =
             &analysis.result_payload
     {
-        qpnoise::summary(ui, response);
+        rspice_results_ui::qpnoise::summary(ui, response);
         if view.viewer == ResultViewer::NoiseContrib {
             waves::right_panel(ui, state);
             return;

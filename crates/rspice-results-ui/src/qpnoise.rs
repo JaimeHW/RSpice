@@ -2,9 +2,6 @@
 use rspice_core::engine::{
     QpnoiseAnalysisResult, QpnoiseObservation, QpnoiseUnavailable, QpnoiseValue, QpxfQuantity,
 };
-pub(super) fn is_renderable(analysis: &crate::state::AnalysisResult) -> bool {
-    rspice_results::noise_spectrum::qpnoise_is_renderable(analysis.as_ref())
-}
 
 fn value(v: QpnoiseValue, unit: &str) -> String {
     match v {
@@ -25,7 +22,8 @@ fn value(v: QpnoiseValue, unit: &str) -> String {
         ),
     }
 }
-pub(super) fn summary(ui: &mut egui::Ui, response: &QpnoiseAnalysisResult) {
+/// Render measurements from source-qualified retained QPNOISE evidence.
+pub fn summary(ui: &mut egui::Ui, response: &QpnoiseAnalysisResult) {
     ui.collapsing("QPNOISE measurements", |ui| {
         ui.small("Each spectrum uses its output's physical frequency. Cross spectra retain complex correlation. Gaps mark unavailable referred measurements.");
         let request = &response.metadata.request;

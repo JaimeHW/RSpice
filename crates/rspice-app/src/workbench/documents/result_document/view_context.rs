@@ -327,7 +327,7 @@ fn viewer_can_render(
         }
         ResultViewer::Bode => structural(super::StructuralGate::BodeResponse, analysis),
         ResultViewer::NoiseContrib => {
-            super::qpnoise::is_renderable(analysis)
+            rspice_results::noise_spectrum::qpnoise_is_renderable(analysis.as_ref())
                 || structural(super::StructuralGate::OrdinaryNoiseSpectrum, analysis)
         }
         ResultViewer::Fft | ResultViewer::Eye => {
