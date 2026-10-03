@@ -6,202 +6,30 @@
 //! project-owned collection. Solver samples and retained run history are
 //! never mutated.
 
-use std::borrow::Cow;
-
-use egui::{Color32, RichText, Sense, Ui, UiBuilder, vec2};
+use rspice_results::document_creation::{ResultDocumentFamily, ResultDocumentLayout};
+use rspice_results_ui::create_document::{
+    self, CreateDocumentHost, CreateResultDocumentDialogState, ViewerChoice,
+};
 
 use crate::diagnostics::ConsoleMessage;
 use crate::product::{AnalysisInstanceId, DatasetBinding, DatasetId, ResultDocumentId};
 use crate::results::viewer_catalog::{
-    ResultCreationFamilyDefinition, VIEWER_DOCUMENTS, ViewerArt, ViewerCapabilities,
-    ViewerCompatibility, ViewerDocumentDefinition, ViewerReleaseClass, result_creation_family,
-    viewer_compatibility, viewer_document,
+    VIEWER_DOCUMENTS, ViewerArt, ViewerCapabilities, ViewerCompatibility, ViewerDocumentDefinition,
+    ViewerReleaseClass, viewer_compatibility, viewer_document,
 };
 use crate::results::visualization_document::{
     AxisOrientation, ColumnRole, DocumentEdit, EntityRef, LinkKind, MAX_SOURCE_CELLS_PER_DATASET,
-    MAX_SOURCE_ROWS, MAX_SOURCE_TEXT_BYTES, NewPagePane, NewPane, PageLayout, PageUpdatePolicy,
+    MAX_SOURCE_ROWS, MAX_SOURCE_TEXT_BYTES, NewPagePane, NewPane, PageUpdatePolicy,
     PaneDataBinding, PaneKind, PanePlacement, ResultDocumentTracking, ResultDocumentTrackingMode,
     SourceColumn, SourceDataset, SourceRow, TypedValue, ValueType, VisualizationDocument,
     VisualizationError,
 };
 use crate::state::workspace::VisualizationDocumentPersistenceError;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationRunLifecycle};
-use crate::ui::tokens::Tokens;
-use crate::workbench::state::{CreateResultDocumentDialogState, Workspace, WorkspaceDocumentId};
-use crate::workbench::{AppState, RSpiceApp, ResultViewer};
+use crate::workbench::state::{Workspace, WorkspaceDocumentId};
+use crate::workbench::{AppState, RSpiceApp};
 
 const MAX_DOCUMENT_NAME_BYTES: usize = 120;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ResultDocumentFamily {
-    WaveformWorksheet,
-    FrequencyAndStability,
-    RfAndNetwork,
-    StatisticsAndYield,
-    DigitalAndAmsEvents,
-    VerificationAndOptimization,
-    FieldsAndPhysical,
-    Photonics,
-    ReportPage,
-}
-
-impl ResultDocumentFamily {
-    const ALL: [Self; 9] = [
-        Self::WaveformWorksheet,
-        Self::FrequencyAndStability,
-        Self::RfAndNetwork,
-        Self::StatisticsAndYield,
-        Self::DigitalAndAmsEvents,
-        Self::VerificationAndOptimization,
-        Self::FieldsAndPhysical,
-        Self::Photonics,
-        Self::ReportPage,
-    ];
-
-    const fn id(self) -> &'static str {
-        match self {
-            Self::WaveformWorksheet => "waveform-worksheet",
-            Self::FrequencyAndStability => "frequency-stability",
-            Self::RfAndNetwork => "rf-network",
-            Self::StatisticsAndYield => "statistics-yield",
-            Self::DigitalAndAmsEvents => "digital-ams-events",
-            Self::VerificationAndOptimization => "verification-optimization",
-            Self::FieldsAndPhysical => "fields-physical",
-            Self::Photonics => "photonics",
-            Self::ReportPage => "report-page",
-        }
-    }
-
-    fn definition(self) -> &'static ResultCreationFamilyDefinition {
-        result_creation_family(self.id()).expect("every Rust family must exist in the contract")
-    }
-
-    fn label(self) -> &'static str {
-        self.definition().label
-    }
-
-    fn description(self) -> &'static str {
-        self.definition().description
-    }
-
-    fn from_id(id: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|family| family.id() == id)
-    }
-
-    /// Resolve the family a persistent page belongs to. Pages are titled with
-    /// the family label at creation; a page the user has renamed, or one
-    /// imported from another build, resolves to `None` and is scoped by its own
-    /// retained panes instead.
-    pub(super) fn from_label(label: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|family| family.label() == label)
-    }
-
-    /// Which workspace sheets this family's docbar offers.
-    ///
-    /// Every viewer document [`Self::includes`] admits has to be offered here:
-    /// that is the same list the Create dialog binds a new document's first
-    /// pane from, so a docbar refusing it would strand the document RSpice had
-    /// just built with no reachable sheet. What follows are quick modes — they
-    /// read the bound dataset through a different sheet without introducing a
-    /// pane type the family does not compose.
-    pub(super) fn offers_sheet(self, viewer: ResultViewer) -> bool {
-        // Dataset-native sheets are evidence the bound dataset either carries
-        // or it does not, never one of a family's plot modes. No family claims
-        // or excludes them; `viewer_availability` is their only gate.
-        let Some(document_id) = viewer.viewer_document_id() else {
-            return true;
-        };
-        if viewer_document(document_id).is_some_and(|document| self.includes(document)) {
-            return true;
-        }
-        match self {
-            // Exact samples and the scalar DC gains behind them are how a
-            // waveform review is checked; neither adds a pane to the sheet.
-            Self::WaveformWorksheet => {
-                matches!(viewer, ResultViewer::TransferFunction | ResultViewer::Table)
-            }
-            _ => false,
-        }
-    }
-
-    fn includes(self, viewer: &ViewerDocumentDefinition) -> bool {
-        // A report page can embed any compatible viewer; the canonical family
-        // intentionally has no fixed viewer list. Every other family consumes
-        // exact generated membership.
-        self == Self::ReportPage || self.definition().viewer_ids.contains(&viewer.id)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ResultDocumentLayout {
-    TwoLinkedPanes,
-    SinglePane,
-    EngineeringGrid,
-    FreeformReviewPage,
-}
-
-impl ResultDocumentLayout {
-    const ALL: [Self; 4] = [
-        Self::TwoLinkedPanes,
-        Self::SinglePane,
-        Self::EngineeringGrid,
-        Self::FreeformReviewPage,
-    ];
-
-    const fn id(self) -> &'static str {
-        match self {
-            Self::TwoLinkedPanes => "two-linked-panes",
-            Self::SinglePane => "single-pane",
-            Self::EngineeringGrid => "engineering-grid-2x2",
-            Self::FreeformReviewPage => "freeform-review-page",
-        }
-    }
-
-    const fn label(self) -> &'static str {
-        match self {
-            Self::TwoLinkedPanes => "Two linked panes",
-            Self::SinglePane => "Single pane",
-            Self::EngineeringGrid => "2 × 2 engineering sheet",
-            Self::FreeformReviewPage => "Freeform review page",
-        }
-    }
-
-    fn from_id(id: &str) -> Option<Self> {
-        match id {
-            "two-linked-panes" => Some(Self::TwoLinkedPanes),
-            "single-pane" => Some(Self::SinglePane),
-            "engineering-grid-2x2" => Some(Self::EngineeringGrid),
-            "freeform-review-page" => Some(Self::FreeformReviewPage),
-            _ => None,
-        }
-    }
-
-    const fn pane_count(self) -> usize {
-        match self {
-            Self::SinglePane | Self::FreeformReviewPage => 1,
-            Self::TwoLinkedPanes => 2,
-            Self::EngineeringGrid => 4,
-        }
-    }
-
-    const fn page_layout(self) -> PageLayout {
-        match self {
-            Self::SinglePane => PageLayout::SinglePane,
-            Self::TwoLinkedPanes => PageLayout::Columns,
-            Self::EngineeringGrid => PageLayout::Grid { columns: 2 },
-            // The review template owns free placement; Rows is its
-            // deterministic initial flow before the user moves objects.
-            Self::FreeformReviewPage => PageLayout::Rows,
-        }
-    }
-
-    const fn template_id(self) -> &'static str {
-        match self {
-            Self::FreeformReviewPage => "review-freeform",
-            Self::SinglePane | Self::TwoLinkedPanes | Self::EngineeringGrid => "engineering-dark",
-        }
-    }
-}
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum CreateResultDocumentError {
@@ -252,426 +80,106 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
     if !app.state.workbench.create_result_document.open {
         return;
     }
-
     let mut draft = app.state.workbench.create_result_document.clone();
-    let mut window_open = true;
-    let mut submit = false;
-    let mut cancel = false;
-    let t = Tokens::get(ctx);
-    let validation = resolve_draft(&app.state, &draft);
-    let validation_message = validation.as_ref().err().map(ToString::to_string);
-    drop(validation);
-    if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
-        cancel = true;
-    }
-    let available = ctx.content_rect().size();
-    let max_window_width = (available.x - 24.0).max(320.0);
-    let max_window_height = (available.y - 24.0).max(320.0);
-
-    egui::Window::new("New result document")
-        .id(egui::Id::new("rspice.create-result-document"))
-        .open(&mut window_open)
-        .collapsible(false)
-        .resizable(true)
-        .default_width(920.0_f32.min(max_window_width))
-        .min_width(720.0_f32.min(max_window_width))
-        .max_width(max_window_width)
-        .min_height(620.0_f32.min(max_window_height))
-        .max_height(max_window_height)
-        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-        .show(ctx, |ui| {
-            let body_height = (max_window_height - 82.0).max(220.0);
-            egui::ScrollArea::vertical()
-                .id_salt("rspice.create-result-document.body")
-                .max_height(body_height)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-            ui.label(
-                RichText::new("RESULTS · DATASET-DRIVEN DOCUMENT")
-                    .monospace()
-                    .color(t.color.text_dim),
-            );
-            ui.add_space(4.0);
-            ui.label(
-                "Choose the engineering question first. RSpice selects a compatible viewer family from the immutable dataset and keeps specialist tools available inside the resulting document.",
-            );
-            ui.add_space(10.0);
-
-            ui.label(RichText::new("Result document type").strong());
-            for row in ResultDocumentFamily::ALL.chunks(2) {
-                ui.columns(2, |columns| {
-                    for (column, family) in row.iter().copied().enumerate() {
-                        let selected = draft.family_id == family.id();
-                        let response = family_card(&mut columns[column], family, selected);
-                        if response.clicked() && !selected {
-                            draft.family_id = family.id().to_owned();
-                            draft.name = next_document_name(&app.state, family);
-                            draft.name_touched = false;
-                            if !viewer_is_creatable(
-                                &app.state,
-                                draft.dataset_id,
-                                family,
-                                &draft.viewer_id,
-                            ) {
-                                draft.viewer_id =
-                                    first_compatible_viewer(&app.state, draft.dataset_id, family)
-                                        .unwrap_or_default()
-                                        .to_owned();
-                            }
-                            draft.validation_error = None;
-                        }
-                    }
-                });
-                ui.add_space(6.0);
-            }
-
-            result_setting_row(
-                ui,
-                "Document name",
-                "A project-owned name; duplicates and invalid byte lengths are rejected on commit.",
-                |ui| {
-                    let response = ui.add(
-                        egui::TextEdit::singleline(&mut draft.name)
-                            .id_salt("rspice.create-result-document.name")
-                            .desired_width(ui.available_width()),
-                    );
-                    if response.changed() {
-                        draft.name_touched = true;
-                        draft.validation_error = None;
-                    }
-                },
-            );
-            result_setting_row(
-                ui,
-                "Dataset",
-                "Document types and viewers update with the selected immutable result.",
-                |ui| {
-                let selected_dataset_label = draft
-                    .dataset_id
-                    .and_then(|id| retained_run(&app.state, id))
-                    .map_or_else(|| "Select retained dataset".to_owned(), dataset_label);
-                egui::ComboBox::from_id_salt("rspice.create-result-document.dataset")
-                    .selected_text(selected_dataset_label)
-                    .width(ui.available_width())
-                    .show_ui(ui, |ui| {
-                        for run in &app.state.simulation.runs {
-                            let selected = draft.dataset_id == Some(run.dataset_id);
-                            if ui
-                                .selectable_label(selected, dataset_label(run))
-                                .clicked()
-                            {
-                                draft.dataset_id = Some(run.dataset_id);
-                                let family =
-                                    ResultDocumentFamily::from_id(&draft.family_id)
-                                        .unwrap_or(ResultDocumentFamily::WaveformWorksheet);
-                                if !viewer_is_creatable(
-                                    &app.state,
-                                    draft.dataset_id,
-                                    family,
-                                    &draft.viewer_id,
-                                ) {
-                                    draft.viewer_id = first_compatible_viewer(
-                                        &app.state,
-                                        draft.dataset_id,
-                                        family,
-                                    )
-                                    .unwrap_or_default()
-                                    .to_owned();
-                                }
-                                draft.validation_error = None;
-                            }
-                        }
-                    });
-                },
-            );
-            result_setting_row(
-                ui,
-                "Document layout",
-                "The document stays editable without changing source samples.",
-                |ui| {
-                let layout = ResultDocumentLayout::from_id(&draft.layout_id)
-                    .unwrap_or(ResultDocumentLayout::TwoLinkedPanes);
-                egui::ComboBox::from_id_salt("rspice.create-result-document.layout")
-                    .selected_text(layout.label())
-                    .width(ui.available_width())
-                    .show_ui(ui, |ui| {
-                        for candidate in ResultDocumentLayout::ALL {
-                            ui.selectable_value(
-                                &mut draft.layout_id,
-                                candidate.id().to_owned(),
-                                candidate.label(),
-                            );
-                        }
-                    });
-                },
-            );
-
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Complete viewer catalog").strong());
-                ui.separator();
-                ui.label(
-                    RichText::new(format!("{} canonical viewers", VIEWER_DOCUMENTS.len()))
-                        .small()
-                        .color(t.color.text_dim),
-                );
-            });
-
-            let capabilities = draft
-                .dataset_id
-                .and_then(|id| retained_run(&app.state, id))
-                .map(run_analysis_ids)
-                .unwrap_or_default();
-            egui::Grid::new("rspice.create-result-document.viewer-table")
-                        .num_columns(3)
-                        .striped(true)
-                        .min_col_width(120.0)
-                        .show(ui, |ui| {
-                            ui.strong("Viewer / family");
-                            ui.strong("Required result");
-                            ui.strong("Status");
-                            ui.end_row();
-
-                            for viewer in VIEWER_DOCUMENTS {
-                                let family = ResultDocumentFamily::from_id(&draft.family_id)
-                                    .unwrap_or(ResultDocumentFamily::WaveformWorksheet);
-                                let compatibility = viewer_compatibility(
-                                    viewer.id,
-                                    ViewerCapabilities {
-                                        analysis_ids: &capabilities,
-                                        external_capabilities: &[],
-                                    },
-                                );
-                                let renderer_available = draft
-                                    .dataset_id
-                                    .and_then(|id| retained_run(&app.state, id))
-                                    .is_some_and(|run| {
-                                        run.analyses.iter().any(|analysis| {
-                                            super::persistent_document::renderer_supports_analysis(
-                                                viewer.id,
-                                                analysis,
-                                            )
-                                        })
-                                    });
-                                let belongs_to_family = family.includes(viewer);
-                                let selectable = belongs_to_family
-                                    && viewer.release == ViewerReleaseClass::ReleaseTarget
-                                    && compatibility.is_compatible()
-                                    && renderer_available;
-                                let selected = draft.viewer_id == viewer.id;
-                                ui.vertical(|ui| {
-                                    let response = ui.add_enabled(
-                                        selectable,
-                                        egui::Button::selectable(selected, viewer.title),
-                                    );
-                                    if response.clicked() {
-                                        draft.viewer_id = viewer.id.to_owned();
-                                        draft.validation_error = None;
-                                    }
-                                    response.on_disabled_hover_text(if !belongs_to_family {
-                                        "Choose a document family that includes this viewer."
-                                            .to_owned()
-                                    } else if viewer.release != ViewerReleaseClass::ReleaseTarget {
-                                        viewer.unavailable_reason().into_owned()
-                                    } else if !compatibility.is_compatible() {
-                                        viewer_requirement(viewer)
-                                    } else {
-                                        "This viewer has no renderer for the selected dataset yet."
-                                            .to_owned()
-                                    });
-                                    ui.label(
-                                        RichText::new(viewer.group.label())
-                                            .small()
-                                            .color(t.color.text_dim),
-                                    );
-                                });
-                                ui.label(viewer_requirement(viewer));
-                                let (status, color) = if belongs_to_family {
-                                    viewer_status(viewer, compatibility, renderer_available, &t)
-                                } else {
-                                    (Cow::Borrowed("other document family"), t.color.text_dim)
-                                };
-                                ui.label(RichText::new(status).color(color));
-                                ui.end_row();
-                            }
-                        });
-
-            ui.add_space(8.0);
-            if let Some(message) = draft
-                .validation_error
-                .as_deref()
-                .or(validation_message.as_deref())
-            {
-                ui.label(RichText::new(message).color(t.color.err));
-            }
-                });
-
-            ui.separator();
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                submit = ui
-                    .add_enabled(
-                        resolve_draft(&app.state, &draft).is_ok(),
-                        egui::Button::new("Create result document"),
-                    )
-                    .clicked();
-                cancel = ui.button("Cancel").clicked();
-            });
-        });
-
-    if !window_open || cancel {
-        draft.open = false;
-    } else if submit {
-        app.state.workbench.create_result_document = draft;
+    let submit = create_document::show(ctx, &mut draft, &CreateDocumentSources(&app.state));
+    app.state.workbench.create_result_document = draft;
+    if submit {
         match commit(app) {
             Ok(document_id) => {
                 app.state.push_user_message(ConsoleMessage::info(format!(
                     "Created project result document {document_id}"
                 )));
-                return;
             }
             Err(error) => {
                 app.state.workbench.create_result_document.validation_error =
                     Some(error.to_string());
-                return;
             }
         }
     }
-    app.state.workbench.create_result_document = draft;
 }
 
-fn family_card(ui: &mut Ui, family: ResultDocumentFamily, selected: bool) -> egui::Response {
-    use crate::ui::theme::mix;
+struct CreateDocumentSources<'a>(&'a AppState);
 
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 52.0), Sense::click());
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::WidgetType::RadioButton,
-            ui.is_enabled(),
-            selected,
-            family.label(),
-        )
-    });
-    if ui.is_rect_visible(rect) {
-        let fill = if selected {
-            t.color.accent_dim
-        } else if response.hovered() {
-            t.color.bg_hover
-        } else {
-            t.color.bg_panel
-        };
-        let border = if selected {
-            t.color.accent
-        } else {
-            t.color.border
-        };
-        ui.painter().rect_filled(rect, 2.0, fill);
-        ui.painter().rect_stroke(
-            rect,
-            2.0,
-            egui::Stroke::new(1.0, border),
-            egui::StrokeKind::Inside,
-        );
-        if selected {
-            ui.painter().rect_filled(
-                egui::Rect::from_min_max(
-                    rect.left_top(),
-                    egui::pos2(rect.left() + 3.0, rect.bottom()),
-                ),
-                1.0,
-                t.color.accent,
+impl CreateDocumentHost for CreateDocumentSources<'_> {
+    fn validation_message(&self, draft: &CreateResultDocumentDialogState) -> Option<String> {
+        resolve_draft(self.0, draft)
+            .as_ref()
+            .err()
+            .map(ToString::to_string)
+    }
+
+    fn can_create(&self, draft: &CreateResultDocumentDialogState) -> bool {
+        resolve_draft(self.0, draft).is_ok()
+    }
+
+    fn select_family(
+        &self,
+        draft: &mut CreateResultDocumentDialogState,
+        family: ResultDocumentFamily,
+    ) {
+        draft.family_id = family.id().to_owned();
+        draft.name = next_document_name(self.0, family);
+        draft.name_touched = false;
+        if !viewer_is_creatable(self.0, draft.dataset_id, family, &draft.viewer_id) {
+            draft.viewer_id = first_compatible_viewer(self.0, draft.dataset_id, family)
+                .unwrap_or_default()
+                .to_owned();
+        }
+        draft.validation_error = None;
+    }
+
+    fn select_dataset(&self, draft: &mut CreateResultDocumentDialogState, dataset_id: DatasetId) {
+        draft.dataset_id = Some(dataset_id);
+        let family = ResultDocumentFamily::from_id(&draft.family_id)
+            .unwrap_or(ResultDocumentFamily::WaveformWorksheet);
+        if !viewer_is_creatable(self.0, draft.dataset_id, family, &draft.viewer_id) {
+            draft.viewer_id = first_compatible_viewer(self.0, draft.dataset_id, family)
+                .unwrap_or_default()
+                .to_owned();
+        }
+        draft.validation_error = None;
+    }
+
+    fn dataset_label(&self, dataset_id: Option<DatasetId>) -> String {
+        dataset_id
+            .and_then(|id| retained_run(self.0, id))
+            .map_or_else(|| "Select retained dataset".to_owned(), dataset_label)
+    }
+
+    fn datasets(&self) -> impl Iterator<Item = (DatasetId, String)> {
+        self.0
+            .simulation
+            .runs
+            .iter()
+            .map(|run| (run.dataset_id, dataset_label(run)))
+    }
+
+    fn viewer_catalog(&self, dataset_id: Option<DatasetId>) -> impl Iterator<Item = ViewerChoice> {
+        let capabilities = dataset_id
+            .and_then(|id| retained_run(self.0, id))
+            .map(run_analysis_ids)
+            .unwrap_or_default();
+        VIEWER_DOCUMENTS.iter().map(move |viewer| {
+            let compatibility = viewer_compatibility(
+                viewer.id,
+                ViewerCapabilities {
+                    analysis_ids: &capabilities,
+                    external_capabilities: &[],
+                },
             );
-        }
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(rect.shrink2(vec2(12.0, 7.0)))
-                .layout(egui::Layout::top_down(egui::Align::Min)),
-            |ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                // Painted, not labels: a label over the card takes the presses on its text.
-                crate::workbench::design_system::painted_label(
-                    ui,
-                    RichText::new(family.label()).strong().color(if selected {
-                        t.color.text
-                    } else {
-                        mix(t.color.text, t.color.text_dim, 0.15)
-                    }),
-                    egui::TextWrapMode::Wrap,
-                );
-                crate::workbench::design_system::painted_label(
-                    ui,
-                    RichText::new(family.description())
-                        .small()
-                        .color(t.color.text_dim),
-                    egui::TextWrapMode::Wrap,
-                );
-            },
-        );
-    }
-    crate::ui::theme::paint_focus_ring(ui, &response, rect);
-    response
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text(family.description())
-}
-
-fn result_setting_row(ui: &mut Ui, title: &str, detail: &str, value: impl FnOnce(&mut Ui)) {
-    let t = Tokens::get(ui.ctx());
-    let width = ui.available_width();
-    let label_width = (width * 0.46).clamp(250.0, 390.0);
-    ui.horizontal(|ui| {
-        ui.allocate_ui_with_layout(
-            vec2(label_width, 48.0),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                ui.label(RichText::new(title).strong());
-                ui.label(RichText::new(detail).small().color(t.color.text_dim));
-            },
-        );
-        ui.add_space(12.0);
-        ui.allocate_ui_with_layout(
-            vec2(ui.available_width(), 48.0),
-            egui::Layout::top_down_justified(egui::Align::Center),
-            value,
-        );
-    });
-}
-
-fn viewer_status(
-    viewer: &ViewerDocumentDefinition,
-    compatibility: ViewerCompatibility,
-    renderer_available: bool,
-    tokens: &Tokens,
-) -> (Cow<'static, str>, Color32) {
-    if viewer.release != ViewerReleaseClass::ReleaseTarget {
-        return (viewer.unavailable_reason(), tokens.color.warn);
-    }
-    if compatibility.is_compatible() && !renderer_available {
-        return (
-            Cow::Borrowed("viewer integration required"),
-            tokens.color.warn,
-        );
-    }
-    match compatibility {
-        ViewerCompatibility::Compatible => (Cow::Borrowed("available"), tokens.color.ok),
-        ViewerCompatibility::MissingAnalysis { .. } => {
-            (Cow::Borrowed("analysis required"), tokens.color.warn)
-        }
-        ViewerCompatibility::MissingExternalCapability { .. } => (
-            Cow::Borrowed("specialist dataset required"),
-            tokens.color.warn,
-        ),
-        ViewerCompatibility::UnknownDocument => (Cow::Borrowed("unregistered"), tokens.color.err),
-    }
-}
-
-fn viewer_requirement(viewer: &ViewerDocumentDefinition) -> String {
-    if let Some(capability) = viewer.external_capability {
-        format!("{capability} result contract")
-    } else if viewer.analysis_ids.is_empty() {
-        "any completed dataset".to_owned()
-    } else {
-        viewer.analysis_ids.join(" or ").to_ascii_uppercase()
+            let renderer_available = dataset_id
+                .and_then(|id| retained_run(self.0, id))
+                .is_some_and(|run| {
+                    run.analyses.iter().any(|analysis| {
+                        super::persistent_document::renderer_supports_analysis(viewer.id, analysis)
+                    })
+                });
+            ViewerChoice {
+                viewer,
+                compatibility,
+                renderer_available,
+            }
+        })
     }
 }
 
@@ -1565,67 +1073,6 @@ mod tests {
             ]),
         );
         run
-    }
-
-    #[test]
-    fn all_catalog_rows_are_covered_by_family_classification() {
-        for viewer in VIEWER_DOCUMENTS {
-            assert!(
-                ResultDocumentFamily::ALL
-                    .into_iter()
-                    .any(|family| family.includes(viewer)),
-                "{} has no result-document family",
-                viewer.id
-            );
-        }
-    }
-
-    /// The Create dialog binds a new document's first pane from the family's
-    /// own `includes` list, and the persistent docbar scopes that page with
-    /// [`ResultDocumentFamily::offers_sheet`]. A docbar refusing the pane the
-    /// dialog had just bound would strand the document with no reachable sheet
-    /// — which is what the digital family did while the two lists were
-    /// maintained apart: it composed waveform and eye panes, then admitted
-    /// neither sheet.
-    #[test]
-    fn every_family_offers_the_sheets_its_create_path_can_bind() {
-        for family in ResultDocumentFamily::ALL {
-            for viewer in ResultViewer::all() {
-                let Some(document_id) = viewer.viewer_document_id() else {
-                    continue;
-                };
-                let composes = VIEWER_DOCUMENTS
-                    .iter()
-                    .any(|document| document.id == document_id && family.includes(document));
-                assert!(
-                    !composes || family.offers_sheet(viewer),
-                    "{} composes {document_id} but its docbar refuses {viewer:?}",
-                    family.label()
-                );
-            }
-        }
-    }
-
-    /// Pages are titled with their family label at creation and nothing else
-    /// records the family, so this coupling is what makes the scoping work at
-    /// all. If either side is renamed, every page of that family silently
-    /// widens to offering all sheets.
-    #[test]
-    fn each_family_label_round_trips_to_the_family_it_titles_pages_with() {
-        assert_eq!(
-            ResultDocumentFamily::ALL.map(ResultDocumentFamily::id),
-            crate::results::viewer_catalog::RESULT_CREATION_FAMILIES
-                .iter()
-                .map(|family| family.id)
-                .collect::<Vec<_>>()
-                .as_slice()
-        );
-        for family in ResultDocumentFamily::ALL {
-            assert_eq!(
-                ResultDocumentFamily::from_label(family.label()),
-                Some(family)
-            );
-        }
     }
 
     #[test]

@@ -4,6 +4,8 @@
 //! for navigation, dock visibility, responsive drawers, and the selection of
 //! the task surface inside each canonical workspace.
 
+use rspice_results_ui::create_document::CreateResultDocumentDialogState;
+
 mod navigator_tree;
 pub(crate) mod plan_provenance;
 pub(crate) mod retired_documents;
@@ -219,38 +221,6 @@ impl WorkspaceDocumentId {
             | Self::NetlistComparison
             | Self::NetlistRunSnapshot
             | Self::NetlistSource => Workspace::Netlist,
-        }
-    }
-}
-
-/// Runtime draft for the dataset-driven Create Result Document transaction.
-///
-/// IDs, rather than translated labels or row positions, cross the modal
-/// boundary. The project-owned document is created only after the workflow
-/// module revalidates every selection against current retained datasets.
-#[derive(Debug, Clone)]
-pub struct CreateResultDocumentDialogState {
-    pub open: bool,
-    pub name: String,
-    pub name_touched: bool,
-    pub dataset_id: Option<crate::product::DatasetId>,
-    pub family_id: String,
-    pub viewer_id: String,
-    pub layout_id: String,
-    pub validation_error: Option<String>,
-}
-
-impl Default for CreateResultDocumentDialogState {
-    fn default() -> Self {
-        Self {
-            open: false,
-            name: String::new(),
-            name_touched: false,
-            dataset_id: None,
-            family_id: "waveform-worksheet".to_owned(),
-            viewer_id: "viewer-waveform".to_owned(),
-            layout_id: "two-linked-panes".to_owned(),
-            validation_error: None,
         }
     }
 }

@@ -7,7 +7,7 @@ use crate::state::{
     PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationRunLifecycle,
     SimulationRunProvenance,
 };
-use crate::workbench::state::CreateResultDocumentDialogState;
+use rspice_results_ui::create_document::CreateResultDocumentDialogState;
 
 fn digest(byte: u8) -> ContentDigest {
     ContentDigest::from_bytes([byte; 32])

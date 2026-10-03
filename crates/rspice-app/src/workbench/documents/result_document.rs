@@ -2258,7 +2258,7 @@ fn viewer_tabs(ui: &mut Ui, state: &mut AppState) {
 /// Imported or renamed pages resolve to no family and keep every sheet their
 /// dataset can feed reachable.
 fn family_allows_viewer(family_label: &str, viewer: ResultViewer) -> bool {
-    create_document::ResultDocumentFamily::from_label(family_label)
+    rspice_results::document_creation::ResultDocumentFamily::from_label(family_label)
         .is_none_or(|family| family.offers_sheet(viewer))
 }
 

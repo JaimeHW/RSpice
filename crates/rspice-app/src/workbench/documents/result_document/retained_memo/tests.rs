@@ -155,7 +155,7 @@ fn retained_memo_immutable_pane_binding_rejects_changed_source_content() {
     let mut app = RSpiceApp::test_instance();
     app.state = retained_state(AnalysisType::Transient, 3);
     app.state.workbench.create_result_document =
-        crate::workbench::state::CreateResultDocumentDialogState {
+        rspice_results_ui::create_document::CreateResultDocumentDialogState {
             open: true,
             name: "Pinned evidence".to_owned(),
             name_touched: true,
