@@ -1,5 +1,7 @@
 //! Results tab strips and instrument controls over caller-owned selection.
 
+pub mod instrument;
+
 use egui::{Ui, WidgetInfo, WidgetType};
 use rspice_results::result_presentation::ResultViewer;
 use rspice_ui_kit::{
@@ -446,3 +448,35 @@ pub fn viewer_tab(ui: &mut Ui, viewer: ResultViewer, active: bool) -> bool {
 
 #[cfg(test)]
 mod tests;
+
+/// Export targets requested by the Results menu.
+#[derive(Default)]
+pub struct ExportRequests {
+    pub csv: bool,
+    pub figure: bool,
+}
+
+pub fn export_menu(ui: &mut Ui) -> ExportRequests {
+    let mut requests = ExportRequests::default();
+    ui.menu_button("Export…", |ui| {
+        // Not "waveform data": the export routes on the active sheet and then
+        // on the retained payload, so it writes a spectrum here and SOA rules,
+        // SOA observations, optimizer candidates or an event history there —
+        // none of them samples.
+        if ui.button("Result data (CSV)…").clicked() {
+            requests.csv = true;
+            ui.close();
+        }
+        // The figure goes through the publication pipeline, which renders this
+        // sheet as PDF/A, PDF, SVG or PNG at a chosen resolution. A window
+        // screenshot used to live here instead: the same pixels the reader
+        // already had, at whatever the display happened to be, with the chrome
+        // cropped off by rectangle. One label for both targets, because the
+        // browser reaches the same pipeline through its own worker.
+        if ui.button("Viewer figure (PDF, SVG, PNG)…").clicked() {
+            requests.figure = true;
+            ui.close();
+        }
+    });
+    requests
+}

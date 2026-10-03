@@ -14,6 +14,7 @@ mod fft;
 pub(crate) mod frame_work;
 mod harmonic_balance;
 mod hist;
+mod instrument;
 pub(crate) mod manifest;
 pub(crate) mod network_matrix;
 mod noise_contrib;
@@ -257,19 +258,18 @@ use crate::results::visualization_document::{MarkerId, PaneId};
 use crate::simulation::SimulationController;
 use crate::simulation::controller::DerivedViewerLoadState;
 use crate::state::{AnalysisResult, SimulationRun, WaveformData};
-use crate::ui::icons::Icon;
-use crate::ui::plot::{CursorPair, DecimationCache, InteractionMode};
+use crate::ui::plot::{CursorPair, DecimationCache};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{IconButton, chip, docbar_at_height};
+use crate::ui::widgets::{chip, docbar_at_height};
 use crate::workbench::app_state::ActiveViewer;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_results::family_projection::SourceSampleSelection;
+use rspice_results_ui::chrome::instrument::ResultPlotTool;
 use rspice_results_ui::chrome::{
-    ResultBarMetrics, instrument_control, instrument_separator, viewer_picker,
-    viewer_picker_separator, viewer_tab, viewer_tab_scroller,
+    ResultBarMetrics, viewer_picker, viewer_picker_separator, viewer_tab, viewer_tab_scroller,
 };
 use rspice_results_ui::derived::DerivedSeries;
 use rspice_results_ui::eye_diagram::EyeTimebase;
@@ -883,31 +883,6 @@ struct PersistentPaneContext {
 }
 
 pub use rspice_results::result_presentation::ResultViewer;
-
-/// Mutually exclusive primary pointer tool for instrument-style result plots.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-enum ResultPlotTool {
-    /// Normal result interaction: cursors/markers plus wheel zoom and panning.
-    #[default]
-    Cursor,
-    /// Primary drag draws a zoom rectangle.
-    BoxZoom,
-    /// Primary drag pans the plot viewport.
-    Pan,
-    /// Primary click or drag places the active pane's horizontal cursor.
-    HorizontalCursor,
-}
-
-impl ResultPlotTool {
-    const fn interaction_mode(self) -> InteractionMode {
-        match self {
-            Self::Cursor => InteractionMode::All,
-            Self::BoxZoom => InteractionMode::Zoom,
-            Self::Pan => InteractionMode::Pan,
-            Self::HorizontalCursor => InteractionMode::Select,
-        }
-    }
-}
 
 /// A viewport gesture on the active sheet, as asked for by a command.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -3192,7 +3167,7 @@ fn show_sheet_bar(ui: &mut Ui, state: &mut AppState) {
             | ResultViewer::Bode
             | ResultViewer::NoiseContrib
     ) {
-        show_wave_instrument(&mut child, state);
+        instrument::show(&mut child, state);
     } else {
         child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // The evidence sheets exist to be recorded, so they carry the same
@@ -3274,202 +3249,6 @@ fn show_structured_result_strip(ui: &mut Ui, state: &mut AppState) {
     });
 }
 
-fn show_wave_instrument(ui: &mut Ui, state: &mut AppState) {
-    let t = Tokens::get(ui.ctx());
-    waves::reconcile_active_pane(state, &t);
-    let limits_available = waves::spec_limits_available(state, &t);
-    let envelope_available = waves::family_envelope_available(state, &t);
-    let marker_available = waves::marker_at_cursor_a_available(state, &t);
-    if !limits_available {
-        state.ui.results.show_spec_limits = false;
-    }
-    if !envelope_available {
-        state.ui.results.show_family_envelope = false;
-    }
-
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        export_menu(ui, state);
-        // The collapsed readout's numbers ride the bar's right edge, where
-        // the strip that owns them would otherwise be.
-        if let Some(readout) = waves::inline_cursor_readout(state, &t) {
-            ui.add_space(8.0);
-            ui.label(
-                egui::RichText::new(readout)
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-            )
-            .on_hover_text("Cursor readout · expand the strip for per-trace values");
-        }
-        let remaining = ui.available_size();
-        ui.allocate_ui_with_layout(
-            remaining,
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                egui::ScrollArea::horizontal()
-                    .id_salt("rspice.results.wave-instrument")
-                    .auto_shrink([false, true])
-                    .scroll_bar_visibility(
-                        egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
-                    )
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
-                            let cursor_active = state.ui.results.plot_tool
-                                == ResultPlotTool::Cursor
-                                && state.ui.results.cursor_tool.is_armed();
-                            if instrument_control(ui, "A|B", cursor_active, "A/B cursor tool")
-                                .clicked()
-                            {
-                                if cursor_active {
-                                    state.ui.results.toggle_cursor_tool();
-                                } else {
-                                    state.ui.results.plot_tool = ResultPlotTool::Cursor;
-                                    if !state.ui.results.cursor_tool.is_armed() {
-                                        state.ui.results.toggle_cursor_tool();
-                                    }
-                                }
-                            }
-                            if instrument_control(
-                                ui,
-                                "H",
-                                state.ui.results.plot_tool == ResultPlotTool::HorizontalCursor,
-                                "Horizontal cursor - click or drag in the active pane",
-                            )
-                            .clicked()
-                            {
-                                state.ui.results.plot_tool = ResultPlotTool::HorizontalCursor;
-                            }
-
-                            // Box zoom and pan are gestures, so they carry
-                            // glyphs; the lettered controls on this bar are
-                            // the named modes beside them.
-                            instrument_separator(ui);
-                            if IconButton::new(Icon::BoxZoom)
-                                .side(ResultBarMetrics::of(ui).instrument_control)
-                                .on(state.ui.results.plot_tool == ResultPlotTool::BoxZoom)
-                                .tooltip("Box zoom - drag a region")
-                                .show(ui)
-                                .clicked()
-                            {
-                                state.ui.results.plot_tool = ResultPlotTool::BoxZoom;
-                            }
-                            if IconButton::new(Icon::Pan)
-                                .side(ResultBarMetrics::of(ui).instrument_control)
-                                .on(state.ui.results.plot_tool == ResultPlotTool::Pan)
-                                .tooltip("Pan viewport - drag the plot")
-                                .show(ui)
-                                .clicked()
-                            {
-                                state.ui.results.plot_tool = ResultPlotTool::Pan;
-                            }
-
-                            // Viewport controls carry their glyphs like the
-                            // mockup: magnitude and fit are gestures, and the
-                            // lettered controls beside them are named modes.
-                            instrument_separator(ui);
-                            if IconButton::new(Icon::ZoomIn)
-                                .side(ResultBarMetrics::of(ui).instrument_control)
-                                .tooltip("Zoom active pane in 2x")
-                                .show(ui)
-                                .clicked()
-                            {
-                                waves::zoom_active_pane(state, &t, 0.5);
-                            }
-                            if IconButton::new(Icon::ZoomOut)
-                                .side(ResultBarMetrics::of(ui).instrument_control)
-                                .tooltip("Zoom active pane out 2x")
-                                .show(ui)
-                                .clicked()
-                            {
-                                waves::zoom_active_pane(state, &t, 2.0);
-                            }
-                            if IconButton::new(Icon::ZoomFit)
-                                .side(ResultBarMetrics::of(ui).instrument_control)
-                                .tooltip("Fit active waveform pane")
-                                .show(ui)
-                                .clicked()
-                            {
-                                waves::fit_active_pane(state, &t);
-                            }
-
-                            instrument_separator(ui);
-                            if ui
-                                .add_enabled_ui(limits_available, |ui| {
-                                    instrument_control(
-                                        ui,
-                                        "LIM",
-                                        state.ui.results.show_spec_limits,
-                                        "Show exact compatible project specification limits",
-                                    )
-                                })
-                                .inner
-                                .clicked()
-                            {
-                                state.ui.results.show_spec_limits =
-                                    !state.ui.results.show_spec_limits;
-                            }
-                            if ui
-                                .add_enabled_ui(envelope_available, |ui| {
-                                    instrument_control(
-                                        ui,
-                                        "ENV",
-                                        state.ui.results.show_family_envelope,
-                                        "Show min/max envelope from retained family samples",
-                                    )
-                                })
-                                .inner
-                                .clicked()
-                            {
-                                state.ui.results.show_family_envelope =
-                                    !state.ui.results.show_family_envelope;
-                            }
-                            if instrument_control(
-                                ui,
-                                "GRID",
-                                state.ui.results.show_minor_grid,
-                                "Show minor waveform grid",
-                            )
-                            .clicked()
-                            {
-                                state.ui.results.show_minor_grid =
-                                    !state.ui.results.show_minor_grid;
-                            }
-                            if ui
-                                .add_enabled_ui(marker_available, |ui| {
-                                    instrument_control(
-                                        ui,
-                                        "+M",
-                                        false,
-                                        "Drop marker at cursor A on selected or nearest visible trace",
-                                    )
-                                })
-                                .inner
-                                .clicked()
-                            {
-                                waves::drop_marker_at_cursor_a(state, &t);
-                            }
-
-                            let hidden = hidden_wave_strip_count(state);
-                            if hidden > 0 {
-                                instrument_separator(ui);
-                                if instrument_control(
-                                    ui,
-                                    &format!("{hidden} HIDDEN"),
-                                    true,
-                                    "Restore closed waveform strips",
-                                )
-                                .clicked()
-                                {
-                                    state.ui.results.hidden_strips.clear();
-                                }
-                            }
-                        });
-                    });
-            },
-        );
-    });
-}
-
 fn hidden_wave_strip_count(state: &AppState) -> usize {
     let Some(run) = state.simulation.active_run() else {
         return 0;
@@ -3543,26 +3322,9 @@ fn sheet_purpose(state: &AppState) -> String {
 }
 
 fn export_menu(ui: &mut Ui, state: &mut AppState) {
-    ui.menu_button("Export…", |ui| {
-        // Not "waveform data": the export routes on the active sheet and then
-        // on the retained payload, so it writes a spectrum here and SOA rules,
-        // SOA observations, optimizer candidates or an event history there —
-        // none of them samples.
-        if ui.button("Result data (CSV)…").clicked() {
-            state.ui.export_csv_requested = true;
-            ui.close();
-        }
-        // The figure goes through the publication pipeline, which renders this
-        // sheet as PDF/A, PDF, SVG or PNG at a chosen resolution. A window
-        // screenshot used to live here instead: the same pixels the reader
-        // already had, at whatever the display happened to be, with the chrome
-        // cropped off by rectangle. One label for both targets, because the
-        // browser reaches the same pipeline through its own worker.
-        if ui.button("Viewer figure (PDF, SVG, PNG)…").clicked() {
-            state.ui.export_figure_requested = true;
-            ui.close();
-        }
-    });
+    let requests = rspice_results_ui::chrome::export_menu(ui);
+    state.ui.export_csv_requested |= requests.csv;
+    state.ui.export_figure_requested |= requests.figure;
 }
 
 fn inline_result_actions(ui: &mut Ui, state: &mut AppState) {
