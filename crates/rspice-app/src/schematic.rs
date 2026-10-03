@@ -20,4 +20,4 @@ pub(crate) mod symbol_editor;
 mod vector_display;
 pub(crate) mod view;
 
-pub(crate) use vector_display::bus_notations;
+pub(crate) use vector_display::{BusNotations, bus_notations};

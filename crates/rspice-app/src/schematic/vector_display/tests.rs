@@ -171,7 +171,7 @@ fn every_results_surface_paints_through_this_boundary() {
         ),
         (
             "workbench/documents/result_document/waves.rs",
-            "notations.display(&trace.name)",
+            "notations.display(name)",
         ),
         (
             "workbench/documents/result_document/table.rs",
@@ -179,7 +179,7 @@ fn every_results_surface_paints_through_this_boundary() {
         ),
         (
             "workbench/documents/result_document/op_inspector.rs",
-            "notations.display(&leaf)",
+            "notations.display(name)",
         ),
         (
             "workbench/documents/visualization_studio/dock/traces.rs",
@@ -199,6 +199,19 @@ fn every_results_surface_paints_through_this_boundary() {
              Every surface that shows a solved vector renders it through \
              `schematic::vector_display`, so a bus bit reads the \
              same everywhere."
+        );
+    }
+    let viewers = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-results-ui/src");
+    for (path, site) in [
+        ("waves/header.rs", "display_name(&trace.name)"),
+        ("op_inspector.rs", "source.mapping.display_node(&leaf)"),
+        ("op_inspector.rs", "source.mapping.display_node(&row.name)"),
+    ] {
+        let source = std::fs::read_to_string(viewers.join(path))
+            .unwrap_or_else(|error| panic!("read {path}: {error}"));
+        assert!(
+            crate::source_guard::production_source(&source).contains(site),
+            "{path} no longer renders retained names through its host notation boundary: {site}"
         );
     }
 }

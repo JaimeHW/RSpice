@@ -1,0 +1,1525 @@
+//! Operating-point cards, grouped row projections and exact retained-value readouts.
+
+use crate::{presentation::well_hint, virtual_rows::RowOffsets};
+use egui::Ui;
+use rspice_results::operating_point::{
+    DcOpResult, OperatingPointDeviceDetailEvidence, OperatingPointValue,
+    report::{
+        OperatingPointReportFacts, RetainedDeviceDetail as RetainedDetail, annotation_label,
+        device_param_unit, process_label, retained_detail_allows, signal_leaf,
+    },
+};
+use rspice_ui_kit::{
+    plot::fmt_si,
+    theme::{self, FontWeight},
+    tokens::{self, Tokens},
+    widgets::{measurement_table, section_header},
+};
+use std::{borrow::Cow, collections::BTreeMap};
+const NAME_W: f32 = 146.0;
+const KIND_W: f32 = 82.0;
+const REGION_W: f32 = 92.0;
+const VALUE_MIN_W: f32 = 78.0;
+const ACTION_W: f32 = 82.0;
+const ROW_H: f32 = 25.0;
+const HEADER_H: f32 = 23.0;
+const GROUP_H: f32 = 24.0;
+const DEVICE_GROUP_GAP: f32 = 8.0;
+const CELL_INSET: f32 = 9.0;
+const TWO_CARD_BREAKPOINT: f32 = 840.0;
+const CARD_HEADER_H: f32 = 31.0;
+
+#[derive(Clone)]
+pub struct OpEvidence {
+    pub run_id: u64,
+    pub label: String,
+    pub success: bool,
+    pub error: Option<String>,
+    pub detail_policy: Option<OperatingPointDeviceDetailEvidence>,
+    pub node_count: usize,
+    pub branch_count: usize,
+    pub facts: Option<OperatingPointReportFacts>,
+}
+#[derive(Clone)]
+pub enum OpAction {
+    LocateNode(String),
+    LocateDevice(u64),
+}
+
+/// Read-only schematic queries for visible rows; the host applies returned actions.
+pub trait SchematicMapping {
+    fn display_node<'a>(&self, name: &'a str) -> Cow<'a, str>;
+    fn node_available(&self, name: &str) -> bool;
+    fn device_target(&self, name: &str) -> Option<u64>;
+}
+
+#[derive(Clone, Copy)]
+pub struct OpControls<'a> {
+    pub filter: &'a str,
+    pub sort: Option<&'a (String, bool)>,
+    pub root: &'a str,
+}
+
+pub struct OpView<'a, M> {
+    pub evidence: &'a OpEvidence,
+    pub dc: Option<&'a DcOpResult>,
+    pub devices: Option<&'a rspice_core::circuit::DeviceOpReport>,
+    pub controls: OpControls<'a>,
+    pub mapping: &'a M,
+}
+
+#[derive(Default)]
+pub struct OpResponse {
+    pub action: Option<OpAction>,
+    pub clicked_sort: Option<String>,
+}
+
+pub enum OpAbsence {
+    Missing,
+    OtherAnalysis,
+    NoValues,
+}
+pub fn show_absent(ui: &mut Ui, absence: OpAbsence) {
+    well_hint(
+        ui,
+        match absence {
+            OpAbsence::Missing => "No operating-point analysis is selected.",
+            OpAbsence::OtherAnalysis => "The selected analysis is not a DC operating-point result.",
+            OpAbsence::NoValues => {
+                "The selected operating-point analysis retained no node, branch, or device values."
+            }
+        },
+    );
+}
+fn detail_label(policy: Option<OperatingPointDeviceDetailEvidence>) -> &'static str {
+    match policy {
+        None => "legacy retained report",
+        Some(OperatingPointDeviceDetailEvidence::AllDevices) => "all devices retained",
+        Some(OperatingPointDeviceDetailEvidence::SelectedAndViolations) => {
+            "selected devices and violations retained"
+        }
+        Some(OperatingPointDeviceDetailEvidence::ViolationsOnly) => "violations retained",
+        Some(OperatingPointDeviceDetailEvidence::None) => "device detail not retained",
+    }
+}
+fn hierarchy_parts(name: &str, root: &str) -> (String, String) {
+    let signal = signal_leaf(name);
+    match rspice_app_types::hierarchy_path::ProbeTarget::parse_legacy(signal) {
+        Ok(target) if !target.scope.is_root() => (target.scope.fold_key(), target.leaf),
+        Ok(target) => (root.to_owned(), target.leaf),
+        Err(_) => (root.to_owned(), signal.to_owned()),
+    }
+}
+fn node_matches(row: &OperatingPointValue, filter: &str, root: &str) -> bool {
+    if filter.trim().is_empty() {
+        return true;
+    }
+    let filter = filter.trim().to_ascii_lowercase();
+    let (scope, leaf) = hierarchy_parts(&row.name, root);
+    row.name.to_ascii_lowercase().contains(&filter)
+        || scope.to_ascii_lowercase().contains(&filter)
+        || leaf.to_ascii_lowercase().contains(&filter)
+        || row.unit.to_ascii_lowercase().contains(&filter)
+}
+fn device_matches(entry: &rspice_core::circuit::DeviceOpEntry, filter: &str, root: &str) -> bool {
+    if filter.trim().is_empty() {
+        return true;
+    }
+    let filter = filter.trim().to_ascii_lowercase();
+    let (scope, leaf) = hierarchy_parts(&entry.name, root);
+    entry.name.to_ascii_lowercase().contains(&filter)
+        || scope.to_ascii_lowercase().contains(&filter)
+        || leaf.to_ascii_lowercase().contains(&filter)
+        || entry.device_kind.to_ascii_lowercase().contains(&filter)
+        || entry
+            .region
+            .is_some_and(|region| region.to_ascii_lowercase().contains(&filter))
+        || entry
+            .params
+            .iter()
+            .any(|(name, _)| name.to_ascii_lowercase().contains(&filter))
+}
+fn sort_groups_by_leaf(groups: &mut BTreeMap<String, Vec<(String, usize)>>) {
+    for rows in groups.values_mut() {
+        rows.sort_by(|left, right| left.0.cmp(&right.0));
+    }
+}
+fn grouped_nodes(
+    dc: &DcOpResult,
+    filter: &str,
+    root: &str,
+) -> BTreeMap<String, Vec<(String, usize)>> {
+    let mut groups = BTreeMap::<String, Vec<(String, usize)>>::new();
+    for (index, row) in dc
+        .node_voltages
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| node_matches(row, filter, root))
+    {
+        groups
+            .entry(hierarchy_parts(&row.name, root).0)
+            .or_default()
+            .push((signal_leaf(&row.name).to_ascii_lowercase(), index));
+    }
+    sort_groups_by_leaf(&mut groups);
+    groups
+}
+fn grouped_devices(
+    report: &rspice_core::circuit::DeviceOpReport,
+    detail: Option<&RetainedDetail>,
+    filter: &str,
+    sort: Option<&(String, bool)>,
+    root: &str,
+) -> BTreeMap<String, Vec<(String, usize)>> {
+    let mut groups = BTreeMap::<String, Vec<(String, usize)>>::new();
+    for (index, entry) in report
+        .entries
+        .iter()
+        .enumerate()
+        .filter(|(_, entry)| retained_detail_allows(&entry.name, detail))
+        .filter(|(_, entry)| device_matches(entry, filter, root))
+    {
+        groups
+            .entry(hierarchy_parts(&entry.name, root).0)
+            .or_default()
+            .push((signal_leaf(&entry.name).to_ascii_lowercase(), index));
+    }
+    let Some((key, ascending)) = sort else {
+        sort_groups_by_leaf(&mut groups);
+        return groups;
+    };
+    for rows in groups.values_mut() {
+        rows.sort_by(|left, right| {
+            let left_value = device_sort_value(&report.entries[left.1], key);
+            let right_value = device_sort_value(&report.entries[right.1], key);
+            let value_order = match (left_value, right_value) {
+                (Some(left), Some(right)) => {
+                    let order = left
+                        .abs()
+                        .total_cmp(&right.abs())
+                        .then_with(|| left.total_cmp(&right));
+                    if *ascending { order } else { order.reverse() }
+                }
+                // Missing and non-finite quantities stay below retained numeric
+                // evidence in both directions.
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            };
+            value_order.then_with(|| left.0.cmp(&right.0))
+        });
+    }
+    groups
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OpScope {
+    scope: String,
+    columns: Vec<(&'static str, &'static str)>,
+    count: usize,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NodePlanRow {
+    Group(usize),
+    Value(usize),
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DevicePlanRow {
+    Group(usize),
+    ColumnHeader(usize),
+    Gap(usize),
+    Device { scope: usize, entry: usize },
+}
+impl NodePlanRow {
+    const fn height(self) -> f32 {
+        match self {
+            Self::Group(_) => GROUP_H,
+            Self::Value(_) => ROW_H,
+        }
+    }
+}
+impl DevicePlanRow {
+    const fn height(self) -> f32 {
+        match self {
+            Self::Group(_) => GROUP_H,
+            Self::ColumnHeader(_) => HEADER_H,
+            Self::Device { .. } => ROW_H,
+            Self::Gap(_) => DEVICE_GROUP_GAP,
+        }
+    }
+
+    const fn scope(self) -> usize {
+        match self {
+            Self::Group(scope)
+            | Self::ColumnHeader(scope)
+            | Self::Gap(scope)
+            | Self::Device { scope, .. } => scope,
+        }
+    }
+}
+#[derive(Debug, Clone)]
+pub struct OpPlan {
+    node_scopes: Vec<OpScope>,
+    node_rows: Vec<NodePlanRow>,
+    node_offsets: RowOffsets,
+    node_shown: usize,
+    device_scopes: Vec<OpScope>,
+    device_rows: Vec<DevicePlanRow>,
+    device_offsets: RowOffsets,
+    device_shown: usize,
+    /// Device rows the retained detail policy admits, before the reader's
+    /// text filter. The panel states the retained scope, not the search.
+    device_in_scope: usize,
+}
+impl OpPlan {
+    pub fn node_shown(&self) -> usize {
+        self.node_shown
+    }
+    pub fn device_shown(&self) -> usize {
+        self.device_shown
+    }
+    pub fn device_in_scope(&self) -> usize {
+        self.device_in_scope
+    }
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn node_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.node_rows.iter().filter_map(|row| match row {
+            NodePlanRow::Value(index) => Some(*index),
+            _ => None,
+        })
+    }
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn device_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.device_rows.iter().filter_map(|row| match row {
+            DevicePlanRow::Device { entry, .. } => Some(*entry),
+            _ => None,
+        })
+    }
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn node_row_count(&self) -> usize {
+        self.node_rows.len()
+    }
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn node_offset_count(&self) -> usize {
+        self.node_offsets.rows()
+    }
+    pub fn new(
+        controls: OpControls<'_>,
+        dc: Option<&DcOpResult>,
+        devices: Option<&rspice_core::circuit::DeviceOpReport>,
+        detail: Option<&RetainedDetail>,
+    ) -> OpPlan {
+        let mut node_scopes = Vec::new();
+        let mut node_rows = Vec::new();
+        let mut node_shown = 0;
+        if let Some(dc) = dc {
+            for (scope, rows) in grouped_nodes(dc, controls.filter, controls.root) {
+                let index = node_scopes.len();
+                node_shown += rows.len();
+                node_scopes.push(OpScope {
+                    scope,
+                    columns: Vec::new(),
+                    count: rows.len(),
+                });
+                node_rows.push(NodePlanRow::Group(index));
+                node_rows.extend(rows.into_iter().map(|(_, row)| NodePlanRow::Value(row)));
+            }
+        }
+
+        let mut device_scopes = Vec::new();
+        let mut device_rows = Vec::new();
+        let mut device_shown = 0;
+        if let Some(report) = devices {
+            for (scope, rows) in grouped_devices(
+                report,
+                detail,
+                controls.filter,
+                controls.sort,
+                controls.root,
+            ) {
+                let index = device_scopes.len();
+                device_shown += rows.len();
+                device_scopes.push(OpScope {
+                    columns: device_columns(report, &rows),
+                    scope,
+                    count: rows.len(),
+                });
+                device_rows.push(DevicePlanRow::Group(index));
+                device_rows.push(DevicePlanRow::ColumnHeader(index));
+                device_rows.extend(rows.into_iter().map(|(_, entry)| DevicePlanRow::Device {
+                    scope: index,
+                    entry,
+                }));
+                device_rows.push(DevicePlanRow::Gap(index));
+            }
+        }
+
+        let device_in_scope = devices.map_or(0, |report| {
+            report
+                .entries
+                .iter()
+                .filter(|entry| retained_detail_allows(&entry.name, detail))
+                .count()
+        });
+        OpPlan {
+            device_in_scope,
+            node_offsets: RowOffsets::from_heights(node_rows.iter().map(|row| row.height())),
+            node_scopes,
+            node_rows,
+            node_shown,
+            device_offsets: RowOffsets::from_heights(device_rows.iter().map(|row| row.height())),
+            device_scopes,
+            device_rows,
+            device_shown,
+        }
+    }
+}
+const DEVICE_FAMILY_ORDER: [&str; 3] = ["MOSFET", "BJT", "DIODE"];
+fn device_sort_value(entry: &rspice_core::circuit::DeviceOpEntry, key: &str) -> Option<f64> {
+    entry
+        .params
+        .iter()
+        .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
+        .map(|(_, value)| *value)
+        .filter(|value| value.is_finite())
+}
+fn device_family_rank(family: &str) -> usize {
+    DEVICE_FAMILY_ORDER
+        .iter()
+        .position(|known| known.eq_ignore_ascii_case(family))
+        .unwrap_or(DEVICE_FAMILY_ORDER.len())
+}
+fn device_columns(
+    report: &rspice_core::circuit::DeviceOpReport,
+    rows: &[(String, usize)],
+) -> Vec<(&'static str, &'static str)> {
+    let mut shown: Vec<usize> = rows.iter().map(|(_, index)| *index).collect();
+    shown.sort_unstable();
+    let mut columns: Vec<(usize, &'static str, &'static str)> = Vec::new();
+    for index in shown {
+        let entry = &report.entries[index];
+        let rank = device_family_rank(entry.device_kind);
+        for (name, _) in &entry.params {
+            if !columns.iter().any(|(_, candidate, _)| candidate == name) {
+                columns.push((rank, *name, device_param_unit(entry.device_kind, name)));
+            }
+        }
+    }
+    // Stable: within one family the quantities keep the order the report
+    // introduced them in.
+    columns.sort_by_key(|(rank, _, _)| *rank);
+    columns
+        .into_iter()
+        .map(|(_, name, unit)| (name, unit))
+        .collect()
+}
+fn op_column_rect(row: egui::Rect, offset: f32, width: f32) -> egui::Rect {
+    egui::Rect::from_min_size(
+        egui::pos2(row.left() + offset, row.top()),
+        egui::vec2(width, row.height()),
+    )
+}
+fn paint_cell(
+    ui: &Ui,
+    cell: egui::Rect,
+    text: impl ToString,
+    align: egui::Align2,
+    font: egui::FontId,
+    color: egui::Color32,
+) {
+    let x = if align == egui::Align2::RIGHT_CENTER {
+        cell.right() - CELL_INSET
+    } else {
+        cell.left() + CELL_INSET
+    };
+    ui.painter()
+        .with_clip_rect(cell.shrink2(egui::vec2(2.0, 0.0)))
+        .text(egui::pos2(x, cell.center().y), align, text, font, color);
+}
+fn group_header(ui: &mut Ui, width: f32, scope: &str, count: usize) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, GROUP_H), egui::Sense::hover());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Label,
+            true,
+            format!("Hierarchy {scope}, {count} rows"),
+        )
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::RowHeader);
+        node.set_label(format!("Hierarchy {scope}, {count} rows"));
+    });
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
+    paint_cell(
+        ui,
+        op_column_rect(rect, 0.0, width),
+        format!("{scope}  ·  {count}"),
+        egui::Align2::LEFT_CENTER,
+        theme::mono(tokens::FS_0, FontWeight::Medium),
+        t.color.text_faint,
+    );
+}
+fn column_header(ui: &mut Ui, width: f32, columns: &[(f32, &str, bool)]) -> egui::Rect {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(width, HEADER_H), egui::Sense::hover());
+    let header_label = columns
+        .iter()
+        .filter_map(|(_, label, _)| (!label.is_empty()).then_some(*label))
+        .collect::<Vec<_>>()
+        .join(", ");
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Label,
+            true,
+            format!("Table columns: {header_label}"),
+        )
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Row);
+        node.set_label(format!("Column headers: {header_label}"));
+    });
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        egui::Stroke::new(1.0, t.color.border),
+    );
+    let mut offset = 0.0;
+    for (column_width, label, numeric) in columns {
+        paint_cell(
+            ui,
+            op_column_rect(rect, offset, *column_width),
+            *label,
+            if *numeric {
+                egui::Align2::RIGHT_CENTER
+            } else {
+                egui::Align2::LEFT_CENTER
+            },
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            t.color.text_faint,
+        );
+        offset += *column_width;
+    }
+    rect
+}
+fn device_column_header(
+    ui: &mut Ui,
+    width: f32,
+    columns: &[(&'static str, &'static str)],
+    scope: &str,
+    sort: Option<&(String, bool)>,
+) -> Option<String> {
+    let mut headers = vec![
+        (NAME_W, "INSTANCE", false),
+        (KIND_W, "FAMILY", false),
+        (REGION_W, "REGION", false),
+    ];
+    headers.extend(columns.iter().map(|(name, _)| (VALUE_MIN_W, *name, true)));
+    headers.push((ACTION_W, "", false));
+    let rect = column_header(ui, width, &headers);
+    let t = Tokens::get(ui.ctx());
+    let mut clicked = None;
+    for (index, (key, _)) in columns.iter().enumerate() {
+        let cell = op_column_rect(
+            rect,
+            NAME_W + KIND_W + REGION_W + index as f32 * VALUE_MIN_W,
+            VALUE_MIN_W,
+        );
+        let selected = sort.is_some_and(|(current, _)| current.eq_ignore_ascii_case(key));
+        let ascending = selected && sort.is_some_and(|(_, ascending)| *ascending);
+        let response = ui.interact(
+            cell,
+            ui.id().with(("op-sort", scope, *key)),
+            egui::Sense::click(),
+        );
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                ui.is_enabled(),
+                format!(
+                    "Sort {scope} devices by {key} {}",
+                    if selected && !ascending {
+                        "ascending"
+                    } else {
+                        "descending"
+                    }
+                ),
+            )
+        });
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(egui::accesskit::Role::ColumnHeader);
+            node.set_label(format!(
+                "{key}; {}; activate to sort {direction}",
+                if selected {
+                    if ascending {
+                        "sorted ascending"
+                    } else {
+                        "sorted descending"
+                    }
+                } else {
+                    "not sorted"
+                },
+                direction = if selected && !ascending {
+                    "ascending"
+                } else {
+                    "descending"
+                },
+            ));
+        });
+        if response.hovered() {
+            ui.painter().rect_filled(
+                cell.shrink2(egui::vec2(2.0, 1.0)),
+                0.0,
+                t.color.bg_hover.gamma_multiply(0.45),
+            );
+        }
+        if selected {
+            let center = egui::pos2(cell.left() + 8.0, cell.center().y);
+            let direction = if ascending { -1.0 } else { 1.0 };
+            ui.painter().add(egui::Shape::convex_polygon(
+                vec![
+                    center + egui::vec2(0.0, direction * 3.0),
+                    center + egui::vec2(-3.5, -direction * 2.5),
+                    center + egui::vec2(3.5, -direction * 2.5),
+                ],
+                t.color.accent,
+                egui::Stroke::NONE,
+            ));
+        }
+        theme::paint_focus_ring(ui, &response, cell.shrink(1.0));
+        if response.clicked() {
+            clicked = Some((*key).to_owned());
+        }
+    }
+    clicked
+}
+fn card_header(ui: &mut Ui, title: &str, count: usize, suffix: &str) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), CARD_HEADER_H),
+        egui::Sense::hover(),
+    );
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
+    paint_cell(
+        ui,
+        op_column_rect(rect, 0.0, rect.width() * 0.64),
+        title,
+        egui::Align2::LEFT_CENTER,
+        theme::sans(tokens::FS_1, FontWeight::Medium),
+        t.color.text,
+    );
+    paint_cell(
+        ui,
+        op_column_rect(rect, rect.width() * 0.64, rect.width() * 0.36),
+        format!("{count} {suffix}"),
+        egui::Align2::RIGHT_CENTER,
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.text_faint,
+    );
+}
+fn stacked_body_height(available_height: f32) -> f32 {
+    ((available_height - CARD_HEADER_H * 2.0 - 1.0) * 0.5).max(1.0)
+}
+fn show_solve_strip(ui: &mut Ui, evidence: &OpEvidence) {
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::new()
+        .fill(t.color.bg_panel)
+        .stroke(egui::Stroke::new(1.0, t.color.border))
+        .inner_margin(egui::Margin::symmetric(11, 8))
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    egui::RichText::new("OP")
+                        .font(theme::mono(tokens::FS_1, FontWeight::SemiBold))
+                        .color(t.color.accent),
+                );
+                ui.label(
+                    egui::RichText::new("Operating point · retained DC solution")
+                        .font(theme::sans(tokens::FS_1, FontWeight::Medium))
+                        .color(t.color.text),
+                );
+                ui.separator();
+                ui.label(
+                    egui::RichText::new(format!("Run {} · {}", evidence.run_id, evidence.label))
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
+                );
+                if let Some(facts) = &evidence.facts {
+                    ui.separator();
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} · {:.3} °C · point {}/{}",
+                            process_label(facts.process),
+                            facts.temperature_celsius,
+                            facts.point_index.saturating_add(1),
+                            facts.point_count.max(1),
+                        ))
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
+                    );
+                }
+                let nodes = evidence.node_count;
+                let branches = evidence.branch_count;
+                ui.separator();
+                ui.label(
+                    egui::RichText::new(format!("{nodes} nodes · {branches} branches"))
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_faint),
+                );
+                if !evidence.success {
+                    ui.separator();
+                    ui.label(
+                        egui::RichText::new("retained partial evidence")
+                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                            .color(t.color.err),
+                    );
+                }
+            });
+            if !evidence.success
+                && let Some(error) = evidence.error.as_deref()
+            {
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new(error)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_dim),
+                );
+            }
+        });
+}
+fn unavailable_card(ui: &mut Ui, title: &str, message: &str) {
+    card_header(ui, title, 0, "retained");
+    let t = Tokens::get(ui.ctx());
+    ui.add_space(12.0);
+    ui.label(
+        egui::RichText::new(message)
+            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+            .color(t.color.text_dim),
+    );
+}
+fn empty_table_message(ui: &mut Ui, message: impl Into<String>) {
+    let t = Tokens::get(ui.ctx());
+    let message = message.into();
+    let response = ui.label(
+        egui::RichText::new(&message)
+            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+            .color(t.color.text_dim),
+    );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Status);
+        node.set_label(message);
+    });
+}
+fn node_value_text(row: &OperatingPointValue) -> (String, bool) {
+    if row.value.is_finite() {
+        (fmt_si(row.value, &row.unit, 6), true)
+    } else {
+        ("invalid · non-finite".to_owned(), false)
+    }
+}
+fn region_color(region: &str, colors: &rspice_ui_kit::palette::Palette) -> egui::Color32 {
+    match region.to_ascii_lowercase().as_str() {
+        "saturation" | "forward active" => colors.ok,
+        "cutoff" | "breakdown" => colors.err,
+        _ => colors.traces[1],
+    }
+}
+fn show_node_card(
+    ui: &mut Ui,
+    plan: &OpPlan,
+    source: &OpView<'_, impl SchematicMapping>,
+    body_max_height: Option<f32>,
+    action: &mut Option<OpAction>,
+) -> usize {
+    let filter = source.controls.filter;
+    let root = source.controls.root;
+
+    let Some(dc) = source.dc else {
+        unavailable_card(
+            ui,
+            "Node voltages",
+            "Node-voltage evidence was not retained for this analysis.",
+        );
+        return 0;
+    };
+    if dc.node_voltages.is_empty() {
+        unavailable_card(
+            ui,
+            "Node voltages",
+            "The retained DC solution contains no node-voltage rows.",
+        );
+        return 0;
+    }
+    let count = plan.node_shown;
+    card_header(ui, "Node voltages", count, "shown");
+    if plan.node_scopes.is_empty() {
+        empty_table_message(ui, format!("No retained node matches “{filter}”."));
+        return 0;
+    }
+
+    // The NODE column names the conductor the design drew; the IDENTITY column
+    // beside it keeps the deck name the engine solved under.
+    let table_width = ui.available_width().max(500.0);
+    // The flat row list and its offsets come from the plan: a retained DC
+    // solution is one row per node, and a real block has tens of thousands.
+    let flat = plan.node_rows.as_slice();
+    let offsets = &plan.node_offsets;
+    let mut scroll = egui::ScrollArea::both()
+        .id_salt("rspice.results.op.nodes")
+        .auto_shrink([false, false]);
+    if let Some(max_height) = body_max_height {
+        scroll = scroll.max_height(max_height);
+    }
+    let table = scroll
+        .show_viewport(ui, |ui, viewport| {
+            ui.scope(|ui| {
+            ui.set_min_width(table_width);
+            column_header(
+                ui,
+                table_width,
+                &[
+                    (NAME_W, "NODE", false),
+                    (VALUE_MIN_W + 36.0, "VOLTAGE", true),
+                    (64.0, "UNIT", false),
+                    (
+                        table_width - NAME_W - VALUE_MIN_W - 100.0 - ACTION_W,
+                        "IDENTITY",
+                        false,
+                    ),
+                    (ACTION_W, "", false),
+                ],
+            );
+            // The header is content, not chrome, so the body's own offsets
+            // start below it.
+            let view = offsets.plan(egui::Rangef::new(
+                viewport.min.y - HEADER_H,
+                viewport.max.y - HEADER_H,
+            ));
+            ui.allocate_space(egui::vec2(table_width, view.leading));
+            for entry in &flat[view.range()] {
+                let row = match *entry {
+                    NodePlanRow::Group(scope) => {
+                        let scope = &plan.node_scopes[scope];
+                        group_header(ui, table_width, &scope.scope, scope.count);
+                        continue;
+                    }
+                    NodePlanRow::Value(row) => &dc.node_voltages[row],
+                };
+                {
+                    let (rect, response) = ui
+                        .allocate_exact_size(egui::vec2(table_width, ROW_H), egui::Sense::hover());
+                    let shown = source.mapping.display_node(&row.name);
+                    response.widget_info(|| {
+                        let (value, valid) = node_value_text(row);
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Label,
+                            true,
+                            if valid {
+                                format!("Node {shown}, value {value}")
+                            } else {
+                                format!("Node {shown}, invalid retained non-finite value")
+                            },
+                        )
+                    });
+                    ui.ctx().accesskit_node_builder(response.id, |node| {
+                        let (value, valid) = node_value_text(row);
+                        node.set_role(egui::accesskit::Role::Row);
+                        node.set_label(if valid {
+                            format!("Node {shown}; voltage {value}; identity {}", row.name)
+                        } else {
+                            format!(
+                                "Node {shown}; voltage unavailable; retained value is non-finite; identity {}",
+                                row.name
+                            )
+                        });
+                    });
+                    if response.hovered() {
+                        ui.painter()
+                            .rect_filled(rect, 0.0, Tokens::get(ui.ctx()).color.bg_hover);
+                    }
+                    ui.painter().hline(
+                        rect.x_range(),
+                        rect.bottom() - 0.5,
+                        egui::Stroke::new(
+                            1.0,
+                            Tokens::get(ui.ctx()).color.border.gamma_multiply(0.6),
+                        ),
+                    );
+                    let (_, leaf) = hierarchy_parts(&row.name, root);
+                    paint_cell(
+                        ui,
+                        op_column_rect(rect, 0.0, NAME_W),
+                        source.mapping.display_node(&leaf),
+                        egui::Align2::LEFT_CENTER,
+                        theme::mono(tokens::FS_1, FontWeight::Regular),
+                        Tokens::get(ui.ctx()).color.text,
+                    );
+                    let (value_text, value_valid) = node_value_text(row);
+                    paint_cell(
+                        ui,
+                        op_column_rect(rect, NAME_W, VALUE_MIN_W + 36.0),
+                        value_text,
+                        egui::Align2::RIGHT_CENTER,
+                        theme::mono(tokens::FS_1, FontWeight::Regular),
+                        if value_valid {
+                            Tokens::get(ui.ctx()).color.text
+                        } else {
+                            Tokens::get(ui.ctx()).color.err
+                        },
+                    );
+                    paint_cell(
+                        ui,
+                        op_column_rect(rect, NAME_W + VALUE_MIN_W + 36.0, 64.0),
+                        &row.unit,
+                        egui::Align2::LEFT_CENTER,
+                        theme::mono(tokens::FS_0, FontWeight::Regular),
+                        Tokens::get(ui.ctx()).color.text_faint,
+                    );
+                    let identity_w = table_width - NAME_W - VALUE_MIN_W - 100.0 - ACTION_W;
+                    paint_cell(
+                        ui,
+                        op_column_rect(rect, NAME_W + VALUE_MIN_W + 100.0, identity_w),
+                        &row.name,
+                        egui::Align2::LEFT_CENTER,
+                        theme::mono(tokens::FS_0, FontWeight::Regular),
+                        Tokens::get(ui.ctx()).color.text_dim,
+                    );
+                    let available = source.mapping.node_available(&row.name);
+                    let button_rect = op_column_rect(rect, table_width - ACTION_W, ACTION_W)
+                        .shrink2(egui::vec2(7.0, 3.0));
+                    let response = ui
+                        .add_enabled_ui(available, |ui| {
+                            ui.put(button_rect, egui::Button::new("Schematic"))
+                        })
+                        .inner
+                        .on_disabled_hover_text(
+                            "This retained node has no current, unambiguous schematic mapping.",
+                        );
+                    if response.clicked() && available {
+                        *action = Some(OpAction::LocateNode(row.name.clone()));
+                    }
+                }
+            }
+            ui.allocate_space(egui::vec2(table_width, view.trailing));
+            })
+            .response
+        });
+    ui.ctx().accesskit_node_builder(table.inner.id, |node| {
+        node.set_role(egui::accesskit::Role::Table);
+        node.set_label("Operating-point node voltages");
+    });
+    count
+}
+fn show_device_card(
+    ui: &mut Ui,
+    plan: &OpPlan,
+    source: &OpView<'_, impl SchematicMapping>,
+    body_max_height: Option<f32>,
+    clicked_sort: &mut Option<String>,
+    action: &mut Option<OpAction>,
+) -> usize {
+    let filter = source.controls.filter;
+    let evidence = source.evidence;
+    let sort = source.controls.sort;
+
+    if evidence.detail_policy == Some(OperatingPointDeviceDetailEvidence::None) {
+        unavailable_card(
+            ui,
+            "Device operating points",
+            "The executed save policy explicitly retained no per-device operating-point detail.",
+        );
+        return 0;
+    }
+    let Some(report) = source.devices else {
+        unavailable_card(
+            ui,
+            "Device operating points",
+            "Per-device operating-point quantities were not retained for this analysis.",
+        );
+        return 0;
+    };
+    if report.entries.is_empty() {
+        unavailable_card(
+            ui,
+            "Device operating points",
+            "The retained per-device report contains no device rows.",
+        );
+        return 0;
+    }
+    let count = plan.device_shown;
+    card_header(ui, "Device operating points", count, "shown");
+    if plan.device_scopes.is_empty() {
+        if filter.trim().is_empty() {
+            empty_table_message(
+                ui,
+                "No device row satisfies the retained device-detail scope.",
+            );
+        } else {
+            empty_table_message(ui, format!("No retained device matches “{filter}”."));
+        }
+        return 0;
+    }
+
+    // Each scope carries its own column set, so the flat list references a
+    // layout rather than repeating it per row. `save_device_op` on a real
+    // block is one row per device; grouping, sorting and measuring them all
+    // every frame is what the plan exists to stop.
+    let layouts = plan.device_scopes.as_slice();
+    let flat = plan.device_rows.as_slice();
+    let offsets = &plan.device_offsets;
+    let mut scroll = egui::ScrollArea::both()
+        .id_salt("rspice.results.op.devices")
+        .auto_shrink([false, false]);
+    if let Some(max_height) = body_max_height {
+        scroll = scroll.max_height(max_height);
+    }
+    let table = scroll.show_viewport(ui, |ui, viewport| {
+        ui.scope(|ui| {
+            let available = ui.available_width();
+            let width_of = |layout: &OpScope| {
+                (NAME_W + KIND_W + REGION_W + layout.columns.len() as f32 * VALUE_MIN_W + ACTION_W)
+                    .max(available)
+            };
+            let widest = layouts.iter().map(width_of).fold(available, f32::max);
+            ui.set_min_width(widest);
+            let view = offsets.plan(viewport.y_range());
+            ui.allocate_space(egui::vec2(widest, view.leading));
+            for row in &flat[view.range()] {
+                let layout = &layouts[row.scope()];
+                let table_width = width_of(layout);
+                let entry = match *row {
+                    DevicePlanRow::Group(_) => {
+                        group_header(ui, table_width, &layout.scope, layout.count);
+                        continue;
+                    }
+                    DevicePlanRow::ColumnHeader(_) => {
+                        if let Some(key) = device_column_header(
+                            ui,
+                            table_width,
+                            &layout.columns,
+                            &layout.scope,
+                            sort,
+                        ) {
+                            *clicked_sort = Some(key);
+                        }
+                        continue;
+                    }
+                    DevicePlanRow::Gap(_) => {
+                        ui.add_space(DEVICE_GROUP_GAP);
+                        continue;
+                    }
+                    DevicePlanRow::Device { entry, .. } => &report.entries[entry],
+                };
+                let columns = &layout.columns;
+                {
+                    let (rect, response) = ui
+                        .allocate_exact_size(egui::vec2(table_width, ROW_H), egui::Sense::hover());
+                    response.widget_info(|| {
+                        let values = entry
+                            .params
+                            .iter()
+                            .map(|(name, value)| format!("{name} {value}"))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Label,
+                            true,
+                            format!(
+                                "{} device {}, region {}, {}",
+                                entry.device_kind,
+                                entry.name,
+                                entry.region.unwrap_or("not reported"),
+                                values,
+                            ),
+                        )
+                    });
+                    ui.ctx().accesskit_node_builder(response.id, |node| {
+                        let values = entry
+                            .params
+                            .iter()
+                            .map(|(name, value)| format!("{name} {value}"))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        node.set_role(egui::accesskit::Role::Row);
+                        node.set_label(format!(
+                            "Instance {}; family {}; region {}; {}",
+                            entry.name,
+                            entry.device_kind,
+                            entry.region.unwrap_or("not reported"),
+                            values,
+                        ));
+                    });
+                    let colors = &Tokens::get(ui.ctx()).color;
+                    if response.hovered() {
+                        ui.painter().rect_filled(rect, 0.0, colors.bg_hover);
+                    }
+                    ui.painter().hline(
+                        rect.x_range(),
+                        rect.bottom() - 0.5,
+                        egui::Stroke::new(1.0, colors.border.gamma_multiply(0.6)),
+                    );
+                    let (_, leaf) = hierarchy_parts(&entry.name, source.controls.root);
+                    paint_cell(
+                        ui,
+                        op_column_rect(rect, 0.0, NAME_W),
+                        leaf,
+                        egui::Align2::LEFT_CENTER,
+                        theme::mono(tokens::FS_1, FontWeight::Regular),
+                        colors.text,
+                    );
+                    paint_cell(
+                        ui,
+                        op_column_rect(rect, NAME_W, KIND_W),
+                        entry.device_kind,
+                        egui::Align2::LEFT_CENTER,
+                        theme::mono(tokens::FS_0, FontWeight::Regular),
+                        colors.text_dim,
+                    );
+                    if let Some(region) = entry.region {
+                        paint_cell(
+                            ui,
+                            op_column_rect(rect, NAME_W + KIND_W, REGION_W),
+                            region,
+                            egui::Align2::LEFT_CENTER,
+                            theme::mono(tokens::FS_0, FontWeight::Regular),
+                            region_color(region, colors),
+                        );
+                    }
+                    for (index, (name, unit)) in columns.iter().enumerate() {
+                        let text = entry
+                            .params
+                            .iter()
+                            .find(|(candidate, _)| candidate == name)
+                            .map(|(_, value)| {
+                                if unit.is_empty() {
+                                    rspice_app_types::property::format_engineering(*value)
+                                } else {
+                                    fmt_si(*value, unit, 4)
+                                }
+                            })
+                            .unwrap_or_else(|| "—".to_owned());
+                        paint_cell(
+                            ui,
+                            op_column_rect(
+                                rect,
+                                NAME_W + KIND_W + REGION_W + index as f32 * VALUE_MIN_W,
+                                VALUE_MIN_W,
+                            ),
+                            text,
+                            egui::Align2::RIGHT_CENTER,
+                            theme::mono(tokens::FS_1, FontWeight::Regular),
+                            colors.text_dim,
+                        );
+                    }
+                    let target = source.mapping.device_target(&entry.name);
+                    let button_rect = op_column_rect(rect, table_width - ACTION_W, ACTION_W)
+                        .shrink2(egui::vec2(7.0, 3.0));
+                    let response = ui
+                        .add_enabled_ui(target.is_some(), |ui| {
+                            ui.put(button_rect, egui::Button::new("Schematic"))
+                        })
+                        .inner
+                        .on_disabled_hover_text(
+                            "This retained device has no current, exact schematic identity.",
+                        );
+                    if response.clicked()
+                        && let Some(component_id) = target
+                    {
+                        *action = Some(OpAction::LocateDevice(component_id));
+                    }
+                }
+            }
+            ui.allocate_space(egui::vec2(widest, view.trailing));
+        })
+        .response
+    });
+    ui.ctx().accesskit_node_builder(table.inner.id, |node| {
+        node.set_role(egui::accesskit::Role::Table);
+        node.set_label("Device operating points");
+    });
+    count
+}
+pub fn show(
+    ui: &mut Ui,
+    plan: Option<&OpPlan>,
+    source: &OpView<'_, impl SchematicMapping>,
+) -> OpResponse {
+    show_solve_strip(ui, source.evidence);
+    ui.add_space(1.0);
+    let Some(plan) = plan else {
+        return OpResponse::default();
+    };
+    let mut clicked_sort = None;
+    let mut action = None;
+    let available = ui.available_size();
+    if available.x >= TWO_CARD_BREAKPOINT {
+        ui.columns(2, |columns| {
+            columns[0].set_min_height(available.y);
+            columns[1].set_min_height(available.y);
+            show_node_card(&mut columns[0], plan, source, None, &mut action);
+            show_device_card(
+                &mut columns[1],
+                plan,
+                source,
+                None,
+                &mut clicked_sort,
+                &mut action,
+            );
+        });
+    } else {
+        // Both structured cards remain in the viewport. Each body owns a
+        // bounded two-axis scroll region; neither can consume the space needed
+        // to reach the other card.
+        let stacked_body_height = stacked_body_height(available.y);
+        show_node_card(ui, plan, source, Some(stacked_body_height), &mut action);
+        ui.add_space(1.0);
+        show_device_card(
+            ui,
+            plan,
+            source,
+            Some(stacked_body_height),
+            &mut clicked_sort,
+            &mut action,
+        );
+    }
+
+    OpResponse {
+        action,
+        clicked_sort,
+    }
+}
+pub fn right_panel(ui: &mut Ui, evidence: &OpEvidence, device_in_scope: usize, current: bool) {
+    section_header(ui, "OP result", None);
+    let run = format!("Run {}", evidence.run_id);
+    let node_count = evidence.node_count.to_string();
+    let branch_count = evidence.branch_count.to_string();
+    // The in-scope device count is a property of the retained detail policy,
+    // so it comes off the plan rather than re-filtering every device row.
+    let device_count = device_in_scope.to_string();
+    measurement_table(
+        ui,
+        &[
+            ("Run", run.as_str()),
+            ("Analysis", evidence.label.as_str()),
+            ("Node values", node_count.as_str()),
+            ("Branch values", branch_count.as_str()),
+            ("Device rows", device_count.as_str()),
+            ("Device scope", detail_label(evidence.detail_policy)),
+        ],
+    );
+
+    if let Some(facts) = &evidence.facts {
+        ui.add_space(8.0);
+        section_header(ui, "Retained solve facts", None);
+        let temperature = format!("{:.3} °C", facts.temperature_celsius);
+        let point = format!(
+            "{} / {}",
+            facts.point_index.saturating_add(1),
+            facts.point_count.max(1)
+        );
+        let process = process_label(facts.process);
+        let mna_nodes = facts.mna_nodes.to_string();
+        let mna_branches = facts.mna_branches.to_string();
+        measurement_table(
+            ui,
+            &[
+                ("Process", process),
+                ("Temperature", temperature.as_str()),
+                ("Run-set point", point.as_str()),
+                ("MNA node rows", mna_nodes.as_str()),
+                ("MNA branch rows", mna_branches.as_str()),
+                ("Back annotation", annotation_label(facts.annotation)),
+            ],
+        );
+    }
+
+    ui.add_space(8.0);
+    section_header(ui, "Schematic association", None);
+    measurement_table(
+        ui,
+        &[(
+            "Mapping",
+            if current {
+                "current · cross-probe enabled"
+            } else {
+                "not current · actions disabled"
+            },
+        )],
+    );
+}
+#[cfg(any(test, feature = "test-support"))]
+pub fn evidence_fixture(
+    nodes: usize,
+    devices: usize,
+) -> (DcOpResult, rspice_core::circuit::DeviceOpReport) {
+    let dc = DcOpResult {
+        node_voltages: (0..nodes)
+            .map(|index| OperatingPointValue {
+                name: format!("V(x{}.n{index})", index % 4),
+                value: index as f64,
+                unit: "V".to_owned(),
+            })
+            .collect(),
+        ..DcOpResult::default()
+    };
+    let report = rspice_core::circuit::DeviceOpReport {
+        entries: (0..devices)
+            .map(|index| rspice_core::circuit::DeviceOpEntry {
+                name: format!("x{}.m{index}", index % 4),
+                device_kind: "MOSFET",
+                region: Some("saturation"),
+                params: vec![("gm", index as f64 * 1.0e-3), ("id", 1.0e-6)],
+            })
+            .collect(),
+    };
+    (dc, report)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn op_inspector_groups_by_occurrence_not_by_the_word_top() {
+        for (name, scope, leaf) in [
+            ("V(out)", "amplifier", "out"),
+            ("0", "amplifier", "0"),
+            ("V(top.n2)", "amplifier", "n2"),
+            ("V(x1.n)", "/x1", "n"),
+            ("V(/X1/n)", "/x1", "n"),
+            ("XAFE.M1", "/xafe", "M1"),
+            ("v1#branch", "amplifier", "v1#branch"),
+            ("XAFE/M1", "amplifier", "XAFE/M1"),
+        ] {
+            assert_eq!(
+                hierarchy_parts(name, "amplifier"),
+                (scope.to_owned(), leaf.to_owned()),
+                "{name}"
+            );
+        }
+
+        let dc = DcOpResult {
+            node_voltages: ["V(out)", "V(top.n2)", "V(x1.n)", "V(/X1/n)"]
+                .into_iter()
+                .map(|name| OperatingPointValue {
+                    name: name.to_owned(),
+                    value: 1.0,
+                    unit: "V".to_owned(),
+                })
+                .collect(),
+            ..DcOpResult::default()
+        };
+        let groups = grouped_nodes(&dc, "", "amplifier");
+        assert_eq!(
+            groups.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["/x1", "amplifier"],
+            "the root group is the cell the run came from, never an invented literal"
+        );
+        assert_eq!(
+            groups["amplifier"].len(),
+            2,
+            "the legacy root segment resolves to the same occurrence as no segment at all"
+        );
+        assert_eq!(
+            groups["/x1"].len(),
+            2,
+            "an engine name and a canonical path name one occurrence"
+        );
+    }
+    #[test]
+    fn stacked_cards_reserve_room_for_both_headers_and_bodies() {
+        let available = 480.0;
+        let body = stacked_body_height(available);
+        assert!(body > 1.0);
+        assert!(CARD_HEADER_H * 2.0 + body * 2.0 + 1.0 <= available);
+        assert_eq!(stacked_body_height(40.0), 1.0);
+    }
+    #[test]
+    fn shared_filter_covers_hierarchy_family_region_and_quantity() {
+        let entry = rspice_core::circuit::DeviceOpEntry {
+            name: "xafe.m1".to_owned(),
+            device_kind: "MOSFET",
+            region: Some("saturation"),
+            params: vec![("gm", 1.2e-3)],
+        };
+        assert!(device_matches(&entry, "xafe", "amplifier"));
+        assert!(device_matches(&entry, "mosfet", "amplifier"));
+        assert!(device_matches(&entry, "satur", "amplifier"));
+        assert!(device_matches(&entry, "gm", "amplifier"));
+        assert!(!device_matches(&entry, "diode", "amplifier"));
+    }
+    #[test]
+    fn non_finite_node_evidence_is_preserved_and_explicitly_invalid() {
+        let dc = DcOpResult {
+            node_voltages: vec![OperatingPointValue {
+                name: "V(failed)".to_owned(),
+                value: f64::NAN,
+                unit: "V".to_owned(),
+            }],
+            ..DcOpResult::default()
+        };
+
+        let groups = grouped_nodes(&dc, "", "amplifier");
+        assert_eq!(groups["amplifier"].len(), 1);
+        let (display, valid) = node_value_text(&dc.node_voltages[groups["amplifier"][0].1]);
+        assert_eq!(display, "invalid · non-finite");
+        assert!(!valid);
+    }
+    #[test]
+    fn device_quantity_sort_is_numeric_stable_and_keeps_missing_values_last() {
+        let report = rspice_core::circuit::DeviceOpReport {
+            entries: vec![
+                rspice_core::circuit::DeviceOpEntry {
+                    name: "M_missing".to_owned(),
+                    device_kind: "MOSFET",
+                    region: Some("cutoff"),
+                    params: vec![],
+                },
+                rspice_core::circuit::DeviceOpEntry {
+                    name: "M_low".to_owned(),
+                    device_kind: "MOSFET",
+                    region: Some("saturation"),
+                    params: vec![("gm", 1.0e-3)],
+                },
+                rspice_core::circuit::DeviceOpEntry {
+                    name: "M_high".to_owned(),
+                    device_kind: "MOSFET",
+                    region: Some("saturation"),
+                    params: vec![("gm", 3.0e-3)],
+                },
+                rspice_core::circuit::DeviceOpEntry {
+                    name: "M_negative".to_owned(),
+                    device_kind: "MOSFET",
+                    region: Some("saturation"),
+                    params: vec![("gm", -4.0e-3)],
+                },
+            ],
+        };
+
+        let names_of = |groups: &BTreeMap<String, Vec<(String, usize)>>| {
+            groups["amplifier"]
+                .iter()
+                .map(|(_, index)| report.entries[*index].name.clone())
+                .collect::<Vec<_>>()
+        };
+
+        let descending = ("gm".to_owned(), false);
+        let groups = grouped_devices(&report, None, "", Some(&descending), "amplifier");
+        assert_eq!(
+            names_of(&groups),
+            vec!["M_negative", "M_high", "M_low", "M_missing"]
+        );
+
+        let ascending = ("gm".to_owned(), true);
+        let groups = grouped_devices(&report, None, "", Some(&ascending), "amplifier");
+        assert_eq!(
+            names_of(&groups),
+            vec!["M_low", "M_high", "M_negative", "M_missing"]
+        );
+    }
+    #[test]
+    fn the_device_column_schema_does_not_move_when_the_sort_does() {
+        let report = rspice_core::circuit::DeviceOpReport {
+            entries: vec![
+                rspice_core::circuit::DeviceOpEntry {
+                    name: "q_first".to_owned(),
+                    device_kind: "BJT",
+                    region: Some("forward"),
+                    params: vec![("ic", 1.0e-3), ("vbe", 0.7)],
+                },
+                rspice_core::circuit::DeviceOpEntry {
+                    name: "m_second".to_owned(),
+                    device_kind: "MOSFET",
+                    region: Some("saturation"),
+                    params: vec![("gm", 2.0e-3), ("vgs", 1.1)],
+                },
+            ],
+        };
+
+        let columns_under = |sort: Option<&(String, bool)>| {
+            let groups = grouped_devices(&report, None, "", sort, "amplifier");
+            device_columns(&report, &groups["amplifier"])
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect::<Vec<_>>()
+        };
+
+        let unsorted = columns_under(None);
+        let by_ic_descending = columns_under(Some(&("ic".to_owned(), false)));
+        let by_gm_ascending = columns_under(Some(&("gm".to_owned(), true)));
+
+        assert_eq!(
+            unsorted, by_ic_descending,
+            "sorting on ic rewrote the column schema"
+        );
+        assert_eq!(
+            unsorted, by_gm_ascending,
+            "sorting on gm rewrote the column schema"
+        );
+        // Families in a fixed order, and each family's quantities together.
+        assert_eq!(unsorted, vec!["gm", "vgs", "ic", "vbe"]);
+    }
+    #[test]
+    fn the_plan_orders_rows_the_way_the_grouping_it_replaced_did() {
+        let (dc, report) = evidence_fixture(40, 40);
+        let (dc, report) = (&dc, &report);
+        let root = "amplifier".to_owned();
+        let plan = OpPlan::new(
+            OpControls {
+                filter: "",
+                sort: None,
+                root: &root,
+            },
+            Some(dc),
+            Some(report),
+            None,
+        );
+        let mut expected = Vec::new();
+        for (scope, rows) in grouped_nodes(dc, "", &root) {
+            expected.push(format!("group {scope}"));
+            expected.extend(
+                rows.into_iter()
+                    .map(|(_, index)| dc.node_voltages[index].name.clone()),
+            );
+        }
+        let actual: Vec<String> = plan
+            .node_rows
+            .iter()
+            .map(|row| match *row {
+                NodePlanRow::Group(scope) => format!("group {}", plan.node_scopes[scope].scope),
+                NodePlanRow::Value(index) => dc.node_voltages[index].name.clone(),
+            })
+            .collect();
+        assert_eq!(actual, expected);
+        assert_eq!(plan.node_shown, dc.node_voltages.len());
+
+        let mut expected = Vec::new();
+        for (scope, rows) in grouped_devices(report, None, "", None, &root) {
+            expected.push(format!("group {scope}"));
+            expected.push("columns".to_owned());
+            expected.extend(
+                rows.into_iter()
+                    .map(|(_, index)| report.entries[index].name.clone()),
+            );
+            expected.push("gap".to_owned());
+        }
+        let actual: Vec<String> = plan
+            .device_rows
+            .iter()
+            .map(|row| match *row {
+                DevicePlanRow::Group(scope) => {
+                    format!("group {}", plan.device_scopes[scope].scope)
+                }
+                DevicePlanRow::ColumnHeader(_) => "columns".to_owned(),
+                DevicePlanRow::Gap(_) => "gap".to_owned(),
+                DevicePlanRow::Device { entry, .. } => report.entries[entry].name.clone(),
+            })
+            .collect();
+        assert_eq!(actual, expected);
+        assert_eq!(plan.device_shown, report.entries.len());
+        assert_eq!(plan.device_in_scope, report.entries.len());
+
+        // The offsets must describe the rows the plan actually holds, or the
+        // scrollbar lies about how long the table is.
+        assert_eq!(plan.node_offsets.rows(), plan.node_rows.len());
+        assert_eq!(plan.device_offsets.rows(), plan.device_rows.len());
+    }
+}
