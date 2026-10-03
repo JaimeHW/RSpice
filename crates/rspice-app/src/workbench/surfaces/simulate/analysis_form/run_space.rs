@@ -118,7 +118,21 @@ pub(super) fn temperature_form(
     route: &mut Option<SimulationPage>,
     policy: crate::quantity::QuantityPresentationPolicy,
     locale: crate::quantity::UiNumberLocale,
+    study_bases: &[(crate::product::AnalysisInstanceId, String)],
 ) {
+    super::study_base_row(
+        ui,
+        &mut setup.base_analysis,
+        study_bases,
+        "Shared base settings (legacy)",
+    );
+    if setup.base_analysis.is_some() {
+        field_note(
+            ui,
+            "Uses the selected analysis's settings at every temperature. Edit that analysis to change its configuration.",
+        );
+    }
+
     use crate::simulation::dialog::temp::TempAxisMode;
 
     let labels: Vec<&str> = TempAxisMode::ALL
@@ -252,7 +266,21 @@ pub(super) fn corner_form(
     setup: &mut crate::simulation::dialog::corner::CornerDialogState,
     context: &RunSpaceContext<'_>,
     route: &mut Option<SimulationPage>,
+    study_bases: &[(crate::product::AnalysisInstanceId, String)],
 ) {
+    super::study_base_row(
+        ui,
+        &mut setup.base_analysis,
+        study_bases,
+        "Shared base settings (legacy)",
+    );
+    if setup.base_analysis.is_some() {
+        field_note(
+            ui,
+            "Uses the selected analysis's settings at every PVT point. Edit that analysis to change its configuration.",
+        );
+    }
+
     sub_header(ui, "Run space");
     for dimension in context.run_set.dimensions.iter() {
         let values = if dimension.values.is_empty() {

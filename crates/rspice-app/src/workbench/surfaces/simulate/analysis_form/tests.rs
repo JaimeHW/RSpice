@@ -234,7 +234,7 @@ fn corner_form_height(run_set: &crate::simulation::run_set::RunSetState) -> f32 
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
                     let top = ui.cursor().top();
-                    run_space::corner_form(ui, &mut corner, &context, &mut None);
+                    run_space::corner_form(ui, &mut corner, &context, &mut None, &[]);
                     height = ui.cursor().top() - top;
                 });
         },
@@ -1503,20 +1503,23 @@ fn every_analysis_form_arm_lives_in_its_own_module() {
     // Counted by line rather than split on a newline literal: `.gitattributes`
     // leaves this tree CRLF on Windows and LF on CI, and a scan that matched
     // one of the two would find nothing on the other and pass empty.
-    let drafts = include_str!("../../../../simulation/plan/config.rs")
-        .split_once("pub enum AnalysisDraft {")
-        .expect("the draft enum is still called `AnalysisDraft`")
-        .1
-        .lines()
-        .map(str::trim_end)
-        .take_while(|line| *line != "}")
-        .filter(|line| {
-            let variant = line.trim_start();
-            line.starts_with("    ")
-                && variant.ends_with(',')
-                && variant.starts_with(|first: char| first.is_ascii_uppercase())
-        })
-        .count();
+    let drafts = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../rspice-simulation-contract/src/analysis_draft.rs"
+    ))
+    .split_once("pub enum AnalysisDraft {")
+    .expect("the draft enum is still called `AnalysisDraft`")
+    .1
+    .lines()
+    .map(str::trim_end)
+    .take_while(|line| *line != "}")
+    .filter(|line| {
+        let variant = line.trim_start();
+        line.starts_with("    ")
+            && variant.ends_with(',')
+            && variant.starts_with(|first: char| first.is_ascii_uppercase())
+    })
+    .count();
     assert_eq!(
         arms.len(),
         drafts,
