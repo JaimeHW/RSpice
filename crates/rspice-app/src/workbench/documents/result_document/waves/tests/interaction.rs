@@ -137,7 +137,7 @@ fn a_logarithmic_pane_zooms_about_its_geometric_centre() {
     );
     let model = &models[0];
     let pane = model.unit_panes().into_iter().next().expect("one pane");
-    set_pane_log_y(&mut state.ui.results, model, &pane, true);
+    set_pane_log_y(&mut state.ui.results.session, model, &pane, true);
     drop(models);
     let before = (1.0, 100.0);
     state

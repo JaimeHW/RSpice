@@ -24,6 +24,7 @@ pub mod pane;
 mod policy;
 mod projection;
 pub mod readout;
+pub mod stack;
 pub use policy::{
     CursorInterpolation, DisplayedSignificantDigits, ReadoutPolicy, cursor_interpolation,
 };

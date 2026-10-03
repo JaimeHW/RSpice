@@ -275,8 +275,8 @@ use rspice_results_ui::selection::{
     SelectedResultTrace, SourceWaveformPresentationKey,
 };
 use rspice_results_ui::session::{
-    AxisExtent, DocumentMarker, ExprEditor, HorizontalWaveCursor, MarkerSelector,
-    OptimizationSelection, PaneAxis, PlotPresentationKey, ViewGesture,
+    AxisExtent, DocumentMarker, MarkerSelector, OptimizationSelection, PaneAxis,
+    PlotPresentationKey, ViewGesture,
 };
 use rspice_results_ui::soa::SoaRuleSelection;
 

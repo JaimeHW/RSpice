@@ -170,7 +170,7 @@ fn every_results_surface_paints_through_this_boundary() {
             "notations.display(&signal.name)",
         ),
         (
-            "workbench/documents/result_document/waves.rs",
+            "workbench/documents/result_document/waves/stack_host.rs",
             "notations.display(name)",
         ),
         (

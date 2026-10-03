@@ -62,17 +62,17 @@ pub(crate) fn zoom_active_pane(state: &mut AppState, t: &Tokens, factor: f64) {
         presentation.complex_number_display(),
         t,
     );
-    let Some((model, ordinal, pane)) = active_pane(&models, &state.ui.results) else {
+    let Some((model, ordinal, pane)) = active_pane(&models, &state.ui.results.session) else {
         return;
     };
     let pane_count = model.unit_panes().len();
-    let logarithmic_y = pane_log_y(&state.ui.results, model, &pane);
+    let logarithmic_y = pane_log_y(&state.ui.results.session, model, &pane);
     let current = state.ui.results.session.analysis_plot_view_pane(
         super::super::ResultViewer::Waves,
         model.analysis_key,
         ordinal,
     );
-    let x = shared_x_view(&state.ui.results, model.analysis_key, pane_count)
+    let x = shared_x_view(&state.ui.results.session, model.analysis_key, pane_count)
         .or(model.x_range)
         .and_then(|range| scaled_range(range, factor, model.x_scale == XScale::Log10));
     let y = match current.y {
@@ -82,7 +82,7 @@ pub(crate) fn zoom_active_pane(state: &mut AppState, t: &Tokens, factor: f64) {
     .and_then(|range| scaled_range(range, factor, logarithmic_y));
     if let Some(x) = x {
         set_shared_x_view(
-            &mut state.ui.results,
+            &mut state.ui.results.session,
             model.analysis_key,
             pane_count,
             Some(x),
@@ -117,7 +117,7 @@ pub(crate) fn fit_active_pane(state: &mut AppState, t: &Tokens) {
         presentation.complex_number_display(),
         t,
     );
-    let Some((model, ordinal, _)) = active_pane(&models, &state.ui.results) else {
+    let Some((model, ordinal, _)) = active_pane(&models, &state.ui.results.session) else {
         return;
     };
     state.ui.results.session.clear_analysis_plot_view_axis(
@@ -220,7 +220,8 @@ pub(crate) fn nudge_cursor(state: &mut AppState, tokens: &Tokens, cursor_b: bool
         return;
     };
     let panes = model.unit_panes().len();
-    let (x0, x1) = shared_x_view(&state.ui.results, model.analysis_key, panes).unwrap_or(full);
+    let (x0, x1) =
+        shared_x_view(&state.ui.results.session, model.analysis_key, panes).unwrap_or(full);
     let cursor = if cursor_b {
         &mut state.ui.results.session.cursors.b
     } else {
@@ -237,32 +238,5 @@ pub(crate) fn nudge_cursor(state: &mut AppState, tokens: &Tokens, cursor_b: bool
     };
     if moved.is_finite() {
         *position = moved.clamp(full.0.min(full.1), full.0.max(full.1));
-    }
-}
-
-pub(super) fn shared_x_view(
-    results: &ResultsState,
-    analysis: AnalysisPresentationKey,
-    pane_count: usize,
-) -> Option<(f64, f64)> {
-    (0..pane_count).find_map(|ordinal| {
-        results
-            .session
-            .analysis_plot_view_pane(super::super::ResultViewer::Waves, analysis, ordinal)
-            .x
-    })
-}
-
-pub(super) fn set_shared_x_view(
-    results: &mut ResultsState,
-    analysis: AnalysisPresentationKey,
-    pane_count: usize,
-    range: Option<(f64, f64)>,
-) {
-    for ordinal in 0..pane_count {
-        results
-            .session
-            .analysis_plot_view_pane_mut(super::super::ResultViewer::Waves, analysis, ordinal)
-            .x = range;
     }
 }

@@ -323,7 +323,7 @@ fn a_zoomed_reverse_sweep_still_draws_its_curve() {
         models[0].analysis_key
     };
     set_shared_x_view(
-        &mut state.ui.results,
+        &mut state.ui.results.session,
         analysis,
         2,
         Some((0.400_000, 0.600_000)),

@@ -9,24 +9,7 @@
 use super::*;
 use crate::state::ComplexExpressionPolicy;
 use rspice_results_ui::waves::cache::apply_waveform_visibility;
-
-/// Palette color for the i-th trace slot of a strip (waveforms, then
-/// expressions).
-pub(super) fn expr_color(tokens: &Tokens, slot: usize) -> egui::Color32 {
-    tokens.color.traces[slot % tokens.color.traces.len()]
-}
-
-/// The palette slot the strip's `slot`-th expression draws in.
-///
-/// Waveform traces take the leading slots and expressions the ones after —
-/// and "the ones after" has to be counted the same way wherever the colour is
-/// asked for. The legend counted only the active run's traces while the
-/// canvas counted every trace it held, overlays included, so the moment a
-/// strip carried a second run the chip beside an expression was a different
-/// colour from the curve it named.
-pub(super) fn expr_palette_slot(model: &StripModel, slot: usize) -> usize {
-    model.traces.len() + slot
-}
+pub(super) use rspice_results_ui::waves::stack::{expr_color, expr_palette_slot, expression_label};
 
 pub(super) const EXPR_EDITOR_PADDING_X: f32 = 10.0;
 pub(super) const EXPR_EDITOR_PADDING_Y: f32 = 5.0;
@@ -541,16 +524,6 @@ pub(super) fn expr_cache_key(analysis: AnalysisPresentationKey, text: &str) -> u
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     (analysis, text).hash(&mut hasher);
     hasher.finish() | (1 << 63)
-}
-
-pub(super) fn expression_label(expr: &ExprTrace, complex: bool) -> String {
-    if expr.complex_policy.is_legacy() {
-        format!("legacy magnitude · {}", elide(&expr.text, 24))
-    } else if complex {
-        format!("mag({})", elide(&expr.text, 24))
-    } else {
-        elide(&expr.text, 24)
-    }
 }
 
 /// Flip a source waveform's quick-view visibility without mutating result data.
