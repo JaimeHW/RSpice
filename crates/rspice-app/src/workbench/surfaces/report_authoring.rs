@@ -211,7 +211,6 @@ fn move_selected_page(app: &mut RSpiceApp, direction: PageMoveDirection) {
     match result {
         Ok(changed) => {
             app.state.workbench.report_authoring.selected_page = Some(page_id);
-            app.state.workbench.report_authoring.preview_block_page = 0;
             app.state.workbench.report_authoring.transaction_error = None;
             app.state.workspace.content.report_documents_dirty |= changed;
         }
@@ -302,7 +301,6 @@ fn commit_page_setting(app: &mut RSpiceApp, page_id: ReportPageId, setting: Page
     match result {
         Ok(changed) => {
             app.state.workbench.report_authoring.selected_page = Some(page_id);
-            app.state.workbench.report_authoring.preview_block_page = 0;
             app.state.workbench.report_authoring.transaction_error = None;
             app.state.workspace.content.report_documents_dirty |= changed;
         }
@@ -425,7 +423,6 @@ fn set_report_block_enabled(
     match result {
         Ok(changed) => {
             app.state.workbench.report_authoring.selected_report_block = Some(block_id);
-            app.state.workbench.report_authoring.preview_block_page = 0;
             app.state.workbench.report_authoring.transaction_error = None;
             app.state.workspace.content.report_documents_dirty |= changed;
         }
@@ -891,7 +888,6 @@ fn commit_create_document(app: &mut RSpiceApp) {
             let editor = &mut app.state.workbench.report_authoring;
             editor.selected_document = Some(document_id);
             editor.selected_page = page_id;
-            editor.preview_block_page = 0;
             editor.create_document_open = false;
             editor.transaction_error = None;
         }
@@ -972,7 +968,6 @@ fn commit_add_page(app: &mut RSpiceApp) {
                 _ => None,
             });
             app.state.workbench.report_authoring.selected_page = created_page;
-            app.state.workbench.report_authoring.preview_block_page = 0;
             app.state.workbench.report_authoring.add_page_open = false;
             app.state.workbench.report_authoring.transaction_error = None;
             app.state.workspace.content.report_documents_dirty = true;
@@ -1191,7 +1186,11 @@ fn add_report_element_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
         .add_report_element_kind
         .min(KIND_LABELS.len() - 1);
     let source_required = matches!(kind_index, 1 | 2 | 3 | 4 | 6);
-    let valid = valid_add_report_element_draft(&app.state, !run_options.is_empty());
+    let valid = app
+        .state
+        .workbench
+        .report_authoring
+        .valid_add_report_element_draft(!run_options.is_empty());
     let writable = report_mutation_allowed(&app.state);
     let error = app
         .state
@@ -1229,7 +1228,7 @@ fn add_report_element_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
                 &options,
                 ui.available_width(),
             ) {
-                reset_add_report_element_kind(app, index);
+                app.state.workbench.report_authoring.reset_add_report_element_kind(index);
             }
         });
         ui.add_space(8.0);
@@ -1464,81 +1463,6 @@ fn add_report_element_field_labels(
     }
 }
 
-fn reset_add_report_element_kind(app: &mut RSpiceApp, kind_index: usize) {
-    let editor = &mut app.state.workbench.report_authoring;
-    editor.add_report_element_kind = kind_index.min(6);
-    let (title, primary, secondary) = match editor.add_report_element_kind {
-        1 => ("Data table", "Value", "0"),
-        2 => ("Datasheet", "Parameter", "Value"),
-        3 => ("Requirement", "State the requirement.", "REQ-1"),
-        4 => ("Specification", "V(out)", "<= 1 V"),
-        5 => ("rspice-local-session", "Review note.", ""),
-        6 => (
-            "Verification evidence",
-            "Summarize the retained evidence.",
-            "",
-        ),
-        _ => (
-            "Engineering summary",
-            "Describe the conclusion and its supporting evidence.",
-            "",
-        ),
-    };
-    editor.add_report_element_title = title.to_owned();
-    editor.add_report_element_primary = primary.to_owned();
-    editor.add_report_element_secondary = secondary.to_owned();
-    editor.add_report_element_tertiary.clear();
-    editor.add_report_element_style = 0;
-    editor.add_report_element_status = 0;
-    editor.transaction_error = None;
-}
-
-fn valid_add_report_element_draft(state: &AppState, source_available: bool) -> bool {
-    let editor = &state.workbench.report_authoring;
-    let kind = editor.add_report_element_kind.min(6);
-    let title = editor.add_report_element_title.trim();
-    let primary = editor.add_report_element_primary.trim();
-    let secondary = editor.add_report_element_secondary.trim();
-    let source_valid = !matches!(kind, 1 | 2 | 3 | 4 | 6) || source_available;
-    let title_limit = if kind == 5 { 256 } else { 512 };
-    let primary_limit = match kind {
-        1 | 2 => 256,
-        4 => 4_096,
-        _ => 65_536,
-    };
-    let secondary_valid = match kind {
-        1 | 2 => !secondary.is_empty() && secondary.len() <= 16_384,
-        3 => {
-            !secondary.is_empty()
-                && secondary.len() <= 256
-                && !secondary.chars().any(|character| {
-                    character.is_control()
-                        || character.is_whitespace()
-                        || matches!(character, '/' | '\\')
-                })
-        }
-        4 => !secondary.is_empty() && secondary.len() <= 4_096,
-        _ => true,
-    };
-    let tertiary_valid = match kind {
-        1 | 2 => editor.add_report_element_tertiary.trim().len() <= 64,
-        3 => editor.add_report_element_tertiary.trim().len() <= 512,
-        4 => editor.add_report_element_tertiary.trim().len() <= 4_096,
-        _ => editor.add_report_element_tertiary.trim().is_empty(),
-    };
-    !title.is_empty()
-        && title.len() <= title_limit
-        && !title.chars().any(char::is_control)
-        && !primary.is_empty()
-        && primary.len() <= primary_limit
-        && !primary
-            .chars()
-            .any(|ch| ch.is_control() && ch != '\n' && ch != '\t')
-        && secondary_valid
-        && tertiary_valid
-        && source_valid
-}
-
 fn report_dataset_snapshot(
     state: &AppState,
     filtered_run_index: usize,
@@ -1737,7 +1661,6 @@ fn commit_add_report_element(app: &mut RSpiceApp) {
                     _ => None,
                 });
             app.state.workbench.report_authoring.add_report_element_open = false;
-            app.state.workbench.report_authoring.preview_block_page = 0;
             app.state.workbench.report_authoring.transaction_error = None;
             app.state.workspace.content.report_documents_dirty = true;
         }
@@ -1864,7 +1787,6 @@ fn commit_remove_report_block(app: &mut RSpiceApp) {
                 .workbench
                 .report_authoring
                 .remove_report_block_open = false;
-            app.state.workbench.report_authoring.preview_block_page = 0;
             app.state.workbench.report_authoring.transaction_error = None;
             app.state.workspace.content.report_documents_dirty = true;
         }
@@ -1943,7 +1865,6 @@ fn commit_page_properties(app: &mut RSpiceApp) {
     match result {
         Ok(changed) => {
             app.state.workbench.report_authoring.selected_page = Some(page_id);
-            app.state.workbench.report_authoring.preview_block_page = 0;
             app.state
                 .workbench
                 .report_authoring
@@ -1967,7 +1888,6 @@ fn synchronize_report_selection(state: &mut AppState) {
     if !selected_is_valid {
         state.workbench.report_authoring.selected_document =
             documents.first().map(ReportDocument::id);
-        state.workbench.report_authoring.preview_block_page = 0;
     }
     let current_page = state.workbench.report_authoring.selected_page;
     let current_block = state.workbench.report_authoring.selected_report_block;
@@ -1990,7 +1910,6 @@ fn synchronize_report_selection(state: &mut AppState) {
     if let Some((selected_page, selected_block_is_on_page)) = selection {
         if current_page != selected_page {
             state.workbench.report_authoring.selected_page = selected_page;
-            state.workbench.report_authoring.preview_block_page = 0;
         }
         if !selected_block_is_on_page {
             state.workbench.report_authoring.selected_report_block = None;
@@ -1998,7 +1917,6 @@ fn synchronize_report_selection(state: &mut AppState) {
     } else {
         state.workbench.report_authoring.selected_page = None;
         state.workbench.report_authoring.selected_report_block = None;
-        state.workbench.report_authoring.preview_block_page = 0;
         state.workbench.report_authoring.inline_page_settings_page = None;
         state
             .workbench

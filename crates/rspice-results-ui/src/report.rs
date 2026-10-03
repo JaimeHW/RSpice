@@ -2,6 +2,7 @@
 pub mod composer;
 pub mod inspector;
 pub mod preview;
+pub mod session;
 use egui::{Color32, Rect, Sense, Stroke, Ui, Vec2};
 use rspice_results::report_document::{ReportPageUpdatePolicy, ReportTemplate};
 use rspice_ui_kit::theme;

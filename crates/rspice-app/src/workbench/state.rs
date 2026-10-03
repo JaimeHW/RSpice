@@ -20,6 +20,7 @@ pub use workflow_drafts::*;
 
 use std::collections::{HashMap, HashSet};
 
+use rspice_results_ui::report::session::ReportAuthoringState;
 use serde::{Deserialize, Serialize};
 
 #[cfg(any(test, target_arch = "wasm32"))]

@@ -130,7 +130,6 @@ impl rspice_results_ui::report::composer::ComposerHost for ReportHost<'_> {
             .workbench
             .report_authoring
             .selected_report_block = None;
-        self.0.state.workbench.report_authoring.preview_block_page = 0;
     }
     fn prepare_page_settings(&mut self, page: &rspice_results::report_document::ReportPage) {
         let page_id = page.id();

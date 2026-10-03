@@ -400,7 +400,6 @@ pub(super) fn commit_insert_result_document(app: &mut RSpiceApp) {
                 .workbench
                 .report_authoring
                 .insert_result_document_open = false;
-            app.state.workbench.report_authoring.preview_block_page = 0;
             app.state.workbench.report_authoring.transaction_error = None;
             app.state.workspace.content.report_documents_dirty = true;
         }
