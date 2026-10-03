@@ -63,200 +63,6 @@ pub(super) fn open_insert_result_document(app: &mut RSpiceApp) {
     editor.transaction_error = None;
 }
 
-pub(super) fn insert_result_document_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app
-        .state
-        .workbench
-        .report_authoring
-        .insert_result_document_open
-    {
-        return;
-    }
-    const SIZING_LABELS: [&str; 3] = ["Fit width", "Fit page", "Natural size"];
-    let figure_options = report_figure_options(&app.state);
-    let source_options = figure_options
-        .iter()
-        .map(|option| option.label.clone())
-        .collect::<Vec<_>>();
-    let source_index = app
-        .state
-        .workbench
-        .report_authoring
-        .insert_result_document_index
-        .min(source_options.len().saturating_sub(1));
-    let caption = app
-        .state
-        .workbench
-        .report_authoring
-        .insert_result_caption
-        .trim();
-    let alternative_text = app
-        .state
-        .workbench
-        .report_authoring
-        .insert_result_alternative_text
-        .trim();
-    let valid = !source_options.is_empty()
-        && !caption.is_empty()
-        && caption.len() <= 2_048
-        && !caption.chars().any(char::is_control)
-        && !alternative_text.is_empty()
-        && alternative_text.len() <= 8_192
-        && !alternative_text
-            .chars()
-            .any(|ch| ch.is_control() && ch != '\n' && ch != '\t');
-    let writable = report_mutation_allowed(&app.state);
-    let error = app
-        .state
-        .workbench
-        .report_authoring
-        .transaction_error
-        .clone();
-    let choice = Dialog::new(
-        "REPORT AUTHORING · IMMUTABLE RESULT SOURCE",
-        "Insert result document",
-        "Insert result document",
-    )
-    .description(
-        "Insert one exact visualization-document revision with all immutable dataset bindings retained for publication audit.",
-    )
-    .ghost("Cancel")
-    .primary_enabled(valid && writable)
-    .initial_focus(DialogInitialFocus::BodyControl)
-    .show_with_initial_body_focus(ctx, |ui| {
-        let label_width = 132.0_f32.min(ui.available_width() * 0.34);
-        ui.horizontal(|ui| {
-            ui.add_sized(
-                Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
-                egui::Label::new("Result document"),
-            );
-            let current = source_options
-                .get(source_index)
-                .map_or("No retained result documents", String::as_str);
-            if let Some(index) = select(
-                ui,
-                "report-insert-result-source",
-                "Immutable result document",
-                current,
-                &source_options,
-                ui.available_width(),
-            ) {
-                app.state
-                    .workbench
-                    .report_authoring
-                    .insert_result_document_index = index;
-                if let Some(option) = figure_options.get(index) {
-                    let revision = app.state.workspace.content.visualization_documents
-                        [option.document_index]
-                        .revision()
-                        .get();
-                    app.state
-                        .workbench
-                        .report_authoring
-                        .insert_result_caption = option.label.clone();
-                    app.state
-                        .workbench
-                        .report_authoring
-                        .insert_result_alternative_text = format!(
-                        "Result figure {} at immutable visualization revision {revision}.",
-                        option.label
-                    );
-                }
-            }
-        });
-        ui.add_space(8.0);
-        let focus = input_row(
-            ui,
-            "Caption",
-            &mut app
-                .state
-                .workbench
-                .report_authoring
-                .insert_result_caption,
-        );
-        ui.add_space(8.0);
-        input_row(
-            ui,
-            "Alternative text",
-            &mut app
-                .state
-                .workbench
-                .report_authoring
-                .insert_result_alternative_text,
-        );
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.add_sized(
-                Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
-                egui::Label::new("Sizing"),
-            );
-            let sizing_index = app
-                .state
-                .workbench
-                .report_authoring
-                .insert_result_sizing
-                .min(SIZING_LABELS.len() - 1);
-            let labels = SIZING_LABELS
-                .iter()
-                .map(|label| (*label).to_owned())
-                .collect::<Vec<_>>();
-            if let Some(index) = select(
-                ui,
-                "report-insert-result-sizing",
-                "Result figure sizing",
-                SIZING_LABELS[sizing_index],
-                &labels,
-                ui.available_width(),
-            ) {
-                app.state
-                    .workbench
-                    .report_authoring
-                    .insert_result_sizing = index;
-            }
-        });
-        ui.add_space(8.0);
-        ui.checkbox(
-            &mut app
-                .state
-                .workbench
-                .report_authoring
-                .insert_result_frozen,
-            "Freeze self-contained source payload in this report revision",
-        );
-        ui.label(if app
-            .state
-            .workbench
-            .report_authoring
-            .insert_result_frozen
-        {
-            "The exact source snapshot and deterministic publication PNG are embedded and digest-authenticated."
-        } else {
-            "The block remains linked to one exact immutable visualization revision."
-        });
-        if !writable {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.err,
-                report_mutation_block_reason(&app.state),
-            );
-        }
-        if let Some(error) = &error {
-            ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
-        }
-        Some(focus.id)
-    });
-    match choice {
-        DialogChoice::Primary if valid && writable => commit_insert_result_document(app),
-        DialogChoice::Ghost | DialogChoice::Cancelled => {
-            app.state
-                .workbench
-                .report_authoring
-                .insert_result_document_open = false;
-            app.state.workbench.report_authoring.transaction_error = None;
-        }
-        _ => {}
-    }
-}
-
 pub(super) fn commit_insert_result_document(app: &mut RSpiceApp) {
     if !report_mutation_allowed(&app.state) {
         app.state.workbench.report_authoring.transaction_error =
@@ -404,5 +210,35 @@ pub(super) fn commit_insert_result_document(app: &mut RSpiceApp) {
             app.state.workspace.content.report_documents_dirty = true;
         }
         Err(error) => app.state.workbench.report_authoring.transaction_error = Some(error),
+    }
+}
+
+impl ReportFigureOption {
+    pub(super) fn label(&self) -> &str {
+        &self.label
+    }
+}
+
+pub(super) fn select_result_document(
+    app: &mut RSpiceApp,
+    index: usize,
+    figure: Option<&ReportFigureOption>,
+) {
+    app.state
+        .workbench
+        .report_authoring
+        .insert_result_document_index = index;
+    if let Some(option) = figure {
+        let revision = app.state.workspace.content.visualization_documents[option.document_index]
+            .revision()
+            .get();
+        app.state.workbench.report_authoring.insert_result_caption = option.label.clone();
+        app.state
+            .workbench
+            .report_authoring
+            .insert_result_alternative_text = format!(
+            "Result figure {} at immutable visualization revision {revision}.",
+            option.label
+        );
     }
 }

@@ -1,6 +1,7 @@
 //! Source queries and authoritative edits for report presentation.
 use super::*;
 use rspice_app_types::product::ResultDocumentId;
+use rspice_results_ui::report::preview::report_block_element_title;
 use rspice_results_ui::report::{
     inspector::InspectorHost,
     preview::{PreviewHost, SummaryMetrics},
@@ -159,5 +160,74 @@ impl rspice_results_ui::report::composer::ComposerHost for ReportHost<'_> {
     }
     fn evidence_label(&self, binding: ReportPageEvidenceBinding) -> String {
         evidence_binding_label(&self.0.state, binding)
+    }
+}
+
+impl rspice_results_ui::report::dialogs::DialogHost for ReportHost<'_> {
+    type Figure = result_insert::ReportFigureOption;
+    fn editor(&mut self) -> &mut rspice_results_ui::report::session::ReportAuthoringState {
+        &mut self.0.state.workbench.report_authoring
+    }
+    fn writable(&self) -> bool {
+        report_mutation_allowed(&self.0.state)
+    }
+    fn blocked_reason(&self) -> &'static str {
+        report_mutation_block_reason(&self.0.state)
+    }
+    fn document_snapshot(&self) -> Option<ReportDocument> {
+        active_document(&self.0.state).cloned()
+    }
+    fn run_options(&self) -> Vec<String> {
+        self.0
+            .state
+            .simulation
+            .runs
+            .iter()
+            .filter(|run| !run.analyses.is_empty())
+            .map(|run| format!("Run {} · immutable dataset", run.id))
+            .collect()
+    }
+    fn removal_target(&self) -> (String, bool) {
+        let block_id = self
+            .0
+            .state
+            .workbench
+            .report_authoring
+            .selected_report_block;
+        let block_title = block_id
+            .and_then(|id| active_document(&self.0.state)?.block(id))
+            .map(|block| report_block_element_title(block.kind()).into_owned())
+            .unwrap_or_else(|| "Unavailable report element".to_owned());
+        let valid = block_id.is_some_and(|id| {
+            active_document(&self.0.state).is_some_and(|document| document.block(id).is_some())
+        });
+        (block_title, valid)
+    }
+    fn figure_options(&self) -> Vec<Self::Figure> {
+        report_figure_options(&self.0.state)
+    }
+    fn figure_label(figure: &Self::Figure) -> &str {
+        figure.label()
+    }
+    fn select_figure(&mut self, index: usize, figure: Option<&Self::Figure>) {
+        result_insert::select_result_document(self.0, index, figure);
+    }
+    fn commit_create_document(&mut self) {
+        commit_create_document(self.0);
+    }
+    fn commit_add_page(&mut self) {
+        commit_add_page(self.0);
+    }
+    fn commit_page_properties(&mut self) {
+        commit_page_properties(self.0);
+    }
+    fn commit_remove_report_block(&mut self) {
+        commit_remove_report_block(self.0);
+    }
+    fn commit_insert_result_document(&mut self) {
+        commit_insert_result_document(self.0);
+    }
+    fn commit_add_report_element(&mut self) {
+        commit_add_report_element(self.0);
     }
 }

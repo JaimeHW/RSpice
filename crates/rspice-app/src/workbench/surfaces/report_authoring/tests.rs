@@ -12,6 +12,7 @@ use rspice_results::report_document::{
     ReportPageNumbering, ReportPublicationPageSize, ReportPublicationProfile,
     ReportPublicationTemplate, ReportTablePrecision,
 };
+use rspice_results_ui::report::page_marker;
 
 #[test]
 fn report_commands_open_for_review_and_gate_mutations_by_exact_authority() {
@@ -583,16 +584,6 @@ fn direct_report_creation_fails_closed_in_read_only_safe_mode() {
             .as_deref(),
         Some("Report changes are unavailable because the active project is read-only.")
     );
-}
-
-#[test]
-fn report_page_title_validation_matches_domain_limits() {
-    assert!(valid_page_title("PVT and yield"));
-    assert!(!valid_page_title(""));
-    assert!(!valid_page_title(" leading"));
-    assert!(!valid_page_title("trailing "));
-    assert!(!valid_page_title("bad\nlabel"));
-    assert!(!valid_page_title(&"x".repeat(513)));
 }
 
 #[test]

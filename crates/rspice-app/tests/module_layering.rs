@@ -1693,6 +1693,7 @@ fn every_production_dialog_callsite_supplies_a_description() {
     let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let mut sources = rust_sources(&source_root.join("rspice-app/src"));
     sources.extend(rust_sources(&source_root.join("rspice-ui-kit/src")));
+    sources.extend(rust_sources(&source_root.join("rspice-results-ui/src")));
 
     let mut audited = 0;
     let mut missing = Vec::new();

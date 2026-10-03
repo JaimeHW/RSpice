@@ -8,22 +8,22 @@ mod presentation;
 mod result_insert;
 use rspice_results_ui::report::composer::{PageMoveDirection, PageSettingEdit};
 use rspice_results_ui::report::inspector::DocumentPublicationEdit;
-use rspice_results_ui::report::preview::report_block_element_title;
-use rspice_results_ui::report::{self, INITIAL_PAGES, page_marker, report_template_label};
+use rspice_results_ui::report::session::{
+    page_update_policy_from_index, page_update_policy_index, report_template_from_index,
+    report_template_index, valid_title,
+};
+use rspice_results_ui::report::{self, INITIAL_PAGES, report_template_label};
 
-use egui::{Ui, Vec2};
+use egui::Ui;
 
 use crate::results::report_document::{
     DataTableBlock, DatasheetBlock, DatasheetField, EvidenceBlock, ProseBlock, ProseStyle,
     ReportBlockId, ReportBlockKind, ReportDocument, ReportEdit, ReportEntityRef,
-    ReportPageEvidenceBinding, ReportPageId, ReportPageUpdatePolicy, ReportReferenceMode,
-    ReportReferenceSnapshot, ReportSourceId, ReportTemplate, RequirementDisposition,
-    RequirementEntry, RequirementsBlock, ReviewNoteBlock, ReviewNoteStatus,
-    SpecificationDisposition, SpecificationEntry, SpecificationsBlock, TableCell, TableColumn,
+    ReportPageEvidenceBinding, ReportPageId, ReportReferenceMode, ReportReferenceSnapshot,
+    ReportSourceId, ReportTemplate, RequirementDisposition, RequirementEntry, RequirementsBlock,
+    ReviewNoteBlock, ReviewNoteStatus, SpecificationDisposition, SpecificationEntry,
+    SpecificationsBlock, TableCell, TableColumn,
 };
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, input_row, select};
 use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::commands::vocabulary::Command;
@@ -31,10 +31,8 @@ use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
 #[cfg(test)]
 use crate::results::report_document::ReportFigureSourceLocator;
-#[cfg(test)]
-use result_insert::commit_insert_result_document;
 use result_insert::{
-    insert_result_document_dialog, open_insert_result_document, report_figure_options,
+    commit_insert_result_document, open_insert_result_document, report_figure_options,
 };
 
 pub(crate) fn open(app: &mut RSpiceApp) {
@@ -231,7 +229,7 @@ fn commit_page_setting(app: &mut RSpiceApp, page_id: ReportPageId, setting: Page
         return;
     }
     if let PageSettingEdit::Title(title) = &setting
-        && !valid_page_title(title)
+        && !valid_title(title)
     {
         app.state.workbench.report_authoring.transaction_error = Some(
             "The page title must be trimmed, non-empty, single-line text of at most 512 characters."
@@ -508,13 +506,7 @@ fn open_create_document(app: &mut RSpiceApp) {
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     report::composer::show(ui, &mut presentation::ReportHost(app));
-
-    create_document_dialog(ui.ctx(), app);
-    add_page_dialog(ui.ctx(), app);
-    page_properties_dialog(ui.ctx(), app);
-    remove_report_block_dialog(ui.ctx(), app);
-    insert_result_document_dialog(ui.ctx(), app);
-    add_report_element_dialog(ui.ctx(), app);
+    report::dialogs::show(ui.ctx(), &mut presentation::ReportHost(app));
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -702,101 +694,6 @@ fn open_release_cockpit(app: &mut RSpiceApp) {
     }
 }
 
-fn create_document_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app.state.workbench.report_authoring.create_document_open {
-        return;
-    }
-    const TEMPLATE_LABELS: [&str; 3] = [
-        "Release verification 4.2",
-        "Design review",
-        "Model qualification",
-    ];
-    let valid = valid_document_title(&app.state.workbench.report_authoring.create_document_title);
-    let writable = report_mutation_allowed(&app.state);
-    let error = app
-        .state
-        .workbench
-        .report_authoring
-        .transaction_error
-        .clone();
-    let choice = Dialog::new(
-        "REPORT AUTHORING · TRACEABLE DERIVED EVIDENCE",
-        "Plan report artifact",
-        "Create report document",
-    )
-    .description(
-        "Create one explicit project-owned report source and its mockup-specified page outline.",
-    )
-    .ghost("Cancel")
-    .primary_enabled(valid && writable)
-    .initial_focus(DialogInitialFocus::BodyControl)
-    .show_with_initial_body_focus(ctx, |ui| {
-        let response = input_row(
-            ui,
-            "Report title",
-            &mut app
-                .state
-                .workbench
-                .report_authoring
-                .create_document_title,
-        );
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.set_width(ui.available_width());
-            let label_width = 130.0_f32.min(ui.available_width() * 0.32);
-            ui.add_sized(
-                Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
-                egui::Label::new("Template"),
-            );
-            let selected = app
-                .state
-                .workbench
-                .report_authoring
-                .create_document_template
-                .min(TEMPLATE_LABELS.len() - 1);
-            let options = TEMPLATE_LABELS
-                .iter()
-                .map(|label| (*label).to_owned())
-                .collect::<Vec<_>>();
-            if let Some(index) = select(
-                ui,
-                "report-document-template",
-                "Report document template",
-                TEMPLATE_LABELS[selected],
-                &options,
-                ui.available_width(),
-            ) {
-                app.state
-                    .workbench
-                    .report_authoring
-                    .create_document_template = index;
-            }
-        });
-        ui.add_space(8.0);
-        ui.label(
-            "The document is created only when this transaction commits; opening Report Authoring never changes the project.",
-        );
-        if !writable {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.err,
-                report_mutation_block_reason(&app.state),
-            );
-        }
-        if let Some(error) = &error {
-            ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
-        }
-        Some(response.id)
-    });
-    match choice {
-        DialogChoice::Primary if valid && writable => commit_create_document(app),
-        DialogChoice::Ghost | DialogChoice::Cancelled => {
-            app.state.workbench.report_authoring.create_document_open = false;
-            app.state.workbench.report_authoring.transaction_error = None;
-        }
-        _ => {}
-    }
-}
-
 fn commit_create_document(app: &mut RSpiceApp) {
     if !report_mutation_allowed(&app.state) {
         app.state.workbench.report_authoring.transaction_error =
@@ -809,7 +706,7 @@ fn commit_create_document(app: &mut RSpiceApp) {
         .report_authoring
         .create_document_title
         .to_owned();
-    if !valid_document_title(&title) {
+    if !valid_title(&title) {
         app.state.workbench.report_authoring.transaction_error = Some(
             "The report title must be trimmed, non-empty, single-line text of at most 512 characters."
                 .to_owned(),
@@ -895,47 +792,6 @@ fn commit_create_document(app: &mut RSpiceApp) {
     }
 }
 
-fn add_page_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app.state.workbench.report_authoring.add_page_open {
-        return;
-    }
-    let valid = valid_page_title(&app.state.workbench.report_authoring.add_page_title);
-    let error = app
-        .state
-        .workbench
-        .report_authoring
-        .transaction_error
-        .clone();
-    let choice = Dialog::new(
-        "REPORTING · DOCUMENT COMPOSITION",
-        "Add report page",
-        "Add page",
-    )
-    .description("Add one versioned page to the project-owned report document.")
-    .ghost("Cancel")
-    .primary_enabled(valid)
-    .initial_focus(DialogInitialFocus::BodyControl)
-    .show_with_initial_body_focus(ctx, |ui| {
-        let response = input_row(
-            ui,
-            "Page title",
-            &mut app.state.workbench.report_authoring.add_page_title,
-        );
-        if let Some(error) = &error {
-            ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
-        }
-        Some(response.id)
-    });
-    match choice {
-        DialogChoice::Primary if valid => commit_add_page(app),
-        DialogChoice::Ghost | DialogChoice::Cancelled => {
-            app.state.workbench.report_authoring.add_page_open = false;
-            app.state.workbench.report_authoring.transaction_error = None;
-        }
-        _ => {}
-    }
-}
-
 fn commit_add_page(app: &mut RSpiceApp) {
     if !report_mutation_allowed(&app.state) {
         app.state.workbench.report_authoring.transaction_error =
@@ -976,163 +832,6 @@ fn commit_add_page(app: &mut RSpiceApp) {
     }
 }
 
-fn page_properties_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app.state.workbench.report_authoring.page_properties_open {
-        return;
-    }
-    let valid = valid_page_title(&app.state.workbench.report_authoring.page_title_draft);
-    let error = app
-        .state
-        .workbench
-        .report_authoring
-        .transaction_error
-        .clone();
-    let Some(document) = active_document(&app.state).cloned() else {
-        app.state.workbench.report_authoring.page_properties_open = false;
-        return;
-    };
-    let page_options = document
-        .pages()
-        .iter()
-        .enumerate()
-        .map(|(index, page)| format!("{} · {}", page_marker(index, page.title()), page.title()))
-        .collect::<Vec<_>>();
-    let page_index = app
-        .state
-        .workbench
-        .report_authoring
-        .page_properties_page
-        .and_then(|page_id| {
-            document
-                .pages()
-                .iter()
-                .position(|page| page.id() == page_id)
-        })
-        .unwrap_or_default();
-    const TEMPLATE_LABELS: [&str; 3] = [
-        "Release verification 4.2",
-        "Design review",
-        "Model qualification",
-    ];
-    const UPDATE_POLICY_LABELS: [&str; 2] = [
-        "Refresh linked figures automatically",
-        "Freeze selected figure revision",
-    ];
-    let choice = Dialog::new(
-        "REPORTING · DOCUMENT COMPOSITION",
-        "Report page properties",
-        "Save page properties",
-    )
-    .description("Edit the selected page through one revision-checked report transaction.")
-    .ghost("Cancel")
-    .primary_enabled(valid)
-    .initial_focus(DialogInitialFocus::BodyControl)
-    .show_with_initial_body_focus(ctx, |ui| {
-        let label_width = 130.0_f32.min(ui.available_width() * 0.32);
-        ui.horizontal(|ui| {
-            ui.set_width(ui.available_width());
-            ui.add_sized(
-                Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
-                egui::Label::new("Template"),
-            );
-            let selected_index = app
-                .state
-                .workbench
-                .report_authoring
-                .report_template_draft
-                .min(TEMPLATE_LABELS.len() - 1);
-            let options = TEMPLATE_LABELS
-                .iter()
-                .map(|label| (*label).to_owned())
-                .collect::<Vec<_>>();
-            if let Some(index) = select(
-                ui,
-                "report-page-template",
-                "Report template",
-                TEMPLATE_LABELS[selected_index],
-                &options,
-                ui.available_width(),
-            ) {
-                app.state.workbench.report_authoring.report_template_draft = index;
-            }
-        });
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.set_width(ui.available_width());
-            ui.add_sized(
-                Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
-                egui::Label::new("Page"),
-            );
-            if let Some(index) = select(
-                ui,
-                "report-page-selection",
-                "Report page",
-                page_options
-                    .get(page_index)
-                    .map_or("No page", String::as_str),
-                &page_options,
-                ui.available_width(),
-            ) && let Some(page) = document.pages().get(index)
-            {
-                let editor = &mut app.state.workbench.report_authoring;
-                editor.page_properties_page = Some(page.id());
-                editor.page_title_draft = page.title().to_owned();
-                editor.page_update_policy_draft = page_update_policy_index(page.update_policy());
-                editor.transaction_error = None;
-            }
-        });
-        ui.add_space(8.0);
-        let response = input_row(
-            ui,
-            "Page title",
-            &mut app.state.workbench.report_authoring.page_title_draft,
-        );
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.set_width(ui.available_width());
-            ui.add_sized(
-                Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
-                egui::Label::new("Update policy"),
-            );
-            let selected_index = app
-                .state
-                .workbench
-                .report_authoring
-                .page_update_policy_draft
-                .min(UPDATE_POLICY_LABELS.len() - 1);
-            let options = UPDATE_POLICY_LABELS
-                .iter()
-                .map(|label| (*label).to_owned())
-                .collect::<Vec<_>>();
-            if let Some(index) = select(
-                ui,
-                "report-page-update-policy",
-                "Report page update policy",
-                UPDATE_POLICY_LABELS[selected_index],
-                &options,
-                ui.available_width(),
-            ) {
-                app.state
-                    .workbench
-                    .report_authoring
-                    .page_update_policy_draft = index;
-            }
-        });
-        if let Some(error) = &error {
-            ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
-        }
-        Some(response.id)
-    });
-    match choice {
-        DialogChoice::Primary if valid => commit_page_properties(app),
-        DialogChoice::Ghost | DialogChoice::Cancelled => {
-            app.state.workbench.report_authoring.page_properties_open = false;
-            app.state.workbench.report_authoring.transaction_error = None;
-        }
-        _ => {}
-    }
-}
-
 fn open_add_report_element(app: &mut RSpiceApp) {
     if !report_mutation_allowed(&app.state) || active_document(&app.state).is_none() {
         return;
@@ -1149,318 +848,6 @@ fn open_add_report_element(app: &mut RSpiceApp) {
     editor.add_report_element_source_run = 0;
     editor.add_report_element_open = true;
     editor.transaction_error = None;
-}
-
-fn add_report_element_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app.state.workbench.report_authoring.add_report_element_open {
-        return;
-    }
-    const KIND_LABELS: [&str; 7] = [
-        "Authored prose",
-        "Data table",
-        "Datasheet field",
-        "Requirement statement",
-        "Specification result",
-        "Review note",
-        "Verification evidence",
-    ];
-    const PROSE_STYLE_LABELS: [&str; 5] = [
-        "Body",
-        "Executive summary",
-        "Method",
-        "Conclusion",
-        "Warning",
-    ];
-    let run_options = app
-        .state
-        .simulation
-        .runs
-        .iter()
-        .filter(|run| !run.analyses.is_empty())
-        .map(|run| format!("Run {} · immutable dataset", run.id))
-        .collect::<Vec<_>>();
-    let kind_index = app
-        .state
-        .workbench
-        .report_authoring
-        .add_report_element_kind
-        .min(KIND_LABELS.len() - 1);
-    let source_required = matches!(kind_index, 1 | 2 | 3 | 4 | 6);
-    let valid = app
-        .state
-        .workbench
-        .report_authoring
-        .valid_add_report_element_draft(!run_options.is_empty());
-    let writable = report_mutation_allowed(&app.state);
-    let error = app
-        .state
-        .workbench
-        .report_authoring
-        .transaction_error
-        .clone();
-    let choice = Dialog::new(
-        "REPORT AUTHORING · PAGE ELEMENT CATALOG",
-        "Add report element",
-        "Add element",
-    )
-    .description(
-        "Create one validated report element. Source-derived elements bind to one exact immutable dataset; result plots use Insert result document.",
-    )
-    .ghost("Cancel")
-    .primary_enabled(valid && writable)
-    .initial_focus(DialogInitialFocus::BodyControl)
-    .show_with_initial_body_focus(ctx, |ui| {
-        let label_width = 134.0_f32.min(ui.available_width() * 0.34);
-        ui.horizontal(|ui| {
-            ui.add_sized(
-                Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
-                egui::Label::new("Element type"),
-            );
-            let options = KIND_LABELS
-                .iter()
-                .map(|label| (*label).to_owned())
-                .collect::<Vec<_>>();
-            if let Some(index) = select(
-                ui,
-                "report-add-element-kind",
-                "Report element type",
-                KIND_LABELS[kind_index],
-                &options,
-                ui.available_width(),
-            ) {
-                app.state.workbench.report_authoring.reset_add_report_element_kind(index);
-            }
-        });
-        ui.add_space(8.0);
-        let focus = input_row(
-            ui,
-            if kind_index == 5 { "Author" } else { "Element title" },
-            &mut app
-                .state
-                .workbench
-                .report_authoring
-                .add_report_element_title,
-        );
-
-        let (primary_label, secondary_label, tertiary_label) =
-            add_report_element_field_labels(kind_index);
-        ui.add_space(8.0);
-        if matches!(kind_index, 0 | 3 | 5 | 6) {
-            dialog_text_area(
-                ui,
-                primary_label,
-                &mut app
-                    .state
-                    .workbench
-                    .report_authoring
-                    .add_report_element_primary,
-            );
-        } else {
-            input_row(
-                ui,
-                primary_label,
-                &mut app
-                    .state
-                    .workbench
-                    .report_authoring
-                    .add_report_element_primary,
-            );
-        }
-        if let Some(label) = secondary_label {
-            ui.add_space(8.0);
-            input_row(
-                ui,
-                label,
-                &mut app
-                    .state
-                    .workbench
-                    .report_authoring
-                    .add_report_element_secondary,
-            );
-        }
-        if let Some(label) = tertiary_label {
-            ui.add_space(8.0);
-            input_row(
-                ui,
-                label,
-                &mut app
-                    .state
-                    .workbench
-                    .report_authoring
-                    .add_report_element_tertiary,
-            );
-        }
-
-        if kind_index == 0 {
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.add_sized(
-                    Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
-                    egui::Label::new("Prose style"),
-                );
-                let style_index = app
-                    .state
-                    .workbench
-                    .report_authoring
-                    .add_report_element_style
-                    .min(PROSE_STYLE_LABELS.len() - 1);
-                let labels = PROSE_STYLE_LABELS
-                    .iter()
-                    .map(|label| (*label).to_owned())
-                    .collect::<Vec<_>>();
-                if let Some(index) = select(
-                    ui,
-                    "report-add-prose-style",
-                    "Report prose style",
-                    PROSE_STYLE_LABELS[style_index],
-                    &labels,
-                    ui.available_width(),
-                ) {
-                    app.state
-                        .workbench
-                        .report_authoring
-                        .add_report_element_style = index;
-                }
-            });
-        }
-        if matches!(kind_index, 3..=5) {
-            ui.add_space(8.0);
-            let status_labels: &[&str] = match kind_index {
-                3 => &["Not evaluated", "Passed", "Failed", "Waived"],
-                4 => &[
-                    "Not evaluated",
-                    "In specification",
-                    "Out of specification",
-                    "Informational",
-                ],
-                _ => &["Open", "Addressed", "Accepted"],
-            };
-            ui.horizontal(|ui| {
-                ui.add_sized(
-                    Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
-                    egui::Label::new("Status"),
-                );
-                let status_index = app
-                    .state
-                    .workbench
-                    .report_authoring
-                    .add_report_element_status
-                    .min(status_labels.len() - 1);
-                let labels = status_labels
-                    .iter()
-                    .map(|label| (*label).to_owned())
-                    .collect::<Vec<_>>();
-                if let Some(index) = select(
-                    ui,
-                    "report-add-element-status",
-                    "Report element status",
-                    status_labels[status_index],
-                    &labels,
-                    ui.available_width(),
-                ) {
-                    app.state
-                        .workbench
-                        .report_authoring
-                        .add_report_element_status = index;
-                }
-            });
-        }
-        if source_required {
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.add_sized(
-                    Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
-                    egui::Label::new("Bound source"),
-                );
-                let run_index = app
-                    .state
-                    .workbench
-                    .report_authoring
-                    .add_report_element_source_run
-                    .min(run_options.len().saturating_sub(1));
-                let current = run_options
-                    .get(run_index)
-                    .map_or("No immutable dataset retained", String::as_str);
-                if let Some(index) = select(
-                    ui,
-                    "report-add-element-source",
-                    "Immutable dataset source",
-                    current,
-                    &run_options,
-                    ui.available_width(),
-                ) {
-                    app.state
-                        .workbench
-                        .report_authoring
-                        .add_report_element_source_run = index;
-                }
-            });
-            if run_options.is_empty() {
-                ui.colored_label(
-                    Tokens::get(ui.ctx()).color.warn,
-                    "Run and retain an analysis before adding this source-derived element.",
-                );
-            }
-        }
-        if !writable {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.err,
-                report_mutation_block_reason(&app.state),
-            );
-        }
-        if let Some(error) = &error {
-            ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
-        }
-        Some(focus.id)
-    });
-    match choice {
-        DialogChoice::Primary if valid && writable => commit_add_report_element(app),
-        DialogChoice::Ghost | DialogChoice::Cancelled => {
-            app.state.workbench.report_authoring.add_report_element_open = false;
-            app.state.workbench.report_authoring.transaction_error = None;
-        }
-        _ => {}
-    }
-}
-
-fn dialog_text_area(ui: &mut Ui, label: &str, value: &mut String) -> egui::Response {
-    let label_width = 134.0_f32.min(ui.available_width() * 0.34);
-    ui.horizontal_top(|ui| {
-        ui.add_sized(Vec2::new(label_width, 82.0), egui::Label::new(label));
-        ui.add_sized(
-            Vec2::new(ui.available_width(), 82.0),
-            egui::TextEdit::multiline(value)
-                .desired_rows(4)
-                .font(theme::mono(tokens::FS_1, FontWeight::Regular)),
-        )
-    })
-    .inner
-}
-
-fn add_report_element_field_labels(
-    kind_index: usize,
-) -> (&'static str, Option<&'static str>, Option<&'static str>) {
-    match kind_index {
-        1 => (
-            "Column heading",
-            Some("Cell value"),
-            Some("Unit (optional)"),
-        ),
-        2 => ("Field label", Some("Field value"), Some("Unit (optional)")),
-        3 => (
-            "Requirement statement",
-            Some("Requirement ID"),
-            Some("Evidence label (optional)"),
-        ),
-        4 => (
-            "Expression",
-            Some("Limit"),
-            Some("Measured value (optional)"),
-        ),
-        5 => ("Review message", None, None),
-        6 => ("Evidence summary", None, None),
-        _ => ("Report text", None, None),
-    }
 }
 
 fn report_dataset_snapshot(
@@ -1692,66 +1079,6 @@ fn report_field_key(label: &str) -> String {
     }
 }
 
-fn remove_report_block_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app
-        .state
-        .workbench
-        .report_authoring
-        .remove_report_block_open
-    {
-        return;
-    }
-    let block_id = app.state.workbench.report_authoring.selected_report_block;
-    let block_title = block_id
-        .and_then(|id| active_document(&app.state)?.block(id))
-        .map(|block| report_block_element_title(block.kind()).into_owned())
-        .unwrap_or_else(|| "Unavailable report element".to_owned());
-    let valid = block_id.is_some_and(|id| {
-        active_document(&app.state).is_some_and(|document| document.block(id).is_some())
-    });
-    let writable = report_mutation_allowed(&app.state);
-    let error = app
-        .state
-        .workbench
-        .report_authoring
-        .transaction_error
-        .clone();
-    let choice = Dialog::new(
-        "REPORT AUTHORING · PAGE ELEMENT",
-        "Remove page element",
-        "Remove",
-    )
-    .description(
-        "Remove the selected element from this report revision. Its stable identity is retained as a tombstone in the report audit history.",
-    )
-    .ghost("Cancel")
-    .primary_enabled(valid && writable)
-    .initial_focus(DialogInitialFocus::Primary)
-    .show(ctx, |ui| {
-        ui.label(format!("Element: {block_title}"));
-        if !writable {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.err,
-                report_mutation_block_reason(&app.state),
-            );
-        }
-        if let Some(error) = &error {
-            ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
-        }
-    });
-    match choice {
-        DialogChoice::Primary if valid && writable => commit_remove_report_block(app),
-        DialogChoice::Ghost | DialogChoice::Cancelled => {
-            app.state
-                .workbench
-                .report_authoring
-                .remove_report_block_open = false;
-            app.state.workbench.report_authoring.transaction_error = None;
-        }
-        _ => {}
-    }
-}
-
 fn commit_remove_report_block(app: &mut RSpiceApp) {
     if !report_mutation_allowed(&app.state) {
         app.state.workbench.report_authoring.transaction_error =
@@ -1954,18 +1281,6 @@ fn selected_page_id(state: &AppState, document: &ReportDocument) -> Option<Repor
         .or_else(|| document.pages().first().map(|page| page.id()))
 }
 
-fn valid_page_title(title: &str) -> bool {
-    let trimmed = title.trim();
-    !trimmed.is_empty()
-        && trimmed == title
-        && trimmed.len() <= 512
-        && !trimmed.chars().any(char::is_control)
-}
-
-fn valid_document_title(title: &str) -> bool {
-    valid_page_title(title)
-}
-
 fn report_mutation_allowed(state: &AppState) -> bool {
     state.project_lifecycle.is_open()
         && !state.workbench.safe_mode.project_read_only()
@@ -1981,36 +1296,6 @@ fn report_mutation_block_reason(state: &AppState) -> &'static str {
         "Wait for the current project operation to finish before changing the report."
     } else {
         "Report changes are unavailable in the current application state."
-    }
-}
-
-fn report_template_index(template: ReportTemplate) -> usize {
-    match template {
-        ReportTemplate::ReleaseVerification42 => 0,
-        ReportTemplate::DesignReview => 1,
-        ReportTemplate::ModelQualification => 2,
-    }
-}
-
-fn report_template_from_index(index: usize) -> ReportTemplate {
-    match index {
-        1 => ReportTemplate::DesignReview,
-        2 => ReportTemplate::ModelQualification,
-        _ => ReportTemplate::ReleaseVerification42,
-    }
-}
-
-fn page_update_policy_index(policy: ReportPageUpdatePolicy) -> usize {
-    match policy {
-        ReportPageUpdatePolicy::RefreshLinkedAutomatically => 0,
-        ReportPageUpdatePolicy::FreezeSelectedRevision => 1,
-    }
-}
-
-fn page_update_policy_from_index(index: usize) -> ReportPageUpdatePolicy {
-    match index {
-        1 => ReportPageUpdatePolicy::FreezeSelectedRevision,
-        _ => ReportPageUpdatePolicy::RefreshLinkedAutomatically,
     }
 }
 

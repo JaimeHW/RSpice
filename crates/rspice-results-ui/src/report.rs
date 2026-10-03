@@ -1,5 +1,6 @@
 //! Report presentation over borrowed canonical documents and application-owned edits.
 pub mod composer;
+pub mod dialogs;
 pub mod inspector;
 pub mod preview;
 pub mod session;

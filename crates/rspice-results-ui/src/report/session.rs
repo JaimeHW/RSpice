@@ -1,6 +1,8 @@
 //! Report editor selection and drafts; canonical document edits remain app-owned.
 use rspice_app_types::product::ResultDocumentId;
-use rspice_results::report_document::{ReportBlockId, ReportPageId};
+use rspice_results::report_document::{
+    ReportBlockId, ReportPageId, ReportPageUpdatePolicy, ReportTemplate,
+};
 use serde::{Deserialize, Serialize};
 
 /// Report-composer selection and transactional editor presentation. The
@@ -149,5 +151,57 @@ impl ReportAuthoringState {
             && secondary_valid
             && tertiary_valid
             && source_valid
+    }
+}
+
+pub fn valid_title(title: &str) -> bool {
+    let trimmed = title.trim();
+    !trimmed.is_empty()
+        && trimmed == title
+        && trimmed.len() <= 512
+        && !trimmed.chars().any(char::is_control)
+}
+
+pub fn report_template_index(template: ReportTemplate) -> usize {
+    match template {
+        ReportTemplate::ReleaseVerification42 => 0,
+        ReportTemplate::DesignReview => 1,
+        ReportTemplate::ModelQualification => 2,
+    }
+}
+
+pub fn report_template_from_index(index: usize) -> ReportTemplate {
+    match index {
+        1 => ReportTemplate::DesignReview,
+        2 => ReportTemplate::ModelQualification,
+        _ => ReportTemplate::ReleaseVerification42,
+    }
+}
+
+pub fn page_update_policy_index(policy: ReportPageUpdatePolicy) -> usize {
+    match policy {
+        ReportPageUpdatePolicy::RefreshLinkedAutomatically => 0,
+        ReportPageUpdatePolicy::FreezeSelectedRevision => 1,
+    }
+}
+
+pub fn page_update_policy_from_index(index: usize) -> ReportPageUpdatePolicy {
+    match index {
+        1 => ReportPageUpdatePolicy::FreezeSelectedRevision,
+        _ => ReportPageUpdatePolicy::RefreshLinkedAutomatically,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn report_page_title_validation_matches_domain_limits() {
+        assert!(valid_title("PVT and yield"));
+        assert!(!valid_title(""));
+        assert!(!valid_title(" leading"));
+        assert!(!valid_title("trailing "));
+        assert!(!valid_title("bad\nlabel"));
+        assert!(!valid_title(&"x".repeat(513)));
     }
 }
