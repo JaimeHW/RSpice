@@ -1,6 +1,9 @@
 //! Cursor values, branch readings and retained-sample measurements.
 
-use super::{ReadoutPolicy, StripModel, StripTrace, TraceKind, cursor_interpolation, trace_key};
+use super::{
+    NOISE_DENSITY_UNIT, ReadoutPolicy, StripModel, StripTrace, TraceKind, cursor_interpolation,
+    trace_key,
+};
 use crate::derived::{DerivedSeries, WindowStats};
 use egui::Ui;
 use rspice_app_types::quantity::QuantityPresentationPolicy;
@@ -8,7 +11,9 @@ use rspice_ui_kit::plot::sample::{
     SweepClass, SweepShape, XOrientation, nearest_sample, sample_at_with_shape,
     sample_branches_into,
 };
-use rspice_ui_kit::plot::{CursorPair, XScale, fmt_si_significant, fmt_significant};
+use rspice_ui_kit::plot::{
+    CursorPair, SampleInterpolation, XScale, fmt_si_significant, fmt_significant,
+};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::section_header;
@@ -571,4 +576,50 @@ fn measurement_rows(
     let rows = measurement_values(derived, model, window, significant_digits, quantity_policy);
     let refs: Vec<(&str, &str)> = rows.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
     rspice_ui_kit::widgets::measurement_table(ui, &refs);
+}
+
+/// Append the exact cursor values using the explicit copied-value policy.
+pub fn append_copied_cursor(
+    target: &mut String,
+    cursor: &str,
+    x: f64,
+    model: &StripModel,
+    interpolation: SampleInterpolation,
+    policy: QuantityPresentationPolicy,
+) {
+    use std::fmt::Write as _;
+
+    let copied_x = if model.x_unit == "Hz" {
+        policy.copy_frequency(x)
+    } else {
+        policy.copy_si_value(x, &model.x_unit)
+    };
+    let _ = writeln!(
+        target,
+        "{cursor} {} = {}",
+        model.x_label(),
+        copied_x.trim_end()
+    );
+    for trace in model.traces.iter().filter(|trace| trace.visible).take(6) {
+        // The copy has to say what the table says. Read unshaped, a loop's
+        // line pasted a value off the far side of its turnaround while the
+        // register on screen reported each branch.
+        let value = sample_at_with_shape(&trace.x, &trace.y, &trace.shape, x, interpolation);
+        let copied = match trace.kind {
+            TraceKind::PhaseDeg => policy.copy_angle(value.to_radians()),
+            TraceKind::PhaseRad => policy.copy_angle(value),
+            TraceKind::MagnitudeDb => policy.copy_si_value(value, model.trace_unit(trace)),
+            TraceKind::NoiseDensity => policy.copy_scaled_unit_value(value, NOISE_DENSITY_UNIT),
+            TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
+                // The trace's own unit, not the strip's: copying a supply
+                // current off a sheet it shares with node voltages must not
+                // paste milliamps as millivolts.
+                policy.copy_si_value(value, model.trace_unit(trace))
+            }
+        };
+        let _ = writeln!(target, "{} = {}", trace.name, copied.trim_end());
+    }
+    while target.ends_with('\n') {
+        target.pop();
+    }
 }

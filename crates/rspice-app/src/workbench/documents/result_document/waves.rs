@@ -9,9 +9,9 @@
 #[cfg(test)]
 use super::{MarkerKind, TracePresentationKey};
 #[cfg(test)]
-use crate::ui::plot::CursorPair;
-#[cfg(test)]
 use crate::ui::plot::fmt_significant;
+#[cfg(test)]
+use crate::ui::plot::{CursorPair, SampleInterpolation};
 use rspice_results_ui::derived::DerivedSeries;
 use rspice_results_ui::presentation::well_hint;
 #[cfg(test)]
@@ -22,12 +22,11 @@ use rspice_results_ui::waves::navigation::shared_axis_viewport_fraction;
 use rspice_results_ui::waves::pane::pane_auto_y;
 #[cfg(test)]
 use rspice_results_ui::waves::pane::{apply_family_trace_style, nearest_drawn_trace};
-#[cfg(test)]
-use rspice_results_ui::waves::trace_key;
+use rspice_results_ui::waves::readout::append_copied_cursor;
 pub(super) use rspice_results_ui::waves::{FamilyTraceVisibilityKey, StripModel, UnitPane};
-use rspice_results_ui::waves::{
-    NOISE_DENSITY_UNIT, StripTrace, TraceKind, anchor_key, family_color, fmt_in_unit,
-};
+use rspice_results_ui::waves::{StripTrace, anchor_key, family_color, fmt_in_unit};
+#[cfg(test)]
+use rspice_results_ui::waves::{TraceKind, trace_key};
 pub(crate) use rspice_results_ui::waves::{
     analysis_default_unit, browser_signal_is_current, browser_signal_unit,
 };
@@ -59,9 +58,8 @@ use crate::state::{AnalysisResult, SimulationState};
 #[cfg(test)]
 use crate::ui::plot::Trace;
 use crate::ui::plot::sample::{SweepShape, sample_at_with_shape};
-use crate::ui::plot::{self, DisplayDecimation, SampleInterpolation, XScale, fmt_si_significant};
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::ui::plot::{self, DisplayDecimation, XScale, fmt_si_significant};
+use crate::ui::tokens::Tokens;
 use crate::workbench::AppState;
 use crate::workbench::{ComplexNumberDisplay, LargeDatasetDisplay};
 use rspice_results::family_projection::SourceSampleSelection;
@@ -483,51 +481,6 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
             display_decimation: display_decimation(presentation.large_dataset_display()),
         },
     );
-}
-
-fn append_copied_cursor(
-    target: &mut String,
-    cursor: &str,
-    x: f64,
-    model: &StripModel,
-    interpolation: SampleInterpolation,
-    policy: crate::quantity::QuantityPresentationPolicy,
-) {
-    use std::fmt::Write as _;
-
-    let copied_x = if model.x_unit == "Hz" {
-        policy.copy_frequency(x)
-    } else {
-        policy.copy_si_value(x, &model.x_unit)
-    };
-    let _ = writeln!(
-        target,
-        "{cursor} {} = {}",
-        model.x_label(),
-        copied_x.trim_end()
-    );
-    for trace in model.traces.iter().filter(|trace| trace.visible).take(6) {
-        // The copy has to say what the table says. Read unshaped, a loop's
-        // line pasted a value off the far side of its turnaround while the
-        // register on screen reported each branch.
-        let value = sample_at_with_shape(&trace.x, &trace.y, &trace.shape, x, interpolation);
-        let copied = match trace.kind {
-            TraceKind::PhaseDeg => policy.copy_angle(value.to_radians()),
-            TraceKind::PhaseRad => policy.copy_angle(value),
-            TraceKind::MagnitudeDb => policy.copy_si_value(value, model.trace_unit(trace)),
-            TraceKind::NoiseDensity => policy.copy_scaled_unit_value(value, NOISE_DENSITY_UNIT),
-            TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
-                // The trace's own unit, not the strip's: copying a supply
-                // current off a sheet it shares with node voltages must not
-                // paste milliamps as millivolts.
-                policy.copy_si_value(value, model.trace_unit(trace))
-            }
-        };
-        let _ = writeln!(target, "{} = {}", trace.name, copied.trim_end());
-    }
-    while target.ends_with('\n') {
-        target.pop();
-    }
 }
 
 /// What the inspector's Active pane section reports about the pane the

@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 pub mod cache;
 pub mod dock;
+pub mod expression_editor;
 pub mod extent;
 pub mod header;
 pub mod marker_dialog;
