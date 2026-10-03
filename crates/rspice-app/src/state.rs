@@ -134,8 +134,11 @@ pub use rspice_model_library::sealed_model_sources;
 #[cfg(test)]
 pub use rspice_results::noise::{NoiseFigureEvidence, NoiseSummary};
 pub use simulation::CurrentImpulseHistoryEvidence;
+#[cfg(test)]
 pub use simulation::DcMismatchEvidence;
 pub(crate) use simulation::RunHistoryRevision;
+#[cfg(test)]
+pub use simulation::SensitivityBasisEvidence;
 #[cfg(test)]
 pub use simulation::TransientConvergenceEvidence;
 #[cfg(test)]
@@ -187,7 +190,7 @@ pub use simulation::{
 };
 #[cfg(test)]
 pub use simulation::{SavedOutputAxis, SavedOutputBoundSource, SavedOutputSourceBindings};
-pub use simulation::{SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow};
+pub use simulation::{SensitivityStudyEvidence, SensitivityStudyRow};
 // Only the two types the persisted model itself names are hoisted here. The
 // rest of the stimulus vocabulary — the definition record, the draft state
 // machine, the adoption verbs — is read through `state::stimulus_library::*`,

@@ -2105,7 +2105,7 @@ pub struct ResultsState {
     /// marks and the normalization.
     pub(crate) polar: rspice_results_ui::polar::PolarSheetState,
     /// Contribution sheet control: the frequency a swept study is read at.
-    pub(crate) study: sensitivity::SensitivitySheetState,
+    pub(crate) study: rspice_results_ui::sensitivity::study::SensitivitySheetState,
     network_matrix: network_matrix::NetworkMatrixState,
     /// Scatter sheet controls and the brushed trial selection.
     pub(crate) scatter: rspice_results_ui::scatter::ScatterSheetState,

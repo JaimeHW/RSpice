@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 mod ac_bode;
 mod analysis_result;
+#[cfg(test)]
 pub use rspice_results::dc_mismatch::DcMismatchEvidence;
 #[cfg(test)]
 pub use rspice_results::dc_mismatch::{DcMismatchContributorEvidence, DcMismatchScopeEvidence};
@@ -39,9 +40,10 @@ mod current_impulses;
 pub(crate) use current_impulses::current_impulse_history_fixture;
 pub use rspice_results::current_impulses::CurrentImpulseHistoryEvidence;
 
+#[cfg(test)]
+pub use rspice_results::sensitivity::SensitivityBasisEvidence;
 pub use rspice_results::sensitivity::{
-    SensitivityBasisEvidence, SensitivityResultMode, SensitivityResultRow,
-    SensitivityStudyEvidence, SensitivityStudyRow,
+    SensitivityResultMode, SensitivityResultRow, SensitivityStudyEvidence, SensitivityStudyRow,
 };
 pub use rspice_results::simulation_values::ComplexResultValue;
 

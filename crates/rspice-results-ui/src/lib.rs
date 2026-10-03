@@ -20,6 +20,7 @@ pub mod phase_noise;
 pub mod polar;
 pub mod presentation;
 pub mod scatter;
+pub mod sensitivity;
 pub mod smith_chart;
 pub mod strip;
 pub mod transfer_function;
