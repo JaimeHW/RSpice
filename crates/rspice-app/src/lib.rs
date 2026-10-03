@@ -1,87 +1,20 @@
-//! RSpice application composition and migration surface.
+//! Desktop and browser application composition.
 //!
-//! A high-performance GUI for the RSpice circuit simulation engine,
-//! built with egui for GPU-accelerated desktop deployment.
+//! Domain data, execution, hardcopy rendering and reusable editor/viewer
+//! presentation belong to the sibling crates. This crate binds those owners
+//! to host services, document lifecycles, commands, navigation and workbench UI.
 //!
-//! # Architecture
-//!
-//! This crate currently holds both application composition and modules being
-//! extracted to headless owners. The simulation engine lives in `rspice-core`
-//! and `rspice-veriloga`. Shared product identities, mutation revisions, and
-//! hierarchy paths now live in `rspice-app-types`. Persisted design state,
-//! project I/O, run orchestration, viewer mathematics, and chrome remain here
-//! until each owner moves across a checked crate boundary.
-//!
-//! The remaining internal module layering is enforced by
-//! `tests/module_layering.rs`. A module may reference
-//! any module below it and none at or above it. Lowest layer first:
-//!
-//! | Layer | Modules | Owns |
-//! |-------|---------|------|
-//! | 0 | `product`, `quantity` | Framework-independent contracts, typed identities, unit-safe presentation policy |
-//! | 1 | `results`, `ui` | Versioned result documents; the design system (tokens, palette, widgets, plot engine) |
-//! | 3 | `state` | The persisted design, library, and project model |
-//! | 4 | `analysis`, `automation_workflow`, `diagnostics`, `io` | Viewer mathematics, the CI workflow language, console/log model, file formats |
-//! | 5 | `services` | DRC, licensing, and the per-analysis engine adapters |
-//! | 6 | `simulation` | Analysis plans, netlist generation, run orchestration |
-//! | 7 | `properties` | Component property editing |
-//! | 8 | `schematic` | The schematic document engine |
-//! | 9 | `workbench` | The application shell: [`RSpiceApp`], state, dialogs, chrome, surfaces, commands, and the workflows that mutate them |
-//!
-//! `workbench` is about half the crate, so one position in this table does not
-//! describe it. Its own submodules are ordered by that test's
-//! `WORKBENCH_LAYERS`, on the same rules.
-//!
-//! Known departures from both orders are recorded, counted, and ratcheted
-//! down in the `ALLOWED_VIOLATIONS` and `ALLOWED_WORKBENCH_VIOLATIONS` tables.
-//! Adding to either is not a way to unblock new code — a fresh violation
-//! means the code is in the wrong module.
+//! Internal layers are checked by `tests/module_layering.rs`; package dependency
+//! boundaries are checked by `tools/ci/check_app_crate_dependencies.py`.
 
 // Temporary allowance for existing external/SPICE naming conventions.
 #![allow(non_snake_case)]
 // Desktop-only workbench paths remain unreachable in the browser build.
 // Native and test builds continue to diagnose ordinary dead code.
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]
-// A rendering or transaction entry point takes one parameter per thing the
-// caller independently varies: the `Ui`, the state it may mutate, the layout
-// it must respect, the identity it acts on. Fifty call sites had already
-// reached that conclusion one `#[allow]` at a time; this states it once. It
-// is not licence to grow a signature that could take a struct.
+// Rendering and transaction entry points may take independent source, state,
+// layout and authority inputs. Group parameters when they form one contract.
 #![allow(clippy::too_many_arguments)]
-// NOTE: this crate previously carried a blanket `#![allow(deprecated)]`,
-// hiding the egui 0.34 migration entirely. It is left off on purpose.
-//
-// Everything migratable on 0.34 has been migrated: the panel constructors
-// (`TopBottomPanel`/`SidePanel` -> `Panel::top`/`left`), `SelectableLabel` ->
-// `Button::selectable`, `Ui::set_enabled` -> `disable()`,
-// `Context::screen_rect` -> `content_rect`, `Ui::allocate_ui_at_rect` ->
-// `scope_builder`, and `popup_below_widget` -> the `Popup` builder. Each was
-// verified against egui's own body first — every one of those forwards to its
-// replacement with identical arguments, so none of them can move a pixel.
-//
-// What remains is one family: `Panel::show(ctx)` and `CentralPanel::show(ctx)`.
-// Those cannot be migrated on 0.34. `show_inside` takes `&mut Ui`, and the
-// root `Ui` that `show(ctx)` builds for itself needs `Context::pass_state_mut`
-// and `PassState::allocate_central_panel`, both `pub(crate)` in egui. The
-// supported way to obtain that root `Ui` arrives with eframe 0.35, which
-// replaces `App::update(&mut self, ctx, frame)` with
-// `App::ui(&mut self, ui, frame)`. So these warnings are not deferred cleanup
-// — they are the visible edge of an eframe 0.35 upgrade, and they should be
-// resolved by that upgrade rather than by hand-rolling egui internals here.
-// NOTE: closing the public surface (see the visibility note below) turned 192
-// items into `dead_code` warnings. They were never reachable — the compiler
-// simply could not say so while their modules were `pub`. All 192 are dead on
-// native, on wasm32, and with tests compiled; `--lib` alone is not enough,
-// because it hides anything only a `#[cfg(test)]` block or a browser-only
-// path calls.
-//
-// They are deliberately not swept. `workbench::simulation_analysis_tabs` is
-// the reason: 26 of its items are unreachable, but it is one coherent catalog
-// of 25 analysis tabs whose two index tables happen to have no reader.
-// Deleting the unreferenced half would leave a catalog that no longer
-// describes the product. Retire these per module — decide whether each thing
-// is finished-but-unwired or genuinely abandoned — not with a bulk delete.
-//
 // The desktop build detaches from its console on Windows and the browser
 // build has no stderr at all, so anything printed is a diagnostic nobody
 // will ever read. Route it through `log` and the application log buffer.
@@ -110,31 +43,29 @@
 // Domain Modules (Organized by Feature)
 // =============================================================================
 
-/// Analysis viewers - Bode, FFT, histogram, Nyquist, pole-zero, Smith chart, eye diagram
+/// Calculator adaptation over retained application results.
 pub(crate) mod analysis;
 
-/// Schematic editor - Canvas, export, toolbar, symbol library
+/// Application binding for schematic and symbol editors.
 pub(crate) mod schematic;
 
-/// Simulation management - Controller, dialogs, netlist generation
+/// Application simulation setup, source preparation and dispatch coordination.
 pub(crate) mod simulation;
 
-/// Property editing - Component properties and design variables
+/// Project-bound property editing workflows.
 pub(crate) mod properties;
 
-/// The RSpice design system - tokens, palettes, fonts, icons, widgets
+/// Shared UI kit exports used by application presentation.
 pub(crate) mod ui;
 
 /// The contract-driven application workbench. This is the only owner of
 /// application chrome, responsive composition, and top-level navigation.
 pub(crate) mod workbench;
 
-/// Versioned visualization documents, immutable dataset bindings, exact-data
-/// queries, viewer compatibility, and progressive result operations.
+/// Result document exports and application integration fixtures.
 pub(crate) mod results;
 
-/// Canonical commercial product model, typed identities, command outcomes,
-/// and fail-closed object lifecycles. This layer is UI-framework independent.
+/// Shared product identity and outcome vocabulary.
 pub(crate) mod product;
 
 /// Strict project-scoped Automation/CI workflow language and deterministic
@@ -150,13 +81,13 @@ pub(crate) mod automation_workflow;
 // Core Infrastructure
 // =============================================================================
 
-/// Backend services (file I/O, simulation runner)
+/// Application service adapters and platform integration.
 pub(crate) mod services;
 
-/// File I/O (library parser, session, netlist, waveform)
+/// Application file workflows and platform I/O adapters.
 pub(crate) mod io;
 
-/// Application state management
+/// Application-held domain owners and session adapters.
 pub(crate) mod state;
 
 /// Unit-safe user presentation and UI quantity-input policy. Values entering
@@ -187,18 +118,8 @@ mod fixture_root;
 // The crate's entire external surface
 // =============================================================================
 //
-// `rspice-app` is an application, not a library. Its only consumers are the
-// desktop and browser binary in `main.rs` and the integration tests --
-// nothing in the workspace depends on it. Every
-// module above is therefore `pub(crate)`, and everything reachable from
-// outside is named here.
-//
-// That is not tidiness. A `pub` module is one the compiler must assume some
-// unseen caller uses, so it cannot report an unreachable item inside it. The
-// eight modules that used to be `pub` covered 262k lines -- 45% of the crate
-// -- in which dead code could not be detected at all. Adding a `pub mod` to
-// reach something from a test re-opens that hole; add a re-export here
-// instead.
+// Keep implementation modules private so the compiler can diagnose unused
+// code. Expose entrypoint and integration contracts explicitly below.
 
 /// The application root, constructed by both the desktop and browser entry
 /// points.
