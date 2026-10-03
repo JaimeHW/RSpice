@@ -15,15 +15,17 @@ use chrome::*;
 mod sections;
 mod stage;
 
+use rspice_results_ui::studio::{
+    inspector::OperationState,
+    stage::{ExactSourceRow, ResultEntityRow},
+};
 use sections::*;
 use stage::*;
 
 use dock::{active_family_sample_selection, dock_action, dock_body};
 use rspice_results_ui::studio::{
-    COMPACT_BREAKPOINT, PANEL_HEADING_HEIGHT, TOUCH_DOCK_HEIGHT, bar_content_height,
-    chrome::{
-        compact_section_picker, engineering_count, section_navigation, status_label, touch_dock,
-    },
+    COMPACT_BREAKPOINT, TOUCH_DOCK_HEIGHT, bar_content_height,
+    chrome::{compact_section_picker, engineering_count, section_navigation, touch_dock},
     widgets::{
         concept_banner, empty_note, labeled_combo, numeric_policy, paint_bottom_rule,
         paint_top_rule, panel_heading, policy_row, separator, table_header,
@@ -33,8 +35,8 @@ use rspice_results_ui::studio::{
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use egui::{
-    Align, Align2, Color32, Frame, Grid, Id, Layout, Margin, Rect, RichText, ScrollArea, Sense,
-    Stroke, Ui, Vec2, vec2,
+    Align, Color32, Frame, Grid, Id, Layout, Margin, Rect, RichText, ScrollArea, Sense, Stroke, Ui,
+    Vec2, vec2,
 };
 use serde::{Deserialize, Serialize};
 
@@ -92,14 +94,6 @@ use rspice_results::family_projection::{FamilyManifest, FamilyValueKind, SourceS
 const NARROW_VIEWER_BREAKPOINT: f32 = 1_100.0;
 const VIEWER_TOOLBAR_HEIGHT: f32 = 36.0;
 const VIEWER_TOOLBAR_VERTICAL_MARGIN: f32 = 5.0;
-const VIEWER_STAGE_HEADER_HEIGHT: f32 = 44.0;
-const VIEWER_STAGE_HEADER_VERTICAL_MARGIN: f32 = 6.0;
-const VIEWER_STAGE_STATUS_HEIGHT: f32 = 27.0;
-const VIEWER_STAGE_STATUS_VERTICAL_MARGIN: f32 = 4.0;
-const EXACT_DATA_CARD_PADDING: f32 = 12.0;
-const EXACT_DATA_TABLE_HEIGHT: f32 = 102.0;
-const EXACT_DATA_DOCK_HEIGHT: f32 =
-    EXACT_DATA_CARD_PADDING * 2.0 + PANEL_HEADING_HEIGHT + EXACT_DATA_TABLE_HEIGHT;
 const NATIVE_VIEWERS: [ResultViewer; 12] = [
     ResultViewer::Waves,
     ResultViewer::DcSweep,
@@ -189,16 +183,6 @@ impl ComparisonAlignmentDraft {
             Self::CrossCorrelation => "Cross-correlation alignment",
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-enum OperationState {
-    #[default]
-    NotStarted,
-    Running,
-    Cancelled,
-    Completed,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

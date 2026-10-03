@@ -1,6 +1,8 @@
 //! Visualization Studio presentation over caller-owned selections and source summaries.
 
 pub mod chrome;
+pub mod inspector;
+pub mod stage;
 pub mod widgets;
 
 pub const COMPACT_BREAKPOINT: f32 = 820.0;
