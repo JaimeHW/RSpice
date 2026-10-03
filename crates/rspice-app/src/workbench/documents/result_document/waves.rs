@@ -7,11 +7,13 @@
 //! measurements render in the right panel.
 
 #[cfg(test)]
-use super::TracePresentationKey;
+use super::{MarkerKind, TracePresentationKey};
 #[cfg(test)]
 use crate::ui::plot::fmt_significant;
 use rspice_results_ui::derived::DerivedSeries;
 use rspice_results_ui::presentation::well_hint;
+#[cfg(test)]
+use rspice_results_ui::session::MarkerView;
 use rspice_results_ui::waves::cursor_interpolation;
 use rspice_results_ui::waves::header::{self as pane_header, WAVE_PANE_HEADER_HEIGHT, elide};
 use rspice_results_ui::waves::navigation::{
@@ -69,9 +71,9 @@ use rspice_results_ui::waves::navigation::model_x_axis;
 use super::frame_work::{self, FrameSampleRead};
 use super::{
     AnalysisPresentationKey, ExprEditor, ExprSeries, ExprTrace, ExpressionSeriesResult,
-    ExpressionSource, ExpressionWaveform, HorizontalWaveCursor, MarkerEditDraft, MarkerKind,
-    MarkerSelector, MarkerView, ResultsState, SelectedResultTrace, SourceWaveformPresentationKey,
-    WavePanePresentationKey, WaveformPresentationKey,
+    ExpressionSource, ExpressionWaveform, HorizontalWaveCursor, MarkerSelector, ResultsState,
+    SelectedResultTrace, SourceWaveformPresentationKey, WavePanePresentationKey,
+    WaveformPresentationKey,
 };
 use rspice_results_ui::strip::{LegendChip, StripHeader};
 

@@ -65,7 +65,7 @@ fn deep_readouts_scroll_without_exceeding_the_212_px_body_cap() {
     assert_eq!(readout_strip_height(&mut state), READOUT_MAX_H);
     assert!(readout_strip_height(&mut state) <= 238.0);
 }
-use crate::product::{AnalysisInstanceId, ContentDigest, DatasetId, ObjectRevision};
+use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::results::visualization_document::{
     FamilyAggregationMethod, FamilyAggregationPolicy, FamilyComparisonOperator, FamilyDimension,
     FamilyEncodingMap, FamilyFilterExpression, FamilyPredicate, FamilyPresentationPolicy,
@@ -728,14 +728,6 @@ fn every_visible_marker_remains_in_the_scroll_owned_body() {
 }
 
 #[test]
-fn cursor_and_marker_columns_split_at_normal_desktop_widths() {
-    assert!(!readout_columns_side_by_side(679.0, true, true));
-    assert!(readout_columns_side_by_side(680.0, true, true));
-    assert!(!readout_columns_side_by_side(900.0, true, false));
-    assert!(!readout_columns_side_by_side(900.0, false, true));
-}
-
-#[test]
 fn markers_outlive_the_tool_that_placed_them() {
     let mut state = marker_fixture();
     let (analysis, waveform) = marker_identity(&state);
@@ -843,50 +835,6 @@ fn only_a_spec_marker_declines_to_report_a_trace_value() {
             kind.label()
         );
     }
-}
-
-#[test]
-fn a_marker_tag_names_the_note_only_when_there_is_one() {
-    let analysis_result = AnalysisResult::new(1, AnalysisType::Transient, "marker analysis");
-    let analysis = AnalysisPresentationKey::new(DatasetId::new(), &analysis_result);
-    let mut marker = super::super::ResultMarker {
-        id: 3,
-        analysis,
-        anchor: WaveformPresentationKey {
-            analysis,
-            trace: TracePresentationKey {
-                source_name: "V(out)".to_owned(),
-                kind: TraceKind::Value as u8,
-                family_group: 0,
-            },
-        },
-        trace_name: "V(out)".to_owned(),
-        x: 0.0,
-        kind: MarkerKind::Note,
-        note: String::new(),
-    };
-    assert_eq!(marker_label(MarkerView::Quick(&marker)), "M3");
-
-    marker.note = "  settling  ".to_owned();
-    assert_eq!(marker_label(MarkerView::Quick(&marker)), "M3 · settling");
-
-    // The two stores allocate independently, so a retained marker's tag can
-    // never be mistaken for the quick marker that happens to share its number.
-    let retained = super::super::DocumentMarker {
-        document_id: crate::product::ResultDocumentId::new(),
-        pane_id: super::super::retained_entity_id(1),
-        retained_id: super::super::retained_entity_id(3),
-        analysis,
-        anchor: marker.anchor.clone(),
-        trace_name: "V(out)".to_owned(),
-        x: 0.0,
-        kind: MarkerKind::Note,
-        note: "  ringing  ".to_owned(),
-    };
-    assert_eq!(
-        marker_label(MarkerView::Document(&retained)),
-        "D3 · ringing"
-    );
 }
 
 #[test]

@@ -275,8 +275,8 @@ use rspice_results_ui::selection::{
     SelectedResultTrace, SourceWaveformPresentationKey,
 };
 use rspice_results_ui::session::{
-    AxisExtent, DocumentMarker, ExprEditor, HorizontalWaveCursor, MarkerEditDraft, MarkerSelector,
-    MarkerView, OptimizationSelection, PaneAxis, PlotPresentationKey, ViewGesture,
+    AxisExtent, DocumentMarker, ExprEditor, HorizontalWaveCursor, MarkerSelector,
+    OptimizationSelection, PaneAxis, PlotPresentationKey, ViewGesture,
 };
 use rspice_results_ui::soa::SoaRuleSelection;
 
@@ -1183,17 +1183,6 @@ pub(super) fn commit_marker_edit(
             Ok(())
         }
     }
-}
-
-/// Name one visualization-document entity identity in a test.
-///
-/// Production identities are allocated by the document itself. A test that
-/// only needs an identity to compare against reads one through the same
-/// transparent representation the project file carries, rather than being
-/// handed a constructor that would let production code invent entity serials.
-#[cfg(test)]
-pub(crate) fn retained_entity_id<T: serde::de::DeserializeOwned>(serial: u64) -> T {
-    serde_json::from_str(&serial.to_string()).expect("a non-zero entity serial")
 }
 
 /// A marker anchor naming one retained signal's plain value projection.

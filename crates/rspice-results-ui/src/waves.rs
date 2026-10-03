@@ -14,7 +14,9 @@ use rspice_ui_kit::plot::{XScale, fmt_si_significant, fmt_significant};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+pub mod dock;
 pub mod header;
+pub mod marker_dialog;
 pub mod navigation;
 pub mod pane;
 mod policy;
