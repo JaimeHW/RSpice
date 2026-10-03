@@ -1520,24 +1520,6 @@ fn versioned_entity_projection_retains_exact_bindings_and_stable_identities() {
 }
 
 #[test]
-fn viewer_columns_preserve_the_mockup_side_widths_exactly() {
-    assert_eq!(visible_available_width(1_312.0, 50.0, 1_280.0), 1_230.0);
-    let desktop = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_230.0, 540.0));
-    let [library, stage, inspector] = viewer_column_rects(desktop, 190.0, 224.0);
-    assert_eq!(library.width(), 190.0);
-    assert_eq!(inspector.width(), 224.0);
-    assert_eq!(stage.width(), 814.0);
-    assert_eq!(stage.left() - library.right(), 1.0);
-    assert_eq!(inspector.left() - stage.right(), 1.0);
-
-    let tablet = Rect::from_min_size(egui::Pos2::ZERO, vec2(900.0, 430.0));
-    let [library, stage, inspector] = viewer_column_rects(tablet, 158.0, 196.0);
-    assert_eq!(library.width(), 158.0);
-    assert_eq!(inspector.width(), 196.0);
-    assert_eq!(stage.width(), 544.0);
-}
-
-#[test]
 fn compact_dialog_body_stays_inside_phone_and_tablet_frames() {
     assert_eq!(compact_dock_geometry(390.0), (372.0, 348.0));
     assert_eq!(compact_dock_geometry(800.0), (520.0, 496.0));

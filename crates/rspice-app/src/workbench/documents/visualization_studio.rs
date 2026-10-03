@@ -14,6 +14,8 @@ use actions::*;
 use chrome::*;
 mod sections;
 mod stage;
+mod viewers;
+use viewers::show as viewers_section;
 
 use rspice_results_ui::studio::{
     inspector::OperationState,
@@ -24,28 +26,27 @@ use stage::*;
 
 use dock::{active_family_sample_selection, dock_action, dock_body};
 use rspice_results_ui::studio::{
-    COMPACT_BREAKPOINT, TOUCH_DOCK_HEIGHT, bar_content_height,
+    COMPACT_BREAKPOINT, TOUCH_DOCK_HEIGHT,
     chrome::{compact_section_picker, engineering_count, section_navigation, touch_dock},
     widgets::{
-        concept_banner, empty_note, labeled_combo, numeric_policy, paint_bottom_rule,
-        paint_top_rule, panel_heading, policy_row, separator, table_header,
+        concept_banner, empty_note, labeled_combo, numeric_policy, policy_row, section_heading,
+        section_scroll, table_header,
     },
 };
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use egui::{
-    Align, Color32, Frame, Grid, Id, Layout, Margin, Rect, RichText, ScrollArea, Sense, Stroke, Ui,
-    Vec2, vec2,
-};
+use egui::{Align, Grid, Id, Layout, RichText, ScrollArea, Ui, vec2};
 use serde::{Deserialize, Serialize};
 
 use crate::analysis::calculator;
 use crate::diagnostics::ConsoleMessage;
 use crate::product::{AnalysisInstanceId, DatasetBinding, DatasetId, ResultDocumentId};
+#[cfg(test)]
+use crate::results::viewer_catalog::VIEWER_DOCUMENTS;
 use crate::results::viewer_catalog::{
-    VIEWER_DOCUMENTS, ViewerArt, ViewerCapabilities, ViewerCompatibility, ViewerDocumentDefinition,
-    ViewerGroup, viewer_compatibility, viewer_document,
+    ViewerArt, ViewerCapabilities, ViewerCompatibility, ViewerDocumentDefinition,
+    viewer_compatibility, viewer_document,
 };
 use crate::results::visualization_document::{
     AccessibleColorPalette, AxisOrientation, ColumnRole, ComparisonAlignmentMethod,
@@ -72,7 +73,7 @@ use crate::workbench::{AppState, RSpiceApp};
 use crate::workbench::{
     ChoicePreference, ResultViewer, RouteTransitionSource, ScalarPreference, SurfaceId,
     SurfaceRoute,
-    design_system::{WorkbenchIcon, property_row},
+    design_system::property_row,
     state::{Workspace, WorkspaceDocumentId},
 };
 
@@ -91,9 +92,6 @@ use rspice_results::studio_presentation::{
 use super::result_document;
 use rspice_results::family_projection::{FamilyManifest, FamilyValueKind, SourceSampleSelection};
 
-const NARROW_VIEWER_BREAKPOINT: f32 = 1_100.0;
-const VIEWER_TOOLBAR_HEIGHT: f32 = 36.0;
-const VIEWER_TOOLBAR_VERTICAL_MARGIN: f32 = 5.0;
 const NATIVE_VIEWERS: [ResultViewer; 12] = [
     ResultViewer::Waves,
     ResultViewer::DcSweep,
@@ -118,23 +116,6 @@ const fn document_pane_kind(art: ViewerArt) -> crate::results::visualization_doc
         ViewerArt::Table => PaneKind::Table,
         _ => PaneKind::Cartesian,
     }
-}
-
-fn viewer_column_rects(rect: Rect, library_width: f32, inspector_width: f32) -> [Rect; 3] {
-    let library = Rect::from_min_size(rect.min, vec2(library_width, rect.height()));
-    let inspector = Rect::from_min_max(
-        egui::pos2(rect.right() - inspector_width, rect.top()),
-        rect.max,
-    );
-    let stage = Rect::from_min_max(
-        egui::pos2(library.right() + 1.0, rect.top()),
-        egui::pos2(inspector.left() - 1.0, rect.bottom()),
-    );
-    [library, stage, inspector]
-}
-
-fn visible_available_width(available: f32, cursor_left: f32, clip_right: f32) -> f32 {
-    available.min((clip_right - cursor_left).max(1.0)).max(1.0)
 }
 
 fn compact_dock_geometry(viewport_width: f32) -> (f32, f32) {

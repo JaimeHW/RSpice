@@ -1,7 +1,11 @@
 //! Shared Studio panel, form, and table widgets.
 
 use super::PANEL_HEADING_HEIGHT;
-use egui::{Align, Color32, Frame, Layout, Margin, Rect, RichText, Sense, Stroke, Ui, Vec2, vec2};
+use egui::{
+    Align, Color32, Frame, Layout, Margin, Rect, RichText, ScrollArea, Sense, Stroke, Ui, Vec2,
+    vec2,
+};
+use rspice_results::studio_presentation::VisualizationSection;
 use rspice_ui_kit::{
     panels::WorkbenchIcon,
     theme::{self, FontWeight},
@@ -139,4 +143,44 @@ pub fn numeric_policy(
             ui.monospace(suffix);
         });
     });
+}
+
+pub fn section_heading(ui: &mut Ui, section: VisualizationSection) {
+    let t = Tokens::get(ui.ctx());
+    Frame::NONE
+        .inner_margin(Margin::symmetric(12, 10))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(format!("VIZ · {}", section.label().to_uppercase()))
+                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                    .color(t.color.text_faint),
+            );
+            ui.label(
+                RichText::new(section.title())
+                    .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
+                    .color(t.color.text),
+            );
+            ui.label(
+                RichText::new(section.description())
+                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                    .color(t.color.text_faint),
+            );
+        });
+    separator(ui, t.color.border);
+}
+
+pub fn section_scroll(ui: &mut Ui, id: &'static str, content: impl FnOnce(&mut Ui)) {
+    Frame::NONE
+        .inner_margin(Margin {
+            left: 12,
+            right: 12,
+            top: 0,
+            bottom: 12,
+        })
+        .show(ui, |ui| {
+            ScrollArea::both()
+                .id_salt(id)
+                .auto_shrink([false, false])
+                .show(ui, content);
+        });
 }
