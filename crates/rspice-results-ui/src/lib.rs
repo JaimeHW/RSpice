@@ -21,6 +21,7 @@ pub mod op_inspector;
 pub mod optimization;
 pub mod phase_noise;
 pub mod polar;
+pub mod pole_zero;
 pub mod presentation;
 pub mod scatter;
 pub mod sensitivity;
