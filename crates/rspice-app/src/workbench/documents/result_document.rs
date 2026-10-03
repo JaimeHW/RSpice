@@ -1626,7 +1626,7 @@ pub struct ResultsState {
     /// Exact retained history and display version behind waveform caches.
     wave_cache_source: Option<(crate::state::RunHistoryRevision, u64)>,
     /// Fingerprint-keyed strip-model cache for the waves viewer.
-    models: waves::ModelsCache,
+    models: rspice_results_ui::waves::cache::ModelsCache,
     /// Cached Bode margins + extremes for the active data version.
     pub bode: Option<BodeDerived>,
     /// Cached Nyquist stability numbers for the active data version.

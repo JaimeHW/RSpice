@@ -23,8 +23,8 @@ pub(super) struct ViewPlans {
     /// [`super::table`].
     pub(super) artifact: Option<Arc<super::table::ArtifactTextPlan>>,
     /// Family envelopes for the drawn wave panes, one per pane; see
-    /// [`super::waves::FamilyEnvelopeCache`].
-    pub(super) envelopes: super::waves::FamilyEnvelopeCache,
+    /// [`rspice_results_ui::waves::extent::FamilyEnvelopeCache`].
+    pub(super) envelopes: rspice_results_ui::waves::extent::FamilyEnvelopeCache,
     /// Descriptive statistics for the drawn distribution; see
     /// [`super::hist`].
     pub(super) hist: RefCell<Option<Arc<super::hist::HistPlan>>>,

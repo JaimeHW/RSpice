@@ -12,10 +12,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::ui::plot::XScale;
+use rspice_ui_kit::plot::XScale;
 
-use super::super::ResultsState;
-use super::super::frame_work::{self, DatasetWalk};
 use super::{StripModel, StripTrace, UnitPane, stable_hash};
 
 /// Resolve every strip's X extent, once, against the traces it will draw.
@@ -25,7 +23,7 @@ use super::{StripModel, StripTrace, UnitPane, stable_hash};
 /// navigator or the inspector writes only the override map, so an extent
 /// baked out of the raw data flags would keep the span of a trace nobody can
 /// see — and would report a domain for a strip whose last trace was hidden.
-pub(super) fn resolve_x_ranges(models: &mut [StripModel]) {
+pub fn resolve_x_ranges(models: &mut [StripModel]) {
     for model in models {
         model.x_range = x_range(model);
     }
@@ -39,7 +37,7 @@ pub(super) fn resolve_x_ranges(models: &mut [StripModel]) {
 /// this reads changes — the retained data, which traces are visible, the
 /// phase projection — so the answer cannot outlive its inputs.
 fn x_range(model: &StripModel) -> Option<(f64, f64)> {
-    frame_work::note(DatasetWalk::WaveXRange);
+    note_extent(0);
     let mut x0 = f64::INFINITY;
     let mut x1 = f64::NEG_INFINITY;
     for x in model
@@ -68,16 +66,16 @@ fn x_range(model: &StripModel) -> Option<(f64, f64)> {
     }
 }
 
-pub(super) use rspice_results_ui::waves::pane::FamilyEnvelopeSeries;
+pub use super::pane::FamilyEnvelopeSeries;
 
 /// One pane's family envelopes.
 #[derive(Debug)]
-pub(in crate::workbench::documents::result_document) struct FamilyEnvelopePlan {
+pub struct FamilyEnvelopePlan {
     series: Vec<FamilyEnvelopeSeries>,
 }
 
 impl FamilyEnvelopePlan {
-    pub(super) fn series(&self) -> &[FamilyEnvelopeSeries] {
+    pub fn series(&self) -> &[FamilyEnvelopeSeries] {
         &self.series
     }
 }
@@ -95,22 +93,22 @@ impl FamilyEnvelopePlan {
 /// whenever anything an envelope reads changes, so a new generation empties
 /// the map rather than being folded into keys that would accumulate.
 #[derive(Debug, Clone, Default)]
-pub(in crate::workbench::documents::result_document) struct FamilyEnvelopeCache {
+pub struct FamilyEnvelopeCache {
     generation: u64,
     plans: HashMap<u64, Arc<FamilyEnvelopePlan>>,
 }
 
 impl FamilyEnvelopeCache {
     /// Whether the cache holds no envelope at all.
-    #[cfg(test)]
-    pub(in crate::workbench::documents::result_document) fn is_empty(&self) -> bool {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn is_empty(&self) -> bool {
         self.plans.is_empty()
     }
 
     /// How many envelopes are held, for a test that pins the cache to one
     /// generation of models rather than letting it grow across them.
-    #[cfg(test)]
-    pub(in crate::workbench::documents::result_document) fn entry_count(&self) -> usize {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn entry_count(&self) -> usize {
         self.plans.len()
     }
 }
@@ -134,14 +132,13 @@ fn envelope_key(models_generation: u64, model: &StripModel, pane: &UnitPane) -> 
 /// the sheet bar asks for it a second time just to decide whether to offer
 /// the control that draws it. Held per pane, because every pane of a strip
 /// asks on the same frame; see [`FamilyEnvelopeCache`].
-pub(super) fn family_envelopes(
-    results: &mut ResultsState,
+pub fn family_envelopes(
+    cache: &mut FamilyEnvelopeCache,
     models_generation: u64,
     model: &StripModel,
     pane: &UnitPane,
 ) -> Arc<FamilyEnvelopePlan> {
     let key = envelope_key(models_generation, model, pane);
-    let cache = &mut results.plans.envelopes;
     if cache.generation != models_generation {
         cache.generation = models_generation;
         cache.plans.clear();
@@ -157,7 +154,7 @@ pub(super) fn family_envelopes(
 }
 
 fn family_envelope_series(model: &StripModel, pane: &UnitPane) -> Vec<FamilyEnvelopeSeries> {
-    frame_work::note(DatasetWalk::WaveEnvelope);
+    note_extent(1);
     let mut groups = HashMap::<(String, u8), Vec<&StripTrace>>::new();
     for trace in pane
         .traces
@@ -222,3 +219,45 @@ fn family_envelope_series(model: &StripModel, pane: &UnitPane) -> Vec<FamilyEnve
     }
     envelopes
 }
+
+// Dataset-walk observations used by the owner and application regression gates.
+#[inline]
+fn note_extent(_index: usize) {
+    #[cfg(any(test, feature = "test-support"))]
+    EXTENT_WALKS.with(|counts| {
+        let mut next = counts.get();
+        next[_index] += 1;
+        counts.set(next);
+    });
+}
+
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    static EXTENT_WALKS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
+}
+
+#[cfg(any(test, feature = "test-support"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExtentWork {
+    pub x_ranges: u64,
+    pub envelopes: u64,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl ExtentWork {
+    pub fn read() -> Self {
+        let [x_ranges, envelopes] = EXTENT_WALKS.with(std::cell::Cell::get);
+        Self {
+            x_ranges,
+            envelopes,
+        }
+    }
+
+    pub fn reset() -> Self {
+        EXTENT_WALKS.with(|counts| counts.set([0; 2]));
+        Self::read()
+    }
+}
+
+#[cfg(test)]
+mod tests;

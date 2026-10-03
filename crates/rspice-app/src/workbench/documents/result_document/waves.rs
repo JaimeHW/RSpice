@@ -24,7 +24,7 @@ use rspice_results_ui::waves::pane::{self as pane_view, pane_auto_y};
 use rspice_results_ui::waves::pane::{apply_family_trace_style, nearest_drawn_trace};
 use rspice_results_ui::waves::{
     CursorDomain, NOISE_DENSITY_UNIT, StripTrace, TraceKind, anchor_key, family_color, fmt_in_unit,
-    stable_hash, trace_key,
+    trace_key,
 };
 pub(super) use rspice_results_ui::waves::{FamilyTraceVisibilityKey, StripModel, UnitPane};
 pub(crate) use rspice_results_ui::waves::{
@@ -32,11 +32,10 @@ pub(crate) use rspice_results_ui::waves::{
 };
 mod expression_evaluation;
 mod expressions;
-mod extent;
-pub(super) use extent::{FamilyEnvelopeCache, FamilyEnvelopePlan};
+use rspice_results_ui::waves::extent::{self, FamilyEnvelopePlan};
 pub(super) mod marker_dialog;
 mod model_cache;
-pub(super) use model_cache::{ModelsCache, cached_models};
+pub(super) use model_cache::cached_models;
 mod readout;
 mod viewport;
 
@@ -45,7 +44,7 @@ pub(crate) use expressions::*;
 pub(crate) use readout::*;
 pub(crate) use viewport::*;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 #[cfg(test)]
 use std::sync::Arc;
 
@@ -53,7 +52,9 @@ use egui::Ui;
 
 use crate::analysis::calculator;
 use crate::schematic::bus_notations;
-use crate::state::{AnalysisResult, AnalysisType, SimulationState};
+#[cfg(test)]
+use crate::state::AnalysisType;
+use crate::state::{AnalysisResult, SimulationState};
 #[cfg(test)]
 use crate::ui::plot::Trace;
 use crate::ui::plot::sample::{SweepShape, sample_at_with_shape};
@@ -91,40 +92,6 @@ fn wave_left_margin(results: &ResultsState) -> f32 {
     }
 }
 const WAVE_MIN_PLOT_HEIGHT: f32 = 24.0;
-
-/// Apply quick-view presentation overrides after constructing the immutable
-/// dataset projection. Family visibility remains the more specific gate, so
-/// revealing a source never accidentally reveals a hidden family member.
-fn apply_waveform_visibility(
-    models: &mut [StripModel],
-    simulation: &SimulationState,
-    overrides: &HashMap<SourceWaveformPresentationKey, bool>,
-    hidden_family_traces: &HashSet<FamilyTraceVisibilityKey>,
-) {
-    let Some(run) = simulation.active_run() else {
-        return;
-    };
-    for model in models {
-        let Some(analysis) = run.analyses.get(model.analysis_index) else {
-            continue;
-        };
-        for trace in &mut model.traces {
-            let Some(waveform) = analysis.waveforms.get(trace.waveform_index) else {
-                trace.visible = false;
-                continue;
-            };
-            let key = SourceWaveformPresentationKey::new(
-                model.analysis_key,
-                trace.source_waveform_name.clone(),
-            );
-            let source_visible = overrides.get(&key).copied().unwrap_or(waveform.visible);
-            trace.visible = source_visible
-                && trace
-                    .family_visibility_key
-                    .is_none_or(|key| !hidden_family_traces.contains(&key));
-        }
-    }
-}
 
 /// Project the host-selected retained sources into the shared waveform model.
 pub(super) fn build_models(
@@ -377,9 +344,14 @@ pub(super) fn family_envelope_available(state: &mut AppState, t: &Tokens) -> boo
     let Some((model, _, pane)) = active_pane(&models, &state.ui.results) else {
         return false;
     };
-    !extent::family_envelopes(&mut state.ui.results, generation, model, &pane)
-        .series()
-        .is_empty()
+    !extent::family_envelopes(
+        &mut state.ui.results.plans.envelopes,
+        generation,
+        model,
+        &pane,
+    )
+    .series()
+    .is_empty()
 }
 
 /// Everything dropping a marker at cursor A needs to name where it landed:
@@ -1576,7 +1548,12 @@ fn show_unit_pane(
         shared_x_view(&state.ui.results, model.analysis_key, pane_count).unwrap_or((x0, x1));
     let family_envelopes = state.ui.results.session.show_family_envelope.then(|| {
         let generation = state.ui.results.models.generation();
-        extent::family_envelopes(&mut state.ui.results, generation, model, pane)
+        extent::family_envelopes(
+            &mut state.ui.results.plans.envelopes,
+            generation,
+            model,
+            pane,
+        )
     });
     let family_envelopes: &[extent::FamilyEnvelopeSeries] = family_envelopes
         .as_deref()

@@ -8,6 +8,7 @@
 
 use super::*;
 use crate::state::ComplexExpressionPolicy;
+use rspice_results_ui::waves::cache::apply_waveform_visibility;
 
 /// Palette color for the i-th trace slot of a strip (waveforms, then
 /// expressions).
@@ -658,7 +659,7 @@ pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
     );
     apply_waveform_visibility(
         &mut models,
-        &state.simulation,
+        state.simulation.active_run().map(AsRef::as_ref),
         &waveform_visibility,
         &hidden_family_traces,
     );

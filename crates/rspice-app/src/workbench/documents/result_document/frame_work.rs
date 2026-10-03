@@ -45,8 +45,10 @@ pub(crate) enum DatasetWalk {
     /// Monte-Carlo moment and consistency walks over a sample population.
     HistMoments,
     /// The shared X extent of a strip: every visible trace's coordinates.
+    #[cfg(test)]
     WaveXRange,
     /// Family-envelope construction: every sample of every family member.
+    #[cfg(test)]
     WaveEnvelope,
     /// Baking the eye density texture from every folded acquisition.
     EyeRaster,
@@ -181,7 +183,13 @@ impl WorkCounts {
     /// The counts accumulated so far on this thread.
     pub(crate) fn read() -> Self {
         Self {
-            walks: COUNTS.with(|counts| *counts.borrow()),
+            walks: COUNTS.with(|counts| {
+                let mut walks = *counts.borrow();
+                let geometry = rspice_results_ui::waves::extent::ExtentWork::read();
+                walks[DatasetWalk::WaveXRange as usize] += geometry.x_ranges;
+                walks[DatasetWalk::WaveEnvelope as usize] += geometry.envelopes;
+                walks
+            }),
             samples: SAMPLES.with(|samples| *samples.borrow()),
         }
     }
@@ -189,6 +197,7 @@ impl WorkCounts {
     /// Reset the counters and return a zero snapshot to measure against.
     pub(crate) fn reset() -> Self {
         COUNTS.with(|counts| *counts.borrow_mut() = Self::ZERO.walks);
+        rspice_results_ui::waves::extent::ExtentWork::reset();
         SAMPLES.with(|samples| *samples.borrow_mut() = Self::ZERO.samples);
         Self::ZERO
     }

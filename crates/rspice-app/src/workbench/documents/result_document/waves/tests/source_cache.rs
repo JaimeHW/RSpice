@@ -185,7 +185,12 @@ fn wave_cache_family_envelopes_follow_rebuilt_model_generations() {
     );
     let generation = results.models.generation();
     let pane = models[0].unit_panes().remove(0);
-    let old = super::super::extent::family_envelopes(&mut results, generation, &models[0], &pane);
+    let old = super::super::extent::family_envelopes(
+        &mut results.plans.envelopes,
+        generation,
+        &models[0],
+        &pane,
+    );
     assert!(!old.series().is_empty());
     for sample in Arc::make_mut(&mut simulation.runs[0].analyses[0].waveforms[0].y) {
         *sample += 100.0;
@@ -199,7 +204,12 @@ fn wave_cache_family_envelopes_follow_rebuilt_model_generations() {
     let next = results.models.generation();
     assert_ne!(generation, next);
     let pane = updated[0].unit_panes().remove(0);
-    let new = super::super::extent::family_envelopes(&mut results, next, &updated[0], &pane);
+    let new = super::super::extent::family_envelopes(
+        &mut results.plans.envelopes,
+        next,
+        &updated[0],
+        &pane,
+    );
     assert_eq!(
         new.series()[0].minimum[0],
         old.series()[0].minimum[0] + 100.0
@@ -230,8 +240,12 @@ fn wave_cache_family_envelopes_follow_rebuilt_model_generations() {
         assert_ne!(generation, previous_generation);
         previous_generation = generation;
         let pane = hidden[0].unit_panes().remove(0);
-        let envelope =
-            super::super::extent::family_envelopes(&mut results, generation, &hidden[0], &pane);
+        let envelope = super::super::extent::family_envelopes(
+            &mut results.plans.envelopes,
+            generation,
+            &hidden[0],
+            &pane,
+        );
         if hidden[0].traces.iter().all(|trace| !trace.visible) {
             assert!(envelope.series().is_empty());
         }
