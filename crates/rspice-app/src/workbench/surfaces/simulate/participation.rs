@@ -9,7 +9,7 @@
 //!
 //! [`PlanParticipation`] resolves it once per frame from the working plan and
 //! the working run set, through the same
-//! [`crate::simulation::run_set::participating_point_keys`] the prepared
+//! [`rspice_simulation_contract::run_set::participating_point_keys`] the prepared
 //! expansion uses. Nothing here decides participation; it only reports what
 //! that resolver returned, so a surface cannot disagree with the queue.
 
@@ -18,13 +18,14 @@ use std::collections::HashSet;
 use egui::Ui;
 
 use crate::product::AnalysisInstanceId;
-use crate::simulation::run_set::{self, AnalysisRunAt, RunSetPoint};
 use crate::state::SpecPointScope;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogSize};
 use crate::workbench::state::AnalysisRunPointsDraft;
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
+use rspice_simulation_contract::run_set::{self, RunSetPoint};
 
 /// One enabled analysis instance and the points it visits.
 pub(super) struct InstanceParticipation {
@@ -154,7 +155,7 @@ impl PlanParticipation {
     /// Whether one instance's queue contains `key`.
     ///
     /// The same resolution [`Self::analyses_at`] counts —
-    /// [`crate::simulation::run_set::participating_point_keys`], whose refusal
+    /// [`rspice_simulation_contract::run_set::participating_point_keys`], whose refusal
     /// is what [`InstanceParticipation::refusal`] holds — read the same way, so
     /// one row of the point table cannot say two things about one instance. A
     /// refused participation visits nothing: it resolves to no point of the
@@ -948,7 +949,7 @@ mod tests {
     #[test]
     fn a_refusal_names_dropped_points_the_way_the_table_does() {
         use crate::simulation::plan::AnalysisKind;
-        use crate::simulation::run_set::RunSetDimensionKind;
+        use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
         use super::super::page_runset_parity_tests::{app_with, scope_to_points};
         use super::{reconcile_selections, run_set};

@@ -34,7 +34,7 @@ fn the_analyses_route_expands_the_declared_space_once_a_frame() {
     app.state.workbench.simulation_page = crate::workbench::state::SimulationPage::Analyses;
     for dimension in &mut app.state.sim_setup.run_set.dimensions {
         dimension.enabled =
-            dimension.kind == crate::simulation::run_set::RunSetDimensionKind::Temperature;
+            dimension.kind == rspice_simulation_contract::run_set::RunSetDimensionKind::Temperature;
     }
 
     reset();
@@ -82,7 +82,7 @@ fn derivations_for_route(page: crate::workbench::state::SimulationPage) -> (usiz
     // an expansion actually costs something.
     for dimension in &mut app.state.sim_setup.run_set.dimensions {
         dimension.enabled =
-            dimension.kind == crate::simulation::run_set::RunSetDimensionKind::Temperature;
+            dimension.kind == rspice_simulation_contract::run_set::RunSetDimensionKind::Temperature;
     }
 
     reset();

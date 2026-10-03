@@ -7,7 +7,6 @@
 
 use egui::Ui;
 
-use crate::simulation::run_set::format_bytes;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
     CaptureGroup, CaptureGroupMembership, ComplexExpressionPolicy, SavedOutput,
@@ -21,6 +20,7 @@ use crate::workbench::commands::vocabulary::Command;
 use rspice_simulation::capture_ledger;
 use rspice_simulation::output_contract::SavedOutputPreflightReport;
 use rspice_simulation::output_contract::SavedOutputSemanticStatus;
+use rspice_simulation_contract::run_set::format_bytes;
 
 use super::page_kit::{
     RowPress, Tone, card, card_body, card_head_row, card_note, card_row, card_with_head,

@@ -626,7 +626,7 @@ fn storage_status_message(status: BrowserPdkStorageStatus) -> String {
         |available| {
             format!(
                 "Browser PDK storage is ready; {durability}; approximately {} available.",
-                crate::simulation::run_set::format_bytes(available)
+                rspice_simulation_contract::run_set::format_bytes(available)
             )
         },
     )

@@ -8,12 +8,11 @@
 //! diverge, the page is what changes.
 
 use crate::simulation::plan::{AnalysisDraft, AnalysisInstance, AnalysisKind};
-use crate::simulation::run_set::{
-    AnalysisRunAt, NETLIST_SUPPLY_SOURCE_PREFIX, RunSetDimensionKind,
-};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use rspice_design::drc::DrcResult;
+use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
+use rspice_simulation_contract::run_set::{NETLIST_SUPPLY_SOURCE_PREFIX, RunSetDimensionKind};
 
 use super::page_runset::{exact_plan_task_count, worst_point_task_cost};
 
@@ -324,7 +323,7 @@ fn a_nested_point_declaration_under_global_axes_is_refused_by_both_derivations()
         .enabled_analysis_instances()
         .map(AnalysisInstance::kind)
         .collect::<Vec<_>>();
-    let validation = crate::simulation::run_set::validate_for_plan(
+    let validation = rspice_simulation_contract::run_set::validate_for_plan(
         &app.state.sim_setup.run_set,
         &kinds,
         exact_plan_task_count(&app).expect("the page can still forecast"),
@@ -400,7 +399,7 @@ pub(super) fn scope_to_points(
     positions: &[usize],
 ) -> Vec<String> {
     let keys: Vec<String> = {
-        let points = crate::simulation::run_set::resolve(&state.sim_setup.run_set)
+        let points = rspice_simulation_contract::run_set::resolve(&state.sim_setup.run_set)
             .expect("the fixture space expands exactly");
         positions
             .iter()

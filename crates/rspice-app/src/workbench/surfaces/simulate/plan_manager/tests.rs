@@ -1282,7 +1282,8 @@ fn an_undeclarable_run_set_says_so_instead_of_reporting_zeros() {
     let mut setup = app.state.sim_setup.clone();
     // Nested composition with a zero maximum depth is a declared run-space
     // error, so there is no workload to forecast.
-    setup.run_set.composition.mode = crate::simulation::run_set::RunSetCompositionMode::Nested;
+    setup.run_set.composition.mode =
+        rspice_simulation_contract::run_set::RunSetCompositionMode::Nested;
     setup.run_set.composition.maximum_depth = 0;
     app.state.sim_setup = setup;
 
@@ -1413,7 +1414,7 @@ fn a_created_plan_inherits_exactly_what_its_route_committed() {
         &mut app,
         "Inheriting plan",
         &crate::workbench::state::NewSimulationPlanDraft {
-            reference_pvt: crate::simulation::run_set::ReferencePoint {
+            reference_pvt: rspice_simulation_contract::run_set::ReferencePoint {
                 process: ProcessCorner::SS,
                 temperature_celsius: -40.0,
             },
@@ -1504,7 +1505,7 @@ fn a_created_plan_that_inherits_nothing_keeps_the_catalog_defaults() {
     .expect("the create transaction commits");
 
     let setup = &app.state.sim_setup;
-    let defaults = crate::simulation::run_set::ReferencePoint::default();
+    let defaults = rspice_simulation_contract::run_set::ReferencePoint::default();
     assert_eq!(setup.reference_pvt.process, defaults.process);
     assert_eq!(
         setup.reference_pvt.temperature_celsius,

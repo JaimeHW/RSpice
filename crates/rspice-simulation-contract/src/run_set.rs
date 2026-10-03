@@ -8,6 +8,8 @@ mod model;
 mod participation;
 mod points;
 mod state_contracts;
+#[cfg(test)]
+mod tests;
 mod transaction;
 mod validate;
 

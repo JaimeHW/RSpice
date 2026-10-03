@@ -10,7 +10,7 @@ pub(super) fn run(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
     let parsed = rspice_core::Netlist::parse(deck).unwrap();
     assert!(parsed.subcircuits.is_empty());
     let mut state = super::super::AppState::default();
-    state.sim_setup.run_set = crate::simulation::run_set::RunSetState::reference_only();
+    state.sim_setup.run_set = rspice_simulation_contract::run_set::RunSetState::reference_only();
     state.sim_setup.reference_pvt.temperature_celsius = 27.0;
     for (index, element) in parsed.elements.iter().enumerate() {
         let (kind, value, params) = match &element.kind {

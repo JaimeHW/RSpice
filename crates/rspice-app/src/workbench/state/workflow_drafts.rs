@@ -576,7 +576,7 @@ pub struct NewSimulationPlanDraft {
     /// axis to, and the temperature its solver options carry. This is the type
     /// `ReferencePvtPoint` aliases, named at its own owner rather than through
     /// the alias, which lives above this module.
-    pub reference_pvt: crate::simulation::run_set::ReferencePoint,
+    pub reference_pvt: rspice_simulation_contract::run_set::ReferencePoint,
     /// Whether the new plan opens with the active plan's ordered model closure
     /// rather than an explicit empty one.
     pub inherit_model_closure: bool,

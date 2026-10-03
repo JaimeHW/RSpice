@@ -133,7 +133,9 @@ fn fixture_dir(label: &str) -> PathBuf {
 fn technology_free_runnable_state() -> AppState {
     let mut state = AppState::default();
     for dimension in &mut state.sim_setup.run_set.dimensions {
-        if dimension.kind == crate::simulation::run_set::RunSetDimensionKind::ProcessSection {
+        if dimension.kind
+            == rspice_simulation_contract::run_set::RunSetDimensionKind::ProcessSection
+        {
             dimension.enabled = false;
         }
     }
@@ -1610,12 +1612,12 @@ fn an_enabled_corner_analysis_without_a_technology_blocks_preparation() {
     let mut state = technology_free_runnable_state();
     // The sections are declared by the plan, which is the only place a run
     // space is declared now. The corner instance reads them.
-    state.sim_setup.run_set = crate::simulation::run_set::RunSetState::default();
+    state.sim_setup.run_set = rspice_simulation_contract::run_set::RunSetState::default();
     for dimension in &mut state.sim_setup.run_set.dimensions {
-        if dimension.kind == crate::simulation::run_set::RunSetDimensionKind::Supply {
+        if dimension.kind == rspice_simulation_contract::run_set::RunSetDimensionKind::Supply {
             dimension.source = format!(
                 "{}VDD",
-                crate::simulation::run_set::NETLIST_SUPPLY_SOURCE_PREFIX
+                rspice_simulation_contract::run_set::NETLIST_SUPPLY_SOURCE_PREFIX
             );
         }
     }

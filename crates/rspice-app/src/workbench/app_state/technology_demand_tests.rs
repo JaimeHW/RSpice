@@ -4,9 +4,9 @@ use crate::product::AnalysisInstanceId;
 use crate::product::ProcessCorner;
 use crate::simulation::dialog::corner::CornerDialogState;
 use crate::simulation::plan::AnalysisDraft;
-use crate::simulation::run_set::RunSetDimensionKind;
 use crate::workbench::app_state::AppState;
 use rspice_simulation::preparation::{TechnologyDemand, TechnologyDemandReason};
+use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
 fn insert_corner(state: &mut AppState, corner: CornerDialogState) -> AnalysisInstanceId {
     let plan = state
@@ -55,12 +55,12 @@ fn disable_global_process_axis(state: &mut AppState) {
     }
 }
 
-fn bind_supply_source(run_set: &mut crate::simulation::run_set::RunSetState) {
+fn bind_supply_source(run_set: &mut rspice_simulation_contract::run_set::RunSetState) {
     for dimension in &mut run_set.dimensions {
         if dimension.kind == RunSetDimensionKind::Supply {
             dimension.source = format!(
                 "{}VDD",
-                crate::simulation::run_set::NETLIST_SUPPLY_SOURCE_PREFIX
+                rspice_simulation_contract::run_set::NETLIST_SUPPLY_SOURCE_PREFIX
             );
         }
     }

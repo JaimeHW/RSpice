@@ -921,7 +921,7 @@ fn visibility_label(public: bool) -> &'static str {
 /// Delegates so the payload gauge and every storage figure elsewhere in the
 /// product describe the same byte count with the same number.
 fn format_bytes(bytes: usize) -> String {
-    crate::simulation::run_set::format_bytes(bytes as u64)
+    rspice_simulation_contract::run_set::format_bytes(bytes as u64)
 }
 
 #[cfg(test)]

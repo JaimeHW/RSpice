@@ -13,11 +13,11 @@
 
 use egui::Ui;
 
-use crate::simulation::run_set::{
-    ReferencePoint, RunSetDimensionKind, RunSetState, nominal_point_key, resolve,
-};
 use crate::state::NominalFailurePolicy;
 use crate::workbench::state::SimulationPage;
+use rspice_simulation_contract::run_set::{
+    ReferencePoint, RunSetDimensionKind, RunSetState, nominal_point_key, resolve,
+};
 
 use super::{action_line, choice_row, field_note, property_row, sub_header};
 
@@ -45,7 +45,7 @@ impl RunSpaceContext<'_> {
     /// `None` has a specific meaning that the caller must not paper over: the
     /// declared space contains no point sitting on the reference condition, and
     /// a nominal-only instance refuses rather than picking one. The refusal is
-    /// [`crate::simulation::run_set::participating_point_keys`]'s; this only
+    /// [`rspice_simulation_contract::run_set::participating_point_keys`]'s; this only
     /// reports the same fact before a run is attempted.
     fn nominal_point_label(&self) -> Option<String> {
         let points = resolve(self.run_set)?;

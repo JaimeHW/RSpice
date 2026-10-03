@@ -16,7 +16,6 @@ use super::{
     verification_navigator_requires_scroll,
 };
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
-use crate::simulation::run_set::RunSetDimensionKind;
 use crate::state::{
     AnalysisResult, AnalysisResultPayload, AnalysisType, SimulationRun, SimulationState,
     WaveformData,
@@ -30,6 +29,7 @@ use rspice_results::yield_analysis::{
 use rspice_results_ui::selection::{
     ResultArtifactPresentationKey, ResultBrowserSelectionKey, SourceWaveformPresentationKey,
 };
+use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
 fn result(trail: Vec<bool>) -> YieldResult {
     let pass_count = trail.iter().filter(|passes| **passes).count();

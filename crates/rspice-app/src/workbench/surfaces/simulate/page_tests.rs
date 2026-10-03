@@ -309,9 +309,9 @@ fn the_run_space_page_states_every_axis_and_what_they_resolve_to() {
         for dimension in &mut app.state.sim_setup.run_set.dimensions {
             dimension.enabled = matches!(
                 dimension.kind,
-                crate::simulation::run_set::RunSetDimensionKind::ProcessSection
-                    | crate::simulation::run_set::RunSetDimensionKind::Supply
-                    | crate::simulation::run_set::RunSetDimensionKind::Temperature
+                rspice_simulation_contract::run_set::RunSetDimensionKind::ProcessSection
+                    | rspice_simulation_contract::run_set::RunSetDimensionKind::Supply
+                    | rspice_simulation_contract::run_set::RunSetDimensionKind::Temperature
             );
         }
     });
@@ -347,9 +347,9 @@ fn an_unresolvable_run_space_shows_its_refusal_and_keeps_the_invalid_value() {
     let rendered = render_with(SimulationPage::RunSet, 1200.0, |app| {
         app.state.sim_setup.run_set.dimensions[2].enabled = true;
         let id = app.state.sim_setup.run_set.dimensions[2].id.clone();
-        crate::simulation::run_set::dispatch(
+        rspice_simulation_contract::run_set::dispatch(
             &mut app.state.sim_setup.run_set,
-            crate::simulation::run_set::RunSetAction::SetValues {
+            rspice_simulation_contract::run_set::RunSetAction::SetValues {
                 id,
                 text: "-40\nwarm\n125".to_owned(),
             },
@@ -383,15 +383,15 @@ fn disabling_an_axis_moves_the_forecast_and_the_point_table_together() {
         for dimension in &mut app.state.sim_setup.run_set.dimensions {
             dimension.enabled = matches!(
                 dimension.kind,
-                crate::simulation::run_set::RunSetDimensionKind::ProcessSection
-                    | crate::simulation::run_set::RunSetDimensionKind::Supply
-                    | crate::simulation::run_set::RunSetDimensionKind::Temperature
+                rspice_simulation_contract::run_set::RunSetDimensionKind::ProcessSection
+                    | rspice_simulation_contract::run_set::RunSetDimensionKind::Supply
+                    | rspice_simulation_contract::run_set::RunSetDimensionKind::Temperature
             );
         }
         let id = app.state.sim_setup.run_set.dimensions[1].id.clone();
-        crate::simulation::run_set::dispatch(
+        rspice_simulation_contract::run_set::dispatch(
             &mut app.state.sim_setup.run_set,
-            crate::simulation::run_set::RunSetAction::SetEnabled { id, enabled: false },
+            rspice_simulation_contract::run_set::RunSetAction::SetEnabled { id, enabled: false },
             1,
         );
     });
@@ -1037,9 +1037,9 @@ fn a_run_space_change_moves_the_plan_revision() {
         .expect("stable plan")
         .revision();
     let id = app.state.sim_setup.run_set.dimensions[2].id.clone();
-    let transaction = crate::simulation::run_set::dispatch(
+    let transaction = rspice_simulation_contract::run_set::dispatch(
         &mut app.state.sim_setup.run_set,
-        crate::simulation::run_set::RunSetAction::SetValues {
+        rspice_simulation_contract::run_set::RunSetAction::SetValues {
             id,
             text: "-40\n0\n25\n85\n125".to_owned(),
         },
@@ -1416,8 +1416,8 @@ fn a_plan_written_before_per_analysis_numerics_still_loads() {
 fn the_applies_to_control_is_built_from_the_declared_run_set() {
     use crate::product::ProcessCorner;
     use crate::simulation::dialog::corner::{CornerBaseAnalysis, CornerConfig};
-    use crate::simulation::run_set::RunSetState;
     use crate::state::{SpecEntry, SpecPointScope};
+    use rspice_simulation_contract::run_set::RunSetState;
 
     fn spec(scope: SpecPointScope) -> SpecEntry {
         SpecEntry {
@@ -1431,7 +1431,7 @@ fn the_applies_to_control_is_built_from_the_declared_run_set() {
     }
 
     fn six_point_run_set() -> RunSetState {
-        crate::simulation::run_set::from_corner_config(&CornerConfig {
+        crate::simulation::run_set_tests::from_corner_config(&CornerConfig {
             process_corners: vec![ProcessCorner::TT, ProcessCorner::SS],
             voltages: vec![1.0],
             supply_source_names: Vec::new(),
@@ -2357,7 +2357,7 @@ fn a_bounded_variable_is_refused_on_every_path_a_test_can_reach() {
 #[test]
 fn a_plan_written_before_run_set_participation_still_loads() {
     use crate::simulation::plan::{AnalysisDraft, AnalysisInstance, SimulationPlan};
-    use crate::simulation::run_set::AnalysisRunAt;
+    use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
 
     let mut plan = SimulationPlan::new();
     let serialized = serde_json::to_string(&plan).expect("the plan serializes");

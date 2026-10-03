@@ -925,7 +925,7 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
     // places. The forecast's point count does not depend on how many analyses
     // are enabled; only its task count does, so one validation answers both.
     let run_set_validation =
-        crate::simulation::run_set::validate(&app.state.sim_setup.run_set, enabled);
+        rspice_simulation_contract::run_set::validate(&app.state.sim_setup.run_set, enabled);
     let declared_points = run_set_validation
         .errors
         .is_empty()

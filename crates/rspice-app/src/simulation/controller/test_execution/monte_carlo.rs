@@ -17,7 +17,9 @@ pub(crate) fn checkpoint_state() -> AppState {
     let mut state = AppState::default();
     state.simulation.run_intent = SimulationRunIntent::SimulateRunSet;
     for dimension in &mut state.sim_setup.run_set.dimensions {
-        if dimension.kind == crate::simulation::run_set::RunSetDimensionKind::ProcessSection {
+        if dimension.kind
+            == rspice_simulation_contract::run_set::RunSetDimensionKind::ProcessSection
+        {
             dimension.enabled = false;
         }
     }

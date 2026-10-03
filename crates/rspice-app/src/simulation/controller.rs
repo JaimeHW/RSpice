@@ -1254,8 +1254,8 @@ impl SimulationController {
                 return Err(format!(
                     "Run {} retention requires {}, exceeding the authenticated {} storage ceiling",
                     run.id,
-                    crate::simulation::run_set::format_bytes(requested),
-                    crate::simulation::run_set::format_bytes(maximum),
+                    rspice_simulation_contract::run_set::format_bytes(requested),
+                    rspice_simulation_contract::run_set::format_bytes(maximum),
                 ));
             }
         }

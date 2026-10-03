@@ -793,7 +793,7 @@ pub(super) fn byte_size(bytes: u64) -> String {
     if bytes == 0 {
         return "—".to_owned();
     }
-    crate::simulation::run_set::format_bytes(bytes)
+    rspice_simulation_contract::run_set::format_bytes(bytes)
 }
 
 /// The packs scope: the pack ledger, then the shipped corpus if present.

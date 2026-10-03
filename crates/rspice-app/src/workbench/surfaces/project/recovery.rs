@@ -7,12 +7,12 @@
 
 use super::page::{self, BODY_TOP, CARD_GAP, HEADER_TOP, STACK_BREAKPOINT, paint_elided};
 use super::*;
-use crate::simulation::run_set::format_bytes;
 use crate::workbench::app_state::AppState;
 use crate::workbench::design_system::{property_row_path, property_row_toned};
 use crate::workbench::lifecycle::project_checkpoint::{
     MAX_RETAINED_CHECKPOINTS, ProjectCheckpointSummary,
 };
+use rspice_simulation_contract::run_set::format_bytes;
 
 /// The one sentence the page opens with: what a checkpoint is, and the
 /// promise restoring one keeps.

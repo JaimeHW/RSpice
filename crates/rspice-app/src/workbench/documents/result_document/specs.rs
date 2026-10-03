@@ -170,11 +170,9 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
         ("All PVT points".to_owned(), SpecPointScope::AllPoints),
         ("Nominal only".to_owned(), SpecPointScope::Nominal),
     ];
-    if let Some(dimension) = state
-        .sim_setup
-        .run_set
-        .enabled_dimension_of(crate::simulation::run_set::RunSetDimensionKind::ProcessSection)
-    {
+    if let Some(dimension) = state.sim_setup.run_set.enabled_dimension_of(
+        rspice_simulation_contract::run_set::RunSetDimensionKind::ProcessSection,
+    ) {
         scope_options.extend(dimension.values.iter().map(|value| {
             let corner = value.lexical.trim().to_owned();
             (

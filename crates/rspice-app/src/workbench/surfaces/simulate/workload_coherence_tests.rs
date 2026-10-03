@@ -15,8 +15,9 @@
 //! rather than pricing every analysis at the full matrix.
 
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
-use crate::simulation::run_set::{self, AnalysisRunAt};
 use crate::workbench::RSpiceApp;
+use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
+use rspice_simulation_contract::run_set;
 
 use super::page_runset::{exact_plan_task_count, plan_run_set_validation};
 use super::page_runset_parity_tests::{

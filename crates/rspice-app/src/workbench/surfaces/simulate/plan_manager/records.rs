@@ -17,13 +17,13 @@
 
 use crate::product::{RunId, SimulationPlanId};
 use crate::simulation::plan::SimulationPlan;
-use crate::simulation::run_set::{
-    ReferencePoint, RunSetForecast, RunSetState, format_bytes, format_duration_ms,
-    validate_with_task_count,
-};
 use crate::state::{SimulationPlanPayload, SpecEntry};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::{ReferencePvtPoint, SimulationPlanLineage};
+use rspice_simulation_contract::run_set::{
+    ReferencePoint, RunSetForecast, RunSetState, format_bytes, format_duration_ms,
+    validate_with_task_count,
+};
 
 /// One named declaration a plan owns, and the declaration itself.
 ///
@@ -485,7 +485,7 @@ fn run_set_roster(run_set: &RunSetState) -> Vec<PlanEntry> {
 mod tests {
     use super::*;
     use crate::product::ProcessCorner;
-    use crate::simulation::run_set::RunSetCompositionMode;
+    use rspice_simulation_contract::run_set::RunSetCompositionMode;
 
     /// Every plan-manager source file. A later wave adds its own file here, so
     /// the duplication guard covers the module rather than two files of it.

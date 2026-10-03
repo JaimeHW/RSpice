@@ -27,7 +27,8 @@ use super::{RENDER_VIEWPORT_HEIGHT, RSpiceApp, SimulationPage};
 /// narrowed to a named subset.
 fn studio_fixture() -> RSpiceApp {
     use crate::simulation::plan::{AnalysisInstance, AnalysisKind};
-    use crate::simulation::run_set::{AnalysisRunAt, RunSetDimensionKind};
+    use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
+    use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
     let mut app = RSpiceApp::test_instance();
     {
@@ -83,15 +84,16 @@ fn studio_fixture() -> RSpiceApp {
             RunSetDimensionKind::Temperature | RunSetDimensionKind::ProcessSection
         );
     }
-    let keys: Vec<String> = crate::simulation::run_set::resolve(&app.state.sim_setup.run_set)
-        .map(|points| {
-            points
-                .iter()
-                .take(2)
-                .map(crate::simulation::run_set::RunSetPoint::point_key)
-                .collect()
-        })
-        .unwrap_or_default();
+    let keys: Vec<String> =
+        rspice_simulation_contract::run_set::resolve(&app.state.sim_setup.run_set)
+            .map(|points| {
+                points
+                    .iter()
+                    .take(2)
+                    .map(rspice_simulation_contract::run_set::RunSetPoint::point_key)
+                    .collect()
+            })
+            .unwrap_or_default();
     let of_kind = |app: &RSpiceApp, kind| {
         app.state
             .sim_setup

@@ -1630,7 +1630,7 @@ fn netlist_import_keeps_creating_the_default_project_without_a_dialog() {
 /// it was a comment in the migration.
 #[test]
 fn a_disagreeing_legacy_corner_run_space_is_reported_on_load() {
-    use crate::simulation::run_set::{RunSetDimension, RunSetDimensionKind, RunSetState};
+    use rspice_simulation_contract::run_set::{RunSetDimension, RunSetDimensionKind, RunSetState};
 
     fn temperatures(values: &[&str]) -> RunSetState {
         let mut state = RunSetState::reference_only();

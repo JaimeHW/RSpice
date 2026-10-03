@@ -238,7 +238,7 @@ pub(super) fn model_hub_progress() -> &'static ModelHubProgress {
 /// decimal unit names, so a receipt and the hub ledger could describe the
 /// same archive with two different numbers.
 fn byte_size(bytes: u64) -> String {
-    crate::simulation::run_set::format_bytes(bytes)
+    rspice_simulation_contract::run_set::format_bytes(bytes)
 }
 
 /// Runs one Model Hub operation to completion against its own hub.

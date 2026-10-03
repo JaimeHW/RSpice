@@ -2,8 +2,8 @@
 
 use super::AppState;
 use crate::simulation::plan::AnalysisDraft;
-use crate::simulation::run_set::{RunSetDimension, RunSetDimensionKind, RunSetState};
 use crate::state::{ComponentType, Point};
+use rspice_simulation_contract::run_set::{RunSetDimension, RunSetDimensionKind, RunSetState};
 
 pub(crate) fn divider() -> AppState {
     let mut state = AppState::default();

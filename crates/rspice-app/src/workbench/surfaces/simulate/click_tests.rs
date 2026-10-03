@@ -309,7 +309,7 @@ fn a_click_on_a_stack_row_selects_it_and_a_click_on_its_switch_enables_it() {
 /// variant would have passed every one of them.
 #[test]
 fn the_run_set_toolbar_undoes_redoes_and_previews_the_declaration() {
-    use crate::simulation::run_set::{RunSetAction, RunSetDimensionKind, dispatch};
+    use rspice_simulation_contract::run_set::{RunSetAction, RunSetDimensionKind, dispatch};
 
     let mut app = RSpiceApp::test_instance();
     // Something to undo, authored through the model so the toolbar is the only

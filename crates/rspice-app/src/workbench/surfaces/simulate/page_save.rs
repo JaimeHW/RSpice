@@ -10,7 +10,6 @@ mod groups;
 use egui::Ui;
 
 use crate::product::RunId;
-pub(super) use crate::simulation::run_set::format_bytes;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
     CaptureGroupMembership, RunRetention, SavedOutputPrecision, SavedOutputStreaming,
@@ -18,6 +17,7 @@ use crate::state::{
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_simulation::capture_ledger::CaptureLedger;
 use rspice_simulation::capture_ledger::CaptureWorkload;
+pub(super) use rspice_simulation_contract::run_set::format_bytes;
 
 use crate::ui::widgets::select;
 

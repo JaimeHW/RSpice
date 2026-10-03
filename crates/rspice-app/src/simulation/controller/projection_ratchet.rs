@@ -998,7 +998,8 @@ fn the_harmonic_balance_initial_state_a_transient_cannot_carry_is_judged_through
 #[test]
 fn every_run_set_participation_moves_the_dispatched_task_set() {
     use crate::simulation::plan::{AnalysisInstance, AnalysisKind};
-    use crate::simulation::run_set::{AnalysisRunAt, RunSetDimensionKind, RunSetPoint};
+    use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
+    use rspice_simulation_contract::run_set::{RunSetDimensionKind, RunSetPoint};
 
     let mut state = super::prepared_run::tests::runnable_state();
     // One axis, and a reference the axis actually declares, so all three
@@ -1011,11 +1012,12 @@ fn every_run_set_participation_moves_the_dispatched_task_set() {
         .set_reference_pvt(crate::product::ProcessCorner::TT, 25.0)
         .expect("25 °C is a valid reference temperature");
 
-    let points: Vec<String> = crate::simulation::run_set::resolve(&state.sim_setup.run_set)
-        .expect("the fixture space expands exactly")
-        .iter()
-        .map(RunSetPoint::point_key)
-        .collect();
+    let points: Vec<String> =
+        rspice_simulation_contract::run_set::resolve(&state.sim_setup.run_set)
+            .expect("the fixture space expands exactly")
+            .iter()
+            .map(RunSetPoint::point_key)
+            .collect();
     assert!(
         points.len() > 2,
         "the fixture space must be able to distinguish all, one, and some"

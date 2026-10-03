@@ -475,7 +475,7 @@ fn import(
 fn envelope_label(bytes: usize) -> String {
     format!(
         "{SIMULATION_PLAN_PACKAGE_FORMAT} · version {SIMULATION_PLAN_PACKAGE_VERSION} · {}",
-        crate::simulation::run_set::format_bytes(bytes as u64)
+        rspice_simulation_contract::run_set::format_bytes(bytes as u64)
     )
 }
 

@@ -1090,7 +1090,7 @@ fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
     use rspice_simulation_contract::fourier_draft::{FourierConfig, FourierDialogState};
 
     let mut state = super::prepared_run::tests::runnable_state();
-    state.sim_setup.run_set = crate::simulation::run_set::RunSetState::reference_only();
+    state.sim_setup.run_set = rspice_simulation_contract::run_set::RunSetState::reference_only();
     let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
     for id in plan
         .instances()

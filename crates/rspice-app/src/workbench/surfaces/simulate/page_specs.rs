@@ -146,7 +146,7 @@ fn plan_payload(app: &RSpiceApp) -> Result<SimulationPlanPayload, String> {
 /// nothing will ever answer. A run set with no process axis still runs one
 /// corner — the plan's reference section — so that is what it declares.
 fn declared_process_corners(app: &RSpiceApp) -> Vec<String> {
-    use crate::simulation::run_set::RunSetDimensionKind;
+    use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
     let run_set = &app.state.sim_setup.run_set;
     match run_set.enabled_dimension_of(RunSetDimensionKind::ProcessSection) {

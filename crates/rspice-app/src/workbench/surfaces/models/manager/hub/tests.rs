@@ -1164,7 +1164,7 @@ fn a_byte_count_reads_as_a_size_rather_than_a_number() {
     assert_eq!(byte_size(150 * 1024 * 1024), "150.00 MiB");
     assert_eq!(
         byte_size(2 * 1024 * 1024),
-        crate::simulation::run_set::format_bytes(2 * 1024 * 1024),
+        rspice_simulation_contract::run_set::format_bytes(2 * 1024 * 1024),
         "every non-zero size is the shared spelling, character for character"
     );
 }

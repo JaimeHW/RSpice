@@ -1,9 +1,10 @@
 //! Run-set model contract.
 
 use super::*;
-use crate::product::ProcessCorner;
-use crate::simulation::dialog::corner::CornerBaseAnalysis;
-use crate::simulation::plan::AnalysisKind;
+use crate::analysis_kind::AnalysisKind;
+use crate::analysis_run_at::AnalysisRunAt;
+use crate::corner_config::CornerBaseAnalysis;
+use rspice_app_types::product::ProcessCorner;
 
 fn reference() -> ReferencePoint {
     ReferencePoint {
@@ -832,67 +833,6 @@ fn undo_restores_an_excluded_point_and_the_composition_it_changed() {
 }
 
 #[test]
-fn a_filtered_space_reaches_the_executor_as_the_points_it_resolved() {
-    let mut state = bound_default();
-    set_values(&mut state, RunSetDimensionKind::ProcessSection, "TT\nSS");
-    set_values(&mut state, RunSetDimensionKind::Supply, "0.9\n1.1");
-    set_values(&mut state, RunSetDimensionKind::Temperature, "-40\n125");
-    let key = key_of(&state, 5);
-    exclude(&mut state, &key);
-
-    let config = state
-        .to_corner_config(CornerBaseAnalysis::Op, reference())
-        .expect("a filtered space is executable");
-    assert_eq!(config.points.len(), 7);
-    assert_eq!(config.num_corners(), 7);
-
-    // Same count, same coordinates, same order as the run set resolved.
-    let resolved = resolve(&state).expect("the filtered space resolves");
-    assert_eq!(config.points.len(), resolved.len());
-    for (point, spec) in resolved.iter().zip(&config.points) {
-        assert_eq!(
-            point.label(),
-            format!(
-                "{} · {} V · {} °C",
-                spec.process.short_name(),
-                spec.voltage,
-                spec.temperature_celsius
-            )
-        );
-    }
-
-    // The expansion the executor and operating-point preparation share must
-    // return exactly that list, not the matrix the axes would rebuild.
-    let expanded = rspice_simulation::sweeps::expand_corner_pvt_points(
-        &rspice_simulation::sweeps::CornerRunConfig {
-            process_corners: vec![
-                rspice_app_types::product::ProcessCorner::TT,
-                rspice_app_types::product::ProcessCorner::SS,
-            ],
-            voltages: config.voltages.clone(),
-            temperatures_c: config.temperatures.clone(),
-            full_matrix: true,
-            points: config
-                .points
-                .iter()
-                .map(|point| rspice_simulation::sweeps::CornerPoint {
-                    process: point.process,
-                    voltage: point.voltage,
-                    temperature_c: point.temperature_celsius,
-                })
-                .collect(),
-            ..Default::default()
-        },
-    )
-    .expect("an explicit list expands");
-    assert_eq!(expanded.len(), 7);
-    for (index, (_, voltage, temperature)) in expanded.iter().enumerate() {
-        assert_eq!(*voltage, config.points[index].voltage);
-        assert_eq!(*temperature, config.points[index].temperature_celsius);
-    }
-}
-
-#[test]
 fn a_filtered_space_narrows_its_axes_to_the_values_its_points_still_use() {
     let mut state = bound_default();
     set_values(&mut state, RunSetDimensionKind::ProcessSection, "TT\nSS");
@@ -1149,7 +1089,7 @@ fn an_orphaned_selection_names_its_points_the_way_the_table_does() {
         refusal.message
     );
 
-    let label = crate::simulation::run_set::point_key_label(&state, &orphan);
+    let label = crate::run_set::point_key_label(&state, &orphan);
     assert!(
         !label.is_empty() && label != orphan,
         "the declaration spells the live half of the key: {label}"

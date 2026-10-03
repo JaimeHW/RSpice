@@ -140,10 +140,10 @@ fn render_analysis_form_into(
 ) -> (f32, Vec<String>) {
     // The run-space forms read the plan; a height measurement supplies a
     // plan-shaped fixture rather than letting the form invent one.
-    let fixture_run_set = crate::simulation::run_set::RunSetState::default();
+    let fixture_run_set = rspice_simulation_contract::run_set::RunSetState::default();
     let run_space_fixture = RunSpaceContext {
         run_set: &fixture_run_set,
-        reference: crate::simulation::run_set::ReferencePoint::default(),
+        reference: rspice_simulation_contract::run_set::ReferencePoint::default(),
         nominal_failure: crate::state::NominalFailurePolicy::Block,
         model_binding_count: 0,
         parallelism: ("Desktop background thread", 1),
@@ -209,10 +209,10 @@ fn painted_lines(shapes: &[egui::epaint::ClippedShape]) -> Vec<String> {
 
 /// The corner form's height against one declared space.
 #[cfg(not(target_arch = "wasm32"))]
-fn corner_form_height(run_set: &crate::simulation::run_set::RunSetState) -> f32 {
+fn corner_form_height(run_set: &rspice_simulation_contract::run_set::RunSetState) -> f32 {
     let context = RunSpaceContext {
         run_set,
-        reference: crate::simulation::run_set::ReferencePoint::default(),
+        reference: rspice_simulation_contract::run_set::ReferencePoint::default(),
         nominal_failure: crate::state::NominalFailurePolicy::Block,
         model_binding_count: 0,
         parallelism: ("Desktop background thread", 1),
@@ -248,11 +248,11 @@ fn corner_form_height(run_set: &crate::simulation::run_set::RunSetState) -> f32 
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn a_disabled_axis_does_not_move_the_corner_form() {
-    let mut disabled = crate::simulation::run_set::RunSetState::default();
+    let mut disabled = rspice_simulation_contract::run_set::RunSetState::default();
     for dimension in &mut disabled.dimensions {
         dimension.enabled = false;
     }
-    let mut enabled = crate::simulation::run_set::RunSetState::default();
+    let mut enabled = rspice_simulation_contract::run_set::RunSetState::default();
     for dimension in &mut enabled.dimensions {
         dimension.enabled = true;
     }
@@ -1206,10 +1206,10 @@ fn xf_form_frames(
     inference: &Result<TfRunConfig, String>,
     press: Option<&str>,
 ) -> (Vec<String>, Vec<egui::accesskit::Node>) {
-    let fixture_run_set = crate::simulation::run_set::RunSetState::default();
+    let fixture_run_set = rspice_simulation_contract::run_set::RunSetState::default();
     let run_space_fixture = RunSpaceContext {
         run_set: &fixture_run_set,
-        reference: crate::simulation::run_set::ReferencePoint::default(),
+        reference: rspice_simulation_contract::run_set::ReferencePoint::default(),
         nominal_failure: crate::state::NominalFailurePolicy::Block,
         model_binding_count: 0,
         parallelism: ("Desktop background thread", 1),

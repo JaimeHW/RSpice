@@ -577,7 +577,8 @@ fn editing_a_group_keeps_the_rules_and_members_the_form_never_showed() {
 #[test]
 fn the_registry_size_and_the_ledger_row_price_one_output_once() {
     use crate::simulation::plan::{AnalysisInstance, AnalysisKind};
-    use crate::simulation::run_set::{AnalysisRunAt, RunSetDimensionKind};
+    use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
+    use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
     let mut app = RSpiceApp::test_instance();
     seed_capture_group(&mut app);

@@ -11,11 +11,6 @@ use egui::{Rect, Sense, Ui, vec2};
 
 use crate::diagnostics::ConsoleMessage;
 use crate::simulation::plan::AnalysisKind;
-use crate::simulation::run_set::{
-    self, InvalidValuePolicy, RunSetAction, RunSetAdaptivePolicy, RunSetBudgets,
-    RunSetCompositionMode, RunSetDimension, RunSetDimensionKind, RunSetReceiptStatus, RunSetState,
-    RunSetValidation,
-};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -23,6 +18,11 @@ use crate::ui::widgets::{Button, IconButton, mono_input, select};
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::RunSetBudgetDrafts;
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_simulation_contract::run_set::{
+    self, InvalidValuePolicy, RunSetAction, RunSetAdaptivePolicy, RunSetBudgets,
+    RunSetCompositionMode, RunSetDimension, RunSetDimensionKind, RunSetReceiptStatus, RunSetState,
+    RunSetValidation,
+};
 
 use super::page_kit::{
     CARD_PAD_X, ReceiptRow, Tone, card, card_body, card_head_row, card_note, card_row, field_pair,

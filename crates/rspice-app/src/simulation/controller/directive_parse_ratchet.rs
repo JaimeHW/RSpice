@@ -220,7 +220,7 @@ fn transient_drafts_preserve_start_maximum_step_and_uic_in_the_engine_card() {
 #[test]
 fn an_inherited_temperature_axis_round_trips_as_the_axis_the_plan_declared() {
     use crate::simulation::plan::AnalysisDraft;
-    use crate::simulation::run_set::{RunSetAction, RunSetDimensionKind, dispatch};
+    use rspice_simulation_contract::run_set::{RunSetAction, RunSetDimensionKind, dispatch};
 
     const DECLARED: [f64; 3] = [-55.0, 27.0, 150.0];
 

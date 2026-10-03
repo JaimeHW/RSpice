@@ -642,7 +642,7 @@ pub(super) fn compared_plans<'records>(
 mod tests {
     use super::*;
     use crate::simulation::plan::AnalysisKind;
-    use crate::simulation::run_set::{RunSetDimension, RunSetDimensionKind};
+    use rspice_simulation_contract::run_set::{RunSetDimension, RunSetDimensionKind};
 
     /// The name a design variable is added under, and the requirement a
     /// specification is added under. Named here because several cases assert
@@ -1048,7 +1048,8 @@ mod tests {
         let mut setup = app.state.sim_setup.clone();
         // A nested composition with a zero maximum depth is a declared
         // run-space error, so the active plan predicts nothing.
-        setup.run_set.composition.mode = crate::simulation::run_set::RunSetCompositionMode::Nested;
+        setup.run_set.composition.mode =
+            rspice_simulation_contract::run_set::RunSetCompositionMode::Nested;
         setup.run_set.composition.maximum_depth = 0;
         app.state.sim_setup = setup;
         let records = plan_catalog_records(&app);

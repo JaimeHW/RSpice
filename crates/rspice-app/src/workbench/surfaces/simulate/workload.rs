@@ -17,7 +17,7 @@
 //! second opinion about the same queue.
 //!
 //! Participation is not decided here either. Every row resolves through
-//! [`crate::simulation::run_set::participating_point_keys`] — the same
+//! [`rspice_simulation_contract::run_set::participating_point_keys`] — the same
 //! resolver the prepared expansion mints tasks from, and the same one the Run
 //! Set page's [`super::participation::PlanParticipation`] reports. So a row
 //! that says an analysis visits four points names four points the queue
@@ -26,14 +26,15 @@
 //!
 //! Duration is the same fact stated in time. It is the task count priced at the
 //! run set's per-task budget through
-//! [`crate::simulation::run_set::modelled_cost_ms`], and every surface that
+//! [`rspice_simulation_contract::run_set::modelled_cost_ms`], and every surface that
 //! promises a duration calls [`modelled_duration`] rather than multiplying
 //! locally. That is what makes "tasks" and "how long" one claim instead of two.
 
 use crate::product::AnalysisInstanceId;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
-use crate::simulation::run_set::{self, AnalysisRunAt, RunSetPoint};
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
+use rspice_simulation_contract::run_set::{self, RunSetPoint};
 
 use super::page_kit::Tone;
 use super::participation::PlanParticipation;
@@ -41,7 +42,7 @@ use super::participation::PlanParticipation;
 /// Where the pricing body learns each instance's participation from.
 ///
 /// Two entry points, one arithmetic. Both arms answer from
-/// [`crate::simulation::run_set::participating_point_keys`] against the same
+/// [`rspice_simulation_contract::run_set::participating_point_keys`] against the same
 /// expansion of the same declaration: `Expansion` calls it here, and `Reported`
 /// reads back the call [`PlanParticipation`] already made for the surface it
 /// belongs to. Reporting a resolver twice is not deciding twice.
@@ -216,7 +217,7 @@ impl PlanWorkload {
     /// that has done it once — the Run Set page's point table does, to fill its
     /// "At" column — must not pay for it again to price the same rows. Reading
     /// that report back is not a second derivation: it is
-    /// [`crate::simulation::run_set::participating_point_keys`] applied to the
+    /// [`rspice_simulation_contract::run_set::participating_point_keys`] applied to the
     /// same expansion, which is the one call [`Self::resolve_for`] makes too.
     pub(super) fn resolve_with(
         app: &RSpiceApp,

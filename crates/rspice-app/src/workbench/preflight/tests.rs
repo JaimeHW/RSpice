@@ -81,7 +81,9 @@ fn prepared_contract() -> PreparedPreflightContract {
 
 fn disable_global_process_axis(state: &mut AppState) {
     for dimension in &mut state.sim_setup.run_set.dimensions {
-        if dimension.kind == crate::simulation::run_set::RunSetDimensionKind::ProcessSection {
+        if dimension.kind
+            == rspice_simulation_contract::run_set::RunSetDimensionKind::ProcessSection
+        {
             dimension.enabled = false;
         }
     }
@@ -410,13 +412,13 @@ fn an_enabled_corner_analysis_demands_the_plans_non_typical_sections() {
     let mut state = AppState::default();
     for dimension in &mut state.sim_setup.run_set.dimensions {
         match dimension.kind {
-            crate::simulation::run_set::RunSetDimensionKind::ProcessSection => {
+            rspice_simulation_contract::run_set::RunSetDimensionKind::ProcessSection => {
                 dimension.enabled = true;
             }
-            crate::simulation::run_set::RunSetDimensionKind::Supply => {
+            rspice_simulation_contract::run_set::RunSetDimensionKind::Supply => {
                 dimension.source = format!(
                     "{}VDD",
-                    crate::simulation::run_set::NETLIST_SUPPLY_SOURCE_PREFIX
+                    rspice_simulation_contract::run_set::NETLIST_SUPPLY_SOURCE_PREFIX
                 );
             }
             _ => {}

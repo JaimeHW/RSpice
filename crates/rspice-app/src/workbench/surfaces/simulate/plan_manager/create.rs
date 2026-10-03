@@ -43,9 +43,9 @@
 use super::*;
 
 use crate::product::ProcessCorner;
-use crate::simulation::run_set::ReferencePoint;
 use crate::workbench::app::concept_banner;
 use crate::workbench::state::NewSimulationPlanDraft;
+use rspice_simulation_contract::run_set::ReferencePoint;
 
 const CREATE_EYEBROW: &str = "SIMULATION · NEW PLAN · FRESH ROOT IDENTITY";
 const CREATE_TITLE: &str = "New simulation plan";

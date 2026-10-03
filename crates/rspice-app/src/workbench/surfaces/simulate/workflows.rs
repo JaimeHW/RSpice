@@ -1651,7 +1651,7 @@ pub(super) fn saved_output_storage_summary(
     match estimate {
         SavedOutputStorageEstimate::ExactBytes(bytes) => format!(
             "{} · {compatible_analyses} compatible {}",
-            crate::simulation::run_set::format_bytes(*bytes),
+            rspice_simulation_contract::run_set::format_bytes(*bytes),
             if compatible_analyses == 1 {
                 "analysis"
             } else {

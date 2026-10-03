@@ -2107,8 +2107,10 @@ fn corner_evidence_run() -> SimulationRun {
         pvt::run_set_divider, run_generated_batch,
     };
     use crate::simulation::plan::AnalysisDraft;
-    use crate::simulation::run_set::{RunSetCompositionMode, RunSetDimension, RunSetDimensionKind};
     use rspice_simulation_contract::drafts::TranSetup;
+    use rspice_simulation_contract::run_set::{
+        RunSetCompositionMode, RunSetDimension, RunSetDimensionKind,
+    };
 
     let mut state = run_set_divider(
         AnalysisDraft::Transient(TranSetup {

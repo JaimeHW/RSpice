@@ -20,7 +20,8 @@ pub(crate) mod plan;
 pub(crate) use rspice_simulation::point_family;
 #[cfg(test)]
 pub(crate) mod results;
-pub(crate) mod run_set;
+#[cfg(test)]
+pub(crate) mod run_set_tests;
 pub(crate) use rspice_simulation::runner;
 pub(crate) use rspice_simulation::status;
 pub(crate) mod stimulus_realize;

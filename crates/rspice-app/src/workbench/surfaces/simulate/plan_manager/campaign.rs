@@ -550,7 +550,7 @@ pub(super) fn commit_simulation_campaign(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::run_set::RunSetCompositionMode;
+    use rspice_simulation_contract::run_set::RunSetCompositionMode;
 
     /// Three root plans in one catalog: the active one the shell projects
     /// first, and two retained beside it. Returns them in projection order.
