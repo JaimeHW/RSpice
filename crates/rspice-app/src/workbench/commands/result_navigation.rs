@@ -134,7 +134,7 @@ pub(crate) fn producer_log_hop(app: &RSpiceApp) -> Result<(String, String), &'st
     if app.state.simulation.active_run().is_none() {
         return Err("no run is selected");
     }
-    let checked = &app.state.ui.results.checked_result_quantities;
+    let checked = &app.state.ui.results.session.checked_result_quantities;
     let key = match checked.len() {
         0 => return Err("check-mark the Data Browser quantity whose producer log to reveal"),
         1 => checked.iter().next().expect("one check-marked quantity"),

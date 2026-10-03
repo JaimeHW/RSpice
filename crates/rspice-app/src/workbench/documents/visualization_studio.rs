@@ -590,7 +590,7 @@ fn active_results_comparison_source(state: &AppState) -> Result<ResultsCompariso
     let document = crate::workbench::chrome::document_bar::active_document_id(state)
         .ok_or_else(|| "No active result document is available.".to_owned())?;
     let mut authored_analysis = None;
-    let mut viewer = state.ui.results.viewer;
+    let mut viewer = state.ui.results.session.viewer;
     let (dataset_id, expected_digest) = match document {
         WorkspaceDocumentId::ResultDataset(dataset_id) => {
             state
@@ -750,7 +750,7 @@ fn bind_comparison_owner(
     studio.selected_viewer_document = viewer_document;
     studio.applied_link_pane = None;
     studio.section = VisualizationSection::Viewers;
-    app.state.ui.results.viewer = source.viewer;
+    app.state.ui.results.session.viewer = source.viewer;
     Ok(())
 }
 
@@ -809,7 +809,7 @@ fn initialize_comparison_dock(
 
 fn open_dock(app: &mut RSpiceApp, dock: VisualizationDock) {
     if dock == VisualizationDock::CursorManager
-        && app.state.ui.results.viewer != ResultViewer::Waves
+        && app.state.ui.results.session.viewer != ResultViewer::Waves
     {
         app.state.push_user_message(ConsoleMessage::warning(
             "Exact source cursor management is available in the waveform renderer.",
@@ -834,8 +834,8 @@ fn open_dock(app: &mut RSpiceApp, dock: VisualizationDock) {
             .active_analysis()
             .map(|analysis| (run.dataset_id, analysis.id, analysis.waveforms.clone()))
     });
-    let phase_continuous = app.state.ui.results.phase_continuous;
-    let active_viewer = app.state.ui.results.viewer;
+    let phase_continuous = app.state.ui.results.session.phase_continuous;
+    let active_viewer = app.state.ui.results.session.viewer;
     let family_manifest = app.state.simulation.active_analysis().and_then(|analysis| {
         FamilyManifest::from_metadata(analysis.analysis_type, analysis.family_metadata.as_ref())
             .ok()
@@ -1094,7 +1094,7 @@ fn reconcile_document(app: &mut RSpiceApp) {
         .simulation
         .active_analysis()
         .map(|analysis| analysis.id);
-    let requested_viewer = app.state.ui.results.viewer;
+    let requested_viewer = app.state.ui.results.session.viewer;
     let (viewer, viewer_document_id) = requested_viewer.viewer_document_id().map_or_else(
         || (ResultViewer::Waves, "viewer-waveform".to_owned()),
         |document_id| (requested_viewer, document_id.to_owned()),
@@ -1413,8 +1413,8 @@ fn reconcile_document(app: &mut RSpiceApp) {
                 studio.applied_link_pane = None;
             }
             studio.linked_cursor_positions.clear();
-            app.state.ui.results.phase_continuous = presentation.phase_continuous;
-            app.state.ui.results.linked_cursors = cursors_linked;
+            app.state.ui.results.session.phase_continuous = presentation.phase_continuous;
+            app.state.ui.results.session.linked_cursors = cursors_linked;
         }
         if let Some(active_pane_id) = app.state.workbench.visualization_studio.active_pane {
             let visibility = app
@@ -1495,9 +1495,9 @@ fn reconcile_document(app: &mut RSpiceApp) {
         studio.selected_viewer_document = viewer_document_id;
     }
     if let Some(pane) = studio.active_pane_mut() {
-        app.state.ui.results.viewer = pane.viewer;
+        app.state.ui.results.session.viewer = pane.viewer;
     }
-    normalize_fit_policy_for_renderer(&mut studio.autoscale, app.state.ui.results.viewer);
+    normalize_fit_policy_for_renderer(&mut studio.autoscale, app.state.ui.results.session.viewer);
     let binding = studio
         .active_pane
         .and_then(|id| studio.panes.iter().find(|pane| pane.id == id))
@@ -1583,17 +1583,17 @@ fn apply_active_link_state(app: &mut RSpiceApp) {
     if let Some(x_range) = x_range {
         result_document::request_view_gesture(
             &mut app.state,
-            result_document::ViewGesture::SetRanges {
+            rspice_results_ui::session::ViewGesture::SetRanges {
                 x: Some(x_range),
                 y: None,
             },
         );
     }
     if let Some((a, b)) = cursors {
-        app.state.ui.results.cursors.a = a;
-        app.state.ui.results.cursors.b = b;
+        app.state.ui.results.session.cursors.a = a;
+        app.state.ui.results.session.cursors.b = b;
     } else {
-        app.state.ui.results.cursors.clear();
+        app.state.ui.results.session.cursors.clear();
     }
     app.state.workbench.visualization_studio.applied_link_pane = Some(pane.id);
 }
@@ -1611,16 +1611,16 @@ fn capture_active_link_state(ctx: &egui::Context, app: &mut RSpiceApp) {
     let x_range = result_document::active_renderer_axis_range(
         ctx,
         &mut app.state,
-        result_document::PaneAxis::X,
+        rspice_results_ui::session::PaneAxis::X,
     );
     let requested_cursors = (
-        app.state.ui.results.cursors.a,
-        app.state.ui.results.cursors.b,
+        app.state.ui.results.session.cursors.a,
+        app.state.ui.results.session.cursors.b,
     );
     commit_active_project_cursor_pair(app, pane.id, requested_cursors);
     let cursors = (
-        app.state.ui.results.cursors.a,
-        app.state.ui.results.cursors.b,
+        app.state.ui.results.session.cursors.a,
+        app.state.ui.results.session.cursors.b,
     );
     let studio = &mut app.state.workbench.visualization_studio;
     if let Some(x_range) = x_range {
@@ -1679,6 +1679,7 @@ fn synchronize_runtime_policies(app: &mut RSpiceApp) {
     app.state
         .ui
         .results
+        .session
         .cache
         .set_memory_budget_mib(tile_memory_mib);
 }
@@ -2129,7 +2130,7 @@ fn add_viewer_pane_bound(
                 }
                 let _ = app.state.simulation.select_run(run_index);
                 let _ = app.state.simulation.select_analysis(analysis_index);
-                app.state.ui.results.viewer = viewer;
+                app.state.ui.results.session.viewer = viewer;
                 reconcile_document(app);
             }
             Err(error) => app.state.push_user_message(ConsoleMessage::error(error)),
@@ -2183,7 +2184,7 @@ fn add_viewer_pane_bound(
         Ok(_) => {
             let _ = app.state.simulation.select_run(run_index);
             let _ = app.state.simulation.select_analysis(analysis_index);
-            app.state.ui.results.viewer = viewer;
+            app.state.ui.results.session.viewer = viewer;
         }
         Err(error) => app.state.push_user_message(ConsoleMessage::error(error)),
     }

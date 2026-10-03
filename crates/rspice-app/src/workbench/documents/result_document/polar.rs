@@ -12,14 +12,14 @@ pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {
             .simulation
             .active_analysis()
             .map(|analysis| &**analysis),
-        &mut context.results.polar,
+        &mut context.results.session.polar,
     )
 }
 
 fn active_locus(context: &SheetContext<'_>) -> Option<PolarLocus> {
     view::resolve_locus(
         context.simulation.active_analysis()?,
-        &context.results.polar,
+        &context.results.session.polar,
     )
 }
 
@@ -35,7 +35,7 @@ pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
     if let Some(response) = view::show(
         ui,
         locus.as_ref(),
-        &context.results.polar,
+        &context.results.session.polar,
         samples,
         &context.policy,
     ) {
@@ -58,7 +58,7 @@ pub fn right_panel(ui: &mut Ui, context: &mut SheetContext<'_>) {
 }
 
 fn seed_cursors(context: &mut SheetContext<'_>, locus: &PolarLocus) {
-    if locus.frequencies().len() < 2 || context.results.cursors.a.is_some() {
+    if locus.frequencies().len() < 2 || context.results.session.cursors.a.is_some() {
         return;
     }
     let first = (0..locus.frequencies().len()).find(|index| locus.is_finite(*index));
@@ -68,20 +68,22 @@ fn seed_cursors(context: &mut SheetContext<'_>, locus: &PolarLocus) {
     let (Some(first), Some(last)) = (first, last) else {
         return;
     };
-    context.results.cursor_strip = context.simulation.active_analysis_idx;
-    context.results.cursors.a = Some(locus.frequencies()[first]);
-    context.results.cursors.b = Some(locus.frequencies()[last]);
+    context.results.session.cursor_strip = context.simulation.active_analysis_idx;
+    context.results.session.cursors.a = Some(locus.frequencies()[first]);
+    context.results.session.cursors.b = Some(locus.frequencies()[last]);
 }
 
 fn cursor_samples(context: &SheetContext<'_>, locus: &PolarLocus) -> CursorSamples {
     CursorSamples {
         a: context
             .results
+            .session
             .cursors
             .a
             .and_then(|frequency| locus.nearest_to_frequency(frequency)),
         b: context
             .results
+            .session
             .cursors
             .b
             .and_then(|frequency| locus.nearest_to_frequency(frequency)),
@@ -126,7 +128,7 @@ fn apply_canvas_input(
     });
     let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
     if escape {
-        context.results.clear_cursors();
+        context.results.session.clear_cursors();
         return;
     }
     if steps == 0 {
@@ -144,16 +146,16 @@ fn apply_canvas_input(
 
 fn snap_nearer_cursor(context: &mut SheetContext<'_>, locus: &PolarLocus, index: usize) {
     let frequency = locus.frequencies()[index];
-    let cursors = context.results.cursors;
-    context.results.cursor_strip = context.simulation.active_analysis_idx;
+    let cursors = context.results.session.cursors;
+    context.results.session.cursor_strip = context.simulation.active_analysis_idx;
     match (cursors.a, cursors.b) {
-        (None, _) => context.results.cursors.a = Some(frequency),
-        (Some(_), None) => context.results.cursors.b = Some(frequency),
+        (None, _) => context.results.session.cursors.a = Some(frequency),
+        (Some(_), None) => context.results.session.cursors.b = Some(frequency),
         (Some(a), Some(b)) => {
             if (a - frequency).abs() <= (b - frequency).abs() {
-                context.results.cursors.a = Some(frequency);
+                context.results.session.cursors.a = Some(frequency);
             } else {
-                context.results.cursors.b = Some(frequency);
+                context.results.session.cursors.b = Some(frequency);
             }
         }
     }
@@ -161,9 +163,9 @@ fn snap_nearer_cursor(context: &mut SheetContext<'_>, locus: &PolarLocus, index:
 
 fn nudge_cursor(context: &mut SheetContext<'_>, locus: &PolarLocus, cursor_b: bool, steps: i64) {
     let current = if cursor_b {
-        context.results.cursors.b
+        context.results.session.cursors.b
     } else {
-        context.results.cursors.a
+        context.results.session.cursors.a
     };
     let Some(index) = current.and_then(|frequency| locus.nearest_to_frequency(frequency)) else {
         return;
@@ -171,11 +173,11 @@ fn nudge_cursor(context: &mut SheetContext<'_>, locus: &PolarLocus, cursor_b: bo
     let last = locus.frequencies().len().saturating_sub(1) as i64;
     let moved = (index as i64 + steps).clamp(0, last) as usize;
     let frequency = locus.frequencies()[moved];
-    context.results.cursor_strip = context.simulation.active_analysis_idx;
+    context.results.session.cursor_strip = context.simulation.active_analysis_idx;
     if cursor_b {
-        context.results.cursors.b = Some(frequency);
+        context.results.session.cursors.b = Some(frequency);
     } else {
-        context.results.cursors.a = Some(frequency);
+        context.results.session.cursors.a = Some(frequency);
     }
 }
 
@@ -254,21 +256,21 @@ mod tests {
         let workspace = crate::state::ProjectWorkspace::default();
         let mut ctx = context(&simulation, &workspace, &mut results);
         let locus = active_locus(&ctx).expect("the fixture retains a locus");
-        ctx.results.cursors.a = Some(locus.frequencies()[0]);
-        ctx.results.cursors.b = Some(locus.frequencies()[locus.frequencies().len() - 1]);
+        ctx.results.session.cursors.a = Some(locus.frequencies()[0]);
+        ctx.results.session.cursors.b = Some(locus.frequencies()[locus.frequencies().len() - 1]);
 
         snap_nearer_cursor(&mut ctx, &locus, 2);
-        assert_eq!(ctx.results.cursors.a, Some(locus.frequencies()[2]));
+        assert_eq!(ctx.results.session.cursors.a, Some(locus.frequencies()[2]));
         assert_eq!(
-            ctx.results.cursors.b,
+            ctx.results.session.cursors.b,
             Some(locus.frequencies()[locus.frequencies().len() - 1]),
             "the far cursor moved"
         );
 
         snap_nearer_cursor(&mut ctx, &locus, locus.frequencies().len() - 3);
-        assert_eq!(ctx.results.cursors.a, Some(locus.frequencies()[2]));
+        assert_eq!(ctx.results.session.cursors.a, Some(locus.frequencies()[2]));
         assert_eq!(
-            ctx.results.cursors.b,
+            ctx.results.session.cursors.b,
             Some(locus.frequencies()[locus.frequencies().len() - 3])
         );
     }
@@ -279,19 +281,19 @@ mod tests {
         let workspace = crate::state::ProjectWorkspace::default();
         let mut ctx = context(&simulation, &workspace, &mut results);
         let locus = active_locus(&ctx).expect("the fixture retains a locus");
-        assert_eq!(ctx.results.cursors.a, None);
+        assert_eq!(ctx.results.session.cursors.a, None);
 
         seed_cursors(&mut ctx, &locus);
-        assert_eq!(ctx.results.cursors.a, Some(locus.frequencies()[0]));
+        assert_eq!(ctx.results.session.cursors.a, Some(locus.frequencies()[0]));
         assert_eq!(
-            ctx.results.cursors.b,
+            ctx.results.session.cursors.b,
             Some(locus.frequencies()[locus.frequencies().len() - 1])
         );
-        assert_eq!(ctx.results.cursor_strip, Some(0));
+        assert_eq!(ctx.results.session.cursor_strip, Some(0));
 
         // Seeding is once: a reader who moved A keeps it.
-        ctx.results.cursors.a = Some(locus.frequencies()[3]);
+        ctx.results.session.cursors.a = Some(locus.frequencies()[3]);
         seed_cursors(&mut ctx, &locus);
-        assert_eq!(ctx.results.cursors.a, Some(locus.frequencies()[3]));
+        assert_eq!(ctx.results.session.cursors.a, Some(locus.frequencies()[3]));
     }
 }

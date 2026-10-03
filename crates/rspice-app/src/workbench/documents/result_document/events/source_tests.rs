@@ -110,7 +110,7 @@ fn event_source_import_readout_survives_restoration_and_source_changes() {
                 "{text}"
             );
         }
-        assert!(state.ui.results.selected_digital_event.is_some());
+        assert!(state.ui.results.session.selected_digital_event.is_some());
     }
 }
 
@@ -203,7 +203,7 @@ fn pick(
                 .flatten()
         })
         .expect("the event was rendered and can be selected");
-    state.ui.results.selected_digital_event = Some(selection.clone());
+    state.ui.results.session.selected_digital_event = Some(selection.clone());
     selection
 }
 
@@ -345,7 +345,7 @@ fn event_source_scalar_selection_rejects_changed_time_value_or_strength() {
                 "{source:?}, change_time={change_time}"
             );
             paint(&mut state, true);
-            assert!(state.ui.results.selected_digital_event.is_none());
+            assert!(state.ui.results.session.selected_digital_event.is_none());
         }
     }
 }
@@ -372,7 +372,7 @@ fn event_source_inspector_rejects_invalid_evidence_and_allows_repair() {
     assert!(!block.stale, "repair can restore the selected event");
     paint(&mut state, true);
     assert_eq!(
-        state.ui.results.selected_digital_event.as_ref(),
+        state.ui.results.session.selected_digital_event.as_ref(),
         Some(&selection)
     );
     state.simulation.runs[0].analyses[0].waveforms.clear();
@@ -401,7 +401,7 @@ fn event_source_bus_selection_detects_changed_members_before_a_frame() {
         "the word is still 00, but its bits now name different members"
     );
     paint(&mut state, true);
-    assert!(state.ui.results.selected_digital_event.is_none());
+    assert!(state.ui.results.session.selected_digital_event.is_none());
 }
 
 #[test]
@@ -434,15 +434,16 @@ fn event_source_appended_history_keeps_selection_and_refreshes_inspector_order()
             .len(),
         5
     );
-    state.ui.results.event_bus_radix = BusRadix::Hex;
+    state.ui.results.session.event_bus_radix = BusRadix::Hex;
     state
         .ui
         .results
+        .session
         .expanded_event_buses
         .insert("count".to_owned());
     paint(&mut state, true);
     assert_eq!(
-        state.ui.results.selected_digital_event.as_ref(),
+        state.ui.results.session.selected_digital_event.as_ref(),
         Some(&selection)
     );
 }
@@ -461,14 +462,14 @@ fn event_source_navigation_keeps_a_retained_selection() {
     assert!(state.simulation.select_analysis(1));
     paint(&mut state, true);
     assert_eq!(
-        state.ui.results.selected_digital_event.as_ref(),
+        state.ui.results.session.selected_digital_event.as_ref(),
         Some(&selection)
     );
     paint(&mut state, false);
     assert!(state.simulation.select_analysis(0));
     paint(&mut state, true);
     assert_eq!(
-        state.ui.results.selected_digital_event.as_ref(),
+        state.ui.results.session.selected_digital_event.as_ref(),
         Some(&selection)
     );
 
@@ -482,20 +483,20 @@ fn event_source_navigation_keeps_a_retained_selection() {
     assert!(state.simulation.select_run(1));
     paint(&mut state, true);
     assert_eq!(
-        state.ui.results.selected_digital_event.as_ref(),
+        state.ui.results.session.selected_digital_event.as_ref(),
         Some(&selection)
     );
     paint(&mut state, false);
     assert!(state.simulation.select_run(0));
     paint(&mut state, true);
     assert_eq!(
-        state.ui.results.selected_digital_event.as_ref(),
+        state.ui.results.session.selected_digital_event.as_ref(),
         Some(&selection)
     );
     state.simulation.runs.remove(0);
     assert!(state.simulation.select_run(0));
     paint(&mut state, true);
-    assert!(state.ui.results.selected_digital_event.is_none());
+    assert!(state.ui.results.session.selected_digital_event.is_none());
 }
 
 #[test]

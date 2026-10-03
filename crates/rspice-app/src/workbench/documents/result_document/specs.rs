@@ -90,7 +90,7 @@ pub(crate) fn export_csv(
 /// Render the active dataset's specification evidence as the upgraded
 /// seven-column engineering table (or the inline contract editor).
 pub fn show(ui: &mut Ui, state: &mut AppState) {
-    if state.ui.results.spec_drafts.is_some() {
+    if state.ui.results.session.spec_drafts.is_some() {
         show_editor(ui, state);
         return;
     }
@@ -108,8 +108,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .and_then(|run| run.analyses.get(analysis_index))
             .map_or(ResultViewer::Manifest, source_viewer);
         if state.simulation.select_analysis(analysis_index) {
-            state.ui.results.viewer = viewer;
-            state.ui.results.clear_cursors();
+            state.ui.results.session.viewer = viewer;
+            state.ui.results.session.clear_cursors();
         }
     }
 }
@@ -186,7 +186,7 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
         }));
     }
 
-    let Some(drafts) = state.ui.results.spec_drafts.as_mut() else {
+    let Some(drafts) = state.ui.results.session.spec_drafts.as_mut() else {
         return;
     };
     editor::show(
@@ -202,7 +202,7 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
 /// Apply the open editor's drafts to the workspace. Returns false (and
 /// leaves the editor open) when a bound fails to parse.
 pub fn apply_drafts(state: &mut AppState) -> bool {
-    let Some(drafts) = state.ui.results.spec_drafts.clone() else {
+    let Some(drafts) = state.ui.results.session.spec_drafts.clone() else {
         return true;
     };
     let mut specs = Vec::with_capacity(drafts.len());
@@ -241,7 +241,7 @@ pub fn apply_drafts(state: &mut AppState) -> bool {
     state.workspace = workspace;
     state.sim_setup = setup;
     state.workbench.preflight = Default::default();
-    state.ui.results.spec_drafts = None;
+    state.ui.results.session.spec_drafts = None;
     true
 }
 
@@ -279,7 +279,7 @@ pub fn open_editor(state: &mut AppState) {
                         .collect()
                 })
         });
-    state.ui.results.spec_drafts = Some(drafts);
+    state.ui.results.session.spec_drafts = Some(drafts);
 }
 
 /// Right panel: the same active-dataset projection shown in the document.

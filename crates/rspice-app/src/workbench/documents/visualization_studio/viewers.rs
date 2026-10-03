@@ -52,7 +52,7 @@ impl viewers::ViewerHost for Host<'_> {
 
 impl toolbar::ToolbarHost for Host<'_> {
     fn waveform_coordinates(&self) -> bool {
-        self.0.state.ui.results.viewer == ResultViewer::Waves
+        self.0.state.ui.results.session.viewer == ResultViewer::Waves
     }
     fn magnification_available(&self) -> bool {
         magnification_available(&self.0.state)

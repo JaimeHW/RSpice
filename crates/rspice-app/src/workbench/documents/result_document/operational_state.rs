@@ -575,7 +575,8 @@ pub(crate) fn classify_viewer(
 
     // Specifications owns an authoring route before any result exists.
     let authoring_without_dataset = viewer == ResultViewer::Specs
-        && (state.ui.results.spec_drafts.is_some() || !state.workspace.content.specs.is_empty());
+        && (state.ui.results.session.spec_drafts.is_some()
+            || !state.workspace.content.specs.is_empty());
     let Some(run_index) = state
         .simulation
         .active_run_idx

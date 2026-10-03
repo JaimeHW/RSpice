@@ -87,6 +87,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         .state
         .ui
         .results
+        .session
         .persistent_document_page(document_id)
         .filter(|selected| document.pages.iter().any(|page| page.page.id == *selected))
         .unwrap_or(first_page.page.id);
@@ -94,6 +95,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
     app.state
         .ui
         .results
+        .session
         .select_persistent_document_page(document_id, selected_page_id);
     let Some(page) = document
         .pages
@@ -123,6 +125,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         .state
         .ui
         .results
+        .session
         .persistent_document_pane(document_id)
         .map(PaneId::get);
     let active_pane_id = resolved_active_pane_id(
@@ -139,6 +142,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
     app.state
         .ui
         .results
+        .session
         .select_persistent_document_pane(document_id, active_pane.id);
     if let Err(reason) = select_pane_binding(&mut app.state, active_pane) {
         unavailable_surface(ui, &active_pane.title, &reason);
@@ -161,7 +165,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         }
         crate::ui::plot::set_interaction_mode(
             ui.ctx(),
-            app.state.ui.results.plot_tool.interaction_mode(),
+            app.state.ui.results.session.plot_tool.interaction_mode(),
         );
     }
 
@@ -199,6 +203,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         app.state
             .ui
             .results
+            .session
             .select_persistent_document_pane(document_id, restored_pane.id);
         let restored_viewer = if activated_pane_id.is_some() {
             ResultViewer::from_viewer_document_id(&restored_pane.viewer_id)
@@ -206,7 +211,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
             active_viewer
         };
         if let Some(viewer) = restored_viewer {
-            app.state.ui.results.viewer = viewer;
+            app.state.ui.results.session.viewer = viewer;
             if let Some(viewer_document_id) = viewer.viewer_document_id() {
                 app.state
                     .workbench
@@ -254,7 +259,7 @@ fn compatible_active_viewer(
     family_label: &str,
     pane: &Pane,
 ) -> Option<ResultViewer> {
-    let selected = state.ui.results.viewer;
+    let selected = state.ui.results.session.viewer;
     if super::family_allows_viewer(family_label, selected)
         && super::viewer_is_available(state, selected)
     {
@@ -267,7 +272,7 @@ fn compatible_active_viewer(
 }
 
 fn select_global_viewer(state: &mut AppState, viewer: ResultViewer) {
-    state.ui.results.viewer = viewer;
+    state.ui.results.session.viewer = viewer;
     if let Some(viewer_document_id) = viewer.viewer_document_id() {
         state
             .workbench
@@ -482,6 +487,7 @@ pub(super) fn activate(state: &mut AppState, document_id: ResultDocumentId) -> b
     let selected_page_id = state
         .ui
         .results
+        .session
         .persistent_document_page(document_id)
         .filter(|selected| document.pages().iter().any(|page| page.id == *selected))
         .or_else(|| document.pages().first().map(|page| page.id));
@@ -495,6 +501,7 @@ pub(super) fn activate(state: &mut AppState, document_id: ResultDocumentId) -> b
         state
             .ui
             .results
+            .session
             .persistent_document_pane(document_id)
             .map(PaneId::get),
         panes.iter().map(|pane| pane.id.get()),
@@ -512,9 +519,10 @@ pub(super) fn activate(state: &mut AppState, document_id: ResultDocumentId) -> b
     state
         .ui
         .results
+        .session
         .select_persistent_document_pane(document_id, pane.id);
     if let Some(viewer) = ResultViewer::from_viewer_document_id(&pane.viewer_id) {
-        state.ui.results.viewer = viewer;
+        state.ui.results.session.viewer = viewer;
     }
     state
         .workbench
@@ -982,6 +990,7 @@ fn project_pane_presentation(
     state
         .ui
         .results
+        .session
         .enter_persistent_pane(pane.document_id, pane.id, analysis_key);
     state
         .ui
@@ -995,7 +1004,7 @@ fn project_pane_presentation(
             .and_then(|axis| axis.range)
             .map(|range| (range.minimum, range.maximum))
     };
-    state.ui.results.project_persistent_plot_view(
+    state.ui.results.session.project_persistent_plot_view(
         viewer,
         axis_range(AxisOrientation::Horizontal),
         axis_range(AxisOrientation::VerticalLeft),
@@ -1010,9 +1019,9 @@ fn project_pane_presentation(
                 _ => None,
             })
     };
-    state.ui.results.cursors.a = cursor_position("A");
-    state.ui.results.cursors.b = cursor_position("B");
-    state.ui.results.cursor_strip = state.simulation.active_analysis_idx;
+    state.ui.results.session.cursors.a = cursor_position("A");
+    state.ui.results.session.cursors.b = cursor_position("B");
+    state.ui.results.session.cursor_strip = state.simulation.active_analysis_idx;
     // Retained markers project into their own overlay. They are entities of
     // this document, not quick-view annotations of the dataset, so they carry
     // the document's full-width serial and never enter the project's
@@ -1055,7 +1064,7 @@ fn project_pane_presentation(
             note: marker.label.clone(),
         });
     }
-    state.ui.results.project_document_markers(markers);
+    state.ui.results.session.project_document_markers(markers);
     Ok(())
 }
 
@@ -1068,8 +1077,8 @@ fn project_pane_presentation(
 /// markers, and it forced the document's full-width entity serials through a
 /// quick-view `u32` to make the two lists comparable at all.
 fn capture_pane_presentation(state: &mut AppState, pane: &PaneProjection, viewer: ResultViewer) {
-    let view = state.ui.results.persistent_plot_view(viewer);
-    let cursors = state.ui.results.cursors;
+    let view = state.ui.results.session.persistent_plot_view(viewer);
+    let cursors = state.ui.results.session.cursors;
     let Some(document) = state
         .workspace
         .content
@@ -1151,7 +1160,7 @@ fn select_pane_context(state: &mut AppState, pane: &Pane) -> Result<(), String> 
         .visualization_studio
         .selected_viewer_document = pane.viewer_id.clone();
     if let Some(viewer) = ResultViewer::from_viewer_document_id(&pane.viewer_id) {
-        state.ui.results.viewer = bound_viewer_projection(state, viewer);
+        state.ui.results.session.viewer = bound_viewer_projection(state, viewer);
     }
     Ok(())
 }

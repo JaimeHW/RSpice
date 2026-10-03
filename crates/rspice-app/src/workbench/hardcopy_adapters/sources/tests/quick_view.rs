@@ -472,6 +472,7 @@ fn a_printed_quick_view_carries_the_markers_and_cursors_the_reader_placed() {
     let marker_id = state
         .ui
         .results
+        .session
         .add_marker(
             analysis_key,
             marker_anchor_for(analysis_key, "V(out)"),
@@ -479,8 +480,8 @@ fn a_printed_quick_view_carries_the_markers_and_cursors_the_reader_placed() {
             1.0,
         )
         .unwrap();
-    state.ui.results.cursors.a = Some(0.0);
-    state.ui.results.cursors.b = Some(2.0);
+    state.ui.results.session.cursors.a = Some(0.0);
+    state.ui.results.session.cursors.b = Some(2.0);
 
     let resolved = resolve_quick_view(&state).expect("quick view resolves");
     let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
@@ -519,9 +520,9 @@ fn a_printed_quick_view_carries_the_markers_and_cursors_the_reader_placed() {
     assert_ne!(a.start.y_um, a.end.y_um);
 
     // A page with nothing placed on it carries neither.
-    state.ui.results.markers.clear();
-    state.ui.results.cursors.a = None;
-    state.ui.results.cursors.b = None;
+    state.ui.results.session.markers.clear();
+    state.ui.results.session.cursors.a = None;
+    state.ui.results.session.cursors.b = None;
     let bare = resolve_quick_view(&state).expect("quick view resolves");
     let HardcopySemanticDocument::Plot(bare) = bare.semantic_document() else {
         panic!("expected a semantic waveform plot")
@@ -890,7 +891,7 @@ fn the_specifications_page_is_offered_on_the_requirements_the_run_froze() {
         state.simulation.runs.push(run);
         state.simulation.active_run_idx = Some(0);
         state.simulation.active_analysis_idx = Some(0);
-        state.ui.results.viewer = ResultViewer::Specs;
+        state.ui.results.session.viewer = ResultViewer::Specs;
         state
     }
 
@@ -967,6 +968,7 @@ fn a_pinned_window_is_part_of_the_page_the_reader_captured() {
     state
         .ui
         .results
+        .session
         .plot_view_mut(ResultViewer::Waves, 0)
         .apply(&crate::ui::plot::ViewChange {
             x: Some((0.4, 0.6)),
@@ -983,7 +985,11 @@ fn a_pinned_window_is_part_of_the_page_the_reader_captured() {
     // The branch production actually uses. Every zoom the waveform strip
     // records is keyed to the analysis, not to a global ordinal, so a test
     // that pins only `Global(0)` covers a key the sheet never writes.
-    state.ui.results.reset_plot_view(ResultViewer::Waves, 0);
+    state
+        .ui
+        .results
+        .session
+        .reset_plot_view(ResultViewer::Waves, 0);
     assert_eq!(point_count(&state), 5, "the global pin is cleared");
     let analysis_key = {
         let run = state.simulation.active_run().expect("active run");
@@ -995,6 +1001,7 @@ fn a_pinned_window_is_part_of_the_page_the_reader_captured() {
     state
         .ui
         .results
+        .session
         .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis_key, 0)
         .apply(&crate::ui::plot::ViewChange {
             x: Some((0.4, 0.6)),
@@ -1078,6 +1085,7 @@ fn a_pane_ordinate_does_not_bound_a_page_that_merges_every_pane() {
     state
         .ui
         .results
+        .session
         .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis_key, 0)
         .apply(&crate::ui::plot::ViewChange {
             x: None,

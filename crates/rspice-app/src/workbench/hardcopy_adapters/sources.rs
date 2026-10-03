@@ -147,13 +147,13 @@ fn capture_results_quick_view_presentation(
 ) -> Result<ResultsQuickViewPresentation, HardcopySourceError> {
     let fft = &state.analysis.fft_state;
     let histogram = &state.analysis.histogram_state;
-    let view = state.ui.results.plot_view(ResultViewer::Hist, 0);
+    let view = state.ui.results.session.plot_view(ResultViewer::Hist, 0);
     let overlay = captured_results_run(state)
         .map(|run| capture_quick_view_overlays(state, run))
         .transpose()?
         .unwrap_or_default();
     ResultsQuickViewPresentation::try_new(
-        state.ui.results.viewer,
+        state.ui.results.session.viewer,
         overlay,
         crate::workbench::documents::result_document::run_specifications(state),
         QuickFftSettings {
@@ -286,7 +286,11 @@ pub(crate) fn enumerate_retained_hardcopy_sources(
                 project_id.as_uuid(),
                 run.dataset_id
             ),
-            display_name: format!("{} · {}", run.label, state.ui.results.viewer.label()),
+            display_name: format!(
+                "{} · {}",
+                run.label,
+                state.ui.results.session.viewer.label()
+            ),
             document_kind: HardcopyDocumentKind::PlotOrWorksheet,
             allowed_scopes: vec![
                 HardcopyScope::ActivePlotDocument,
@@ -893,7 +897,7 @@ fn quick_result_availability(
             run.dataset_id
         ));
     }
-    let viewer = state.ui.results.viewer;
+    let viewer = state.ui.results.session.viewer;
     if viewer == ResultViewer::Manifest {
         // Manifest hardcopy is bound to the terminal dataset as a whole and
         // must not require an arbitrarily selected analysis.
@@ -1287,6 +1291,7 @@ fn active_visualization_document_pane(
     let selected_page_id = state
         .ui
         .results
+        .session
         .persistent_document_page(document_id)
         .filter(|selected| document.pages().iter().any(|page| page.id == *selected))
         .or_else(|| document.pages().first().map(|page| page.id))?;

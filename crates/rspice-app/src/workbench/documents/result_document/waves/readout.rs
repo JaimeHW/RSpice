@@ -37,12 +37,12 @@ const MARKER_EMPTY_H: f32 = 32.0;
 /// viewer whose projection drops the cursor's strip entirely reserved rows
 /// nothing could fill.
 pub(super) fn readout_row_count(state: &mut AppState) -> usize {
-    let Some(index) = state.ui.results.cursor_strip else {
+    let Some(index) = state.ui.results.session.cursor_strip else {
         return 0;
     };
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
-    let cursors = state.ui.results.cursors;
+    let cursors = state.ui.results.session.cursors;
     let models = cached_models(
         &state.simulation,
         &mut state.ui.results,
@@ -91,13 +91,13 @@ pub(super) fn on_screen_strips(state: &AppState) -> Vec<AnalysisPresentationKey>
     };
     let results = &state.ui.results;
     let present = |key: AnalysisPresentationKey| key.resolve(run).is_some();
-    match results.maximized_strip {
+    match results.session.maximized_strip {
         Some(max_key) if present(max_key) => vec![max_key],
         _ => run
             .analyses
             .iter()
             .map(|analysis| AnalysisPresentationKey::new(run.dataset_id, analysis))
-            .filter(|key| !results.hidden_strips.contains(key))
+            .filter(|key| !results.session.hidden_strips.contains(key))
             .collect(),
     }
 }
@@ -109,7 +109,7 @@ pub(super) fn on_screen_strips(state: &AppState) -> Vec<AnalysisPresentationKey>
 pub(super) fn visible_markers(state: &AppState) -> Vec<MarkerView<'_>> {
     on_screen_strips(state)
         .into_iter()
-        .flat_map(|analysis| state.ui.results.strip_markers(analysis))
+        .flat_map(|analysis| state.ui.results.session.strip_markers(analysis))
         .collect()
 }
 
@@ -120,10 +120,10 @@ pub(super) fn visible_markers(state: &AppState) -> Vec<MarkerView<'_>> {
 /// the cursor pointing at a strip the sheet no longer draws. The band was
 /// still reserved for it, and the table it opened for drew nothing.
 fn cursor_target_available(state: &mut AppState) -> bool {
-    if !state.ui.results.cursor_readout_active() {
+    if !state.ui.results.session.cursor_readout_active() {
         return false;
     }
-    let Some(index) = state.ui.results.cursor_strip else {
+    let Some(index) = state.ui.results.session.cursor_strip else {
         return false;
     };
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -174,12 +174,12 @@ pub(super) fn readout_columns_side_by_side(width: f32, cursor: bool, markers: bo
 /// projection is the models cache: the alternative was a band sized by one
 /// rule and filled by another.
 pub fn readout_strip_height(state: &mut AppState) -> f32 {
-    let cursor = state.ui.results.cursor_readout_active();
+    let cursor = state.ui.results.session.cursor_readout_active();
     let markers = !visible_markers(state).is_empty();
     if !cursor && !markers {
         return 0.0;
     }
-    if state.ui.results.readout_collapsed {
+    if state.ui.results.session.readout_collapsed {
         return READOUT_HEADER_H;
     }
     (READOUT_HEADER_H + readout_body_content_height(state)).min(READOUT_MAX_H)
@@ -210,7 +210,7 @@ pub fn readout_strip(ui: &mut Ui, state: &mut AppState, height: f32) {
         ),
     );
     readout_header(ui, state, header);
-    if state.ui.results.readout_collapsed || rect.bottom() <= header.bottom() {
+    if state.ui.results.session.readout_collapsed || rect.bottom() <= header.bottom() {
         return;
     }
 
@@ -233,7 +233,7 @@ pub fn readout_strip(ui: &mut Ui, state: &mut AppState, height: f32) {
 fn readout_header(ui: &mut Ui, state: &mut AppState, rect: egui::Rect) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let cursor = state.ui.results.cursor_readout_active();
+    let cursor = state.ui.results.session.cursor_readout_active();
     let trace_count = if cursor { readout_row_count(state) } else { 0 };
     let marker_count = visible_markers(state).len();
     let title = if cursor {
@@ -273,7 +273,7 @@ fn readout_header(ui: &mut Ui, state: &mut AppState, rect: egui::Rect) {
             .background_color(c.bg_inset),
     );
     header_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        let collapsed = state.ui.results.readout_collapsed;
+        let collapsed = state.ui.results.session.readout_collapsed;
         let label = if collapsed {
             "Expand readout"
         } else {
@@ -287,7 +287,7 @@ fn readout_header(ui: &mut Ui, state: &mut AppState, rect: egui::Rect) {
             .on_hover_text(label)
             .clicked()
         {
-            state.ui.results.readout_collapsed = !collapsed;
+            state.ui.results.session.readout_collapsed = !collapsed;
         }
     });
 }
@@ -351,7 +351,9 @@ fn readout_body(ui: &mut Ui, state: &mut AppState) {
 /// the bar states them until it is expanded again — never both at once, which
 /// is the duplication the results de-duplication pass removed.
 pub(crate) fn inline_cursor_readout(state: &mut AppState, t: &Tokens) -> Option<String> {
-    if !state.ui.results.readout_collapsed || !state.ui.results.cursor_readout_active() {
+    if !state.ui.results.session.readout_collapsed
+        || !state.ui.results.session.cursor_readout_active()
+    {
         return None;
     }
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -366,9 +368,10 @@ pub(crate) fn inline_cursor_readout(state: &mut AppState, t: &Tokens) -> Option<
     let model = state
         .ui
         .results
+        .session
         .cursor_strip
         .and_then(|index| models.iter().find(|model| model.analysis_index == index))?;
-    let cursors = state.ui.results.cursors;
+    let cursors = state.ui.results.session.cursors;
     let a = cursors.a?;
     let a_text = model.format_x(a, significant_digits, quantity_policy);
     let Some(b) = cursors.b else {
@@ -402,7 +405,7 @@ pub(super) fn cursor_readout_section(ui: &mut Ui, state: &mut AppState) {
 
 fn cursor_readout_table(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
-    if !state.ui.results.cursor_readout_active() {
+    if !state.ui.results.session.cursor_readout_active() {
         return;
     }
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -416,12 +419,13 @@ fn cursor_readout_table(ui: &mut Ui, state: &mut AppState) {
     let Some(model) = state
         .ui
         .results
+        .session
         .cursor_strip
         .and_then(|index| models.iter().find(|model| model.analysis_index == index))
     else {
         return;
     };
-    let cursors = state.ui.results.cursors;
+    let cursors = state.ui.results.session.cursors;
 
     rspice_results_ui::waves::readout::cursor_readout_table(
         ui,
@@ -688,11 +692,12 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let cursor_model = state
         .ui
         .results
+        .session
         .cursor_strip
         .and_then(|index| models.iter().find(|m| m.analysis_index == index));
 
     // Statistics over the cursor window (or the full range).
-    let cursors = state.ui.results.cursors;
+    let cursors = state.ui.results.session.cursors;
     let measured_model = cursor_model.or_else(|| models.first());
     if let Some(model) = measured_model {
         let window = match (cursors.a, cursors.b) {
@@ -701,7 +706,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         };
         rspice_results_ui::waves::readout::measurement_panel(
             ui,
-            &mut state.ui.results.derived,
+            &mut state.ui.results.session.derived,
             model,
             window,
             significant_digits,

@@ -40,14 +40,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .selected_source
         .as_deref()
         .unwrap_or("the active trace");
-    let plot_view = state.ui.results.plot_view(ResultViewer::Eye, 0);
+    let plot_view = state.ui.results.session.plot_view(ResultViewer::Eye, 0);
     let out = view::show(
         ui,
         &state.analysis.eye_diagram_state,
         source,
         plot_view,
-        &mut state.ui.results.eye_texture,
-        &mut state.ui.results.cache,
+        &mut state.ui.results.session.eye_texture,
+        &mut state.ui.results.session.cache,
     );
     if out.density_baked {
         frame_work::note(DatasetWalk::EyeRaster);
@@ -58,6 +58,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             state
                 .ui
                 .results
+                .session
                 .plot_view_mut(ResultViewer::Eye, 0)
                 .apply(&response.view);
         }
@@ -116,6 +117,7 @@ mod tests {
             let view = state
                 .ui
                 .results
+                .session
                 .plot_view_mut(super::super::ResultViewer::Eye, 0);
             view.x = Some((window.0, window.1));
             view.y = Some((window.2, window.3));

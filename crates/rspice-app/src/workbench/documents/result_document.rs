@@ -48,16 +48,13 @@ pub(crate) struct ResultSheetCsv {
     pub(crate) detail: String,
 }
 
-// The Events sheet's own model: which row a selection names, the merged
-// order it is an index into, and the buses declared over it. `ResultsState`
-// holds two of them, which is why they are named here.
+// The application retains the Events source-order cache; viewer selections
+// belong to the lower-owned session.
 pub(crate) use events::EventOrderCache;
 pub(crate) use manifest::export_csv as export_manifest_csv;
 pub(crate) use noise_contrib::export_csv as export_noise_contribution_csv;
 pub(crate) use op_inspector::export_csv as export_operating_point_csv;
 pub(crate) use optimization::export_csv as export_optimization_csv;
-pub(crate) use rspice_results::events::projection::BusRadix;
-pub(crate) use rspice_results_ui::events::DigitalEventSelection;
 pub(crate) use specs::active_run_specifications as run_specifications;
 pub(crate) use specs::export_csv as export_specs_csv;
 
@@ -74,7 +71,7 @@ pub(crate) fn open_specification_editor(state: &mut AppState) {
     // the draft rows so those projections cannot erase the requested editor
     // before the Results destination gets its first frame.
     state.workbench.specification_editor_route_pending = true;
-    state.ui.results.viewer = crate::workbench::ResultViewer::Specs;
+    state.ui.results.session.viewer = crate::workbench::ResultViewer::Specs;
     specs::open_editor(state);
     state
         .workbench
@@ -90,7 +87,7 @@ pub(crate) fn consume_pending_specification_editor(state: &mut AppState) -> bool
     if !std::mem::take(&mut state.workbench.specification_editor_route_pending) {
         return false;
     }
-    state.ui.results.viewer = crate::workbench::ResultViewer::Specs;
+    state.ui.results.session.viewer = crate::workbench::ResultViewer::Specs;
     specs::open_editor(state);
     true
 }
@@ -216,7 +213,7 @@ pub(crate) fn open_dataset_browser(app: &mut RSpiceApp) {
     app.state.workbench.navigator_visible = true;
     app.state.workbench.inspector_visible = true;
     app.state.workbench.focus_navigator_search = true;
-    app.state.ui.results.viewer = ResultViewer::Manifest;
+    app.state.ui.results.session.viewer = ResultViewer::Manifest;
 }
 
 /// Open a fresh immutable-dataset-bound result-document transaction.
@@ -249,19 +246,19 @@ use egui::{Ui, WidgetInfo, WidgetType};
 #[cfg(test)]
 pub(crate) use crate::state::result_presentation::TracePresentationKey;
 pub(crate) use crate::state::result_presentation::{
-    AnalysisPresentationKey, AnalysisPresentationSource, WaveformPresentationKey,
+    AnalysisPresentationKey, WaveformPresentationKey,
 };
 pub use crate::state::result_presentation::{
     ExprTrace, MarkerKind, ResultMarker, WavePanePresentationKey,
 };
 use crate::state::result_presentation::{ResultExpressionGroup, ResultPresentation};
 
-use crate::product::{AnalysisInstanceId, DatasetId, ResultDocumentId};
-use crate::results::visualization_document::{MarkerId, PaneId};
+use crate::product::{AnalysisInstanceId, DatasetId};
+
 use crate::simulation::SimulationController;
 use crate::simulation::controller::DerivedViewerLoadState;
 use crate::state::{AnalysisResult, SimulationRun, WaveformData};
-use crate::ui::plot::{CursorPair, DecimationCache};
+
 use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::ActiveViewer;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
@@ -272,22 +269,16 @@ use rspice_results_ui::chrome::bars::viewer_has_sheet_bar;
 #[cfg(test)]
 use rspice_results_ui::chrome::bars::viewer_has_structured_strip;
 use rspice_results_ui::chrome::instrument::ResultPlotTool;
-use rspice_results_ui::derived::DerivedSeries;
-use rspice_results_ui::eye_diagram::EyeTimebase;
-use rspice_results_ui::eye_diagram::view::EyeTexture;
-use rspice_results_ui::fft::view::FftSeries;
 use rspice_results_ui::presentation::{PlotView, well_hint};
 use rspice_results_ui::selection::{
     ResultArtifactPresentationKey, ResultBrowserSelectionKey, ResultExpressionPresentationKey,
     SelectedResultTrace, SourceWaveformPresentationKey,
 };
-use rspice_results_ui::soa::{SoaRuleFilter, SoaRuleSelection};
-use rspice_results_ui::specs::editor::SpecDraft;
-
-/// One axis interval, low then high, in data space.
-pub(crate) type AxisExtent = (f64, f64);
-/// The X and Y intervals one plot last drew.
-pub(crate) type DrawnAxes = (AxisExtent, AxisExtent);
+use rspice_results_ui::session::{
+    AxisExtent, DocumentMarker, ExprEditor, HorizontalWaveCursor, MarkerEditDraft, MarkerSelector,
+    MarkerView, OptimizationSelection, PaneAxis, PlotPresentationKey, ViewGesture,
+};
+use rspice_results_ui::soa::SoaRuleSelection;
 
 pub(crate) type ExpressionSeriesResult = Result<Vec<ExpressionWaveform>, String>;
 
@@ -716,48 +707,7 @@ fn optional_exact_float(value: Option<f64>) -> String {
     value.map_or_else(String::new, |value| format!("{value:.17e}"))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum PlotPresentationKey {
-    Global(usize),
-    /// One waveform stack strip, named by the analysis it draws rather than
-    /// by the one dataset that analysis produced.
-    ///
-    /// A re-run mints a new dataset identity, so keying the strip by the
-    /// dataset threw away the reader's zoom on every run — while the
-    /// ordinal-keyed single-canvas sheets beside it kept theirs, which is
-    /// what [`ResultsState::views`] says the map is for.
-    Analysis(AnalysisPresentationSource),
-    Document(ResultDocumentId, PaneId),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PersistentPaneContext {
-    document_id: ResultDocumentId,
-    pane_id: PaneId,
-    analysis: AnalysisPresentationKey,
-}
-
 pub use rspice_results::result_presentation::ResultViewer;
-
-/// A viewport gesture on the active sheet, as asked for by a command.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum ViewGesture {
-    /// Drop every pinned viewport on the active plot.
-    Fit,
-    /// Halve the visible interval about its centre.
-    ZoomIn,
-    /// Double the visible interval about its centre.
-    ZoomOut,
-    /// Pin one or both axes to exact data-space intervals.
-    ///
-    /// `None` leaves that axis unchanged. This is queued instead of writing a
-    /// viewport directly so the waveform stack can resolve the active stable
-    /// analysis and unit-pane identity inside its drawing pass.
-    SetRanges {
-        x: Option<(f64, f64)>,
-        y: Option<(f64, f64)>,
-    },
-}
 
 /// Whether a viewer draws through the shared unit-pane waveform stack.
 ///
@@ -768,7 +718,7 @@ pub(crate) use rspice_results::result_presentation::viewer_uses_wave_stack;
 
 /// Queue a viewport gesture for the active result sheet.
 pub(crate) fn request_view_gesture(state: &mut AppState, gesture: ViewGesture) {
-    state.ui.results.pending_view_gesture = Some(gesture);
+    state.ui.results.session.pending_view_gesture = Some(gesture);
 }
 
 /// Whether the active sheet has a viewport that fitting can release.
@@ -776,7 +726,7 @@ pub(crate) fn request_view_gesture(state: &mut AppState, gesture: ViewGesture) {
 /// Every plot sheet does; the structured documents (OP, specs, table, XF,
 /// manifest) have no viewport at all and must not offer the gesture.
 pub(crate) fn fit_gesture_available(state: &AppState) -> bool {
-    state.simulation.has_results() && viewer_draws_a_pane(state.ui.results.viewer)
+    state.simulation.has_results() && viewer_draws_a_pane(state.ui.results.session.viewer)
 }
 
 /// Whether this sheet draws a plot pane at all.
@@ -801,23 +751,23 @@ pub(crate) const fn viewer_draws_a_pane(viewer: ResultViewer) -> bool {
 /// Only the unit-pane stack exposes the retained extents a zoom step has to
 /// be computed against; the single-canvas viewers own their own gestures.
 pub(crate) fn zoom_gesture_available(state: &AppState) -> bool {
-    state.simulation.has_results() && viewer_uses_wave_stack(state.ui.results.viewer)
+    state.simulation.has_results() && viewer_uses_wave_stack(state.ui.results.session.viewer)
 }
 
 /// Apply any queued viewport gesture, now that the sheet's models and theme
 /// tokens exist.
 pub(crate) fn apply_pending_view_gesture(ui: &Ui, state: &mut AppState) {
-    let Some(gesture) = state.ui.results.pending_view_gesture.take() else {
+    let Some(gesture) = state.ui.results.session.pending_view_gesture.take() else {
         return;
     };
-    let viewer = state.ui.results.viewer;
+    let viewer = state.ui.results.session.viewer;
     if !viewer_uses_wave_stack(viewer) {
         // Single-canvas viewers keep their views under plot ordinals, and
         // only fit is expressible without their renderer's own extents.
         match gesture {
-            ViewGesture::Fit => state.ui.results.reset_viewer_plot_views(viewer),
+            ViewGesture::Fit => state.ui.results.session.reset_viewer_plot_views(viewer),
             ViewGesture::SetRanges { x, y } => {
-                let view = state.ui.results.plot_view_pane_mut_for(
+                let view = state.ui.results.session.plot_view_pane_mut_for(
                     viewer,
                     PlotPresentationKey::Global(0),
                     0,
@@ -894,56 +844,6 @@ impl<'a> SheetContext<'a> {
             results: &mut state.ui.results,
         }
     }
-}
-
-/// The A│B cursor tool: armed, a click on a plot places cursor A and then
-/// B; disarmed, plots ignore cursor clicks and the readout strip stands
-/// down, so the tool state and what is on screen can never disagree.
-///
-/// Armed by default — placing a cursor is the first thing anyone does with
-/// a waveform, and an unarmed default would read as a dead plot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CursorTool(bool);
-
-impl Default for CursorTool {
-    fn default() -> Self {
-        Self(true)
-    }
-}
-
-impl CursorTool {
-    /// `true` when plot clicks place cursors.
-    pub const fn is_armed(self) -> bool {
-        self.0
-    }
-}
-
-/// Which store owns one marker, and where in it.
-///
-/// The two stores are genuinely different objects: a quick marker is a
-/// project-scoped annotation on a dataset, and a document marker is a retained
-/// entity of one project-owned visualization document. Naming the store in the
-/// identity means every edit routes by construction — there is no shared
-/// integer space to collide in, and no truncation of the document's full-width
-/// entity serial into a session id.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MarkerSelector {
-    /// Project-persisted quick-view marker in [`ResultsState::markers`].
-    Quick(u32),
-    /// Retained marker of one project-owned visualization document pane.
-    Document {
-        document_id: ResultDocumentId,
-        pane_id: PaneId,
-        marker_id: MarkerId,
-    },
-}
-
-/// An uncommitted edit of one marker's purpose.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct MarkerEditDraft {
-    pub selector: MarkerSelector,
-    pub note: String,
-    pub kind: MarkerKind,
 }
 
 /// How a retained plot-marker kind reads as a Results marker kind.
@@ -1043,6 +943,7 @@ pub(super) fn place_marker(
     let retained = state
         .ui
         .results
+        .session
         .persistent_pane_context
         .and_then(|context| {
             let document = state
@@ -1058,6 +959,7 @@ pub(super) fn place_marker(
     let quick_fallback = |state: &mut AppState, reason: Option<String>| match state
         .ui
         .results
+        .session
         .add_marker(analysis, anchor.clone(), trace_name.clone(), x)
     {
         Ok(id) => {
@@ -1075,7 +977,7 @@ pub(super) fn place_marker(
     };
 
     let Some((context, revision, trace_id)) = retained else {
-        let reason = state.ui.results.persistent_pane_context.is_some().then(|| {
+        let reason = state.ui.results.session.persistent_pane_context.is_some().then(|| {
             format!(
                 "'{trace_name}' is not a retained trace of this result document, so the marker was placed on the dataset instead of the document."
             )
@@ -1117,17 +1019,22 @@ pub(super) fn place_marker(
         })?;
     // The overlay is rebuilt by the next projection, but the marker has to be
     // on screen and addressable in the frame the reader placed it.
-    state.ui.results.document_markers.push(DocumentMarker {
-        document_id: context.document_id,
-        pane_id: context.pane_id,
-        retained_id: marker_id,
-        analysis,
-        anchor,
-        trace_name: trace_name.clone(),
-        x: retained_x,
-        kind: MarkerKind::default(),
-        note: trace_name,
-    });
+    state
+        .ui
+        .results
+        .session
+        .document_markers
+        .push(DocumentMarker {
+            document_id: context.document_id,
+            pane_id: context.pane_id,
+            retained_id: marker_id,
+            analysis,
+            anchor,
+            trace_name: trace_name.clone(),
+            x: retained_x,
+            kind: MarkerKind::default(),
+            note: trace_name,
+        });
     Some(MarkerSelector::Document {
         document_id: context.document_id,
         pane_id: context.pane_id,
@@ -1138,7 +1045,7 @@ pub(super) fn place_marker(
 /// Remove one marker from whichever store owns it.
 pub(super) fn remove_marker(state: &mut AppState, selector: MarkerSelector) {
     match selector {
-        MarkerSelector::Quick(id) => state.ui.results.remove_marker(id),
+        MarkerSelector::Quick(id) => state.ui.results.session.remove_marker(id),
         MarkerSelector::Document {
             document_id,
             marker_id,
@@ -1169,16 +1076,18 @@ pub(super) fn remove_marker(state: &mut AppState, selector: MarkerSelector) {
             state
                 .ui
                 .results
+                .session
                 .document_markers
                 .retain(|marker| marker.retained_id != marker_id);
             if state
                 .ui
                 .results
+                .session
                 .marker_edit
                 .as_ref()
                 .is_some_and(|draft| draft.selector == selector)
             {
-                state.ui.results.marker_edit = None;
+                state.ui.results.session.marker_edit = None;
             }
         }
     }
@@ -1198,7 +1107,7 @@ pub(super) fn commit_marker_edit(
     match selector {
         MarkerSelector::Quick(id) => {
             let marker =
-                state.ui.results.marker_mut(id).ok_or_else(|| {
+                state.ui.results.session.marker_mut(id).ok_or_else(|| {
                     "The quick marker is no longer part of this project.".to_owned()
                 })?;
             marker.note = note.to_owned();
@@ -1213,6 +1122,7 @@ pub(super) fn commit_marker_edit(
             let trace_name = state
                 .ui
                 .results
+                .session
                 .document_marker(marker_id)
                 .map(|marker| marker.trace_name.clone())
                 .unwrap_or_default();
@@ -1262,6 +1172,7 @@ pub(super) fn commit_marker_edit(
             if let Some(marker) = state
                 .ui
                 .results
+                .session
                 .document_markers
                 .iter_mut()
                 .find(|marker| marker.retained_id == marker_id)
@@ -1355,7 +1266,7 @@ pub(crate) fn restore_markers(
                 .any(|run| marker.analysis.resolve(run).is_some())
         })
         .collect();
-    state.ui.results.adopt_markers(retained, highest);
+    state.ui.results.session.adopt_markers(retained, highest);
 }
 
 /// Whether one loaded quick marker restates a marker a project-owned
@@ -1407,7 +1318,7 @@ fn is_document_marker_projection(state: &AppState, marker: &ResultMarker) -> boo
 /// Same rule as the markers above: a presentation decision that cannot find
 /// the dataset it was made about is not a decision about anything.
 pub(crate) fn restore_log_y_panes(state: &mut AppState, panes: Vec<WavePanePresentationKey>) {
-    state.ui.results.log_y_panes = panes
+    state.ui.results.session.log_y_panes = panes
         .into_iter()
         .filter(|pane| {
             state
@@ -1423,9 +1334,9 @@ pub(crate) fn restore_log_y_panes(state: &mut AppState, panes: Vec<WavePanePrese
 /// datasets have been loaded. Stale groups fail closed instead of attaching
 /// their text to whichever analysis happens to occupy an old ordinal.
 pub(crate) fn restore_expression_groups(state: &mut AppState, groups: Vec<ResultExpressionGroup>) {
-    state.ui.results.analysis_exprs.clear();
-    state.ui.results.exprs.clear();
-    state.ui.results.expr_projection_keys.clear();
+    state.ui.results.session.analysis_exprs.clear();
+    state.ui.results.session.exprs.clear();
+    state.ui.results.session.expr_projection_keys.clear();
     state.ui.results.analysis_expr_cache.clear();
     for group in groups {
         let retained = state
@@ -1437,6 +1348,7 @@ pub(crate) fn restore_expression_groups(state: &mut AppState, groups: Vec<Result
             state
                 .ui
                 .results
+                .session
                 .analysis_exprs
                 .insert(group.analysis, group.traces);
         }
@@ -1445,122 +1357,6 @@ pub(crate) fn restore_expression_groups(state: &mut AppState, groups: Vec<Result
         .ui
         .results
         .reconcile_expression_projection(&state.simulation);
-}
-
-/// Per-frame projection of one persistent pane's retained markers.
-///
-/// The project-owned visualization document is the only owner of these: the
-/// overlay is rebuilt by projection every frame, never serialized, and never
-/// saved into the project's quick-view marker list. It exists so the renderer
-/// and the readout can draw a retained marker without the document having to
-/// impersonate a quick one.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct DocumentMarker {
-    pub document_id: ResultDocumentId,
-    pub pane_id: PaneId,
-    /// The document's own retained serial, at full width.
-    pub retained_id: MarkerId,
-    /// Dataset-bound identity of the strip this marker lives on.
-    pub analysis: AnalysisPresentationKey,
-    /// Dataset-bound identity of the trace the marker rides.
-    pub anchor: WaveformPresentationKey,
-    pub trace_name: String,
-    pub x: f64,
-    pub kind: MarkerKind,
-    pub note: String,
-}
-
-/// One marker to draw or list, whichever store owns it.
-///
-/// Both stores can be live at once — a document pane can carry a quick marker
-/// when the retained document does not own the clicked trace — so every
-/// consumer reads one union rather than picking a store and being wrong half
-/// the time.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum MarkerView<'a> {
-    Quick(&'a ResultMarker),
-    Document(&'a DocumentMarker),
-}
-
-impl<'a> MarkerView<'a> {
-    pub(crate) fn selector(self) -> MarkerSelector {
-        match self {
-            MarkerView::Quick(marker) => MarkerSelector::Quick(marker.id),
-            MarkerView::Document(marker) => MarkerSelector::Document {
-                document_id: marker.document_id,
-                pane_id: marker.pane_id,
-                marker_id: marker.retained_id,
-            },
-        }
-    }
-
-    pub(crate) fn analysis(self) -> AnalysisPresentationKey {
-        match self {
-            MarkerView::Quick(marker) => marker.analysis,
-            MarkerView::Document(marker) => marker.analysis,
-        }
-    }
-
-    pub(crate) fn anchor(self) -> &'a WaveformPresentationKey {
-        match self {
-            MarkerView::Quick(marker) => &marker.anchor,
-            MarkerView::Document(marker) => &marker.anchor,
-        }
-    }
-
-    pub(crate) fn trace_name(self) -> &'a str {
-        match self {
-            MarkerView::Quick(marker) => &marker.trace_name,
-            MarkerView::Document(marker) => &marker.trace_name,
-        }
-    }
-
-    pub(crate) fn x(self) -> f64 {
-        match self {
-            MarkerView::Quick(marker) => marker.x,
-            MarkerView::Document(marker) => marker.x,
-        }
-    }
-
-    pub(crate) fn kind(self) -> MarkerKind {
-        match self {
-            MarkerView::Quick(marker) => marker.kind,
-            MarkerView::Document(marker) => marker.kind,
-        }
-    }
-
-    pub(crate) fn note(self) -> &'a str {
-        match self {
-            MarkerView::Quick(marker) => &marker.note,
-            MarkerView::Document(marker) => &marker.note,
-        }
-    }
-
-    /// What the tag reads on the plot and in the readout.
-    ///
-    /// The two stores allocate independently, so they are given distinct
-    /// prefixes: an `M7` quick marker and a `D7` retained one can share a
-    /// strip without either label claiming to name the other.
-    pub(crate) fn display_id(self) -> String {
-        match self {
-            MarkerView::Quick(marker) => format!("M{}", marker.id),
-            MarkerView::Document(marker) => format!("D{}", marker.retained_id.get()),
-        }
-    }
-}
-
-/// One horizontal measurement cursor bound to an exact waveform pane.
-#[derive(Debug, Clone, PartialEq)]
-pub(super) struct HorizontalWaveCursor {
-    pub pane: WavePanePresentationKey,
-    pub y: f64,
-}
-
-/// One optimizer candidate picked out of the iteration history.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct OptimizationSelection {
-    pub analysis: AnalysisPresentationKey,
-    pub iteration_index: usize,
 }
 
 /// Whether one analysis' retained evidence passes its own validator.
@@ -1722,15 +1518,16 @@ pub(crate) fn captured_viewport(
     state: &AppState,
     analysis: AnalysisPresentationKey,
 ) -> Option<CapturedViewport> {
-    let viewer = state.ui.results.viewer;
+    let viewer = state.ui.results.session.viewer;
     let analysis_pane = state
         .ui
         .results
+        .session
         .analysis_plot_view_pane(viewer, analysis, 0);
     let view = if analysis_pane.is_zoomed() {
         analysis_pane
     } else {
-        state.ui.results.plot_view(viewer, 0)
+        state.ui.results.session.plot_view(viewer, 0)
     };
     let y = captured_ordinate(viewer, view);
     (view.x.is_some() || y.is_some()).then_some((view.x, y))
@@ -1814,51 +1611,19 @@ pub(crate) fn analysis_evidence_failure(
     )
 }
 
-/// The marker tool: armed, a plot click drops a marker on the nearest
-/// visible trace. Off by default — unlike cursors, annotating is a
-/// deliberate act, and an always-armed default would litter the plot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct MarkerTool(bool);
-
-impl MarkerTool {
-    /// `true` when plot clicks place markers.
-    pub const fn is_armed(self) -> bool {
-        self.0
-    }
-}
-
-/// Per-session results-workspace state. Only the viewer selection persists;
-/// caches and cursors are transient.
+/// Application composition of viewer state and source-bound caches.
 #[derive(Debug, Clone, Default)]
 pub struct ResultsState {
-    /// Active viewer tab.
-    pub viewer: ResultViewer,
+    pub session: rspice_results_ui::session::ResultViewerState,
     /// Explicit runtime boundary reported by the operation that owns it.
     /// Source-derived states such as stale, partial, and corrupted are never
     /// stored here; the operational classifier recomputes those from exact
     /// retained evidence and provenance.
     operational_condition: Option<operational_state::ResultRuntimeCondition>,
-    /// Device-local page selection for each project-owned result document.
-    ///
-    /// Page selection is presentation state, not part of the immutable
-    /// visualization document. Stable document and page identities prevent a
-    /// project reload or page reorder from selecting a different page.
-    persistent_document_pages: std::collections::HashMap<
-        crate::product::ResultDocumentId,
-        crate::results::visualization_document::PageId,
-    >,
     /// The retained dataset history this presentation state was last
     /// reconciled against. Transient.
     retained_datasets: HashSet<DatasetId>,
     retained_history_revision: Option<crate::state::RunHistoryRevision>,
-    /// Device-local pane selection for each project-owned result document.
-    ///
-    /// Kept per document for the same reason page selection is: which pane a
-    /// reader is working in is a fact about one document. A single global
-    /// selection meant activating a pane in one document selected the pane
-    /// with the same serial in every other open one, and switching documents
-    /// forgot where the reader had been.
-    persistent_document_panes: std::collections::HashMap<crate::product::ResultDocumentId, PaneId>,
     /// Why Latest tracking could not advance one document onto one candidate
     /// dataset.
     ///
@@ -1868,214 +1633,22 @@ pub struct ResultsState {
     /// refused, so a genuinely new run is still tried once. Transient.
     latest_retarget_failures:
         std::collections::HashMap<crate::product::ResultDocumentId, (DatasetId, String)>,
-    /// Exact retained pane currently projected through a native renderer.
-    /// This scopes otherwise session-only plot state and routes edits back to
-    /// the project-owned visualization document.
-    persistent_pane_context: Option<PersistentPaneContext>,
-    /// Markers of the persistent pane currently being projected.
-    ///
-    /// Single-pane and wholesale-replaced: panes project, render and capture
-    /// strictly in sequence, and the active pane re-projects last, so the
-    /// stage readout always observes the pane the reader is working in. Each
-    /// entry still names its own document and pane so a read can verify
-    /// against `persistent_pane_context` rather than trust the cadence.
-    ///
-    /// Transient by construction — it is a projection of retained document
-    /// entities, never a second owner of them, and is never serialized.
-    document_markers: Vec<DocumentMarker>,
-    /// The A│B cursor tool.
-    pub cursor_tool: CursorTool,
-    /// Polar sheet controls: the network term, the radius ruling, the decade
-    /// marks and the normalization.
-    pub(crate) polar: rspice_results_ui::polar::PolarSheetState,
-    /// Contribution sheet control: the frequency a swept study is read at.
-    pub(crate) study: rspice_results_ui::sensitivity::study::SensitivitySheetState,
     network_matrix: network_matrix::NetworkMatrixState,
-    /// Scatter sheet controls and the brushed trial selection.
-    pub(crate) scatter: rspice_results_ui::scatter::ScatterSheetState,
-    /// Box/violin sheet controls: the grouping, the margin scale, the body
-    /// and the whisker rule.
-    pub(crate) box_violin: rspice_results_ui::box_violin::BoxViolinSheetState,
-    /// The marker tool.
-    pub marker_tool: MarkerTool,
-    /// Primary plot pointer tool shown in the 31 px instrument strip.
-    plot_tool: ResultPlotTool,
-    /// Exact retained waveform selected from a trace chip. This is only an
-    /// identity into the canonical result dataset; it never copies samples or
-    /// creates a second result owner.
-    pub(crate) selected_trace: Option<SelectedResultTrace>,
-    /// Exact non-waveform Data Browser row selected for inspection. Like
-    /// `selected_trace`, this is only an immutable source identity.
-    pub(crate) selected_result_artifact: Option<ResultArtifactPresentationKey>,
-    /// How the Events sheet spells a bus word. One per sheet, like the polar
-    /// sheet's radius ruling: a radix is how the reader is reading, not a
-    /// property of any one declaration.
-    pub(crate) event_bus_radix: BusRadix,
-    /// Buses whose member rows the Events sheet lists beside the bus row.
-    ///
-    /// Keyed by bus name alone rather than by analysis: a reader who opened
-    /// `count[1:0]` to its bits wants the same of the same bus in the next
-    /// run, and a declaration that is not in the active analysis contributes
-    /// no rows either way.
-    pub(crate) expanded_event_buses: std::collections::BTreeSet<String>,
-    /// User-placed markers across every waveform strip.
-    pub markers: Vec<ResultMarker>,
-    /// Signals starred in the results data browser. A deliberate,
-    /// session-scoped mark like `markers`, keyed by immutable dataset, stable
-    /// analysis identity, and retained waveform name. Equal names in another
-    /// run cannot inherit this mark.
-    pub(crate) favorite_signals: HashSet<SourceWaveformPresentationKey>,
-    /// Personal favorites for typed non-waveform quantities.
-    pub(crate) favorite_result_artifacts: HashSet<ResultArtifactPresentationKey>,
-    /// Most-recent-first stable waveform identities the user selected or
-    /// revealed, deduplicated and bounded: the browser's Recent scope is this
-    /// order.
-    pub(crate) recent_signals: Vec<SourceWaveformPresentationKey>,
-    /// Most-recent-first typed artifact identities.
-    pub(crate) recent_result_artifacts: Vec<ResultArtifactPresentationKey>,
-    /// Quantities check-marked in the browser for a batch action. Session
-    /// state like the marks above it; the immutable dataset never sees it and
-    /// equal names in another retained analysis are not selected implicitly.
-    pub(crate) checked_result_quantities: HashSet<ResultBrowserSelectionKey>,
-    /// Stable end point for Shift+click / Shift+Arrow range selection in the
-    /// filtered browser inventory. The range itself is recomputed from the
-    /// current deterministic row order, so filtering never leaves an ordinal
-    /// pointing at a different quantity.
-    pub(crate) browser_range_anchor: Option<ResultBrowserSelectionKey>,
-    /// Highest allocated or restored quick-marker ID in this live project.
-    /// Restoring markers can raise it; deleting markers never lowers it.
-    next_marker_id: u32,
-    /// Allocation history owned by the current Results draft. Revert restores
-    /// this value while the live allocator above retains its monotonic floor.
-    marker_allocation_high_water: u32,
-    /// The open marker-purpose dialog's uncommitted edit, if any.
-    ///
-    /// Editing is transactional: nothing reaches the marker until Apply, so
-    /// a half-typed label can always be abandoned. Reclassifying a marker is
-    /// a decision, not a side effect of clicking its kind.
-    pub(super) marker_edit: Option<MarkerEditDraft>,
-    /// Whether the stage-level cursor/marker dock is collapsed. Session-only
-    /// presentation state; retained result documents never serialize it.
-    pub readout_collapsed: bool,
-    /// A/B cursors (data-space X of the strip they live on).
-    pub cursors: CursorPair,
-    /// Dataset-bound strip identity the cursors were placed on.
-    pub cursor_strip: Option<usize>,
-    /// Exact visible trace nearest cursor A when A was placed.
-    pub(super) cursor_a_anchor: Option<WaveformPresentationKey>,
-    /// Unit-scoped waveform pane receiving instrument actions.
-    pub(super) active_wave_pane: Option<WavePanePresentationKey>,
-    /// Horizontal cursor, bound to the pane whose Y axis owns its value.
-    pub(super) horizontal_cursor: Option<HorizontalWaveCursor>,
-    /// Unit-scoped panes the user put on a logarithmic Y axis.
-    ///
-    /// This lived in egui's persisted memory under a hand-built id, which put
-    /// a project-scoped presentation decision outside every owner that knows
-    /// about projects: `clear_project_scoped_state` could not reach it, the
-    /// project file could not carry it, and it accumulated an entry for every
-    /// dataset the user ever opened. It is the same class of fact as a marker
-    /// and it is kept the same way.
-    pub(crate) log_y_panes: HashSet<WavePanePresentationKey>,
-    /// Draw exact project specification bounds compatible with visible axes.
-    pub(super) show_spec_limits: bool,
-    /// Draw derived min/max curves only when retained family samples exist.
-    pub(super) show_family_envelope: bool,
-    /// Draw unlabeled minor subdivisions between authoritative major ticks.
-    pub(super) show_minor_grid: bool,
-    /// Share the same A/B cursor positions across every compatible waveform
-    /// strip instead of scoping them to `cursor_strip`.
-    pub linked_cursors: bool,
-    /// Decimation envelope cache.
-    pub cache: DecimationCache,
-    /// Derived dB/phase series cache.
-    pub derived: DerivedSeries,
     /// Exact retained history and display version behind waveform caches.
     wave_cache_source: Option<(crate::state::RunHistoryRevision, u64)>,
     /// Fingerprint-keyed strip-model cache for the waves viewer.
     models: waves::ModelsCache,
-    /// Presentation-only exact family rows selected by Visualization Studio.
-    /// Source datasets are never modified by this projection.
-    pub(crate) sample_selection: Option<SourceSampleSelection>,
-    /// Session-only visibility overrides for exact family group traces. These
-    /// are presentation state and never alter source WaveformData visibility.
-    hidden_family_traces: HashSet<waves::FamilyTraceVisibilityKey>,
-    /// Session-only source-waveform visibility overrides for quick views.
-    ///
-    /// A missing key means "use the immutable dataset default". Keeping this
-    /// tri-state representation allows a source that defaults hidden to be
-    /// revealed without writing into solver-owned result data.
-    waveform_visibility: HashMap<SourceWaveformPresentationKey, bool>,
-    /// Strips hidden via the strip-close action.
-    pub hidden_strips: HashSet<AnalysisPresentationKey>,
-    /// Strip currently maximized via the strip action, if any.
-    pub maximized_strip: Option<AnalysisPresentationKey>,
-    /// Cached FFT display arrays for the active spectrum revision.
-    pub fft_series: Option<FftSeries>,
     /// Cached Bode margins + extremes for the active data version.
     pub bode: Option<BodeDerived>,
     /// Cached Nyquist stability numbers for the active data version.
     pub nyquist: Option<nyquist::NyquistDerived>,
-    /// Baked EYE density texture for the active eye revision and size.
-    pub eye_texture: Option<EyeTexture>,
     /// `simulation.data_version` last seen by the workspace; when it
     /// advances, cursors are cleared so they never report stale data.
     seen_version: u64,
-    /// Zoom/pan overrides per plot, keyed by stable plot identity. Survives
-    /// re-runs on purpose — keeping the zoomed window across parameter
-    /// tweaks is how engineers compare iterations.
-    pub views: std::collections::HashMap<(ResultViewer, PlotPresentationKey, usize), PlotView>,
-    /// What each single-canvas sheet's axes actually spanned when it last
-    /// drew, pinned or fitted.
-    ///
-    /// The axis-limit editor has to open on the interval the reader is
-    /// looking at, and an unpinned sheet's interval is derived inside the
-    /// sheet from its own data. The waveform stack is deliberately absent:
-    /// it reports its panes through `active_pane_facts`, which knows which
-    /// of several panes is active — something a last-drawn record cannot.
-    /// Transient.
-    pub(crate) drawn_axes: std::collections::HashMap<ResultViewer, DrawnAxes>,
-    /// A viewport gesture asked for from outside the drawing pass.
-    ///
-    /// Menus, the command palette and shortcuts all reach the workspace
-    /// without an `egui::Context`, and resolving which pane a gesture applies
-    /// to needs the sheet's built models and theme tokens. Queueing here and
-    /// applying inside the viewer well keeps one owner for the gesture
-    /// instead of a second, token-free approximation of pane resolution.
-    pending_view_gesture: Option<ViewGesture>,
-    /// User expression traces per dataset-bound waves strip, evaluated by
-    /// the calculator against that analysis' waveforms.
-    /// Compatibility projection for integrations that still address the
-    /// active run by ordinal. The Results document migrates these entries
-    /// into `analysis_exprs` before use; stable state lives there.
-    pub exprs: std::collections::HashMap<usize, Vec<ExprTrace>>,
-    pub(crate) analysis_exprs: std::collections::HashMap<AnalysisPresentationKey, Vec<ExprTrace>>,
-    /// Bit period the reader has pinned the eye to, per result.
-    ///
-    /// Absent means the eye recovers the period from the waveform. Project
-    /// scoped like the log-axis panes: a rate stated about one project's
-    /// result is not a statement about the next project's, and
-    /// `clear_project_scoped_state` resets it with the rest of the document.
-    pub(crate) eye_timebase:
-        std::collections::HashMap<rspice_results_ui::eye_diagram::EyeTimebaseKey, EyeTimebase>,
-    /// Identity map behind the ordinal compatibility projection.
-    expr_projection_keys: std::collections::HashMap<usize, AnalysisPresentationKey>,
-    /// The inline expression editor, when open (one strip at a time).
-    pub expr_editor: Option<ExprEditor>,
     /// Evaluated expression series, keyed by (stable analysis, expression);
     /// refreshed when the simulation data version advances.
     pub(crate) analysis_expr_cache:
         std::collections::HashMap<(AnalysisPresentationKey, String), ExprSeries>,
-    /// Pinned data point per XY viewer (trace slot, point index) — the
-    /// Smith/Nyquist/PZ click-to-pin readout.
-    pub rf_pin: std::collections::HashMap<ResultViewer, (usize, usize)>,
-    /// Display AC phase traces unwrapped into a continuous curve instead of
-    /// wrapped to ±180°. Applies to the BODE phase trace and the waves
-    /// strips' phase traces; the margin math always reads the raw wrapped
-    /// arrays. Transient — not persisted with the session.
-    pub phase_continuous: bool,
-    /// Screen rect of the document well (docbar excluded) from the last
-    /// rendered frame — the crop window for viewer PNG export. Transient.
-    pub well_rect: Option<egui::Rect>,
     /// The run whose attributed failure sites are currently marked on the
     /// drawing, if any.
     ///
@@ -2083,32 +1656,6 @@ pub struct ResultsState {
     /// keyed by run so selecting a different dataset does not leave a stale
     /// "Clear" offering to unmark objects another run named. Transient.
     pub(crate) marked_failure_run: Option<u64>,
-    /// OP inspector device-name filter (docbar input). Transient.
-    pub op_filter: String,
-    /// OP inspector sort: (column key, descending). Transient.
-    pub op_sort: Option<(String, bool)>,
-    /// The axis-limit field being typed, if any.
-    ///
-    /// Editing is transactional like the marker dialog: the pinned interval
-    /// only moves on commit, so a half-typed bound never rescales the plot
-    /// under the reader's hands. Transient.
-    pub(crate) axis_limit_draft: Option<(ResultViewer, PaneAxis, String)>,
-    /// Open spec-editor rows (None = matrix view). Transient.
-    pub spec_drafts: Option<Vec<SpecDraft>>,
-    /// SOA rule whose evidence the inspector reports. Transient.
-    pub(super) selected_soa_rule: Option<SoaRuleSelection>,
-    /// Verdict filter applied to the SOA rule table. Transient.
-    pub(super) soa_rule_filter: SoaRuleFilter,
-    /// Whether the selected SOA rule's stress history is drawn above the
-    /// table. Off by default: the table is the evidence, the trace is the
-    /// follow-up question.
-    pub(super) soa_stress_trace_open: bool,
-    /// Optimizer candidate whose retained cost and variables the inspector
-    /// reports. Transient.
-    pub(super) selected_optimization: Option<OptimizationSelection>,
-    /// Event whose exact value and provenance the inspector reports.
-    /// Transient.
-    pub(super) selected_digital_event: Option<DigitalEventSelection>,
     /// Merged event order for the analysis the EVENTS sheet last drew.
     pub(super) event_order_cache: Option<EventOrderCache>,
     /// Source-aware retained-evidence verdict per analysis; see
@@ -2125,25 +1672,6 @@ pub struct ResultsState {
     structural_gates: RetainedMemo<(AnalysisPresentationKey, StructuralGate), bool>,
     /// Memoized viewer projections; see [`view_plans::ViewPlans`].
     plans: view_plans::ViewPlans,
-    /// Row/column selection for the TABLE viewer.
-    pub table: rspice_results_ui::table::TableView,
-    /// Last row count the table rendered, as its footer states it. Written
-    /// by the viewer so the docbar reports what is actually on screen
-    /// rather than recomputing a second, possibly different, answer.
-    pub table_status: Option<String>,
-}
-
-/// State of the inline expression editor under a strip header.
-#[derive(Debug, Clone)]
-pub struct ExprEditor {
-    /// The dataset-bound strip the editor is attached to.
-    pub analysis: AnalysisPresentationKey,
-    /// Text being edited.
-    pub text: String,
-    /// Last evaluation error, shown inline.
-    pub error: Option<String>,
-    /// Request keyboard focus on the next frame (set when opened).
-    pub want_focus: bool,
 }
 
 /// One evaluated expression series (owned arrays, cheap to clone).
@@ -2208,7 +1736,7 @@ fn results_keymap(ui: &Ui, app: &mut RSpiceApp) {
         return;
     }
     // Nor may the map fire underneath a dialog.
-    if app.state.ui.results.marker_edit.is_some() {
+    if app.state.ui.results.session.marker_edit.is_some() {
         return;
     }
     if !app.state.simulation.has_results() {
@@ -2249,24 +1777,25 @@ fn results_keymap(ui: &Ui, app: &mut RSpiceApp) {
             request_view_gesture(&mut app.state, gesture);
         }
     }
-    if viewer_uses_wave_stack(app.state.ui.results.viewer)
+    if viewer_uses_wave_stack(app.state.ui.results.session.viewer)
         && consume_command_key(
             ctx,
             &app.state,
             crate::workbench::commands::vocabulary::Command::CycleGrid,
         )
     {
-        app.state.ui.results.show_minor_grid = !app.state.ui.results.show_minor_grid;
+        app.state.ui.results.session.show_minor_grid =
+            !app.state.ui.results.session.show_minor_grid;
     }
 
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::C)) {
-        app.state.ui.results.toggle_cursor_tool();
+        app.state.ui.results.session.toggle_cursor_tool();
     }
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
         hide_selected_trace(&mut app.state);
     }
     // Arrow nudging is a cursor gesture, so it only exists while cursors do.
-    if app.state.ui.results.cursor_readout_active() {
+    if app.state.ui.results.session.cursor_readout_active() {
         let shift = ctx.input(|input| input.modifiers.shift);
         let modifiers = if shift {
             egui::Modifiers::SHIFT
@@ -2350,7 +1879,7 @@ fn hide_selected_trace(state: &mut AppState) {
         });
     if let Some((analysis_index, waveform_index)) = located {
         waves::toggle_visibility(state, analysis_index, waveform_index);
-        state.ui.results.selected_trace = None;
+        state.ui.results.session.selected_trace = None;
     }
 }
 
@@ -2402,7 +1931,7 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     // projection here, not just the full one: the compact split renders the
     // same strips, and a pane context left over from a project-owned document
     // would scope its plot views, cursors and marker edits onto them.
-    app.state.ui.results.leave_persistent_document();
+    app.state.ui.results.session.leave_persistent_document();
     app.state.ui.results.set_sample_selection(None);
     prepare_viewer_state(app);
     let plan_before_docbar = app
@@ -2422,7 +1951,7 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     }
     crate::ui::plot::set_interaction_mode(
         ui.ctx(),
-        app.state.ui.results.plot_tool.interaction_mode(),
+        app.state.ui.results.session.plot_tool.interaction_mode(),
     );
     let plan_after_docbar = app
         .state
@@ -2458,12 +1987,13 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
 /// Specs, and Table use the mockup's 40 px structured-document strip. XF and
 /// Manifest own no controls there and therefore collapse the row completely.
 fn result_stage_bar_visible(state: &AppState) -> bool {
-    (state.ui.results.viewer == ResultViewer::Specs && state.ui.results.spec_drafts.is_some())
+    (state.ui.results.session.viewer == ResultViewer::Specs
+        && state.ui.results.session.spec_drafts.is_some())
         || (state
             .simulation
             .active_run()
             .is_some_and(|run| !run.analyses.is_empty())
-            && viewer_has_sheet_bar(state.ui.results.viewer))
+            && viewer_has_sheet_bar(state.ui.results.session.viewer))
 }
 
 /// Height of the stage's readout strip for the active viewer, or zero.
@@ -2471,7 +2001,7 @@ fn result_stage_bar_visible(state: &AppState) -> bool {
 /// Only the cursor-bearing waveform viewers carry a readout; structured
 /// documents (OP, specs, tables) have no cursor to report.
 fn readout_strip_height(state: &mut AppState) -> f32 {
-    match state.ui.results.viewer {
+    match state.ui.results.session.viewer {
         ResultViewer::Waves
         | ResultViewer::DcSweep
         | ResultViewer::Bode
@@ -2538,7 +2068,7 @@ pub(crate) fn show_embedded_with_sample_selection(
 ) {
     // The Studio stage is a quick-style surface too: it embeds the renderer
     // against the global projection, never against a retained document pane.
-    app.state.ui.results.leave_persistent_document();
+    app.state.ui.results.session.leave_persistent_document();
     app.state.ui.results.set_sample_selection(selection);
     prepare_viewer_state(app);
     show_viewer_well(ui, app, ResultChrome::Full);
@@ -2551,7 +2081,7 @@ pub(crate) fn show_embedded_with_sample_selection(
 pub(super) fn show_persistent_pane_viewer(ui: &mut Ui, app: &mut RSpiceApp, viewer: ResultViewer) {
     app.state.ui.results.set_sample_selection(None);
     prepare_viewer_state(app);
-    app.state.ui.results.viewer = viewer;
+    app.state.ui.results.session.viewer = viewer;
     show_viewer_well(ui, app, ResultChrome::Full);
 }
 
@@ -2569,26 +2099,26 @@ pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
     // costs a comparison unless the budget actually shrank.
     let budget = app.state.workbench.visualization_studio.tile_memory_mib;
     let results = &mut app.state.ui.results;
-    results.cache.set_memory_budget_mib(budget);
+    results.session.cache.set_memory_budget_mib(budget);
     results.synchronize_wave_caches(&app.state.simulation);
     if results.seen_version != data_version {
         results.seen_version = data_version;
-        results.clear_cursors();
-        results.horizontal_cursor = None;
-        results.active_wave_pane = None;
-        results.selected_trace = None;
-        results.selected_result_artifact = None;
+        results.session.clear_cursors();
+        results.session.horizontal_cursor = None;
+        results.session.active_wave_pane = None;
+        results.session.selected_trace = None;
+        results.session.selected_result_artifact = None;
         // Pinned XY readouts index into the old run's point arrays;
         // a same-shape new run would silently relabel them.
-        results.rf_pin.clear();
+        results.session.rf_pin.clear();
         // The merged event order belongs to the retained dataset version.
         results.event_order_cache = None;
         // Runtime operation failures and recovery notices belong to the
         // dataset generation that reported them.
         results.operational_condition = None;
     }
-    results.cache.ensure_version(data_version);
-    results.derived.ensure_version(data_version);
+    results.session.cache.ensure_version(data_version);
+    results.session.derived.ensure_version(data_version);
 
     smith::synchronize_active_analysis(&mut app.state);
     reconcile_active_viewer(&mut app.state);
@@ -2632,14 +2162,7 @@ pub(super) fn record_drawn_axes(
     viewer: ResultViewer,
     response: &crate::ui::plot::PlotResponse,
 ) {
-    results.drawn_axes.insert(viewer, response.axes);
-}
-
-/// Which axis an explicit range applies to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PaneAxis {
-    X,
-    Y,
+    results.session.drawn_axes.insert(viewer, response.axes);
 }
 
 /// The interval the active sheet's axis is showing, pinned or fitted.
@@ -2648,15 +2171,15 @@ pub(crate) fn active_axis_range(
     facts: &waves::ActivePaneFacts,
     axis: PaneAxis,
 ) -> Option<(f64, f64)> {
-    let viewer = state.ui.results.viewer;
+    let viewer = state.ui.results.session.viewer;
     if viewer_uses_wave_stack(viewer) {
         return match axis {
             PaneAxis::X => facts.x_extent,
             PaneAxis::Y => facts.y_extent,
         };
     }
-    let drawn = state.ui.results.drawn_axes.get(&viewer).copied();
-    let pinned = state.ui.results.plot_view(viewer, 0);
+    let drawn = state.ui.results.session.drawn_axes.get(&viewer).copied();
+    let pinned = state.ui.results.session.plot_view(viewer, 0);
     match axis {
         PaneAxis::X => pinned.x.or_else(|| drawn.map(|(x, _)| x)),
         PaneAxis::Y => pinned.y.or_else(|| drawn.map(|(_, y)| y)),
@@ -2674,13 +2197,13 @@ pub(crate) fn active_renderer_axis_range(
     state: &mut AppState,
     axis: PaneAxis,
 ) -> Option<(f64, f64)> {
-    if viewer_uses_wave_stack(state.ui.results.viewer) {
+    if viewer_uses_wave_stack(state.ui.results.session.viewer) {
         let facts = active_pane_facts(&Tokens::get(ctx), state);
         return active_axis_range(state, &facts, axis);
     }
-    let viewer = state.ui.results.viewer;
-    let drawn = state.ui.results.drawn_axes.get(&viewer).copied();
-    let pinned = state.ui.results.plot_view(viewer, 0);
+    let viewer = state.ui.results.session.viewer;
+    let drawn = state.ui.results.session.drawn_axes.get(&viewer).copied();
+    let pinned = state.ui.results.session.plot_view(viewer, 0);
     match axis {
         PaneAxis::X => pinned.x.or_else(|| drawn.map(|(x, _)| x)),
         PaneAxis::Y => pinned.y.or_else(|| drawn.map(|(_, y)| y)),
@@ -2690,11 +2213,11 @@ pub(crate) fn active_renderer_axis_range(
 /// Whether the active sheet's axis is pinned to an explicit interval rather
 /// than fitting its data.
 pub(crate) fn active_axis_is_pinned(state: &AppState, axis: PaneAxis) -> bool {
-    let viewer = state.ui.results.viewer;
+    let viewer = state.ui.results.session.viewer;
     if viewer_uses_wave_stack(viewer) {
         return waves::active_pane_axis_is_pinned(&state.ui.results, axis);
     }
-    let pinned = state.ui.results.plot_view(viewer, 0);
+    let pinned = state.ui.results.session.plot_view(viewer, 0);
     match axis {
         PaneAxis::X => pinned.x.is_some(),
         PaneAxis::Y => pinned.y.is_some(),
@@ -2713,14 +2236,16 @@ pub(crate) fn set_active_axis_range(
     axis: PaneAxis,
     range: Option<(f64, f64)>,
 ) -> bool {
-    let viewer = state.ui.results.viewer;
+    let viewer = state.ui.results.session.viewer;
     if viewer_uses_wave_stack(viewer) {
         return waves::set_active_pane_axis_range(tokens, state, axis, range);
     }
-    let view = state
-        .ui
-        .results
-        .plot_view_pane_mut_for(viewer, PlotPresentationKey::Global(0), 0);
+    let view =
+        state
+            .ui
+            .results
+            .session
+            .plot_view_pane_mut_for(viewer, PlotPresentationKey::Global(0), 0);
     match axis {
         PaneAxis::X => view.x = range,
         PaneAxis::Y => view.y = range,
@@ -2735,8 +2260,8 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     // as the crop window for viewer PNG export.
     let well = ui.available_rect_before_wrap();
     ui.painter().rect_filled(well, 0.0, t.color.canvas_bg);
-    app.state.ui.results.well_rect = Some(well);
-    let viewer = app.state.ui.results.viewer;
+    app.state.ui.results.session.well_rect = Some(well);
+    let viewer = app.state.ui.results.session.viewer;
     let panel = ui.interact(
         well,
         ui.id().with(("result-viewer-panel", viewer)),
@@ -2826,9 +2351,10 @@ const fn viewer_requires_retained_results(viewer: ResultViewer) -> bool {
 fn show_compact_docbar(ui: &mut Ui, state: &mut AppState) {
     let available =
         ResultViewer::all().filter(|&viewer| viewer_availability(state, viewer).available);
-    if let Some(viewer) = chrome::bars::compact_document_bar(ui, state.ui.results.viewer, available)
+    if let Some(viewer) =
+        chrome::bars::compact_document_bar(ui, state.ui.results.session.viewer, available)
     {
-        state.ui.results.viewer = viewer;
+        state.ui.results.session.viewer = viewer;
     }
 }
 
@@ -2845,9 +2371,9 @@ fn show_docbar_for_family(ui: &mut Ui, app: &mut RSpiceApp, family_label: Option
         family_label.is_none_or(|family| family_allows_viewer(family, viewer))
             && viewer_availability(&app.state, viewer).available
     });
-    let actions = chrome::bars::document_bar(ui, app.state.ui.results.viewer, available);
+    let actions = chrome::bars::document_bar(ui, app.state.ui.results.session.viewer, available);
     if let Some(viewer) = actions.viewer {
-        app.state.ui.results.viewer = viewer;
+        app.state.ui.results.session.viewer = viewer;
     }
     if actions.create_document {
         create_document::open(app);
@@ -2865,7 +2391,7 @@ fn show_docbar_for_family(ui: &mut Ui, app: &mut RSpiceApp, family_label: Option
 /// which network term, which two columns, which normalization — and the sheet
 /// is the only place that knows what the retained result can offer.
 fn sheet_domain_controls(ui: &mut Ui, state: &mut AppState) -> bool {
-    let viewer = state.ui.results.viewer;
+    let viewer = state.ui.results.session.viewer;
     let mut context = SheetContext::of(state);
     match viewer {
         ResultViewer::Polar => polar::domain_bar(ui, &mut context),
@@ -2884,6 +2410,7 @@ fn hidden_wave_strip_count(state: &AppState) -> usize {
     state
         .ui
         .results
+        .session
         .hidden_strips
         .iter()
         .filter(|key| key.dataset_id() == run.dataset_id && key.resolve(run).is_some())
@@ -2929,7 +2456,7 @@ fn memoized_incomplete_evidence_reason(
 /// The same question for whichever analysis the active sheet is speaking for.
 fn active_incomplete_evidence_reason(state: &AppState) -> Option<&'static str> {
     let run = state.simulation.active_run()?;
-    if viewer_uses_wave_stack(state.ui.results.viewer) {
+    if viewer_uses_wave_stack(state.ui.results.session.viewer) {
         // The stack draws every analysis of the run at once, so the bar
         // speaks for the run: one failed strip makes the sheet's evidence
         // incomplete even when the strip beside it converged.
@@ -2941,7 +2468,7 @@ fn active_incomplete_evidence_reason(state: &AppState) -> Option<&'static str> {
 }
 
 fn sheet_purpose(state: &AppState) -> String {
-    let viewer = state.ui.results.viewer;
+    let viewer = state.ui.results.session.viewer;
     let detail = viewer_availability(state, viewer).reason;
     match active_incomplete_evidence_reason(state) {
         Some(caution) => format!("{} · {detail} · {caution}", viewer.tab_label()),
@@ -2953,8 +2480,9 @@ fn sheet_purpose(state: &AppState) -> String {
 fn viewer_tabs(ui: &mut Ui, state: &mut AppState) {
     let available =
         ResultViewer::all().filter(|&viewer| viewer_availability(state, viewer).available);
-    if let Some(viewer) = chrome::bars::viewer_tabs(ui, state.ui.results.viewer, available) {
-        state.ui.results.viewer = viewer;
+    if let Some(viewer) = chrome::bars::viewer_tabs(ui, state.ui.results.session.viewer, available)
+    {
+        state.ui.results.session.viewer = viewer;
     }
 }
 
@@ -2975,7 +2503,7 @@ fn family_allows_viewer(family_label: &str, viewer: ResultViewer) -> bool {
 }
 
 fn reconcile_active_viewer(state: &mut AppState) {
-    if viewer_availability(state, state.ui.results.viewer).available {
+    if viewer_availability(state, state.ui.results.session.viewer).available {
         return;
     }
     if state.simulation.active_run().is_none() {
@@ -2984,7 +2512,7 @@ fn reconcile_active_viewer(state: &mut AppState) {
     if let Some(viewer) =
         ResultViewer::all().find(|viewer| viewer_availability(state, *viewer).available)
     {
-        state.ui.results.viewer = viewer;
+        state.ui.results.session.viewer = viewer;
     }
 }
 
@@ -3352,7 +2880,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             return;
         }
     }
-    match state.ui.results.viewer {
+    match state.ui.results.session.viewer {
         ResultViewer::Waves | ResultViewer::DcSweep => waves::right_panel(ui, state),
         ResultViewer::Bode => bode::right_panel(ui, state),
         ResultViewer::Fft => fft::right_panel(ui, state),

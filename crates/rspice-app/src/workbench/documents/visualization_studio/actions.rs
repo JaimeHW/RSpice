@@ -180,8 +180,8 @@ pub(super) fn add_cursor_at_midpoint(app: &mut RSpiceApp) {
             }
             return;
         }
-        app.state.ui.results.cursors.place(x);
-        app.state.ui.results.cursor_strip = app.state.simulation.active_analysis_idx;
+        app.state.ui.results.session.cursors.place(x);
+        app.state.ui.results.session.cursor_strip = app.state.simulation.active_analysis_idx;
     } else {
         app.state.push_user_message(ConsoleMessage::warning(
             "An exact source waveform is required before a cursor can be placed.",
@@ -199,7 +199,7 @@ pub(super) fn fit_active_view(app: &mut RSpiceApp) {
         VisualizationAutoscale::RobustVisible => {
             result_document::request_view_gesture(
                 &mut app.state,
-                result_document::ViewGesture::Fit,
+                rspice_results_ui::session::ViewGesture::Fit,
             );
         }
         VisualizationAutoscale::ExactExtrema => {
@@ -207,7 +207,7 @@ pub(super) fn fit_active_view(app: &mut RSpiceApp) {
                 .expect("fit availability guarantees finite exact waveform extrema");
             result_document::request_view_gesture(
                 &mut app.state,
-                result_document::ViewGesture::SetRanges {
+                rspice_results_ui::session::ViewGesture::SetRanges {
                     x: Some(x),
                     y: Some(y),
                 },
@@ -218,7 +218,7 @@ pub(super) fn fit_active_view(app: &mut RSpiceApp) {
                 .expect("fit availability guarantees exact specification bounds");
             result_document::request_view_gesture(
                 &mut app.state,
-                result_document::ViewGesture::SetRanges {
+                rspice_results_ui::session::ViewGesture::SetRanges {
                     x: Some(x),
                     y: Some(y),
                 },
@@ -243,7 +243,9 @@ pub(super) fn normalize_fit_policy_for_renderer(
 pub(super) fn fit_block_reason(state: &AppState) -> Option<&'static str> {
     match state.workbench.visualization_studio.autoscale {
         VisualizationAutoscale::RobustVisible => None,
-        VisualizationAutoscale::ExactExtrema if state.ui.results.viewer != ResultViewer::Waves => {
+        VisualizationAutoscale::ExactExtrema
+            if state.ui.results.session.viewer != ResultViewer::Waves =>
+        {
             Some("Exact-extrema fitting is available only for the waveform renderer.")
         }
         VisualizationAutoscale::ExactExtrema if exact_extrema_fit(state).is_none() => Some(
@@ -251,7 +253,7 @@ pub(super) fn fit_block_reason(state: &AppState) -> Option<&'static str> {
         ),
         VisualizationAutoscale::ExactExtrema => None,
         VisualizationAutoscale::SpecificationBounds
-            if state.ui.results.viewer != ResultViewer::Waves =>
+            if state.ui.results.session.viewer != ResultViewer::Waves =>
         {
             Some("Specification-bound fitting is available only for the waveform renderer.")
         }
@@ -265,7 +267,7 @@ pub(super) fn fit_block_reason(state: &AppState) -> Option<&'static str> {
 }
 
 pub(super) fn exact_extrema_fit(state: &AppState) -> Option<((f64, f64), (f64, f64))> {
-    if state.ui.results.viewer != ResultViewer::Waves {
+    if state.ui.results.session.viewer != ResultViewer::Waves {
         return None;
     }
     let analysis = state.simulation.active_analysis()?;
@@ -311,7 +313,7 @@ pub(super) fn nondegenerate_range(minimum: f64, maximum: f64) -> (f64, f64) {
 /// case-insensitive measurement/quantity name contract; fuzzy labels or unit
 /// coercion could silently apply an unrelated engineering limit.
 pub(super) fn specification_bound_fit(state: &AppState) -> Option<((f64, f64), (f64, f64))> {
-    if state.ui.results.viewer != ResultViewer::Waves {
+    if state.ui.results.session.viewer != ResultViewer::Waves {
         return None;
     }
     let analysis = state.simulation.active_analysis()?;
@@ -373,9 +375,9 @@ pub(super) fn zoom_active(app: &mut RSpiceApp, factor: f32) {
         return;
     }
     let gesture = if factor >= 1.0 {
-        result_document::ViewGesture::ZoomIn
+        rspice_results_ui::session::ViewGesture::ZoomIn
     } else {
-        result_document::ViewGesture::ZoomOut
+        rspice_results_ui::session::ViewGesture::ZoomOut
     };
     result_document::request_view_gesture(&mut app.state, gesture);
     app.state.workbench.visualization_studio.zoom = next_zoom;

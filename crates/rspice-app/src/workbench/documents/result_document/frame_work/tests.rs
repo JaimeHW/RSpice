@@ -503,7 +503,7 @@ fn large_state() -> AppState {
 
     // The reader has the envelope on: the drawn panes build it, and so does
     // the sheet bar's own gate before them.
-    state.ui.results.show_family_envelope = true;
+    state.ui.results.session.show_family_envelope = true;
     state
 }
 
@@ -576,7 +576,7 @@ fn surfaces() -> Vec<(&'static str, ResultViewer)> {
 }
 
 fn show_surface(viewer: ResultViewer, ui: &mut egui::Ui, state: &mut AppState) {
-    state.ui.results.viewer = viewer;
+    state.ui.results.session.viewer = viewer;
     // The document bar states the sheet's purpose on every frame, including
     // whether the retained evidence validated, and the tab strip decides on
     // every frame which sheets to offer. Both are part of the frame, and both
@@ -674,7 +674,7 @@ fn add_transient_expression(state: &mut AppState) {
         .find(|analysis| analysis.analysis_type == AnalysisType::Transient)
         .expect("the fixture retains a transient analysis");
     let key = super::super::AnalysisPresentationKey::new(run.dataset_id, analysis);
-    state.ui.results.analysis_exprs.insert(
+    state.ui.results.session.analysis_exprs.insert(
         key,
         vec![super::super::ExprTrace {
             text: "V(n0) * 2".to_owned(),
@@ -763,10 +763,10 @@ fn a_new_data_version_rebuilds_every_memo() {
 #[test]
 fn the_table_maps_a_cursor_without_scanning_the_grid() {
     let mut state = state_for(ResultViewer::Table);
-    state.ui.results.table.around_cursor = true;
-    state.ui.results.cursors.place(1.0e-4);
-    state.ui.results.cursors.place(2.0e-4);
-    state.ui.results.cursor_strip = Some(0);
+    state.ui.results.session.table.around_cursor = true;
+    state.ui.results.session.cursors.place(1.0e-4);
+    state.ui.results.session.cursors.place(2.0e-4);
+    state.ui.results.session.cursor_strip = Some(0);
 
     let work = steady_state_work(&mut state, |ui, state| {
         show_surface(ResultViewer::Table, ui, state);
@@ -786,7 +786,7 @@ fn the_table_maps_a_cursor_without_scanning_the_grid() {
 #[test]
 fn corrupted_evidence_closes_the_gates_that_read_the_memo() {
     let mut state = state_for(ResultViewer::Soa);
-    state.ui.results.viewer = ResultViewer::Soa;
+    state.ui.results.session.viewer = ResultViewer::Soa;
     assert!(soa::active_payload_is_valid(&state));
     let purpose = super::super::sheet_purpose(&state);
     assert!(

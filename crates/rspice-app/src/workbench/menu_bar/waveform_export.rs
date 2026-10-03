@@ -1113,7 +1113,7 @@ fn exported_waveforms<'a>(
         .waveforms
         .iter()
         .filter(|waveform| {
-            state.ui.results.waveform_visibility(
+            state.ui.results.session.waveform_visibility(
                 &SourceWaveformPresentationKey::new(analysis_key, &waveform.name),
                 waveform.visible,
             )

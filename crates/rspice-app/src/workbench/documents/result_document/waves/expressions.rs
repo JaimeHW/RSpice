@@ -131,6 +131,7 @@ pub(super) fn expr_editor_row(
     let scope_note = state
         .ui
         .results
+        .session
         .sample_selection
         .as_ref()
         .and_then(|selection| {
@@ -150,6 +151,7 @@ pub(super) fn expr_editor_row(
     let Some(editor) = state
         .ui
         .results
+        .session
         .expr_editor
         .as_mut()
         .filter(|editor| editor.analysis == analysis_key)
@@ -323,20 +325,21 @@ pub(super) fn expr_editor_row(
 
     match action {
         Action::None => {}
-        Action::Cancel => state.ui.results.expr_editor = None,
+        Action::Cancel => state.ui.results.session.expr_editor = None,
         Action::Commit => {
             let text = state
                 .ui
                 .results
+                .session
                 .expr_editor
                 .as_ref()
                 .map(|e| e.text.trim().to_owned())
                 .unwrap_or_default();
             if text.is_empty() {
-                state.ui.results.expr_editor = None;
+                state.ui.results.session.expr_editor = None;
                 return;
             }
-            let sample_selection = state.ui.results.sample_selection.clone();
+            let sample_selection = state.ui.results.session.sample_selection.clone();
             let series = evaluate_expression(
                 &state.simulation,
                 analysis_index,
@@ -364,10 +367,10 @@ pub(super) fn expr_editor_row(
                     if added {
                         state.workspace.content.visualization_documents_dirty = true;
                     }
-                    state.ui.results.expr_editor = None;
+                    state.ui.results.session.expr_editor = None;
                 }
                 Err(error) => {
-                    if let Some(editor) = state.ui.results.expr_editor.as_mut() {
+                    if let Some(editor) = state.ui.results.session.expr_editor.as_mut() {
                         editor.error = Some(error);
                         editor.want_focus = true;
                     }
@@ -406,6 +409,7 @@ pub(super) fn resolve_strip_exprs(
     let exprs: Vec<(usize, ExprTrace)> = state
         .ui
         .results
+        .session
         .analysis_exprs
         .get(&model.analysis_key)
         .map(|list| list.iter().cloned().enumerate().collect())
@@ -414,7 +418,7 @@ pub(super) fn resolve_strip_exprs(
         return Vec::new();
     }
 
-    let sample_selection = state.ui.results.sample_selection.clone();
+    let sample_selection = state.ui.results.session.sample_selection.clone();
     let mut resolved = Vec::new();
     for (slot, expr) in exprs {
         let version = expression_version(
@@ -498,6 +502,7 @@ pub(super) fn resolve_strip_exprs(
             let shape = state
                 .ui
                 .results
+                .session
                 .derived
                 .shape_or(cache_key, || SweepShape::of(&x));
             // Cached beside the shape, under the same identity: the pane's
@@ -507,6 +512,7 @@ pub(super) fn resolve_strip_exprs(
             let y_extremes = state
                 .ui
                 .results
+                .session
                 .derived
                 .range_or(cache_key, || super::super::finite_extremes(&y));
             resolved.push(ResolvedExpr {
@@ -570,6 +576,7 @@ pub(crate) fn toggle_visibility(
     if let Some(context) = state
         .ui
         .results
+        .session
         .persistent_pane_context
         .filter(|context| context.analysis == key.analysis())
     {
@@ -614,7 +621,7 @@ pub(crate) fn toggle_visibility(
                 return;
             }
             if now_visible {
-                state.ui.results.note_recent_signal(key);
+                state.ui.results.session.note_recent_signal(key);
             }
             return;
         }
@@ -625,26 +632,26 @@ pub(crate) fn toggle_visibility(
         .toggle_waveform_visibility(key.clone(), dataset_default);
     // Revealing a trace is a deliberate act; feed the browser's Recent scope.
     if now_visible {
-        state.ui.results.note_recent_signal(key);
+        state.ui.results.session.note_recent_signal(key);
     }
 }
 
 /// Serialize the active Waves cursor readout for the platform clipboard.
 /// This is the Edit → Copy consumer for the Units copied-value policy.
 pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
-    let x = state.ui.results.cursors.a?;
+    let x = state.ui.results.session.cursors.a?;
     state.ui.results.synchronize_wave_caches(&state.simulation);
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
-    let sample_selection = state.ui.results.sample_selection.clone();
-    let hidden_family_traces = state.ui.results.hidden_family_traces.clone();
-    let waveform_visibility = state.ui.results.waveform_visibility.clone();
+    let sample_selection = state.ui.results.session.sample_selection.clone();
+    let hidden_family_traces = state.ui.results.session.hidden_family_traces.clone();
+    let waveform_visibility = state.ui.results.session.waveform_visibility.clone();
     let mut models = build_models(
         &state.simulation,
-        &mut state.ui.results.derived,
+        &mut state.ui.results.session.derived,
         &Tokens::default(),
-        state.ui.results.phase_continuous,
+        state.ui.results.session.phase_continuous,
         presentation.complex_number_display(),
         sample_selection.as_ref(),
         &hidden_family_traces,
@@ -661,12 +668,13 @@ pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
     let model = state
         .ui
         .results
+        .session
         .cursor_strip
         .and_then(|index| models.iter().find(|model| model.analysis_index == index))?;
 
     let mut text = String::new();
     append_copied_cursor(&mut text, "A", x, model, interpolation, quantity_policy);
-    if let Some(b) = state.ui.results.cursors.b {
+    if let Some(b) = state.ui.results.session.cursors.b {
         text.push('\n');
         append_copied_cursor(&mut text, "B", b, model, interpolation, quantity_policy);
     }
@@ -691,7 +699,7 @@ mod tests {
                 ]),
         );
         state.simulation.complete_run();
-        state.ui.results.viewer = super::super::super::ResultViewer::Bode;
+        state.ui.results.session.viewer = super::super::super::ResultViewer::Bode;
         let digest = state
             .simulation
             .active_run()
@@ -717,11 +725,13 @@ mod tests {
         state
             .ui
             .results
+            .session
             .analysis_exprs
             .insert(model.analysis_key, vec![legacy]);
         state
             .ui
             .results
+            .session
             .sync_expression_projection(model.analysis_key, 0);
         let old = resolve_strip_exprs(&mut state, model, &Tokens::default());
         assert_eq!(old[0].y.as_slice(), &[0.0; 2]);

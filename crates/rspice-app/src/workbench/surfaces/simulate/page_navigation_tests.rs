@@ -436,6 +436,7 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
         app.state
             .ui
             .results
+            .session
             .selected_trace
             .as_ref()
             .map(rspice_results_ui::selection::SelectedResultTrace::source_name),
@@ -527,10 +528,10 @@ fn a_saved_output_dc_family_reveals_all_members_without_changing_retained_data()
     let resolved = super::page_outputs::materialized_traces(&app, &output).unwrap();
     assert_eq!(resolved, (0, vec![0, 1]));
     super::page_outputs::open_materialized_traces(&mut app, resolved.0, &resolved.1);
-    assert!(app.state.ui.results.selected_trace.is_none());
+    assert!(app.state.ui.results.session.selected_trace.is_none());
     for (index, key) in keys.iter().enumerate() {
         assert_eq!(
-            app.state.ui.results.waveform_visibility(key, false),
+            app.state.ui.results.session.waveform_visibility(key, false),
             index < 2
         );
     }

@@ -105,9 +105,9 @@ fn presentation_state_follows_analysis_identity_after_reorder() {
     state.simulation.runs = vec![run].into();
     assert!(state.simulation.select_run(0));
 
-    state.ui.results.hidden_strips.insert(first_key);
-    state.ui.results.maximized_strip = Some(second_key);
-    state.ui.results.analysis_exprs.insert(
+    state.ui.results.session.hidden_strips.insert(first_key);
+    state.ui.results.session.maximized_strip = Some(second_key);
+    state.ui.results.session.analysis_exprs.insert(
         first_key,
         vec![ExprTrace {
             text: "V(a) * 2".to_owned(),
@@ -118,9 +118,10 @@ fn presentation_state_follows_analysis_identity_after_reorder() {
     state
         .ui
         .results
+        .session
         .analysis_plot_view_pane_mut(ResultViewer::Waves, first_key, 0)
         .x = Some((0.25, 0.75));
-    state.ui.results.table.analysis = Some(second_key);
+    state.ui.results.session.table.analysis = Some(second_key);
 
     state.simulation.runs[0].analyses.swap(0, 1);
     let reordered = state.simulation.active_run().expect("active retained run");
@@ -132,10 +133,10 @@ fn presentation_state_follows_analysis_identity_after_reorder() {
         second_key.resolve(reordered).map(|(index, _)| index),
         Some(0)
     );
-    assert!(state.ui.results.hidden_strips.contains(&first_key));
-    assert_eq!(state.ui.results.maximized_strip, Some(second_key));
+    assert!(state.ui.results.session.hidden_strips.contains(&first_key));
+    assert_eq!(state.ui.results.session.maximized_strip, Some(second_key));
     assert_eq!(
-        state.ui.results.analysis_exprs[&first_key][0].text,
+        state.ui.results.session.analysis_exprs[&first_key][0].text,
         "V(a) * 2"
     );
     let expression = ResultExpressionPresentationKey::new(first_key, "V(a) * 2");
@@ -144,16 +145,17 @@ fn presentation_state_follows_analysis_identity_after_reorder() {
         .results
         .toggle_expression_visibility_by_key(&state.simulation, &expression)
         .expect("stable expression identity resolves after analysis reorder");
-    assert!(!state.ui.results.analysis_exprs[&first_key][0].visible);
+    assert!(!state.ui.results.session.analysis_exprs[&first_key][0].visible);
     assert_eq!(
         state
             .ui
             .results
+            .session
             .analysis_plot_view_pane(ResultViewer::Waves, first_key, 0)
             .x,
         Some((0.25, 0.75))
     );
-    assert_eq!(state.ui.results.table.analysis, Some(second_key));
+    assert_eq!(state.ui.results.session.table.analysis, Some(second_key));
 }
 
 #[test]
@@ -174,22 +176,23 @@ fn table_and_marker_waveform_identity_survive_waveform_reorder() {
         analysis: analysis_key,
         trace: trace.clone(),
     };
-    state.ui.results.table.analysis = Some(analysis_key);
-    state.ui.results.table.columns = vec![trace];
+    state.ui.results.session.table.analysis = Some(analysis_key);
+    state.ui.results.session.table.columns = vec![trace];
     state
         .ui
         .results
+        .session
         .add_marker(analysis_key, waveform.clone(), "V(a)".to_owned(), 0.5)
         .unwrap();
 
     state.simulation.runs[0].analyses[0].waveforms.swap(0, 1);
     assert_eq!(
-        state.ui.results.table.columns[0].source_name, "V(a)",
+        state.ui.results.session.table.columns[0].source_name, "V(a)",
         "the selected table column must not become the new waveform at slot zero"
     );
-    assert_eq!(state.ui.results.markers[0].anchor, waveform);
+    assert_eq!(state.ui.results.session.markers[0].anchor, waveform);
     assert_eq!(
-        state.ui.results.markers[0].anchor.trace.source_name, "V(a)",
+        state.ui.results.session.markers[0].anchor.trace.source_name, "V(a)",
         "the marker must remain attached to its source signal"
     );
 }
@@ -200,7 +203,7 @@ fn selected_trace_identity_fails_closed_after_active_dataset_changes() {
         WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
     ]);
     let mut state = state_with_analysis(analysis.clone());
-    state.ui.results.selected_trace = Some(
+    state.ui.results.session.selected_trace = Some(
         SelectedResultTrace::from_run_indices(
             state.simulation.active_run().expect("active retained run"),
             0,
@@ -267,7 +270,7 @@ fn dc_sweep_is_a_distinct_mockup_viewer_and_waveform_projection() {
     assert!(viewer_availability(&state, ResultViewer::Waves).available);
     assert!(viewer_availability(&state, ResultViewer::DcSweep).available);
 
-    state.ui.results.viewer = ResultViewer::Waves;
+    state.ui.results.session.viewer = ResultViewer::Waves;
     let presentation = state.ui.preferences.result_presentation_policy();
     let waves = waves::cached_models(
         &state.simulation,
@@ -278,7 +281,7 @@ fn dc_sweep_is_a_distinct_mockup_viewer_and_waveform_projection() {
     assert_eq!(waves.len(), 1);
     assert_eq!(waves[0].analysis_type(), AnalysisType::Transient);
 
-    state.ui.results.viewer = ResultViewer::DcSweep;
+    state.ui.results.session.viewer = ResultViewer::DcSweep;
     let dc = waves::cached_models(
         &state.simulation,
         &mut state.ui.results,
@@ -586,11 +589,11 @@ fn incompatible_active_viewer_falls_back_to_compatible_view() {
             ),
         ]),
     );
-    state.ui.results.viewer = ResultViewer::Hist;
+    state.ui.results.session.viewer = ResultViewer::Hist;
 
     reconcile_active_viewer(&mut state);
 
-    assert_eq!(state.ui.results.viewer, ResultViewer::Waves);
+    assert_eq!(state.ui.results.session.viewer, ResultViewer::Waves);
 }
 
 #[test]
@@ -636,7 +639,7 @@ fn specification_authoring_is_reachable_before_the_first_dataset() {
     assert!(viewer_requires_retained_results(ResultViewer::Op));
 
     let mut state = AppState::default();
-    state.ui.results.viewer = ResultViewer::Specs;
+    state.ui.results.session.viewer = ResultViewer::Specs;
     specs::open_editor(&mut state);
     assert!(result_stage_bar_visible(&state));
 }
@@ -677,7 +680,7 @@ fn structured_result_controls_have_a_reachable_40_px_strip() {
 #[test]
 fn stage_bar_stands_down_without_a_retained_dataset() {
     let empty = AppState::default();
-    assert_eq!(empty.ui.results.viewer, ResultViewer::Waves);
+    assert_eq!(empty.ui.results.session.viewer, ResultViewer::Waves);
     assert!(!result_stage_bar_visible(&empty));
 
     let mut allocated = AppState::default();
@@ -694,7 +697,7 @@ fn hidden_wave_strips_make_the_instrument_restore_control_reachable() {
     let mut state = state_with_analysis(analysis);
     let run = state.simulation.active_run().expect("active retained run");
     let key = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
-    state.ui.results.hidden_strips.insert(key);
+    state.ui.results.session.hidden_strips.insert(key);
 
     let mut other_run = SimulationRun::new(2);
     other_run.add_analysis(AnalysisResult::new(
@@ -707,7 +710,7 @@ fn hidden_wave_strips_make_the_instrument_restore_control_reachable() {
         other_run.analyses.first().expect("other analysis"),
     );
     state.simulation.runs.push(other_run);
-    state.ui.results.hidden_strips.insert(other_key);
+    state.ui.results.session.hidden_strips.insert(other_key);
 
     assert_eq!(hidden_wave_strip_count(&state), 1);
 }
@@ -939,12 +942,12 @@ fn every_newly_reachable_sheet_draws_and_meshes() {
         (events_analysis(), ResultViewer::Events),
     ] {
         let mut state = state_with_analysis(analysis);
-        state.ui.results.viewer = viewer;
+        state.ui.results.session.viewer = viewer;
         if viewer == ResultViewer::Soa {
             // The stress trace is the sheet's only plot; a card that never
             // opens is a card this test never covers.
-            state.ui.results.soa_stress_trace_open = true;
-            state.ui.results.selected_soa_rule = Some(SoaRuleSelection {
+            state.ui.results.session.soa_stress_trace_open = true;
+            state.ui.results.session.selected_soa_rule = Some(SoaRuleSelection {
                 analysis: active_analysis_key(&state),
                 device_id: "M1".to_owned(),
                 parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
@@ -991,7 +994,7 @@ fn every_sheet_paints_an_empty_dataset() {
         let mut app = RSpiceApp::test_instance();
         draw_sheet_and_tessellate(&mut app, viewer);
         assert_eq!(
-            app.state.ui.results.viewer, viewer,
+            app.state.ui.results.session.viewer, viewer,
             "{viewer:?} did not stay selected across its own frame"
         );
     }
@@ -1073,7 +1076,7 @@ fn the_catalog_sheets_fit_their_window_at_both_gates() {
     ] {
         for (width, height) in SHEET_FIT_GATES {
             let mut app = app_showing(viewer);
-            app.state.ui.results.viewer = viewer;
+            app.state.ui.results.session.viewer = viewer;
             for (_, node) in sheet_route_nodes(app, width, height) {
                 if !matches!(
                     node.role(),
@@ -1372,7 +1375,7 @@ fn an_explicit_interval_lands_in_the_store_its_own_sheet_reads() {
     let tokens = Tokens::default();
     let mut app = app_showing(ResultViewer::Waves);
     let analysis = active_analysis_key(&app.state);
-    app.state.ui.results.active_wave_pane = Some(WavePanePresentationKey {
+    app.state.ui.results.session.active_wave_pane = Some(WavePanePresentationKey {
         analysis,
         unit: "V".to_owned(),
     });
@@ -1387,6 +1390,7 @@ fn an_explicit_interval_lands_in_the_store_its_own_sheet_reads() {
         app.state
             .ui
             .results
+            .session
             .analysis_plot_view_pane(ResultViewer::Waves, analysis, 0)
             .x,
         Some((1.0e-6, 4.0e-6)),
@@ -1398,7 +1402,7 @@ fn an_explicit_interval_lands_in_the_store_its_own_sheet_reads() {
     assert!(!active_axis_is_pinned(&app.state, PaneAxis::X));
 
     let mut app = app_showing(ResultViewer::Smith);
-    app.state.ui.results.viewer = ResultViewer::Smith;
+    app.state.ui.results.session.viewer = ResultViewer::Smith;
     assert!(set_active_axis_range(
         &tokens,
         &mut app.state,
@@ -1406,7 +1410,12 @@ fn an_explicit_interval_lands_in_the_store_its_own_sheet_reads() {
         Some((-0.5, 0.5))
     ));
     assert_eq!(
-        app.state.ui.results.plot_view(ResultViewer::Smith, 0).y,
+        app.state
+            .ui
+            .results
+            .session
+            .plot_view(ResultViewer::Smith, 0)
+            .y,
         Some((-0.5, 0.5)),
         "a single-canvas sheet keeps its viewport under the plot ordinal"
     );
@@ -1418,7 +1427,7 @@ fn an_explicit_interval_lands_in_the_store_its_own_sheet_reads() {
 #[test]
 fn the_axis_editor_opens_on_what_the_sheet_actually_drew() {
     let mut app = app_showing(ResultViewer::Smith);
-    app.state.ui.results.viewer = ResultViewer::Smith;
+    app.state.ui.results.session.viewer = ResultViewer::Smith;
     draw_sheet_and_tessellate(&mut app, ResultViewer::Smith);
 
     let facts = ActivePaneFacts {
@@ -1456,7 +1465,7 @@ fn the_axis_editor_opens_on_what_the_sheet_actually_drew() {
 fn every_sheet_draws_at_a_touch_composition() {
     for viewer in ResultViewer::all() {
         let mut app = app_showing(viewer);
-        app.state.ui.results.viewer = viewer;
+        app.state.ui.results.session.viewer = viewer;
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         crate::ui::Theme::default()
@@ -1533,6 +1542,7 @@ fn a_re_run_keeps_the_window_the_reader_zoomed_the_wave_stack_to() {
     state
         .ui
         .results
+        .session
         .analysis_plot_view_pane_mut(ResultViewer::Waves, first, 0)
         .x = Some((0.25, 0.75));
 
@@ -1552,6 +1562,7 @@ fn a_re_run_keeps_the_window_the_reader_zoomed_the_wave_stack_to() {
         state
             .ui
             .results
+            .session
             .analysis_plot_view_pane(ResultViewer::Waves, second, 0)
             .x,
         Some((0.25, 0.75)),
@@ -1584,6 +1595,7 @@ fn pruning_a_run_drops_the_presentation_state_that_named_its_dataset() {
         state
             .ui
             .results
+            .session
             .add_marker(
                 analysis,
                 marker_anchor_for(analysis, name),
@@ -1594,18 +1606,25 @@ fn pruning_a_run_drops_the_presentation_state_that_named_its_dataset() {
         state
             .ui
             .results
+            .session
             .log_y_panes
             .insert(WavePanePresentationKey {
                 analysis,
                 unit: "V".to_owned(),
             });
-        state.ui.results.hidden_strips.insert(analysis);
+        state.ui.results.session.hidden_strips.insert(analysis);
         state
             .ui
             .results
+            .session
             .favorite_signals
             .insert(SourceWaveformPresentationKey::new(analysis, name));
-        state.ui.results.analysis_exprs.insert(analysis, Vec::new());
+        state
+            .ui
+            .results
+            .session
+            .analysis_exprs
+            .insert(analysis, Vec::new());
     }
 
     // Retention discards the second run.
@@ -1618,13 +1637,13 @@ fn pruning_a_run_drops_the_presentation_state_that_named_its_dataset() {
         .results
         .reconcile_retained_datasets(&state.simulation);
 
-    assert_eq!(state.ui.results.markers.len(), 1);
-    assert_eq!(state.ui.results.markers[0].analysis, kept);
-    assert_eq!(state.ui.results.log_y_panes.len(), 1);
-    assert_eq!(state.ui.results.hidden_strips.len(), 1);
-    assert_eq!(state.ui.results.favorite_signals.len(), 1);
-    assert_eq!(state.ui.results.analysis_exprs.len(), 1);
-    assert!(state.ui.results.analysis_exprs.contains_key(&kept));
+    assert_eq!(state.ui.results.session.markers.len(), 1);
+    assert_eq!(state.ui.results.session.markers[0].analysis, kept);
+    assert_eq!(state.ui.results.session.log_y_panes.len(), 1);
+    assert_eq!(state.ui.results.session.hidden_strips.len(), 1);
+    assert_eq!(state.ui.results.session.favorite_signals.len(), 1);
+    assert_eq!(state.ui.results.session.analysis_exprs.len(), 1);
+    assert!(state.ui.results.session.analysis_exprs.contains_key(&kept));
     assert!(
         state
             .ui
@@ -1645,6 +1664,7 @@ fn retained_history_reconciliation_skips_reads_and_tracks_edits_and_replacement(
     state
         .ui
         .results
+        .session
         .add_marker(
             analysis,
             marker_anchor_for(analysis, "V(out)"),
@@ -1684,7 +1704,7 @@ fn retained_history_reconciliation_skips_reads_and_tracks_edits_and_replacement(
         .results
         .reconcile_retained_datasets(&state.simulation);
     assert_eq!(baseline.since().get(DatasetWalk::RetainedHistoryScan), 1);
-    assert_eq!(state.ui.results.markers.len(), 1);
+    assert_eq!(state.ui.results.session.markers.len(), 1);
 
     // Same run count and sequence, different dataset: no old annotation survives.
     state.simulation.runs = transient_state().simulation.runs;
@@ -1694,7 +1714,7 @@ fn retained_history_reconciliation_skips_reads_and_tracks_edits_and_replacement(
         .results
         .reconcile_retained_datasets(&state.simulation);
     assert_eq!(baseline.since().get(DatasetWalk::RetainedHistoryScan), 1);
-    assert!(state.ui.results.markers.is_empty());
+    assert!(state.ui.results.session.markers.is_empty());
 }
 
 /// The defect this pins: the waveform sheets key their viewports by
@@ -1708,14 +1728,16 @@ fn fitting_the_wave_stack_clears_the_viewport_the_sheet_actually_reads() {
     state
         .ui
         .results
+        .session
         .analysis_plot_view_pane_mut(ResultViewer::Waves, key, 0)
         .y = Some((0.0, 1.0));
     state
         .ui
         .results
+        .session
         .analysis_plot_view_pane_mut(ResultViewer::Waves, key, 1)
         .x = Some((0.0, 0.5));
-    state.ui.results.active_wave_pane = Some(WavePanePresentationKey {
+    state.ui.results.session.active_wave_pane = Some(WavePanePresentationKey {
         analysis: key,
         unit: "V".to_owned(),
     });
@@ -1727,6 +1749,7 @@ fn fitting_the_wave_stack_clears_the_viewport_the_sheet_actually_reads() {
             !state
                 .ui
                 .results
+                .session
                 .analysis_plot_view_pane(ResultViewer::Waves, key, ordinal)
                 .is_zoomed(),
             "pane {ordinal} kept a pinned viewport after the strip was fitted"
@@ -1741,9 +1764,10 @@ fn fitting_without_an_active_pane_releases_every_strip() {
     state
         .ui
         .results
+        .session
         .analysis_plot_view_pane_mut(ResultViewer::Waves, key, 0)
         .y = Some((0.0, 1.0));
-    state.ui.results.active_wave_pane = None;
+    state.ui.results.session.active_wave_pane = None;
 
     waves::fit_active_strip(&mut state);
 
@@ -1751,6 +1775,7 @@ fn fitting_without_an_active_pane_releases_every_strip() {
         !state
             .ui
             .results
+            .session
             .analysis_plot_view_pane(ResultViewer::Waves, key, 0)
             .is_zoomed()
     );
@@ -1762,18 +1787,18 @@ fn fitting_without_an_active_pane_releases_every_strip() {
 #[test]
 fn zoom_is_offered_only_where_it_can_be_carried_out() {
     let mut state = transient_state();
-    state.ui.results.viewer = ResultViewer::Waves;
+    state.ui.results.session.viewer = ResultViewer::Waves;
     assert!(zoom_gesture_available(&state));
     assert!(fit_gesture_available(&state));
 
-    state.ui.results.viewer = ResultViewer::Fft;
+    state.ui.results.session.viewer = ResultViewer::Fft;
     assert!(!zoom_gesture_available(&state));
     assert!(
         fit_gesture_available(&state),
         "a single-canvas plot still has a viewport to release"
     );
 
-    state.ui.results.viewer = ResultViewer::Table;
+    state.ui.results.session.viewer = ResultViewer::Table;
     assert!(!fit_gesture_available(&state));
     assert!(!zoom_gesture_available(&state));
 }
@@ -1824,14 +1849,15 @@ fn restored_markers_keep_their_labels_and_advance_the_id_allocator() {
 
     restore_markers(&mut state, vec![marker], None);
 
-    assert_eq!(state.ui.results.markers.len(), 1);
-    assert_eq!(state.ui.results.markers[0].note, "settling");
+    assert_eq!(state.ui.results.session.markers.len(), 1);
+    assert_eq!(state.ui.results.session.markers[0].note, "settling");
     let next = state
         .ui
         .results
+        .session
         .add_marker(
             key,
-            state.ui.results.markers[0].anchor.clone(),
+            state.ui.results.session.markers[0].anchor.clone(),
             "V(out)".to_owned(),
             0.75,
         )
@@ -1881,8 +1907,8 @@ fn markers_for_absent_datasets_are_dropped_on_restore() {
 
     restore_markers(&mut state, vec![kept, dropped], None);
 
-    assert_eq!(state.ui.results.markers.len(), 1);
-    assert_eq!(state.ui.results.markers[0].id, 1);
+    assert_eq!(state.ui.results.session.markers.len(), 1);
+    assert_eq!(state.ui.results.session.markers[0].id, 1);
 }
 
 /// The offering gate has to fail closed on both of its branches.

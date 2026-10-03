@@ -17,7 +17,7 @@ fn qpac_plot_keeps_signed_probe_offsets_on_a_named_linear_axis() {
     assert!(crate::state::ac_bode_summary_for_analysis(&result, 0).is_none());
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(result);
-    state.ui.results.viewer = super::super::super::ResultViewer::Bode;
+    state.ui.results.session.viewer = super::super::super::ResultViewer::Bode;
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
         &state.simulation,
@@ -43,7 +43,7 @@ fn qpxf_plot_keeps_signed_output_frequencies_on_a_named_linear_axis() {
     assert!(crate::state::ac_bode_summary_for_analysis(&result, 0).is_none());
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(result);
-    state.ui.results.viewer = super::super::super::ResultViewer::Bode;
+    state.ui.results.session.viewer = super::super::super::ResultViewer::Bode;
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
         &state.simulation,
@@ -80,7 +80,7 @@ fn swept_current_source() -> AppState {
             model_sources: Vec::new(),
         }],
     });
-    state.ui.results.viewer = super::super::super::ResultViewer::DcSweep;
+    state.ui.results.session.viewer = super::super::super::ResultViewer::DcSweep;
     state
 }
 
@@ -124,7 +124,7 @@ fn a_solved_current_source_sweep_keeps_amperes_without_an_executed_deck() {
     );
     let mut state = AppState::default();
     state.simulation = crate::simulation::controller::dc_history_tests::history(analysis);
-    state.ui.results.viewer = super::super::super::ResultViewer::DcSweep;
+    state.ui.results.session.viewer = super::super::super::ResultViewer::DcSweep;
     assert_eq!(model_axis(&mut state), ("IBIAS".to_owned(), "A".to_owned()));
     let stored = crate::io::capture_simulation_results(&state.simulation);
     crate::io::restore_simulation_results(stored, &mut state.simulation).unwrap();
@@ -226,7 +226,7 @@ fn an_overlay_row_names_the_run_it_came_from() {
         ]),
     );
     state.simulation.overlay_dataset_ids.push(earlier);
-    state.ui.results.cursor_strip = Some(0);
+    state.ui.results.session.cursor_strip = Some(0);
 
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
@@ -262,12 +262,12 @@ fn an_overlay_row_names_the_run_it_came_from() {
 #[test]
 fn the_cursor_table_publishes_what_it_paints() {
     let mut state = super::branches::hysteresis_run();
-    if !state.ui.results.cursor_tool.is_armed() {
-        state.ui.results.toggle_cursor_tool();
+    if !state.ui.results.session.cursor_tool.is_armed() {
+        state.ui.results.session.toggle_cursor_tool();
     }
-    state.ui.results.cursors.place(0.25);
-    state.ui.results.cursors.place(0.75);
-    state.ui.results.readout_collapsed = false;
+    state.ui.results.session.cursors.place(0.25);
+    state.ui.results.session.cursors.place(0.75);
+    state.ui.results.session.readout_collapsed = false;
 
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
@@ -324,14 +324,14 @@ fn qpnoise_result_plot_preserves_physical_frequencies_and_separate_noise_units()
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(result);
     state.simulation.active_analysis_idx = Some(0);
-    state.ui.results.viewer = super::super::super::ResultViewer::NoiseContrib;
+    state.ui.results.session.viewer = super::super::super::ResultViewer::NoiseContrib;
     assert!(super::super::super::view_context::analysis_supports_viewer(
-        state.ui.results.viewer,
+        state.ui.results.session.viewer,
         state.simulation.active_analysis().unwrap()
     ));
     assert!(super::super::super::viewer_is_available(
         &state,
-        state.ui.results.viewer
+        state.ui.results.session.viewer
     ));
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(

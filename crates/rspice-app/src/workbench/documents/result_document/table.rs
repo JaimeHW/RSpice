@@ -77,7 +77,7 @@ fn show_operating_point_table(ui: &mut Ui, state: &mut AppState) -> bool {
 }
 
 fn show_selected_result_artifact_table(ui: &mut Ui, state: &mut AppState) -> bool {
-    let Some(key) = state.ui.results.selected_result_artifact.clone() else {
+    let Some(key) = state.ui.results.session.selected_result_artifact.clone() else {
         return false;
     };
     let Some(plan) = artifact_text(state, &key) else {
@@ -88,20 +88,20 @@ fn show_selected_result_artifact_table(ui: &mut Ui, state: &mut AppState) -> boo
 }
 
 fn place_table_cursor(results: &mut ResultsState, analysis_index: usize, x: f64) {
-    if !results.cursor_tool.is_armed() {
-        results.toggle_cursor_tool();
+    if !results.session.cursor_tool.is_armed() {
+        results.session.toggle_cursor_tool();
     }
-    if results.cursor_strip != Some(analysis_index) {
-        results.clear_cursors();
+    if results.session.cursor_strip != Some(analysis_index) {
+        results.session.clear_cursors();
     }
-    let placing_a = results.cursor_a_is_next();
-    results.cursor_strip = Some(analysis_index);
-    results.cursors.place(x);
+    let placing_a = results.session.cursor_a_is_next();
+    results.session.cursor_strip = Some(analysis_index);
+    results.session.cursors.place(x);
     if placing_a {
         // A table row has no unique trace anchor; retaining the plot's
         // previous anchor would make marker placement claim the wrong
         // waveform identity.
-        results.cursor_a_anchor = None;
+        results.session.cursor_a_anchor = None;
     }
 }
 
@@ -127,7 +127,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     }
 
-    let view = &state.ui.results.table;
+    let view = &state.ui.results.session.table;
     let Some(model) = models
         .iter()
         .find(|model| Some(model.analysis_key()) == view.analysis)
@@ -139,11 +139,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     // Around-cursor mode follows cursor A only when it belongs to this
     // analysis; a cursor on another strip is not a window into this one.
-    let cursor = (state.ui.results.cursor_strip == Some(model.analysis_index()))
-        .then_some(state.ui.results.cursors.a)
+    let cursor = (state.ui.results.session.cursor_strip == Some(model.analysis_index()))
+        .then_some(state.ui.results.session.cursors.a)
         .flatten();
-    let cursor_b = (state.ui.results.cursor_strip == Some(model.analysis_index()))
-        .then_some(state.ui.results.cursors.b)
+    let cursor_b = (state.ui.results.session.cursor_strip == Some(model.analysis_index()))
+        .then_some(state.ui.results.session.cursors.b)
         .flatten();
     let notations = OnceCell::new();
     let Some(response) = viewer::show_samples(
@@ -168,8 +168,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     if let Some(sample) = response.clicked_sample {
         place_table_cursor(&mut state.ui.results, model.analysis_index(), sample);
     }
-    state.ui.results.table.analysis = Some(model.analysis_key());
-    state.ui.results.table_status = Some(response.status);
+    state.ui.results.session.table.analysis = Some(model.analysis_key());
+    state.ui.results.session.table_status = Some(response.status);
 }
 
 pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
@@ -193,11 +193,11 @@ pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
         ui,
         viewer::TableControls {
             models: &models,
-            cursor_strip: state.ui.results.cursor_strip,
-            cursor_a: state.ui.results.cursors.a,
-            status: state.ui.results.table_status.as_deref(),
+            cursor_strip: state.ui.results.session.cursor_strip,
+            cursor_a: state.ui.results.session.cursors.a,
+            status: state.ui.results.session.table_status.as_deref(),
         },
-        &mut state.ui.results.table,
+        &mut state.ui.results.session.table,
         |name| {
             notations
                 .get_or_init(|| bus_notations(&state.workspace, &state.schematic))
@@ -222,7 +222,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         presentation.complex_number_display(),
         &t,
     );
-    let analysis_key = state.ui.results.table.analysis;
+    let analysis_key = state.ui.results.session.table.analysis;
     let Some(model) = models
         .iter()
         .find(|model| Some(model.analysis_key()) == analysis_key)
@@ -321,32 +321,32 @@ mod tests {
     fn row_activation_places_a_and_b_at_exact_samples() {
         let mut state = AppState::default();
         place_table_cursor(&mut state.ui.results, 3, 1.25e-6);
-        assert_eq!(state.ui.results.cursor_strip, Some(3));
-        assert_eq!(state.ui.results.cursors.a, Some(1.25e-6));
-        assert_eq!(state.ui.results.cursors.b, None);
+        assert_eq!(state.ui.results.session.cursor_strip, Some(3));
+        assert_eq!(state.ui.results.session.cursors.a, Some(1.25e-6));
+        assert_eq!(state.ui.results.session.cursors.b, None);
 
         place_table_cursor(&mut state.ui.results, 3, 8.5e-6);
-        assert_eq!(state.ui.results.cursors.a, Some(1.25e-6));
-        assert_eq!(state.ui.results.cursors.b, Some(8.5e-6));
+        assert_eq!(state.ui.results.session.cursors.a, Some(1.25e-6));
+        assert_eq!(state.ui.results.session.cursors.b, Some(8.5e-6));
 
         place_table_cursor(&mut state.ui.results, 3, 4.0e-6);
-        assert_eq!(state.ui.results.cursors.a, Some(4.0e-6));
-        assert_eq!(state.ui.results.cursors.b, None);
+        assert_eq!(state.ui.results.session.cursors.a, Some(4.0e-6));
+        assert_eq!(state.ui.results.session.cursors.b, None);
     }
 
     #[test]
     fn row_activation_rearms_and_rebinds_the_cursor_without_stale_b() {
         let mut state = AppState::default();
-        state.ui.results.toggle_cursor_tool();
-        assert!(!state.ui.results.cursor_tool.is_armed());
+        state.ui.results.session.toggle_cursor_tool();
+        assert!(!state.ui.results.session.cursor_tool.is_armed());
 
         place_table_cursor(&mut state.ui.results, 1, 1.0);
         place_table_cursor(&mut state.ui.results, 1, 2.0);
         place_table_cursor(&mut state.ui.results, 2, 9.0);
 
-        assert!(state.ui.results.cursor_tool.is_armed());
-        assert_eq!(state.ui.results.cursor_strip, Some(2));
-        assert_eq!(state.ui.results.cursors.a, Some(9.0));
-        assert_eq!(state.ui.results.cursors.b, None);
+        assert!(state.ui.results.session.cursor_tool.is_armed());
+        assert_eq!(state.ui.results.session.cursor_strip, Some(2));
+        assert_eq!(state.ui.results.session.cursors.a, Some(9.0));
+        assert_eq!(state.ui.results.session.cursors.b, None);
     }
 }

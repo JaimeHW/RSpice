@@ -28,6 +28,7 @@ pub mod report;
 pub mod scatter;
 pub mod selection;
 pub mod sensitivity;
+pub mod session;
 pub mod smith_chart;
 pub mod soa;
 pub mod specs;

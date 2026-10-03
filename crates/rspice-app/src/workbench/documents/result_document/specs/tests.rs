@@ -313,7 +313,7 @@ fn authored_plan_measurements_editor_commits_the_active_plan_definition() {
     draft.primary_limit = "20".to_owned();
     draft.secondary_limit = "40".to_owned();
     draft.unit = "dB".to_owned();
-    state.ui.results.spec_drafts = Some(vec![draft]);
+    state.ui.results.session.spec_drafts = Some(vec![draft]);
 
     assert!(apply_drafts(&mut state));
 
@@ -347,7 +347,7 @@ fn authored_plan_measurements_editor_commits_the_active_plan_definition() {
             .revision()
             > source_revision
     );
-    assert!(state.ui.results.spec_drafts.is_none());
+    assert!(state.ui.results.session.spec_drafts.is_none());
 }
 
 #[test]
@@ -396,7 +396,7 @@ fn governed_editor_preserves_identity_source_waiver_producer_and_equality_kind()
         .replace_active_specification_definitions(plan_id, vec![definition]);
 
     super::open_editor(&mut state);
-    state.ui.results.spec_drafts.as_mut().unwrap()[0].requirement_name =
+    state.ui.results.session.spec_drafts.as_mut().unwrap()[0].requirement_name =
         "Input-referred offset".to_owned();
     assert!(apply_drafts(&mut state));
 

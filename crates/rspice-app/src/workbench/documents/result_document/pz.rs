@@ -50,30 +50,30 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let results = &mut state.ui.results;
     let viewer = super::ResultViewer::PoleZero;
-    let mut plot_view = results.plot_view(viewer, 0);
-    let mut pin = results.rf_pin.get(&viewer).copied();
+    let mut plot_view = results.session.plot_view(viewer, 0);
+    let mut pin = results.session.rf_pin.get(&viewer).copied();
     if let Some(response) = view::show(
         ui,
         data.as_ref(),
         &mut plot_view,
         &mut pin,
-        &mut results.cache,
+        &mut results.session.cache,
         &quantity_policy,
     ) {
         if response.fit_clicked {
-            results.reset_plot_view(viewer, 0);
+            results.session.reset_plot_view(viewer, 0);
         }
         super::record_drawn_axes(results, viewer, &response.plot);
         if response.plot.view.any() {
-            *results.plot_view_mut(viewer, 0) = plot_view;
+            *results.session.plot_view_mut(viewer, 0) = plot_view;
         }
         if response.plot.response.clicked() {
             match pin {
                 Some(hit) => {
-                    results.rf_pin.insert(viewer, hit);
+                    results.session.rf_pin.insert(viewer, hit);
                 }
                 None => {
-                    results.rf_pin.remove(&viewer);
+                    results.session.rf_pin.remove(&viewer);
                 }
             }
         }

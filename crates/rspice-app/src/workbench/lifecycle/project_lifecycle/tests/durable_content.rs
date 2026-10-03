@@ -96,6 +96,7 @@ impl Annotation {
         match self {
             Self::Marker => {
                 results
+                    .session
                     .add_marker(
                         key,
                         marker_anchor_for(key, "V(out)"),
@@ -105,7 +106,7 @@ impl Annotation {
                     .unwrap();
             }
             Self::LogAxis => {
-                results.log_y_panes.insert(WavePanePresentationKey {
+                results.session.log_y_panes.insert(WavePanePresentationKey {
                     analysis: key,
                     unit: "V".to_owned(),
                 });
@@ -164,6 +165,7 @@ fn result_log_axis_presentation_has_canonical_order_after_restore() {
         state
             .ui
             .results
+            .session
             .log_y_panes
             .insert(WavePanePresentationKey {
                 analysis: key,
@@ -276,10 +278,11 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
         // Save acceptance compares against the actual published snapshot.
         // A later annotation must remain dirty even if an earlier write finishes.
         annotation.add(&mut state.ui.results, &state.simulation, key);
-        state.ui.results.log_y_panes.clear();
+        state.ui.results.session.log_y_panes.clear();
         state
             .ui
             .results
+            .session
             .add_marker(
                 key,
                 marker_anchor_for(key, "V(out)"),

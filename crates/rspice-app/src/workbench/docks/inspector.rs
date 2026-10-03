@@ -26,10 +26,11 @@ use crate::state::{CellViewRef, Component, ComponentType, ViewType, explicit_com
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::DesignCheckStatus;
+use crate::workbench::documents::result_document::analysis_evidence_failure;
 use crate::workbench::documents::result_document::manifest::active_manifest;
-use crate::workbench::documents::result_document::{PaneAxis, analysis_evidence_failure};
 use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
 use crate::workbench::{AppState, MessageId, RSpiceApp, ResultViewer};
+use rspice_results_ui::session::PaneAxis;
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
@@ -343,7 +344,10 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
             // A result sheet's context panel is named by the sheet it is
             // reading, the way every other workspace names its subject.
             Workspace::Results => {
-                format!("{} details", app.state.ui.results.viewer.tab_label())
+                format!(
+                    "{} details",
+                    app.state.ui.results.session.viewer.tab_label()
+                )
             }
             _ => app.state.workbench.workspace.inspector_title().to_owned(),
         }
@@ -1222,6 +1226,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         .state
         .ui
         .results
+        .session
         .selected_result_artifact
         .clone()
         .filter(|key| key.resolve(&app.state.simulation.runs).is_some());
@@ -1283,7 +1288,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     // the trace and pane controls, matching the upgraded mockup's hierarchy
     // without creating a second result-data owner here.
     ui.add_space(8.0);
-    if app.state.ui.results.viewer != ResultViewer::Manifest {
+    if app.state.ui.results.session.viewer != ResultViewer::Manifest {
         crate::workbench::documents::result_document::right_panel(ui, &mut app.state);
     }
 
@@ -1594,7 +1599,7 @@ fn active_result_pane(
     app: &mut RSpiceApp,
     selected: Option<&rspice_results_ui::selection::SelectedResultTrace>,
 ) {
-    let viewer = app.state.ui.results.viewer;
+    let viewer = app.state.ui.results.session.viewer;
     // A pure evidence table — OP, specs, samples, events, the manifest — has
     // no drawn pane at all. Reporting one would have the inspector state a
     // view, a fit and a limit mask for a sheet that has none of them.
@@ -1632,7 +1637,7 @@ fn active_result_pane(
     // store here reported "automatic fit" over a pinned pane and left the fit
     // button permanently disabled.
     let wave_stack = crate::workbench::documents::result_document::viewer_uses_wave_stack(viewer);
-    let view = app.state.ui.results.plot_view(viewer, 0);
+    let view = app.state.ui.results.session.plot_view(viewer, 0);
     let pinned = if wave_stack {
         facts.pinned.unwrap_or(false)
     } else {
@@ -1692,7 +1697,7 @@ fn active_result_pane(
     {
         crate::workbench::documents::result_document::request_view_gesture(
             &mut app.state,
-            crate::workbench::documents::result_document::ViewGesture::Fit,
+            rspice_results_ui::session::ViewGesture::Fit,
         );
     }
 }
@@ -1713,11 +1718,11 @@ fn axis_limit_row(
         active_axis_is_pinned, active_axis_range, set_active_axis_range,
     };
 
-    let viewer = app.state.ui.results.viewer;
+    let viewer = app.state.ui.results.session.viewer;
     let current = active_axis_range(&app.state, facts, axis);
     let pinned = active_axis_is_pinned(&app.state, axis);
     let committed = current.map(format_axis_range).unwrap_or_default();
-    let mut text = match app.state.ui.results.axis_limit_draft.as_ref() {
+    let mut text = match app.state.ui.results.session.axis_limit_draft.as_ref() {
         Some((draft_viewer, draft_axis, text))
             if *draft_viewer == viewer && *draft_axis == axis =>
         {
@@ -1742,7 +1747,7 @@ fn axis_limit_row(
     );
 
     if edit.changed() {
-        app.state.ui.results.axis_limit_draft = Some((viewer, axis, text.clone()));
+        app.state.ui.results.session.axis_limit_draft = Some((viewer, axis, text.clone()));
     }
     // Commit on Enter or on leaving the field, never per keystroke: "1.2" is
     // a legal prefix of "1.2m" and three orders of magnitude away from it.
@@ -1750,16 +1755,16 @@ fn axis_limit_row(
         let tokens = Tokens::get(ui.ctx());
         if text.trim().is_empty() {
             set_active_axis_range(&tokens, &mut app.state, axis, None);
-            app.state.ui.results.axis_limit_draft = None;
+            app.state.ui.results.session.axis_limit_draft = None;
         } else if let Some(range) = parse_axis_range(&text) {
             set_active_axis_range(&tokens, &mut app.state, axis, Some(range));
-            app.state.ui.results.axis_limit_draft = None;
+            app.state.ui.results.session.axis_limit_draft = None;
         }
     }
     if reset.clicked() {
         let tokens = Tokens::get(ui.ctx());
         set_active_axis_range(&tokens, &mut app.state, axis, None);
-        app.state.ui.results.axis_limit_draft = None;
+        app.state.ui.results.session.axis_limit_draft = None;
     }
 }
 

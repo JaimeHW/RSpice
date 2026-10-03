@@ -290,17 +290,18 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
             app.state.workbench.stimulus_browser.clear();
         }
         Workspace::Results => {
-            let viewer = app.state.ui.results.viewer;
+            let viewer = app.state.ui.results.session.viewer;
             app.state
                 .ui
                 .results
+                .session
                 .views
                 .retain(|(candidate, _, _), _| *candidate != viewer);
-            app.state.ui.results.clear_cursors();
-            app.state.ui.results.rf_pin.remove(&viewer);
+            app.state.ui.results.session.clear_cursors();
+            app.state.ui.results.session.rf_pin.remove(&viewer);
             if viewer == crate::workbench::ResultViewer::Waves {
-                app.state.ui.results.hidden_strips.clear();
-                app.state.ui.results.maximized_strip = None;
+                app.state.ui.results.session.hidden_strips.clear();
+                app.state.ui.results.session.maximized_strip = None;
             }
             app.state
                 .workbench

@@ -7,17 +7,21 @@ use rspice_results_ui::fft::view;
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
-    let plot_view = state.ui.results.plot_view(ResultViewer::Fft, 0);
+    let plot_view = state.ui.results.session.plot_view(ResultViewer::Fft, 0);
     let out = view::show(
         ui,
         &mut state.analysis.fft_state,
-        &mut state.ui.results.fft_series,
+        &mut state.ui.results.session.fft_series,
         plot_view,
-        &mut state.ui.results.cache,
+        &mut state.ui.results.session.cache,
         &quantity_policy,
     );
     if out.fit_requested {
-        state.ui.results.reset_plot_view(ResultViewer::Fft, 0);
+        state
+            .ui
+            .results
+            .session
+            .reset_plot_view(ResultViewer::Fft, 0);
     }
     if out.rebuild_failed {
         state.clear_fft_viewer_cache_authority();
@@ -32,6 +36,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             state
                 .ui
                 .results
+                .session
                 .plot_view_mut(ResultViewer::Fft, 0)
                 .apply(&response.view);
         }
@@ -42,7 +47,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     view::right_panel(
         ui,
         &state.analysis.fft_state,
-        &mut state.ui.results.fft_series,
+        &mut state.ui.results.session.fft_series,
         &state.ui.preferences.quantity_presentation_policy(),
     );
 }

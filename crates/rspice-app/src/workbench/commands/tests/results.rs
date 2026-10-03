@@ -16,10 +16,10 @@ fn edit_specifications_opens_the_real_results_editor() {
 
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
     assert_eq!(
-        app.state.ui.results.viewer,
+        app.state.ui.results.session.viewer,
         crate::workbench::ResultViewer::Specs
     );
-    assert!(app.state.ui.results.spec_drafts.is_some());
+    assert!(app.state.ui.results.session.spec_drafts.is_some());
 }
 
 #[test]
@@ -33,7 +33,7 @@ fn generic_results_command_opens_the_workspace_without_a_dataset() {
 
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
     assert_eq!(
-        app.state.ui.results.viewer,
+        app.state.ui.results.session.viewer,
         crate::workbench::ResultViewer::Waves
     );
 }
@@ -58,7 +58,7 @@ fn incompatible_result_viewer_command_is_disabled_and_cannot_navigate() {
 
     assert_eq!(app.state.workbench.workspace, Workspace::Project);
     assert_eq!(
-        app.state.ui.results.viewer,
+        app.state.ui.results.session.viewer,
         crate::workbench::ResultViewer::Waves
     );
     assert!(

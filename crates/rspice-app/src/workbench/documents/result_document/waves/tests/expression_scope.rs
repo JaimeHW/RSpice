@@ -32,7 +32,7 @@ fn fixture(indices: Vec<usize>, text: &str) -> (AppState, Vec<StripModel>) {
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
-        state.ui.results.sample_selection.as_ref(),
+        state.ui.results.session.sample_selection.as_ref(),
         &HashSet::new(),
     );
     (state, models)
@@ -91,7 +91,7 @@ fn empty_family_selection_is_an_error_instead_of_a_successful_empty_trace() {
         &state.simulation,
         0,
         "max(V(out))",
-        state.ui.results.sample_selection.as_ref(),
+        state.ui.results.session.sample_selection.as_ref(),
     )
     .unwrap_err();
     assert!(error.contains("no samples"), "{error}");
@@ -181,7 +181,7 @@ fn restored_expression_and_typed_family_filter_keep_the_selected_measurement() {
 #[test]
 fn family_editor_displays_calculation_scope_inside_a_narrow_pane() {
     let (mut state, models) = fixture(vec![2, 3], "max(V(out))");
-    state.ui.results.expr_editor = Some(ExprEditor {
+    state.ui.results.session.expr_editor = Some(ExprEditor {
         analysis: models[0].analysis_key,
         text: "max(V(out))".to_owned(),
         error: None,

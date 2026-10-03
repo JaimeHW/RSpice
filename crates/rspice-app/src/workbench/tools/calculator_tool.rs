@@ -168,7 +168,8 @@ fn plot_expression(ctx: &Context, app: &mut RSpiceApp) {
     if added {
         app.state.workspace.content.visualization_documents_dirty = true;
     }
-    app.state.ui.results.viewer = crate::workbench::documents::result_document::ResultViewer::Waves;
+    app.state.ui.results.session.viewer =
+        crate::workbench::documents::result_document::ResultViewer::Waves;
     app.state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
@@ -216,7 +217,14 @@ mod tests {
         plot_expression(&ctx, &mut app);
         plot_expression(&ctx, &mut app);
 
-        let traces = app.state.ui.results.exprs.get(&0).expect("trace recorded");
+        let traces = app
+            .state
+            .ui
+            .results
+            .session
+            .exprs
+            .get(&0)
+            .expect("trace recorded");
         assert_eq!(traces.len(), 1, "the same expression plotted twice");
         assert_eq!(traces[0].text, "V(out)/V(in)");
         assert!(app.state.workspace.content.visualization_documents_dirty);
@@ -234,6 +242,6 @@ mod tests {
 
         plot_expression(&ctx, &mut app);
 
-        assert!(app.state.ui.results.exprs.is_empty());
+        assert!(app.state.ui.results.session.exprs.is_empty());
     }
 }

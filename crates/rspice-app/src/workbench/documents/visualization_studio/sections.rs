@@ -37,7 +37,7 @@ impl SectionHost for Host<'_> {
         match value {
             VisualizationAutoscale::RobustVisible => true,
             VisualizationAutoscale::ExactExtrema => {
-                self.0.state.ui.results.viewer == ResultViewer::Waves
+                self.0.state.ui.results.session.viewer == ResultViewer::Waves
             }
             VisualizationAutoscale::SpecificationBounds => {
                 specification_bound_fit(&self.0.state).is_some()
@@ -87,9 +87,9 @@ impl SectionHost for Host<'_> {
         MeasurementsView {
             measurements: &studio.measurements,
             expressions,
-            cursor_a: state.ui.results.cursors.a.is_some(),
-            cursor_b: state.ui.results.cursors.b.is_some(),
-            linked_cursors: state.ui.results.linked_cursors,
+            cursor_a: state.ui.results.session.cursors.a.is_some(),
+            cursor_b: state.ui.results.session.cursors.b.is_some(),
+            linked_cursors: state.ui.results.session.linked_cursors,
             markers: &studio.markers,
             annotations: &studio.annotations,
         }
@@ -192,13 +192,9 @@ pub(super) fn active_analysis_expressions(state: &AppState) -> &[result_document
         .zip(state.simulation.active_analysis_idx)
         .and_then(|(run, index)| Some((run.dataset_id, run.analyses.get(index)?)))
         .and_then(|(dataset_id, analysis)| {
-            state
-                .ui
-                .results
-                .analysis_exprs
-                .get(&result_document::AnalysisPresentationKey::new(
-                    dataset_id, analysis,
-                ))
+            state.ui.results.session.analysis_exprs.get(
+                &result_document::AnalysisPresentationKey::new(dataset_id, analysis),
+            )
         })
         .map_or(&[][..], Vec::as_slice)
 }
@@ -280,7 +276,7 @@ mod tests {
             ResultViewer::Bode,
             ResultViewer::NoiseContrib,
         ] {
-            state.ui.results.viewer = viewer;
+            state.ui.results.session.viewer = viewer;
             assert!(
                 result_document::zoom_gesture_available(&state),
                 "{viewer:?} answers the zoom gesture"
@@ -292,7 +288,7 @@ mod tests {
         }
         // A sheet that owns its own canvas is still not offered the unit-pane
         // gesture, so this is not a blanket enable.
-        state.ui.results.viewer = ResultViewer::Smith;
+        state.ui.results.session.viewer = ResultViewer::Smith;
         assert!(!magnification_available(&state));
     }
 
@@ -346,7 +342,7 @@ mod tests {
 
         assert!(active_analysis_expressions(&state).is_empty());
 
-        state.ui.results.analysis_exprs.insert(
+        state.ui.results.session.analysis_exprs.insert(
             key,
             vec![result_document::ExprTrace {
                 text: "V(out)*2".to_owned(),
@@ -356,7 +352,7 @@ mod tests {
         );
         // The ordinal projection is deliberately left empty: that is the
         // state the section is opened in when no waveform sheet has run.
-        assert!(state.ui.results.exprs.is_empty());
+        assert!(state.ui.results.session.exprs.is_empty());
 
         let expressions = active_analysis_expressions(&state);
         assert_eq!(expressions.len(), 1);

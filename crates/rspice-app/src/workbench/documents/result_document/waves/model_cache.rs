@@ -98,12 +98,12 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
     results.reconcile_expression_projection(simulation);
     let fp = models_fingerprint(
         simulation,
-        results.viewer,
-        results.phase_continuous,
+        results.session.viewer,
+        results.session.phase_continuous,
         complex_display,
-        results.sample_selection.as_ref(),
-        &results.hidden_family_traces,
-        &results.waveform_visibility,
+        results.session.sample_selection.as_ref(),
+        &results.session.hidden_family_traces,
+        &results.session.waveform_visibility,
         t,
     );
     if let Some(cached) = &results.models.cached
@@ -114,23 +114,23 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
     }
     let mut built = build_models(
         simulation,
-        &mut results.derived,
+        &mut results.session.derived,
         t,
-        results.phase_continuous,
+        results.session.phase_continuous,
         complex_display,
-        results.sample_selection.as_ref(),
-        &results.hidden_family_traces,
+        results.session.sample_selection.as_ref(),
+        &results.session.hidden_family_traces,
     );
     apply_waveform_visibility(
         &mut built,
         simulation,
-        &results.waveform_visibility,
-        &results.hidden_family_traces,
+        &results.session.waveform_visibility,
+        &results.session.hidden_family_traces,
     );
     // Only now is it settled which traces the strip draws, so only now can
     // its shared X extent be resolved.
     extent::resolve_x_ranges(&mut built);
-    built.retain(|model| match results.viewer {
+    built.retain(|model| match results.session.viewer {
         ResultViewer::DcSweep => model.analysis_type == AnalysisType::DcSweep,
         ResultViewer::Waves => model.analysis_type.is_time_domain(),
         ResultViewer::Bode => {

@@ -1095,6 +1095,7 @@ fn save_project_to_path_round_trips_result_markers() {
     let anchor = state
         .ui
         .results
+        .session
         .markers
         .first()
         .map(|marker| marker.anchor.clone());
@@ -1105,10 +1106,11 @@ fn save_project_to_path_round_trips_result_markers() {
         state
             .ui
             .results
+            .session
             .add_marker(analysis, waveform_anchor, "V(out)".to_owned(), 1.0)
             .unwrap()
     };
-    if let Some(marker) = state.ui.results.marker_mut(id) {
+    if let Some(marker) = state.ui.results.session.marker_mut(id) {
         marker.note = "settling point".to_owned();
     }
 
@@ -1138,8 +1140,11 @@ fn save_project_to_path_round_trips_result_markers() {
         &mut reopened,
         loaded.file.result_presentation,
     );
-    assert_eq!(reopened.ui.results.markers.len(), 1);
-    assert_eq!(reopened.ui.results.markers[0].note, "settling point");
+    assert_eq!(reopened.ui.results.session.markers.len(), 1);
+    assert_eq!(
+        reopened.ui.results.session.markers[0].note,
+        "settling point"
+    );
 }
 
 /// A logarithmic Y axis is a decision about a dataset, like a marker.
@@ -1189,8 +1194,8 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
         ),
         unit: "A".to_owned(),
     };
-    state.ui.results.log_y_panes.insert(pane.clone());
-    state.ui.results.log_y_panes.insert(orphan.clone());
+    state.ui.results.session.log_y_panes.insert(pane.clone());
+    state.ui.results.session.log_y_panes.insert(orphan.clone());
 
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1219,7 +1224,13 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
     older_file.push(orphan);
     crate::workbench::documents::result_document::restore_log_y_panes(&mut reopened, older_file);
     assert_eq!(
-        reopened.ui.results.log_y_panes.iter().collect::<Vec<_>>(),
+        reopened
+            .ui
+            .results
+            .session
+            .log_y_panes
+            .iter()
+            .collect::<Vec<_>>(),
         vec![&pane],
         "only the pane whose analysis is still retained comes back"
     );

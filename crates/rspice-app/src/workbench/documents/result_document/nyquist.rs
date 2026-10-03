@@ -63,7 +63,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .curve()
             .map(|curve| curve.points.as_slice())
             .unwrap_or_default();
-        let series = &mut state.ui.results.derived;
+        let series = &mut state.ui.results.session.derived;
         let re = series.get_or(
             plot::trace_cache_key(NYQUIST_CACHE_BASE, REAL_SERIES),
             || std::sync::Arc::new(points.iter().map(|p| p.real).collect::<Vec<_>>()),
@@ -91,27 +91,27 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     });
     let results = &mut state.ui.results;
     let viewer = super::ResultViewer::Nyquist;
-    let mut view = results.plot_view(viewer, 0);
-    let mut pin = results.rf_pin.get(&viewer).copied();
+    let mut view = results.session.plot_view(viewer, 0);
+    let mut pin = results.session.rf_pin.get(&viewer).copied();
     if let Some(response) = view::show(
         ui,
         source,
         &mut view,
         &mut pin,
-        &mut results.cache,
+        &mut results.session.cache,
         &quantity_policy,
     ) {
         super::record_drawn_axes(results, viewer, &response);
         if response.view.any() {
-            *results.plot_view_mut(viewer, 0) = view;
+            *results.session.plot_view_mut(viewer, 0) = view;
         }
         if response.response.clicked() {
             match pin {
                 Some(hit) => {
-                    results.rf_pin.insert(viewer, hit);
+                    results.session.rf_pin.insert(viewer, hit);
                 }
                 None => {
-                    results.rf_pin.remove(&viewer);
+                    results.session.rf_pin.remove(&viewer);
                 }
             }
         }

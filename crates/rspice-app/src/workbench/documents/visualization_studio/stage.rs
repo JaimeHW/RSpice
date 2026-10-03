@@ -64,7 +64,7 @@ impl presentation::StageHost for StageHost<'_> {
     fn render(&mut self, ui: &mut Ui, viewer: ResultViewer) {
         let app = &mut *self.app;
         let family_selection = self.family_selection;
-        app.state.ui.results.viewer = viewer;
+        app.state.ui.results.session.viewer = viewer;
         let interaction = match app.state.workbench.visualization_studio.tool {
             ViewerTool::Select => crate::ui::plot::InteractionMode::Select,
             ViewerTool::Pan => crate::ui::plot::InteractionMode::Pan,
@@ -104,10 +104,10 @@ pub(super) fn marker_domain_matches_the_pane(viewer: ResultViewer) -> bool {
 }
 
 pub(super) fn paint_visualization_markers(ui: &Ui, app: &mut RSpiceApp) {
-    if !marker_domain_matches_the_pane(app.state.ui.results.viewer) {
+    if !marker_domain_matches_the_pane(app.state.ui.results.session.viewer) {
         return;
     }
-    let Some(well) = app.state.ui.results.well_rect else {
+    let Some(well) = app.state.ui.results.session.well_rect else {
         return;
     };
     let Some(analysis_index) = app.state.simulation.active_analysis_idx else {
@@ -128,7 +128,7 @@ pub(super) fn paint_visualization_markers(ui: &Ui, app: &mut RSpiceApp) {
     let (x_min, x_max) = result_document::active_renderer_axis_range(
         ui.ctx(),
         &mut app.state,
-        result_document::PaneAxis::X,
+        rspice_results_ui::session::PaneAxis::X,
     )
     .unwrap_or((source_min, source_max));
     presentation::paint_markers(
@@ -227,9 +227,12 @@ pub(super) fn exact_source_rows(state: &AppState) -> Vec<ExactSourceRow> {
         return Vec::new();
     }
     let mut indices = vec![0, count / 2, count - 1];
-    for cursor in [state.ui.results.cursors.a, state.ui.results.cursors.b]
-        .into_iter()
-        .flatten()
+    for cursor in [
+        state.ui.results.session.cursors.a,
+        state.ui.results.session.cursors.b,
+    ]
+    .into_iter()
+    .flatten()
     {
         if let Some(index) = waveform.x[..count]
             .iter()
@@ -549,8 +552,8 @@ pub(super) fn result_entity_rows(state: &AppState) -> Vec<ResultEntityRow> {
         }
     }
     for (label, coordinate) in [
-        ("A", state.ui.results.cursors.a),
-        ("B", state.ui.results.cursors.b),
+        ("A", state.ui.results.session.cursors.a),
+        ("B", state.ui.results.session.cursors.b),
     ] {
         if let Some(coordinate) = coordinate {
             rows.push(ResultEntityRow {

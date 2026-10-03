@@ -803,9 +803,9 @@ fn operating_point_hop_carries_the_clicked_device_into_the_op_inspector() {
     open_operating_point(&mut state);
 
     assert_eq!(state.workbench.workspace, Workspace::Results);
-    assert_eq!(state.ui.results.viewer, ResultViewer::Op);
+    assert_eq!(state.ui.results.session.viewer, ResultViewer::Op);
     assert_eq!(
-        state.ui.results.op_filter, "M1",
+        state.ui.results.session.op_filter, "M1",
         "the Op inspector must arrive selected on the device the menu named"
     );
 }
@@ -832,13 +832,13 @@ fn operating_point_hop_leaves_the_report_unfiltered_when_the_device_is_unreporte
     // A stale filter is the failure this guards: the previous device's name
     // was left in place, so the inspector opened on another instance's row
     // and read as a hop that had worked.
-    state.ui.results.op_filter = "M1".to_owned();
+    state.ui.results.session.op_filter = "M1".to_owned();
 
     open_operating_point(&mut state);
 
     assert_eq!(state.workbench.workspace, Workspace::Results);
-    assert_eq!(state.ui.results.viewer, ResultViewer::Op);
-    assert!(state.ui.results.op_filter.is_empty());
+    assert_eq!(state.ui.results.session.viewer, ResultViewer::Op);
+    assert!(state.ui.results.session.op_filter.is_empty());
 }
 
 /// The hop selects the operating point, not just the workspace and viewer.
@@ -882,7 +882,7 @@ fn operating_point_hop_selects_the_operating_point_analysis() {
         AnalysisType::DcOp,
         "the hop must select the result its viewer can render"
     );
-    assert_eq!(state.ui.results.op_filter, "M1");
+    assert_eq!(state.ui.results.session.op_filter, "M1");
 }
 
 fn render_context_contents(

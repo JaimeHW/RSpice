@@ -122,7 +122,7 @@ pub(super) fn save_document_properties(
                 Ok(())
             })?;
     }
-    app.state.ui.results.phase_continuous = phase_continuous;
+    app.state.ui.results.session.phase_continuous = phase_continuous;
     app.state.workbench.visualization_studio.significant_digits = significant_digits;
     Ok(())
 }

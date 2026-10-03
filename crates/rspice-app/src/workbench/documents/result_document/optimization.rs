@@ -107,6 +107,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let plot_view = state
         .ui
         .results
+        .session
         .plot_view(super::ResultViewer::Optimization, 0);
     // The convergence axis fits to the retained cost history, which does not
     // change while the reader looks at it. Scanning for its bounds on every
@@ -120,6 +121,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let (cost_min, cost_max) = state
         .ui
         .results
+        .session
         .derived
         .range_or(cost_key, || super::finite_extremes(&view.cost.y))
         .unwrap_or((0.0, 1.0));
@@ -131,6 +133,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             selected: state
                 .ui
                 .results
+                .session
                 .selected_optimization
                 .filter(|selection| selection.analysis == analysis_key)
                 .map(|selection| selection.iteration_index),
@@ -138,23 +141,25 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             plot_view,
             cost_range: (cost_min, cost_max),
         },
-        &mut state.ui.results.cache,
+        &mut state.ui.results.session.cache,
     );
     if response.fit {
         state
             .ui
             .results
+            .session
             .reset_plot_view(super::ResultViewer::Optimization, 0);
     }
     if response.view.any() {
         state
             .ui
             .results
+            .session
             .plot_view_mut(super::ResultViewer::Optimization, 0)
             .apply(&response.view);
     }
     if let Some(index) = response.selected {
-        state.ui.results.selected_optimization = Some(OptimizationSelection {
+        state.ui.results.session.selected_optimization = Some(OptimizationSelection {
             analysis: analysis_key,
             iteration_index: index,
         });
@@ -162,7 +167,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 }
 
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    let Some(selection) = state.ui.results.selected_optimization else {
+    let Some(selection) = state.ui.results.session.selected_optimization else {
         section_header(ui, "Candidate selection", None);
         panel_note(
             ui,
@@ -171,13 +176,13 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         return;
     };
     let Some(run) = state.simulation.active_run() else {
-        state.ui.results.selected_optimization = None;
+        state.ui.results.session.selected_optimization = None;
         section_header(ui, "Candidate selection", None);
         panel_note(ui, "Select a retained optimization analysis and candidate.");
         return;
     };
     let Some((analysis_index, analysis)) = selection.analysis.resolve(run) else {
-        state.ui.results.selected_optimization = None;
+        state.ui.results.session.selected_optimization = None;
         section_header(ui, "Candidate selection", None);
         panel_note(
             ui,
@@ -186,7 +191,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         return;
     };
     if state.simulation.active_analysis_idx != Some(analysis_index) {
-        state.ui.results.selected_optimization = None;
+        state.ui.results.session.selected_optimization = None;
         section_header(ui, "Candidate selection", None);
         panel_note(
             ui,
@@ -203,7 +208,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         converged,
     }) = analysis.family_metadata.as_ref()
     else {
-        state.ui.results.selected_optimization = None;
+        state.ui.results.session.selected_optimization = None;
         section_header(ui, "Candidate selection", None);
         panel_note(
             ui,
@@ -213,7 +218,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     };
     let index = selection.iteration_index;
     if index >= iterations.len() {
-        state.ui.results.selected_optimization = None;
+        state.ui.results.session.selected_optimization = None;
         section_header(ui, "Candidate selection", None);
         panel_note(
             ui,

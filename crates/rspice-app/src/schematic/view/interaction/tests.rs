@@ -2153,10 +2153,10 @@ fn requirement_link_activation_uses_owned_specifications_or_safe_external_url() 
         crate::workbench::state::Workspace::Results
     );
     assert_eq!(
-        state.ui.results.viewer,
+        state.ui.results.session.viewer,
         crate::workbench::ResultViewer::Specs
     );
-    assert!(state.ui.results.spec_drafts.is_some());
+    assert!(state.ui.results.session.spec_drafts.is_some());
 
     state.schematic.document_mut_for_test().design_notes.push(
         crate::state::DesignNote::new(

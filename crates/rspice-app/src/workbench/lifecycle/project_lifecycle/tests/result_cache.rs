@@ -188,6 +188,7 @@ fn result_fingerprint_cache_preserves_signed_zero_in_annotation_edits() {
     state
         .ui
         .results
+        .session
         .add_marker(
             key,
             marker_anchor_for(key, "V(out)"),
@@ -198,7 +199,7 @@ fn result_fingerprint_cache_preserves_signed_zero_in_annotation_edits() {
     let baseline = snapshot(&state).unwrap();
     state.project_lifecycle.accept_project(baseline, None);
     assert!(!has_unsaved_changes(&state));
-    state.ui.results.markers[0].x = -0.0;
+    state.ui.results.session.markers[0].x = -0.0;
     assert!(has_unsaved_changes(&state));
     let current = snapshot(&state).unwrap();
     assert_eq!(
@@ -214,6 +215,6 @@ fn result_fingerprint_cache_preserves_signed_zero_in_annotation_edits() {
             .content_digest(),
         registry::content_digest(&current.file).unwrap()
     );
-    state.ui.results.markers[0].x = 0.0;
+    state.ui.results.session.markers[0].x = 0.0;
     assert!(!has_unsaved_changes(&state));
 }

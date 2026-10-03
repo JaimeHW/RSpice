@@ -647,7 +647,7 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
         "resource rows do not enter command recents"
     );
 
-    app.state.ui.results.viewer = crate::workbench::ResultViewer::Bode;
+    app.state.ui.results.session.viewer = crate::workbench::ResultViewer::Bode;
     let hidden_strip = crate::workbench::documents::result_document::AnalysisPresentationKey::new(
         active_dataset_id,
         &app.state.simulation.runs[1].analyses[1],
@@ -657,8 +657,13 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
             active_dataset_id,
             &app.state.simulation.runs[1].analyses[0],
         );
-    app.state.ui.results.hidden_strips.insert(hidden_strip);
-    app.state.ui.results.maximized_strip = Some(maximized_strip);
+    app.state
+        .ui
+        .results
+        .session
+        .hidden_strips
+        .insert(hidden_strip);
+    app.state.ui.results.session.maximized_strip = Some(maximized_strip);
     let version_before = app.state.simulation.data_version;
     entry.execute(&mut app).expect("open real result signal");
 
@@ -669,11 +674,18 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
     assert!(app.state.simulation.waveforms[0].visible);
     assert!(app.state.simulation.data_version > version_before);
     assert_eq!(
-        app.state.ui.results.viewer,
+        app.state.ui.results.session.viewer,
         crate::workbench::ResultViewer::Waves
     );
-    assert!(!app.state.ui.results.hidden_strips.contains(&hidden_strip));
-    assert_eq!(app.state.ui.results.maximized_strip, None);
+    assert!(
+        !app.state
+            .ui
+            .results
+            .session
+            .hidden_strips
+            .contains(&hidden_strip)
+    );
+    assert_eq!(app.state.ui.results.session.maximized_strip, None);
     assert_eq!(
         app.state.workbench.workspace,
         crate::workbench::state::Workspace::Results

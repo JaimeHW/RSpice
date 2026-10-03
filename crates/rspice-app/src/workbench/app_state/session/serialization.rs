@@ -1275,7 +1275,7 @@ mod tests {
     #[test]
     fn app_state_session_does_not_persist_waves_expr_traces() {
         let mut state = AppState::default();
-        state.ui.results.exprs.insert(
+        state.ui.results.session.exprs.insert(
             0,
             vec![crate::workbench::documents::result_document::ExprTrace {
                 text: "V(out)/V(in)".to_string(),
@@ -1308,7 +1308,7 @@ mod tests {
         let restored: AppState = serde_json::from_str(json).expect("legacy session loads");
 
         assert!(
-            restored.ui.results.exprs.is_empty(),
+            restored.ui.results.session.exprs.is_empty(),
             "legacy project-scoped Waves traces must not be restored into a new session"
         );
     }

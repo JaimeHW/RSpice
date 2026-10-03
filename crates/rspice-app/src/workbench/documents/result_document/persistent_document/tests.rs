@@ -88,25 +88,27 @@ fn idle_frames_of_an_open_persistent_document_hold_cursors_and_trace_selection()
         app.state.simulation.runs[0].dataset_id,
         &app.state.simulation.runs[0].analyses[0],
     );
-    app.state.ui.results.selected_trace = Some(super::super::SelectedResultTrace::from_identity(
-        analysis, "V(out)",
-    ));
+    app.state.ui.results.session.selected_trace = Some(
+        super::super::SelectedResultTrace::from_identity(analysis, "V(out)"),
+    );
     app.state
         .ui
         .results
+        .session
         .rf_pin
         .insert(ResultViewer::Smith, (0, 3));
 
     for frame in 0..3 {
         drive_frame(|ui| show(ui, &mut app, document_id));
         assert!(
-            app.state.ui.results.selected_trace.is_some(),
+            app.state.ui.results.session.selected_trace.is_some(),
             "idle frame {frame} cleared the selected trace"
         );
         assert!(
             app.state
                 .ui
                 .results
+                .session
                 .rf_pin
                 .contains_key(&ResultViewer::Smith),
             "idle frame {frame} cleared the pinned readout"
@@ -208,19 +210,26 @@ fn projecting_a_retained_marker_never_adopts_it_into_the_quick_list() {
     let pane = projected_pane(&mut app.state, document_id);
 
     assert!(
-        app.state.ui.results.markers.is_empty(),
+        app.state.ui.results.session.markers.is_empty(),
         "a retained document marker leaked into the project's quick-view list: {:?}",
         app.state
             .ui
             .results
+            .session
             .markers
             .iter()
             .map(|marker| (marker.id, marker.note.clone()))
             .collect::<Vec<_>>()
     );
-    assert_eq!(app.state.ui.results.document_markers.len(), 1);
-    assert_eq!(app.state.ui.results.document_markers[0].note, "retained");
-    assert_eq!(app.state.ui.results.document_markers[0].pane_id, pane.id);
+    assert_eq!(app.state.ui.results.session.document_markers.len(), 1);
+    assert_eq!(
+        app.state.ui.results.session.document_markers[0].note,
+        "retained"
+    );
+    assert_eq!(
+        app.state.ui.results.session.document_markers[0].pane_id,
+        pane.id
+    );
 }
 
 /// (h.7) A click inside a persistent pane is retained by the document,
@@ -267,11 +276,18 @@ fn placing_a_marker_on_a_persistent_pane_transacts_against_the_document() {
         "retaining a marker advances the document revision"
     );
     assert!(
-        app.state.ui.results.markers.is_empty(),
+        app.state.ui.results.session.markers.is_empty(),
         "a document marker must never enter the project's quick-view list"
     );
     // It is addressable in the frame it was placed in, not one frame later.
-    assert!(app.state.ui.results.document_marker(marker_id).is_some());
+    assert!(
+        app.state
+            .ui
+            .results
+            .session
+            .document_marker(marker_id)
+            .is_some()
+    );
 }
 
 /// (h.7) A document cannot retain a marker on a trace it does not own, so
@@ -289,7 +305,7 @@ fn a_trace_the_document_does_not_retain_falls_back_to_a_quick_marker() {
     .expect("the placement resolves a store");
 
     assert!(matches!(selector, super::super::MarkerSelector::Quick(_)));
-    assert_eq!(app.state.ui.results.markers.len(), 1);
+    assert_eq!(app.state.ui.results.session.markers.len(), 1);
     assert!(retained_markers(&app, document_id).is_empty());
     assert!(
         app.state
@@ -310,9 +326,10 @@ fn quick_markers_are_untouched_by_opening_and_leaving_a_persistent_document() {
         .state
         .ui
         .results
+        .session
         .add_marker(analysis, anchor.clone(), "V(out)".to_owned(), 0.75)
         .unwrap();
-    if let Some(marker) = app.state.ui.results.marker_mut(quick) {
+    if let Some(marker) = app.state.ui.results.session.marker_mut(quick) {
         marker.note = "dataset note".to_owned();
     }
     let pane = projected_pane(&mut app.state, document_id);
@@ -323,23 +340,33 @@ fn quick_markers_are_untouched_by_opening_and_leaving_a_persistent_document() {
         drive_frame(|ui| show(ui, &mut app, document_id));
     }
 
-    assert_eq!(app.state.ui.results.markers.len(), 1);
-    assert_eq!(app.state.ui.results.markers[0].id, quick);
-    assert_eq!(app.state.ui.results.markers[0].note, "dataset note");
+    assert_eq!(app.state.ui.results.session.markers.len(), 1);
+    assert_eq!(app.state.ui.results.session.markers[0].id, quick);
+    assert_eq!(app.state.ui.results.session.markers[0].note, "dataset note");
     assert_eq!(
-        app.state.ui.results.document_markers.len(),
+        app.state.ui.results.session.document_markers.len(),
         1,
         "the drawn pane's retained markers project into the overlay"
     );
-    assert_eq!(app.state.ui.results.document_markers[0].pane_id, pane.id);
+    assert_eq!(
+        app.state.ui.results.session.document_markers[0].pane_id,
+        pane.id
+    );
 
     // Back on a quick surface the overlay is gone and the quick marker is
     // exactly what it was.
     drive_frame(|ui| super::super::show_compact_split(ui, &mut app));
-    assert!(app.state.ui.results.document_markers.is_empty());
-    assert!(app.state.ui.results.persistent_pane_context.is_none());
-    assert_eq!(app.state.ui.results.markers.len(), 1);
-    assert_eq!(app.state.ui.results.markers[0].note, "dataset note");
+    assert!(app.state.ui.results.session.document_markers.is_empty());
+    assert!(
+        app.state
+            .ui
+            .results
+            .session
+            .persistent_pane_context
+            .is_none()
+    );
+    assert_eq!(app.state.ui.results.session.markers.len(), 1);
+    assert_eq!(app.state.ui.results.session.markers[0].note, "dataset note");
 }
 
 /// (h.8) The Studio stage embeds the renderer against the global
@@ -351,14 +378,21 @@ fn the_studio_stage_clears_the_persistent_pane_context_and_overlay() {
     let _pane = projected_pane(&mut app.state, document_id);
     super::super::place_marker(&mut app.state, placement(analysis, &anchor, "V(out)", 0.5))
         .expect("the document retains its own marker");
-    assert!(!app.state.ui.results.document_markers.is_empty());
+    assert!(!app.state.ui.results.session.document_markers.is_empty());
 
     drive_frame(|ui| {
         super::super::show_embedded_with_sample_selection(ui, &mut app, None);
     });
 
-    assert!(app.state.ui.results.persistent_pane_context.is_none());
-    assert!(app.state.ui.results.document_markers.is_empty());
+    assert!(
+        app.state
+            .ui
+            .results
+            .session
+            .persistent_pane_context
+            .is_none()
+    );
+    assert!(app.state.ui.results.session.document_markers.is_empty());
 }
 
 /// (h.2, h.3) The two stores never contend: a document serial cannot
@@ -380,6 +414,7 @@ fn document_marker_serials_never_reach_the_project_save_or_the_quick_allocator()
         .state
         .ui
         .results
+        .session
         .add_marker(analysis, anchor, "V(out)".to_owned(), 0.9)
         .unwrap();
 
@@ -391,11 +426,11 @@ fn document_marker_serials_never_reach_the_project_save_or_the_quick_allocator()
         marker_id.get()
     );
     assert_eq!(
-        app.state.ui.results.markers.len(),
+        app.state.ui.results.session.markers.len(),
         1,
         "the project's saved marker list is exactly the quick markers"
     );
-    assert_eq!(app.state.ui.results.markers[0].id, quick);
+    assert_eq!(app.state.ui.results.session.markers[0].id, quick);
 }
 
 /// (h.5) Apply routes by the store the dialog opened on, even when a quick
@@ -416,7 +451,7 @@ fn the_marker_dialog_applies_to_the_store_it_opened_on() {
     // the two identities collide as integers and can only be told apart
     // by the store they name.
     let colliding = u32::try_from(marker_id.get()).expect("a small test serial");
-    app.state.ui.results.adopt_markers(
+    app.state.ui.results.session.adopt_markers(
         vec![super::super::ResultMarker {
             id: colliding,
             analysis,
@@ -445,11 +480,11 @@ fn the_marker_dialog_applies_to_the_store_it_opened_on() {
         crate::results::visualization_document::PlotMarkerKind::Peak
     );
     assert_eq!(
-        app.state.ui.results.markers[0].note, "quick",
+        app.state.ui.results.session.markers[0].note, "quick",
         "the quick marker that shares the number must be untouched"
     );
     assert_eq!(
-        app.state.ui.results.markers[0].kind,
+        app.state.ui.results.session.markers[0].kind,
         super::super::MarkerKind::Note
     );
 
@@ -461,7 +496,7 @@ fn the_marker_dialog_applies_to_the_store_it_opened_on() {
     )
     .expect("the quick edit commits");
 
-    assert_eq!(app.state.ui.results.markers[0].note, "edited quick");
+    assert_eq!(app.state.ui.results.session.markers[0].note, "edited quick");
     assert_eq!(
         retained_markers(&app, document_id)[0].label,
         "retained",
@@ -483,6 +518,7 @@ fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
         .state
         .ui
         .results
+        .session
         .add_marker(analysis, anchor, "V(out)".to_owned(), 0.9)
         .unwrap();
     let revision_before = app
@@ -495,7 +531,7 @@ fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
 
     super::super::remove_marker(&mut app.state, super::super::MarkerSelector::Quick(quick));
 
-    assert!(app.state.ui.results.markers.is_empty());
+    assert!(app.state.ui.results.session.markers.is_empty());
     assert_eq!(retained_markers(&app, document_id).len(), 1);
     assert_eq!(
         app.state
@@ -511,7 +547,7 @@ fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
     super::super::remove_marker(&mut app.state, document_selector);
 
     assert!(retained_markers(&app, document_id).is_empty());
-    assert!(app.state.ui.results.document_markers.is_empty());
+    assert!(app.state.ui.results.session.document_markers.is_empty());
     assert_ne!(
         app.state
             .workspace
@@ -571,8 +607,8 @@ fn a_saved_projection_of_a_retained_marker_is_dropped_on_load() {
         None,
     );
 
-    assert_eq!(app.state.ui.results.markers.len(), 1);
-    assert_eq!(app.state.ui.results.markers[0].note, "settling");
+    assert_eq!(app.state.ui.results.session.markers.len(), 1);
+    assert_eq!(app.state.ui.results.session.markers[0].note, "settling");
 
     // Current files explicitly own quick markers. Identical annotation text
     // and coordinates no longer identify a legacy document projection.
@@ -584,8 +620,8 @@ fn a_saved_projection_of_a_retained_marker_is_dropped_on_load() {
             ..Default::default()
         },
     );
-    assert_eq!(app.state.ui.results.markers.len(), 2);
-    assert_eq!(app.state.ui.results.markers[0].note, "overshoot");
+    assert_eq!(app.state.ui.results.session.markers.len(), 2);
+    assert_eq!(app.state.ui.results.session.markers[0].note, "overshoot");
 }
 
 #[test]
@@ -615,8 +651,11 @@ fn matching_marker_text_on_another_dataset_is_preserved_on_load() {
         note: retained.label,
     };
     super::super::restore_markers(&mut app.state, vec![marker], None);
-    assert_eq!(app.state.ui.results.markers.len(), 1);
-    assert_eq!(app.state.ui.results.markers[0].analysis, another_analysis);
+    assert_eq!(app.state.ui.results.session.markers.len(), 1);
+    assert_eq!(
+        app.state.ui.results.session.markers[0].analysis,
+        another_analysis
+    );
 }
 
 #[test]
@@ -669,14 +708,15 @@ fn persistent_trace_axis_and_cursor_interactions_commit_without_mutating_results
         app.state.simulation.runs[0].dataset_id,
         &app.state.simulation.runs[0].analyses[0],
     );
-    let view = app
-        .state
-        .ui
-        .results
-        .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis, 0);
+    let view =
+        app.state
+            .ui
+            .results
+            .session
+            .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis, 0);
     view.x = Some((0.2, 0.8));
     view.y = Some((-0.25, 1.25));
-    app.state.ui.results.cursors.a = Some(0.5);
+    app.state.ui.results.session.cursors.a = Some(0.5);
     capture_pane_presentation(&mut app.state, &pane, ResultViewer::Waves);
 
     let document = app
@@ -767,6 +807,7 @@ fn pane_selection_belongs_to_the_document_it_was_made_in() {
         .state
         .ui
         .results
+        .session
         .persistent_document_pane(first)
         .expect("the first document selected a pane");
 
@@ -786,14 +827,19 @@ fn pane_selection_belongs_to_the_document_it_was_made_in() {
     app.state
         .ui
         .results
+        .session
         .select_persistent_document_pane(second, working_pane);
     drive_frame(|ui| show(ui, &mut app, second));
     assert_eq!(
-        app.state.ui.results.persistent_document_pane(second),
+        app.state
+            .ui
+            .results
+            .session
+            .persistent_document_pane(second),
         Some(working_pane)
     );
     assert_eq!(
-        app.state.ui.results.persistent_document_pane(first),
+        app.state.ui.results.session.persistent_document_pane(first),
         Some(first_pane),
         "drawing another document must not restate this one's selection"
     );
@@ -824,54 +870,73 @@ fn closing_and_reopening_a_document_holds_the_readers_place() {
         .state
         .ui
         .results
+        .session
         .persistent_document_pane(document_id)
         .expect("the document selected a pane");
     let page = app
         .state
         .ui
         .results
+        .session
         .persistent_document_page(document_id)
         .expect("the document selected a page");
     let analysis = super::super::AnalysisPresentationKey::new(
         app.state.simulation.runs[0].dataset_id,
         &app.state.simulation.runs[0].analyses[0],
     );
-    app.state.ui.results.selected_trace = Some(super::super::SelectedResultTrace::from_identity(
-        analysis, "V(out)",
-    ));
+    app.state.ui.results.session.selected_trace = Some(
+        super::super::SelectedResultTrace::from_identity(analysis, "V(out)"),
+    );
     app.state
         .ui
         .results
+        .session
         .rf_pin
         .insert(ResultViewer::Smith, (0, 3));
 
     // Close: the reader goes back to the dataset quick view, which leaves
     // the persistent projection behind.
     drive_frame(|ui| super::super::show_compact_split(ui, &mut app));
-    assert!(app.state.ui.results.persistent_pane_context.is_none());
+    assert!(
+        app.state
+            .ui
+            .results
+            .session
+            .persistent_pane_context
+            .is_none()
+    );
 
     // Re-open, and hold it open.
     for frame in 0..3 {
         drive_frame(|ui| show(ui, &mut app, document_id));
         assert!(
-            app.state.ui.results.selected_trace.is_some(),
+            app.state.ui.results.session.selected_trace.is_some(),
             "frame {frame} after re-opening lost the selected trace"
         );
         assert!(
             app.state
                 .ui
                 .results
+                .session
                 .rf_pin
                 .contains_key(&ResultViewer::Smith),
             "frame {frame} after re-opening lost the pinned readout"
         );
     }
     assert_eq!(
-        app.state.ui.results.persistent_document_pane(document_id),
+        app.state
+            .ui
+            .results
+            .session
+            .persistent_document_pane(document_id),
         Some(pane)
     );
     assert_eq!(
-        app.state.ui.results.persistent_document_page(document_id),
+        app.state
+            .ui
+            .results
+            .session
+            .persistent_document_page(document_id),
         Some(page)
     );
 }
@@ -894,19 +959,21 @@ fn zooming_one_unit_pane_of_a_document_never_restates_another_pane_axis() {
     );
 
     // The volts pane — the one the document's vertical axis states.
-    let volts = app
-        .state
-        .ui
-        .results
-        .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis, 0);
+    let volts =
+        app.state
+            .ui
+            .results
+            .session
+            .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis, 0);
     volts.x = Some((0.2, 0.8));
     volts.y = Some((-1.0, 1.0));
     // The amps pane, whose scale the document cannot also state.
-    let amps = app
-        .state
-        .ui
-        .results
-        .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis, 1);
+    let amps =
+        app.state
+            .ui
+            .results
+            .session
+            .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis, 1);
     amps.y = Some((-5.0e-3, 5.0e-3));
 
     capture_pane_presentation(&mut app.state, &pane, ResultViewer::Waves);
@@ -936,6 +1003,7 @@ fn zooming_one_unit_pane_of_a_document_never_restates_another_pane_axis() {
         app.state
             .ui
             .results
+            .session
             .analysis_plot_view_pane(ResultViewer::Waves, analysis, 1)
             .y,
         Some((-5.0e-3, 5.0e-3))
@@ -944,6 +1012,7 @@ fn zooming_one_unit_pane_of_a_document_never_restates_another_pane_axis() {
         app.state
             .ui
             .results
+            .session
             .analysis_plot_view_pane(ResultViewer::Waves, analysis, 0)
             .y,
         Some((-1.0, 1.0)),
@@ -1118,6 +1187,7 @@ fn a_latest_document_that_cannot_retarget_keeps_its_last_good_binding() {
         .state
         .ui
         .results
+        .session
         .persistent_pane_context
         .expect("the document still projects a pane");
     assert_eq!(context.document_id, document_id);

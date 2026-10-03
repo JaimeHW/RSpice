@@ -139,9 +139,9 @@ pub(super) fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
         &mut controls.controls,
         |block, sample| matrix_csv(&matrix, analysis, block, sample),
     ) {
-        context.results.polar.quantity = Some(coefficient.waveform_name);
-        context.results.cursors.a = Some(coefficient.frequency);
-        context.results.cursors.b = None;
+        context.results.session.polar.quantity = Some(coefficient.waveform_name);
+        context.results.session.cursors.a = Some(coefficient.frequency);
+        context.results.session.cursors.b = None;
         controls.open_trace = true;
     }
     let mut open_trace = controls.open_trace;
@@ -398,7 +398,10 @@ pub(crate) mod tests {
             }
             let _ = frame(Vec::new());
             assert!(app.ui.results.network_matrix.open_trace);
-            assert_eq!(app.ui.results.polar.quantity.as_deref(), Some("|Sdd11|"));
+            assert_eq!(
+                app.ui.results.session.polar.quantity.as_deref(),
+                Some("|Sdd11|")
+            );
             assert_eq!(
                 before,
                 app.simulation
@@ -466,7 +469,7 @@ pub(crate) mod tests {
                 let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
                 app.ui.results.network_matrix.bind(key, &app.simulation);
                 app.ui.results.network_matrix.open_trace = true;
-                app.ui.results.polar.quantity = Some("|Sdd11|".to_owned());
+                app.ui.results.session.polar.quantity = Some("|Sdd11|".to_owned());
             }
             let canvas =
                 crate::ui::raster::render(egui::vec2(width as f32, 640.0), |ui, background| {

@@ -166,18 +166,20 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let viewport = state
         .ui
         .results
+        .session
         .plot_view(super::ResultViewer::HarmonicBalance, 0);
     let response = view::show(
         ui,
         &model,
         viewport,
         &quantity_policy,
-        &mut state.ui.results.cache,
+        &mut state.ui.results.session.cache,
     );
     if response.fit {
         state
             .ui
             .results
+            .session
             .reset_plot_view(super::ResultViewer::HarmonicBalance, 0);
     }
     if let Some(response) = response.plot {
@@ -190,6 +192,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             state
                 .ui
                 .results
+                .session
                 .plot_view_mut(super::ResultViewer::HarmonicBalance, 0)
                 .apply(&response.view);
         }

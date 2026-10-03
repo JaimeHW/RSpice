@@ -31,7 +31,7 @@ fn spectrum_models(
     simulation: &SimulationState,
     results: &mut ResultsState,
 ) -> Arc<Vec<StripModel>> {
-    results.viewer = super::super::super::ResultViewer::Bode;
+    results.session.viewer = super::super::super::ResultViewer::Bode;
     cached_models(
         simulation,
         results,
@@ -42,7 +42,7 @@ fn spectrum_models(
 
 fn stats(results: &mut ResultsState, model: &StripModel) -> Option<(f64, f64, f64)> {
     let trace = &model.traces[0];
-    trace_interval_statistics(&mut results.derived, model, trace, None, None)
+    trace_interval_statistics(&mut results.session.derived, model, trace, None, None)
         .ok()
         .map(|stats| (stats.min, stats.max, stats.rms))
 }
@@ -74,7 +74,7 @@ fn wave_cache_source_edits_refresh_conversions_ranges_stats_and_grid_shape() {
     let mut results = ResultsState::default();
     let before = spectrum_models(&simulation, &mut results);
     assert_eq!(
-        pane_y_range(&mut results.derived, &before[0], &[0]),
+        pane_y_range(&mut results.session.derived, &before[0], &[0]),
         Some((-1.0, 1.0))
     );
     assert_eq!(stats(&mut results, &before[0]), Some((0.0, 0.0, 0.0)));
@@ -86,7 +86,7 @@ fn wave_cache_source_edits_refresh_conversions_ranges_stats_and_grid_shape() {
     assert_eq!(simulation.data_version, version);
     assert_eq!(after[0].traces[0].y.as_slice(), [0.0, 20.0, 40.0]);
     assert_eq!(
-        pane_y_range(&mut results.derived, &after[0], &[0]),
+        pane_y_range(&mut results.session.derived, &after[0], &[0]),
         Some((-3.2, 43.2))
     );
     let actual_stats = stats(&mut results, &after[0]).unwrap();
@@ -132,8 +132,8 @@ fn wave_cache_cursor_copy_refreshes_values_without_frame_preparation() {
     state.simulation = restored_spectrum(1.0, 3);
     let models = spectrum_models(&state.simulation, &mut state.ui.results);
     assert_eq!(models[0].traces[0].y.as_slice(), [0.0; 3]);
-    state.ui.results.cursor_strip = Some(0);
-    state.ui.results.cursors.a = Some(1.0);
+    state.ui.results.session.cursor_strip = Some(0);
+    state.ui.results.session.cursors.a = Some(1.0);
     Arc::make_mut(&mut state.simulation.runs[0].analyses[0].waveforms[0].y).fill(10.0);
 
     let copied = copy_cursor_text(&mut state).expect("the cursor has a retained readout");
@@ -176,7 +176,7 @@ fn wave_cache_family_envelopes_follow_rebuilt_model_generations() {
         .unwrap();
     let mut results = ResultsState::default();
     results.set_sample_selection(Some(selection));
-    results.viewer = super::super::super::ResultViewer::Table;
+    results.session.viewer = super::super::super::ResultViewer::Table;
     let models = cached_models(
         &simulation,
         &mut results,
@@ -252,7 +252,7 @@ fn measurement_cache_keeps_only_the_latest_window_per_trace_branch() {
         let upper = step as f64 / 1000.0;
         for branch in 0..2 {
             let stats = trace_interval_statistics(
-                &mut state.ui.results.derived,
+                &mut state.ui.results.session.derived,
                 model,
                 &model.traces[0],
                 Some((0.0, upper)),
@@ -263,10 +263,11 @@ fn measurement_cache_keeps_only_the_latest_window_per_trace_branch() {
             assert!((stats.mean - expected).abs() < 1e-14);
         }
     }
-    assert_eq!(state.ui.results.derived.window_stats_count(), 2);
+    assert_eq!(state.ui.results.session.derived.window_stats_count(), 2);
     let last = state
         .ui
         .results
+        .session
         .derived
         .stats_or(
             (

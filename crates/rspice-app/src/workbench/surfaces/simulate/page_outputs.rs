@@ -1241,8 +1241,8 @@ pub(super) fn open_materialized_traces(
         return;
     }
     app.state.ui.results.reveal_waveforms(visibility);
-    app.state.ui.results.selected_trace = selected;
-    app.state.ui.results.clear_cursors();
+    app.state.ui.results.session.selected_trace = selected;
+    app.state.ui.results.session.clear_cursors();
     Command::ResultViewer(crate::workbench::ResultViewer::Waves).execute(app);
 }
 

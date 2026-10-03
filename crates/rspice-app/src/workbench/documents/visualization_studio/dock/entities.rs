@@ -149,7 +149,7 @@ impl CursorHost for Host<'_> {
         active_project_visualization_document_id(&self.0.state).is_some()
     }
     fn linked(&self) -> bool {
-        self.0.state.ui.results.linked_cursors
+        self.0.state.ui.results.session.linked_cursors
     }
     fn set_linked(&mut self, canonical: bool, linked_cursors: bool) {
         let app = &mut self.0;
@@ -157,13 +157,13 @@ impl CursorHost for Host<'_> {
         if canonical {
             set_active_project_cursor_links(app, linked_cursors);
         } else {
-            app.state.ui.results.linked_cursors = linked_cursors;
+            app.state.ui.results.session.linked_cursors = linked_cursors;
         }
     }
     fn positions(&self) -> (Option<f64>, Option<f64>) {
         (
-            self.0.state.ui.results.cursors.a,
-            self.0.state.ui.results.cursors.b,
+            self.0.state.ui.results.session.cursors.a,
+            self.0.state.ui.results.session.cursors.b,
         )
     }
     fn place_cursor(&mut self) {
@@ -180,7 +180,7 @@ impl CursorHost for Host<'_> {
                 commit_active_project_cursor_pair(app, pane_id, (None, None));
             }
         } else {
-            app.state.ui.results.clear_cursors();
+            app.state.ui.results.session.clear_cursors();
         }
     }
     fn clear_markers(&mut self) {

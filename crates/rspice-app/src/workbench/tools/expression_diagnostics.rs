@@ -184,7 +184,7 @@ fn collect_rows(app: &RSpiceApp) -> Vec<ExpressionRow> {
     let mut rows = Vec::new();
     for analysis in &run.analyses {
         let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
-        let Some(expressions) = state.ui.results.analysis_exprs.get(&key) else {
+        let Some(expressions) = state.ui.results.session.analysis_exprs.get(&key) else {
             continue;
         };
         for expression in expressions {

@@ -39,7 +39,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn specification_editor_open(app: &RSpiceApp) -> bool {
-    app.state.ui.results.spec_drafts.is_some()
+    app.state.ui.results.session.spec_drafts.is_some()
 }
 
 #[cfg(test)]
@@ -63,8 +63,8 @@ mod tests {
         assert!(app.state.workbench.specification_editor_route_pending);
 
         // Model the destination's persistent-document/viewer reconciliation.
-        app.state.ui.results.viewer = crate::workbench::ResultViewer::Waves;
-        app.state.ui.results.spec_drafts = None;
+        app.state.ui.results.session.viewer = crate::workbench::ResultViewer::Waves;
+        app.state.ui.results.session.spec_drafts = None;
 
         assert!(
             crate::workbench::documents::result_document::consume_pending_specification_editor(
@@ -74,7 +74,7 @@ mod tests {
 
         assert!(specification_editor_open(&app));
         assert_eq!(
-            app.state.ui.results.viewer,
+            app.state.ui.results.session.viewer,
             crate::workbench::ResultViewer::Specs
         );
         assert!(!app.state.workbench.specification_editor_route_pending);

@@ -59,7 +59,7 @@ fn event_order(state: &mut AppState) -> Option<Arc<EventOrder>> {
         state.simulation.runs.revision(),
         state.simulation.data_version,
     );
-    let expanded = &state.ui.results.expanded_event_buses;
+    let expanded = &state.ui.results.session.expanded_event_buses;
     if let Some(cache) = &state.ui.results.event_order_cache
         && cache.analysis == key
         && cache.source == source
@@ -173,9 +173,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             analysis: &analysis.data,
             order: &cache,
             origin: active_event_origin(state),
-            radix: state.ui.results.event_bus_radix,
-            expanded: &state.ui.results.expanded_event_buses,
-            selected: state.ui.results.selected_digital_event.as_ref(),
+            radix: state.ui.results.session.event_bus_radix,
+            expanded: &state.ui.results.session.expanded_event_buses,
+            selected: state.ui.results.session.selected_digital_event.as_ref(),
         },
     );
     let viewer::EventResponse {
@@ -183,12 +183,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         toggled_bus,
     } = response;
     if let Some(selection) = requested {
-        state.ui.results.selected_digital_event = Some(selection);
+        state.ui.results.session.selected_digital_event = Some(selection);
     }
     if let Some(bus) = toggled_bus
-        && !state.ui.results.expanded_event_buses.remove(&bus)
+        && !state.ui.results.session.expanded_event_buses.remove(&bus)
     {
-        state.ui.results.expanded_event_buses.insert(bus);
+        state.ui.results.session.expanded_event_buses.insert(bus);
     }
 }
 pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {
@@ -206,7 +206,7 @@ pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {
     if !declares_bus {
         return false;
     }
-    viewer::domain_bar(ui, &mut context.results.event_bus_radix);
+    viewer::domain_bar(ui, &mut context.results.session.event_bus_radix);
     true
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,7 +247,7 @@ fn event_selection_block(
     if event_row_for_selection(
         analysis,
         order.buses(),
-        state.ui.results.event_bus_radix,
+        state.ui.results.session.event_bus_radix,
         selection,
     )
     .is_none()
@@ -257,18 +257,18 @@ fn event_selection_block(
     None
 }
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    let Some(selection) = state.ui.results.selected_digital_event.clone() else {
+    let Some(selection) = state.ui.results.session.selected_digital_event.clone() else {
         viewer::selection_absent(ui, SelectionAbsence::Unselected);
         return;
     };
     if let Some(block) = event_selection_block(state, &selection) {
         if block.stale {
-            state.ui.results.selected_digital_event = None;
+            state.ui.results.session.selected_digital_event = None;
         }
         viewer::selection_absent(ui, block.reason);
         return;
     }
-    let radix = state.ui.results.event_bus_radix;
+    let radix = state.ui.results.session.event_bus_radix;
     let Some(order) = event_order(state) else {
         return;
     };

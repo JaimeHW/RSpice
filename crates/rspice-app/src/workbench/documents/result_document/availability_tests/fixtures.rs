@@ -304,8 +304,8 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
     if viewer == ResultViewer::Soa {
         // The stress trace is the sheet's only plot; a card that never
         // opens is a card this test never covers.
-        app.state.ui.results.soa_stress_trace_open = true;
-        app.state.ui.results.selected_soa_rule = Some(SoaRuleSelection {
+        app.state.ui.results.session.soa_stress_trace_open = true;
+        app.state.ui.results.session.selected_soa_rule = Some(SoaRuleSelection {
             analysis: active_analysis_key(&app.state),
             device_id: "M1".to_owned(),
             parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,

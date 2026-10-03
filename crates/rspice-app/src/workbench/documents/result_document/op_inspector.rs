@@ -273,8 +273,8 @@ fn op_plan(state: &mut AppState, analysis: AnalysisPresentationKey) -> Option<Ar
             state.simulation.data_version,
         ),
         analysis,
-        filter: state.ui.results.op_filter.clone(),
-        sort: state.ui.results.op_sort.clone(),
+        filter: state.ui.results.session.op_filter.clone(),
+        sort: state.ui.results.session.op_sort.clone(),
         root: state.workspace.content.simulation_root_reference().cell,
     };
     if let Some(plan) = state.ui.results.plans.op.as_ref()
@@ -375,7 +375,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         apply_action(ui, state, action);
     }
     if let Some(key) = clicked_sort {
-        state.ui.results.op_sort = match state.ui.results.op_sort.as_ref() {
+        state.ui.results.session.op_sort = match state.ui.results.session.op_sort.as_ref() {
             Some((current, ascending)) if current.eq_ignore_ascii_case(&key) => {
                 Some((key, !*ascending))
             }
@@ -535,7 +535,7 @@ mod tests {
             &op_plan(&mut state, key).expect("a row plan")
         ));
 
-        state.ui.results.op_filter = "m1".to_owned();
+        state.ui.results.session.op_filter = "m1".to_owned();
         let filtered = op_plan(&mut state, key).expect("a row plan");
         assert!(filtered.display.device_shown() < unfiltered.display.device_shown());
         assert!(
@@ -543,8 +543,8 @@ mod tests {
             "the filter matched nothing, so it proves nothing"
         );
 
-        state.ui.results.op_filter.clear();
-        state.ui.results.op_sort = Some(("gm".to_owned(), true));
+        state.ui.results.session.op_filter.clear();
+        state.ui.results.session.op_sort = Some(("gm".to_owned(), true));
         let sorted = op_plan(&mut state, key).expect("a row plan");
         assert_ne!(
             sorted.display.device_indices().collect::<Vec<_>>(),

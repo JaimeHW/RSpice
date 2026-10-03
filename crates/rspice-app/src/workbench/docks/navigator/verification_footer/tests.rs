@@ -826,6 +826,7 @@ fn batch_plot_action_moves_only_the_checked_quantities() {
         !app.state
             .ui
             .results
+            .session
             .waveform_visibility(&checked_key, source_default),
         "the checked quantity leaves its pane"
     );
@@ -833,6 +834,7 @@ fn batch_plot_action_moves_only_the_checked_quantities() {
         app.state
             .ui
             .results
+            .session
             .waveform_visibility(&untouched_key, untouched_default),
         untouched_default,
         "an unchecked quantity in another analysis is not disturbed"
@@ -847,6 +849,7 @@ fn batch_plot_action_moves_only_the_checked_quantities() {
         app.state
             .ui
             .results
+            .session
             .waveform_visibility(&checked_key, source_default),
         "the same act returns it"
     );
@@ -856,6 +859,7 @@ fn batch_plot_action_moves_only_the_checked_quantities() {
         app.state
             .ui
             .results
+            .session
             .waveform_visibility(&checked_key, source_default)
     );
 }
@@ -967,13 +971,15 @@ fn browser_range_selection_uses_stable_filtered_order() {
     app.state
         .ui
         .results
+        .session
         .set_browser_range_anchor(first_selection);
     app.state
         .ui
         .results
+        .session
         .select_checked_result_range(&second_selection, &visible);
-    assert!(app.state.ui.results.is_checked_signal(&first));
-    assert!(app.state.ui.results.is_checked_signal(&second));
+    assert!(app.state.ui.results.session.is_checked_signal(&first));
+    assert!(app.state.ui.results.session.is_checked_signal(&second));
 }
 
 /// The browser offers one facet per independent question. Kind carries the

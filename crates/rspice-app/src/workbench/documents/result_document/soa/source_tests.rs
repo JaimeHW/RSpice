@@ -59,7 +59,7 @@ fn soa_reporting_detail_uses_complete_history_and_hashes_its_samples() {
     let analysis = &state.simulation.runs[0].analyses[0];
     assert_eq!(analysis.waveforms[0].x.len(), 2);
     pick(&mut state);
-    state.ui.results.soa_stress_trace_open = true;
+    state.ui.results.session.soa_stress_trace_open = true;
     assert!(paint(&mut state, false).contains("64 exact samples"));
     let before = state.simulation.runs[0].analyses[0].result_data_digest();
     let analysis = &mut state.simulation.runs[0].analyses[0];
@@ -91,7 +91,7 @@ fn envelope(state: &mut AppState) -> Arc<[[f64; 2]]> {
     let facts = plan.presentation.facts(0).unwrap();
     let waveform = &state.simulation.runs[0].analyses[0].waveforms
         [facts.stress_waveform.expect("verified stress history")];
-    state.ui.results.cache.series(
+    state.ui.results.session.cache.series(
         DisplayDecimation::EnvelopeExtrema,
         facts.stress_cache_key,
         &waveform.x,
@@ -112,7 +112,7 @@ fn envelope(state: &mut AppState) -> Arc<[[f64; 2]]> {
 }
 
 fn pick(state: &mut AppState) {
-    state.ui.results.selected_soa_rule = Some(SoaRuleSelection {
+    state.ui.results.session.selected_soa_rule = Some(SoaRuleSelection {
         analysis: active_key(state),
         device_id: "M0000".to_owned(),
         parameter: SoaParameterEvidence::DrainSourceVoltage,
@@ -220,7 +220,7 @@ fn soa_source_rule_selection_survives_navigation_but_not_rule_removal() {
     assert!(paint(&mut state, true).contains("SELECTED SOA RULE"));
     state.simulation.active_analysis_idx = Some(1);
     assert!(!paint(&mut state, true).contains("SELECTED SOA RULE"));
-    assert!(state.ui.results.selected_soa_rule.is_some());
+    assert!(state.ui.results.session.selected_soa_rule.is_some());
     state.simulation.active_analysis_idx = Some(0);
     let analysis = &mut state.simulation.runs[0].analyses[0];
     analysis.waveforms.reverse();
@@ -232,7 +232,7 @@ fn soa_source_rule_selection_survives_navigation_but_not_rule_removal() {
     // Rules have a canonical retained order; waveform storage does not.
     assert!(analysis.validate_retained_evidence().is_err());
     assert!(!paint(&mut state, true).contains("SELECTED SOA RULE"));
-    assert!(state.ui.results.selected_soa_rule.is_some());
+    assert!(state.ui.results.session.selected_soa_rule.is_some());
     let analysis = &mut state.simulation.runs[0].analyses[0];
     let Some(AnalysisResultPayload::Soa { evaluations, .. }) = analysis.result_payload.as_mut()
     else {
@@ -255,7 +255,7 @@ fn soa_source_rule_selection_survives_navigation_but_not_rule_removal() {
     violations.retain(|event| event.device_id != "M0000");
     let removed = paint(&mut state, true);
     assert!(removed.contains("no longer retained"), "{removed}");
-    assert!(state.ui.results.selected_soa_rule.is_none());
+    assert!(state.ui.results.session.selected_soa_rule.is_none());
 }
 
 #[test]
@@ -272,12 +272,12 @@ fn soa_source_inspector_blocks_invalid_and_failed_evidence_until_repaired() {
     evaluations[0].limit_value = f64::NAN;
     let invalid = paint(&mut state, true);
     assert!(!invalid.contains("SELECTED SOA RULE"), "{invalid}");
-    assert!(state.ui.results.selected_soa_rule.is_some());
+    assert!(state.ui.results.session.selected_soa_rule.is_some());
     state.simulation.runs[0].analyses[0] = valid;
     state.simulation.runs[0].analyses[0].success = false;
     let failed = paint(&mut state, true);
     assert!(!failed.contains("SELECTED SOA RULE"), "{failed}");
-    assert!(state.ui.results.selected_soa_rule.is_some());
+    assert!(state.ui.results.session.selected_soa_rule.is_some());
     state.simulation.runs[0].analyses[0].success = true;
     assert!(paint(&mut state, true).contains("SELECTED SOA RULE"));
 }
@@ -288,7 +288,7 @@ fn soa_source_unchanged_large_histories_and_clones_reuse_scans_and_envelopes() {
 
     let mut original = soa_state(1, 100_000, 3.0);
     pick(&mut original);
-    original.ui.results.soa_stress_trace_open = true;
+    original.ui.results.session.soa_stress_trace_open = true;
     let before = envelope(&mut original);
     paint(&mut original, false);
     paint(&mut original, true);

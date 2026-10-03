@@ -20,6 +20,7 @@ pub(in super::super) fn open(state: &mut AppState, selector: MarkerSelector) {
         MarkerSelector::Quick(id) => state
             .ui
             .results
+            .session
             .markers
             .iter()
             .find(|marker| marker.id == id)
@@ -27,13 +28,14 @@ pub(in super::super) fn open(state: &mut AppState, selector: MarkerSelector) {
         MarkerSelector::Document { marker_id, .. } => state
             .ui
             .results
+            .session
             .document_marker(marker_id)
             .map(|marker| (marker.note.clone(), marker.kind)),
     };
     let Some((note, kind)) = seed else {
         return;
     };
-    state.ui.results.marker_edit = Some(MarkerEditDraft {
+    state.ui.results.session.marker_edit = Some(MarkerEditDraft {
         selector,
         note,
         kind,
@@ -52,7 +54,13 @@ struct MarkerFacts {
 fn marker_facts(state: &AppState, selector: MarkerSelector) -> Option<MarkerFacts> {
     match selector {
         MarkerSelector::Quick(id) => {
-            let marker = state.ui.results.markers.iter().find(|m| m.id == id)?;
+            let marker = state
+                .ui
+                .results
+                .session
+                .markers
+                .iter()
+                .find(|m| m.id == id)?;
             Some(MarkerFacts {
                 display_id: format!("M{id}"),
                 analysis: marker.analysis,
@@ -62,7 +70,7 @@ fn marker_facts(state: &AppState, selector: MarkerSelector) -> Option<MarkerFact
             })
         }
         MarkerSelector::Document { marker_id, .. } => {
-            let marker = state.ui.results.document_marker(marker_id)?;
+            let marker = state.ui.results.session.document_marker(marker_id)?;
             Some(MarkerFacts {
                 display_id: format!("D{}", marker_id.get()),
                 analysis: marker.analysis,
@@ -76,14 +84,14 @@ fn marker_facts(state: &AppState, selector: MarkerSelector) -> Option<MarkerFact
 
 /// Render the dialog while a draft is open.
 pub(in super::super) fn show(ctx: &egui::Context, state: &mut AppState) {
-    let Some(mut draft) = state.ui.results.marker_edit.clone() else {
+    let Some(mut draft) = state.ui.results.session.marker_edit.clone() else {
         return;
     };
     let Some(marker) = marker_facts(state, draft.selector) else {
         // The marker vanished under the dialog (dataset change, or a document
         // that stopped retaining it): the draft has nothing to apply to and
         // must not linger.
-        state.ui.results.marker_edit = None;
+        state.ui.results.session.marker_edit = None;
         return;
     };
 
@@ -189,13 +197,13 @@ pub(in super::super) fn show(ctx: &egui::Context, state: &mut AppState) {
             state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
                 "Could not retain marker edit: {error}"
             )));
-            state.ui.results.marker_edit = Some(draft);
+            state.ui.results.session.marker_edit = Some(draft);
             return;
         }
-        state.ui.results.marker_edit = None;
+        state.ui.results.session.marker_edit = None;
     } else if cancel || !window_open {
-        state.ui.results.marker_edit = None;
+        state.ui.results.session.marker_edit = None;
     } else {
-        state.ui.results.marker_edit = Some(draft);
+        state.ui.results.session.marker_edit = Some(draft);
     }
 }

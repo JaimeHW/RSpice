@@ -67,7 +67,7 @@ pub(crate) fn zoom_active_pane(state: &mut AppState, t: &Tokens, factor: f64) {
     };
     let pane_count = model.unit_panes().len();
     let logarithmic_y = pane_log_y(&state.ui.results, model, &pane);
-    let current = state.ui.results.analysis_plot_view_pane(
+    let current = state.ui.results.session.analysis_plot_view_pane(
         super::super::ResultViewer::Waves,
         model.analysis_key,
         ordinal,
@@ -92,6 +92,7 @@ pub(crate) fn zoom_active_pane(state: &mut AppState, t: &Tokens, factor: f64) {
         state
             .ui
             .results
+            .session
             .analysis_plot_view_pane_mut(
                 super::super::ResultViewer::Waves,
                 model.analysis_key,
@@ -119,7 +120,7 @@ pub(crate) fn fit_active_pane(state: &mut AppState, t: &Tokens) {
     let Some((model, ordinal, _)) = active_pane(&models, &state.ui.results) else {
         return;
     };
-    state.ui.results.clear_analysis_plot_view_axis(
+    state.ui.results.session.clear_analysis_plot_view_axis(
         super::super::ResultViewer::Waves,
         model.analysis_key,
         super::super::PaneAxis::X,
@@ -127,6 +128,7 @@ pub(crate) fn fit_active_pane(state: &mut AppState, t: &Tokens) {
     state
         .ui
         .results
+        .session
         .analysis_plot_view_pane_mut(
             super::super::ResultViewer::Waves,
             model.analysis_key,
@@ -145,12 +147,20 @@ pub(crate) fn fit_active_pane(state: &mut AppState, t: &Tokens) {
 /// has singled one out.
 pub(crate) fn fit_active_strip(state: &mut AppState) {
     let viewer = super::super::ResultViewer::Waves;
-    match state.ui.results.active_wave_pane.as_ref() {
+    match state.ui.results.session.active_wave_pane.as_ref() {
         Some(key) => {
             let analysis = key.analysis;
-            state.ui.results.reset_analysis_plot_view(viewer, analysis);
+            state
+                .ui
+                .results
+                .session
+                .reset_analysis_plot_view(viewer, analysis);
         }
-        None => state.ui.results.reset_all_analysis_plot_views(viewer),
+        None => state
+            .ui
+            .results
+            .session
+            .reset_all_analysis_plot_views(viewer),
     }
 }
 
@@ -160,7 +170,7 @@ pub(crate) fn fit_active_strip(state: &mut AppState) {
 /// The waveform stack keys its viewports by analysis, not by the legacy
 /// `Global` plot index, so this is the only honest reading for these sheets.
 pub(super) fn active_pane_is_pinned(tokens: &Tokens, state: &mut AppState) -> bool {
-    let Some(key) = state.ui.results.active_wave_pane.clone() else {
+    let Some(key) = state.ui.results.session.active_wave_pane.clone() else {
         return false;
     };
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -181,6 +191,7 @@ pub(super) fn active_pane_is_pinned(tokens: &Tokens, state: &mut AppState) -> bo
         state
             .ui
             .results
+            .session
             .analysis_plot_view_pane(super::super::ResultViewer::Waves, key.analysis, ordinal)
             .is_zoomed()
     })
@@ -199,7 +210,7 @@ pub(crate) fn nudge_cursor(state: &mut AppState, tokens: &Tokens, cursor_b: bool
         presentation.complex_number_display(),
         tokens,
     );
-    let Some(strip) = state.ui.results.cursor_strip else {
+    let Some(strip) = state.ui.results.session.cursor_strip else {
         return;
     };
     let Some(model) = models.iter().find(|model| model.analysis_index == strip) else {
@@ -211,9 +222,9 @@ pub(crate) fn nudge_cursor(state: &mut AppState, tokens: &Tokens, cursor_b: bool
     let panes = model.unit_panes().len();
     let (x0, x1) = shared_x_view(&state.ui.results, model.analysis_key, panes).unwrap_or(full);
     let cursor = if cursor_b {
-        &mut state.ui.results.cursors.b
+        &mut state.ui.results.session.cursors.b
     } else {
-        &mut state.ui.results.cursors.a
+        &mut state.ui.results.session.cursors.a
     };
     let Some(position) = cursor else {
         return;
@@ -236,6 +247,7 @@ pub(super) fn shared_x_view(
 ) -> Option<(f64, f64)> {
     (0..pane_count).find_map(|ordinal| {
         results
+            .session
             .analysis_plot_view_pane(super::super::ResultViewer::Waves, analysis, ordinal)
             .x
     })
@@ -249,6 +261,7 @@ pub(super) fn set_shared_x_view(
 ) {
     for ordinal in 0..pane_count {
         results
+            .session
             .analysis_plot_view_pane_mut(super::super::ResultViewer::Waves, analysis, ordinal)
             .x = range;
     }

@@ -24,7 +24,7 @@ fn marker_state(id: u32) -> (AppState, AnalysisPresentationKey) {
         .unwrap();
     assert!(state.simulation.select_run(0));
     let analysis = active_analysis_key(&state);
-    state.ui.results.adopt_markers(
+    state.ui.results.session.adopt_markers(
         vec![ResultMarker {
             id,
             analysis,
@@ -64,9 +64,12 @@ fn restored_maximum_marker_id_cannot_wrap_or_retarget_existing_annotations() {
     let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
     restore_presentation(&mut state, restored.file.result_presentation);
     assert_eq!(place_quick(&mut state, analysis, 0.75), None);
-    assert_eq!(state.ui.results.markers.len(), 1);
-    assert_eq!(state.ui.results.markers[0].id, u32::MAX);
-    assert_eq!(state.ui.results.markers[0].note, "Retained annotation");
+    assert_eq!(state.ui.results.session.markers.len(), 1);
+    assert_eq!(state.ui.results.session.markers[0].id, u32::MAX);
+    assert_eq!(
+        state.ui.results.session.markers[0].note,
+        "Retained annotation"
+    );
     assert!(
         state
             .log_buffer
@@ -80,9 +83,9 @@ fn restored_maximum_marker_id_cannot_wrap_or_retarget_existing_annotations() {
         MarkerKind::Spec,
     )
     .unwrap();
-    assert_eq!(state.ui.results.markers[0].note, "Edited");
-    state.ui.results.remove_marker(u32::MAX);
-    assert!(state.ui.results.markers.is_empty());
+    assert_eq!(state.ui.results.session.markers[0].note, "Edited");
+    state.ui.results.session.remove_marker(u32::MAX);
+    assert!(state.ui.results.session.markers.is_empty());
     assert_eq!(
         place_quick(&mut state, analysis, 0.75),
         None,
@@ -134,7 +137,7 @@ fn duplicate_marker_ids_are_refused_before_project_publication() {
 #[test]
 fn an_edit_cannot_succeed_after_its_quick_marker_has_been_removed() {
     let (mut state, _) = marker_state(7);
-    state.ui.results.remove_marker(7);
+    state.ui.results.session.remove_marker(7);
     assert!(
         commit_marker_edit(
             &mut state,
@@ -144,7 +147,7 @@ fn an_edit_cannot_succeed_after_its_quick_marker_has_been_removed() {
         )
         .is_err()
     );
-    assert!(state.ui.results.markers.is_empty());
+    assert!(state.ui.results.session.markers.is_empty());
 }
 
 #[test]
@@ -154,10 +157,10 @@ fn last_marker_identity_can_be_allocated_once_and_remains_serializable() {
         place_quick(&mut state, analysis, 0.75),
         Some(MarkerSelector::Quick(u32::MAX))
     );
-    let before = serde_json::to_value(&state.ui.results.markers).unwrap();
+    let before = serde_json::to_value(&state.ui.results.session.markers).unwrap();
     assert_eq!(place_quick(&mut state, analysis, 0.9), None);
     assert_eq!(
-        serde_json::to_value(&state.ui.results.markers).unwrap(),
+        serde_json::to_value(&state.ui.results.session.markers).unwrap(),
         before
     );
     let project = marker_project(&state);
@@ -172,13 +175,14 @@ fn last_marker_identity_can_be_allocated_once_and_remains_serializable() {
 #[test]
 fn invalid_marker_placement_does_not_consume_an_identity_or_mutate_annotations() {
     let (mut state, analysis) = marker_state(7);
-    let before = serde_json::to_value(&state.ui.results.markers).unwrap();
+    let before = serde_json::to_value(&state.ui.results.session.markers).unwrap();
     for x in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert_eq!(place_quick(&mut state, analysis, x), None);
         assert!(
             state
                 .ui
                 .results
+                .session
                 .add_marker(
                     analysis,
                     marker_anchor_for(analysis, "V(out)"),
@@ -196,6 +200,7 @@ fn invalid_marker_placement_does_not_consume_an_identity_or_mutate_annotations()
         state
             .ui
             .results
+            .session
             .add_marker(
                 analysis,
                 marker_anchor_for(foreign, "V(out)"),
@@ -205,7 +210,7 @@ fn invalid_marker_placement_does_not_consume_an_identity_or_mutate_annotations()
             .is_err()
     );
     assert_eq!(
-        serde_json::to_value(&state.ui.results.markers).unwrap(),
+        serde_json::to_value(&state.ui.results.session.markers).unwrap(),
         before
     );
     assert_eq!(
@@ -215,9 +220,9 @@ fn invalid_marker_placement_does_not_consume_an_identity_or_mutate_annotations()
 
     // Until every legacy caller uses the marker owner, a directly inserted
     // identity must also be respected by the allocator.
-    let mut inserted = state.ui.results.markers[0].clone();
+    let mut inserted = state.ui.results.session.markers[0].clone();
     inserted.id = 100;
-    state.ui.results.markers.push(inserted);
+    state.ui.results.session.markers.push(inserted);
     assert_eq!(
         place_quick(&mut state, analysis, 0.9),
         Some(MarkerSelector::Quick(101))
@@ -296,9 +301,20 @@ fn duplicate_ids_in_older_projects_are_repaired_without_losing_annotations() {
         MarkerKind::Spec,
     )
     .unwrap();
-    assert_eq!(state.ui.results.markers[5].note, "Only this annotation");
-    assert_eq!(state.ui.results.markers[3].note, "Annotation 3");
-    state.ui.results.remove_marker(3);
-    assert_eq!(state.ui.results.markers.len(), 7);
-    assert!(state.ui.results.markers.iter().any(|marker| marker.id == 7));
+    assert_eq!(
+        state.ui.results.session.markers[5].note,
+        "Only this annotation"
+    );
+    assert_eq!(state.ui.results.session.markers[3].note, "Annotation 3");
+    state.ui.results.session.remove_marker(3);
+    assert_eq!(state.ui.results.session.markers.len(), 7);
+    assert!(
+        state
+            .ui
+            .results
+            .session
+            .markers
+            .iter()
+            .any(|marker| marker.id == 7)
+    );
 }

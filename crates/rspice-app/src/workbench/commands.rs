@@ -466,7 +466,7 @@ impl Command {
             }
             Self::Copy => {
                 if state.workbench.workspace == Workspace::Results {
-                    state.ui.results.cursors.a.is_some()
+                    state.ui.results.session.cursors.a.is_some()
                 } else if active_symbol_editor(app) {
                     !state.ui.symbol.editor.effective_selection().is_empty()
                 } else {
@@ -1244,7 +1244,7 @@ impl Command {
                 if app.state.workbench.workspace == Workspace::Results {
                     crate::workbench::documents::result_document::request_view_gesture(
                         &mut app.state,
-                        crate::workbench::documents::result_document::ViewGesture::ZoomIn,
+                        rspice_results_ui::session::ViewGesture::ZoomIn,
                     );
                 } else if active_symbol_editor(app) {
                     app.state.ui.symbol.editor.zoom =
@@ -1258,7 +1258,7 @@ impl Command {
                 if app.state.workbench.workspace == Workspace::Results {
                     crate::workbench::documents::result_document::request_view_gesture(
                         &mut app.state,
-                        crate::workbench::documents::result_document::ViewGesture::ZoomOut,
+                        rspice_results_ui::session::ViewGesture::ZoomOut,
                     );
                 } else if active_symbol_editor(app) {
                     app.state.ui.symbol.editor.zoom =
@@ -1274,7 +1274,7 @@ impl Command {
                     // fitting them is not a write to the plot-ordinal store.
                     crate::workbench::documents::result_document::request_view_gesture(
                         &mut app.state,
-                        crate::workbench::documents::result_document::ViewGesture::Fit,
+                        rspice_results_ui::session::ViewGesture::Fit,
                     );
                 } else if active_symbol_editor(app) {
                     app.state.ui.symbol.editor.needs_fit = true;
@@ -1717,9 +1717,9 @@ impl Command {
                 } else if app.state.tabbed_property_dialog.open {
                     app.state.tabbed_property_dialog.attempt_close();
                 } else if app.state.workbench.workspace == Workspace::Results
-                    && app.state.ui.results.cursors.any()
+                    && app.state.ui.results.session.cursors.any()
                 {
-                    app.state.ui.results.clear_cursors();
+                    app.state.ui.results.session.clear_cursors();
                 } else {
                     app.state.schematic.cancel_interaction_step();
                 }
@@ -1876,7 +1876,7 @@ impl Command {
                     app.state.clear_simulation_results();
                 }
             }
-            Self::ToggleLinkedCursors => app.state.ui.results.toggle_linked_cursors(),
+            Self::ToggleLinkedCursors => app.state.ui.results.session.toggle_linked_cursors(),
             Self::DatasetManifestBrowser => {
                 crate::workbench::documents::result_document::open_dataset_browser(app);
             }
@@ -1896,7 +1896,7 @@ impl Command {
                         &app.state, viewer,
                     )
                 {
-                    app.state.ui.results.viewer = viewer;
+                    app.state.ui.results.session.viewer = viewer;
                     activate_workspace(app, Workspace::Results);
                 } else {
                     let reason =

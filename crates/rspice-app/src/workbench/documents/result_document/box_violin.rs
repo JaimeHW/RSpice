@@ -9,8 +9,8 @@ pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {
     view::domain_bar(
         ui,
         plan.as_deref().map(|plan| &**plan),
-        &mut context.results.box_violin,
-        &mut context.results.show_spec_limits,
+        &mut context.results.session.box_violin,
+        &mut context.results.session.show_spec_limits,
     )
 }
 
@@ -19,9 +19,9 @@ pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
     if let Some(response) = view::show(
         ui,
         plan.as_deref().map(|plan| &**plan),
-        &context.results.box_violin,
-        context.results.show_spec_limits,
-        &mut context.results.cache,
+        &context.results.session.box_violin,
+        context.results.session.show_spec_limits,
+        &mut context.results.session.cache,
     ) {
         super::record_drawn_axes(context.results, super::ResultViewer::BoxViolin, &response);
     }
@@ -32,7 +32,7 @@ pub fn right_panel(ui: &mut Ui, context: &mut SheetContext<'_>) {
     view::right_panel(
         ui,
         plan.as_deref().map(|plan| &**plan),
-        &mut context.results.box_violin,
+        &mut context.results.session.box_violin,
     );
 }
 

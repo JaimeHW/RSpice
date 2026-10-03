@@ -36,7 +36,7 @@ fn retained_state(kind: AnalysisType, samples: usize) -> AppState {
         crate::io::capture_simulation_results(&state.simulation),
     )
     .unwrap();
-    state.ui.results.viewer = ResultViewer::Waves;
+    state.ui.results.session.viewer = ResultViewer::Waves;
     state
         .workbench
         .documents

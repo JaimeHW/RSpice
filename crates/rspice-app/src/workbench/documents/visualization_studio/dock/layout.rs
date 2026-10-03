@@ -41,7 +41,7 @@ impl PropertiesHost for Host<'_> {
             |policy| policy.significant_digits,
         );
         let current_phase_continuous = document_policy
-            .map_or(app.state.ui.results.phase_continuous, |policy| {
+            .map_or(app.state.ui.results.session.phase_continuous, |policy| {
                 policy.phase_continuous
             });
         (current_significant_digits, current_phase_continuous)
@@ -173,7 +173,7 @@ impl LinksHost for Host<'_> {
         active_project_visualization_document_id(&self.0.state).is_some()
     }
     fn linked_cursors(&self) -> bool {
-        self.0.state.ui.results.linked_cursors
+        self.0.state.ui.results.session.linked_cursors
     }
     fn set_cursor_links(&mut self, linked: bool) {
         set_active_project_cursor_links(self.0, linked);

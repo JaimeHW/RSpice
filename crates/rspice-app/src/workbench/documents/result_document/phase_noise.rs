@@ -134,6 +134,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let viewport = state
         .ui
         .results
+        .session
         .plot_view(super::ResultViewer::PhaseNoise, 0);
     let level_range = finite_range(&model.level_dbc_per_hz);
     let response = view::show(
@@ -142,12 +143,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         viewport,
         level_range,
         &quantities,
-        &mut state.ui.results.cache,
+        &mut state.ui.results.session.cache,
     );
     if response.fit {
         state
             .ui
             .results
+            .session
             .reset_plot_view(super::ResultViewer::PhaseNoise, 0);
     }
     if let Some(response) = response.plot {
@@ -160,6 +162,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             state
                 .ui
                 .results
+                .session
                 .plot_view_mut(super::ResultViewer::PhaseNoise, 0)
                 .apply(&response.view);
         }

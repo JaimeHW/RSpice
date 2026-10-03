@@ -462,11 +462,13 @@ fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
     app.state
         .ui
         .results
+        .session
         .checked_result_quantities
         .insert(artifact.clone());
     app.state
         .ui
         .results
+        .session
         .checked_result_quantities
         .insert(second);
     assert_eq!(
@@ -475,10 +477,16 @@ fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
         "two check-marks are two destinations, and the command must not pick one"
     );
 
-    app.state.ui.results.checked_result_quantities.clear();
     app.state
         .ui
         .results
+        .session
+        .checked_result_quantities
+        .clear();
+    app.state
+        .ui
+        .results
+        .session
         .checked_result_quantities
         .insert(artifact.clone());
     assert_eq!(

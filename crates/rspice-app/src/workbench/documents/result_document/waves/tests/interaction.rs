@@ -29,7 +29,7 @@ fn bode_strip() -> AppState {
             ),
         ]),
     );
-    state.ui.results.viewer = super::super::super::ResultViewer::Bode;
+    state.ui.results.session.viewer = super::super::super::ResultViewer::Bode;
     state
 }
 
@@ -67,6 +67,7 @@ fn pane_x(
     state
         .ui
         .results
+        .session
         .analysis_plot_view_pane(super::super::super::ResultViewer::Waves, analysis, ordinal)
         .x
 }
@@ -87,7 +88,7 @@ fn zoom_from_a_companion_pane_moves_the_strips_shared_abscissa() {
         .expect("the phase pane");
     assert_ne!(phase_ordinal, 0, "the phase pane is the companion");
 
-    state.ui.results.active_wave_pane = Some(WavePanePresentationKey {
+    state.ui.results.session.active_wave_pane = Some(WavePanePresentationKey {
         analysis,
         unit: units[phase_ordinal].clone(),
     });
@@ -123,7 +124,7 @@ fn a_logarithmic_pane_zooms_about_its_geometric_centre() {
     );
     let analysis = strip_key(&mut state);
     let units = pane_units(&mut state);
-    state.ui.results.active_wave_pane = Some(WavePanePresentationKey {
+    state.ui.results.session.active_wave_pane = Some(WavePanePresentationKey {
         analysis,
         unit: units[0].clone(),
     });
@@ -142,6 +143,7 @@ fn a_logarithmic_pane_zooms_about_its_geometric_centre() {
     state
         .ui
         .results
+        .session
         .analysis_plot_view_pane_mut(super::super::super::ResultViewer::Waves, analysis, 0)
         .y = Some(before);
 
@@ -150,6 +152,7 @@ fn a_logarithmic_pane_zooms_about_its_geometric_centre() {
     let after = state
         .ui
         .results
+        .session
         .analysis_plot_view_pane(super::super::super::ResultViewer::Waves, analysis, 0)
         .y
         .expect("the zoom pinned a Y window");
@@ -180,15 +183,17 @@ fn fitting_a_pane_releases_every_ordinal_the_strip_pinned() {
         state
             .ui
             .results
+            .session
             .analysis_plot_view_pane_mut(viewer, analysis, ordinal)
             .x = Some((10.0, 100.0));
     }
     state
         .ui
         .results
+        .session
         .analysis_plot_view_pane_mut(viewer, analysis, 1)
         .y = Some((-90.0, 0.0));
-    state.ui.results.active_wave_pane = Some(WavePanePresentationKey {
+    state.ui.results.session.active_wave_pane = Some(WavePanePresentationKey {
         analysis,
         unit: units[0].clone(),
     });
@@ -196,7 +201,7 @@ fn fitting_a_pane_releases_every_ordinal_the_strip_pinned() {
     fit_active_pane(&mut state, &Tokens::default());
 
     assert!(
-        !state.ui.results.analysis_strip_axis_is_pinned(
+        !state.ui.results.session.analysis_strip_axis_is_pinned(
             viewer,
             analysis,
             super::super::super::PaneAxis::X
@@ -207,6 +212,7 @@ fn fitting_a_pane_releases_every_ordinal_the_strip_pinned() {
         state
             .ui
             .results
+            .session
             .analysis_plot_view_pane(viewer, analysis, 1)
             .y,
         Some((-90.0, 0.0)),

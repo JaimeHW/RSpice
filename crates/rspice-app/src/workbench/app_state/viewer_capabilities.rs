@@ -135,6 +135,7 @@ impl AppState {
     ) -> EyeTimebase {
         self.ui
             .results
+            .session
             .eye_timebase
             .get(&eye_timebase_key(provenance))
             .copied()
@@ -154,10 +155,10 @@ impl AppState {
         let key = eye_timebase_key(provenance);
         match timebase {
             EyeTimebase::Auto => {
-                self.ui.results.eye_timebase.remove(&key);
+                self.ui.results.session.eye_timebase.remove(&key);
             }
             explicit => {
-                self.ui.results.eye_timebase.insert(key, explicit);
+                self.ui.results.session.eye_timebase.insert(key, explicit);
             }
         }
     }
@@ -782,8 +783,9 @@ mod tests {
     #[test]
     fn clearing_design_execution_context_clears_project_scoped_results_state() {
         use crate::workbench::documents::result_document::{
-            AnalysisPresentationKey, ExprEditor, ExprSeries, ExprTrace, ResultViewer,
+            AnalysisPresentationKey, ExprSeries, ExprTrace, ResultViewer,
         };
+        use rspice_results_ui::session::ExprEditor;
 
         let mut state = AppState::default();
         let analysis = crate::state::AnalysisResult::new(
@@ -795,18 +797,18 @@ mod tests {
             AnalysisPresentationKey::new(crate::product::DatasetId::new(), &analysis);
         state.ui.results_seen_version = 99;
         let results = &mut state.ui.results;
-        results.viewer = ResultViewer::Fft;
-        results.phase_continuous = true;
-        results.cursors.place(1.0);
-        results.cursor_strip = Some(0);
-        results.hidden_strips.insert(analysis_key);
-        results.maximized_strip = Some(analysis_key);
-        *results.plot_view_mut(ResultViewer::Waves, 0) =
+        results.session.viewer = ResultViewer::Fft;
+        results.session.phase_continuous = true;
+        results.session.cursors.place(1.0);
+        results.session.cursor_strip = Some(0);
+        results.session.hidden_strips.insert(analysis_key);
+        results.session.maximized_strip = Some(analysis_key);
+        *results.session.plot_view_mut(ResultViewer::Waves, 0) =
             rspice_results_ui::presentation::PlotView {
                 x: Some((0.0, 1.0)),
                 y: Some((-1.0, 1.0)),
             };
-        results.analysis_exprs.insert(
+        results.session.analysis_exprs.insert(
             analysis_key,
             vec![ExprTrace {
                 text: "V(out)/V(in)".to_string(),
@@ -814,7 +816,7 @@ mod tests {
                 visible: true,
             }],
         );
-        results.expr_editor = Some(ExprEditor {
+        results.session.expr_editor = Some(ExprEditor {
             analysis: analysis_key,
             text: "V(out)".to_string(),
             error: Some("stale".to_string()),
@@ -827,30 +829,30 @@ mod tests {
                 series: Err("stale".to_string()),
             },
         );
-        results.rf_pin.insert(ResultViewer::Smith, (0, 1));
-        results.op_filter = "M1".to_string();
-        results.op_sort = Some(("gm".to_string(), true));
-        results.spec_drafts = Some(Vec::new());
+        results.session.rf_pin.insert(ResultViewer::Smith, (0, 1));
+        results.session.op_filter = "M1".to_string();
+        results.session.op_sort = Some(("gm".to_string(), true));
+        results.session.spec_drafts = Some(Vec::new());
         state.workbench.specification_editor_route_pending = true;
 
         state.clear_design_execution_context();
         let results = &state.ui.results;
 
         assert_eq!(state.ui.results_seen_version, 0);
-        assert_eq!(results.viewer, ResultViewer::Fft);
-        assert!(results.phase_continuous);
-        assert!(!results.cursors.any());
-        assert_eq!(results.cursor_strip, None);
-        assert!(results.hidden_strips.is_empty());
-        assert_eq!(results.maximized_strip, None);
-        assert!(results.views.is_empty());
-        assert!(results.analysis_exprs.is_empty());
-        assert!(results.expr_editor.is_none());
+        assert_eq!(results.session.viewer, ResultViewer::Fft);
+        assert!(results.session.phase_continuous);
+        assert!(!results.session.cursors.any());
+        assert_eq!(results.session.cursor_strip, None);
+        assert!(results.session.hidden_strips.is_empty());
+        assert_eq!(results.session.maximized_strip, None);
+        assert!(results.session.views.is_empty());
+        assert!(results.session.analysis_exprs.is_empty());
+        assert!(results.session.expr_editor.is_none());
         assert!(results.analysis_expr_cache.is_empty());
-        assert!(results.rf_pin.is_empty());
-        assert!(results.op_filter.is_empty());
-        assert_eq!(results.op_sort, None);
-        assert!(results.spec_drafts.is_none());
+        assert!(results.session.rf_pin.is_empty());
+        assert!(results.session.op_filter.is_empty());
+        assert_eq!(results.session.op_sort, None);
+        assert!(results.session.spec_drafts.is_none());
         assert!(!state.workbench.specification_editor_route_pending);
     }
 }

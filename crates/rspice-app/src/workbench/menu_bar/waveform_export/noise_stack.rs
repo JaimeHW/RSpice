@@ -70,7 +70,7 @@ mod tests {
         state.workbench.documents.activate(
             crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset),
         );
-        state.ui.results.viewer = crate::workbench::ResultViewer::NoiseContrib;
+        state.ui.results.session.viewer = crate::workbench::ResultViewer::NoiseContrib;
         let displayed = crate::workbench::documents::result_document::view_context::resolve_displayed_result_view(&state).unwrap();
         assert_eq!(displayed.analysis_indices.len(), 2);
         let (export, _) = super::super::prepare_displayed_table(&state, &displayed)

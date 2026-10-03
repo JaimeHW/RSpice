@@ -120,7 +120,7 @@ pub(crate) fn synchronize_schematic_cross_probe(state: &mut AppState) {
         .as_ref()
         .and_then(|target| compatible_result_trace(state, target));
     if let Some(selected) = selected_trace.clone() {
-        state.ui.results.selected_trace = Some(selected);
+        state.ui.results.session.selected_trace = Some(selected);
     }
 
     let source_line = target
@@ -149,8 +149,10 @@ fn clear_synchronized_projection(state: &mut AppState) {
 
 fn clear_synchronized_result_trace(state: &mut AppState) {
     let synchronized = state.ui.schematic_cross_probe.selected_trace.take();
-    if synchronized.is_some() && state.ui.results.selected_trace.as_ref() == synchronized.as_ref() {
-        state.ui.results.selected_trace = None;
+    if synchronized.is_some()
+        && state.ui.results.session.selected_trace.as_ref() == synchronized.as_ref()
+    {
+        state.ui.results.session.selected_trace = None;
     }
 }
 
@@ -729,6 +731,7 @@ mod tests {
             state
                 .ui
                 .results
+                .session
                 .selected_trace
                 .as_ref()
                 .map(|trace| trace.source_name()),
@@ -737,7 +740,7 @@ mod tests {
 
         state.schematic.bump_topology_version();
         synchronize_schematic_cross_probe(&mut state);
-        assert!(state.ui.results.selected_trace.is_none());
+        assert!(state.ui.results.session.selected_trace.is_none());
     }
 
     #[test]
@@ -778,6 +781,7 @@ mod tests {
             state
                 .ui
                 .results
+                .session
                 .selected_trace
                 .as_ref()
                 .map(|trace| trace.source_name()),
@@ -810,7 +814,7 @@ mod tests {
 
         synchronize_schematic_cross_probe(&mut state);
 
-        assert!(state.ui.results.selected_trace.is_none());
+        assert!(state.ui.results.session.selected_trace.is_none());
         assert!(state.ui.netlist.cross_probe_line.is_none());
     }
 
@@ -847,6 +851,7 @@ mod tests {
             state
                 .ui
                 .results
+                .session
                 .selected_trace
                 .as_ref()
                 .map(|trace| trace.source_name()),

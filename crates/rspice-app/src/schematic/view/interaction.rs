@@ -988,7 +988,7 @@ fn select_materialized_probe_trace(state: &mut AppState, probe_name: &str) {
         })
     };
     if let Some(selected) = selected {
-        state.ui.results.selected_trace = Some(selected);
+        state.ui.results.session.selected_trace = Some(selected);
     }
 }
 

@@ -83,7 +83,7 @@ const WAVE_SHARED_LEFT_MARGIN: f32 = 64.0;
 /// The mockup's per-sheet left gutter: the noise sheet's nV/√Hz tick
 /// labels need 88 px where the shared 64 px gutter suffices elsewhere.
 fn wave_left_margin(results: &ResultsState) -> f32 {
-    match results.viewer {
+    match results.session.viewer {
         super::ResultViewer::NoiseContrib => 88.0,
         _ => WAVE_SHARED_LEFT_MARGIN,
     }
@@ -208,11 +208,11 @@ fn pane_y_range(
 }
 
 fn model_is_visible(model: &StripModel, models: &[StripModel], results: &ResultsState) -> bool {
-    match results.maximized_strip {
+    match results.session.maximized_strip {
         Some(maximized) if models.iter().any(|item| item.analysis_key == maximized) => {
             model.analysis_key == maximized
         }
-        _ => !results.hidden_strips.contains(&model.analysis_key),
+        _ => !results.session.hidden_strips.contains(&model.analysis_key),
     }
 }
 
@@ -220,7 +220,7 @@ fn active_pane<'a>(
     models: &'a [StripModel],
     results: &ResultsState,
 ) -> Option<(&'a StripModel, usize, UnitPane<'a>)> {
-    let active = results.active_wave_pane.as_ref()?;
+    let active = results.session.active_wave_pane.as_ref()?;
     let model = models
         .iter()
         .find(|model| model.analysis_key == active.analysis)
@@ -255,7 +255,7 @@ pub(super) fn reconcile_active_pane(state: &mut AppState, t: &Tokens) {
         .valid_selected_trace(&state.simulation)
         .map(SelectedResultTrace::analysis_key)
         .or_else(|| {
-            state.ui.results.cursor_strip.and_then(|index| {
+            state.ui.results.session.cursor_strip.and_then(|index| {
                 models
                     .iter()
                     .find(|model| model.analysis_index == index)
@@ -283,7 +283,7 @@ pub(super) fn reconcile_active_pane(state: &mut AppState, t: &Tokens) {
                     unit: pane.unit.to_owned(),
                 })
         });
-    state.ui.results.active_wave_pane = next;
+    state.ui.results.session.active_wave_pane = next;
 }
 
 fn matching_spec_limits(
@@ -397,6 +397,7 @@ fn cursor_marker_target(state: &AppState, models: &[StripModel]) -> Option<Curso
     let cursor_x = state
         .ui
         .results
+        .session
         .cursors
         .a
         .filter(|value| value.is_finite())?;
@@ -416,6 +417,7 @@ fn cursor_marker_target(state: &AppState, models: &[StripModel]) -> Option<Curso
     let trace = state
         .ui
         .results
+        .session
         .cursor_a_anchor
         .as_ref()
         .filter(|anchor| anchor.analysis == model.analysis_key)
@@ -569,14 +571,14 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
 
     // Apply hide/maximize strip state.
     let results = &state.ui.results;
-    let visible: Vec<&StripModel> = match results.maximized_strip {
+    let visible: Vec<&StripModel> = match results.session.maximized_strip {
         Some(max_key) if models.iter().any(|m| m.analysis_key == max_key) => models
             .iter()
             .filter(|m| m.analysis_key == max_key)
             .collect(),
         _ => models
             .iter()
-            .filter(|m| !results.hidden_strips.contains(&m.analysis_key))
+            .filter(|m| !results.session.hidden_strips.contains(&m.analysis_key))
             .collect(),
     };
     if visible.is_empty() {
@@ -595,10 +597,11 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
     let n = visible.len();
     let separators = (n.saturating_sub(1)) as f32;
     let strip_height = ((avail.height() - separators) / n as f32).max(140.0);
-    let maximized = state.ui.results.maximized_strip.is_some();
+    let maximized = state.ui.results.session.maximized_strip.is_some();
     let linked_cursor_domain = state
         .ui
         .results
+        .session
         .cursor_strip
         .and_then(|owner| models.iter().find(|model| model.analysis_index == owner))
         .map(|model| model.cursor_domain());
@@ -629,6 +632,7 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
                         let strip_exprs: Vec<ExprTrace> = state
                             .ui
                             .results
+                            .session
                             .analysis_exprs
                             .get(&model.analysis_key)
                             .cloned()
@@ -661,7 +665,7 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
                             })
                             .collect();
 
-                        let zoomed = state.ui.results.analysis_strip_is_zoomed(
+                        let zoomed = state.ui.results.session.analysis_strip_is_zoomed(
                             super::ResultViewer::Waves,
                             model.analysis_key,
                         );
@@ -715,34 +719,40 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
     // Apply deferred mutations.
     let results = &mut state.ui.results;
     if let Some(idx) = toggle_maximize {
-        results.maximized_strip = (results.maximized_strip != Some(idx)).then_some(idx);
+        results.session.maximized_strip =
+            (results.session.maximized_strip != Some(idx)).then_some(idx);
     }
     if let Some(idx) = close_strip {
-        results.hidden_strips.insert(idx);
+        results.session.hidden_strips.insert(idx);
         if models
             .iter()
             .find(|model| model.analysis_key == idx)
-            .is_some_and(|model| results.cursor_strip == Some(model.analysis_index))
+            .is_some_and(|model| results.session.cursor_strip == Some(model.analysis_index))
         {
-            results.clear_cursors();
+            results.session.clear_cursors();
         }
     }
     if let Some(key) = fit_strip {
-        results.reset_analysis_plot_view(super::ResultViewer::Waves, key);
+        results
+            .session
+            .reset_analysis_plot_view(super::ResultViewer::Waves, key);
     }
     if let Some((analysis, index)) = toggle_expr
         && let Some(expr) = results
+            .session
             .analysis_exprs
             .get_mut(&analysis)
             .and_then(|list| list.get_mut(index))
     {
         expr.visible = !expr.visible;
         if let Some(model) = models.iter().find(|model| model.analysis_key == analysis) {
-            results.sync_expression_projection(analysis, model.analysis_index);
+            results
+                .session
+                .sync_expression_projection(analysis, model.analysis_index);
         }
     }
     if let Some((analysis, index)) = remove_expr
-        && let Some(list) = results.analysis_exprs.get_mut(&analysis)
+        && let Some(list) = results.session.analysis_exprs.get_mut(&analysis)
     {
         if index < list.len() {
             let removed = list.remove(index);
@@ -751,14 +761,16 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
                 .remove(&(analysis, removed.text));
         }
         if list.is_empty() {
-            results.analysis_exprs.remove(&analysis);
+            results.session.analysis_exprs.remove(&analysis);
         }
         if let Some(model) = models.iter().find(|model| model.analysis_key == analysis) {
-            results.sync_expression_projection(analysis, model.analysis_index);
+            results
+                .session
+                .sync_expression_projection(analysis, model.analysis_index);
         }
     }
     if let Some(analysis) = open_editor {
-        results.expr_editor = Some(ExprEditor {
+        results.session.expr_editor = Some(ExprEditor {
             analysis,
             text: String::new(),
             error: None,
@@ -916,16 +928,17 @@ pub(crate) fn active_pane_facts(tokens: &Tokens, state: &mut AppState) -> Active
     let pinned = state
         .ui
         .results
+        .session
         .active_wave_pane
         .is_some()
         .then(|| active_pane_is_pinned(tokens, state));
-    let key = state.ui.results.active_wave_pane.as_ref();
+    let key = state.ui.results.session.active_wave_pane.as_ref();
     let scale = key.map(|key| {
         // One owner: the pane’s own log-Y flag on ResultsState. This read
         // used to reach into egui’s persisted memory with a hand-built id,
         // which is a second copy of a fact and drifts the moment either side
         // changes its key.
-        if state.ui.results.log_y_panes.contains(key) {
+        if state.ui.results.session.log_y_panes.contains(key) {
             "logarithmic"
         } else {
             "linear"
@@ -937,7 +950,7 @@ pub(crate) fn active_pane_facts(tokens: &Tokens, state: &mut AppState) -> Active
         traces,
         runs,
         scale,
-        limit_mask: if state.ui.results.show_spec_limits {
+        limit_mask: if state.ui.results.session.show_spec_limits {
             "project specification limits"
         } else {
             "none bound"
@@ -974,6 +987,7 @@ pub(crate) fn active_shared_x_status(
     let active = state
         .ui
         .results
+        .session
         .active_wave_pane
         .as_ref()
         .map(|key| key.analysis);
@@ -1011,7 +1025,7 @@ fn active_pane_identity(
     tokens: &Tokens,
     state: &mut AppState,
 ) -> (Option<String>, Option<(usize, usize)>, Option<usize>) {
-    let Some(key) = state.ui.results.active_wave_pane.clone() else {
+    let Some(key) = state.ui.results.session.active_wave_pane.clone() else {
         return (None, None, None);
     };
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -1062,7 +1076,7 @@ fn active_pane_extents(
     tokens: &Tokens,
     state: &mut AppState,
 ) -> (Option<super::AxisExtent>, Option<super::AxisExtent>) {
-    let Some(key) = state.ui.results.active_wave_pane.clone() else {
+    let Some(key) = state.ui.results.session.active_wave_pane.clone() else {
         return (None, None);
     };
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -1092,6 +1106,7 @@ fn active_pane_extents(
     let pinned = state
         .ui
         .results
+        .session
         .analysis_plot_view_pane(super::ResultViewer::Waves, key.analysis, ordinal)
         .y;
     let y = match pinned {
@@ -1103,14 +1118,16 @@ fn active_pane_extents(
 
 /// Whether the active pane's axis carries an explicit interval.
 pub(crate) fn active_pane_axis_is_pinned(results: &ResultsState, axis: super::PaneAxis) -> bool {
-    let Some(key) = results.active_wave_pane.as_ref() else {
+    let Some(key) = results.session.active_wave_pane.as_ref() else {
         return false;
     };
     // Resolving the pane ordinal would need the built models, which this
     // accessor deliberately does not take. It does not need them: X is shared
     // by the whole strip, and a pinned Y on any pane of the strip is what the
     // "manual range" state means to a reader either way.
-    results.analysis_strip_axis_is_pinned(super::ResultViewer::Waves, key.analysis, axis)
+    results
+        .session
+        .analysis_strip_axis_is_pinned(super::ResultViewer::Waves, key.analysis, axis)
 }
 
 /// Pin the active pane's axis to an explicit interval, or clear it.
@@ -1125,7 +1142,7 @@ pub(crate) fn set_active_pane_axis_range(
     axis: super::PaneAxis,
     range: Option<(f64, f64)>,
 ) -> bool {
-    let Some(key) = state.ui.results.active_wave_pane.clone() else {
+    let Some(key) = state.ui.results.session.active_wave_pane.clone() else {
         return false;
     };
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -1153,6 +1170,7 @@ pub(crate) fn set_active_pane_axis_range(
             state
                 .ui
                 .results
+                .session
                 .analysis_plot_view_pane_mut(super::ResultViewer::Waves, key.analysis, ordinal)
                 .y = range;
         }
@@ -1164,7 +1182,7 @@ fn active_pane_viewports(
     tokens: &Tokens,
     state: &mut AppState,
 ) -> (Option<String>, Option<String>) {
-    let Some(key) = state.ui.results.active_wave_pane.clone() else {
+    let Some(key) = state.ui.results.session.active_wave_pane.clone() else {
         return (None, None);
     };
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -1201,6 +1219,7 @@ fn active_pane_viewports(
     let pinned = state
         .ui
         .results
+        .session
         .analysis_plot_view_pane(super::ResultViewer::Waves, key.analysis, ordinal)
         .y;
     let unit = pane.unit;
@@ -1226,15 +1245,18 @@ fn pane_log_y_key(model: &StripModel, pane: &UnitPane) -> WavePanePresentationKe
 }
 
 pub(super) fn pane_log_y(results: &ResultsState, model: &StripModel, pane: &UnitPane) -> bool {
-    results.log_y_panes.contains(&pane_log_y_key(model, pane))
+    results
+        .session
+        .log_y_panes
+        .contains(&pane_log_y_key(model, pane))
 }
 
 fn set_pane_log_y(results: &mut ResultsState, model: &StripModel, pane: &UnitPane, enabled: bool) {
     let key = pane_log_y_key(model, pane);
     if enabled {
-        results.log_y_panes.insert(key);
+        results.session.log_y_panes.insert(key);
     } else {
-        results.log_y_panes.remove(&key);
+        results.session.log_y_panes.remove(&key);
     }
 }
 
@@ -1255,10 +1277,10 @@ fn show_unit_pane_header(
         unit: pane.unit.to_owned(),
     };
     // Cursor A only reads out on the strip it was placed on.
-    let cursor_a = (state.ui.results.cursor_readout_active()
-        && state.ui.results.cursor_strip == Some(model.analysis_index))
+    let cursor_a = (state.ui.results.session.cursor_readout_active()
+        && state.ui.results.session.cursor_strip == Some(model.analysis_index))
     .then(|| {
-        state.ui.results.cursors.a.map(|x| {
+        state.ui.results.session.cursors.a.map(|x| {
             (
                 x,
                 state.ui.preferences.result_presentation_policy().readout(),
@@ -1269,7 +1291,7 @@ fn show_unit_pane_header(
     .flatten();
     let input = pane_header::PaneHeader {
         height,
-        active: state.ui.results.active_wave_pane.as_ref() == Some(&pane_key),
+        active: state.ui.results.session.active_wave_pane.as_ref() == Some(&pane_key),
         log_y,
         log_y_available,
         cursor_a,
@@ -1300,15 +1322,16 @@ fn show_unit_pane_header(
         }
 
         fn select_trace(&mut self, trace: &StripTrace) {
-            self.state.ui.results.selected_trace = Some(SelectedResultTrace::from_identity(
-                self.model.analysis_key,
-                trace.source_waveform_name.clone(),
-            ));
+            self.state.ui.results.session.selected_trace =
+                Some(SelectedResultTrace::from_identity(
+                    self.model.analysis_key,
+                    trace.source_waveform_name.clone(),
+                ));
             self.activate_pane();
         }
 
         fn activate_pane(&mut self) {
-            self.state.ui.results.active_wave_pane = Some(self.pane_key.clone());
+            self.state.ui.results.session.active_wave_pane = Some(self.pane_key.clone());
         }
     }
     pane_header::show_header(
@@ -1341,18 +1364,19 @@ fn show_shared_x_axis(
     }
     let current =
         shared_x_view(&state.ui.results, model.analysis_key, pane_count).unwrap_or(full_domain);
-    let cursor_owner = state.ui.results.cursor_strip == Some(model.analysis_index);
-    let linked_cursor =
-        state.ui.results.linked_cursors && linked_cursor_domain == Some(&model.cursor_domain());
+    let cursor_owner = state.ui.results.session.cursor_strip == Some(model.analysis_index);
+    let linked_cursor = state.ui.results.session.linked_cursors
+        && linked_cursor_domain == Some(&model.cursor_domain());
     let input = navigation::SharedXAxis {
         full_domain,
         current,
         height,
         left_margin: wave_left_margin(&state.ui.results),
         quantity_policy: state.ui.preferences.quantity_presentation_policy(),
-        cursors: (cursor_owner || linked_cursor).then_some(state.ui.results.cursors),
+        cursors: (cursor_owner || linked_cursor).then_some(state.ui.results.session.cursors),
     };
-    let output = navigation::show_shared_x_axis(ui, &mut state.ui.results.derived, model, input);
+    let output =
+        navigation::show_shared_x_axis(ui, &mut state.ui.results.session.derived, model, input);
     frame_work::note_samples(FrameSampleRead::StripOverview, output.overview_samples_read);
     frame_work::note_samples(FrameSampleRead::TraceExtremes, output.extrema_samples_read);
     if let Some(viewport) = output.viewport {
@@ -1364,15 +1388,15 @@ fn show_shared_x_axis(
     }
     if let Some(cursor) = output.cursor {
         if !cursor_owner && !linked_cursor {
-            state.ui.results.clear_cursors();
-            state.ui.results.cursor_strip = Some(model.analysis_index);
+            state.ui.results.session.clear_cursors();
+            state.ui.results.session.cursor_strip = Some(model.analysis_index);
         }
         match cursor {
             navigation::CursorMove::A(x) => {
-                state.ui.results.cursors.a = Some(x);
-                state.ui.results.cursor_a_anchor = None;
+                state.ui.results.session.cursors.a = Some(x);
+                state.ui.results.session.cursor_a_anchor = None;
             }
-            navigation::CursorMove::B(x) => state.ui.results.cursors.b = Some(x),
+            navigation::CursorMove::B(x) => state.ui.results.session.cursors.b = Some(x),
         }
     }
 }
@@ -1461,8 +1485,8 @@ pub(super) fn displayed_pane_auto_y(
     ordinal: usize,
     t: &Tokens,
 ) -> Option<(f64, f64)> {
-    let pane_range = pane_y_range(&mut state.ui.results.derived, model, &pane.traces);
-    let limits = if state.ui.results.show_spec_limits {
+    let pane_range = pane_y_range(&mut state.ui.results.session.derived, model, &pane.traces);
+    let limits = if state.ui.results.session.show_spec_limits {
         matching_spec_limits(state, model, pane, t)
     } else {
         Vec::new()
@@ -1497,8 +1521,8 @@ fn show_unit_pane(
     // canvas together once the pane's full height is known.
     let pane_top = ui.available_rect_before_wrap().top();
 
-    let pane_range = pane_y_range(&mut state.ui.results.derived, model, &pane.traces);
-    let specification_limits = if state.ui.results.show_spec_limits {
+    let pane_range = pane_y_range(&mut state.ui.results.session.derived, model, &pane.traces);
+    let specification_limits = if state.ui.results.session.show_spec_limits {
         matching_spec_limits(state, model, pane, &t)
     } else {
         Vec::new()
@@ -1520,7 +1544,7 @@ fn show_unit_pane(
         WAVE_PANE_HEADER_HEIGHT.min(ui.available_height()),
     );
     if header.autoscale_y || header.toggle_log_y {
-        let view = state.ui.results.analysis_plot_view_pane_mut(
+        let view = state.ui.results.session.analysis_plot_view_pane_mut(
             super::ResultViewer::Waves,
             model.analysis_key,
             ordinal,
@@ -1541,14 +1565,14 @@ fn show_unit_pane(
     }
 
     // User zoom/pan overrides the automatic fit per axis, per pane.
-    let pane_view = state.ui.results.analysis_plot_view_pane(
+    let pane_view = state.ui.results.session.analysis_plot_view_pane(
         super::ResultViewer::Waves,
         model.analysis_key,
         ordinal,
     );
     let (x0, x1) =
         shared_x_view(&state.ui.results, model.analysis_key, pane_count).unwrap_or((x0, x1));
-    let family_envelopes = state.ui.results.show_family_envelope.then(|| {
+    let family_envelopes = state.ui.results.session.show_family_envelope.then(|| {
         let generation = state.ui.results.models.generation();
         extent::family_envelopes(&mut state.ui.results, generation, model, pane)
     });
@@ -1561,9 +1585,9 @@ fn show_unit_pane(
     };
     let model_cursor_domain = model.cursor_domain();
     let cursor_domain_matches = linked_cursor_domain == Some(&model_cursor_domain);
-    let cursors = (state.ui.results.cursor_strip == Some(model.analysis_index)
-        || (state.ui.results.linked_cursors && cursor_domain_matches))
-        .then_some(state.ui.results.cursors);
+    let cursors = (state.ui.results.session.cursor_strip == Some(model.analysis_index)
+        || (state.ui.results.session.linked_cursors && cursor_domain_matches))
+        .then_some(state.ui.results.session.cursors);
     let markers = pane_view::plot_markers(
         model,
         pane,
@@ -1571,6 +1595,7 @@ fn show_unit_pane(
         state
             .ui
             .results
+            .session
             .strip_markers(model.analysis_key)
             .into_iter()
             .map(|marker| pane_view::MarkerPresentation {
@@ -1590,40 +1615,47 @@ fn show_unit_pane(
         readout: presentation.readout(),
         quantity: quantity_policy,
         display_decimation: display_decimation(presentation.large_dataset_display()),
-        minor_grid: state.ui.results.show_minor_grid,
+        minor_grid: state.ui.results.session.show_minor_grid,
         horizontal_cursor: state
             .ui
             .results
+            .session
             .horizontal_cursor
             .as_ref()
             .filter(|cursor| cursor.pane == pane_key)
             .map(|cursor| cursor.y),
-        horizontal_cursor_interactive: state.ui.results.horizontal_cursor_placement_enabled(),
+        horizontal_cursor_interactive: state
+            .ui
+            .results
+            .session
+            .horizontal_cursor_placement_enabled(),
         cursors,
         specification_limits,
         markers,
         expressions: exprs,
         family_envelopes,
-        find_nearest: state.ui.results.marker_tool.is_armed()
-            || (state.ui.results.cursor_placement_enabled() && state.ui.results.cursor_a_is_next()),
+        find_nearest: state.ui.results.session.marker_tool.is_armed()
+            || (state.ui.results.session.cursor_placement_enabled()
+                && state.ui.results.session.cursor_a_is_next()),
     };
-    let drawn = pane_view::show_plot(ui, &mut state.ui.results.cache, model, pane, input);
+    let drawn = pane_view::show_plot(ui, &mut state.ui.results.session.cache, model, pane, input);
     let response = drawn.response;
     if response.response.hovered()
         || response.response.dragged()
         || response.clicked_x.is_some()
         || response.horizontal_cursor_y.is_some()
     {
-        state.ui.results.active_wave_pane = Some(pane_key.clone());
+        state.ui.results.session.active_wave_pane = Some(pane_key.clone());
     }
     if let Some(y) = response.horizontal_cursor_y {
-        state.ui.results.horizontal_cursor = Some(HorizontalWaveCursor { pane: pane_key, y });
+        state.ui.results.session.horizontal_cursor =
+            Some(HorizontalWaveCursor { pane: pane_key, y });
     }
 
     // The marker tool takes the click when armed: one click cannot both
     // annotate and move a cursor, and the armed chip says which it will do.
     if let Some(clicked_x) = response.clicked_x
-        && state.ui.results.marker_tool.is_armed()
+        && state.ui.results.session.marker_tool.is_armed()
     {
         let nearest = drawn.nearest_trace;
         if let Some(trace) = nearest {
@@ -1641,27 +1673,27 @@ fn show_unit_pane(
             }
         }
     } else if let Some(clicked_x) = response.clicked_x
-        && state.ui.results.cursor_placement_enabled()
+        && state.ui.results.session.cursor_placement_enabled()
     {
-        let placing_cursor_a = state.ui.results.cursor_a_is_next();
+        let placing_cursor_a = state.ui.results.session.cursor_a_is_next();
         let nearest_anchor =
             placing_cursor_a.then(|| drawn.nearest_trace.map(|trace| anchor_key(model, trace)));
         let results = &mut state.ui.results;
-        if results.cursor_strip != Some(model.analysis_index)
-            && (!results.linked_cursors || !cursor_domain_matches)
+        if results.session.cursor_strip != Some(model.analysis_index)
+            && (!results.session.linked_cursors || !cursor_domain_matches)
         {
-            results.cursors = CursorPair::default();
+            results.session.cursors = CursorPair::default();
         }
-        results.cursor_strip = Some(model.analysis_index);
+        results.session.cursor_strip = Some(model.analysis_index);
         if placing_cursor_a {
-            results.cursor_a_anchor = nearest_anchor.flatten();
+            results.session.cursor_a_anchor = nearest_anchor.flatten();
         }
-        results.cursors.place(clicked_x);
+        results.session.cursors.place(clicked_x);
     }
 
     if response.view.reset {
         set_shared_x_view(&mut state.ui.results, model.analysis_key, pane_count, None);
-        let view = state.ui.results.analysis_plot_view_pane_mut(
+        let view = state.ui.results.session.analysis_plot_view_pane_mut(
             super::ResultViewer::Waves,
             model.analysis_key,
             ordinal,
@@ -1676,7 +1708,7 @@ fn show_unit_pane(
                 Some(x),
             );
         }
-        let view = state.ui.results.analysis_plot_view_pane_mut(
+        let view = state.ui.results.session.analysis_plot_view_pane_mut(
             super::ResultViewer::Waves,
             model.analysis_key,
             ordinal,
@@ -1689,7 +1721,7 @@ fn show_unit_pane(
     // The mockup's `.plot-pane.active::before`: a 2 px rail down the pane
     // that received the instrument's actions. Painted last so it reads over
     // the header fill and the canvas alike.
-    let pane_active = state.ui.results.active_wave_pane.as_ref()
+    let pane_active = state.ui.results.session.active_wave_pane.as_ref()
         == Some(&WavePanePresentationKey {
             analysis: model.analysis_key,
             unit: pane.unit.to_owned(),

@@ -19,12 +19,15 @@ mod source_cache;
 #[test]
 fn the_readout_strip_stands_down_until_a_cursor_is_placed() {
     let mut state = AppState::default();
-    assert!(state.ui.results.cursor_tool.is_armed(), "armed by default");
-    assert!(!state.ui.results.cursor_readout_active());
+    assert!(
+        state.ui.results.session.cursor_tool.is_armed(),
+        "armed by default"
+    );
+    assert!(!state.ui.results.session.cursor_readout_active());
     assert_eq!(readout_strip_height(&mut state), 0.0);
 
-    state.ui.results.cursors.place(1.0e-3);
-    assert!(state.ui.results.cursor_readout_active());
+    state.ui.results.session.cursors.place(1.0e-3);
+    assert!(state.ui.results.session.cursor_readout_active());
     // No visible traces on an empty run: the header alone, never a band
     // of blank rows.
     assert_eq!(readout_strip_height(&mut state), READOUT_HEADER_H);
@@ -33,21 +36,21 @@ fn the_readout_strip_stands_down_until_a_cursor_is_placed() {
 #[test]
 fn disarming_the_cursor_tool_clears_the_pair_and_hides_the_strip() {
     let mut state = AppState::default();
-    state.ui.results.cursors.place(1.0);
-    state.ui.results.cursors.place(2.0);
-    state.ui.results.cursor_strip = Some(0);
+    state.ui.results.session.cursors.place(1.0);
+    state.ui.results.session.cursors.place(2.0);
+    state.ui.results.session.cursor_strip = Some(0);
 
-    state.ui.results.toggle_cursor_tool();
+    state.ui.results.session.toggle_cursor_tool();
 
-    assert!(!state.ui.results.cursor_tool.is_armed());
-    assert!(!state.ui.results.cursors.any());
-    assert_eq!(state.ui.results.cursor_strip, None);
+    assert!(!state.ui.results.session.cursor_tool.is_armed());
+    assert!(!state.ui.results.session.cursors.any());
+    assert_eq!(state.ui.results.session.cursor_strip, None);
     assert_eq!(readout_strip_height(&mut state), 0.0);
 
-    state.ui.results.toggle_cursor_tool();
-    assert!(state.ui.results.cursor_tool.is_armed());
+    state.ui.results.session.toggle_cursor_tool();
+    assert!(state.ui.results.session.cursor_tool.is_armed());
     assert!(
-        !state.ui.results.cursors.any(),
+        !state.ui.results.session.cursors.any(),
         "re-arming must not resurrect cleared cursors"
     );
 }
@@ -237,8 +240,8 @@ fn deep_readout_fixture(trace_count: usize) -> AppState {
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(waveforms),
     );
-    state.ui.results.cursors.place(0.5);
-    state.ui.results.cursor_strip = Some(0);
+    state.ui.results.session.cursors.place(0.5);
+    state.ui.results.session.cursor_strip = Some(0);
     state
 }
 
@@ -323,7 +326,7 @@ fn a_pane_states_how_many_runs_it_draws() {
     );
     let run = state.simulation.active_run().expect("active run");
     let analysis = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
-    state.ui.results.active_wave_pane = Some(WavePanePresentationKey {
+    state.ui.results.session.active_wave_pane = Some(WavePanePresentationKey {
         analysis,
         unit: "V".to_owned(),
     });
@@ -391,8 +394,8 @@ fn a_copied_value_is_named_by_its_own_unit_not_the_strips() {
             WaveformData::new("I(VDD)", vec![0.0, 1.0], vec![0.0, 1.5e-3], "#fff"),
         ]),
     );
-    state.ui.results.cursor_strip = Some(0);
-    state.ui.results.cursors.a = Some(1.0);
+    state.ui.results.session.cursor_strip = Some(0);
+    state.ui.results.session.cursors.a = Some(1.0);
 
     let copied = copy_cursor_text(&mut state).expect("active cursor has copy data");
 
@@ -418,8 +421,8 @@ fn a_copied_noise_density_never_takes_a_second_prefix() {
             WaveformData::new("onoise", vec![1.0, 10.0], vec![4.0e-12, 4.0e-12], "#fff"),
         ]),
     );
-    state.ui.results.cursor_strip = Some(0);
-    state.ui.results.cursors.a = Some(10.0);
+    state.ui.results.session.cursor_strip = Some(0);
+    state.ui.results.session.cursors.a = Some(10.0);
 
     let copied = copy_cursor_text(&mut state).expect("active cursor has copy data");
 
@@ -492,7 +495,7 @@ fn quick_view_visibility_never_mutates_retained_or_live_waveforms() {
     );
 
     toggle_visibility(&mut state, 0, 0);
-    assert!(state.ui.results.waveform_visibility.is_empty());
+    assert!(state.ui.results.session.waveform_visibility.is_empty());
     assert_eq!(
         state.simulation.runs[0].analyses[0].waveforms[0].visible,
         retained_default
@@ -502,9 +505,9 @@ fn quick_view_visibility_never_mutates_retained_or_live_waveforms() {
 #[test]
 fn shared_x_frame_exposes_current_and_full_ranges_to_accessibility() {
     let mut state = marker_fixture();
-    state.ui.results.cursor_strip = Some(0);
-    state.ui.results.cursors.a = Some(0.25);
-    state.ui.results.cursors.b = Some(0.75);
+    state.ui.results.session.cursor_strip = Some(0);
+    state.ui.results.session.cursors.a = Some(0.25);
+    state.ui.results.session.cursors.b = Some(0.75);
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
         &state.simulation,
@@ -647,6 +650,7 @@ fn markers_alone_keep_a_compact_readout_strip_on_screen() {
     state
         .ui
         .results
+        .session
         .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
         .unwrap();
     assert_eq!(
@@ -656,7 +660,7 @@ fn markers_alone_keep_a_compact_readout_strip_on_screen() {
     );
 
     // A closed strip takes its markers off screen with it.
-    state.ui.results.hidden_strips.insert(analysis);
+    state.ui.results.session.hidden_strips.insert(analysis);
     assert_eq!(readout_strip_height(&mut state), 0.0);
 }
 
@@ -664,14 +668,15 @@ fn markers_alone_keep_a_compact_readout_strip_on_screen() {
 fn the_strip_carries_cursors_and_markers_together() {
     let mut state = marker_fixture();
     let (analysis, waveform) = marker_identity(&state);
-    state.ui.results.cursors.place(0.5);
-    state.ui.results.cursor_strip = Some(0);
+    state.ui.results.session.cursors.place(0.5);
+    state.ui.results.session.cursor_strip = Some(0);
     let cursors_only = readout_strip_height(&mut state);
     assert!(cursors_only > 0.0);
 
     state
         .ui
         .results
+        .session
         .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
         .unwrap();
     assert_eq!(
@@ -688,13 +693,14 @@ fn collapse_keeps_one_header_and_no_content_still_removes_the_strip() {
     state
         .ui
         .results
+        .session
         .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
         .unwrap();
-    state.ui.results.readout_collapsed = true;
+    state.ui.results.session.readout_collapsed = true;
 
     assert_eq!(readout_strip_height(&mut state), READOUT_HEADER_H);
 
-    state.ui.results.hidden_strips.insert(analysis);
+    state.ui.results.session.hidden_strips.insert(analysis);
     assert_eq!(readout_strip_height(&mut state), 0.0);
 }
 
@@ -706,6 +712,7 @@ fn every_visible_marker_remains_in_the_scroll_owned_body() {
         state
             .ui
             .results
+            .session
             .add_marker(
                 analysis,
                 waveform.clone(),
@@ -733,24 +740,25 @@ fn markers_outlive_the_tool_that_placed_them() {
     let mut state = marker_fixture();
     let (analysis, waveform) = marker_identity(&state);
     assert!(
-        !state.ui.results.marker_tool.is_armed(),
+        !state.ui.results.session.marker_tool.is_armed(),
         "annotating is deliberate — the tool is off until asked for"
     );
-    state.ui.results.toggle_marker_tool();
+    state.ui.results.session.toggle_marker_tool();
     let id = state
         .ui
         .results
+        .session
         .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
         .unwrap();
-    state.ui.results.toggle_marker_tool();
+    state.ui.results.session.toggle_marker_tool();
 
-    assert!(!state.ui.results.marker_tool.is_armed());
-    assert_eq!(state.ui.results.markers.len(), 1);
+    assert!(!state.ui.results.session.marker_tool.is_armed());
+    assert_eq!(state.ui.results.session.markers.len(), 1);
 
     // Cursors are a readout and clear; markers are content and do not.
-    state.ui.results.clear_cursors();
-    assert_eq!(state.ui.results.markers.len(), 1);
-    assert_eq!(state.ui.results.markers[0].id, id);
+    state.ui.results.session.clear_cursors();
+    assert_eq!(state.ui.results.session.markers.len(), 1);
+    assert_eq!(state.ui.results.session.markers[0].id, id);
 }
 
 #[test]
@@ -760,16 +768,17 @@ fn removing_a_marker_takes_its_open_edit_with_it() {
     let first = state
         .ui
         .results
+        .session
         .add_marker(analysis, waveform.clone(), "V(out)".to_owned(), 0.5)
         .unwrap();
     marker_dialog::open(&mut state, MarkerSelector::Quick(first));
-    assert!(state.ui.results.marker_edit.is_some());
+    assert!(state.ui.results.session.marker_edit.is_some());
 
-    state.ui.results.remove_marker(first);
+    state.ui.results.session.remove_marker(first);
 
-    assert!(state.ui.results.markers.is_empty());
+    assert!(state.ui.results.session.markers.is_empty());
     assert!(
-        state.ui.results.marker_edit.is_none(),
+        state.ui.results.session.marker_edit.is_none(),
         "an edit of a marker that no longer exists has nothing to apply to"
     );
 
@@ -777,6 +786,7 @@ fn removing_a_marker_takes_its_open_edit_with_it() {
     let second = state
         .ui
         .results
+        .session
         .add_marker(analysis, waveform, "V(out)".to_owned(), 0.9)
         .unwrap();
     assert_ne!(first, second);
@@ -791,16 +801,23 @@ fn opening_a_marker_edit_seeds_the_draft_from_the_marker() {
     let id = state
         .ui
         .results
+        .session
         .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
         .unwrap();
-    if let Some(marker) = state.ui.results.marker_mut(id) {
+    if let Some(marker) = state.ui.results.session.marker_mut(id) {
         marker.note = "overshoot".to_owned();
         marker.kind = MarkerKind::Peak;
     }
 
     marker_dialog::open(&mut state, MarkerSelector::Quick(id));
 
-    let draft = state.ui.results.marker_edit.clone().expect("draft opened");
+    let draft = state
+        .ui
+        .results
+        .session
+        .marker_edit
+        .clone()
+        .expect("draft opened");
     assert_eq!(draft.selector, MarkerSelector::Quick(id));
     assert_eq!(draft.note, "overshoot");
     assert_eq!(draft.kind, MarkerKind::Peak);
@@ -1090,46 +1107,6 @@ fn phase_panes_order_after_quantity_panes_regardless_of_waveform_order() {
 }
 
 #[test]
-fn fitting_a_strip_fits_every_pane_of_it() {
-    let mut state = AppState::default();
-    let viewer = super::super::ResultViewer::Waves;
-    state.ui.results.plot_view_pane_mut(viewer, 0, 0).y = Some((0.0, 1.0));
-    state.ui.results.plot_view_pane_mut(viewer, 0, 1).y = Some((0.0, 2.0));
-    state.ui.results.plot_view_pane_mut(viewer, 1, 0).y = Some((0.0, 3.0));
-    assert!(state.ui.results.strip_is_zoomed(viewer, 0));
-
-    state.ui.results.reset_plot_view(viewer, 0);
-
-    assert!(
-        !state.ui.results.strip_is_zoomed(viewer, 0),
-        "leaving one pane zoomed would make the strip's panes disagree"
-    );
-    assert!(
-        state.ui.results.strip_is_zoomed(viewer, 1),
-        "fitting one strip does not reach into another"
-    );
-}
-
-#[test]
-fn each_pane_keeps_its_own_y_viewport() {
-    let mut state = AppState::default();
-    let viewer = super::super::ResultViewer::Waves;
-    state.ui.results.plot_view_pane_mut(viewer, 0, 0).y = Some((-5.0, 5.0));
-    state.ui.results.plot_view_pane_mut(viewer, 0, 1).y = Some((0.0, 1.0e-3));
-
-    // One zoom factor across volts and amps would mean nothing, so the
-    // panes never share a Y override.
-    assert_eq!(
-        state.ui.results.plot_view_pane(viewer, 0, 0).y,
-        Some((-5.0, 5.0))
-    );
-    assert_eq!(
-        state.ui.results.plot_view_pane(viewer, 0, 1).y,
-        Some((0.0, 1.0e-3))
-    );
-}
-
-#[test]
 fn noise_strip_uses_spectral_density_unit_without_db_conversion() {
     let mut simulation = SimulationState::default();
     simulation.start_run().add_analysis(
@@ -1326,12 +1303,12 @@ fn family_policy_expands_stable_styles_and_preserves_overlay_sources() {
     results.toggle_family_trace_visibility(tt_visibility_key);
     let toggled = build_models(
         &simulation,
-        &mut results.derived,
+        &mut results.session.derived,
         &Tokens::default(),
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
         Some(&selection),
-        &results.hidden_family_traces,
+        &results.session.hidden_family_traces,
     );
     let toggled_model = &toggled[0];
     assert!(
@@ -1370,7 +1347,7 @@ fn family_policy_expands_stable_styles_and_preserves_overlay_sources() {
     );
     assert!(simulation.runs[0].analyses[0].waveforms[0].visible);
     results.set_sample_selection(None);
-    assert!(results.hidden_family_traces.is_empty());
+    assert!(results.session.hidden_family_traces.is_empty());
 }
 
 #[test]
@@ -1606,8 +1583,8 @@ fn cursor_copy_uses_explicit_scientific_si_policy() {
             WaveformData::new("onoise", vec![1.0, 10.0], vec![2.0e-18, 4.0e-18], "#fff"),
         ]),
     );
-    state.ui.results.cursor_strip = Some(0);
-    state.ui.results.cursors.a = Some(10.0);
+    state.ui.results.session.cursor_strip = Some(0);
+    state.ui.results.session.cursors.a = Some(10.0);
     state
         .ui
         .preferences
@@ -1623,67 +1600,6 @@ fn cursor_copy_uses_explicit_scientific_si_policy() {
     assert!(copied.contains("e0 nV/√Hz"));
 }
 
-#[test]
-fn favorite_toggle_is_a_strict_membership_flip() {
-    let mut state = AppState::default();
-    let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
-    let key = SourceWaveformPresentationKey::new(
-        AnalysisPresentationKey::new(crate::product::DatasetId::new(), &analysis),
-        "V(out)",
-    );
-    let results = &mut state.ui.results;
-    assert!(!results.is_favorite_signal(&key));
-    results.toggle_favorite_signal(key.clone());
-    assert!(results.is_favorite_signal(&key));
-    results.toggle_favorite_signal(key.clone());
-    assert!(!results.is_favorite_signal(&key));
-}
-
-#[test]
-fn recent_signals_front_insert_deduplicate_and_age_out() {
-    let mut state = AppState::default();
-    let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
-    let analysis_key = AnalysisPresentationKey::new(crate::product::DatasetId::new(), &analysis);
-    let key = |index| SourceWaveformPresentationKey::new(analysis_key, format!("V(n{index})"));
-    let results = &mut state.ui.results;
-    for index in 0..30 {
-        results.note_recent_signal(key(index));
-    }
-    // Re-noting an older name moves it to the front without duplicating it.
-    results.note_recent_signal(key(20));
-    assert_eq!(results.recent_signal_rank(&key(20)), Some(0));
-    assert_eq!(results.recent_signal_rank(&key(29)), Some(1));
-    // The shortlist is bounded: the oldest names have aged out entirely.
-    assert!(results.recent_signal_rank(&key(6)).is_some());
-    assert_eq!(results.recent_signal_rank(&key(5)), None);
-    assert_eq!(results.recent_signal_rank(&key(0)), None);
-}
-
-#[test]
-fn browser_signal_marks_do_not_alias_equal_names_from_different_datasets() {
-    let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
-    let first = SourceWaveformPresentationKey::new(
-        AnalysisPresentationKey::new(crate::product::DatasetId::new(), &analysis),
-        "V(out)",
-    );
-    let second = SourceWaveformPresentationKey::new(
-        AnalysisPresentationKey::new(crate::product::DatasetId::new(), &analysis),
-        "V(out)",
-    );
-    let mut results = ResultsState::default();
-
-    results.toggle_favorite_signal(first.clone());
-    results.toggle_checked_result_quantity(first.clone().into());
-    results.note_recent_signal(first.clone());
-
-    assert!(results.is_favorite_signal(&first));
-    assert!(results.is_checked_signal(&first));
-    assert_eq!(results.recent_signal_rank(&first), Some(0));
-    assert!(!results.is_favorite_signal(&second));
-    assert!(!results.is_checked_signal(&second));
-    assert_eq!(results.recent_signal_rank(&second), None);
-}
-
 /// The inline readout exists only to cover the collapsed strip. It must stay
 /// silent whenever the strip itself is showing the same three numbers.
 #[test]
@@ -1695,25 +1611,25 @@ fn inline_readout_speaks_only_for_a_collapsed_strip() {
             WaveformData::new("V(out)", vec![0.0, 1.0e-3], vec![0.0, 1.0], "#fff"),
         ]),
     );
-    state.ui.results.cursor_strip = Some(0);
-    if !state.ui.results.cursor_tool.is_armed() {
-        state.ui.results.toggle_cursor_tool();
+    state.ui.results.session.cursor_strip = Some(0);
+    if !state.ui.results.session.cursor_tool.is_armed() {
+        state.ui.results.session.toggle_cursor_tool();
     }
-    state.ui.results.cursors.a = Some(0.0);
-    state.ui.results.cursors.b = Some(1.0e-3);
+    state.ui.results.session.cursors.a = Some(0.0);
+    state.ui.results.session.cursors.b = Some(1.0e-3);
 
     // Expanded: the strip owns the readout, so the bar says nothing.
-    state.ui.results.readout_collapsed = false;
+    state.ui.results.session.readout_collapsed = false;
     assert_eq!(inline_cursor_readout(&mut state, &t), None);
 
-    state.ui.results.readout_collapsed = true;
+    state.ui.results.session.readout_collapsed = true;
     let readout = inline_cursor_readout(&mut state, &t).expect("collapsed strip yields a readout");
     assert!(readout.starts_with("A "), "{readout}");
     assert!(readout.contains(" · B "), "{readout}");
     assert!(readout.contains(" \u{0394} "), "{readout}");
 
     // Cursor B unplaced: report A alone rather than an empty delta.
-    state.ui.results.cursors.b = None;
+    state.ui.results.session.cursors.b = None;
     let single = inline_cursor_readout(&mut state, &t).expect("cursor A alone still reads out");
     assert!(!single.contains('\u{0394}'), "{single}");
 }
@@ -1738,21 +1654,21 @@ fn legend_cursor_values_stay_on_the_strip_that_owns_the_cursor() {
             "#0af",
         )]),
     );
-    if !state.ui.results.cursor_tool.is_armed() {
-        state.ui.results.toggle_cursor_tool();
+    if !state.ui.results.session.cursor_tool.is_armed() {
+        state.ui.results.session.toggle_cursor_tool();
     }
-    state.ui.results.cursors.a = Some(0.5);
-    state.ui.results.cursor_strip = Some(0);
+    state.ui.results.session.cursors.a = Some(0.5);
+    state.ui.results.session.cursor_strip = Some(0);
 
     let owns = |analysis_index: usize, state: &AppState| {
-        state.ui.results.cursor_readout_active()
-            && state.ui.results.cursor_strip == Some(analysis_index)
+        state.ui.results.session.cursor_readout_active()
+            && state.ui.results.session.cursor_strip == Some(analysis_index)
     };
     assert!(owns(0, &state), "the placed strip reports its cursor value");
     assert!(!owns(1, &state), "a sibling strip must not borrow cursor A");
 
     // Disarming the tool retires every chip value at once.
-    state.ui.results.toggle_cursor_tool();
+    state.ui.results.session.toggle_cursor_tool();
     assert!(!owns(0, &state));
 }
 
@@ -1783,14 +1699,14 @@ fn inline_readout_finds_a_noise_strip_behind_earlier_analyses() {
             WaveformData::new("onoise", vec![1.0e3, 1.0e4], vec![1.0e-18, 4.0e-18], "#f80"),
         ]),
     );
-    state.ui.results.viewer = super::super::ResultViewer::NoiseContrib;
-    if !state.ui.results.cursor_tool.is_armed() {
-        state.ui.results.toggle_cursor_tool();
+    state.ui.results.session.viewer = super::super::ResultViewer::NoiseContrib;
+    if !state.ui.results.session.cursor_tool.is_armed() {
+        state.ui.results.session.toggle_cursor_tool();
     }
-    state.ui.results.cursor_strip = Some(3);
-    state.ui.results.cursors.a = Some(1.0e3);
-    state.ui.results.cursors.b = Some(1.0e4);
-    state.ui.results.readout_collapsed = true;
+    state.ui.results.session.cursor_strip = Some(3);
+    state.ui.results.session.cursors.a = Some(1.0e3);
+    state.ui.results.session.cursors.b = Some(1.0e4);
+    state.ui.results.session.readout_collapsed = true;
 
     let readout = inline_cursor_readout(&mut state, &t)
         .expect("the noise strip at index 3 owns the cursor readout");
@@ -1847,7 +1763,7 @@ fn bode_models_include_pac_pxf_and_stb_but_exclude_pstb_mode_data() {
         )]),
     );
 
-    state.ui.results.viewer = super::super::ResultViewer::Bode;
+    state.ui.results.session.viewer = super::super::ResultViewer::Bode;
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
         &state.simulation,
@@ -1895,7 +1811,7 @@ fn waves_models_include_pss_and_envelope_complex_data() {
         ]),
     );
 
-    state.ui.results.viewer = super::super::ResultViewer::Waves;
+    state.ui.results.session.viewer = super::super::ResultViewer::Waves;
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
         &state.simulation,
@@ -1931,7 +1847,7 @@ fn disto_frequency_curves_preserve_raw_values_and_units() {
             .with_unit("dBc"),
         ]),
     );
-    state.ui.results.viewer = super::super::ResultViewer::Bode;
+    state.ui.results.session.viewer = super::super::ResultViewer::Bode;
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
         &state.simulation,

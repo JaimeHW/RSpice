@@ -26,8 +26,8 @@ pub(super) fn hysteresis_run() -> AppState {
             ),
         ]),
     );
-    state.ui.results.viewer = super::super::super::ResultViewer::DcSweep;
-    state.ui.results.cursor_strip = Some(0);
+    state.ui.results.session.viewer = super::super::super::ResultViewer::DcSweep;
+    state.ui.results.session.cursor_strip = Some(0);
     state
 }
 
@@ -134,8 +134,8 @@ fn a_descending_sweep_keeps_one_untagged_row() {
             WaveformData::new("V(out)", vec![2.0, 1.0, 0.0], vec![20.0, 10.0, 0.0], "#fff"),
         ]),
     );
-    state.ui.results.viewer = super::super::super::ResultViewer::DcSweep;
-    state.ui.results.cursor_strip = Some(0);
+    state.ui.results.session.viewer = super::super::super::ResultViewer::DcSweep;
+    state.ui.results.session.cursor_strip = Some(0);
 
     let rows = rows_of(&mut state, Some(0.5), Some(1.5));
     assert_eq!(
@@ -184,8 +184,8 @@ fn a_sweep_past_the_branch_budget_reports_the_nearest_retained_sample() {
         AnalysisResult::new(1, AnalysisType::DcSweep, "DC")
             .with_waveforms(vec![WaveformData::new("V(out)", x, y, "#fff")]),
     );
-    state.ui.results.viewer = super::super::super::ResultViewer::DcSweep;
-    state.ui.results.cursor_strip = Some(0);
+    state.ui.results.session.viewer = super::super::super::ResultViewer::DcSweep;
+    state.ui.results.session.cursor_strip = Some(0);
 
     let rows = rows_of(&mut state, Some(0.5), Some(0.75));
     assert_eq!(
@@ -221,11 +221,11 @@ fn a_sweep_past_the_branch_budget_reports_the_nearest_retained_sample() {
 #[test]
 fn the_readout_band_is_sized_by_the_rows_it_will_draw() {
     let mut state = hysteresis_run();
-    if !state.ui.results.cursor_tool.is_armed() {
-        state.ui.results.toggle_cursor_tool();
+    if !state.ui.results.session.cursor_tool.is_armed() {
+        state.ui.results.session.toggle_cursor_tool();
     }
-    state.ui.results.cursors.place(0.25);
-    state.ui.results.readout_collapsed = false;
+    state.ui.results.session.cursors.place(0.25);
+    state.ui.results.session.readout_collapsed = false;
 
     let retained_waveforms = state.simulation.active_run().unwrap().analyses[0]
         .waveforms
@@ -246,16 +246,16 @@ fn the_readout_band_is_sized_by_the_rows_it_will_draw() {
 #[test]
 fn a_viewer_without_the_cursors_strip_reserves_no_band() {
     let mut state = hysteresis_run();
-    if !state.ui.results.cursor_tool.is_armed() {
-        state.ui.results.toggle_cursor_tool();
+    if !state.ui.results.session.cursor_tool.is_armed() {
+        state.ui.results.session.toggle_cursor_tool();
     }
-    state.ui.results.cursors.place(0.25);
-    state.ui.results.readout_collapsed = false;
+    state.ui.results.session.cursors.place(0.25);
+    state.ui.results.session.readout_collapsed = false;
     assert!(readout_strip_height(&mut state) > READOUT_HEADER_H);
 
     // The waveform sheet projects time-domain analyses only, so this DC sweep
     // is not on it — while the retained analysis is still there to be found.
-    state.ui.results.viewer = super::super::super::ResultViewer::Waves;
+    state.ui.results.session.viewer = super::super::super::ResultViewer::Waves;
     assert_eq!(
         readout_strip_height(&mut state),
         READOUT_HEADER_H,
@@ -269,8 +269,8 @@ fn a_viewer_without_the_cursors_strip_reserves_no_band() {
 #[test]
 fn window_statistics_measure_each_branch_between_the_cursors() {
     let mut state = hysteresis_run();
-    state.ui.results.cursors.a = Some(0.0);
-    state.ui.results.cursors.b = Some(0.5);
+    state.ui.results.session.cursors.a = Some(0.0);
+    state.ui.results.session.cursors.b = Some(0.5);
 
     let painted = super::interaction::painted_texts(&mut state, right_panel);
     // x ≤ 0.5 selects indices {0, 1} on the way out and {3, 4} on the way
@@ -311,7 +311,7 @@ fn a_zoomed_reverse_sweep_still_draws_its_curve() {
         AnalysisResult::new(1, AnalysisType::DcSweep, "DC")
             .with_waveforms(vec![WaveformData::new("V(out)", x, y, "#fff")]),
     );
-    state.ui.results.viewer = super::super::super::ResultViewer::DcSweep;
+    state.ui.results.session.viewer = super::super::super::ResultViewer::DcSweep;
     let analysis = {
         let presentation = state.ui.preferences.result_presentation_policy();
         let models = cached_models(
@@ -381,6 +381,7 @@ fn a_marker_row_states_a_value_the_marked_branch_takes() {
     state
         .ui
         .results
+        .session
         .add_marker(analysis, anchor, "V(out)".to_owned(), 0.25)
         .unwrap();
 
@@ -404,7 +405,7 @@ fn a_marker_row_states_a_value_the_marked_branch_takes() {
 #[test]
 fn the_copied_cursor_value_stays_on_a_branch_of_the_loop() {
     let mut state = hysteresis_run();
-    state.ui.results.cursors.place(0.25);
+    state.ui.results.session.cursors.place(0.25);
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let forward = quantity_policy.copy_si_value(0.5, "V");
     let artifact = quantity_policy.copy_si_value(4.0, "V");
@@ -431,7 +432,7 @@ fn the_copied_cursor_value_stays_on_a_branch_of_the_loop() {
 #[test]
 fn the_legend_chip_states_a_branch_value_at_cursor_a() {
     let mut state = hysteresis_run();
-    state.ui.results.cursors.place(0.25);
+    state.ui.results.session.cursors.place(0.25);
     let (_, _, forward, artifact) = loop_readings(&mut state);
 
     let painted = super::interaction::painted_texts(&mut state, show);

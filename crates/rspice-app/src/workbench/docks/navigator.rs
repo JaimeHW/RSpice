@@ -1247,11 +1247,17 @@ fn nav_property(ui: &mut Ui, label: &str, value: &str) {
 }
 
 fn results(ui: &mut Ui, app: &mut RSpiceApp) {
-    if !app.state.ui.results.checked_result_quantities.is_empty()
+    if !app
+        .state
+        .ui
+        .results
+        .session
+        .checked_result_quantities
+        .is_empty()
         && !egui::Popup::is_any_open(ui.ctx())
         && ui.input(|input| input.key_pressed(egui::Key::Escape))
     {
-        app.state.ui.results.clear_checked_signals();
+        app.state.ui.results.session.clear_checked_signals();
     }
     let query = app.state.workbench.navigator_filter().trim().to_lowercase();
     let active_browser_tab = results_browser_active_tab(ui.ctx());
@@ -1293,7 +1299,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     };
     // A snapshot keeps the favorites predicate borrow-free inside the run map;
     // recency reads its owning accessor, which states the rank once.
-    let favorite_signals = app.state.ui.results.favorite_signals.clone();
+    let favorite_signals = app.state.ui.results.session.favorite_signals.clone();
     let active_run = app
         .state
         .simulation
@@ -1327,6 +1333,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         .state
         .ui
         .results
+        .session
         .selected_result_artifact
         .clone()
         .filter(|key| key.resolve(&app.state.simulation.runs).is_some());
@@ -1468,7 +1475,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                     .state
                                     .ui
                                     .results
-                                    .recent_signal_rank(&identity)
+                                    .session.recent_signal_rank(&identity)
                                     .is_some(),
                             };
                             if !in_scope {
@@ -1481,7 +1488,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                     .state
                                     .ui
                                     .results
-                                    .waveform_visibility(&identity, waveform.visible),
+                                    .session.waveform_visibility(&identity, waveform.visible),
                                 identity,
                                 name: waveform.name.clone(),
                                 color: waveform.color.clone(),
@@ -1536,12 +1543,12 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                 .state
                                 .ui
                                 .results
-                                .is_favorite_result_artifact(&artifact.identity),
+                                .session.is_favorite_result_artifact(&artifact.identity),
                             ResultsBrowserScope::Recent => app
                                 .state
                                 .ui
                                 .results
-                                .recent_result_artifact_rank(&artifact.identity)
+                                .session.recent_result_artifact_rank(&artifact.identity)
                                 .is_some(),
                         })
                         .collect::<Vec<_>>();
@@ -1551,14 +1558,14 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             app.state
                                 .ui
                                 .results
-                                .recent_signal_rank(&signal.identity)
+                                .session.recent_signal_rank(&signal.identity)
                                 .unwrap_or(usize::MAX)
                         });
                         artifacts.sort_by_key(|artifact| {
                             app.state
                                 .ui
                                 .results
-                                .recent_result_artifact_rank(&artifact.identity)
+                                .session.recent_result_artifact_rank(&artifact.identity)
                                 .unwrap_or(usize::MAX)
                         });
                     } else if sort == ResultsBrowserSort::Name {
@@ -1817,11 +1824,23 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     // act on, with only the actions RSpice actually performs on a set of
     // quantities — plot membership, and letting the set go.
     if tab == ResultsBrowserTab::Signals
-        && (!app.state.ui.results.checked_result_quantities.is_empty()
+        && (!app
+            .state
+            .ui
+            .results
+            .session
+            .checked_result_quantities
+            .is_empty()
             || !visible_result_keys.is_empty())
     {
         let t = Tokens::get(ui.ctx());
-        let checked = app.state.ui.results.checked_result_quantities.clone();
+        let checked = app
+            .state
+            .ui
+            .results
+            .session
+            .checked_result_quantities
+            .clone();
         let checked_ordered = ordered_checked_result_keys(&checked, &app.state.simulation.runs);
         let exact_validation_error = checked_ordered.iter().find_map(|key| {
             crate::workbench::documents::result_document::validate_result_browser_selection_evidence(
@@ -1891,7 +1910,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                 app.state
                                     .ui
                                     .results
-                                    .select_visible_signals(&visible_result_keys);
+                                    .session.select_visible_signals(&visible_result_keys);
                             }
                         },
                     );
@@ -1916,11 +1935,11 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             app.state
                                 .ui
                                 .results
-                                .select_visible_signals(&visible_result_keys);
+                                .session.select_visible_signals(&visible_result_keys);
                             ui.close();
                         }
                         if ui.button("Clear selection").clicked() {
-                            app.state.ui.results.clear_checked_signals();
+                            app.state.ui.results.session.clear_checked_signals();
                             ui.close();
                         }
                         let show = ui.add_enabled(
@@ -4044,8 +4063,8 @@ fn show_virtualized_result_signals(
                                 color,
                                 signal_selected,
                                 signal.visible,
-                                app.state.ui.results.is_favorite_signal(&signal.identity),
-                                app.state.ui.results.is_checked_signal(&signal.identity),
+                                app.state.ui.results.session.is_favorite_signal(&signal.identity),
+                                app.state.ui.results.session.is_checked_signal(&signal.identity),
                             );
                             if responses.check.clicked() {
                                 let modifiers = ui.input(|input| input.modifiers);
@@ -4067,7 +4086,7 @@ fn show_virtualized_result_signals(
                                 app.state
                                     .ui
                                     .results
-                                    .toggle_favorite_signal(signal.identity.clone());
+                                    .session.toggle_favorite_signal(signal.identity.clone());
                             }
                             if responses.selection.clicked() {
                                 let modifiers = ui.input(|input| input.modifiers);
@@ -4084,7 +4103,7 @@ fn show_virtualized_result_signals(
                                     app.state
                                         .ui
                                         .results
-                                        .set_browser_range_anchor(
+                                        .session.set_browser_range_anchor(
                                             ResultBrowserSelectionKey::Waveform(
                                                 signal.identity.clone(),
                                             ),
@@ -4102,7 +4121,7 @@ fn show_virtualized_result_signals(
                                 .state
                                 .ui
                                 .results
-                                .is_favorite_signal(&signal.identity);
+                                .session.is_favorite_signal(&signal.identity);
                             result_signal_context_menu(
                                 &responses.selection,
                                 app,
@@ -4125,7 +4144,7 @@ fn show_virtualized_result_signals(
                                 .state
                                 .ui
                                 .results
-                                .is_favorite_result_artifact(&artifact.identity);
+                                .session.is_favorite_result_artifact(&artifact.identity);
                             let responses = result_artifact_row(
                                 ui,
                                 result_signal_row_id(&selection_key),
@@ -4138,7 +4157,7 @@ fn show_virtualized_result_signals(
                                 app.state
                                     .ui
                                     .results
-                                    .is_checked_result_artifact(&artifact.identity),
+                                    .session.is_checked_result_artifact(&artifact.identity),
                             );
                             if responses.check.clicked() {
                                 update_result_browser_multi_selection(
@@ -4156,7 +4175,7 @@ fn show_virtualized_result_signals(
                                 app.state
                                     .ui
                                     .results
-                                    .toggle_favorite_result_artifact(artifact.identity.clone());
+                                    .session.toggle_favorite_result_artifact(artifact.identity.clone());
                             }
                             if responses.selection.clicked() {
                                 let modifiers = ui.input(|input| input.modifiers);
@@ -4171,7 +4190,7 @@ fn show_virtualized_result_signals(
                                     app.state
                                         .ui
                                         .results
-                                        .set_browser_range_anchor(selection_key.clone());
+                                        .session.set_browser_range_anchor(selection_key.clone());
                                 }
                                 select_result_artifact(app, &artifact.identity);
                             }
@@ -5351,15 +5370,18 @@ fn update_result_browser_multi_selection(
         app.state
             .ui
             .results
+            .session
             .select_checked_result_range(target, ordered_visible);
     } else {
         app.state
             .ui
             .results
+            .session
             .toggle_checked_result_quantity(target.clone());
         app.state
             .ui
             .results
+            .session
             .set_browser_range_anchor(target.clone());
     }
 }
@@ -5424,9 +5446,14 @@ fn handle_result_signal_keyboard(
         app.state
             .ui
             .results
+            .session
             .select_checked_result_range(next, ordered_visible);
     } else {
-        app.state.ui.results.set_browser_range_anchor(next.clone());
+        app.state
+            .ui
+            .results
+            .session
+            .set_browser_range_anchor(next.clone());
     }
     select_result_browser_key(app, next);
     response
@@ -5485,9 +5512,14 @@ fn handle_result_artifact_keyboard(
         app.state
             .ui
             .results
+            .session
             .select_checked_result_range(next, ordered_visible);
     } else {
-        app.state.ui.results.set_browser_range_anchor(next.clone());
+        app.state
+            .ui
+            .results
+            .session
+            .set_browser_range_anchor(next.clone());
     }
     select_result_browser_key(app, next);
     response
@@ -5513,6 +5545,7 @@ fn set_checked_signal_visibility(
                 .state
                 .ui
                 .results
+                .session
                 .waveform_visibility(key, waveform.visible);
             (target_run == run_index && currently_visible != visible)
                 .then_some((analysis_index, waveform_index))
@@ -5561,8 +5594,8 @@ fn select_result_dataset(app: &mut RSpiceApp, run_index: usize) -> bool {
     if !super::super::chrome::document_bar::activate_document_by_id(&mut app.state, &document) {
         return false;
     }
-    app.state.ui.results.selected_trace = None;
-    app.state.ui.results.selected_result_artifact = None;
+    app.state.ui.results.session.selected_trace = None;
+    app.state.ui.results.session.selected_result_artifact = None;
     true
 }
 
@@ -5583,8 +5616,8 @@ fn select_result_analysis(app: &mut RSpiceApp, run_index: usize, analysis_index:
     if !app.state.simulation.select_analysis(analysis_index) {
         return false;
     }
-    app.state.ui.results.selected_trace = None;
-    app.state.ui.results.selected_result_artifact = None;
+    app.state.ui.results.session.selected_trace = None;
+    app.state.ui.results.session.selected_result_artifact = None;
     true
 }
 
@@ -5631,10 +5664,10 @@ fn select_result_signal(
     crate::workbench::documents::result_document::prepare_viewer_state(app);
     let name = selected.source_name().to_owned();
     let recent = SourceWaveformPresentationKey::new(selected.analysis_key(), name);
-    app.state.ui.results.selected_trace = Some(selected);
-    app.state.ui.results.selected_result_artifact = None;
+    app.state.ui.results.session.selected_trace = Some(selected);
+    app.state.ui.results.session.selected_result_artifact = None;
     // Selecting a trace is a deliberate act; feed the browser's Recent scope.
-    app.state.ui.results.note_recent_signal(recent);
+    app.state.ui.results.session.note_recent_signal(recent);
     true
 }
 
@@ -5654,11 +5687,12 @@ fn select_result_artifact(app: &mut RSpiceApp, key: &ResultArtifactPresentationK
     if !select_result_analysis(app, run_index, analysis_index) {
         return false;
     }
-    app.state.ui.results.selected_trace = None;
-    app.state.ui.results.selected_result_artifact = Some(key.clone());
+    app.state.ui.results.session.selected_trace = None;
+    app.state.ui.results.session.selected_result_artifact = Some(key.clone());
     app.state
         .ui
         .results
+        .session
         .note_recent_result_artifact(key.clone());
     true
 }
@@ -5727,7 +5761,7 @@ fn result_artifact_context_menu(
         }
         if add.clicked() {
             if select_result_artifact(app, &artifact.identity) {
-                app.state.ui.results.viewer = artifact.viewer;
+                app.state.ui.results.session.viewer = artifact.viewer;
                 crate::workbench::documents::visualization_studio::open(app);
                 crate::workbench::documents::visualization_studio::open_add_pane(app);
             }
@@ -5806,7 +5840,7 @@ fn result_artifact_context_menu(
             app.state
                 .ui
                 .results
-                .toggle_favorite_result_artifact(artifact.identity.clone());
+                .session.toggle_favorite_result_artifact(artifact.identity.clone());
             ui.close();
         }
         let export = ui.add_enabled(
@@ -6007,7 +6041,7 @@ fn result_signal_context_menu(
             })
             .clicked()
         {
-            app.state.ui.results.toggle_favorite_signal(key.clone());
+            app.state.ui.results.session.toggle_favorite_signal(key.clone());
             ui.close();
         }
         let signal_name = key
@@ -6054,10 +6088,10 @@ fn open_signal_table(
             app.state.ui.export_result_quantities_requested =
                 Some(vec![ResultBrowserSelectionKey::Waveform(key.clone())]);
         } else {
-            if let Some(selected) = &app.state.ui.results.selected_trace {
+            if let Some(selected) = &app.state.ui.results.session.selected_trace {
                 let (analysis, column) = selected.table_binding();
-                app.state.ui.results.table.analysis = Some(analysis);
-                app.state.ui.results.table.columns = vec![column];
+                app.state.ui.results.session.table.analysis = Some(analysis);
+                app.state.ui.results.session.table.columns = vec![column];
             }
             Command::ResultViewer(crate::workbench::ResultViewer::Table).execute(app);
         }

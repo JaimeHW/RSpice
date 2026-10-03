@@ -124,13 +124,13 @@ fn draw_and_tessellate(state: &mut AppState, sheet: fn(&mut Ui, &mut AppState)) 
 /// compute and format from the samples themselves, so a degenerate run has
 /// to survive being read as well as being drawn.
 fn arm_cursors(state: &mut AppState) {
-    if !state.ui.results.cursor_tool.is_armed() {
-        state.ui.results.toggle_cursor_tool();
+    if !state.ui.results.session.cursor_tool.is_armed() {
+        state.ui.results.session.toggle_cursor_tool();
     }
-    state.ui.results.cursor_strip = Some(0);
-    state.ui.results.cursors.a = Some(5.0e-4);
-    state.ui.results.cursors.b = Some(1.0e-3);
-    state.ui.results.readout_collapsed = false;
+    state.ui.results.session.cursor_strip = Some(0);
+    state.ui.results.session.cursors.a = Some(5.0e-4);
+    state.ui.results.session.cursors.b = Some(1.0e-3);
+    state.ui.results.session.readout_collapsed = false;
 }
 
 // The crate bans stderr printing so debugging scaffolding cannot reach a
@@ -244,9 +244,9 @@ fn the_log_frequency_sheets_survive_a_non_positive_abscissa() {
         ]),
     );
 
-    state.ui.results.viewer = super::super::super::ResultViewer::Bode;
+    state.ui.results.session.viewer = super::super::super::ResultViewer::Bode;
     draw_and_tessellate(&mut state, show_bode);
 
-    state.ui.results.viewer = super::super::super::ResultViewer::NoiseContrib;
+    state.ui.results.session.viewer = super::super::super::ResultViewer::NoiseContrib;
     draw_and_tessellate(&mut state, show_noise);
 }

@@ -287,9 +287,9 @@ impl RSpiceApp {
                     self.state.tabbed_property_dialog.attempt_close();
                 } else if self.state.workbench.workspace
                     == crate::workbench::state::Workspace::Results
-                    && self.state.ui.results.cursors.any()
+                    && self.state.ui.results.session.cursors.any()
                 {
-                    self.state.ui.results.clear_cursors();
+                    self.state.ui.results.session.clear_cursors();
                 } else {
                     self.state.schematic.cancel_interaction_step();
                 }
@@ -325,7 +325,7 @@ impl RSpiceApp {
             }
             ShortcutCommand::ZoomIn | ShortcutCommand::ZoomOut => command.execute(self),
             ShortcutCommand::ToggleLinkedCursors => {
-                self.state.ui.results.toggle_linked_cursors();
+                self.state.ui.results.session.toggle_linked_cursors();
             }
             ShortcutCommand::ZoomFit
             | ShortcutCommand::FitSchematicContent
@@ -1043,11 +1043,11 @@ mod shortcut_ownership_tests {
     #[test]
     fn linked_cursor_command_toggles_real_results_state() {
         let mut app = RSpiceApp::test_instance();
-        assert!(!app.state.ui.results.linked_cursors);
+        assert!(!app.state.ui.results.session.linked_cursors);
         app.execute_shortcut_command(ShortcutCommand::ToggleLinkedCursors);
-        assert!(app.state.ui.results.linked_cursors);
+        assert!(app.state.ui.results.session.linked_cursors);
         app.execute_shortcut_command(ShortcutCommand::ToggleLinkedCursors);
-        assert!(!app.state.ui.results.linked_cursors);
+        assert!(!app.state.ui.results.session.linked_cursors);
     }
 
     #[test]
@@ -1068,8 +1068,8 @@ mod shortcut_ownership_tests {
         app.state
             .workbench
             .activate(crate::workbench::state::Workspace::Results);
-        app.state.ui.results.cursors.a = Some(0.5);
-        app.state.ui.results.cursor_strip = Some(0);
+        app.state.ui.results.session.cursors.a = Some(0.5);
+        app.state.ui.results.session.cursor_strip = Some(0);
 
         app.execute_shortcut_command(ShortcutCommand::Copy);
 

@@ -180,7 +180,15 @@ pub(super) fn status_strip(ui: &mut Ui, app: &RSpiceApp) {
         .flatten()
         .collect::<HashSet<_>>()
         .len();
-    let expression_count: usize = app.state.ui.results.exprs.values().map(Vec::len).sum();
+    let expression_count: usize = app
+        .state
+        .ui
+        .results
+        .session
+        .exprs
+        .values()
+        .map(Vec::len)
+        .sum();
     let samples: usize = app
         .state
         .simulation

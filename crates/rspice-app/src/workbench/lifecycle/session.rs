@@ -453,9 +453,10 @@ impl From<&UiSessionState> for UiSessionStateSer {
             preferences: session.preferences.clone(),
             browser_spoken_feedback: session.browser_spoken_feedback,
             text_locale: session.text_locale,
-            result_viewer: session.results.viewer,
+            result_viewer: session.results.session.viewer,
             eye_timebase: session
                 .results
+                .session
                 .eye_timebase
                 .iter()
                 .filter(|(key, _)| key.is_persistable())
@@ -511,8 +512,8 @@ impl From<UiSessionStateSer> for UiSessionState {
             text_locale: ser.text_locale,
             ..Self::new()
         };
-        session.results.viewer = ser.result_viewer;
-        session.results.eye_timebase = ser
+        session.results.session.viewer = ser.result_viewer;
+        session.results.session.eye_timebase = ser
             .eye_timebase
             .into_iter()
             .filter(|(key, _)| key.is_persistable())

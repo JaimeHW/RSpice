@@ -453,6 +453,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         state
             .ui
             .results
+            .session
             .reset_plot_view(super::ResultViewer::Hist, 0);
     }
     let plan = selected_histogram_name(state).map(|name| hist_plan(state, &name));
@@ -481,12 +482,17 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 source: &plan.display_source,
             }),
     };
-    let plot_view = state.ui.results.plot_view(super::ResultViewer::Hist, 0);
-    let out = view::show(ui, model, plot_view, &mut state.ui.results.cache);
+    let plot_view = state
+        .ui
+        .results
+        .session
+        .plot_view(super::ResultViewer::Hist, 0);
+    let out = view::show(ui, model, plot_view, &mut state.ui.results.session.cache);
     if out.fit_requested {
         state
             .ui
             .results
+            .session
             .reset_plot_view(super::ResultViewer::Hist, 0);
     }
     if let Some(response) = out.plot {
@@ -495,6 +501,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             state
                 .ui
                 .results
+                .session
                 .plot_view_mut(super::ResultViewer::Hist, 0)
                 .apply(&response.view);
         }
@@ -517,6 +524,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         state
             .ui
             .results
+            .session
             .reset_plot_view(super::ResultViewer::Hist, 0);
     }
     let plan = hist_plan(state, &name);

@@ -15,10 +15,10 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
     let envelope_available = waves::family_envelope_available(state, &t);
     let marker_available = waves::marker_at_cursor_a_available(state, &t);
     if !limits_available {
-        state.ui.results.show_spec_limits = false;
+        state.ui.results.session.show_spec_limits = false;
     }
     if !envelope_available {
-        state.ui.results.show_family_envelope = false;
+        state.ui.results.session.show_family_envelope = false;
     }
 
     instrument::show(
@@ -41,45 +41,48 @@ impl WaveInstrumentHost for Host<'_> {
     fn controls(&self) -> InstrumentControls {
         let results = &self.state.ui.results;
         InstrumentControls {
-            plot_tool: results.plot_tool,
-            cursor_armed: results.cursor_tool.is_armed(),
-            show_spec_limits: results.show_spec_limits,
-            show_family_envelope: results.show_family_envelope,
-            show_minor_grid: results.show_minor_grid,
+            plot_tool: results.session.plot_tool,
+            cursor_armed: results.session.cursor_tool.is_armed(),
+            show_spec_limits: results.session.show_spec_limits,
+            show_family_envelope: results.session.show_family_envelope,
+            show_minor_grid: results.session.show_minor_grid,
         }
     }
 
     fn request(&mut self, action: InstrumentAction) {
         match action {
             InstrumentAction::Cursor => {
-                let cursor_active = self.state.ui.results.plot_tool == ResultPlotTool::Cursor
-                    && self.state.ui.results.cursor_tool.is_armed();
+                let cursor_active = self.state.ui.results.session.plot_tool
+                    == ResultPlotTool::Cursor
+                    && self.state.ui.results.session.cursor_tool.is_armed();
                 if cursor_active {
-                    self.state.ui.results.toggle_cursor_tool();
+                    self.state.ui.results.session.toggle_cursor_tool();
                 } else {
-                    self.state.ui.results.plot_tool = ResultPlotTool::Cursor;
-                    if !self.state.ui.results.cursor_tool.is_armed() {
-                        self.state.ui.results.toggle_cursor_tool();
+                    self.state.ui.results.session.plot_tool = ResultPlotTool::Cursor;
+                    if !self.state.ui.results.session.cursor_tool.is_armed() {
+                        self.state.ui.results.session.toggle_cursor_tool();
                     }
                 }
             }
-            InstrumentAction::Tool(tool) => self.state.ui.results.plot_tool = tool,
+            InstrumentAction::Tool(tool) => self.state.ui.results.session.plot_tool = tool,
             InstrumentAction::Zoom(factor) => {
                 waves::zoom_active_pane(self.state, self.tokens, factor)
             }
             InstrumentAction::Fit => waves::fit_active_pane(self.state, self.tokens),
             InstrumentAction::ToggleLimits => {
-                self.state.ui.results.show_spec_limits = !self.state.ui.results.show_spec_limits
+                self.state.ui.results.session.show_spec_limits =
+                    !self.state.ui.results.session.show_spec_limits
             }
             InstrumentAction::ToggleEnvelope => {
-                self.state.ui.results.show_family_envelope =
-                    !self.state.ui.results.show_family_envelope
+                self.state.ui.results.session.show_family_envelope =
+                    !self.state.ui.results.session.show_family_envelope
             }
             InstrumentAction::ToggleGrid => {
-                self.state.ui.results.show_minor_grid = !self.state.ui.results.show_minor_grid
+                self.state.ui.results.session.show_minor_grid =
+                    !self.state.ui.results.session.show_minor_grid
             }
             InstrumentAction::DropMarker => waves::drop_marker_at_cursor_a(self.state, self.tokens),
-            InstrumentAction::RestoreStrips => self.state.ui.results.hidden_strips.clear(),
+            InstrumentAction::RestoreStrips => self.state.ui.results.session.hidden_strips.clear(),
         }
     }
 

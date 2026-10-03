@@ -26,7 +26,7 @@ fn measurement_readout_uses_interpolated_endpoints_and_matches_calculator() {
     let model = &models[0];
     let trace = &model.traces[0];
     let stats = trace_interval_statistics(
-        &mut state.ui.results.derived,
+        &mut state.ui.results.session.derived,
         model,
         trace,
         Some((0.25, 0.75)),
@@ -36,7 +36,7 @@ fn measurement_readout_uses_interpolated_endpoints_and_matches_calculator() {
     assert_eq!((stats.min, stats.max, stats.mean), (0.25, 0.75, 0.5));
     assert!((stats.rms - (13.0_f64 / 48.0).sqrt()).abs() < 1e-14);
     let rows = readout::measurement_values(
-        &mut state.ui.results.derived,
+        &mut state.ui.results.session.derived,
         model,
         Some((0.25, 0.75)),
         8,
@@ -57,8 +57,14 @@ fn measurement_readout_uses_interpolated_endpoints_and_matches_calculator() {
             )
         );
     }
-    let full =
-        trace_interval_statistics(&mut state.ui.results.derived, model, trace, None, None).unwrap();
+    let full = trace_interval_statistics(
+        &mut state.ui.results.session.derived,
+        model,
+        trace,
+        None,
+        None,
+    )
+    .unwrap();
     let expression = calculator::parser::try_parse("rms(V(out))").unwrap();
     let calculator = calculator::evaluator::evaluate(
         &expression,
@@ -69,7 +75,7 @@ fn measurement_readout_uses_interpolated_endpoints_and_matches_calculator() {
         matches!(calculator, calculator::CalcValue::Real(calculator::RealValue::Scalar(value)) if (value - full.rms).abs() < 1e-14)
     );
     let reversed = trace_interval_statistics(
-        &mut state.ui.results.derived,
+        &mut state.ui.results.session.derived,
         model,
         trace,
         Some((0.75, 0.25)),
@@ -79,7 +85,7 @@ fn measurement_readout_uses_interpolated_endpoints_and_matches_calculator() {
     assert_eq!(stats, reversed);
     assert!(
         trace_interval_statistics(
-            &mut state.ui.results.derived,
+            &mut state.ui.results.session.derived,
             model,
             trace,
             Some((f64::NAN, 0.5)),
@@ -89,7 +95,7 @@ fn measurement_readout_uses_interpolated_endpoints_and_matches_calculator() {
     );
     assert_eq!(
         trace_interval_statistics(
-            &mut state.ui.results.derived,
+            &mut state.ui.results.session.derived,
             model,
             trace,
             Some((0.5, 0.5)),
@@ -111,7 +117,7 @@ fn measurement_readout_identifies_each_sweep_branch() {
         &Tokens::default(),
     );
     let rows = readout::measurement_values(
-        &mut state.ui.results.derived,
+        &mut state.ui.results.session.derived,
         &models[0],
         Some((0.25, 0.75)),
         8,
@@ -123,7 +129,7 @@ fn measurement_readout_identifies_each_sweep_branch() {
     let model = &models[0];
     for (branch, expected) in [(0, (0.5, 1.5, 1.0)), (1, (2.5, 3.5, 3.0))] {
         let stats = trace_interval_statistics(
-            &mut state.ui.results.derived,
+            &mut state.ui.results.session.derived,
             model,
             &model.traces[0],
             Some((0.25, 0.75)),
@@ -147,7 +153,7 @@ fn measurement_readout_explains_missing_coverage_instead_of_hiding_it() {
         &Tokens::default(),
     );
     let rows = readout::measurement_values(
-        &mut state.ui.results.derived,
+        &mut state.ui.results.session.derived,
         &models[0],
         None,
         8,

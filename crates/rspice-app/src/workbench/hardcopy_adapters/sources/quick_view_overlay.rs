@@ -1,11 +1,10 @@
 //! Capture the live Results sheet's reading through its authoritative UI accessors.
 
 use super::*;
-use crate::workbench::documents::result_document::{
-    AnalysisPresentationKey, MarkerKind, MarkerView,
-};
+use crate::workbench::documents::result_document::{AnalysisPresentationKey, MarkerKind};
 use crate::workbench::preferences::CursorInterpolation;
 use rspice_results_ui::selection::SourceWaveformPresentationKey;
+use rspice_results_ui::session::MarkerView;
 
 pub(super) fn capture_quick_view_overlays(
     state: &AppState,
@@ -33,7 +32,7 @@ fn capture_quick_view_overlay(
         .waveforms
         .iter()
         .filter(|waveform| {
-            results.waveform_visibility(
+            results.session.waveform_visibility(
                 &SourceWaveformPresentationKey::new(analysis_key, &waveform.name),
                 waveform.visible,
             )
@@ -45,6 +44,7 @@ fn capture_quick_view_overlay(
     // context, so a stale projection cannot put another document's
     // markers on this page.
     let markers = results
+        .session
         .strip_markers(analysis_key)
         .map(|marker| RetainedQuickMarker {
             label: marker_tag(marker),
@@ -55,8 +55,8 @@ fn capture_quick_view_overlay(
         .collect();
     RetainedQuickViewOverlay::try_new(
         Some(visible_traces),
-        results.cursors.a,
-        results.cursors.b,
+        results.session.cursors.a,
+        results.session.cursors.b,
         markers,
         match state
             .ui

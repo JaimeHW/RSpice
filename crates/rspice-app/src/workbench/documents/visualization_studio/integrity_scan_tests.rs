@@ -38,7 +38,7 @@ fn activate_voltage_wave_pane(app: &mut RSpiceApp) -> AnalysisPresentationKey {
         .active_analysis()
         .expect("active analysis");
     let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
-    app.state.ui.results.active_wave_pane = Some(WavePanePresentationKey {
+    app.state.ui.results.session.active_wave_pane = Some(WavePanePresentationKey {
         analysis: key,
         unit: "V".to_owned(),
     });
@@ -371,12 +371,12 @@ fn canonical_ab_cursors_persist_link_move_and_clear_as_document_entities() {
 #[test]
 fn restored_exact_extrema_policy_normalizes_for_non_wave_renderer() {
     let mut app = app_with_exact_source();
-    app.state.ui.results.viewer = ResultViewer::Bode;
+    app.state.ui.results.session.viewer = ResultViewer::Bode;
     app.state.workbench.visualization_studio.autoscale = VisualizationAutoscale::ExactExtrema;
 
     reconcile_document(&mut app);
 
-    assert_eq!(app.state.ui.results.viewer, ResultViewer::Bode);
+    assert_eq!(app.state.ui.results.session.viewer, ResultViewer::Bode);
     assert_eq!(
         app.state.workbench.visualization_studio.autoscale,
         VisualizationAutoscale::RobustVisible
@@ -407,7 +407,7 @@ fn fit_contract_reports_exact_source_and_specification_blockers() {
         )
     );
 
-    app.state.ui.results.viewer = ResultViewer::Smith;
+    app.state.ui.results.session.viewer = ResultViewer::Smith;
     assert_eq!(
         fit_block_reason(&app.state),
         Some("Specification-bound fitting is available only for the waveform renderer.")
@@ -417,7 +417,7 @@ fn fit_contract_reports_exact_source_and_specification_blockers() {
 #[test]
 fn robust_fit_is_available_for_non_wave_renderers() {
     let mut app = app_with_exact_source();
-    app.state.ui.results.viewer = ResultViewer::Bode;
+    app.state.ui.results.session.viewer = ResultViewer::Bode;
     app.state.workbench.visualization_studio.autoscale = VisualizationAutoscale::RobustVisible;
     app.state.workbench.visualization_studio.zoom = 2.5;
 
@@ -469,11 +469,12 @@ fn specification_bound_autoscale_commits_the_exact_data_and_limit_envelope() {
     crate::ui::Theme::default().apply(&ctx);
     apply_queued_view_gesture(&ctx, &mut app);
 
-    let view = app
-        .state
-        .ui
-        .results
-        .analysis_plot_view_pane(ResultViewer::Waves, analysis_key, 0);
+    let view =
+        app.state
+            .ui
+            .results
+            .session
+            .analysis_plot_view_pane(ResultViewer::Waves, analysis_key, 0);
     assert_eq!(view.x, Some((0.0, 20.0)));
     assert_eq!(view.y, Some((-2.0, 5.0)));
     assert_eq!(app.state.workbench.visualization_studio.zoom, 1.0);
@@ -1187,10 +1188,11 @@ fn link_groups_apply_the_same_exact_x_range_and_cursor_pair() {
     app.state
         .ui
         .results
+        .session
         .analysis_plot_view_pane_mut(first.viewer, analysis_key, 0)
         .x = Some((0.25, 0.75));
-    app.state.ui.results.cursors.a = Some(0.3);
-    app.state.ui.results.cursors.b = Some(0.7);
+    app.state.ui.results.session.cursors.a = Some(0.3);
+    app.state.ui.results.session.cursors.b = Some(0.7);
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     capture_active_link_state(&ctx, &mut app);
@@ -1208,9 +1210,10 @@ fn link_groups_apply_the_same_exact_x_range_and_cursor_pair() {
     app.state
         .ui
         .results
+        .session
         .analysis_plot_view_pane_mut(second.viewer, analysis_key, 0)
         .x = None;
-    app.state.ui.results.cursors.clear();
+    app.state.ui.results.session.cursors.clear();
 
     apply_active_link_state(&mut app);
     apply_queued_view_gesture(&ctx, &mut app);
@@ -1219,12 +1222,13 @@ fn link_groups_apply_the_same_exact_x_range_and_cursor_pair() {
         app.state
             .ui
             .results
+            .session
             .analysis_plot_view_pane(second.viewer, analysis_key, 0)
             .x,
         Some((0.25, 0.75))
     );
-    assert_eq!(app.state.ui.results.cursors.a, Some(0.3));
-    assert_eq!(app.state.ui.results.cursors.b, Some(0.7));
+    assert_eq!(app.state.ui.results.session.cursors.a, Some(0.3));
+    assert_eq!(app.state.ui.results.session.cursors.b, Some(0.7));
 }
 
 #[test]
@@ -1331,7 +1335,7 @@ fn versioned_entity_projection_retains_exact_bindings_and_stable_identities() {
         .active_run()
         .expect("fixture retains an active run")
         .dataset_id;
-    app.state.ui.results.cursors.a = Some(0.5);
+    app.state.ui.results.session.cursors.a = Some(0.5);
     app.state
         .workbench
         .visualization_studio

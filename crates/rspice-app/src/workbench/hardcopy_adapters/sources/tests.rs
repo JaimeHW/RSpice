@@ -52,7 +52,7 @@ fn quick_view_state(analysis: AnalysisResult, viewer: ResultViewer) -> AppState 
     state.simulation.runs.push(run);
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
-    state.ui.results.viewer = viewer;
+    state.ui.results.session.viewer = viewer;
     state
 }
 
@@ -1157,7 +1157,7 @@ fn waves_quick_view_selects_retained_transient_when_another_analysis_is_active()
     state.simulation.runs.push(run);
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
-    state.ui.results.viewer = ResultViewer::Waves;
+    state.ui.results.session.viewer = ResultViewer::Waves;
 
     let resolved = resolve_quick_view(&state).expect("transient Waves semantic hardcopy");
     let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
@@ -1196,7 +1196,7 @@ fn production_figure_preparation_uses_the_open_dataset_not_the_global_run_select
     state.simulation.runs = vec![displayed, background].into();
     state.simulation.active_run_idx = Some(1);
     state.simulation.active_analysis_idx = Some(0);
-    state.ui.results.viewer = ResultViewer::Waves;
+    state.ui.results.session.viewer = ResultViewer::Waves;
     state.workbench.workspace = Workspace::Results;
     state
         .workbench
@@ -1262,7 +1262,7 @@ fn production_manifest_hardcopy_retains_the_complete_displayed_dataset_through_w
     state.simulation.runs = vec![displayed, background].into();
     state.simulation.active_run_idx = Some(1);
     state.simulation.active_analysis_idx = Some(0);
-    state.ui.results.viewer = ResultViewer::Manifest;
+    state.ui.results.session.viewer = ResultViewer::Manifest;
     state.workbench.workspace = Workspace::Results;
     state
         .workbench
@@ -1316,7 +1316,7 @@ fn production_stacked_results_hardcopy_retains_every_displayed_analysis() {
     state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
-    state.ui.results.viewer = ResultViewer::Waves;
+    state.ui.results.session.viewer = ResultViewer::Waves;
     state.workbench.workspace = Workspace::Results;
     state
         .workbench
@@ -1402,7 +1402,7 @@ fn production_specs_hardcopy_judges_the_complete_dataset() {
             scope: crate::state::SpecPointScope::AllPoints,
         },
     ];
-    state.ui.results.viewer = ResultViewer::Specs;
+    state.ui.results.session.viewer = ResultViewer::Specs;
     state.workbench.workspace = Workspace::Results;
     state
         .workbench
@@ -1506,7 +1506,7 @@ fn signed_off_specification_workspace() -> (AppState, String) {
     state.simulation.runs = vec![run].into();
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
-    state.ui.results.viewer = ResultViewer::Specs;
+    state.ui.results.session.viewer = ResultViewer::Specs;
     state.workbench.workspace = Workspace::Results;
     state
         .workbench
@@ -1599,7 +1599,7 @@ fn quick_view_reads_exact_active_retained_waveform_without_report_reference() {
     state.simulation.active_run_idx = Some(0);
     state.simulation.active_analysis_idx = Some(0);
     state.simulation.data_version = 9;
-    state.ui.results.viewer = ResultViewer::Waves;
+    state.ui.results.session.viewer = ResultViewer::Waves;
 
     let resolved = resolve_results_quick_view_source(ResultsQuickViewHardcopySource {
         source_key: "results-quick-view".to_owned(),

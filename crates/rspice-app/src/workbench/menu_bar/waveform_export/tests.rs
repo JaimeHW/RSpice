@@ -201,7 +201,7 @@ fn activate_result_document(state: &mut AppState, viewer: crate::workbench::Resu
     state.workbench.documents.activate(
         crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id),
     );
-    state.ui.results.viewer = viewer;
+    state.ui.results.session.viewer = viewer;
 }
 
 fn bind_active_fft_authority(state: &mut AppState) {
@@ -325,7 +325,7 @@ fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
             SpectrumNormalization::Peak,
         ));
     bind_active_fft_authority(&mut state);
-    state.ui.results.viewer = crate::workbench::ResultViewer::Fft;
+    state.ui.results.session.viewer = crate::workbench::ResultViewer::Fft;
     let io = MockExportWorkflowIo::default();
 
     action_export_csv_with_io(&mut state, &io);
@@ -378,7 +378,7 @@ fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
         crate::io::capture_simulation_results(&state.simulation),
     )
     .unwrap();
-    state.ui.results.viewer = crate::workbench::ResultViewer::Hist;
+    state.ui.results.session.viewer = crate::workbench::ResultViewer::Hist;
     let io = MockExportWorkflowIo::default();
 
     action_export_csv_with_io(&mut state, &io);
@@ -434,7 +434,7 @@ fn unavailable_fft_export_never_falls_through_to_the_source_transient() {
         SpectrumNormalization::Peak,
     ));
     bind_active_fft_authority(&mut state);
-    state.ui.results.viewer = crate::workbench::ResultViewer::Fft;
+    state.ui.results.session.viewer = crate::workbench::ResultViewer::Fft;
     let io = MockExportWorkflowIo::default();
 
     action_export_csv_with_io(&mut state, &io);
@@ -475,7 +475,7 @@ fn fft_export_rejects_complete_but_unbound_or_stale_cache_evidence() {
                 authority,
             );
         }
-        state.ui.results.viewer = crate::workbench::ResultViewer::Fft;
+        state.ui.results.session.viewer = crate::workbench::ResultViewer::Fft;
         let io = MockExportWorkflowIo::default();
 
         action_export_csv_with_io(&mut state, &io);
@@ -498,7 +498,7 @@ fn csv_export_from_a_retained_sheet_is_unchanged_by_the_derived_route() {
             vec![0.0, 2.0],
         )]),
     );
-    state.ui.results.viewer = crate::workbench::ResultViewer::Waves;
+    state.ui.results.session.viewer = crate::workbench::ResultViewer::Waves;
     let io = MockExportWorkflowIo::default();
 
     action_export_csv_with_io(&mut state, &io);
