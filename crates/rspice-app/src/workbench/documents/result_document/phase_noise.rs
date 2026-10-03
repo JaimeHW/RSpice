@@ -1,32 +1,15 @@
-//! PHASE NOISE — retained PNOISE/QPNOISE phase-noise spectra.
-//!
-//! A periodic-noise result can also contain output- or input-referred noise.
-//! Those quantities are not phase noise, even when their analysis kind is
-//! PNOISE.  This view therefore requires an explicitly phase-noise-labelled
-//! retained trace plus typed periodic-noise quantity metadata before it
-//! presents the data as `L(f)` in dBc/Hz. Integrated phase error, timing jitter
-//! and device shares come from retained measurements, without estimating
-//! absent evidence from the displayed spectrum.
-
-use std::sync::Arc;
-
-use egui::Ui;
-
-use rspice_results::phase_noise::{
-    exact_retained_value_at, retained_device_noise_shares, retained_measurement,
-    retained_phase_noise_carrier,
-};
+//! Phase-noise source qualification, retained trace binding and viewport ownership.
 
 use crate::state::{AnalysisResult, AnalysisType, SharedWaveformValues, WaveformData};
 #[cfg(test)]
 use crate::state::{AnalysisResultFamilyMetadata, PeriodicNoiseOutputQuantity};
-use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale};
-use crate::ui::tokens::Tokens;
-use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
-
-use rspice_results_ui::presentation::well_hint;
-use rspice_results_ui::strip::{self, LegendChip};
+use egui::Ui;
+#[cfg(test)]
+use rspice_results::phase_noise::retained_measurement;
+use rspice_results::phase_noise::retained_phase_noise_carrier;
+use rspice_results_ui::phase_noise as view;
+use std::sync::Arc;
 
 /// Exactly one phase-noise waveform selected from the active immutable run.
 struct PhaseNoiseModel {
@@ -37,6 +20,21 @@ struct PhaseNoiseModel {
     carrier_frequency_hz: f64,
     offset_hz: SharedWaveformValues,
     level_dbc_per_hz: SharedWaveformValues,
+}
+
+impl PhaseNoiseModel {
+    fn trace(&self) -> view::PhaseNoiseTrace<'_> {
+        view::PhaseNoiseTrace {
+            label: &self.label,
+            source: &self.source,
+            carrier_frequency_hz: self.carrier_frequency_hz,
+            offset_hz: &self.offset_hz,
+            level_dbc_per_hz: &self.level_dbc_per_hz,
+            cache_key: 0x504E_0000_u64
+                | ((self.analysis_index as u64) << 16)
+                | self.waveform_index as u64,
+        }
+    }
 }
 
 pub(super) fn phase_noise_waveform_is_renderable(waveform: &WaveformData) -> bool {
@@ -126,212 +124,58 @@ fn finite_range(values: &[f64]) -> Option<(f64, f64)> {
     super::finite_extremes(values)
 }
 
-fn format_offset_range(
-    range: Option<(f64, f64)>,
-    quantities: &crate::quantity::QuantityPresentationPolicy,
-) -> String {
-    range.map_or_else(
-        || "Unavailable — no retained offsets".to_owned(),
-        |(start, stop)| {
-            format!(
-                "{} – {}",
-                quantities.format_frequency(start, 2),
-                quantities.format_frequency(stop, 2)
-            )
-        },
-    )
-}
-
-// ---------------------------------------------------------------------------
-// center view
-// ---------------------------------------------------------------------------
-
-/// Render the phase-noise spectrum with a logarithmic offset-frequency axis.
+/// Resolve the displayed source and apply requests to the phase-noise viewport.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
-    let tokens = Tokens::get(ui.ctx());
-    let colors = tokens.color;
     let quantities = state.ui.preferences.quantity_presentation_policy();
     let Some(model) = build_model(state) else {
-        well_hint(
-            ui,
-            if active_periodic_noise_without_phase_trace(state) {
-                "The selected PNOISE result retains no trace explicitly identified as phase noise"
-            } else {
-                "No retained phase-noise spectrum in the active dataset"
-            },
-        );
+        view::show_absent(ui, active_periodic_noise_without_phase_trace(state));
         return;
     };
-
-    let legend = [LegendChip {
-        name: "L(f) dBc/Hz",
-        color: colors.traces[0],
-        on: true,
-    }];
-    let view = state
+    let viewport = state
         .ui
         .results
         .plot_view(super::ResultViewer::PhaseNoise, 0);
-    let header = strip::StripHeader::new(
-        "PHASE NOISE",
-        &format!("{} · {} · retained L(f)", model.label, model.source),
-        &legend,
-    )
-    .zoomed(view.is_zoomed())
-    .show(ui);
-    if header.fit_clicked {
+    let level_range = finite_range(&model.level_dbc_per_hz);
+    let response = view::show(
+        ui,
+        &model.trace(),
+        viewport,
+        level_range,
+        &quantities,
+        &mut state.ui.results.cache,
+    );
+    if response.fit {
         state
             .ui
             .results
             .reset_plot_view(super::ResultViewer::PhaseNoise, 0);
     }
-
-    let x0 = *model.offset_hz.first().unwrap_or(&1.0);
-    let x1 = *model.offset_hz.last().unwrap_or(&1.0);
-    if !matches!(x1.partial_cmp(&x0), Some(std::cmp::Ordering::Greater)) {
-        well_hint(ui, "Degenerate retained offset-frequency axis");
-        return;
-    }
-    let Some((level_min, level_max)) = finite_range(&model.level_dbc_per_hz) else {
-        well_hint(
-            ui,
-            "The retained phase-noise trace contains no finite levels",
+    if let Some(response) = response.plot {
+        super::record_drawn_axes(
+            &mut state.ui.results,
+            super::ResultViewer::PhaseNoise,
+            &response,
         );
-        return;
-    };
-    let y_pad = ((level_max - level_min) * 0.1).max(3.0);
-    let (x0, x1) = view.x.unwrap_or((x0, x1));
-    let (y0, y1) = view.y.unwrap_or((level_min - y_pad, level_max + y_pad));
-    let (frequency_scale, frequency_offset, frequency_unit) = quantities.frequency_axis_transform();
-    let x_axis = Axis::log_decades(x0, x1, "Hz").with_display_transform(
-        frequency_scale,
-        frequency_offset,
-        frequency_unit,
-    );
-    let y_axis = Axis::linear_with(y0, y1, "dBc/Hz", 6).with_label("L(f)");
-    let mut spec = PlotSpec::new(x_axis, XScale::Log10, y_axis)
-        .accessible_name("Phase-noise plot")
-        .accessible_detail("Retained phase-noise trace shown as L(f) in dBc/Hz.");
-    spec.traces.push(
-        Trace::new(&model.offset_hz, &model.level_dbc_per_hz, colors.traces[0]).cache_key(
-            0x504E_0000_u64 | ((model.analysis_index as u64) << 16) | model.waveform_index as u64,
-        ),
-    );
-    if let Some(level) = exact_retained_value_at(&model.offset_hz, &model.level_dbc_per_hz, 1.0e6) {
-        spec.markers.push(plot::Marker {
-            x: 1.0e6,
-            y: level,
-            color: colors.accent,
-            label: format!("1 MHz {level:.1} dBc/Hz"),
-            drop_line: true,
-            label_dy: 0.0,
-            shape: plot::MarkerShape::Point,
-        });
-    }
-
-    let readout = |offset| {
-        vec![
-            ("offset".to_owned(), quantities.format_frequency(offset, 2)),
-            (
-                "L(f)".to_owned(),
-                format!(
-                    "{:.3} dBc/Hz",
-                    crate::ui::plot::sample_at(&model.offset_hz, &model.level_dbc_per_hz, offset)
-                ),
-            ),
-        ]
-    };
-    let response = plot::show(ui, &spec, &mut state.ui.results.cache, None, Some(&readout));
-    super::record_drawn_axes(
-        &mut state.ui.results,
-        super::ResultViewer::PhaseNoise,
-        &response,
-    );
-    if response.view.any() {
-        state
-            .ui
-            .results
-            .plot_view_mut(super::ResultViewer::PhaseNoise, 0)
-            .apply(&response.view);
+        if response.view.any() {
+            state
+                .ui
+                .results
+                .plot_view_mut(super::ResultViewer::PhaseNoise, 0)
+                .apply(&response.view);
+        }
     }
 }
 
-// ---------------------------------------------------------------------------
-// right panel
-// ---------------------------------------------------------------------------
-
-/// Render only the Phase Noise inspector fields that the retained model can
-/// substantiate.  All absent data is explicit so export, screenshot, and
-/// interactive use tell the same truth.
+/// Bind inspector measurements to the selected phase-noise trace.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    section_header(ui, "Phase noise", None);
     let quantities = state.ui.preferences.quantity_presentation_policy();
-    let Some(model) = build_model(state) else {
-        rspice_results_ui::presentation::panel_note(
-            ui,
-            "A PNOISE/QPNOISE result needs an explicitly labelled phase-noise trace before L(f) can be shown.",
-        );
-        return;
-    };
-
-    let offset_range = format_offset_range(finite_range(&model.offset_hz), &quantities);
-    let analysis = &state.simulation.active_run().unwrap().analyses[model.analysis_index];
-    let phase = retained_measurement(&analysis.data, "phase_error_rms_rad")
-        .map(|value| format!("{value:.6e} rad RMS"))
-        .unwrap_or_else(|| "Not retained".into());
-    let jitter = retained_measurement(&analysis.data, "timing_jitter_rms_s")
-        .map(|value| crate::ui::plot::fmt_si(value, "s RMS", 6))
-        .unwrap_or_else(|| "Not retained".into());
-    let spot = exact_retained_value_at(&model.offset_hz, &model.level_dbc_per_hz, 1.0e6)
-        .map_or_else(
-            || "Unavailable — 1 MHz sample not retained".to_owned(),
-            |level| format!("{level:.3} dBc/Hz · retained sample"),
-        );
-    let rows = [
-        ("Trace", model.source, false),
-        (
-            "Carrier",
-            quantities.format_frequency(model.carrier_frequency_hz, 3),
-            false,
-        ),
-        ("Offset range", offset_range, true),
-        ("Integrated phase error", phase, true),
-        ("Integrated timing jitter", jitter, true),
-        ("Spot L(f) at 1 MHz", spot, true),
-        (
-            "Spurs",
-            "Unavailable — spur evidence not retained".to_owned(),
-            false,
-        ),
-    ];
-    rspice_results_ui::presentation::stat_table(ui, &rows);
-    ui.collapsing("Device noise shares", |ui| {
-        let shares: Vec<_> = retained_device_noise_shares(&analysis.measurements).collect();
-        if shares.is_empty() {
-            rspice_results_ui::presentation::panel_note(
-                ui,
-                "No per-device noise shares were retained.",
-            );
-        } else {
-            egui::ScrollArea::vertical().max_height(240.0).show_rows(
-                ui,
-                30.0,
-                shares.len(),
-                |ui, range| {
-                    for index in range {
-                        rspice_results_ui::presentation::stat_table(
-                            ui,
-                            &[(shares[index].0, format!("{:.6} %", shares[index].1), false)],
-                        );
-                    }
-                },
-            );
-        }
+    let model = build_model(state);
+    let input = model.as_ref().map(|model| view::PhaseNoiseInspector {
+        trace: model.trace(),
+        analysis: &state.simulation.active_run().unwrap().analyses[model.analysis_index].data,
+        offset_range: finite_range(&model.offset_hz),
     });
-    rspice_results_ui::presentation::panel_note(
-        ui,
-        "Only an explicitly labelled retained phase-noise trace is rendered; ordinary periodic-noise traces are not reinterpreted as L(f).",
-    );
+    view::right_panel(ui, input, &quantities);
 }
 
 #[cfg(test)]
