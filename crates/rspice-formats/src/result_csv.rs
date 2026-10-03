@@ -1,4 +1,4 @@
-//! CSV encoders over already-selected canonical result records.
+//! CSV and exact text encoders over already-selected canonical result records.
 //!
 //! The application owns view/cache admission, filenames and publication.
 
@@ -9,6 +9,7 @@ mod network_matrix;
 mod noise_report;
 mod operating_point_report;
 mod optimization;
+mod selection;
 mod specifications;
 mod typed;
 pub use analysis_stack::{AnalysisStackCsv, AnalysisStackCsvError};
@@ -18,6 +19,9 @@ pub use network_matrix::encode_network_matrix_csv;
 pub use noise_report::NoiseReportCsv;
 pub use operating_point_report::OperatingPointReportCsv;
 pub use optimization::{EncodedOptimizationCsv, encode_optimization_csv};
+pub use selection::{
+    encode_artifact_text, encode_exact_sample, encode_selection_text, encode_signal_tsv,
+};
 pub use specifications::{EncodedSpecificationCsv, encode_specification_csv};
 pub use typed::{EncodedTypedCsv, TypedCsvSummary, encode_typed_result_csv};
 
