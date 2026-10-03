@@ -1,5 +1,7 @@
 //! Specification result table and inspector over retained runs and frozen requirements.
 
+pub mod editor;
+
 use crate::presentation::well_hint;
 use egui::Ui;
 use rspice_app_types::product::{self, DatasetId};

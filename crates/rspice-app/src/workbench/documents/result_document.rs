@@ -273,6 +273,7 @@ use rspice_results_ui::eye_diagram::view::EyeTexture;
 use rspice_results_ui::fft::view::FftSeries;
 use rspice_results_ui::presentation::{PlotView, well_hint};
 use rspice_results_ui::soa::{SoaRuleFilter, SoaRuleSelection};
+use rspice_results_ui::specs::editor::SpecDraft;
 
 /// One axis interval, low then high, in data space.
 pub(crate) type AxisExtent = (f64, f64);
@@ -2289,7 +2290,7 @@ pub struct ResultsState {
     /// under the reader's hands. Transient.
     pub(crate) axis_limit_draft: Option<(ResultViewer, PaneAxis, String)>,
     /// Open spec-editor rows (None = matrix view). Transient.
-    pub spec_drafts: Option<Vec<specs::SpecDraft>>,
+    pub spec_drafts: Option<Vec<SpecDraft>>,
     /// SOA rule whose evidence the inspector reports. Transient.
     pub(super) selected_soa_rule: Option<SoaRuleSelection>,
     /// Verdict filter applied to the SOA rule table. Transient.

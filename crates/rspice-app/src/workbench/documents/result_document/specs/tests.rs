@@ -303,18 +303,17 @@ fn authored_plan_measurements_editor_commits_the_active_plan_definition() {
         .stable_analysis_plan()
         .expect("default plan")
         .revision();
-    state.ui.results.spec_drafts = Some(vec![SpecDraft {
-        requirement_key: "REQ-GAIN-001".to_owned(),
-        requirement_name: "Closed-loop gain window".to_owned(),
-        measurement: "gain_db".to_owned(),
-        expression: ".MEAS AC gain_db MAX VDB(out)".to_owned(),
-        define_measurement: true,
-        comparison: super::ComparisonDraftKind::Range,
-        primary_limit: "20".to_owned(),
-        secondary_limit: "40".to_owned(),
-        unit: "dB".to_owned(),
-        ..Default::default()
-    }]);
+    let mut draft = SpecDraft::default();
+    draft.requirement_key = "REQ-GAIN-001".to_owned();
+    draft.requirement_name = "Closed-loop gain window".to_owned();
+    draft.measurement = "gain_db".to_owned();
+    draft.expression = ".MEAS AC gain_db MAX VDB(out)".to_owned();
+    draft.define_measurement = true;
+    draft.comparison = rspice_results_ui::specs::editor::ComparisonDraftKind::Range;
+    draft.primary_limit = "20".to_owned();
+    draft.secondary_limit = "40".to_owned();
+    draft.unit = "dB".to_owned();
+    state.ui.results.spec_drafts = Some(vec![draft]);
 
     assert!(apply_drafts(&mut state));
 

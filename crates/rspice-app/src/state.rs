@@ -221,13 +221,13 @@ pub use workspace::{
     RetainedOwnedNetlistDeck, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
     SavedOutputOrigin, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
     SimulationPlanPayload, SimulationPlanPayloadRecord, SpecEntry, SpecPointScope,
-    SpecificationComparison, SpecificationDefinition, SpecificationPolicy, SpecificationRole,
-    UNGROUPED_NAME, group_namer, validate_owned_netlist_artifact_path,
+    SpecificationDefinition, SpecificationPolicy, SpecificationRole, UNGROUPED_NAME, group_namer,
+    validate_owned_netlist_artifact_path,
 };
 
 pub use simulation::{MonteCarloCheckpointEvidence, MonteCarloCheckpointLibrary};
 #[cfg(test)]
-pub use workspace::SavedOutputDisplayIntent;
+pub use workspace::{SavedOutputDisplayIntent, SpecificationComparison};
 
 #[cfg(test)]
 mod symbol_document_tests {
