@@ -94,3 +94,71 @@ impl InspectorHost for ReportHost<'_> {
         open_release_cockpit(self.0);
     }
 }
+
+impl rspice_results_ui::report::composer::ComposerHost for ReportHost<'_> {
+    fn project_open(&self) -> bool {
+        self.0.state.project_lifecycle.is_open()
+    }
+    fn synchronize_selection(&mut self) {
+        synchronize_report_selection(&mut self.0.state);
+    }
+    fn document_snapshot(&self) -> Option<ReportDocument> {
+        active_document(&self.0.state).cloned()
+    }
+    fn selected_page(&self, document: &ReportDocument) -> Option<ReportPageId> {
+        selected_page_id(&self.0.state, document)
+    }
+    fn create_document(&mut self) {
+        open_create_document(self.0);
+    }
+    fn add_page(&mut self) {
+        open_add_page(self.0);
+    }
+    fn page_properties(&mut self) {
+        open_page_properties(self.0);
+    }
+    fn can_move_page(&self, direction: PageMoveDirection) -> bool {
+        can_move_selected_page(&self.0.state, direction)
+    }
+    fn move_page(&mut self, direction: PageMoveDirection) {
+        move_selected_page(self.0, direction);
+    }
+    fn select_page(&mut self, page: ReportPageId) {
+        self.0.state.workbench.report_authoring.selected_page = Some(page);
+        self.0
+            .state
+            .workbench
+            .report_authoring
+            .selected_report_block = None;
+        self.0.state.workbench.report_authoring.preview_block_page = 0;
+    }
+    fn prepare_page_settings(&mut self, page: &rspice_results::report_document::ReportPage) {
+        let page_id = page.id();
+        let editor = &mut self.0.state.workbench.report_authoring;
+        if editor.inline_page_settings_page != Some(page_id) {
+            editor.inline_page_settings_page = Some(page_id);
+            editor.inline_page_title_draft = page.title().to_owned();
+            editor.transaction_error = None;
+        }
+    }
+    fn title_draft(&mut self) -> &mut String {
+        &mut self
+            .0
+            .state
+            .workbench
+            .report_authoring
+            .inline_page_title_draft
+    }
+    fn commit_page_setting(&mut self, page: ReportPageId, setting: PageSettingEdit) {
+        commit_page_setting(self.0, page, setting);
+    }
+    fn evidence_options(
+        &self,
+        binding: ReportPageEvidenceBinding,
+    ) -> Vec<(String, ReportPageEvidenceBinding)> {
+        evidence_binding_options(&self.0.state, binding)
+    }
+    fn evidence_label(&self, binding: ReportPageEvidenceBinding) -> String {
+        evidence_binding_label(&self.0.state, binding)
+    }
+}

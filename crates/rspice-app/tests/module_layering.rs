@@ -1612,7 +1612,6 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     // remaining source exactly and may not grow during the crate split.
     ("workbench/documents/result_document.rs", 4_601),
     ("workbench/surfaces/pdk_technology_admin.rs", 5_115),
-    ("workbench/surfaces/report_authoring.rs", 3_909),
 ];
 
 #[test]

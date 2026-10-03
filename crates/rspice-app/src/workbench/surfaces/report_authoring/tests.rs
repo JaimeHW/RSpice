@@ -8,30 +8,10 @@
 
 use super::*;
 use rspice_results::report_document::{
-    ReportDraftMarking, ReportOutputFormats, ReportPageNumbering, ReportPublicationPageSize,
-    ReportPublicationProfile, ReportPublicationTemplate, ReportTablePrecision,
+    ReportBlockedGateTextPolicy, ReportDraftMarking, ReportOutputFormats, ReportPageInclusion,
+    ReportPageNumbering, ReportPublicationPageSize, ReportPublicationProfile,
+    ReportPublicationTemplate, ReportTablePrecision,
 };
-
-#[test]
-fn responsive_report_builder_matches_mockup_breakpoints() {
-    assert_eq!(OUTLINE_DESKTOP_WIDTH, 250.0);
-    assert_eq!(OUTLINE_TABLET_WIDTH, 180.0);
-    assert_eq!(INSPECTOR_WIDTH, 300.0);
-    assert_eq!(
-        ComposerLayout::resolve(1_280.0),
-        ComposerLayout::ThreeColumn
-    );
-    assert_eq!(
-        ComposerLayout::resolve(1_020.0),
-        ComposerLayout::TwoColumnInspectorBelow
-    );
-    assert_eq!(
-        ComposerLayout::resolve(821.0),
-        ComposerLayout::TwoColumnInspectorBelow
-    );
-    assert_eq!(ComposerLayout::resolve(820.0), ComposerLayout::Stacked);
-    assert_eq!(ComposerLayout::resolve(390.0), ComposerLayout::Stacked);
-}
 
 #[test]
 fn report_commands_open_for_review_and_gate_mutations_by_exact_authority() {
@@ -84,79 +64,6 @@ fn report_commands_open_for_review_and_gate_mutations_by_exact_authority() {
     assert!(!Command::SaveReportDocument.is_enabled(&app));
     assert!(!Command::AddReportPage.is_enabled(&app));
     assert!(!Command::ReportPageProperties.is_enabled(&app));
-}
-
-#[test]
-fn every_report_layout_assigns_each_internal_seam_to_one_pane() {
-    assert_eq!(
-        ComposerLayout::ThreeColumn.separators(),
-        [
-            PaneSeparators {
-                right: true,
-                ..PaneSeparators::default()
-            },
-            PaneSeparators {
-                right: true,
-                ..PaneSeparators::default()
-            },
-            PaneSeparators::default(),
-        ]
-    );
-    assert_eq!(
-        ComposerLayout::TwoColumnInspectorBelow.separators(),
-        [
-            PaneSeparators {
-                right: true,
-                ..PaneSeparators::default()
-            },
-            PaneSeparators::default(),
-            PaneSeparators {
-                top: true,
-                ..PaneSeparators::default()
-            },
-        ]
-    );
-    assert_eq!(
-        ComposerLayout::Stacked.separators(),
-        [
-            PaneSeparators {
-                bottom: true,
-                ..PaneSeparators::default()
-            },
-            PaneSeparators {
-                bottom: true,
-                ..PaneSeparators::default()
-            },
-            PaneSeparators::default(),
-        ]
-    );
-}
-
-#[test]
-fn tablet_and_stacked_pane_heights_follow_local_space_and_document_content() {
-    let tablet_short = composer_pane_heights(
-        ComposerLayout::TwoColumnInspectorBelow,
-        640.0,
-        INITIAL_PAGES.len(),
-        true,
-    );
-    let tablet_tall = composer_pane_heights(
-        ComposerLayout::TwoColumnInspectorBelow,
-        1_600.0,
-        INITIAL_PAGES.len(),
-        true,
-    );
-    assert!(tablet_tall.preview > tablet_short.preview);
-    assert!(tablet_tall.inspector > tablet_short.inspector);
-    assert!(tablet_short.preview + tablet_short.inspector + 0.01 >= 640.0);
-    assert!(tablet_tall.preview + tablet_tall.inspector + 0.01 >= 1_600.0);
-
-    let compact_seven =
-        composer_pane_heights(ComposerLayout::Stacked, 720.0, INITIAL_PAGES.len(), true);
-    let compact_twelve = composer_pane_heights(ComposerLayout::Stacked, 720.0, 12, true);
-    assert!(compact_twelve.outline > compact_seven.outline);
-    assert_eq!(compact_seven.preview, PREVIEW_MIN_HEIGHT);
-    assert!(compact_seven.inspector > 300.0);
 }
 
 #[test]
