@@ -66,7 +66,9 @@ pub(in crate::workbench::surfaces::simulate) fn fields(
             "These defaults apply to study stages that inherit them. Settings on the selected base analysis and its prerequisites take precedence.",
         );
     }
-    if matches!(draft, AnalysisDraft::HarmonicBalance(_)) && ownership.time_integration == Some(true) {
+    if matches!(draft, AnalysisDraft::HarmonicBalance(_))
+        && ownership.time_integration == Some(true)
+    {
         super::field_note(
             ui,
             "Time-integration settings control the transient used to initialize harmonic balance.",

@@ -226,8 +226,12 @@ pub(super) fn parse_generated_netlist_bundle(
     let expanded = if dependencies.is_empty() {
         source.clone()
     } else {
-        rspice_simulation::netlist_sources::expand_retained_netlist_dependencies(document_id, &source, &dependencies)?
-            .source
+        rspice_simulation::netlist_sources::expand_retained_netlist_dependencies(
+            document_id,
+            &source,
+            &dependencies,
+        )?
+        .source
     };
     rspice_core::Netlist::parse(&expanded)
         .map_err(|error| format!("Retained archive closure does not parse: {error}"))?;
