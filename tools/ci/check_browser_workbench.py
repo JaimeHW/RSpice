@@ -67,7 +67,7 @@ def reject_checkpoint_clock(browser, name):
     before = checkpoint_records(browser)
     for fault in CLOCK_FAULTS:
         with wall_clock(browser, fault):
-            browser.click("Checkpoint now…", "button")
+            browser.click("Create checkpoint", "button")
             verify_clock_rejection(browser.capture(f"{name}-clock-{fault}"), "Project checkpoint")
             if checkpoint_records(browser) != before:
                 raise AssertionError("A failed timestamp operation changed durable checkpoint records")
@@ -77,11 +77,13 @@ def verify_age(browser, name, now_ms):
     for value, expected, suffix in ((now_ms - 86_400_000, "clock skew", "rollback"),
                                     (now_ms + 86_400_000, "1 d ago", "forward"),
                                     ("nonfinite", "time unavailable", "unavailable")):
+        if name == "checkpoint":
+            expected = {"clock skew": "time unavailable", "1 d ago": "yesterday"}.get(expected, expected)
         with wall_clock(browser, value):
             snapshot = browser.capture(f"{name}-age-{suffix}")
             if not any(control["value"] == expected or (
-                    name == "checkpoint" and control["role"] == "button" and
-                    control["label"].startswith(f"Manual checkpoint, {expected}, revision 1,"))
+                    name == "checkpoint" and
+                    control["label"].startswith(f"Manual checkpoint, {expected} · revision 1 ·"))
                     for control in controls(snapshot)):
                 raise AssertionError(f"{name} did not report {expected!r} after a clock adjustment")
 
@@ -249,7 +251,7 @@ def model_validation_clock(browser):
     choose_command(browser, "Open recovery center")
     before = checkpoint_records(browser)
     started_ms = time.time_ns() // 1_000_000
-    browser.click("Checkpoint now…", "button")
+    browser.click("Create checkpoint", "button")
     records = wait_for_checkpoint_publication(browser, before, "the checkpoint after failed model validation")
     _, _, project = verify_checkpoint(records, started_ms, time.time_ns() // 1_000_000)
     if project["execution_context"].get("model_validation_receipt") != receipt:
@@ -397,7 +399,7 @@ def run_with_saved_provider(browser, decision):
     choose_command(browser, "Open recovery center")
     before = checkpoint_records(browser)
     started_ms = time.time_ns() // 1_000_000
-    browser.click("Checkpoint now…", "button")
+    browser.click("Create checkpoint", "button")
     records = wait_for_checkpoint_publication(browser, before, "the saved-provider result checkpoint")
     _, raw, project = verify_checkpoint(records, started_ms, time.time_ns() // 1_000_000)
     if project["execution_context"]["model_resolution_records"] != [decision]:
@@ -621,13 +623,13 @@ def run(browser):
     configuration_opening_input(browser)
     review_intervals = create_and_resolve_review(browser)
     choose_command(browser, "Open recovery center")
-    wait_for(lambda: any(control["label"] == "Checkpoint now…"
+    wait_for(lambda: any(control["label"] == "Create checkpoint"
                         for control in controls(browser.snapshot())), "the recovery workspace")
     if checkpoint_records(browser):
         raise AssertionError("A fresh profile already contains recovery records")
     reject_checkpoint_clock(browser, "empty-checkpoint-store")
     started_ms = time.time_ns() // 1_000_000
-    browser.click("Checkpoint now…", "button")
+    browser.click("Create checkpoint", "button")
 
     records = wait_for_checkpoint_publication(browser, {}, "durable checkpoint publication")
     (browser.output / "checkpoint-records.json").write_text(json.dumps(records, indent=2), encoding="utf-8")
@@ -636,7 +638,7 @@ def run(browser):
     browser.capture("checkpoint-created")
     reject_checkpoint_clock(browser, "retained-checkpoint-store")
     verify_age(browser, "checkpoint", time.time_ns() // 1_000_000)
-    browser.click("Restore…", "button")
+    browser.click("Restore Manual checkpoint as a new project", "button")
 
     def download():
         files = list(browser.downloads.glob("*.rspiceproj"))
