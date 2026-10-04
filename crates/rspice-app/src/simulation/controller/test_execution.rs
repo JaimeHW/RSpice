@@ -11,7 +11,7 @@ pub(crate) mod saved_outputs;
 
 pub(crate) fn start_manual_deck(source: &str) -> SimulationRunner {
     let mut state = AppState::default();
-    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.workspace.content.netlist_source = Some(source.to_owned());
     let mut controller = SimulationController::new();
     controller
@@ -64,7 +64,7 @@ pub(crate) fn run_manual_batch_with_lifecycle(
     expected_lifecycle: SimulationRunLifecycle,
 ) -> crate::state::SimulationRun {
     let mut state = AppState::default();
-    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.workspace.content.netlist_source = Some(source.to_owned());
     let mut controller = SimulationController::new();
     controller
@@ -77,7 +77,7 @@ pub(crate) fn run_generated_batch(
     mut state: AppState,
     expected_lifecycle: SimulationRunLifecycle,
 ) -> crate::state::SimulationRun {
-    state.simulation.run_intent = SimulationRunIntent::SimulateRunSet;
+    state.simulation.execution.run_intent = SimulationRunIntent::SimulateRunSet;
     state.sync_active_schematic_to_workspace();
     let checks = state
         .run_active_design_checks()
@@ -96,7 +96,7 @@ fn run_batch(
     expected_lifecycle: SimulationRunLifecycle,
 ) -> crate::state::SimulationRun {
     let export_io = super::tests::MockExportWorkflowIo::default();
-    state.simulation.trigger_simulation = true;
+    state.simulation.execution.trigger_simulation = true;
     controller.update(&mut state, &export_io);
     let deadline = Instant::now() + Duration::from_secs(60);
     while controller.has_active_batch() {
@@ -105,12 +105,12 @@ fn run_batch(
         controller.update(&mut state, &export_io);
     }
     assert_eq!(
-        state.simulation.runs.len(),
+        state.simulation.retained.runs.len(),
         1,
         "{}",
-        state.simulation.status
+        state.simulation.execution.status
     );
-    let run = state.simulation.runs[0].clone();
+    let run = state.simulation.retained.runs[0].clone();
     assert_eq!(run.lifecycle, expected_lifecycle, "{:?}", run.analyses);
     assert!(!run.analyses.is_empty());
     if expected_lifecycle == SimulationRunLifecycle::Completed {

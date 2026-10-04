@@ -106,7 +106,7 @@ fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
     );
     run_and_queue(&mut app);
 
-    assert!(!app.state.simulation.trigger_simulation);
+    assert!(!app.state.simulation.execution.trigger_simulation);
     let report = app
         .state
         .workbench
@@ -149,7 +149,7 @@ fn a_current_retained_report_queues_without_reauthoring_preflight() {
     });
 
     assert!(queue_retained_run(&mut app));
-    assert!(app.state.simulation.trigger_simulation);
+    assert!(app.state.simulation.execution.trigger_simulation);
     assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
 }
 

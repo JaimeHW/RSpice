@@ -133,7 +133,7 @@ pub(crate) fn commit_dependency_relink(
     candidate.ui.netlist.active_document = transaction.root;
     candidate.ui.netlist.active_dependency_root = Some(transaction.root);
     candidate.ui.netlist.active_dependency_identity = Some(transaction.logical_identity.clone());
-    candidate.simulation.netlist_content = source;
+    candidate.simulation.source.netlist_content = source;
     candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
     candidate.ui.netlist.completion_open = false;
     candidate.ui.netlist.edited_lines.clear();

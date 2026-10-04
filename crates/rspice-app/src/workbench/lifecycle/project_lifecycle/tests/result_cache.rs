@@ -19,12 +19,13 @@ fn deck(text: &str) -> ExecutedDeck {
 fn unchanged_dirty_queries_do_not_rebuild_validate_or_hash_retained_results() {
     for samples in [2, 100_000] {
         let (mut state, _) = super::durable_content::retained_results();
-        state.simulation.runs[0].analyses[0].waveforms = vec![crate::state::WaveformData::new(
-            "V(out)",
-            (0..samples).map(|n| n as f64).collect::<Vec<_>>(),
-            vec![1.0; samples],
-            "#ffffff",
-        )];
+        state.simulation.retained.runs[0].analyses[0].waveforms =
+            vec![crate::state::WaveformData::new(
+                "V(out)",
+                (0..samples).map(|n| n as f64).collect::<Vec<_>>(),
+                vec![1.0; samples],
+                "#ffffff",
+            )];
         let baseline = snapshot(&state).unwrap();
         state.project_lifecycle.accept_project(baseline, None);
         assert!(!has_unsaved_changes(&state));
@@ -68,31 +69,54 @@ fn unchanged_dirty_queries_do_not_rebuild_validate_or_hash_retained_results() {
 #[test]
 fn every_persisted_result_input_invalidates_the_snapshot_and_matches_fresh_capture() {
     let (mut base, _) = super::durable_content::retained_results();
-    let mut second_analysis = base.simulation.runs[0].analyses[0].clone();
+    let mut second_analysis = base.simulation.retained.runs[0].analyses[0].clone();
     second_analysis.id = 2;
     second_analysis.label = "Second".to_owned();
-    base.simulation.runs[0].analyses.push(second_analysis);
+    base.simulation.retained.runs[0]
+        .analyses
+        .push(second_analysis);
     let (other, _) = super::durable_content::retained_results();
-    let mut second_run = other.simulation.runs[0].clone();
+    let mut second_run = other.simulation.retained.runs[0].clone();
     second_run.id = 2;
-    base.simulation.runs.push(second_run);
-    base.simulation.next_run_id = 2;
-    base.simulation.executed_decks.retain(deck("original deck"));
+    base.simulation.retained.runs.push(second_run);
+    base.simulation.retained.next_run_id = 2;
+    base.simulation
+        .retained
+        .executed_decks
+        .retain(deck("original deck"));
     let edits: [fn(&mut SimulationState); 11] = [
-        |state| state.next_run_id = 7,
-        |state| state.retained_dataset_limit = Some(3),
-        |state| state.active_run_idx = Some(1),
-        |state| state.active_analysis_idx = Some(1),
-        |state| state.overlay_dataset_ids.push(state.runs[1].dataset_id),
-        |state| state.runs[0].analyses[0].label.push_str(" changed"),
-        |state| std::sync::Arc::make_mut(&mut state.runs[0].analyses[0].waveforms[0].y)[1] = 9.0,
-        |state| state.executed_decks.retain(deck("changed deck")),
-        |state| state.executed_decks.retain_runs(|_| false),
+        |state| state.retained.next_run_id = 7,
+        |state| state.retained.retained_dataset_limit = Some(3),
+        |state| state.view.active_run_idx = Some(1),
+        |state| state.view.active_analysis_idx = Some(1),
         |state| {
-            state.executed_decks =
+            state
+                .view
+                .overlay_dataset_ids
+                .push(state.retained.runs[1].dataset_id)
+        },
+        |state| {
+            state.retained.runs[0].analyses[0]
+                .label
+                .push_str(" changed")
+        },
+        |state| {
+            std::sync::Arc::make_mut(&mut state.retained.runs[0].analyses[0].waveforms[0].y)[1] =
+                9.0
+        },
+        |state| state.retained.executed_decks.retain(deck("changed deck")),
+        |state| state.retained.executed_decks.retain_runs(|_| false),
+        |state| {
+            state.retained.executed_decks =
                 ExecutedDeckArchive::restore(vec![deck("restored deck")]).unwrap()
         },
-        |state| state.runs = super::durable_content::retained_results().0.simulation.runs,
+        |state| {
+            state.retained.runs = super::durable_content::retained_results()
+                .0
+                .simulation
+                .retained
+                .runs
+        },
     ];
     for (index, edit) in edits.into_iter().enumerate() {
         let mut state = base.clone();
@@ -140,10 +164,10 @@ fn runtime_changes_and_clones_reuse_results_but_invalid_edits_do_not() {
     let retained = baseline.file.simulation_results.clone();
     state.project_lifecycle.accept_project(baseline, None);
     assert!(!has_unsaved_changes(&state));
-    state.simulation.progress = 0.75;
-    state.simulation.status = "runtime status".to_owned();
-    state.simulation.data_version += 1;
-    state.simulation.netlist_content = "runtime preview".to_owned();
+    state.simulation.execution.progress = 0.75;
+    state.simulation.execution.status = "runtime status".to_owned();
+    state.simulation.view.data_version += 1;
+    state.simulation.source.netlist_content = "runtime preview".to_owned();
     assert!(
         snapshot(&state)
             .unwrap()
@@ -160,24 +184,25 @@ fn runtime_changes_and_clones_reuse_results_but_invalid_edits_do_not() {
             .shares_content_with(&retained)
     );
 
-    let elapsed = state.simulation.runs[0].elapsed_time;
-    state.simulation.runs[0].elapsed_time = -1.0;
+    let elapsed = state.simulation.retained.runs[0].elapsed_time;
+    state.simulation.retained.runs[0].elapsed_time = -1.0;
     assert!(snapshot(&state).is_err());
     assert!(has_unsaved_changes(&state));
     assert!(active_document_is_dirty(&state));
     retained.validate().unwrap();
     assert!(!has_unsaved_changes(&fork));
-    state.simulation.runs[0].elapsed_time = elapsed;
+    state.simulation.retained.runs[0].elapsed_time = elapsed;
     assert!(
         !has_unsaved_changes(&state),
         "returning to accepted content must be clean"
     );
 
-    std::sync::Arc::make_mut(&mut state.simulation.runs[0].analyses[0].waveforms[0].x)[1] =
-        f64::NAN;
+    std::sync::Arc::make_mut(&mut state.simulation.retained.runs[0].analyses[0].waveforms[0].x)
+        [1] = f64::NAN;
     assert!(snapshot(&state).is_err());
     assert!(has_unsaved_changes(&state));
-    std::sync::Arc::make_mut(&mut state.simulation.runs[0].analyses[0].waveforms[0].x)[1] = 1.0;
+    std::sync::Arc::make_mut(&mut state.simulation.retained.runs[0].analyses[0].waveforms[0].x)
+        [1] = 1.0;
     assert!(!has_unsaved_changes(&state));
 }
 

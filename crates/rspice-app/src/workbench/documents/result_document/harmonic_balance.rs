@@ -41,6 +41,7 @@ fn selected_hb_analysis(state: &AppState) -> Option<&AnalysisResult> {
     let run = state.simulation.active_run()?;
     state
         .simulation
+        .view
         .active_analysis_idx
         .and_then(|index| run.analyses.get(index))
         .filter(|analysis| analysis_is_renderable(analysis))

@@ -505,13 +505,13 @@ mod tests {
     #[test]
     fn cleared_run_sequence_survives_session_round_trip() {
         let mut state = AppState::default();
-        state.simulation.next_run_id = 41;
+        state.simulation.retained.next_run_id = 41;
         assert_eq!(state.simulation.start_run().id, 42);
         state.simulation.clear_runs();
         let json = serde_json::to_string(&state).expect("session serializes");
         let mut restored: AppState = serde_json::from_str(&json).expect("session restores");
-        assert!(restored.simulation.runs.is_empty());
-        assert_eq!(restored.simulation.next_run_id, 42);
+        assert!(restored.simulation.retained.runs.is_empty());
+        assert_eq!(restored.simulation.retained.next_run_id, 42);
         assert_eq!(restored.simulation.start_run().id, 43);
     }
 
@@ -565,18 +565,18 @@ mod tests {
                 .with_waveforms(vec![waveform]),
         );
         seal_legacy_unattributed(&mut run);
-        state.simulation.runs = vec![run].into();
-        state.simulation.next_run_id = 3;
-        state.simulation.active_run_idx = Some(0);
-        state.simulation.active_analysis_idx = Some(0);
-        state.simulation.is_running = true;
-        state.simulation.trigger_abort = true;
+        state.simulation.retained.runs = vec![run].into();
+        state.simulation.retained.next_run_id = 3;
+        state.simulation.view.active_run_idx = Some(0);
+        state.simulation.view.active_analysis_idx = Some(0);
+        state.simulation.execution.is_running = true;
+        state.simulation.execution.trigger_abort = true;
 
         let json = serde_json::to_string(&state).expect("session serializes");
         assert!(json.contains("simulation_results"));
         let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
 
-        assert_eq!(restored.simulation.run_count(), 1);
+        assert_eq!(restored.simulation.retained.run_count(), 1);
         assert_eq!(
             restored
                 .simulation
@@ -585,9 +585,9 @@ mod tests {
                 .label,
             "Run 3 (session fixture)"
         );
-        assert_eq!(restored.simulation.waveforms[0].name, "V(out)");
-        assert!(!restored.simulation.is_running);
-        assert!(!restored.simulation.trigger_abort);
+        assert_eq!(restored.simulation.view.waveforms[0].name, "V(out)");
+        assert!(!restored.simulation.execution.is_running);
+        assert!(!restored.simulation.execution.trigger_abort);
     }
 
     #[test]
@@ -818,9 +818,9 @@ mod tests {
     fn legacy_session_without_results_loads_empty_result_history() {
         let restored: AppState = serde_json::from_str("{}").expect("legacy session loads");
 
-        assert_eq!(restored.simulation.run_count(), 0);
-        assert!(restored.simulation.waveforms.is_empty());
-        assert!(!restored.simulation.is_running);
+        assert_eq!(restored.simulation.retained.run_count(), 0);
+        assert!(restored.simulation.view.waveforms.is_empty());
+        assert!(!restored.simulation.execution.is_running);
         assert!(!restored.ui.browser_spoken_feedback);
         assert!(restored.log_buffer.entries().any(|entry| {
             entry
@@ -1154,10 +1154,10 @@ mod tests {
             "TRAN legacy session",
         ));
         seal_legacy_unattributed(&mut run);
-        state.simulation.runs = vec![run].into();
-        state.simulation.next_run_id = 3;
-        state.simulation.active_run_idx = Some(0);
-        state.simulation.active_analysis_idx = Some(0);
+        state.simulation.retained.runs = vec![run].into();
+        state.simulation.retained.next_run_id = 3;
+        state.simulation.view.active_run_idx = Some(0);
+        state.simulation.view.active_analysis_idx = Some(0);
         let mut value = serde_json::to_value(&state).expect("session converts to JSON");
         let results = value["simulation_results"]
             .as_object_mut()
@@ -1220,10 +1220,10 @@ mod tests {
                 .with_family_metadata(metadata.clone()),
         );
         seal_legacy_unattributed(&mut run);
-        state.simulation.runs = vec![run].into();
-        state.simulation.next_run_id = 1;
-        state.simulation.active_run_idx = Some(0);
-        state.simulation.active_analysis_idx = Some(0);
+        state.simulation.retained.runs = vec![run].into();
+        state.simulation.retained.next_run_id = 1;
+        state.simulation.view.active_run_idx = Some(0);
+        state.simulation.view.active_analysis_idx = Some(0);
 
         let json = serde_json::to_string(&state).expect("session metadata serializes");
         let restored: AppState = serde_json::from_str(&json).expect("session metadata restores");
@@ -1260,16 +1260,16 @@ mod tests {
             crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
                 .with_waveforms(vec![waveform]),
         );
-        state.simulation.runs = vec![run].into();
-        state.simulation.next_run_id = 3;
-        state.simulation.active_run_idx = Some(0);
-        state.simulation.active_analysis_idx = Some(0);
+        state.simulation.retained.runs = vec![run].into();
+        state.simulation.retained.next_run_id = 3;
+        state.simulation.view.active_run_idx = Some(0);
+        state.simulation.view.active_analysis_idx = Some(0);
 
         let json = serde_json::to_string(&state).expect("session serializes");
         let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
 
         assert!(!json.contains("simulation_results"));
-        assert_eq!(restored.simulation.run_count(), 0);
+        assert_eq!(restored.simulation.retained.run_count(), 0);
     }
 
     #[test]
@@ -1322,18 +1322,18 @@ mod tests {
             crate::state::AnalysisType::Transient,
             "TRAN",
         ));
-        state.simulation.runs = vec![run].into();
-        state.simulation.next_run_id = 3;
-        state.simulation.active_run_idx = Some(0);
-        state.simulation.active_analysis_idx = Some(0);
+        state.simulation.retained.runs = vec![run].into();
+        state.simulation.retained.next_run_id = 3;
+        state.simulation.view.active_run_idx = Some(0);
+        state.simulation.view.active_analysis_idx = Some(0);
         let mut value = serde_json::to_value(&state).expect("session serializes");
         value["simulation_results"]["schema_version"] = serde_json::Value::from(999);
         let json = serde_json::to_string(&value).expect("mutated session serializes");
 
         let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
 
-        assert_eq!(restored.simulation.run_count(), 0);
-        assert!(restored.simulation.waveforms.is_empty());
+        assert_eq!(restored.simulation.retained.run_count(), 0);
+        assert!(restored.simulation.view.waveforms.is_empty());
         assert!(restored.log_buffer.entries().any(|entry| {
             entry
                 .message
@@ -1400,10 +1400,10 @@ mod tests {
             run_receipt,
         )))
         .expect("prepared run fixture seals");
-        state.simulation.runs = vec![run].into();
-        state.simulation.next_run_id = 4;
-        state.simulation.active_run_idx = Some(0);
-        state.simulation.active_analysis_idx = Some(0);
+        state.simulation.retained.runs = vec![run].into();
+        state.simulation.retained.next_run_id = 4;
+        state.simulation.view.active_run_idx = Some(0);
+        state.simulation.view.active_analysis_idx = Some(0);
         let mut session = serde_json::to_value(&state).expect("session serializes");
         let orphaned_identity = crate::product::AnalysisInstanceId::new();
         session["simulation_results"]["runs"][0]["analyses"][0]["provenance"]["source_instance_id"] =
@@ -1414,7 +1414,7 @@ mod tests {
         let restored: AppState =
             serde_json::from_value(session).expect("orphaned result is recoverable");
 
-        assert_eq!(restored.simulation.run_count(), 0);
+        assert_eq!(restored.simulation.retained.run_count(), 0);
         assert!(restored.log_buffer.entries().any(|entry| {
             entry
                 .message

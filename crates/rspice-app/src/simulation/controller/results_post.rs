@@ -18,7 +18,7 @@ impl SimulationController {
         state: &AppState,
     ) -> Option<SpecializedViewerCacheProvenance> {
         let run_sequence = self.current_run_id?;
-        let run = state.simulation.run_by_sequence(run_sequence)?;
+        let run = state.simulation.retained.run_by_sequence(run_sequence)?;
         let source_instance_id = self.current_provenance.as_ref()?.source_instance_id();
         Some(SpecializedViewerCacheProvenance::for_prepared_analysis(
             run.dataset_id,

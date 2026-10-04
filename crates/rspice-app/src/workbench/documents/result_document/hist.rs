@@ -271,9 +271,9 @@ pub(super) struct HistPlan {
 /// Resolve bins and statistics together. Source tokens also cover nested edits,
 /// wholesale replacement and clones whose numeric generations happen to match.
 fn hist_plan(state: &AppState, histogram: &str) -> Arc<HistPlan> {
-    let version = state.simulation.data_version;
-    let source = state.simulation.runs.revision();
-    let yield_source = state.simulation.yield_evidence.revision();
+    let version = state.simulation.view.data_version;
+    let source = state.simulation.retained.runs.revision();
+    let yield_source = state.simulation.retained.yield_evidence.revision();
     let dataset = state.simulation.active_run().map(|run| run.dataset_id);
     let analysis = dataset
         .zip(state.simulation.active_analysis())
@@ -303,20 +303,23 @@ fn hist_plan(state: &AppState, histogram: &str) -> Arc<HistPlan> {
             return false;
         }
         match authority {
-            Some(authority) => state
-                .simulation
-                .yield_provenance()
-                .is_some_and(|provenance| {
-                    provenance.seed == authority.seed
-                        && provenance.runs_requested == authority.runs_requested
-                        && provenance.runs_completed == authority.runs_completed
-                        && result.samples.len() == authority.variable.samples.len()
-                        && result
-                            .samples
-                            .iter()
-                            .zip(&authority.variable.samples)
-                            .all(|(a, b)| a.to_bits() == b.to_bits())
-                }),
+            Some(authority) => {
+                state
+                    .simulation
+                    .retained
+                    .yield_provenance()
+                    .is_some_and(|provenance| {
+                        provenance.seed == authority.seed
+                            && provenance.runs_requested == authority.runs_requested
+                            && provenance.runs_completed == authority.runs_completed
+                            && result.samples.len() == authority.variable.samples.len()
+                            && result
+                                .samples
+                                .iter()
+                                .zip(&authority.variable.samples)
+                                .all(|(a, b)| a.to_bits() == b.to_bits())
+                    })
+            }
             None => legacy_yield_is_eligible(state),
         }
     });
@@ -608,8 +611,8 @@ mod tests {
     fn selected_measurement_never_uses_first_result_for_another_measurement() {
         let run = SimulationRun::new(1);
         let mut simulation = SimulationState::default();
-        simulation.runs.push(run.clone());
-        simulation.active_run_idx = Some(0);
+        simulation.retained.runs.push(run.clone());
+        simulation.view.active_run_idx = Some(0);
         simulation.replace_yield_evidence(
             vec![result("gain", 12.0), result("V(out)", 97.0)],
             Some(provenance(&run)),
@@ -626,8 +629,8 @@ mod tests {
         let stale_run = SimulationRun::new(1);
         let active_run = SimulationRun::new(2);
         let mut simulation = SimulationState::default();
-        simulation.runs = vec![stale_run.clone(), active_run].into();
-        simulation.active_run_idx = Some(1);
+        simulation.retained.runs = vec![stale_run.clone(), active_run].into();
+        simulation.view.active_run_idx = Some(1);
         simulation
             .replace_yield_evidence(vec![result("V(out)", 23.0)], Some(provenance(&stale_run)));
 
@@ -638,8 +641,8 @@ mod tests {
     fn absent_or_ambiguous_measurement_evidence_fails_closed() {
         let run = SimulationRun::new(1);
         let mut simulation = SimulationState::default();
-        simulation.runs.push(run.clone());
-        simulation.active_run_idx = Some(0);
+        simulation.retained.runs.push(run.clone());
+        simulation.view.active_run_idx = Some(0);
         simulation.replace_yield_evidence(vec![result("gain", 90.0)], Some(provenance(&run)));
         assert!(selected_yield_result(&simulation, "V(out)", true).is_none());
 
@@ -654,8 +657,8 @@ mod tests {
     fn mean_wrapper_resolves_only_its_exact_sample_population() {
         let run = SimulationRun::new(1);
         let mut simulation = SimulationState::default();
-        simulation.runs.push(run.clone());
-        simulation.active_run_idx = Some(0);
+        simulation.retained.runs.push(run.clone());
+        simulation.view.active_run_idx = Some(0);
         simulation
             .replace_yield_evidence(vec![result("mean(V(out))", 88.0)], Some(provenance(&run)));
 
@@ -694,7 +697,7 @@ mod tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
         let mut state = AppState::default();
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
 
         let authority = active_monte_carlo_authority(&state, "offset")
@@ -721,7 +724,7 @@ mod tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
         let mut state = AppState::default();
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
 
         assert!(active_monte_carlo_authority(&state, "gain").is_none());
@@ -745,7 +748,7 @@ mod tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
         let mut state = AppState::default();
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
 
         assert!(exact_moments(&state, "gain").is_none());
@@ -783,7 +786,7 @@ mod tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
         let mut state = AppState::default();
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
 
         let first = hist_plan(&state, "gain");
@@ -802,11 +805,11 @@ mod tests {
         assert!(!std::sync::Arc::ptr_eq(&first, &other));
 
         // A new generation of the population is a new answer.
-        let AnalysisResultFamilyMetadata::MonteCarlo { variables, .. } = state.simulation.runs[0]
-            .analyses[0]
-            .family_metadata
-            .as_mut()
-            .expect("Monte Carlo metadata")
+        let AnalysisResultFamilyMetadata::MonteCarlo { variables, .. } =
+            state.simulation.retained.runs[0].analyses[0]
+                .family_metadata
+                .as_mut()
+                .expect("Monte Carlo metadata")
         else {
             panic!("the fixture retains Monte Carlo metadata");
         };
@@ -815,7 +818,7 @@ mod tests {
         variables[0].std_dev = 10.0;
         variables[0].min = 10.0;
         variables[0].max = 30.0;
-        state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
+        state.simulation.view.data_version = state.simulation.view.data_version.wrapping_add(1);
 
         let after = hist_plan(&state, "gain");
         assert_eq!(

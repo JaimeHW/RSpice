@@ -93,6 +93,7 @@ impl OverviewIntent {
                 let has_retained_dataset = app
                     .state
                     .simulation
+                    .retained
                     .runs
                     .get(index)
                     .is_some_and(|run| !run.analyses.is_empty());
@@ -406,7 +407,7 @@ impl OverviewSnapshot {
             rspice_design::connectivity::summary::design_nets(schematic).len()
         });
 
-        let latest_run_status = state.simulation.runs.first().map_or_else(
+        let latest_run_status = state.simulation.retained.runs.first().map_or_else(
             || {
                 let command = Command::OpenWorkspace(run_destination(false, netlist_first));
                 let (enabled, disabled_reason) = command_gate(app, command);
@@ -566,6 +567,7 @@ impl OverviewSnapshot {
             u64::try_from(crate::time_compat::unix_epoch().as_millis()).unwrap_or(u64::MAX);
         let mut operations = state
             .simulation
+            .retained
             .runs
             .iter()
             .enumerate()
@@ -692,7 +694,7 @@ impl OverviewSnapshot {
             .map(|revision| revision.id().as_uuid())
             .collect::<BTreeSet<_>>()
             .len();
-        let operation_total = state.simulation.runs.len()
+        let operation_total = state.simulation.retained.runs.len()
             + retained_revision_total
             + state.workspace.content.project.library_publications().len();
         let operations = operations

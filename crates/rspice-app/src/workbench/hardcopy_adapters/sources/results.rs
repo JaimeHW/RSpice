@@ -16,7 +16,7 @@ fn studio_source<'a>(
     StudioHardcopySource {
         project_id,
         studio: studio.into(),
-        runs: &simulation.runs,
+        runs: &simulation.retained.runs,
         waveform_style: |waveform| StudioWaveformStyle {
             color: &waveform.color,
             visible: waveform.visible,

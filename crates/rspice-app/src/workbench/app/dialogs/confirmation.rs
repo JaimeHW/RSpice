@@ -184,7 +184,7 @@ impl RSpiceApp {
                 format!("Stimulus definition {definition}: draft not applied (discarded on close)"),
             ));
         }
-        if self.state.simulation.has_active_execution() {
+        if self.state.simulation.execution.has_active_execution() {
             self.render_close_blocked_by_run(ctx, &unsaved);
         } else if documents.is_empty() && unsaved.is_empty() {
             self.state.dialogs.project_review_dialog.close();
@@ -601,7 +601,7 @@ mod tests {
         let identity = run
             .execution_identity()
             .expect("running fixture has an identity");
-        app.state.simulation.active_execution = Some(identity);
+        app.state.simulation.execution.active_execution = Some(identity);
 
         let painted = painted_text(&render_close_review(&mut app, egui::vec2(1_280.0, 800.0)));
         let shows = |wanted: &str| painted.iter().any(|(text, _)| text == wanted);

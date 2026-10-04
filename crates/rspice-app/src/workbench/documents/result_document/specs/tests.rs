@@ -28,8 +28,8 @@ fn the_table_marks_the_limit_a_hop_carried_into_it() {
             rspice_core::MeasureResult::success("bandwidth_3db", 1.0e6),
         ]),
     );
-    state.simulation.runs = vec![run].into();
-    state.simulation.active_run_idx = Some(0);
+    state.simulation.retained.runs = vec![run].into();
+    state.simulation.view.active_run_idx = Some(0);
     state.workspace.content.specs = vec![
         SpecEntry {
             measurement: "gain_dc".to_owned(),
@@ -790,9 +790,9 @@ fn two_runs_over_a_long_contract() -> AppState {
                     .collect(),
             ),
         );
-        state.simulation.runs.push(run);
+        state.simulation.retained.runs.push(run);
     }
-    state.simulation.active_run_idx = Some(0);
+    state.simulation.view.active_run_idx = Some(0);
     state.workspace.content.specs = names
         .iter()
         .map(|name| SpecEntry {
@@ -862,7 +862,7 @@ fn the_carried_limit_is_scrolled_to_again_in_the_next_run() {
         "the hop into the first run puts its limit on screen: {first:?}"
     );
 
-    state.simulation.active_run_idx = Some(1);
+    state.simulation.view.active_run_idx = Some(1);
     let second = carried_row_position(&ctx, &mut state, screen);
 
     assert!(
@@ -901,11 +901,11 @@ fn the_source_button_opens_the_viewer_the_shared_map_names() {
             },
         ),
     );
-    state.simulation.runs = vec![run].into();
-    state.simulation.active_run_idx = Some(0);
-    state.simulation.active_analysis_idx = Some(0);
+    state.simulation.retained.runs = vec![run].into();
+    state.simulation.view.active_run_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
 
-    let optimization = state.simulation.runs[0].analyses[1].clone();
+    let optimization = state.simulation.retained.runs[0].analyses[1].clone();
 
     assert_eq!(
         super::source_viewer(&optimization),

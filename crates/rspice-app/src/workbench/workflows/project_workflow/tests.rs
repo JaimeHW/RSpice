@@ -214,13 +214,13 @@ fn live_project_snapshot_waits_out_a_local_run_and_rejects_garbage() {
         crate::io::project_io::serialize_project_file(&snapshot).expect("snapshot serializes");
 
     let mut guest = AppState::default();
-    guest.simulation.is_running = true;
+    guest.simulation.execution.is_running = true;
     assert!(matches!(
         apply_live_project_snapshot(&mut guest, text.as_bytes(), "Jaime"),
         LiveProjectApply::RetryLater
     ));
 
-    guest.simulation.is_running = false;
+    guest.simulation.execution.is_running = false;
     assert!(matches!(
         apply_live_project_snapshot(&mut guest, b"not a project", "Jaime"),
         LiveProjectApply::Rejected
@@ -277,10 +277,10 @@ fn project_named_with_results(path: &str) -> ProjectSnapshot {
     );
     seal_legacy_unattributed(&mut run);
     let mut simulation = crate::state::SimulationState::default();
-    simulation.runs = vec![run].into();
-    simulation.next_run_id = 4;
-    simulation.active_run_idx = Some(0);
-    simulation.active_analysis_idx = Some(0);
+    simulation.retained.runs = vec![run].into();
+    simulation.retained.next_run_id = 4;
+    simulation.view.active_run_idx = Some(0);
+    simulation.view.active_analysis_idx = Some(0);
 
     ProjectSnapshot::new_with_simulation_results(
         workspace,
@@ -302,10 +302,10 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
             .with_waveforms(vec![waveform]),
     );
     seal_legacy_unattributed(&mut run);
-    state.simulation.runs = vec![run].into();
-    state.simulation.active_run_idx = Some(0);
-    state.simulation.active_analysis_idx = Some(0);
-    state.simulation.next_run_id = 2;
+    state.simulation.retained.runs = vec![run].into();
+    state.simulation.view.active_run_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
+    state.simulation.retained.next_run_id = 2;
 
     state.analysis.histogram_state.selected = Some("old measurement".to_owned());
     let mut bode = BodeData::new();
@@ -397,7 +397,7 @@ fn assert_specialized_viewer_caches_cleared(state: &AppState) {
 fn browser_import_applies_project_clears_runs_and_skips_recents() {
     let mut state = AppState::default();
     seal_legacy_unattributed(state.simulation.start_run());
-    assert!(state.simulation.has_results());
+    assert!(state.simulation.retained.has_results());
 
     let mut project = project_named("browser-import.rspiceproj");
     project.file.workspace.project.path = None;
@@ -414,7 +414,7 @@ fn browser_import_applies_project_clears_runs_and_skips_recents() {
         "browser-import"
     );
     assert!(state.workspace.content.project.path.is_none());
-    assert!(!state.simulation.has_results());
+    assert!(!state.simulation.retained.has_results());
     assert!(state.recent_files.is_empty());
     assert!(state.log_buffer.entries().any(|entry| {
         entry
@@ -910,7 +910,7 @@ fn invalid_execution_context_does_not_partially_replace_open_project() {
 fn browser_import_restores_project_simulation_results_and_skips_recents() {
     let mut state = AppState::default();
     seal_legacy_unattributed(state.simulation.start_run());
-    assert!(state.simulation.has_results());
+    assert!(state.simulation.retained.has_results());
 
     let project = project_named_with_results("browser-import.rspiceproj");
 
@@ -925,7 +925,7 @@ fn browser_import_restores_project_simulation_results_and_skips_recents() {
         state.workspace.content.project.display_name(),
         "browser-import"
     );
-    assert_eq!(state.simulation.run_count(), 1);
+    assert_eq!(state.simulation.retained.run_count(), 1);
     assert_eq!(
         state
             .simulation
@@ -934,8 +934,8 @@ fn browser_import_restores_project_simulation_results_and_skips_recents() {
             .label,
         "Run 4 (import fixture)"
     );
-    assert_eq!(state.simulation.waveforms.len(), 1);
-    assert_eq!(state.simulation.waveforms[0].name, "V(out)");
+    assert_eq!(state.simulation.view.waveforms.len(), 1);
+    assert_eq!(state.simulation.view.waveforms[0].name, "V(out)");
     assert!(state.recent_files.is_empty());
 }
 
@@ -945,17 +945,18 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
     // An actually running local simulation deliberately blocks project
     // replacement. These are stale, non-persisted controls from an
     // already-finished run and must be reset by the accepted import.
-    state.simulation.is_running = false;
-    state.simulation.trigger_simulation = true;
-    state.simulation.trigger_abort = true;
-    state.simulation.progress = 0.75;
-    state.simulation.status = "Running stale project".to_string();
-    state.simulation.netlist_content = "stale netlist".to_string();
+    state.simulation.execution.is_running = false;
+    state.simulation.execution.trigger_simulation = true;
+    state.simulation.execution.trigger_abort = true;
+    state.simulation.execution.progress = 0.75;
+    state.simulation.execution.status = "Running stale project".to_string();
+    state.simulation.source.netlist_content = "stale netlist".to_string();
     state
         .simulation
+        .view
         .node_to_waveform
         .insert("stale".to_string(), 99);
-    state.simulation.ground_node = Some("OLD_GND".to_string());
+    state.simulation.view.ground_node = Some("OLD_GND".to_string());
     state.ui.code_workspace.page =
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
     state.ui.code_workspace.automation.debug.watches.push(
@@ -996,15 +997,15 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
         ProjectLoadOrigin::BrowserImport("browser-import.rspiceproj"),
     ));
 
-    assert!(!state.simulation.is_running);
-    assert!(!state.simulation.trigger_simulation);
-    assert!(!state.simulation.trigger_abort);
-    assert_eq!(state.simulation.progress, 0.0);
-    assert!(state.simulation.status.is_empty());
-    assert!(state.simulation.netlist_content.is_empty());
-    assert_eq!(state.simulation.node_to_waveform.get("stale"), None);
-    assert_eq!(state.simulation.ground_node, None);
-    assert_eq!(state.simulation.waveforms[0].name, "V(out)");
+    assert!(!state.simulation.execution.is_running);
+    assert!(!state.simulation.execution.trigger_simulation);
+    assert!(!state.simulation.execution.trigger_abort);
+    assert_eq!(state.simulation.execution.progress, 0.0);
+    assert!(state.simulation.execution.status.is_empty());
+    assert!(state.simulation.source.netlist_content.is_empty());
+    assert_eq!(state.simulation.view.node_to_waveform.get("stale"), None);
+    assert_eq!(state.simulation.view.ground_node, None);
+    assert_eq!(state.simulation.view.waveforms[0].name, "V(out)");
     assert_eq!(
         state.ui.code_workspace.page,
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
@@ -1037,10 +1038,10 @@ fn save_project_to_path_writes_simulation_results() {
             .with_waveforms(vec![waveform]),
     );
     seal_legacy_unattributed(&mut run);
-    state.simulation.runs = vec![run].into();
-    state.simulation.next_run_id = 9;
-    state.simulation.active_run_idx = Some(0);
-    state.simulation.active_analysis_idx = Some(0);
+    state.simulation.retained.runs = vec![run].into();
+    state.simulation.retained.next_run_id = 9;
+    state.simulation.view.active_run_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
 
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1085,10 +1086,10 @@ fn save_project_to_path_round_trips_result_markers() {
             .with_waveforms(vec![waveform]),
     );
     seal_legacy_unattributed(&mut run);
-    state.simulation.runs = vec![run].into();
-    state.simulation.next_run_id = 11;
-    state.simulation.active_run_idx = Some(0);
-    state.simulation.active_analysis_idx = Some(0);
+    state.simulation.retained.runs = vec![run].into();
+    state.simulation.retained.next_run_id = 11;
+    state.simulation.view.active_run_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
 
     let active = state.simulation.active_run().expect("active retained run");
     let analysis = AnalysisPresentationKey::new(active.dataset_id, &active.analyses[0]);
@@ -1173,10 +1174,10 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
         ),
     );
     seal_legacy_unattributed(&mut run);
-    state.simulation.runs = vec![run].into();
-    state.simulation.next_run_id = 12;
-    state.simulation.active_run_idx = Some(0);
-    state.simulation.active_analysis_idx = Some(0);
+    state.simulation.retained.runs = vec![run].into();
+    state.simulation.retained.next_run_id = 12;
+    state.simulation.view.active_run_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
 
     let active = state.simulation.active_run().expect("active retained run");
     let analysis = AnalysisPresentationKey::new(active.dataset_id, &active.analyses[0]);
@@ -1251,14 +1252,14 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
             )]),
     );
     seal_legacy_unattributed(&mut run);
-    state.simulation.runs = vec![run].into();
-    state.simulation.next_run_id = 13;
-    state.simulation.active_run_idx = Some(0);
-    state.simulation.active_analysis_idx = Some(0);
+    state.simulation.retained.runs = vec![run].into();
+    state.simulation.retained.next_run_id = 13;
+    state.simulation.view.active_run_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
     let expression_owner =
         crate::workbench::documents::result_document::AnalysisPresentationKey::new(
-            state.simulation.runs[0].dataset_id,
-            &state.simulation.runs[0].analyses[0],
+            state.simulation.retained.runs[0].dataset_id,
+            &state.simulation.retained.runs[0].analyses[0],
         );
     assert!(
         state
@@ -1330,11 +1331,11 @@ fn save_project_to_path_round_trips_canonical_result_document_entities() {
             )]),
     );
     seal_legacy_unattributed(&mut run);
-    state.simulation.runs = vec![run].into();
-    state.simulation.next_run_id = 21;
-    state.simulation.active_run_idx = Some(0);
-    state.simulation.active_analysis_idx = Some(0);
-    let run = &state.simulation.runs[0];
+    state.simulation.retained.runs = vec![run].into();
+    state.simulation.retained.next_run_id = 21;
+    state.simulation.view.active_run_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
+    let run = &state.simulation.retained.runs[0];
     let analysis = &run.analyses[0];
     let source =
         crate::workbench::documents::result_document::visualization_source_dataset(run, analysis)
@@ -1474,10 +1475,10 @@ fn save_project_to_path_rejects_invalid_simulation_results_without_publishing() 
         crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
             .with_waveforms(vec![waveform]),
     );
-    state.simulation.runs = vec![run].into();
-    state.simulation.next_run_id = 10;
-    state.simulation.active_run_idx = Some(0);
-    state.simulation.active_analysis_idx = Some(0);
+    state.simulation.retained.runs = vec![run].into();
+    state.simulation.retained.next_run_id = 10;
+    state.simulation.view.active_run_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
 
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

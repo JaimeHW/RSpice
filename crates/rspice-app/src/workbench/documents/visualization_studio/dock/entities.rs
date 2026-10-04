@@ -36,7 +36,7 @@ impl TraceHost for Host<'_> {
         let binding_exists = dataset_id
             .zip(analysis_id)
             .is_some_and(|(dataset, analysis)| {
-                app.state.simulation.runs.iter().any(|run| {
+                app.state.simulation.retained.runs.iter().any(|run| {
                     run.dataset_id == dataset
                         && run
                             .analyses
@@ -126,6 +126,7 @@ fn apply_trace_changes(
         && let Some(analysis) = app
             .state
             .simulation
+            .retained
             .runs
             .iter_mut()
             .find(|run| run.dataset_id == dataset_id)

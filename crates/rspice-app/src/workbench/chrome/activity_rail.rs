@@ -66,15 +66,16 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp) {
         .show(root, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
             if app.state.workbench.workspace == Workspace::Results {
-                app.state.ui.results_seen_version = app.state.simulation.data_version;
+                app.state.ui.results_seen_version = app.state.simulation.view.data_version;
             }
             for workspace in Workspace::ALL {
                 let active = app.state.workbench.workspace == workspace;
                 let new_result_count = usize::from(
                     workspace == Workspace::Results
                         && !active
-                        && app.state.simulation.has_results()
-                        && app.state.ui.results_seen_version != app.state.simulation.data_version,
+                        && app.state.simulation.retained.has_results()
+                        && app.state.ui.results_seen_version
+                            != app.state.simulation.view.data_version,
                 );
                 let command = Command::OpenWorkspace(workspace);
                 let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
@@ -89,7 +90,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp) {
                     .inner;
                 if response.clicked() {
                     if workspace == Workspace::Results {
-                        app.state.ui.results_seen_version = app.state.simulation.data_version;
+                        app.state.ui.results_seen_version = app.state.simulation.view.data_version;
                     }
                     command.execute(app);
                     ui.ctx().request_repaint();

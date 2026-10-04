@@ -283,7 +283,7 @@ impl SimulationController {
                     .map(|yield_results| {
                         let provenance = target_run_id
                             .and_then(|run_sequence| {
-                                state.simulation.run_by_sequence(run_sequence)
+                                state.simulation.retained.run_by_sequence(run_sequence)
                             })
                             .and_then(|run| {
                                 rspice_simulation::results::yield_provenance_from_monte_carlo_result(
@@ -480,11 +480,11 @@ impl SimulationController {
                 self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
                 self.current_analysis_idx = 0;
                 self.total_analyses = 0;
-                state.simulation.active_execution = None;
-                state.simulation.abort_request = None;
+                state.simulation.execution.active_execution = None;
+                state.simulation.execution.abort_request = None;
                 state.ui.netlist.pending_manual_run_id = None;
                 state.ui.netlist.pending_run_buffer = None;
-                state.simulation.status = "Aborted".to_string();
+                state.simulation.execution.status = "Aborted".to_string();
                 state.push_sim_message(ConsoleMessage::warning(
                     "Simulation aborted by user".to_owned(),
                 ));
@@ -547,7 +547,7 @@ impl SimulationController {
                     );
                     self.start_next_analysis(state);
                 } else {
-                    state.simulation.status = "Completed with errors".to_string();
+                    state.simulation.execution.status = "Completed with errors".to_string();
                     self.finish_simulation_batch(state);
                 }
             }

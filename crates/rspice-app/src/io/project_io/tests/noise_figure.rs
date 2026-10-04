@@ -52,10 +52,10 @@ fn sampled_pnoise_studio_results_round_trip_and_reject_changed_geometry() {
     );
     seal_legacy_unattributed(&mut run);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run].into();
-    simulation.next_run_id = 1;
-    simulation.active_run_idx = Some(0);
-    simulation.active_analysis_idx = Some(0);
+    simulation.retained.runs = vec![run].into();
+    simulation.retained.next_run_id = 1;
+    simulation.view.active_run_idx = Some(0);
+    simulation.view.active_analysis_idx = Some(0);
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     let project = ProjectSnapshot::new_with_simulation_results(
@@ -158,10 +158,10 @@ fn hbnoise_reference_results_survive_project_load_and_reject_tampering_and_old_s
         );
         seal_legacy_unattributed(&mut run);
         let mut simulation = SimulationState::default();
-        simulation.runs = vec![run].into();
-        simulation.next_run_id = 1;
-        simulation.active_run_idx = Some(0);
-        simulation.active_analysis_idx = Some(0);
+        simulation.retained.runs = vec![run].into();
+        simulation.retained.next_run_id = 1;
+        simulation.view.active_run_idx = Some(0);
+        simulation.view.active_analysis_idx = Some(0);
         let mut libraries = LibraryManager::with_primitives();
         let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
         let project = ProjectSnapshot::new_with_simulation_results(
@@ -274,10 +274,10 @@ fn noise_input_units_survive_projects_and_reject_unit_tampering() {
         seal_legacy_unattributed(&mut run);
         let digest = run.analyses[0].result_data_digest();
         let mut simulation = SimulationState::default();
-        simulation.runs = vec![run].into();
-        simulation.next_run_id = 1;
-        simulation.active_run_idx = Some(0);
-        simulation.active_analysis_idx = Some(0);
+        simulation.retained.runs = vec![run].into();
+        simulation.retained.next_run_id = 1;
+        simulation.view.active_run_idx = Some(0);
+        simulation.view.active_analysis_idx = Some(0);
         let mut libraries = LibraryManager::with_primitives();
         let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
         let project = ProjectSnapshot::new_with_simulation_results(

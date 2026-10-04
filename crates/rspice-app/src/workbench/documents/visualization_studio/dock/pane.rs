@@ -47,6 +47,7 @@ impl PaneHost for Host<'_> {
         self.0
             .state
             .simulation
+            .retained
             .runs
             .iter()
             .find(|run| run.dataset_id == dataset)
@@ -56,6 +57,7 @@ impl PaneHost for Host<'_> {
         self.0
             .state
             .simulation
+            .retained
             .runs
             .iter()
             .map(|run| DatasetRow {
@@ -75,6 +77,7 @@ impl PaneHost for Host<'_> {
                 self.0
                     .state
                     .simulation
+                    .retained
                     .runs
                     .iter()
                     .find(|run| run.dataset_id == dataset_id)

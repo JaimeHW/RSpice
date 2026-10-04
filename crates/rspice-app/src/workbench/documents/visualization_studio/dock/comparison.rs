@@ -23,7 +23,7 @@ impl ComparisonHost for Host<'_> {
     fn prepare(&mut self) -> bool {
         let app = &mut self.app;
         let active_dataset = app.state.simulation.active_run().map(|run| run.dataset_id);
-        let comparison_data_version = app.state.simulation.data_version;
+        let comparison_data_version = app.state.simulation.view.data_version;
         if app
             .state
             .workbench
@@ -75,6 +75,7 @@ impl ComparisonHost for Host<'_> {
                 self.app
                     .state
                     .simulation
+                    .retained
                     .runs
                     .iter()
                     .find(|run| run.dataset_id == dataset)
@@ -97,6 +98,7 @@ impl ComparisonHost for Host<'_> {
                 .draft_comparison_dataset,
             state
                 .simulation
+                .retained
                 .runs
                 .iter()
                 .filter(move |run| {

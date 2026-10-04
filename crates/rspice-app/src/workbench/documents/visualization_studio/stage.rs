@@ -110,7 +110,7 @@ pub(super) fn paint_visualization_markers(ui: &Ui, app: &mut RSpiceApp) {
     let Some(well) = app.state.ui.results.session.well_rect else {
         return;
     };
-    let Some(analysis_index) = app.state.simulation.active_analysis_idx else {
+    let Some(analysis_index) = app.state.simulation.view.active_analysis_idx else {
         return;
     };
     let source = app.state.simulation.active_run().and_then(|run| {
@@ -162,6 +162,7 @@ pub(super) fn active_binding_error(app: &RSpiceApp) -> Option<String> {
     let Some(run) = app
         .state
         .simulation
+        .retained
         .runs
         .iter()
         .find(|run| run.dataset_id == pane.dataset_id)
@@ -196,7 +197,7 @@ pub(super) fn exact_source_rows(state: &AppState) -> Vec<ExactSourceRow> {
     let Some(run) = state.simulation.active_run() else {
         return Vec::new();
     };
-    let Some(analysis_index) = state.simulation.active_analysis_idx else {
+    let Some(analysis_index) = state.simulation.view.active_analysis_idx else {
         return Vec::new();
     };
     let Some(analysis) = run.analyses.get(analysis_index) else {

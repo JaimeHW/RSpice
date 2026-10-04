@@ -102,10 +102,10 @@ pub(crate) fn synchronize_schematic_cross_probe(state: &mut AppState) {
         occurrence: state.workspace.content.occurrence_path(),
         topology_version: state.schematic.topology_version(),
         target: target.clone(),
-        cross_probe_version: state.simulation.cross_probe.version,
-        result_data_version: state.simulation.data_version,
+        cross_probe_version: state.simulation.source.cross_probe.version,
+        result_data_version: state.simulation.view.data_version,
         active_dataset: state.simulation.active_run().map(|run| run.dataset_id),
-        active_analysis_index: state.simulation.active_analysis_idx,
+        active_analysis_index: state.simulation.view.active_analysis_idx,
         active_netlist_document: state.ui.netlist.active_document,
         generated_input_digest,
     };
@@ -372,7 +372,7 @@ fn compatible_result_trace(
     state: &AppState,
     target: &SchematicCrossProbeTarget,
 ) -> Option<SelectedResultTrace> {
-    if !state.simulation.cross_probe.is_current_for(
+    if !state.simulation.source.cross_probe.is_current_for(
         &state.workspace.content.active_view,
         state.schematic.topology_version(),
     ) {
@@ -395,8 +395,10 @@ fn compatible_result_trace(
             .engine()
             .to_owned(),
         SchematicCrossProbeTarget::Net { name } => {
-            let index =
-                crate::state::CrossProbeIndex::from_receipt(receipt, &state.simulation.cross_probe);
+            let index = crate::state::CrossProbeIndex::from_receipt(
+                receipt,
+                &state.simulation.source.cross_probe,
+            );
             let engine = index
                 .for_occurrence(&occurrence)
                 .first()?
@@ -405,7 +407,7 @@ fn compatible_result_trace(
         }
     };
 
-    let preferred = state.simulation.active_analysis_idx;
+    let preferred = state.simulation.view.active_analysis_idx;
     let find_in_analysis = |analysis_index: usize| {
         let analysis = run.analyses.get(analysis_index)?;
         let (waveform_index, _) = analysis
@@ -661,7 +663,7 @@ mod tests {
 
     fn install_current_map(state: &mut AppState, net: &str) {
         let point = crate::state::Point::new(0, 0);
-        state.simulation.cross_probe.update(
+        state.simulation.source.cross_probe.update(
             state.workspace.content.active_view.clone(),
             std::collections::HashMap::from([(point, net.to_owned())]),
             std::collections::HashMap::from([(net.to_owned(), vec![point])]),
@@ -721,9 +723,13 @@ mod tests {
         state.schematic.session.editor.selection.select_net_label(7);
         install_current_map(&mut state, "OUT");
         let revision = state.workspace.content.project.revision();
-        state.simulation.runs.push(prepared_run(revision, "V(OUT)"));
-        state.simulation.active_run_idx = Some(0);
-        state.simulation.active_analysis_idx = Some(0);
+        state
+            .simulation
+            .retained
+            .runs
+            .push(prepared_run(revision, "V(OUT)"));
+        state.simulation.view.active_run_idx = Some(0);
+        state.simulation.view.active_analysis_idx = Some(0);
 
         synchronize_schematic_cross_probe(&mut state);
 
@@ -764,7 +770,7 @@ mod tests {
         state.schematic.session.editor.selection.select_net_label(7);
         install_current_map(&mut state, "n1");
         let revision = state.workspace.content.project.revision();
-        state.simulation.runs.push(prepared_run_in(
+        state.simulation.retained.runs.push(prepared_run_in(
             revision,
             "V(x1.n1)",
             vec![
@@ -772,8 +778,8 @@ mod tests {
                     .expect("one occurrence row"),
             ],
         ));
-        state.simulation.active_run_idx = Some(0);
-        state.simulation.active_analysis_idx = Some(0);
+        state.simulation.view.active_run_idx = Some(0);
+        state.simulation.view.active_analysis_idx = Some(0);
 
         synchronize_schematic_cross_probe(&mut state);
 
@@ -809,8 +815,12 @@ mod tests {
         state.schematic.session.editor.selection.select_net_label(7);
         install_current_map(&mut state, "OUT");
         let revision = state.workspace.content.project.revision();
-        state.simulation.runs.push(prepared_run(revision, "V(OUT)"));
-        state.simulation.active_run_idx = Some(0);
+        state
+            .simulation
+            .retained
+            .runs
+            .push(prepared_run(revision, "V(OUT)"));
+        state.simulation.view.active_run_idx = Some(0);
 
         synchronize_schematic_cross_probe(&mut state);
 
@@ -842,8 +852,12 @@ mod tests {
         install_current_map(&mut state, "OUT");
         let revision = state.workspace.content.project.revision();
         let signal = format!("I({emitted})");
-        state.simulation.runs.push(prepared_run(revision, &signal));
-        state.simulation.active_run_idx = Some(0);
+        state
+            .simulation
+            .retained
+            .runs
+            .push(prepared_run(revision, &signal));
+        state.simulation.view.active_run_idx = Some(0);
 
         synchronize_schematic_cross_probe(&mut state);
 

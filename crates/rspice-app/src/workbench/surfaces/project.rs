@@ -485,7 +485,7 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
         Command::ConfigurationSets.execute(app);
     }
 
-    if let Some((index, run)) = app.state.simulation.runs.iter().enumerate().next() {
+    if let Some((index, run)) = app.state.simulation.retained.runs.iter().enumerate().next() {
         let has_dataset = !run.analyses.is_empty();
         let run_label = format!(
             "run {} · {}",

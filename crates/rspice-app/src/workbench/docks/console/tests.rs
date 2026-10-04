@@ -170,7 +170,7 @@ fn clearing_console_preserves_diagnostics_measurements_and_run_history() {
         AnalysisResult::new(1, AnalysisType::Ac, "AC").with_measurements(vec![measurement]);
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
-    state.simulation.runs.push(run);
+    state.simulation.retained.runs.push(run);
 
     state.clear_primary_log();
     state.script_console.history.clear();
@@ -179,8 +179,13 @@ fn clearing_console_preserves_diagnostics_measurements_and_run_history() {
     assert!(state.script_console.history.is_empty());
     assert_eq!(state.script_console.input_buffer, "pending command");
     assert!(state.dialogs.drc_results.is_some());
-    assert_eq!(state.simulation.runs.len(), 1);
-    assert_eq!(state.simulation.runs[0].analyses[0].measurements.len(), 1);
+    assert_eq!(state.simulation.retained.runs.len(), 1);
+    assert_eq!(
+        state.simulation.retained.runs[0].analyses[0]
+            .measurements
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -253,7 +258,7 @@ fn interactive_console_reads_exact_retained_measurement_and_plan_state() {
         .with_measurements(vec![rspice_core::MeasureResult::success("gain_dc", 42.0)]);
     let mut run = SimulationRun::new(7);
     run.add_analysis(analysis);
-    app.state.simulation.runs.push(run);
+    app.state.simulation.retained.runs.push(run);
 
     let measurement =
         execute_interactive_command("project.results[\"Run 7\"].measure(\"gain_dc\")", &mut app);
@@ -429,12 +434,12 @@ fn measurement_badge_counts_only_the_active_immutable_dataset() {
     let mut retained = SimulationRun::new(1);
     retained.add_analysis(first);
     retained.add_analysis(second);
-    simulation.runs.push(retained);
+    simulation.retained.runs.push(retained);
 
     assert_eq!(active_measurement_count(&simulation), 0);
-    simulation.active_run_idx = Some(0);
+    simulation.view.active_run_idx = Some(0);
     assert_eq!(active_measurement_count(&simulation), 3);
-    simulation.active_run_idx = Some(9);
+    simulation.view.active_run_idx = Some(9);
     assert_eq!(active_measurement_count(&simulation), 0);
 }
 
@@ -538,10 +543,10 @@ fn run_outcome_header_uses_selected_history_lifecycle() {
         historical.success = lifecycle == Lifecycle::Completed;
         historical.restore_lifecycle(lifecycle, 1.25).unwrap();
         app.state.simulation.start_run().mark_running().unwrap();
-        app.state.simulation.runs[0]
+        app.state.simulation.retained.runs[0]
             .finish_lifecycle(Lifecycle::Completed)
             .unwrap();
-        app.state.simulation.active_run_idx = Some(1);
+        app.state.simulation.view.active_run_idx = Some(1);
         observed.push(painted_console_body(|ui| console_context(ui, &app)));
         expected.push(format!(
             "Selected result · Historical operating point · {label} · 1.25 s elapsed\n"

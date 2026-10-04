@@ -917,6 +917,7 @@ enum ProbeSignalOutcome {
 fn toggle_materialized_waveform(state: &mut AppState, probe_name: &str) -> Option<bool> {
     let before = state
         .simulation
+        .view
         .waveforms
         .iter()
         .map(|waveform| waveform.visible)
@@ -926,6 +927,7 @@ fn toggle_materialized_waveform(state: &mut AppState, probe_name: &str) -> Optio
     }
     state
         .simulation
+        .view
         .waveforms
         .iter()
         .zip(before)
@@ -1544,6 +1546,7 @@ fn live_terminal_probe_net_name(
 fn retained_probe_net_name(state: &AppState, position: Point) -> Option<String> {
     state
         .simulation
+        .source
         .cross_probe
         .net_at_in(
             &state.workspace.content.active_view,

@@ -595,6 +595,7 @@ fn active_results_comparison_source(state: &AppState) -> Result<ResultsCompariso
         WorkspaceDocumentId::ResultDataset(dataset_id) => {
             state
                 .simulation
+                .retained
                 .runs
                 .iter()
                 .find(|run| run.dataset_id == dataset_id)
@@ -634,6 +635,7 @@ fn active_results_comparison_source(state: &AppState) -> Result<ResultsCompariso
     };
     let run = state
         .simulation
+        .retained
         .runs
         .iter()
         .find(|run| run.dataset_id == dataset_id)
@@ -685,11 +687,12 @@ fn select_results_comparison_source(
     let run_index = app
         .state
         .simulation
+        .retained
         .runs
         .iter()
         .position(|run| run.dataset_id == source.dataset_id)
         .ok_or_else(|| "The candidate dataset is no longer retained.".to_owned())?;
-    let analysis_index = app.state.simulation.runs[run_index]
+    let analysis_index = app.state.simulation.retained.runs[run_index]
         .analyses
         .iter()
         .position(|analysis| analysis.id == source.analysis_sequence)
@@ -776,7 +779,7 @@ fn open_results_comparison_inner(app: &mut RSpiceApp) -> Result<(), String> {
     navigate_to_visualization_studio(app)?;
     select_results_comparison_source(app, source)?;
     bind_comparison_owner(app, source)?;
-    let comparison_data_version = app.state.simulation.data_version;
+    let comparison_data_version = app.state.simulation.view.data_version;
     initialize_comparison_dock(
         &mut app.state.workbench.visualization_studio,
         comparison_datasets,
@@ -856,7 +859,7 @@ fn open_dock(app: &mut RSpiceApp, dock: VisualizationDock) {
     } else {
         Vec::new()
     };
-    let comparison_data_version = app.state.simulation.data_version;
+    let comparison_data_version = app.state.simulation.view.data_version;
     let studio = &mut app.state.workbench.visualization_studio;
     match dock {
         VisualizationDock::AddPane => {
@@ -1110,6 +1113,7 @@ fn reconcile_document(app: &mut RSpiceApp) {
                     |dataset_id: DatasetId, analysis_id: AnalysisInstanceId| {
                         app.state
                             .simulation
+                            .retained
                             .runs
                             .iter()
                             .find(|run| run.dataset_id == dataset_id)
@@ -1167,6 +1171,7 @@ fn reconcile_document(app: &mut RSpiceApp) {
                             .and_then(|binding| {
                                 app.state
                                     .simulation
+                                    .retained
                                     .runs
                                     .iter()
                                     .find(|run| run.dataset_id == dataset_id)
@@ -1226,6 +1231,7 @@ fn reconcile_document(app: &mut RSpiceApp) {
                         let waveform = app
                             .state
                             .simulation
+                            .retained
                             .runs
                             .iter()
                             .find(|run| run.dataset_id == dataset_id)?
@@ -1443,6 +1449,7 @@ fn reconcile_document(app: &mut RSpiceApp) {
                     let run = app
                         .state
                         .simulation
+                        .retained
                         .runs
                         .iter()
                         .find(|run| run.dataset_id == pane.dataset_id)?;
@@ -1511,6 +1518,7 @@ fn reconcile_document(app: &mut RSpiceApp) {
         && let Some(run_index) = app
             .state
             .simulation
+            .retained
             .runs
             .iter()
             .position(|run| run.dataset_id == dataset_id)
@@ -1695,6 +1703,7 @@ fn resolved_viewer_availability_for_binding(
         analysis_sequence.ok_or_else(|| "Select a retained analysis".to_owned())?;
     let run = state
         .simulation
+        .retained
         .runs
         .iter()
         .find(|run| run.dataset_id == dataset_id)
@@ -1812,6 +1821,7 @@ fn active_studio_exact_export_available(state: &AppState) -> bool {
     };
     let Some(run) = state
         .simulation
+        .retained
         .runs
         .iter()
         .find(|run| run.dataset_id == pane.dataset_id)
@@ -1937,6 +1947,7 @@ fn add_viewer_pane_bound(
     let binding = app
         .state
         .simulation
+        .retained
         .runs
         .iter()
         .enumerate()
@@ -1990,7 +2001,7 @@ fn add_viewer_pane_bound(
     }
     if active_project_visualization_document_id(&app.state).is_some() {
         let analysis_id = {
-            let run = &app.state.simulation.runs[run_index];
+            let run = &app.state.simulation.retained.runs[run_index];
             let analysis = &run.analyses[analysis_index];
             analysis.provenance().map_or_else(
                 || {
@@ -2001,7 +2012,7 @@ fn add_viewer_pane_bound(
             )
         };
         let dataset_binding = {
-            let run = &app.state.simulation.runs[run_index];
+            let run = &app.state.simulation.retained.runs[run_index];
             DatasetBinding::new(run.dataset_id, run.dataset_content_digest())
         };
         let binding = crate::results::visualization_document::PaneDataBinding {
@@ -2022,7 +2033,7 @@ fn add_viewer_pane_bound(
                     .any(|dataset| dataset.binding() == dataset_binding)
             });
         let source = {
-            let run = &app.state.simulation.runs[run_index];
+            let run = &app.state.simulation.retained.runs[run_index];
             let analysis = &run.analyses[analysis_index];
             match result_document::visualization_source_dataset(run, analysis) {
                 Ok(source) => source,

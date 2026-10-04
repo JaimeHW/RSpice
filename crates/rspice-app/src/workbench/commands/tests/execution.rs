@@ -61,8 +61,8 @@ fn clear_results_cannot_remove_the_executor_owned_run() {
     let run = app.state.simulation.start_run();
     run.mark_running().unwrap();
     let identity = run.execution_identity().unwrap();
-    app.state.simulation.active_execution = Some(identity);
-    app.state.simulation.is_running = true;
+    app.state.simulation.execution.active_execution = Some(identity);
+    app.state.simulation.execution.is_running = true;
 
     assert!(!Command::ClearResults.is_enabled(&app));
     assert_eq!(
@@ -75,6 +75,7 @@ fn clear_results_cannot_remove_the_executor_owned_run() {
     assert!(
         app.state
             .simulation
+            .retained
             .run_by_stable_id(identity.run_id)
             .is_some()
     );
@@ -88,8 +89,8 @@ fn stop_command_follows_the_execution_target_capability() {
         .start_run()
         .execution_identity()
         .expect("current run has execution identity");
-    simulation.active_execution = Some(identity);
-    simulation.is_running = false;
+    simulation.execution.active_execution = Some(identity);
+    simulation.execution.is_running = false;
     assert_eq!(
         stop_simulation_enabled(&simulation),
         crate::simulation::execution::execution_target_supports_cancellation()
@@ -109,8 +110,8 @@ fn run_controls_follow_stable_execution_ownership_through_cancellation() {
         .start_run()
         .execution_identity()
         .expect("current run has execution identity");
-    app.state.simulation.active_execution = Some(identity);
-    app.state.simulation.is_running = false;
+    app.state.simulation.execution.active_execution = Some(identity);
+    app.state.simulation.execution.is_running = false;
 
     assert!(!Command::RunSimulation.is_enabled(&app));
     assert!(Command::StopSimulation.is_enabled(&app));

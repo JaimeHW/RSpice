@@ -39,10 +39,10 @@ fn monte_carlo_checkpoint_retention_project_round_trip_integrity_and_legacy_abse
     run.finish_lifecycle(SimulationRunLifecycle::Aborted)
         .unwrap();
     let mut state = SimulationState::default();
-    state.runs = vec![run].into();
-    state.next_run_id = 1;
-    state.active_run_idx = Some(0);
-    state.active_analysis_idx = Some(0);
+    state.retained.runs = vec![run].into();
+    state.retained.next_run_id = 1;
+    state.view.active_run_idx = Some(0);
+    state.view.active_analysis_idx = Some(0);
     let mut libraries = LibraryManager::with_primitives();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
     let mut project = ProjectSnapshot::new_with_simulation_results(
@@ -68,7 +68,7 @@ fn monte_carlo_checkpoint_retention_project_round_trip_integrity_and_legacy_abse
     );
     assert_eq!(
         analysis.result_data_digest(),
-        state.runs[0].analyses[0].result_data_digest()
+        state.retained.runs[0].analyses[0].result_data_digest()
     );
 
     for mutation in 0..5 {
@@ -104,7 +104,7 @@ fn monte_carlo_checkpoint_retention_project_round_trip_integrity_and_legacy_abse
         assert!(loaded.file.simulation_results_warning.is_some());
     }
 
-    let mut wrong_type = state.runs[0].analyses[0].clone();
+    let mut wrong_type = state.retained.runs[0].analyses[0].clone();
     wrong_type.analysis_type = AnalysisType::Transient;
     assert!(wrong_type.validate_retained_evidence().is_err());
     wrong_type.analysis_type = AnalysisType::MonteCarlo;
@@ -114,9 +114,14 @@ fn monte_carlo_checkpoint_retention_project_round_trip_integrity_and_legacy_abse
     // Autosave may capture a still-running task. Authenticate its original
     // bytes first, then restore an interrupted outcome with the same journal.
     let mut active = state.clone();
-    active.runs[0].lifecycle = SimulationRunLifecycle::Running;
-    active.runs[0].analyses[0] = AnalysisResult::live_monte_carlo_partial("MC", checkpoint.clone())
-        .with_provenance(state.runs[0].analyses[0].provenance.clone().unwrap());
+    active.retained.runs[0].lifecycle = SimulationRunLifecycle::Running;
+    active.retained.runs[0].analyses[0] =
+        AnalysisResult::live_monte_carlo_partial("MC", checkpoint.clone()).with_provenance(
+            state.retained.runs[0].analyses[0]
+                .provenance
+                .clone()
+                .unwrap(),
+        );
     project.file.simulation_results = crate::io::capture_simulation_results(&active);
     let live_json = serialize_project_file(&project).unwrap();
     let loaded = load_project_text(&live_json, None).unwrap();
@@ -128,10 +133,10 @@ fn monte_carlo_checkpoint_retention_project_round_trip_integrity_and_legacy_abse
     let restored =
         crate::io::simulation_state_from_results(loaded.file.simulation_results).unwrap();
     assert_eq!(
-        restored.runs[0].lifecycle,
+        restored.retained.runs[0].lifecycle,
         SimulationRunLifecycle::Interrupted
     );
-    let partial = &restored.runs[0].analyses[0];
+    let partial = &restored.retained.runs[0].analyses[0];
     assert!(!partial.success);
     assert!(!partial.is_live_partial());
     assert!(
@@ -144,20 +149,20 @@ fn monte_carlo_checkpoint_retention_project_round_trip_integrity_and_legacy_abse
     assert_eq!(partial.monte_carlo_checkpoint.as_ref(), Some(&checkpoint));
 
     // Pre-checkpoint projects preserve both absence and the old digest.
-    state.runs[0].analyses[0].monte_carlo_checkpoint = None;
+    state.retained.runs[0].analyses[0].monte_carlo_checkpoint = None;
     let mut legacy = crate::io::capture_simulation_results(&state);
-    let digest = state.runs[0].dataset_content_digest();
+    let digest = state.retained.runs[0].dataset_content_digest();
     legacy.schema_version = 34;
     legacy
         .migrate_to_current(project.file.workspace.project.id())
         .unwrap();
     let restored = crate::io::simulation_state_from_results(legacy).unwrap();
     assert!(
-        restored.runs[0].analyses[0]
+        restored.retained.runs[0].analyses[0]
             .monte_carlo_checkpoint
             .is_none()
     );
-    assert_eq!(restored.runs[0].dataset_content_digest(), digest);
+    assert_eq!(restored.retained.runs[0].dataset_content_digest(), digest);
 }
 
 #[test]
@@ -255,10 +260,10 @@ fn project_file_round_trips_exact_result_family_metadata_and_migrates_v6_absence
     );
     seal_legacy_unattributed(&mut run);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run].into();
-    simulation.next_run_id = 1;
-    simulation.active_run_idx = Some(0);
-    simulation.active_analysis_idx = Some(0);
+    simulation.retained.runs = vec![run].into();
+    simulation.retained.next_run_id = 1;
+    simulation.view.active_run_idx = Some(0);
+    simulation.view.active_analysis_idx = Some(0);
 
     let project = ProjectSnapshot::new_with_simulation_results(
         workspace,
@@ -389,15 +394,16 @@ fn monte_carlo_checkpoint_file_round_trip_rejects_corruption_and_bounds() {
 
     // Imported inputs survive project result persistence without native runs.
     let mut simulation = crate::state::SimulationState::default();
-    simulation.imported_monte_carlo_checkpoints = frozen;
+    simulation.retained.imported_monte_carlo_checkpoints = frozen;
     let results = crate::io::capture_simulation_results(&simulation);
     assert!(!results.is_empty());
     let restored: crate::io::ProjectSimulationResults =
         serde_json::from_str(&serde_json::to_string(&results).unwrap()).unwrap();
     let restored = crate::io::simulation_state_from_results(restored).unwrap();
-    assert!(restored.runs.is_empty());
+    assert!(restored.retained.runs.is_empty());
     assert_eq!(
         restored
+            .retained
             .imported_monte_carlo_checkpoints
             .get(checkpoint.digest()),
         Some(&checkpoint)

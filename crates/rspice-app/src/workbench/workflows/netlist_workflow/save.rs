@@ -46,7 +46,7 @@ pub(crate) fn save_owned_netlist_source(
         ));
         return false;
     };
-    if source != state.simulation.netlist_content {
+    if source != state.simulation.source.netlist_content {
         state.push_user_message(ConsoleMessage::error(
             "Source save was blocked because the editor and project-owned deck differ.",
         ));

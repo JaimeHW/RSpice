@@ -97,7 +97,7 @@ pub(super) fn use_section(
             "This netlist source is read-only; its .lib section cannot be changed.".to_owned(),
         );
     }
-    let source = state.simulation.netlist_content.clone();
+    let source = state.simulation.source.netlist_content.clone();
     let span = section_token_span(&source, line)
         .ok_or_else(|| format!("Line {line} does not write a `.lib \"file\" section` card."))?;
     if source[span.clone()].trim_matches(['"', '\'']) == section {
@@ -225,7 +225,7 @@ mod tests {
         state.ui.netlist.owned_document = Some(owned);
         state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
         state.ui.netlist.active_document_initialized = true;
-        state.simulation.netlist_content = root.to_owned();
+        state.simulation.source.netlist_content = root.to_owned();
         state
             .workspace
             .content

@@ -50,9 +50,9 @@ fn row_names(app: &RSpiceApp) -> Vec<String> {
 #[test]
 fn stability_margins_from_a_failed_solve_never_reach_the_measurement_table() {
     let mut app = RSpiceApp::test_instance();
-    app.state.simulation.runs = vec![ac_run()].into();
+    app.state.simulation.retained.runs = vec![ac_run()].into();
     assert!(app.state.simulation.select_run(0));
-    app.state.simulation.active_analysis_idx = Some(0);
+    app.state.simulation.view.active_analysis_idx = Some(0);
 
     assert!(
         row_names(&app).iter().any(|name| name == "phase_margin"),
@@ -60,8 +60,8 @@ fn stability_margins_from_a_failed_solve_never_reach_the_measurement_table() {
         row_names(&app)
     );
 
-    app.state.simulation.runs[0].analyses[0].success = false;
-    app.state.simulation.runs[0].analyses[0].error_message =
+    app.state.simulation.retained.runs[0].analyses[0].success = false;
+    app.state.simulation.retained.runs[0].analyses[0].error_message =
         Some("the solve did not converge".to_owned());
 
     assert!(

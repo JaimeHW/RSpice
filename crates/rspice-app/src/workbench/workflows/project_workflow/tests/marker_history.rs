@@ -31,7 +31,7 @@ fn install_retained_results(state: &mut AppState) -> AnalysisPresentationKey {
     run.finish_lifecycle(crate::state::SimulationRunLifecycle::Completed)
         .unwrap();
     let key = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
-    state.simulation.runs.push(run);
+    state.simulation.retained.runs.push(run);
     assert!(state.simulation.select_run(0));
     state
         .workbench

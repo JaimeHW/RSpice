@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 pub(crate) fn checkpoint_state() -> AppState {
     let mut state = AppState::default();
-    state.simulation.run_intent = SimulationRunIntent::SimulateRunSet;
+    state.simulation.execution.run_intent = SimulationRunIntent::SimulateRunSet;
     for dimension in &mut state.sim_setup.run_set.dimensions {
         if dimension.kind
             == rspice_simulation_contract::run_set::RunSetDimensionKind::ProcessSection

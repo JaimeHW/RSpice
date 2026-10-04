@@ -178,8 +178,12 @@ fn executed_deck_section(ui: &mut Ui, state: &mut AppState, run_id: u64) {
         Some("as this run's own sealed sources state them"),
         None,
     );
-    let held: Option<(Vec<String>, Vec<String>)> =
-        state.simulation.executed_decks.get(run_id).map(|deck| {
+    let held: Option<(Vec<String>, Vec<String>)> = state
+        .simulation
+        .retained
+        .executed_decks
+        .get(run_id)
+        .map(|deck| {
             (
                 deck.points
                     .iter()

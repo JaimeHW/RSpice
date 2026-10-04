@@ -288,6 +288,7 @@ impl AppState {
             }
             LogAnchor::ResultRun { run_sequence } => self
                 .simulation
+                .retained
                 .runs
                 .iter()
                 .all(|run| run.id != *run_sequence)

@@ -218,12 +218,13 @@ fn bind_test_run_running(
 ) {
     let run = state
         .simulation
+        .retained
         .run_by_sequence_mut(run_sequence)
         .expect("test execution has a retained run");
     run.mark_running().expect("test run enters running state");
     let identity = run.execution_identity();
     controller.current_run_id = Some(run_sequence);
-    state.simulation.active_execution = identity;
+    state.simulation.execution.active_execution = identity;
 }
 
 fn bind_and_request_test_abort(state: &mut AppState, controller: &mut SimulationController) {
@@ -302,6 +303,7 @@ fn failed_result_retention_never_satisfies_prepared_dependencies() {
     assert!(!controller.successful_analysis_instances.contains(&instance));
     let run = state
         .simulation
+        .retained
         .run_by_sequence(run_sequence)
         .expect("target run remains");
     assert!(!run.success);
@@ -323,7 +325,7 @@ fn sealing_a_failure_declares_a_new_dataset_generation() {
     let run_sequence = state.simulation.start_run().id;
     let controller = SimulationController::new();
 
-    let before = state.simulation.data_version;
+    let before = state.simulation.view.data_version;
     let failed = AnalysisResult::failed(1, AnalysisType::DcOp, "OP", "solver gave up")
         .with_provenance(synthetic_result_provenance());
     assert_eq!(
@@ -334,29 +336,31 @@ fn sealing_a_failure_declares_a_new_dataset_generation() {
 
     let run = state
         .simulation
+        .retained
         .run_by_sequence(run_sequence)
         .expect("target run remains");
     assert!(!run.success, "the run's verdict must flip to failed");
     assert_eq!(run.analyses.len(), 1);
     assert_ne!(
-        state.simulation.data_version, before,
+        state.simulation.view.data_version, before,
         "the retained run changed under memos that key on the data version"
     );
 
     // A terminal lifecycle is part of the same event, and the generation is
     // declared after it rather than between the two mutations. Nothing to
     // retain is not nothing to declare: the verdict alone moved the run.
-    let before = state.simulation.data_version;
+    let before = state.simulation.view.data_version;
     let terminal = Some(SimulationRunLifecycle::Aborted);
     assert!(
         controller
             .seal_failed_run(&mut state, Some(run_sequence), None, terminal)
             .is_empty()
     );
-    assert_ne!(state.simulation.data_version, before);
+    assert_ne!(state.simulation.view.data_version, before);
     assert_eq!(
         state
             .simulation
+            .retained
             .run_by_sequence(run_sequence)
             .expect("target run remains")
             .lifecycle,
@@ -365,14 +369,14 @@ fn sealing_a_failure_declares_a_new_dataset_generation() {
 
     // A target run that no longer exists has nothing to seal and nothing to
     // declare.
-    let before = state.simulation.data_version;
+    let before = state.simulation.view.data_version;
     for absent in [Some(run_sequence + 4_096), None] {
         assert!(
             controller
                 .seal_failed_run(&mut state, absent, None, None)
                 .is_empty()
         );
-        assert_eq!(state.simulation.data_version, before);
+        assert_eq!(state.simulation.view.data_version, before);
     }
 }
 
@@ -488,6 +492,7 @@ fn plan_owned_runtime_retention_enforces_authenticated_storage_ceiling() {
     assert!(
         state
             .simulation
+            .retained
             .run_by_sequence(run_sequence)
             .expect("target run remains")
             .analyses
@@ -520,6 +525,7 @@ fn provisional_live_result_obeys_the_authenticated_storage_ceiling() {
         .validate_analysis_retention(
             state
                 .simulation
+                .retained
                 .run_by_sequence(run_sequence)
                 .expect("target run"),
             &partial,
@@ -530,6 +536,7 @@ fn provisional_live_result_obeys_the_authenticated_storage_ceiling() {
     assert!(
         state
             .simulation
+            .retained
             .run_by_sequence(run_sequence)
             .expect("target run")
             .analyses
@@ -554,12 +561,12 @@ fn direct_trigger_is_blocked_by_current_drc_errors() {
     let mut controller = SimulationController::new();
     let export_io = MockExportWorkflowIo::default();
 
-    state.simulation.request_simulate_run_set();
+    state.simulation.execution.request_simulate_run_set();
     controller.update(&mut state, &export_io);
 
-    assert!(!state.simulation.trigger_simulation);
-    assert!(!state.simulation.is_running);
-    assert_eq!(state.simulation.status, "Run blocked");
+    assert!(!state.simulation.execution.trigger_simulation);
+    assert!(!state.simulation.execution.is_running);
+    assert_eq!(state.simulation.execution.status, "Run blocked");
 }
 
 /// A schematic run seals the deck its engine read.
@@ -577,13 +584,14 @@ fn a_schematic_run_retains_the_deck_it_executed() {
     controller
         .prepare_run_set_for_preflight(&state)
         .expect("clean plan preflight");
-    state.simulation.request_simulate_run_set();
+    state.simulation.execution.request_simulate_run_set();
     controller.start_simulation(&mut state);
     let run_id = state.simulation.active_run().expect("a run starts").id;
     controller.abort();
 
     let deck = state
         .simulation
+        .retained
         .executed_decks
         .get(run_id)
         .expect("a schematic run seals its executed deck too");
@@ -617,7 +625,7 @@ fn controller_plan_run_is_sealed_with_exact_prepared_receipt_before_results() {
         .prepare_run_set_for_preflight(&state)
         .expect("clean plan preflight");
 
-    state.simulation.request_simulate_run_set();
+    state.simulation.execution.request_simulate_run_set();
     controller.start_simulation(&mut state);
 
     let run = state.simulation.active_run().expect("prepared run starts");
@@ -659,7 +667,7 @@ fn controller_plan_run_receipt_survives_production_project_round_trip() {
     controller
         .prepare_run_set_for_preflight(&state)
         .expect("clean plan preflight");
-    state.simulation.request_simulate_run_set();
+    state.simulation.execution.request_simulate_run_set();
     controller.start_simulation(&mut state);
     let task_provenance = controller
         .current_provenance
@@ -693,7 +701,7 @@ fn controller_plan_run_receipt_survives_production_project_round_trip() {
         .id();
     let restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
         .expect("controller plan history restores");
-    let run = &restored.runs[0];
+    let run = &restored.retained.runs[0];
     let receipt = run.prepared_receipt().expect("prepared receipt retained");
     let result_provenance = run.analyses[0]
         .provenance
@@ -731,11 +739,11 @@ fn design_context_reset_discards_pending_controller_result() {
     controller.update(&mut state, &export_io);
 
     assert!(
-        !state.simulation.has_results(),
+        !state.simulation.retained.has_results(),
         "stale result from previous design should be discarded"
     );
     assert_eq!(state.log_buffer.len(), 0);
-    assert_eq!(state.simulation.status, "");
+    assert_eq!(state.simulation.execution.status, "");
     assert!(!controller.is_running());
 }
 
@@ -752,12 +760,13 @@ fn design_epoch_reset_terminalizes_executor_owned_history() {
 
     let run = state
         .simulation
+        .retained
         .run_by_sequence(run_sequence)
         .expect("interrupted history remains retained");
     assert_eq!(run.lifecycle, SimulationRunLifecycle::Interrupted);
     assert!(!run.success);
-    assert!(state.simulation.active_execution.is_none());
-    assert!(state.simulation.abort_request.is_none());
+    assert!(state.simulation.execution.active_execution.is_none());
+    assert!(state.simulation.execution.abort_request.is_none());
 }
 
 #[test]
@@ -771,19 +780,20 @@ fn stale_cancellation_request_never_mutates_run_lifecycle() {
         .simulation
         .request_abort_active_run()
         .expect("request is initially bound");
-    state.simulation.active_execution = None;
+    state.simulation.execution.active_execution = None;
 
     controller.update(&mut state, &export_io);
 
     assert_eq!(
         state
             .simulation
+            .retained
             .run_by_sequence(run_sequence)
             .unwrap()
             .lifecycle,
         SimulationRunLifecycle::Running
     );
-    assert!(state.simulation.abort_request.is_none());
+    assert!(state.simulation.execution.abort_request.is_none());
     assert!(
         state
             .log_buffer
@@ -798,7 +808,7 @@ fn abort_trigger_discards_worker_aborted_result_without_failed_analysis() {
     let mut controller = SimulationController::new();
     let export_io = MockExportWorkflowIo::default();
     state.simulation.start_run();
-    state.simulation.status = "Running".to_string();
+    state.simulation.execution.status = "Running".to_string();
     controller.current_spec = Some(AnalysisSpec::dc_op());
     controller.current_analysis_idx = 1;
     controller.total_analyses = 1;
@@ -811,7 +821,7 @@ fn abort_trigger_discards_worker_aborted_result_without_failed_analysis() {
 
     controller.update(&mut state, &export_io);
 
-    assert_eq!(state.simulation.status, "Aborted");
+    assert_eq!(state.simulation.execution.status, "Aborted");
     let run = state.simulation.active_run().expect("active run remains");
     assert!(
         run.analyses.is_empty(),
@@ -828,7 +838,7 @@ fn abort_trigger_discards_unpolled_success_result() {
     let mut controller = SimulationController::new();
     let export_io = MockExportWorkflowIo::default();
     state.simulation.start_run();
-    state.simulation.status = "Running".to_string();
+    state.simulation.execution.status = "Running".to_string();
     controller.current_spec = Some(AnalysisSpec::dc_op());
     controller.current_analysis_idx = 1;
     controller.total_analyses = 1;
@@ -840,7 +850,7 @@ fn abort_trigger_discards_unpolled_success_result() {
 
     controller.update(&mut state, &export_io);
 
-    assert_eq!(state.simulation.status, "Aborted");
+    assert_eq!(state.simulation.execution.status, "Aborted");
     let run = state.simulation.active_run().expect("active run remains");
     assert!(
         run.analyses.is_empty(),
@@ -875,10 +885,12 @@ fn completed_result_attaches_to_started_run_when_active_selection_changes() {
 
     let older_run = state
         .simulation
+        .retained
         .run_by_sequence(older_run_id)
         .expect("older run remains");
     let started_run = state
         .simulation
+        .retained
         .run_by_sequence(started_run_id)
         .expect("started run remains");
     assert!(
@@ -1157,6 +1169,7 @@ fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
     .expect("failed prerequisite provenance");
     state
         .simulation
+        .retained
         .run_by_sequence_mut(run_sequence)
         .expect("active run")
         .add_analysis(
@@ -1173,6 +1186,7 @@ fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
 
     let run = state
         .simulation
+        .retained
         .run_by_sequence(run_sequence)
         .expect("completed run remains");
     assert_eq!(run.analyses.len(), 2);
@@ -1194,7 +1208,7 @@ fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
             .dependency_ids(),
         &[prerequisite_id]
     );
-    assert_eq!(state.simulation.status, "Completed with errors");
+    assert_eq!(state.simulation.execution.status, "Completed with errors");
     assert!(!controller.is_running());
 }
 

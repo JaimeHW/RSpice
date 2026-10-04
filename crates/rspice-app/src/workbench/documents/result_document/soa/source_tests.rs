@@ -13,7 +13,7 @@ fn plan(state: &mut AppState) -> Arc<SoaPlan> {
 #[test]
 fn soa_reporting_detail_uses_complete_history_and_hashes_its_samples() {
     let mut state = soa_state(1, 64, 3.0);
-    let analysis = &mut state.simulation.runs[0].analyses[0];
+    let analysis = &mut state.simulation.retained.runs[0].analyses[0];
     let full = analysis.waveforms[0].clone();
     let mut count = vec![0.0; full.x.len()];
     *count.last_mut().unwrap() = 1.0;
@@ -56,13 +56,13 @@ fn soa_reporting_detail_uses_complete_history_and_hashes_its_samples() {
     *source_history = Some(Arc::new(source));
     analysis.validate_retained_evidence().unwrap();
     plan(&mut state);
-    let analysis = &state.simulation.runs[0].analyses[0];
+    let analysis = &state.simulation.retained.runs[0].analyses[0];
     assert_eq!(analysis.waveforms[0].x.len(), 2);
     pick(&mut state);
     state.ui.results.session.soa_stress_trace_open = true;
     assert!(paint(&mut state, false).contains("64 exact samples"));
-    let before = state.simulation.runs[0].analyses[0].result_data_digest();
-    let analysis = &mut state.simulation.runs[0].analyses[0];
+    let before = state.simulation.retained.runs[0].analyses[0].result_data_digest();
+    let analysis = &mut state.simulation.retained.runs[0].analyses[0];
     let Some(AnalysisResultPayload::Soa {
         source_history: Some(source),
         ..
@@ -73,14 +73,14 @@ fn soa_reporting_detail_uses_complete_history_and_hashes_its_samples() {
     Arc::make_mut(source).waveforms[0].values[20] += 0.01;
     assert_ne!(
         before,
-        state.simulation.runs[0].analyses[0].result_data_digest()
+        state.simulation.retained.runs[0].analyses[0].result_data_digest()
     );
 }
 
 fn replace_stress(state: &mut AppState, samples: usize, peak: f64) {
     let mut donor = soa_state(1, samples, peak);
-    let replacement = donor.simulation.runs[0].analyses.remove(0);
-    let analysis = &mut state.simulation.runs[0].analyses[0];
+    let replacement = donor.simulation.retained.runs[0].analyses.remove(0);
+    let analysis = &mut state.simulation.retained.runs[0].analyses[0];
     analysis.waveforms = replacement.data.waveforms;
     analysis.result_payload = replacement.data.result_payload;
     analysis.family_metadata = replacement.data.family_metadata;
@@ -89,7 +89,7 @@ fn replace_stress(state: &mut AppState, samples: usize, peak: f64) {
 fn envelope(state: &mut AppState) -> Arc<[[f64; 2]]> {
     let plan = plan(state);
     let facts = plan.presentation.facts(0).unwrap();
-    let waveform = &state.simulation.runs[0].analyses[0].waveforms
+    let waveform = &state.simulation.retained.runs[0].analyses[0].waveforms
         [facts.stress_waveform.expect("verified stress history")];
     state.ui.results.session.cache.series(
         DisplayDecimation::EnvelopeExtrema,
@@ -161,10 +161,10 @@ fn paint(state: &mut AppState, panel: bool) -> String {
 fn soa_source_nested_edits_refresh_facts_without_a_version_bump() {
     let mut state = soa_state(1, 64, 3.0);
     let before = plan(&mut state);
-    let version = state.simulation.data_version;
+    let version = state.simulation.view.data_version;
     replace_stress(&mut state, 64, 3.2);
     let after = plan(&mut state);
-    assert_eq!(state.simulation.data_version, version);
+    assert_eq!(state.simulation.view.data_version, version);
     assert_ne!(
         before.presentation.facts(0).unwrap().interval_full,
         after.presentation.facts(0).unwrap().interval_full
@@ -176,15 +176,15 @@ fn soa_source_restoration_refreshes_the_actual_plot_before_a_frame() {
     use crate::state::{SimulationRunLifecycle, SimulationRunProvenance};
 
     let mut state = soa_state(1, 64, 3.0);
-    let run = &mut state.simulation.runs[0];
+    let run = &mut state.simulation.retained.runs[0];
     run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
         .unwrap();
     run.mark_running().unwrap();
     run.finish_lifecycle(SimulationRunLifecycle::Completed)
         .unwrap();
-    state.simulation.next_run_id = 1;
+    state.simulation.retained.next_run_id = 1;
     let before = envelope(&mut state);
-    let version = state.simulation.data_version;
+    let version = state.simulation.view.data_version;
     let key = active_key(&state);
     replace_stress(&mut state, 64, 3.2);
     let restored = crate::io::simulation_state_from_results(crate::io::capture_simulation_results(
@@ -192,7 +192,7 @@ fn soa_source_restoration_refreshes_the_actual_plot_before_a_frame() {
     ))
     .unwrap();
     state.simulation = restored;
-    state.simulation.data_version = version;
+    state.simulation.view.data_version = version;
     assert_eq!(active_key(&state), key);
     let after = envelope(&mut state);
     assert_eq!(before.last().unwrap()[1], 3.0);
@@ -203,26 +203,26 @@ fn soa_source_restoration_refreshes_the_actual_plot_before_a_frame() {
 #[test]
 fn soa_source_cached_analysis_must_still_be_active() {
     let mut state = soa_state(1, 32, 3.0);
-    let second = soa_state(1, 32, 3.2).simulation.runs[0].analyses[0].clone();
-    state.simulation.runs[0].add_analysis(second);
+    let second = soa_state(1, 32, 3.2).simulation.retained.runs[0].analyses[0].clone();
+    state.simulation.retained.runs[0].add_analysis(second);
     let key = active_key(&state);
     plan(&mut state);
-    state.simulation.active_analysis_idx = Some(1);
+    state.simulation.view.active_analysis_idx = Some(1);
     assert!(soa_plan(&mut state, key).is_none());
 }
 
 #[test]
 fn soa_source_rule_selection_survives_navigation_but_not_rule_removal() {
     let mut state = soa_state(2, 32, 3.0);
-    let second = soa_state(1, 32, 3.2).simulation.runs[0].analyses[0].clone();
-    state.simulation.runs[0].add_analysis(second);
+    let second = soa_state(1, 32, 3.2).simulation.retained.runs[0].analyses[0].clone();
+    state.simulation.retained.runs[0].add_analysis(second);
     pick(&mut state);
     assert!(paint(&mut state, true).contains("SELECTED SOA RULE"));
-    state.simulation.active_analysis_idx = Some(1);
+    state.simulation.view.active_analysis_idx = Some(1);
     assert!(!paint(&mut state, true).contains("SELECTED SOA RULE"));
     assert!(state.ui.results.session.selected_soa_rule.is_some());
-    state.simulation.active_analysis_idx = Some(0);
-    let analysis = &mut state.simulation.runs[0].analyses[0];
+    state.simulation.view.active_analysis_idx = Some(0);
+    let analysis = &mut state.simulation.retained.runs[0].analyses[0];
     analysis.waveforms.reverse();
     let Some(AnalysisResultPayload::Soa { evaluations, .. }) = analysis.result_payload.as_mut()
     else {
@@ -233,7 +233,7 @@ fn soa_source_rule_selection_survives_navigation_but_not_rule_removal() {
     assert!(analysis.validate_retained_evidence().is_err());
     assert!(!paint(&mut state, true).contains("SELECTED SOA RULE"));
     assert!(state.ui.results.session.selected_soa_rule.is_some());
-    let analysis = &mut state.simulation.runs[0].analyses[0];
+    let analysis = &mut state.simulation.retained.runs[0].analyses[0];
     let Some(AnalysisResultPayload::Soa { evaluations, .. }) = analysis.result_payload.as_mut()
     else {
         unreachable!()
@@ -247,7 +247,9 @@ fn soa_source_rule_selection_survives_navigation_but_not_rule_removal() {
         source_history: _,
         evaluations,
         violations,
-    }) = state.simulation.runs[0].analyses[0].result_payload.as_mut()
+    }) = state.simulation.retained.runs[0].analyses[0]
+        .result_payload
+        .as_mut()
     else {
         unreachable!()
     };
@@ -263,9 +265,11 @@ fn soa_source_inspector_blocks_invalid_and_failed_evidence_until_repaired() {
     let mut state = soa_state(1, 32, 3.0);
     pick(&mut state);
     assert!(paint(&mut state, true).contains("SELECTED SOA RULE"));
-    let valid = state.simulation.runs[0].analyses[0].clone();
-    let Some(AnalysisResultPayload::Soa { evaluations, .. }) =
-        state.simulation.runs[0].analyses[0].result_payload.as_mut()
+    let valid = state.simulation.retained.runs[0].analyses[0].clone();
+    let Some(AnalysisResultPayload::Soa { evaluations, .. }) = state.simulation.retained.runs[0]
+        .analyses[0]
+        .result_payload
+        .as_mut()
     else {
         unreachable!()
     };
@@ -273,12 +277,12 @@ fn soa_source_inspector_blocks_invalid_and_failed_evidence_until_repaired() {
     let invalid = paint(&mut state, true);
     assert!(!invalid.contains("SELECTED SOA RULE"), "{invalid}");
     assert!(state.ui.results.session.selected_soa_rule.is_some());
-    state.simulation.runs[0].analyses[0] = valid;
-    state.simulation.runs[0].analyses[0].success = false;
+    state.simulation.retained.runs[0].analyses[0] = valid;
+    state.simulation.retained.runs[0].analyses[0].success = false;
     let failed = paint(&mut state, true);
     assert!(!failed.contains("SELECTED SOA RULE"), "{failed}");
     assert!(state.ui.results.session.selected_soa_rule.is_some());
-    state.simulation.runs[0].analyses[0].success = true;
+    state.simulation.retained.runs[0].analyses[0].success = true;
     assert!(paint(&mut state, true).contains("SELECTED SOA RULE"));
 }
 

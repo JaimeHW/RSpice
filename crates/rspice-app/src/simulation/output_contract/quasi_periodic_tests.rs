@@ -37,6 +37,7 @@ fn reload(analysis: AnalysisResult) -> AnalysisResult {
         serde_json::from_slice(&serde_json::to_vec(&persisted).unwrap()).unwrap();
     crate::io::simulation_state_from_results(loaded)
         .unwrap()
+        .retained
         .runs[0]
         .analyses[0]
         .clone()

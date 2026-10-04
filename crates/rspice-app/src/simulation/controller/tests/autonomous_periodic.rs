@@ -25,15 +25,15 @@ fn round_trip(run: SimulationRun) -> SimulationRun {
         assert_eq!(decoded, saved);
     }
     let mut state = SimulationState::default();
-    state.next_run_id = run.id;
-    state.runs = vec![run.clone()].into();
+    state.retained.next_run_id = run.id;
+    state.retained.runs = vec![run.clone()].into();
     let saved = crate::io::capture_simulation_results(&state);
     saved.validate().unwrap();
     let decoded: ProjectSimulationResults =
         serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
     assert_eq!(decoded, saved);
     let loaded = crate::io::simulation_state_from_results(decoded).unwrap();
-    let restored = &loaded.runs[0];
+    let restored = &loaded.retained.runs[0];
     restored.validate_provenance().unwrap();
     assert_eq!(restored.analyses.len(), run.analyses.len());
     for (original, result) in run.analyses.iter().zip(&restored.analyses) {

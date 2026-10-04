@@ -18,7 +18,7 @@ fn netlist_document_commands_are_not_offered_from_the_sibling_code_pages() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Netlist;
     app.state.ui.code_workspace.page = CodeWorkspacePage::Netlist;
-    app.state.simulation.netlist_content = "deck\n.end\n".to_owned();
+    app.state.simulation.source.netlist_content = "deck\n.end\n".to_owned();
 
     assert!(Command::ValidateCodeDocument.is_enabled(&app));
 

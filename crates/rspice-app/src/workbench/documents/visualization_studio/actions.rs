@@ -51,6 +51,7 @@ pub(super) fn advance_source_integrity_scan(app: &mut RSpiceApp) -> Result<(), S
     let run = app
         .state
         .simulation
+        .retained
         .runs
         .iter()
         .find(|run| run.dataset_id == dataset_id)
@@ -109,7 +110,7 @@ pub(super) fn recover_source_integrity_scan(app: &mut RSpiceApp) -> Result<(), S
     if studio.operation_processed >= studio.operation_total {
         return Err("A completed integrity scan cannot be recovered".to_owned());
     }
-    let binding_exists = app.state.simulation.runs.iter().any(|run| {
+    let binding_exists = app.state.simulation.retained.runs.iter().any(|run| {
         run.dataset_id == dataset_id
             && run
                 .analyses
@@ -181,7 +182,7 @@ pub(super) fn add_cursor_at_midpoint(app: &mut RSpiceApp) {
             return;
         }
         app.state.ui.results.session.cursors.place(x);
-        app.state.ui.results.session.cursor_strip = app.state.simulation.active_analysis_idx;
+        app.state.ui.results.session.cursor_strip = app.state.simulation.view.active_analysis_idx;
     } else {
         app.state.push_user_message(ConsoleMessage::warning(
             "An exact source waveform is required before a cursor can be placed.",

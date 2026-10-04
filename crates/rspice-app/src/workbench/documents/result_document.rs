@@ -497,7 +497,7 @@ pub(crate) fn request_view_gesture(state: &mut AppState, gesture: ViewGesture) {
 /// Every plot sheet does; the structured documents (OP, specs, table, XF,
 /// manifest) have no viewport at all and must not offer the gesture.
 pub(crate) fn fit_gesture_available(state: &AppState) -> bool {
-    state.simulation.has_results() && viewer_draws_a_pane(state.ui.results.session.viewer)
+    state.simulation.retained.has_results() && viewer_draws_a_pane(state.ui.results.session.viewer)
 }
 
 /// Whether this sheet draws a plot pane at all.
@@ -522,7 +522,8 @@ pub(crate) const fn viewer_draws_a_pane(viewer: ResultViewer) -> bool {
 /// Only the unit-pane stack exposes the retained extents a zoom step has to
 /// be computed against; the single-canvas viewers own their own gestures.
 pub(crate) fn zoom_gesture_available(state: &AppState) -> bool {
-    state.simulation.has_results() && viewer_uses_wave_stack(state.ui.results.session.viewer)
+    state.simulation.retained.has_results()
+        && viewer_uses_wave_stack(state.ui.results.session.viewer)
 }
 
 /// Apply any queued viewport gesture, now that the sheet's models and theme
@@ -1021,6 +1022,7 @@ pub(crate) fn restore_markers(
             highest = highest.max(marker.id);
             state
                 .simulation
+                .retained
                 .runs
                 .iter()
                 .any(|run| marker.analysis.resolve(run).is_some())
@@ -1083,6 +1085,7 @@ pub(crate) fn restore_log_y_panes(state: &mut AppState, panes: Vec<WavePanePrese
         .filter(|pane| {
             state
                 .simulation
+                .retained
                 .runs
                 .iter()
                 .any(|run| pane.analysis.resolve(run).is_some())
@@ -1101,6 +1104,7 @@ pub(crate) fn restore_expression_groups(state: &mut AppState, groups: Vec<Result
     for group in groups {
         let retained = state
             .simulation
+            .retained
             .runs
             .iter()
             .any(|run| group.analysis.resolve(run).is_some());
@@ -1141,6 +1145,7 @@ pub(crate) fn retained_evidence_is_valid(
         .get_or_insert_with(&state.simulation, analysis, || {
             state
                 .simulation
+                .retained
                 .runs
                 .iter()
                 .find_map(|run| analysis.resolve(run))
@@ -1499,7 +1504,7 @@ fn results_keymap(ui: &Ui, app: &mut RSpiceApp) {
     if app.state.ui.results.session.marker_edit.is_some() {
         return;
     }
-    if !app.state.simulation.has_results() {
+    if !app.state.simulation.retained.has_results() {
         return;
     }
     let plain = ctx
@@ -1851,7 +1856,7 @@ pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
         .ui
         .results
         .reconcile_retained_datasets(&app.state.simulation);
-    let data_version = app.state.simulation.data_version;
+    let data_version = app.state.simulation.view.data_version;
     // The user's display-cache budget is session state, and the cache is not,
     // so applying it only where the setting is edited left a restored session
     // running on the default until the reader happened to reopen that panel.
@@ -1901,13 +1906,14 @@ fn synchronize_quick_view_dataset_authority(state: &mut AppState) -> bool {
     };
     let Some(run_index) = state
         .simulation
+        .retained
         .runs
         .iter()
         .position(|run| run.dataset_id == *dataset_id)
     else {
         return false;
     };
-    if state.simulation.active_run_idx == Some(run_index) {
+    if state.simulation.view.active_run_idx == Some(run_index) {
         return false;
     }
     state.simulation.select_run(run_index)
@@ -2039,7 +2045,7 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         return;
     }
 
-    if viewer_requires_retained_results(viewer) && !app.state.simulation.has_results() {
+    if viewer_requires_retained_results(viewer) && !app.state.simulation.retained.has_results() {
         let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
             crate::workbench::commands::vocabulary::Command::RunSimulation,
             crate::workbench::app_state::runtime_command_platform(ui.ctx()),
@@ -2584,7 +2590,7 @@ fn ensure_derived(ui: &mut Ui, app: &mut RSpiceApp, viewer: ActiveViewer) -> boo
             true
         }
         DerivedViewerLoadState::Loading => {
-            let data_version = app.state.simulation.data_version;
+            let data_version = app.state.simulation.view.data_version;
             app.state.ui.results.record_runtime_condition(
                 operational_state::ResultRuntimeConditionKind::IntegrityVerifying,
                 "Preparing and validating derived data from the active transient.",

@@ -442,7 +442,7 @@ fn large_state() -> AppState {
     run.add_analysis(phase_noise_analysis());
     run.add_analysis(sparameter_analysis());
 
-    state.simulation.runs = vec![run].into();
+    state.simulation.retained.runs = vec![run].into();
     assert!(state.simulation.select_run(0));
 
     let mut eye = rspice_results_ui::eye_diagram::EyeData::new(1.0e-9, 2);
@@ -745,7 +745,7 @@ fn a_new_data_version_rebuilds_every_memo() {
             show_surface(viewer, ui, state);
         });
 
-        state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
+        state.simulation.view.data_version = state.simulation.view.data_version.wrapping_add(1);
         let baseline = WorkCounts::reset();
         frame(&ctx, &mut state, &mut |ui, state| {
             show_surface(viewer, ui, state);
@@ -796,7 +796,7 @@ fn corrupted_evidence_closes_the_gates_that_read_the_memo() {
 
     // A retained waveform with more coordinates than values is exactly what
     // `validate_retained_evidence` exists to refuse.
-    let analysis = state.simulation.runs[0]
+    let analysis = state.simulation.retained.runs[0]
         .analyses
         .iter_mut()
         .find(|analysis| analysis.analysis_type == AnalysisType::Soa)
@@ -804,7 +804,7 @@ fn corrupted_evidence_closes_the_gates_that_read_the_memo() {
     let mut shortened = analysis.waveforms[0].y.as_ref().clone();
     shortened.pop();
     analysis.waveforms[0].y = std::sync::Arc::new(shortened);
-    state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
+    state.simulation.view.data_version = state.simulation.view.data_version.wrapping_add(1);
 
     assert!(
         !soa::active_payload_is_valid(&state),

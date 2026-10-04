@@ -67,7 +67,7 @@ pub(super) fn apply_imported_netlist_transaction(
         ));
         return false;
     }
-    if state.simulation.has_active_execution() {
+    if state.simulation.execution.has_active_execution() {
         state.push_user_message(ConsoleMessage::error(
             "SPICE deck import is blocked while a simulation execution owns the project",
         ));
@@ -118,7 +118,7 @@ pub(super) fn apply_imported_netlist_transaction(
     candidate.workspace.content.netlist_descriptor = Some(descriptor);
     candidate.workspace.content.netlist_source_path = source_path;
     candidate.workspace.content.set_netlist_source_dirty(true);
-    candidate.simulation.netlist_content = source;
+    candidate.simulation.source.netlist_content = source;
     candidate.ui.netlist.owned_document = Some(document);
     candidate.ui.netlist.externally_saved_content_digest =
         reopenable_import.then_some(source_digest);
@@ -168,7 +168,7 @@ pub(super) fn netlist_import_start_block_reason(
     state: &AppState,
     mode: NetlistImportMode,
 ) -> Option<&'static str> {
-    if state.simulation.has_active_execution() {
+    if state.simulation.execution.has_active_execution() {
         return Some("a simulation execution still owns the project");
     }
     if mode == NetlistImportMode::ImportIntoProject && !state.project_lifecycle.is_open() {
@@ -195,7 +195,7 @@ pub(super) fn apply_opened_netlist_project(
         )));
         return false;
     }
-    if state.simulation.has_active_execution() {
+    if state.simulation.execution.has_active_execution() {
         state.push_user_message(ConsoleMessage::error(
             "Netlist project open is blocked while a simulation execution owns the project",
         ));

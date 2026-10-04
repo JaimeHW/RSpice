@@ -154,8 +154,8 @@ fn start_prepared_run_for_active_plan(state: &mut AppState, analysis: Option<Ana
     if let Some(analysis) = analysis {
         run.add_analysis(analysis);
     }
-    state.simulation.active_run_idx = Some(0);
-    state.simulation.active_analysis_idx = holds_analysis.then_some(0);
+    state.simulation.view.active_run_idx = Some(0);
+    state.simulation.view.active_analysis_idx = holds_analysis.then_some(0);
 }
 
 /// The plan heading says whether a prior dataset exists; both controls beside
@@ -390,7 +390,7 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
     );
 
     // A deferred contract is retained but unevaluated, and says so.
-    app.state.simulation.runs[0].analyses[0]
+    app.state.simulation.retained.runs[0].analyses[0]
         .saved_output_receipts
         .push(SavedOutputReceipt {
             source_bindings: None,
@@ -416,7 +416,7 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
     );
 
     // Materialized, and the waveform is there: the hop resolves to it.
-    app.state.simulation.runs[0].analyses[0].saved_output_receipts[0].status =
+    app.state.simulation.retained.runs[0].analyses[0].saved_output_receipts[0].status =
         SavedOutputMaterializationStatus::Materialized {
             waveform_name: "V(out)".to_owned(),
             sample_count: 2,
@@ -567,6 +567,7 @@ fn the_heading_the_hop_and_the_contract_card_agree_about_the_prior_run() {
         // in history, sealed to this plan, holding nothing.
         let run = state
             .simulation
+            .retained
             .runs
             .first()
             .expect("the run is at the front of history");
@@ -623,9 +624,9 @@ fn a_run_still_executing_is_named_as_in_progress_rather_than_immutable() {
             state,
             AnalysisResult::new(1, AnalysisType::Transient, "live TRAN"),
         );
-        state.simulation.is_running = true;
+        state.simulation.execution.is_running = true;
         assert!(
-            state.simulation.has_active_execution(),
+            state.simulation.execution.has_active_execution(),
             "the fixture is a run an execution still owns"
         );
     });

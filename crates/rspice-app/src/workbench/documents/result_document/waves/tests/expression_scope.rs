@@ -102,7 +102,7 @@ fn changing_scope_refreshes_calculations_while_visibility_does_not() {
     let (mut state, models) = fixture(vec![2, 3], "max(V(out))");
     let first = resolve_strip_exprs(&mut state, &models[0], &Tokens::default());
     assert_eq!(first[0].y.as_slice(), &[1.0, 1.0]);
-    let version = state.simulation.data_version;
+    let version = state.simulation.view.data_version;
     let run = state.simulation.active_run().unwrap();
     let digest = run.dataset_content_digest();
     let manifest = FamilyManifest::from_metadata(
@@ -122,7 +122,7 @@ fn changing_scope_refreshes_calculations_while_visibility_does_not() {
     toggle_visibility(&mut state, 0, 0);
     let hidden = resolve_strip_exprs(&mut state, &models[0], &Tokens::default());
     assert_eq!(hidden[0].y, second[0].y);
-    assert_eq!(state.simulation.data_version, version);
+    assert_eq!(state.simulation.view.data_version, version);
     assert_eq!(
         state
             .simulation

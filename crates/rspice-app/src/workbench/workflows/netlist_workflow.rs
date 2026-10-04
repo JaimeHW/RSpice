@@ -80,7 +80,7 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
         return false;
     }
 
-    let visible_digest = crate::state::content_digest(&app.state.simulation.netlist_content);
+    let visible_digest = crate::state::content_digest(&app.state.simulation.source.netlist_content);
     match app
         .simulation_controller
         .validate_manual_deck_document(&app.state)

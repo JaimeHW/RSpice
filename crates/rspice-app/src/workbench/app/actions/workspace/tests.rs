@@ -2391,7 +2391,7 @@ fn state_with_probed_conductors() -> AppState {
     let wires = &mut state.schematic.document_mut_for_test().wires;
     wires.push(Wire::new(91, vec![out_a, out_b]));
     wires.push(Wire::new(92, vec![mid_a, mid_b]));
-    state.simulation.cross_probe.update(
+    state.simulation.source.cross_probe.update(
         state.workspace.content.active_view.clone(),
         HashMap::from([
             (out_a, "OUT".to_owned()),

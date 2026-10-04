@@ -183,7 +183,7 @@ fn showing_an_instance_opens_the_generated_primary_at_its_card() {
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
     );
     assert!(state.ui.netlist.active_dependency_identity.is_none());
-    assert_eq!(state.simulation.netlist_content, DECK);
+    assert_eq!(state.simulation.source.netlist_content, DECK);
     // The outline and the source-mapping panel both read the active line, so
     // the caret request and the cursor have to agree about which card it is.
     assert_eq!(state.ui.netlist.requested_line, Some(3));

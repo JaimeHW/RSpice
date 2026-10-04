@@ -511,7 +511,7 @@ impl LiveSessionEngine {
     /// Finish a policy-mandated mirror teardown that had to wait for the
     /// local run to stop.
     fn settle_mirror_discard(&mut self, state: &mut AppState) {
-        if !self.mirror_discard_pending || state.simulation.has_active_execution() {
+        if !self.mirror_discard_pending || state.simulation.execution.has_active_execution() {
             return;
         }
         state
@@ -623,7 +623,7 @@ impl LiveSessionEngine {
             "The live session ended; its policy does not allow keeping a copy, \
              so the mirrored project is closing.",
         ));
-        if state.simulation.has_active_execution() {
+        if state.simulation.execution.has_active_execution() {
             if state.simulation.can_request_abort_active_run()
                 && let Err(error) = state.simulation.request_abort_active_run()
             {
@@ -1217,9 +1217,9 @@ impl LiveSessionEngine {
         let Role::Host(host) = &mut self.role else {
             return;
         };
-        let running = state.simulation.has_active_execution();
-        let fraction = state.simulation.progress.clamp(0.0, 1.0);
-        let status = state.simulation.status.clone();
+        let running = state.simulation.execution.has_active_execution();
+        let fraction = state.simulation.execution.progress.clamp(0.0, 1.0);
+        let status = state.simulation.execution.status.clone();
         let mut outgoing: Option<RunStatusPayload> = None;
         if running && !host.run.active {
             host.run.active = true;
@@ -1837,7 +1837,7 @@ mod tests {
         engine.drain_inbound(&mut state);
 
         assert!(engine.pending_run_requests.is_empty());
-        assert!(!state.simulation.trigger_simulation);
+        assert!(!state.simulation.execution.trigger_simulation);
     }
 
     #[test]
@@ -1867,13 +1867,13 @@ mod tests {
         engine.drain_inbound(&mut state);
 
         assert_eq!(engine.pending_run_requests.len(), 1);
-        assert!(!state.simulation.trigger_simulation);
+        assert!(!state.simulation.execution.trigger_simulation);
 
         let approved = engine.approve_run_request(editor);
 
         assert!(approved);
         assert!(engine.pending_run_requests.is_empty());
-        assert!(!state.simulation.trigger_simulation);
+        assert!(!state.simulation.execution.trigger_simulation);
     }
 
     #[test]

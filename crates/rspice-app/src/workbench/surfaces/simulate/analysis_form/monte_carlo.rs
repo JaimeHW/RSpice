@@ -213,6 +213,7 @@ pub(in crate::workbench::surfaces::simulate) fn checkpoint_sources(
     }
     let mut seen = std::collections::HashSet::new();
     let candidates = simulation
+        .retained
         .runs
         .iter()
         .rev()
@@ -235,6 +236,7 @@ pub(in crate::workbench::surfaces::simulate) fn checkpoint_sources(
         })
         .chain(
             simulation
+                .retained
                 .imported_monte_carlo_checkpoints
                 .iter()
                 .map(|entry| {
@@ -290,6 +292,7 @@ pub(in crate::workbench::surfaces::simulate) fn checkpoint_sources(
                 action = Some(checkpoint_exchange::Action::Export(checkpoint.clone()));
             }
             if simulation
+                .retained
                 .imported_monte_carlo_checkpoints
                 .get(digest)
                 .is_some()

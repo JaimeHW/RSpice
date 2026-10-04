@@ -79,7 +79,7 @@ impl AppState {
 
     /// Clear user-visible simulation result history and derived result viewers.
     pub(crate) fn clear_simulation_results(&mut self) {
-        if self.simulation.has_active_execution() {
+        if self.simulation.execution.has_active_execution() {
             return;
         }
         self.simulation.clear_runs();
@@ -451,7 +451,7 @@ mod tests {
     fn seed_result_viewers(state: &mut AppState) {
         let mut run = crate::state::SimulationRun::new(1);
         run.add_analysis(retained_analysis(1, crate::state::AnalysisType::Ac, 0x11));
-        state.simulation.runs.push(run);
+        state.simulation.retained.runs.push(run);
         assert!(state.simulation.select_run(0));
 
         let mut bode = BodeData::new();
@@ -527,7 +527,7 @@ mod tests {
     fn clearing_simulation_results_clears_specialized_result_viewers() {
         let mut state = AppState::default();
         seed_result_viewers(&mut state);
-        assert!(state.simulation.has_results());
+        assert!(state.simulation.retained.has_results());
         // Arbitrary cached bins on an AC analysis are not MC evidence.
         assert!(!state.viewer_is_available(ActiveViewer::Histogram));
         assert!(state.viewer_is_available(ActiveViewer::SmithChart));
@@ -535,7 +535,7 @@ mod tests {
 
         state.clear_simulation_results();
 
-        assert!(!state.simulation.has_results());
+        assert!(!state.simulation.retained.has_results());
         for viewer in [
             ActiveViewer::SmithChart,
             ActiveViewer::EyeDiagram,
@@ -571,14 +571,14 @@ mod tests {
         let mut state = AppState::default();
         seed_result_viewers(&mut state);
 
-        state.simulation.runs[0].add_analysis(retained_analysis(
+        state.simulation.retained.runs[0].add_analysis(retained_analysis(
             2,
             crate::state::AnalysisType::Ac,
             0x12,
         ));
         let mut second_run = crate::state::SimulationRun::new(2);
         second_run.add_analysis(retained_analysis(1, crate::state::AnalysisType::Ac, 0x21));
-        state.simulation.runs.push(second_run);
+        state.simulation.retained.runs.push(second_run);
 
         assert!(state.simulation.select_analysis(1));
         for viewer in [
@@ -616,7 +616,7 @@ mod tests {
 
         let mut incompatible = crate::state::SimulationRun::new(2);
         incompatible.add_analysis(retained_analysis(1, crate::state::AnalysisType::DcOp, 0x31));
-        state.simulation.runs.push(incompatible);
+        state.simulation.retained.runs.push(incompatible);
         assert!(state.simulation.select_run(1));
 
         for viewer in [
@@ -687,14 +687,14 @@ mod tests {
             crate::state::AnalysisType::PoleZero,
             "PZ without retained evidence",
         ));
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         assert!(
             !state.viewer_is_available(ActiveViewer::PoleZero),
             "an analysis without retained pole-zero evidence must not enable the viewer"
         );
 
-        state.simulation.runs[0].analyses[0] = crate::state::AnalysisResult::new(
+        state.simulation.retained.runs[0].analyses[0] = crate::state::AnalysisResult::new(
             1,
             crate::state::AnalysisType::PoleZero,
             "Retained PZ",

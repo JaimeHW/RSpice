@@ -344,19 +344,19 @@ impl Command {
             Self::RevertActiveDocument => {
                 state.project_lifecycle.accepted().is_some()
                     && crate::workbench::lifecycle::project_lifecycle::active_document_is_dirty(state)
-                    && !state.simulation.has_active_execution()
+                    && !state.simulation.execution.has_active_execution()
             }
             Self::CloseActiveDocument => {
                 crate::workbench::lifecycle::project_lifecycle::can_close_active_document(state)
             }
             Self::CloseProject => state.project_lifecycle.is_open(),
             Self::OpenNetlist => {
-                !state.simulation.has_active_execution()
+                !state.simulation.execution.has_active_execution()
             }
             Self::ImportNetlist => {
                 state.project_lifecycle.is_open()
                     && !state.workbench.safe_mode.project_read_only()
-                    && !state.simulation.has_active_execution()
+                    && !state.simulation.execution.has_active_execution()
             }
             Self::PublishToWeb => {
                 matches!(
@@ -633,7 +633,7 @@ impl Command {
             Self::ToggleResultsSplit => {
                 state.project_lifecycle.is_open()
                     && state.workbench.supports_results_split()
-                    && state.simulation.has_retained_result_dataset()
+                    && state.simulation.retained.has_retained_result_dataset()
             }
             Self::PreviousDocument | Self::NextDocument => {
                 crate::workbench::chrome::document_bar::document_descriptors(state)
@@ -744,8 +744,8 @@ impl Command {
                 if state.workbench.workspace == Workspace::Netlist {
                     app.manual_deck_run_block_reason().is_none()
                 } else {
-                    !state.simulation.has_active_execution()
-                        && !state.simulation.trigger_simulation
+                    !state.simulation.execution.has_active_execution()
+                        && !state.simulation.execution.trigger_simulation
                 }
             }
             // Both edit the plan catalog through the active plan's stable
@@ -768,7 +768,7 @@ impl Command {
                 netlist_page_is_visible(state)
                     && state.ui.netlist.active_document
                         != crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
-                    && !state.simulation.netlist_content.trim().is_empty()
+                    && !state.simulation.source.netlist_content.trim().is_empty()
             }
             // Unlike its neighbours this one belongs to the two language
             // pages, not the netlist page: it manages a project source
@@ -794,12 +794,12 @@ impl Command {
             }
             Self::StopSimulation => stop_simulation_enabled(&state.simulation),
             Self::ClearResults => {
-                state.simulation.has_results()
-                    && !state.simulation.has_active_execution()
+                state.simulation.retained.has_results()
+                    && !state.simulation.execution.has_active_execution()
             }
             Self::ImportResultDataset => {
                 !state.workbench.safe_mode.project_read_only()
-                    && !state.simulation.has_active_execution()
+                    && !state.simulation.execution.has_active_execution()
             }
             // Waves is the workspace's default sheet, and its empty state is
             // the workspace's landing, so this route stays actionable before a
@@ -811,13 +811,13 @@ impl Command {
                 crate::workbench::documents::result_document::viewer_is_available(state, viewer)
             }
             Self::ToggleLinkedCursors => {
-                state.workbench.workspace == Workspace::Results && state.simulation.has_results()
+                state.workbench.workspace == Workspace::Results && state.simulation.retained.has_results()
             }
             Self::DatasetManifestBrowser => {
-                state.project_lifecycle.is_open() && !state.simulation.runs.is_empty()
+                state.project_lifecycle.is_open() && !state.simulation.retained.runs.is_empty()
             }
             Self::CreateResultDocument => {
-                state.project_lifecycle.is_open() && state.simulation.has_results()
+                state.project_lifecycle.is_open() && state.simulation.retained.has_results()
             }
             Self::CompareResultDatasets => {
                 crate::workbench::documents::visualization_studio::results_comparison_available(
@@ -940,7 +940,7 @@ impl Command {
                 state.workbench.current_route().surface_id()
                     == super::SurfaceId::VisualizationStudio
                     && state.project_lifecycle.is_open()
-                    && state.simulation.has_results()
+                    && state.simulation.retained.has_results()
             }
             Self::VisualizationTraceManager
             | Self::VisualizationCursorManager
@@ -951,7 +951,7 @@ impl Command {
                     state.workbench.current_route().surface_id(),
                     super::SurfaceId::Results | super::SurfaceId::VisualizationStudio
                 ) && state.project_lifecycle.is_open()
-                    && state.simulation.has_results()
+                    && state.simulation.retained.has_results()
             }
             Self::VisualizationDocumentProperties => {
                 let surface = state.workbench.current_route().surface_id();
@@ -960,7 +960,7 @@ impl Command {
                     super::SurfaceId::Results | super::SurfaceId::VisualizationStudio
                 ) && state.project_lifecycle.is_open()
                     && (surface == super::SurfaceId::VisualizationStudio
-                        || state.simulation.has_results())
+                        || state.simulation.retained.has_results())
             }
             // Both return edges are judged on the dataset, never on the
             // surface the reader is standing on: they exist precisely to be
@@ -975,7 +975,7 @@ impl Command {
             Self::OpenProducingPlan => result_navigation::producing_plan_hop(app).is_ok(),
             Self::OpenTaskDeck => result_navigation::task_deck_hop(app).is_ok(),
             Self::RevealProducerLog => result_navigation::producer_log_hop(app).is_ok(),
-            Self::ExpressionDiagnostics => state.simulation.has_results(),
+            Self::ExpressionDiagnostics => state.simulation.retained.has_results(),
             Self::ExportWaveformsCsv => result_navigation::dataset_export_is_resolvable(state),
             Self::VerificationPage(page) if !page.is_operational() => false,
             Self::ClearConsole => match state.workbench.console_page {
@@ -1353,7 +1353,11 @@ impl Command {
             Self::ToggleResultsSplit => {
                 let enabled = !app.state.workbench.split_with_results;
                 if enabled {
-                    if let Some(run_index) = app.state.simulation.newest_retained_result_run_index()
+                    if let Some(run_index) = app
+                        .state
+                        .simulation
+                        .retained
+                        .newest_retained_result_run_index()
                     {
                         // The split starts on the newest materialized dataset,
                         // but remains the one canonical Results selection:
@@ -1770,7 +1774,7 @@ impl Command {
                         app.state
                             .push_sim_message(crate::diagnostics::ConsoleMessage::warning(error));
                     }
-                } else if app.state.simulation.has_active_execution() {
+                } else if app.state.simulation.execution.has_active_execution() {
                     let reason = match Self::StopSimulation.availability(app) {
                         CommandAvailability::Disabled(reason) => reason,
                         CommandAvailability::Available | CommandAvailability::Hidden => {
@@ -1866,7 +1870,7 @@ impl Command {
                     .saturating_sub(1);
             }
             Self::ClearResults => {
-                if app.state.simulation.has_active_execution() {
+                if app.state.simulation.execution.has_active_execution() {
                     app.state
                         .push_sim_message(crate::diagnostics::ConsoleMessage::warning(
                         "Result history cannot be cleared while a simulation execution owns a run"

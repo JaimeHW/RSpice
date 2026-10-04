@@ -30,29 +30,41 @@ impl CachedResults {
     fn matches(&self, state: &SimulationState) -> bool {
         // Adding state requires an explicit persisted-versus-runtime choice.
         let SimulationState {
-            runs,
-            executed_decks,
-            imported_monte_carlo_checkpoints,
-            next_run_id,
-            retained_dataset_limit,
-            active_run_idx,
-            active_analysis_idx,
-            overlay_dataset_ids,
-            is_running: _,
-            trigger_simulation: _,
-            trigger_abort: _,
-            active_execution: _,
-            abort_request: _,
-            run_intent: _,
-            progress: _,
-            status: _,
-            waveforms: _,
-            data_version: _,
-            netlist_content: _,
-            node_to_waveform: _,
-            ground_node: _,
-            cross_probe: _,
-            yield_evidence: _,
+            retained:
+                crate::state::RetainedSimulationState {
+                    runs,
+                    executed_decks,
+                    imported_monte_carlo_checkpoints,
+                    next_run_id,
+                    retained_dataset_limit,
+                    yield_evidence: _,
+                },
+            view:
+                crate::state::SimulationViewState {
+                    active_run_idx,
+                    active_analysis_idx,
+                    overlay_dataset_ids,
+                    waveforms: _,
+                    data_version: _,
+                    node_to_waveform: _,
+                    ground_node: _,
+                },
+            execution:
+                crate::state::SimulationExecutionState {
+                    is_running: _,
+                    trigger_simulation: _,
+                    trigger_abort: _,
+                    active_execution: _,
+                    abort_request: _,
+                    run_intent: _,
+                    progress: _,
+                    status: _,
+                },
+            source:
+                crate::state::SimulationSourceState {
+                    netlist_content: _,
+                    cross_probe: _,
+                },
         } = state;
         self.history == runs.revision()
             && self.decks.shares_content_with(executed_decks)
@@ -75,14 +87,14 @@ impl ResultCache {
         }
         let snapshot = crate::io::capture_simulation_results(state);
         *cached = Some(CachedResults {
-            history: state.runs.revision(),
-            decks: state.executed_decks.clone(),
-            imported_checkpoints: state.imported_monte_carlo_checkpoints.clone(),
-            next_run_id: state.next_run_id,
-            retained_dataset_limit: state.retained_dataset_limit,
-            active_run_idx: state.active_run_idx,
-            active_analysis_idx: state.active_analysis_idx,
-            overlay_dataset_ids: state.overlay_dataset_ids.clone(),
+            history: state.retained.runs.revision(),
+            decks: state.retained.executed_decks.clone(),
+            imported_checkpoints: state.retained.imported_monte_carlo_checkpoints.clone(),
+            next_run_id: state.retained.next_run_id,
+            retained_dataset_limit: state.retained.retained_dataset_limit,
+            active_run_idx: state.view.active_run_idx,
+            active_analysis_idx: state.view.active_analysis_idx,
+            overlay_dataset_ids: state.view.overlay_dataset_ids.clone(),
             snapshot: snapshot.clone(),
         });
         snapshot

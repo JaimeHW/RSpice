@@ -1314,7 +1314,7 @@ pub(super) fn active_run_matches_design(state: &AppState) -> bool {
     };
     run.prepared_receipt().is_some_and(|receipt| {
         receipt.project_revision() == state.workspace.content.project.revision()
-    }) && state.simulation.cross_probe.is_current_for(
+    }) && state.simulation.source.cross_probe.is_current_for(
         &state.workspace.content.active_view,
         state.schematic.topology_version(),
     )

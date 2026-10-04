@@ -111,7 +111,7 @@ fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
     // only then consulting the memo below — meant the memo saved nothing: the
     // conversion and every crossing search had already happened by the time
     // its key was known.
-    let shape = ac_bode_shape_for_selection(run, simulation.active_analysis_idx)
+    let shape = ac_bode_shape_for_selection(run, simulation.view.active_analysis_idx)
         .ok_or(NoMargins::NoResponse)?;
 
     // Fail closed, as every sibling sheet does. The shape resolves which
@@ -132,7 +132,7 @@ fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
     // Margins + extremes from the curves, cached on (data version, resolved
     // magnitude waveform) — the crossings and folds are O(points) and both
     // panels read them every frame.
-    let version = simulation.data_version;
+    let version = simulation.view.data_version;
     let margins = match state.ui.results.bode {
         Some(d)
             if d.version == version
@@ -184,7 +184,7 @@ fn is_noise_analysis(analysis_type: AnalysisType) -> bool {
 /// no noise intent for the binding to honour.
 pub(super) fn selected_noise_analysis_index(state: &AppState) -> Option<usize> {
     let run = state.simulation.active_run()?;
-    selected_noise_analysis_index_with(state.simulation.active_analysis_idx, run, |analysis| {
+    selected_noise_analysis_index_with(state.simulation.view.active_analysis_idx, run, |analysis| {
         ordinary_noise_spectrum_is_renderable_in(state, run.dataset_id, analysis)
     })
 }
@@ -342,7 +342,7 @@ mod tests {
         run.add_analysis(ac_result(second_id, "V(second)", [100.0, 10.0]));
 
         let mut state = AppState::default();
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
 
         assert!(state.simulation.select_analysis(0));
@@ -386,7 +386,7 @@ mod tests {
         );
 
         let mut state = AppState::default();
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         let model = build_model(&mut state).expect("Bode model");
 
@@ -435,7 +435,7 @@ mod tests {
         run.add_analysis(failed);
 
         let mut state = AppState::default();
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         assert!(state.simulation.select_analysis(0));
 
@@ -471,7 +471,7 @@ mod tests {
         run.add_analysis(AnalysisResult::new(3, AnalysisType::Transient, "TRAN"));
 
         let mut state = AppState::default();
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
 
         // The selection is a noise analysis with no ordinary spectrum: the
@@ -488,7 +488,7 @@ mod tests {
         assert!(state.simulation.select_analysis(2));
         assert_eq!(selected_noise_analysis_index(&state), Some(1));
 
-        state.simulation.active_analysis_idx = None;
+        state.simulation.view.active_analysis_idx = None;
         assert_eq!(selected_noise_analysis_index(&state), Some(1));
     }
 
@@ -507,7 +507,7 @@ mod tests {
         );
 
         let mut state = AppState::default();
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
 
         // The selected PNOISE analysis holds no ordinary spectrum. Its own
@@ -547,7 +547,7 @@ mod tests {
         );
 
         let mut state = AppState::default();
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         let model = build_noise_model(&state).expect("input-referred noise model");
         // Input-referred evidence takes the card without mixing in output

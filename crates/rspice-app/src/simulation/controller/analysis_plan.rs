@@ -90,7 +90,7 @@ impl SimulationController {
             analysis_inputs(state),
             plan,
             sealed_model_sources,
-            &state.simulation.imported_monte_carlo_checkpoints,
+            &state.simulation.retained.imported_monte_carlo_checkpoints,
             state.schematic.session.current_file.as_deref(),
         )
     }

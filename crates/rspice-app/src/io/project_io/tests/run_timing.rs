@@ -16,7 +16,7 @@ fn timed_results() -> ProjectSimulationResults {
     run.timestamp = 1234.5;
     run.elapsed_time = 12.5;
     let mut state = SimulationState::default();
-    state.runs.push(run);
+    state.retained.runs.push(run);
     crate::io::capture_simulation_results(&state)
 }
 
@@ -34,8 +34,10 @@ fn restored_terminal_run_timing_is_unchanged_by_repeated_sealing() {
         let mut restored = crate::io::simulation_state_from_results(results).unwrap();
         let before =
             serde_json::to_value(crate::io::capture_simulation_results(&restored)).unwrap();
-        restored.runs[0].finish_lifecycle(terminal).unwrap();
-        assert_eq!(restored.runs[0].elapsed_time, 12.5);
+        restored.retained.runs[0]
+            .finish_lifecycle(terminal)
+            .unwrap();
+        assert_eq!(restored.retained.runs[0].elapsed_time, 12.5);
         assert_eq!(
             serde_json::to_value(crate::io::capture_simulation_results(&restored)).unwrap(),
             before,
@@ -55,7 +57,7 @@ fn restored_interrupted_run_timing_does_not_count_time_since_the_old_timestamp()
         results.runs[0].lifecycle = Some(active);
         results.runs[0].success = false;
         let mut restored = crate::io::simulation_state_from_results(results).unwrap();
-        let run = &mut restored.runs[0];
+        let run = &mut restored.retained.runs[0];
         assert_eq!(run.lifecycle, SimulationRunLifecycle::Interrupted);
         assert!(!run.success);
         assert_eq!(run.elapsed_time, 12.5);

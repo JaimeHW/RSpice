@@ -368,6 +368,7 @@ pub(super) fn regression_run_pair(
     let selected = active_regression_baseline(app).and_then(|id| {
         app.state
             .simulation
+            .retained
             .runs
             .iter()
             .find(|run| run.run_id == id)
@@ -610,6 +611,7 @@ pub(super) fn commit_regression_baseline(
     if !app
         .state
         .simulation
+        .retained
         .runs
         .iter()
         .any(|run| run.run_id == run_id)
@@ -619,6 +621,7 @@ pub(super) fn commit_regression_baseline(
     let selected = app
         .state
         .simulation
+        .retained
         .runs
         .iter()
         .find(|run| run.run_id == run_id)

@@ -172,7 +172,7 @@ pub(crate) fn select_signal_conductor(
     let view = cross_probe::CrossProbeView {
         document,
         occurrence: &occurrence,
-        net_to_points: current.then_some(&state.simulation.cross_probe.net_to_points),
+        net_to_points: current.then_some(&state.simulation.source.cross_probe.net_to_points),
     };
     cross_probe::select_signal_conductor(&view, editor, signal)
 }
@@ -188,7 +188,7 @@ pub(crate) fn drawn_failure_site_count(
         document: state.schematic.document(),
         occurrence: &occurrence,
         net_to_points: result_mapping_is_current(state)
-            .then_some(&state.simulation.cross_probe.net_to_points),
+            .then_some(&state.simulation.source.cross_probe.net_to_points),
     };
     cross_probe::drawn_failure_site_count(&view, nets, devices)
 }
@@ -196,7 +196,7 @@ pub(crate) fn drawn_failure_site_count(
 /// Whether the retained cross-probe map belongs to the open cell as it is
 /// drawn right now.
 fn result_mapping_is_current(state: &AppState) -> bool {
-    state.simulation.cross_probe.is_current_for(
+    state.simulation.source.cross_probe.is_current_for(
         &state.workspace.content.active_view,
         state.schematic.topology_version(),
     )
@@ -214,7 +214,7 @@ pub(crate) fn select_failure_sites(
     let view = cross_probe::CrossProbeView {
         document,
         occurrence: &occurrence,
-        net_to_points: current.then_some(&state.simulation.cross_probe.net_to_points),
+        net_to_points: current.then_some(&state.simulation.source.cross_probe.net_to_points),
     };
     cross_probe::select_failure_sites(&view, editor, nets, devices)
 }
@@ -451,7 +451,7 @@ mod tests {
             .document_mut_for_test()
             .wires
             .push(crate::state::Wire::new(1, vec![a, b]));
-        state.simulation.cross_probe.update(
+        state.simulation.source.cross_probe.update(
             state.workspace.content.active_view.clone(),
             std::collections::HashMap::from([(a, "OUT".to_owned()), (b, "OUT".to_owned())]),
             std::collections::HashMap::from([("OUT".to_owned(), vec![a, b])]),
@@ -489,7 +489,7 @@ mod tests {
             .document_mut_for_test()
             .wires
             .push(crate::state::Wire::new(1, vec![a, b]));
-        state.simulation.cross_probe.update(
+        state.simulation.source.cross_probe.update(
             state.workspace.content.active_view.clone(),
             std::collections::HashMap::from([(a, "OUT".to_owned()), (b, "OUT".to_owned())]),
             std::collections::HashMap::from([("OUT".to_owned(), vec![a, b])]),

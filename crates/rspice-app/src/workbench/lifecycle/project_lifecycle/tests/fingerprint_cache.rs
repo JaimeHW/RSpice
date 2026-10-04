@@ -6,12 +6,13 @@ use super::*;
 fn accepted_content_is_fingerprinted_only_once_across_dirty_queries() {
     for samples in [2, 100_000] {
         let (mut state, _) = super::durable_content::retained_results();
-        state.simulation.runs[0].analyses[0].waveforms = vec![crate::state::WaveformData::new(
-            "V(out)",
-            (0..samples).map(|index| index as f64).collect::<Vec<_>>(),
-            vec![1.0; samples],
-            "#ffffff",
-        )];
+        state.simulation.retained.runs[0].analyses[0].waveforms =
+            vec![crate::state::WaveformData::new(
+                "V(out)",
+                (0..samples).map(|index| index as f64).collect::<Vec<_>>(),
+                vec![1.0; samples],
+                "#ffffff",
+            )];
         assert!(state.simulation.select_run(0));
         let baseline = snapshot(&state).unwrap();
         registry::FINGERPRINT_PASSES.with(|passes| passes.set(0));

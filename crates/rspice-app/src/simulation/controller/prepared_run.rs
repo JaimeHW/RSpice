@@ -81,7 +81,7 @@ fn run_preparation_inputs(
         schematic_source: rspice_design::projection::ProjectionSource::projection_source(
             &state.schematic,
         ),
-        imported_checkpoints: &state.simulation.imported_monte_carlo_checkpoints,
+        imported_checkpoints: &state.simulation.retained.imported_monte_carlo_checkpoints,
         display_waveform_cache_samples: crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
         compilation: state
             .ui
@@ -500,7 +500,7 @@ impl SimulationController {
                     "Campaign '{}' {outcome}: {} completed, {} failed",
                     campaign.name, campaign.completed_count, campaign.failed_count
                 )));
-                state.simulation.status = format!("Campaign {outcome}");
+                state.simulation.execution.status = format!("Campaign {outcome}");
                 return Ok(());
             };
             campaign.dispatched_count = campaign.dispatched_count.saturating_add(1);
@@ -577,7 +577,7 @@ impl SimulationController {
                 "Campaign scheduling stopped safely: {error}"
             )));
             self.active_campaign = None;
-            state.simulation.status = "Campaign stopped".to_owned();
+            state.simulation.execution.status = "Campaign stopped".to_owned();
         }
     }
 
@@ -630,7 +630,7 @@ impl SimulationController {
         &mut self,
         state: &AppState,
     ) -> Result<AuthorizedRunDispatch, PreparationError> {
-        let intent = state.simulation.run_intent;
+        let intent = state.simulation.execution.run_intent;
         self.run_authorization
             .consume(intent, || Self::build_prepared_snapshot(state, intent))
     }
@@ -677,7 +677,7 @@ impl SimulationController {
         let owned_active = state.ui.netlist.active_document
             == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
             || (!state.ui.netlist.active_document_initialized
-                && state.simulation.netlist_content.is_empty()
+                && state.simulation.source.netlist_content.is_empty()
                 && state.workspace.content.netlist_source.is_some());
         let source = if owned_active {
             state
@@ -685,9 +685,9 @@ impl SimulationController {
                 .content
                 .netlist_source
                 .as_deref()
-                .unwrap_or(state.simulation.netlist_content.as_str())
+                .unwrap_or(state.simulation.source.netlist_content.as_str())
         } else {
-            state.simulation.netlist_content.as_str()
+            state.simulation.source.netlist_content.as_str()
         };
         let origin = if owned_active {
             state.workspace.content.netlist_source_path.as_deref()

@@ -256,7 +256,7 @@ impl RSpiceApp {
                     .to_owned(),
             );
         }
-        if self.state.simulation.has_active_execution() {
+        if self.state.simulation.execution.has_active_execution() {
             return Err(
                 "project library publication is unavailable while a simulation is running"
                     .to_owned(),
@@ -314,7 +314,7 @@ impl RSpiceApp {
                     .to_owned(),
             );
         }
-        if self.state.simulation.has_active_execution() {
+        if self.state.simulation.execution.has_active_execution() {
             return Err(
                 "project library publication is unavailable while a simulation is running"
                     .to_owned(),
@@ -380,7 +380,7 @@ impl RSpiceApp {
                     .to_owned(),
             );
         }
-        if self.state.simulation.has_active_execution() {
+        if self.state.simulation.execution.has_active_execution() {
             return Err(
                 "project library rollback is unavailable while a simulation is running".to_owned(),
             );

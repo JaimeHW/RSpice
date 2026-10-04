@@ -223,7 +223,7 @@ fn fft_quick_view_ignores_stale_cache_and_global_data_version() {
         20_000.0,
         rspice_results_ui::fft::data::SpectrumNormalization::Peak,
     ));
-    state.simulation.data_version = 9;
+    state.simulation.view.data_version = 9;
 
     let first = resolve_quick_view(&state).unwrap();
     let HardcopySemanticDocument::Plot(plot) = first.semantic_document() else {
@@ -237,7 +237,7 @@ fn fft_quick_view_ignores_stale_cache_and_global_data_version() {
             .all(|(x, y)| *x != 9_999.0f64.to_bits() && *y != 8_888.0f64.to_bits())
     );
 
-    state.simulation.data_version = 10_000;
+    state.simulation.view.data_version = 10_000;
     state.analysis.fft_state.data = Some(rspice_results_ui::fft::spectrum_fixture(
         "different stale cache",
         &[123_456.0],
@@ -386,10 +386,10 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
     );
     // A point population keeps its exact coordinate/count and a visible bar
     // with presentation width, even though its exact bin has zero width.
-    let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) = state.simulation.runs[0]
-        .analyses[0]
-        .family_metadata
-        .as_mut()
+    let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
+        state.simulation.retained.runs[0].analyses[0]
+            .family_metadata
+            .as_mut()
     else {
         unreachable!()
     };
@@ -742,17 +742,15 @@ fn a_failed_noise_solve_is_neither_offered_nor_printed() {
     // scanned for the first analysis the ungated predicate accepted, so a run
     // that solved noise twice — once badly, once well — bound the page to the
     // failed attempt and then refused the whole page for being unsuccessful.
-    state.simulation.runs[0].analyses.push(
+    state.simulation.retained.runs[0].analyses.push(
         AnalysisResult::new(10, AnalysisType::Noise, "Noise").with_waveforms(vec![
             WaveformData::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#0ff"),
         ]),
     );
-    state.simulation.runs[0].analyses.push(AnalysisResult::new(
-        11,
-        AnalysisType::Transient,
-        "TRAN",
-    ));
-    state.simulation.active_analysis_idx = Some(2);
+    state.simulation.retained.runs[0]
+        .analyses
+        .push(AnalysisResult::new(11, AnalysisType::Transient, "TRAN"));
+    state.simulation.view.active_analysis_idx = Some(2);
     let run = state.simulation.active_run().unwrap();
     assert_eq!(
         quick_result_analysis_index(&state, run, ResultViewer::NoiseContrib),
@@ -788,12 +786,12 @@ fn a_selected_noise_analysis_is_never_substituted_on_the_printed_page() {
     let transient = AnalysisResult::new(3, AnalysisType::Transient, "TRAN");
 
     let mut state = quick_view_state(phase, ResultViewer::NoiseContrib);
-    state.simulation.runs[0].analyses.push(ordinary);
-    state.simulation.runs[0].analyses.push(transient);
+    state.simulation.retained.runs[0].analyses.push(ordinary);
+    state.simulation.retained.runs[0].analyses.push(transient);
 
     // The selection is a noise-family analysis with no ordinary spectrum:
     // nothing is offered rather than the neighbouring NOISE result.
-    state.simulation.active_analysis_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
     let run = state.simulation.active_run().unwrap();
     assert_eq!(
         quick_result_analysis_index(&state, run, ResultViewer::NoiseContrib),
@@ -802,7 +800,7 @@ fn a_selected_noise_analysis_is_never_substituted_on_the_printed_page() {
     assert!(!quick_result_availability(&state, run).is_available());
 
     // The selection is the ordinary-noise result itself.
-    state.simulation.active_analysis_idx = Some(1);
+    state.simulation.view.active_analysis_idx = Some(1);
     let run = state.simulation.active_run().unwrap();
     assert_eq!(
         quick_result_analysis_index(&state, run, ResultViewer::NoiseContrib),
@@ -811,7 +809,7 @@ fn a_selected_noise_analysis_is_never_substituted_on_the_printed_page() {
 
     // A transient selection expresses no noise intent, so the run-wide
     // fallback still finds the one printable spectrum.
-    state.simulation.active_analysis_idx = Some(2);
+    state.simulation.view.active_analysis_idx = Some(2);
     let run = state.simulation.active_run().unwrap();
     assert_eq!(
         quick_result_analysis_index(&state, run, ResultViewer::NoiseContrib),
@@ -888,9 +886,9 @@ fn the_specifications_page_is_offered_on_the_requirements_the_run_froze() {
 
     fn specs_state(run: SimulationRun) -> AppState {
         let mut state = AppState::default();
-        state.simulation.runs.push(run);
-        state.simulation.active_run_idx = Some(0);
-        state.simulation.active_analysis_idx = Some(0);
+        state.simulation.retained.runs.push(run);
+        state.simulation.view.active_run_idx = Some(0);
+        state.simulation.view.active_analysis_idx = Some(0);
         state.ui.results.session.viewer = ResultViewer::Specs;
         state
     }

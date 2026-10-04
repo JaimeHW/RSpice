@@ -378,8 +378,8 @@ fn operating_point_outputs_resolve_retained_voltages_currents_and_expressions() 
 
 fn stored(run: SimulationRun) -> crate::io::project_io::ProjectSimulationResults {
     let mut state = crate::state::SimulationState::default();
-    state.next_run_id = run.id;
-    state.runs = vec![run].into();
+    state.retained.next_run_id = run.id;
+    state.retained.runs = vec![run].into();
     crate::io::capture_simulation_results(&state)
 }
 
@@ -399,7 +399,7 @@ fn dc_family_receipts_round_trip_every_member_and_reject_schema_downgrades() {
         serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
     let mut state = crate::state::SimulationState::default();
     crate::io::restore_simulation_results(restored, &mut state).unwrap();
-    let analysis = &state.runs[0].analyses[0];
+    let analysis = &state.retained.runs[0].analyses[0];
     assert_eq!(analysis.result_data_digest(), digest);
     assert_eq!(analysis.waveforms.len(), 3);
     assert!(
@@ -466,7 +466,10 @@ fn schema_22_saved_outputs_authenticate_and_reseal_their_result_digests() {
         );
         let mut state = crate::state::SimulationState::default();
         crate::io::restore_simulation_results(snapshot, &mut state).unwrap();
-        assert_ne!(state.runs[0].analyses[0].result_data_digest(), digest);
+        assert_ne!(
+            state.retained.runs[0].analyses[0].result_data_digest(),
+            digest
+        );
     }
 }
 

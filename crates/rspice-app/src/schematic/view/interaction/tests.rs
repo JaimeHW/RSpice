@@ -305,7 +305,7 @@ fn schematic_and_exact_veriloga_instance_double_click_destinations_are_distinct(
 #[test]
 fn materialized_probe_toggles_immediately_and_preserves_future_save_intent() {
     let mut state = AppState::default();
-    state.simulation.waveforms.push(WaveformData::new(
+    state.simulation.view.waveforms.push(WaveformData::new(
         "V(OUT)",
         vec![0.0, 1.0],
         vec![0.0, 1.0],
@@ -316,21 +316,21 @@ fn materialized_probe_toggles_immediately_and_preserves_future_save_intent() {
         request_probe_signal(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)")),
         ProbeSignalOutcome::WaveformHidden
     );
-    assert!(!state.simulation.waveforms[0].visible);
+    assert!(!state.simulation.view.waveforms[0].visible);
     assert_eq!(saved_outputs(&state).len(), 1);
 
     assert_eq!(
         request_probe_signal(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)")),
         ProbeSignalOutcome::WaveformShown
     );
-    assert!(state.simulation.waveforms[0].visible);
+    assert!(state.simulation.view.waveforms[0].visible);
     assert_eq!(saved_outputs(&state).len(), 1);
 }
 
 #[test]
 fn ensure_visible_probe_action_never_hides_an_existing_trace() {
     let mut state = AppState::default();
-    state.simulation.waveforms.push(WaveformData::new(
+    state.simulation.view.waveforms.push(WaveformData::new(
         "V(OUT)",
         vec![0.0, 1.0],
         vec![0.0, 1.0],
@@ -341,15 +341,15 @@ fn ensure_visible_probe_action_never_hides_an_existing_trace() {
         request_probe_signal_visible(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)")),
         ProbeSignalOutcome::WaveformAlreadyVisible
     );
-    assert!(state.simulation.waveforms[0].visible);
+    assert!(state.simulation.view.waveforms[0].visible);
     assert_eq!(saved_outputs(&state).len(), 1);
 
-    state.simulation.waveforms[0].visible = false;
+    state.simulation.view.waveforms[0].visible = false;
     assert_eq!(
         request_probe_signal_visible(&mut state, &OccurrenceProbeSpelling::verbatim("V(OUT)")),
         ProbeSignalOutcome::WaveformShown
     );
-    assert!(state.simulation.waveforms[0].visible);
+    assert!(state.simulation.view.waveforms[0].visible);
     assert_eq!(saved_outputs(&state).len(), 1);
 }
 
@@ -370,6 +370,7 @@ fn wire_probe_resolves_from_live_connectivity_without_retained_run_data() {
     assert!(
         state
             .simulation
+            .source
             .cross_probe
             .net_at_in(
                 &state.workspace.content.active_view,

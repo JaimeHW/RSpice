@@ -18,8 +18,8 @@ fn tran() -> AnalysisSpec {
 
 fn stored(run: SimulationRun) -> ProjectSimulationResults {
     let mut state = SimulationState::default();
-    state.next_run_id = run.id;
-    state.runs = vec![run].into();
+    state.retained.next_run_id = run.id;
+    state.retained.runs = vec![run].into();
     let stored = crate::io::capture_simulation_results(&state);
     stored.validate().unwrap();
     stored
@@ -50,7 +50,7 @@ fn task_ground_and_formal_port_bindings_survive_reload_without_deck_history() {
                 let loaded: ProjectSimulationResults =
                     serde_json::from_slice(&serde_json::to_vec(&persisted).unwrap()).unwrap();
                 let mut state = crate::io::simulation_state_from_results(loaded).unwrap();
-                let analysis = &mut state.runs[0].analyses[0];
+                let analysis = &mut state.retained.runs[0].analyses[0];
                 for index in 0..outputs.len() {
                     if deferred {
                         materialize_deferred_saved_output(analysis, index).unwrap();
@@ -147,7 +147,7 @@ fn authored_transient_and_ac_labels_cannot_invent_deferred_physical_sources() {
                         let before =
                             serde_json::to_vec(&crate::io::capture_simulation_results(&state))
                                 .unwrap();
-                        let version = state.data_version;
+                        let version = state.view.data_version;
                         assert!(
                             state
                                 .materialize_deferred_saved_output(
@@ -157,7 +157,7 @@ fn authored_transient_and_ac_labels_cannot_invent_deferred_physical_sources() {
                                 )
                                 .is_err()
                         );
-                        assert_eq!(state.data_version, version);
+                        assert_eq!(state.view.data_version, version);
                         assert_eq!(
                             serde_json::to_vec(&crate::io::capture_simulation_results(&state))
                                 .unwrap(),
@@ -170,7 +170,7 @@ fn authored_transient_and_ac_labels_cannot_invent_deferred_physical_sources() {
                                 2,
                             )
                             .unwrap();
-                        check_value(&state.runs[0], 2, if complex { 2.0 } else { 4.0 });
+                        check_value(&state.retained.runs[0], 2, if complex { 2.0 } else { 4.0 });
                     }
                 }
             }
@@ -268,7 +268,7 @@ fn schema_21_through_23_authenticate_original_digests_without_inventing_bindings
                 crate::io::project_io::ProjectSimulationResults::default().schema_version
             );
             let mut state = crate::io::simulation_state_from_results(old).unwrap();
-            let analysis = &mut state.runs[0].analyses[0];
+            let analysis = &mut state.retained.runs[0].analyses[0];
             assert!(analysis.saved_output_receipts[0].source_bindings.is_none());
             assert_ne!(analysis.result_data_digest(), original);
             let result = materialize_deferred_saved_output(analysis, 0);

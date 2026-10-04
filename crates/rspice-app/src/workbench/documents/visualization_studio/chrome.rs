@@ -26,6 +26,7 @@ pub(super) fn visualization_configuration_status(state: &AppState) -> Result<(),
     for pane in &studio.panes {
         let run = state
             .simulation
+            .retained
             .runs
             .iter()
             .find(|run| run.dataset_id == pane.dataset_id)
@@ -120,7 +121,7 @@ pub(super) fn visualization_configuration_status(state: &AppState) -> Result<(),
         }
     }
     for annotation in &studio.annotations {
-        if !state.simulation.runs.iter().any(|run| {
+        if !state.simulation.retained.runs.iter().any(|run| {
             run.dataset_id == annotation.dataset_id
                 && run
                     .analyses
@@ -134,7 +135,7 @@ pub(super) fn visualization_configuration_status(state: &AppState) -> Result<(),
         }
     }
     for marker in &studio.markers {
-        if !state.simulation.runs.iter().any(|run| {
+        if !state.simulation.retained.runs.iter().any(|run| {
             run.dataset_id == marker.dataset_id
                 && run
                     .analyses
@@ -148,7 +149,7 @@ pub(super) fn visualization_configuration_status(state: &AppState) -> Result<(),
         }
     }
     for measurement in &studio.measurements {
-        if !state.simulation.runs.iter().any(|run| {
+        if !state.simulation.retained.runs.iter().any(|run| {
             run.dataset_id == measurement.dataset_id
                 && run
                     .analyses
@@ -192,6 +193,7 @@ pub(super) fn status_strip(ui: &mut Ui, app: &RSpiceApp) {
     let samples: usize = app
         .state
         .simulation
+        .retained
         .runs
         .iter()
         .filter(|run| bound_datasets.contains(&run.dataset_id))

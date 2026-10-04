@@ -25,7 +25,7 @@ fn app_with_exact_source() -> RSpiceApp {
     ]);
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
-    app.state.simulation.runs = vec![run].into();
+    app.state.simulation.retained.runs = vec![run].into();
     assert!(app.state.simulation.select_run(0));
     app
 }
@@ -141,11 +141,12 @@ fn studio_export_requires_the_selected_successful_completed_binding() {
     reconcile_document(&mut app);
     assert!(!active_studio_exact_export_available(&app.state));
 
-    app.state.simulation.runs[0].lifecycle = crate::state::SimulationRunLifecycle::Completed;
+    app.state.simulation.retained.runs[0].lifecycle =
+        crate::state::SimulationRunLifecycle::Completed;
     assert!(active_studio_exact_export_available(&app.state));
     assert!(active_studio_figure_export_available(&app.state));
 
-    app.state.simulation.runs[0].analyses[0].success = false;
+    app.state.simulation.retained.runs[0].analyses[0].success = false;
     assert!(!active_studio_exact_export_available(&app.state));
     assert!(!active_studio_figure_export_available(&app.state));
 }
@@ -390,7 +391,7 @@ fn fit_contract_reports_exact_source_and_specification_blockers() {
     app.state.workbench.visualization_studio.autoscale = VisualizationAutoscale::ExactExtrema;
     assert_eq!(fit_block_reason(&app.state), None);
 
-    for waveform in &mut app.state.simulation.runs[0].analyses[0].waveforms {
+    for waveform in &mut app.state.simulation.retained.runs[0].analyses[0].waveforms {
         waveform.visible = false;
     }
     assert_eq!(
@@ -589,7 +590,7 @@ fn recovery_fails_closed_when_immutable_source_binding_disappears() {
     advance_source_integrity_scan(&mut app).expect("initial exact chunk must scan");
     app.state.workbench.visualization_studio.operation_state = OperationState::Cancelled;
 
-    app.state.simulation.runs.clear();
+    app.state.simulation.retained.runs.clear();
 
     assert_eq!(
         recover_source_integrity_scan(&mut app),
@@ -637,7 +638,7 @@ fn explicit_comparison_executes_exact_contract_without_mutating_sources() {
         ]),
     );
     let baseline_id = baseline.dataset_id;
-    app.state.simulation.runs.push(baseline);
+    app.state.simulation.retained.runs.push(baseline);
     app.state
         .workbench
         .visualization_studio
@@ -734,7 +735,7 @@ fn project_document_owns_comparison_receipts_and_studio_only_projects_them() {
         ]),
     );
     let baseline_id = baseline.dataset_id;
-    app.state.simulation.runs.push(baseline);
+    app.state.simulation.retained.runs.push(baseline);
     let studio = &mut app.state.workbench.visualization_studio;
     studio.draft_comparison_dataset = Some(baseline_id);
     studio.draft_comparison_absolute_tolerance = 0.1;
@@ -770,7 +771,7 @@ fn results_comparison_handoff_rebinds_a_stale_owner_to_the_active_document() {
     let mut app = app_with_exact_source();
     app.state.project_lifecycle.authority.open_session();
     app.state.workbench.workspace = Workspace::Results;
-    let candidate_id = app.state.simulation.runs[0].dataset_id;
+    let candidate_id = app.state.simulation.retained.runs[0].dataset_id;
     app.state
         .workbench
         .documents
@@ -788,7 +789,7 @@ fn results_comparison_handoff_rebinds_a_stale_owner_to_the_active_document() {
         ]),
     );
     let baseline_id = baseline.dataset_id;
-    app.state.simulation.runs.push(baseline);
+    app.state.simulation.retained.runs.push(baseline);
 
     app.state.workbench.visualization_studio.panes = vec![VisualizationPane {
         id: 1,
@@ -851,7 +852,7 @@ fn results_comparison_fails_closed_before_navigation_without_a_compatible_baseli
     let mut app = app_with_exact_source();
     app.state.project_lifecycle.authority.open_session();
     app.state.workbench.workspace = Workspace::Results;
-    let candidate_id = app.state.simulation.runs[0].dataset_id;
+    let candidate_id = app.state.simulation.retained.runs[0].dataset_id;
     app.state
         .workbench
         .documents
@@ -869,7 +870,7 @@ fn results_comparison_fails_closed_before_navigation_without_a_compatible_baseli
             ),
         ]),
     );
-    app.state.simulation.runs.push(incompatible);
+    app.state.simulation.retained.runs.push(incompatible);
 
     assert!(!results_comparison_available(&app.state));
     let error = open_results_comparison_inner(&mut app)
@@ -954,7 +955,7 @@ fn a_view_no_sheet_draws_reports_its_release_scope_not_a_data_requirement() {
 #[test]
 fn a_retained_pane_sharing_a_viewer_document_still_validates() {
     let mut app = app_with_exact_source();
-    app.state.simulation.runs[0].analyses[0].measurements =
+    app.state.simulation.retained.runs[0].analyses[0].measurements =
         vec![rspice_core::MeasureResult::success("V(out)", 4.0)];
     reconcile_document(&mut app);
     let panes = &mut app.state.workbench.visualization_studio.panes;
@@ -984,7 +985,7 @@ fn configuration_status_fails_closed_when_a_retained_binding_disappears() {
     visualization_configuration_status(&app.state)
         .expect("a compatible retained pane binding must validate");
 
-    app.state.simulation.runs.clear();
+    app.state.simulation.retained.runs.clear();
 
     assert!(
         visualization_configuration_status(&app.state)
@@ -1018,7 +1019,7 @@ fn append_retained_pole_zero_run(app: &mut RSpiceApp) -> (DatasetId, u64) {
     let mut run = SimulationRun::new(2);
     run.add_analysis(analysis);
     let dataset_id = run.dataset_id;
-    app.state.simulation.runs.push(run);
+    app.state.simulation.retained.runs.push(run);
     (dataset_id, analysis_sequence)
 }
 
@@ -1046,7 +1047,7 @@ fn append_retained_sensitivity_run(app: &mut RSpiceApp) -> (DatasetId, u64) {
     let mut run = SimulationRun::new(3);
     run.add_analysis(analysis);
     let dataset_id = run.dataset_id;
-    app.state.simulation.runs.push(run);
+    app.state.simulation.retained.runs.push(run);
     (dataset_id, analysis_sequence)
 }
 
@@ -1066,7 +1067,7 @@ fn table_binding_accepts_payload_only_and_zero_mode_periodic_results() {
         let mut run = SimulationRun::new(run_sequence);
         run.add_analysis(analysis);
         let dataset_id = run.dataset_id;
-        app.state.simulation.runs.push(run);
+        app.state.simulation.retained.runs.push(run);
 
         assert_eq!(
             resolved_viewer_availability_for_binding(
@@ -1084,7 +1085,7 @@ fn table_binding_accepts_payload_only_and_zero_mode_periodic_results() {
 fn historical_sensitivity_binding_uses_its_retained_payload() {
     let mut app = app_with_exact_source();
     let (dataset_id, analysis_sequence) = append_retained_sensitivity_run(&mut app);
-    assert_eq!(app.state.simulation.active_run_idx, Some(0));
+    assert_eq!(app.state.simulation.view.active_run_idx, Some(0));
 
     let definition =
         viewer_document("viewer-contribution").expect("registered contribution viewer");
@@ -1119,7 +1120,7 @@ fn sensitivity_exact_data_rows_preserve_parameter_values_output_and_basis() {
 
     use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
     let Some(AnalysisResultPayload::Sensitivity { rows, .. }) =
-        &mut app.state.simulation.runs[1].analyses[0].result_payload
+        &mut app.state.simulation.retained.runs[1].analyses[0].result_payload
     else {
         panic!("sensitivity fixture")
     };
@@ -1135,7 +1136,7 @@ fn sensitivity_exact_data_rows_preserve_parameter_values_output_and_basis() {
 fn historical_pole_zero_binding_uses_its_retained_payload_without_derived_state() {
     let mut app = app_with_exact_source();
     let (dataset_id, analysis_sequence) = append_retained_pole_zero_run(&mut app);
-    assert_eq!(app.state.simulation.active_run_idx, Some(0));
+    assert_eq!(app.state.simulation.view.active_run_idx, Some(0));
 
     let definition = viewer_document("viewer-pz").expect("registered PZ viewer");
     assert_eq!(
@@ -1243,7 +1244,7 @@ fn add_pane_binds_the_requested_retained_analysis_and_selects_its_run() {
     let mut historical_run = SimulationRun::new(2);
     historical_run.add_analysis(historical_analysis);
     let historical_dataset = historical_run.dataset_id;
-    app.state.simulation.runs.push(historical_run);
+    app.state.simulation.retained.runs.push(historical_run);
 
     add_viewer_pane_bound(
         &mut app,
@@ -1263,8 +1264,8 @@ fn add_pane_binds_the_requested_retained_analysis_and_selects_its_run() {
     assert_eq!(pane.page, "Engineering");
     assert_eq!(pane.x_link, Some(1));
     assert_eq!(pane.cursor_group, Some(1));
-    assert_eq!(app.state.simulation.active_run_idx, Some(1));
-    assert_eq!(app.state.simulation.active_analysis_idx, Some(0));
+    assert_eq!(app.state.simulation.view.active_run_idx, Some(1));
+    assert_eq!(app.state.simulation.view.active_analysis_idx, Some(0));
 }
 
 #[test]

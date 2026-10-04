@@ -21,7 +21,7 @@ pub(crate) fn open_netlist_comparison(state: &mut AppState) -> bool {
     state.ui.netlist.active_dependency_identity = None;
     state.ui.netlist.active_dependency_root = None;
     state.ui.netlist.active_document_initialized = true;
-    state.simulation.netlist_content = state.ui.netlist.generated_diff_source.clone();
+    state.simulation.source.netlist_content = state.ui.netlist.generated_diff_source.clone();
     state.ui.netlist.completion_open = false;
     state.ui.netlist.completion_dismissed_at = None;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
@@ -60,7 +60,7 @@ pub fn compare_generated_revision(state: &mut AppState, index: usize) -> Result<
     state.ui.netlist.active_dependency_root = None;
     state.ui.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
     state.ui.netlist.active_document_initialized = true;
-    state.simulation.netlist_content = state.ui.netlist.generated_diff_source.clone();
+    state.simulation.source.netlist_content = state.ui.netlist.generated_diff_source.clone();
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
     state.ui.netlist.completion_open = false;
     invalidate_source_evidence(&mut state.ui.netlist);
@@ -106,7 +106,7 @@ pub fn compare_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
     state.ui.netlist.active_dependency_root = None;
     state.ui.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
     state.ui.netlist.active_document_initialized = true;
-    state.simulation.netlist_content = state.ui.netlist.generated_diff_source.clone();
+    state.simulation.source.netlist_content = state.ui.netlist.generated_diff_source.clone();
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
     state.ui.netlist.completion_open = false;
     invalidate_source_evidence(&mut state.ui.netlist);
@@ -175,7 +175,7 @@ pub fn restore_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
     candidate.ui.netlist.active_dependency_identity = None;
     candidate.ui.netlist.active_dependency_root = None;
     candidate.ui.netlist.active_document_initialized = true;
-    candidate.simulation.netlist_content = snapshot.source;
+    candidate.simulation.source.netlist_content = snapshot.source;
     candidate.ui.netlist.generated_diff_source.clear();
     candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
     invalidate_source_evidence(&mut candidate.ui.netlist);
@@ -199,11 +199,11 @@ fn return_to_working_deck(state: &mut AppState, root: ActiveNetlistDocument) {
     match (root, state.workspace.content.netlist_source.clone()) {
         (ActiveNetlistDocument::OwnedSource, Some(source)) => {
             state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-            state.simulation.netlist_content = source;
+            state.simulation.source.netlist_content = source;
         }
         _ => {
             state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
-            state.simulation.netlist_content = state.ui.netlist.generated_source.clone();
+            state.simulation.source.netlist_content = state.ui.netlist.generated_source.clone();
         }
     }
     state.ui.netlist.active_document_initialized = true;
@@ -277,7 +277,7 @@ pub fn open_run_deck_snapshot(state: &mut AppState) -> bool {
 /// travels with the selection. Opening is the only moment the answer can
 /// change, because both of its inputs are sealed.
 pub fn open_executed_deck(state: &mut AppState, run_id: u64, point: usize) -> bool {
-    let Some(deck) = state.simulation.executed_decks.get(run_id) else {
+    let Some(deck) = state.simulation.retained.executed_decks.get(run_id) else {
         return false;
     };
     let point = point.min(deck.points.len().saturating_sub(1));
@@ -345,7 +345,7 @@ fn project_run_snapshot(state: &mut AppState) {
     state.ui.netlist.active_dependency_identity = None;
     state.ui.netlist.active_dependency_root = None;
     state.ui.netlist.active_document_initialized = true;
-    state.simulation.netlist_content = source;
+    state.simulation.source.netlist_content = source;
     state.ui.netlist.requested_line = None;
     state.ui.netlist.cursor_line = 0;
     state.ui.netlist.completion_open = false;
@@ -439,7 +439,7 @@ pub fn compare_run_deck_snapshot(state: &mut AppState) -> Result<(), String> {
     state.ui.netlist.active_dependency_root = None;
     state.ui.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
     state.ui.netlist.active_document_initialized = true;
-    state.simulation.netlist_content = state.ui.netlist.generated_diff_source.clone();
+    state.simulation.source.netlist_content = state.ui.netlist.generated_diff_source.clone();
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
     state.ui.netlist.completion_open = false;
     invalidate_source_evidence(&mut state.ui.netlist);

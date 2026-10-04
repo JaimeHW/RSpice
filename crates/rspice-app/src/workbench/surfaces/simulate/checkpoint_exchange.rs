@@ -21,6 +21,7 @@ pub(super) fn apply(ctx: &egui::Context, app: &mut RSpiceApp, action: Action) {
             if app
                 .state
                 .simulation
+                .retained
                 .imported_monte_carlo_checkpoints
                 .remove(digest)
             {
@@ -159,6 +160,7 @@ pub(super) fn poll(ctx: &egui::Context, app: &mut RSpiceApp) {
                         .and_then(|checkpoint| {
                             app.state
                                 .simulation
+                                .retained
                                 .imported_monte_carlo_checkpoints
                                 .insert(file.name, checkpoint)
                         });

@@ -285,8 +285,8 @@ fn current_result_source_digest(state: &AppState) -> Option<ContentDigest> {
     (netlist.generation_error.is_none()
         && netlist.generated_input_digest.is_some()
         && netlist.generated_input_digest == netlist.current_generation_input_digest
-        && !state.simulation.netlist_content.trim().is_empty())
-    .then(|| crate::state::content_digest(&state.simulation.netlist_content))
+        && !state.simulation.source.netlist_content.trim().is_empty())
+    .then(|| crate::state::content_digest(&state.simulation.source.netlist_content))
 }
 
 fn run_matches_current_authority(
@@ -375,6 +375,7 @@ fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -
 
     let Some(candidate) = state
         .simulation
+        .retained
         .runs
         .iter()
         .filter(|run| run_matches_current_authority(run, plan_id, project_revision, source_digest))
@@ -417,6 +418,7 @@ fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -
 
     let prepared = state
         .simulation
+        .retained
         .runs
         .iter()
         .find(|run| run.dataset_id == candidate_dataset)
@@ -824,7 +826,7 @@ fn project_pane_presentation(
     };
     state.ui.results.session.cursors.a = cursor_position("A");
     state.ui.results.session.cursors.b = cursor_position("B");
-    state.ui.results.session.cursor_strip = state.simulation.active_analysis_idx;
+    state.ui.results.session.cursor_strip = state.simulation.view.active_analysis_idx;
     // Retained markers project into their own overlay. They are entities of
     // this document, not quick-view annotations of the dataset, so they carry
     // the document's full-width serial and never enter the project's
@@ -993,8 +995,8 @@ fn select_pane_binding(state: &mut AppState, pane: &Pane) -> Result<(), String> 
         .binding
         .ok_or_else(|| "This result pane has no immutable dataset binding.".to_owned())?;
     let (run_index, analysis_index) = resolve_binding(state, binding)?;
-    if state.simulation.active_run_idx == Some(run_index)
-        && state.simulation.active_analysis_idx == Some(analysis_index)
+    if state.simulation.view.active_run_idx == Some(run_index)
+        && state.simulation.view.active_analysis_idx == Some(analysis_index)
     {
         return Ok(());
     }
@@ -1010,11 +1012,12 @@ fn select_pane_binding(state: &mut AppState, pane: &Pane) -> Result<(), String> 
 fn resolve_binding(state: &AppState, binding: PaneDataBinding) -> Result<(usize, usize), String> {
     let run_index = state
         .simulation
+        .retained
         .runs
         .iter()
         .position(|run| run.dataset_id == binding.dataset.dataset_id)
         .ok_or_else(|| "The pane's immutable result dataset is no longer retained.".to_owned())?;
-    let run = &state.simulation.runs[run_index];
+    let run = &state.simulation.retained.runs[run_index];
     if run.dataset_content_digest() != binding.dataset.content_digest {
         return Err(
             "The retained dataset content does not match the pane's immutable binding.".to_owned(),

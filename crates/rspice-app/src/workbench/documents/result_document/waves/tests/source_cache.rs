@@ -54,14 +54,17 @@ fn wave_cache_restored_history_replaces_same_version_and_display_sequence() {
     let before = spectrum_models(&old, &mut results);
     let generation = results.models.generation();
     let restored = restored_spectrum(10.0, 3);
-    assert_eq!(old.data_version, restored.data_version);
-    assert_eq!(old.runs[0].id, restored.runs[0].id);
-    assert_ne!(old.runs[0].dataset_id, restored.runs[0].dataset_id);
+    assert_eq!(old.view.data_version, restored.view.data_version);
+    assert_eq!(old.retained.runs[0].id, restored.retained.runs[0].id);
+    assert_ne!(
+        old.retained.runs[0].dataset_id,
+        restored.retained.runs[0].dataset_id
+    );
 
     let after = spectrum_models(&restored, &mut results);
     assert_eq!(
         after[0].analysis_key.dataset_id(),
-        restored.runs[0].dataset_id
+        restored.retained.runs[0].dataset_id
     );
     assert_eq!(after[0].traces[0].y.as_slice(), [20.0; 3]);
     assert_ne!(results.models.generation(), generation);
@@ -78,12 +81,12 @@ fn wave_cache_source_edits_refresh_conversions_ranges_stats_and_grid_shape() {
         Some((-1.0, 1.0))
     );
     assert_eq!(stats(&mut results, &before[0]), Some((0.0, 0.0, 0.0)));
-    let version = simulation.data_version;
-    Arc::make_mut(&mut simulation.runs[0].analyses[0].waveforms[0].y)
+    let version = simulation.view.data_version;
+    Arc::make_mut(&mut simulation.retained.runs[0].analyses[0].waveforms[0].y)
         .copy_from_slice(&[1.0, 10.0, 100.0]);
 
     let after = spectrum_models(&simulation, &mut results);
-    assert_eq!(simulation.data_version, version);
+    assert_eq!(simulation.view.data_version, version);
     assert_eq!(after[0].traces[0].y.as_slice(), [0.0, 20.0, 40.0]);
     assert_eq!(
         pane_y_range(&mut results.session.derived, &after[0], &[0]),
@@ -92,7 +95,7 @@ fn wave_cache_source_edits_refresh_conversions_ranges_stats_and_grid_shape() {
     let actual_stats = stats(&mut results, &after[0]).unwrap();
     assert_eq!((actual_stats.0, actual_stats.1), (0.0, 40.0));
 
-    Arc::make_mut(&mut simulation.runs[0].analyses[0].waveforms[0].x)
+    Arc::make_mut(&mut simulation.retained.runs[0].analyses[0].waveforms[0].x)
         .copy_from_slice(&[3.0, 2.0, 1.0]);
     let reversed = spectrum_models(&simulation, &mut results);
     assert!(!reversed[0].traces[0].shape.is_single_ascending());
@@ -134,7 +137,7 @@ fn wave_cache_cursor_copy_refreshes_values_without_frame_preparation() {
     assert_eq!(models[0].traces[0].y.as_slice(), [0.0; 3]);
     state.ui.results.session.cursor_strip = Some(0);
     state.ui.results.session.cursors.a = Some(1.0);
-    Arc::make_mut(&mut state.simulation.runs[0].analyses[0].waveforms[0].y).fill(10.0);
+    Arc::make_mut(&mut state.simulation.retained.runs[0].analyses[0].waveforms[0].y).fill(10.0);
 
     let copied = copy_cursor_text(&mut state).expect("the cursor has a retained readout");
     let magnitude = copied
@@ -157,13 +160,15 @@ fn wave_cache_family_envelopes_follow_rebuilt_model_generations() {
     simulation
         .start_run()
         .add_analysis(family_analysis(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0]));
-    let Some(AnalysisResultFamilyMetadata::Corner { x_values, .. }) =
-        simulation.runs[0].analyses[0].family_metadata.as_mut()
+    let Some(AnalysisResultFamilyMetadata::Corner { x_values, .. }) = simulation.retained.runs[0]
+        .analyses[0]
+        .family_metadata
+        .as_mut()
     else {
         panic!("corner family fixture");
     };
     *x_values = vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0];
-    let run = &simulation.runs[0];
+    let run = &simulation.retained.runs[0];
     let manifest = FamilyManifest::from_metadata(
         run.analyses[0].analysis_type,
         run.analyses[0].family_metadata.as_ref(),
@@ -192,7 +197,7 @@ fn wave_cache_family_envelopes_follow_rebuilt_model_generations() {
         &pane,
     );
     assert!(!old.series().is_empty());
-    for sample in Arc::make_mut(&mut simulation.runs[0].analyses[0].waveforms[0].y) {
+    for sample in Arc::make_mut(&mut simulation.retained.runs[0].analyses[0].waveforms[0].y) {
         *sample += 100.0;
     }
     let updated = cached_models(

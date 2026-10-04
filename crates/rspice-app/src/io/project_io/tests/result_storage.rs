@@ -30,7 +30,7 @@ fn result_snapshot_clones_share_complete_history_records() {
 fn immutable_result_validation_is_shared_and_mutation_invalidates_both_verdicts() {
     for samples in [2, 100_000] {
         let mut state = super::waveform_storage::complex_history();
-        state.runs[0].analyses[0].waveforms = vec![WaveformData::new(
+        state.retained.runs[0].analyses[0].waveforms = vec![WaveformData::new(
             "V(out)",
             (1..=samples).map(|n| n as f64).collect::<Vec<_>>(),
             vec![1.0; samples],

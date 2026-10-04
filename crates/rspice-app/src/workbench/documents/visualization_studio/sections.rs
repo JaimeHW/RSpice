@@ -60,6 +60,7 @@ impl SectionHost for Host<'_> {
         let active_dataset = app.state.simulation.active_run().map(|run| run.dataset_id);
         app.state
             .simulation
+            .retained
             .runs
             .iter()
             .map(|run| {
@@ -189,7 +190,7 @@ pub(super) fn active_analysis_expressions(state: &AppState) -> &[result_document
     state
         .simulation
         .active_run()
-        .zip(state.simulation.active_analysis_idx)
+        .zip(state.simulation.view.active_analysis_idx)
         .and_then(|(run, index)| Some((run.dataset_id, run.analyses.get(index)?)))
         .and_then(|(dataset_id, analysis)| {
             state.ui.results.session.analysis_exprs.get(
@@ -255,7 +256,7 @@ mod tests {
                 WaveformData::new("V(out)", vec![0.0, 0.5, 1.0], vec![-1.25, 2.5, 4.0], "#0af"),
             ]),
         );
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         assert!(state.simulation.select_analysis(0));
         state

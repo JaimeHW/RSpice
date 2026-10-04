@@ -33,8 +33,8 @@ pub(super) fn plan(context: &mut SheetContext<'_>) -> Option<Arc<PopulationPlan>
     let analysis = context.simulation.active_analysis()?;
     let key = AnalysisPresentationKey::new(dataset_id, analysis);
     let source = (
-        context.simulation.runs.revision(),
-        context.simulation.data_version,
+        context.simulation.retained.runs.revision(),
+        context.simulation.view.data_version,
     );
     if let Some(plan) = context.results.plans.population.as_ref()
         && plan.source == source

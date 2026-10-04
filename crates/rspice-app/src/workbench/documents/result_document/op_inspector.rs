@@ -154,7 +154,7 @@ fn result_mapping_is_current(state: &AppState) -> bool {
     };
     run.prepared_receipt().is_some_and(|receipt| {
         receipt.project_revision() == state.workspace.content.project.revision()
-    }) && state.simulation.cross_probe.is_current_for(
+    }) && state.simulation.source.cross_probe.is_current_for(
         &state.workspace.content.active_view,
         state.schematic.topology_version(),
     )
@@ -167,6 +167,7 @@ fn node_target_available(state: &AppState, name: &str) -> bool {
     name != "0"
         && state
             .simulation
+            .source
             .cross_probe
             .net_to_points
             .iter()
@@ -269,8 +270,8 @@ pub(super) struct OpPlan {
 fn op_plan(state: &mut AppState, analysis: AnalysisPresentationKey) -> Option<Arc<OpPlan>> {
     let key = OpPlanKey {
         source: (
-            state.simulation.runs.revision(),
-            state.simulation.data_version,
+            state.simulation.retained.runs.revision(),
+            state.simulation.view.data_version,
         ),
         analysis,
         filter: state.ui.results.session.op_filter.clone(),
@@ -420,9 +421,9 @@ mod tests {
         let mut run = SimulationRun::new(3);
         run.add_analysis(analysis);
         let mut state = AppState::default();
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
-        state.simulation.active_analysis_idx = Some(0);
+        state.simulation.view.active_analysis_idx = Some(0);
         state
     }
     fn active_key(state: &AppState) -> AnalysisPresentationKey {
@@ -446,12 +447,12 @@ mod tests {
         });
         run.add_analysis(first);
         run.add_analysis(AnalysisResult::new(2, AnalysisType::Transient, "TRAN"));
-        state.simulation.runs.push(run);
-        state.simulation.active_run_idx = Some(0);
+        state.simulation.retained.runs.push(run);
+        state.simulation.view.active_run_idx = Some(0);
 
-        state.simulation.active_analysis_idx = Some(1);
+        state.simulation.view.active_analysis_idx = Some(1);
         assert!(selected_op_evidence(&state).is_none());
-        state.simulation.active_analysis_idx = Some(0);
+        state.simulation.view.active_analysis_idx = Some(0);
         let evidence = selected_op_evidence(&state).expect("selected OP evidence");
         assert_eq!(evidence.run_id, 9);
         assert_eq!(evidence.label, "OP 1");
@@ -473,17 +474,21 @@ mod tests {
             ..DcOpResult::default()
         });
         run.add_analysis(analysis);
-        state.simulation.runs.push(run);
-        state.simulation.active_run_idx = Some(0);
-        state.simulation.active_analysis_idx = Some(0);
+        state.simulation.retained.runs.push(run);
+        state.simulation.view.active_run_idx = Some(0);
+        state.simulation.view.active_analysis_idx = Some(0);
 
         let evidence = selected_op_evidence(&state).expect("retained OP evidence");
         assert_eq!(evidence.node_count, 1);
-        let dc = state.simulation.runs[0].analyses[0]
+        let dc = state.simulation.retained.runs[0].analyses[0]
             .dc_op
             .as_ref()
             .expect("retained node voltages");
-        assert!(state.simulation.runs[0].analyses[0].device_op.is_none());
+        assert!(
+            state.simulation.retained.runs[0].analyses[0]
+                .device_op
+                .is_none()
+        );
         assert_eq!(
             viewer::OpPlan::new(
                 viewer::OpControls {
@@ -504,9 +509,9 @@ mod tests {
         let mut state = op_state(40, 40);
         let key = active_key(&state);
         let original = op_plan(&mut state, key).unwrap();
-        let version = state.simulation.data_version;
-        state.simulation.runs[0].analyses[0] =
-            op_state(3, 2).simulation.runs[0].analyses[0].clone();
+        let version = state.simulation.view.data_version;
+        state.simulation.retained.runs[0].analyses[0] =
+            op_state(3, 2).simulation.retained.runs[0].analyses[0].clone();
         let changed = op_plan(&mut state, key).unwrap();
         assert_eq!(changed.display.node_shown(), 3);
         assert_eq!(changed.display.device_shown(), 2);
@@ -523,7 +528,7 @@ mod tests {
                 right_panel(ui, &mut state);
             });
         });
-        assert_eq!(state.simulation.data_version, version);
+        assert_eq!(state.simulation.view.data_version, version);
     }
     #[test]
     fn the_readers_controls_are_part_of_the_row_plan_key() {
@@ -559,13 +564,13 @@ mod tests {
         let before = op_plan(&mut state, key).expect("a row plan");
         assert_eq!(before.display.node_shown(), 8);
 
-        state.simulation.runs[0].analyses[0]
+        state.simulation.retained.runs[0].analyses[0]
             .dc_op
             .as_mut()
             .expect("retained node voltages")
             .node_voltages
             .truncate(3);
-        state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
+        state.simulation.view.data_version = state.simulation.view.data_version.wrapping_add(1);
 
         let after = op_plan(&mut state, key).expect("a row plan");
         assert_eq!(

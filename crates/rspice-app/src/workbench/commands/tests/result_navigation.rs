@@ -105,8 +105,8 @@ fn app_with_prepared_run(origin: RunOrigin) -> RSpiceApp {
                 .expect("valid prepared analysis provenance"),
             ),
         );
-    app.state.simulation.active_run_idx = Some(0);
-    app.state.simulation.active_analysis_idx = Some(0);
+    app.state.simulation.view.active_run_idx = Some(0);
+    app.state.simulation.view.active_analysis_idx = Some(0);
     app
 }
 
@@ -182,7 +182,7 @@ fn the_newest_retained_run_is_what_an_unnamed_results_hop_opens() {
 
     let mut app = app_with_prepared_run(RunOrigin::ManualDeck);
     app.state.workbench.activate(Workspace::Simulate);
-    app.state.simulation.active_run_idx = None;
+    app.state.simulation.view.active_run_idx = None;
     assert!(result_navigation::open_newest_retained_run(&mut app));
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
     assert_eq!(app.state.simulation.active_run().map(|run| run.id), Some(1));
@@ -272,7 +272,7 @@ fn each_reason_a_dataset_cannot_name_its_plan_is_stated_exactly() {
         .simulation
         .start_run()
         .add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "legacy"));
-    legacy.state.simulation.active_run_idx = Some(0);
+    legacy.state.simulation.view.active_run_idx = Some(0);
     assert_eq!(
         Command::OpenProducingPlan.availability(&legacy),
         CommandAvailability::Disabled(
@@ -379,14 +379,18 @@ fn the_task_deck_hop_is_refused_by_the_reason_it_would_have_failed() {
         .active_run()
         .expect("the fixture selected a run")
         .id;
-    app.state.simulation.executed_decks.retain(ExecutedDeck {
-        run_id: sequence,
-        points: vec![ExecutedDeckPoint {
-            label: "nominal".to_owned(),
-            deck: "task deck\nV1 1 0 1\nR1 1 0 1k\n.op\n.end\n".into(),
-            model_sources: Vec::new(),
-        }],
-    });
+    app.state
+        .simulation
+        .retained
+        .executed_decks
+        .retain(ExecutedDeck {
+            run_id: sequence,
+            points: vec![ExecutedDeckPoint {
+                label: "nominal".to_owned(),
+                deck: "task deck\nV1 1 0 1\nR1 1 0 1k\n.op\n.end\n".into(),
+                model_sources: Vec::new(),
+            }],
+        });
 
     assert_eq!(
         Command::OpenTaskDeck.availability(&app),
@@ -497,7 +501,7 @@ fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
     let expected =
         crate::workbench::documents::result_document::result_browser_selection_stable_path(
             &artifact,
-            &app.state.simulation.runs,
+            &app.state.simulation.retained.runs,
         )
         .expect("the check-marked artifact resolves a stable path");
     Command::RevealProducerLog.execute(&mut app);

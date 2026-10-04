@@ -618,9 +618,9 @@ impl RSpiceApp {
         crate::workbench::browser::accessibility::publish_workspace_context(
             self.state.workbench.workspace.label(),
             &self.state.workspace.content.active_view.display_path(),
-            self.state.simulation.has_active_execution(),
+            self.state.simulation.execution.has_active_execution(),
         );
-        if self.state.simulation.has_active_execution() {
+        if self.state.simulation.execution.has_active_execution() {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
         if matches!(
@@ -2029,22 +2029,22 @@ mod tests {
             .start_run()
             .execution_identity()
             .expect("current run has execution identity");
-        state.simulation.active_execution = Some(identity);
-        state.simulation.is_running = false;
+        state.simulation.execution.active_execution = Some(identity);
+        state.simulation.execution.is_running = false;
         state.request_netlist_manual_deck_run();
 
         assert_eq!(
-            state.simulation.run_intent,
+            state.simulation.execution.run_intent,
             crate::state::SimulationRunIntent::ManualDeck
         );
-        assert!(!state.simulation.trigger_simulation);
+        assert!(!state.simulation.execution.trigger_simulation);
         assert!(state.ui.netlist.rerun_queued);
 
-        state.simulation.active_execution = None;
+        state.simulation.execution.active_execution = None;
         state.ui.netlist.rerun_queued = false;
         state.request_netlist_manual_deck_run();
 
-        assert!(state.simulation.trigger_simulation);
+        assert!(state.simulation.execution.trigger_simulation);
         assert!(!state.ui.netlist.rerun_queued);
     }
 

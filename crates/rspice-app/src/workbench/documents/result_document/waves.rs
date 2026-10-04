@@ -92,7 +92,7 @@ pub(super) fn build_models(
     let display_runs = simulation.display_runs();
     rspice_results_ui::waves::build_models(
         &display_runs,
-        &simulation.executed_decks,
+        &simulation.retained.executed_decks,
         derived,
         tokens,
         rspice_results_ui::waves::ProjectionOptions {
@@ -116,7 +116,7 @@ pub(super) fn source_waveform_anchor(
         presentation.complex_number_display(),
         &Tokens::default(),
     );
-    let active_analysis_index = state.simulation.active_analysis_idx?;
+    let active_analysis_index = state.simulation.view.active_analysis_idx?;
     let model = models
         .iter()
         .find(|model| model.analysis_index == active_analysis_index)?;

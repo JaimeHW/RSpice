@@ -221,7 +221,7 @@ pub(super) fn create_owned_source(
     state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
     state.ui.netlist.active_document_initialized = true;
     state.ui.netlist.externally_saved_content_digest = None;
-    state.simulation.netlist_content = source;
+    state.simulation.source.netlist_content = source;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
     crate::workbench::documents::netlist_document::invalidate_source_evidence(
         &mut state.ui.netlist,
@@ -398,7 +398,7 @@ pub(super) fn open_owned_source(state: &mut AppState) -> bool {
     state.ui.netlist.active_dependency_identity = None;
     state.ui.netlist.active_dependency_root = None;
     state.ui.netlist.active_document_initialized = true;
-    state.simulation.netlist_content = source;
+    state.simulation.source.netlist_content = source;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
     state.ui.netlist.completion_open = false;
     state.ui.netlist.completion_dismissed_at = None;

@@ -373,7 +373,7 @@ pub(crate) fn action_view_netlist(state: &mut AppState) {
         return;
     };
 
-    state.simulation.netlist_content = netlist_content.clone();
+    state.simulation.source.netlist_content = netlist_content.clone();
 
     let preview_lines: Vec<&str> = netlist_content.lines().take(10).collect();
     let preview = preview_lines.join("\n");

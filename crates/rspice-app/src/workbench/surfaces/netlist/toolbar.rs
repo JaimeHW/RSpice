@@ -915,7 +915,7 @@ fn run_control_label(
     app: &RSpiceApp,
     messages: crate::workbench::MessageCatalog,
 ) -> (bool, String) {
-    let execution_active = app.state.simulation.has_active_execution();
+    let execution_active = app.state.simulation.execution.has_active_execution();
     let label = messages.text(if execution_active {
         MessageId::NetlistStopRun
     } else {
@@ -1195,7 +1195,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
         app.state.workspace.content.netlist_source = Some(DECK.to_owned());
-        app.state.simulation.netlist_content = DECK.to_owned();
+        app.state.simulation.source.netlist_content = DECK.to_owned();
         app.state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
         app.state.ui.netlist.active_document_initialized = true;
         app
@@ -1209,7 +1209,7 @@ mod tests {
             &mut app.state,
             "generated\nR1 out 0 1k\n.op\n.end\n",
         );
-        app.state.simulation.netlist_content = app.state.ui.netlist.generated_source.clone();
+        app.state.simulation.source.netlist_content = app.state.ui.netlist.generated_source.clone();
         app.state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
         app.state.ui.netlist.active_document_initialized = true;
         app

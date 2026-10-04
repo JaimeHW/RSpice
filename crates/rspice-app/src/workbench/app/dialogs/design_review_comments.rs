@@ -437,6 +437,7 @@ fn selected_review_note(state: &AppState) -> Option<&DesignNote> {
 fn evidence_candidates(state: &AppState) -> Vec<EvidenceCandidate> {
     state
         .simulation
+        .retained
         .runs
         .iter()
         .filter(|run| run.lifecycle.is_terminal())

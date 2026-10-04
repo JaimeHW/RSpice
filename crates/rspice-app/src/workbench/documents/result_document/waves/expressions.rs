@@ -83,7 +83,7 @@ pub(super) fn expr_editor_row(
                         (analysis_key, text.clone()),
                         ExprSeries {
                             version: expression_version(
-                                state.simulation.data_version,
+                                state.simulation.view.data_version,
                                 sample_selection.as_ref(),
                                 ComplexExpressionPolicy::Rectangular,
                             ),
@@ -153,7 +153,7 @@ pub(super) fn resolve_strip_exprs(
     let mut resolved = Vec::new();
     for (slot, expr) in exprs {
         let version = expression_version(
-            state.simulation.data_version,
+            state.simulation.view.data_version,
             sample_selection.as_ref(),
             expr.complex_policy,
         );

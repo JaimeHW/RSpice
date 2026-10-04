@@ -2060,8 +2060,8 @@ fn seed_two_specifications(state: &mut AppState) {
                 .expect("valid test provenance"),
             ),
     );
-    state.simulation.runs = vec![run].into();
-    state.simulation.active_run_idx = Some(0);
+    state.simulation.retained.runs = vec![run].into();
+    state.simulation.view.active_run_idx = Some(0);
 }
 
 /// The text filter matches over the cells the table paints, so a surviving row
@@ -2189,7 +2189,7 @@ fn a_dataset_backed_handoff_states_its_condition_before_a_run_exists() {
     let rendered = render_with(SimulationPage::Outputs, 1200.0, |app| {
         seed_three_outputs(&mut app.state);
         app.state.workbench.selected_saved_output = Some("vout".to_owned());
-        assert!(!app.state.simulation.has_results());
+        assert!(!app.state.simulation.retained.has_results());
     });
 
     for action in EditorHandoff::ALL {

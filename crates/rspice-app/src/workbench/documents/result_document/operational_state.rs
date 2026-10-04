@@ -274,7 +274,7 @@ pub(crate) fn run_currentness(
             .as_ref()
             .is_some_and(|condition| {
                 condition.kind == ResultRuntimeConditionKind::Recovered
-                    && condition.data_version == state.simulation.data_version
+                    && condition.data_version == state.simulation.view.data_version
                     && state
                         .simulation
                         .active_run()
@@ -355,8 +355,9 @@ pub(crate) fn classify_viewer(
             || !state.workspace.content.specs.is_empty());
     let Some(run_index) = state
         .simulation
+        .view
         .active_run_idx
-        .filter(|index| state.simulation.runs.get(*index).is_some())
+        .filter(|index| state.simulation.retained.runs.get(*index).is_some())
     else {
         return if authoring_without_dataset {
             ResultOperationalStatus::canonical(ResultOperationalState::Complete, false)
@@ -366,7 +367,7 @@ pub(crate) fn classify_viewer(
     };
 
     let (run_has_data, analysis_keys) = {
-        let run = &state.simulation.runs[run_index];
+        let run = &state.simulation.retained.runs[run_index];
         (
             !run.analyses.is_empty(),
             run.analyses
@@ -382,10 +383,10 @@ pub(crate) fn classify_viewer(
         return ResultOperationalStatus::canonical(ResultOperationalState::Corrupted, true);
     }
 
-    let run = &state.simulation.runs[run_index];
+    let run = &state.simulation.retained.runs[run_index];
 
     if let Some(condition) = state.ui.results.operational_condition.clone()
-        && condition.data_version == state.simulation.data_version
+        && condition.data_version == state.simulation.view.data_version
     {
         let operational_state = condition.kind.operational_state();
         return ResultOperationalStatus {

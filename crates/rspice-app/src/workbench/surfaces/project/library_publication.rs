@@ -676,7 +676,7 @@ fn publication_lifecycle_error(state: &AppState, stale: bool) -> Option<&'static
         Some("Open a project before publishing its library.")
     } else if state.workbench.safe_mode.project_read_only() {
         Some("Publication is unavailable while the project is open read-only.")
-    } else if state.simulation.has_active_execution() {
+    } else if state.simulation.execution.has_active_execution() {
         Some("Publication is unavailable while a simulation is running.")
     } else if stale {
         Some("The publication review is stale.")
@@ -690,7 +690,7 @@ fn rollback_lifecycle_error(state: &AppState) -> Option<&'static str> {
         Some("Open the publication's project before rollback.")
     } else if state.workbench.safe_mode.project_read_only() {
         Some("Rollback is unavailable while the project is open read-only.")
-    } else if state.simulation.has_active_execution() {
+    } else if state.simulation.execution.has_active_execution() {
         Some("Rollback is unavailable while a simulation is running.")
     } else {
         None

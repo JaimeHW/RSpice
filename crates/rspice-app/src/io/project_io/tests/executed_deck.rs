@@ -70,9 +70,9 @@ fn swept_state() -> SimulationState {
     let nominal: std::sync::Arc<str> = std::sync::Arc::from(NOMINAL);
     let hot: std::sync::Arc<str> = std::sync::Arc::from(HOT);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![sealed_run(7, 0xc0)].into();
-    simulation.next_run_id = 7;
-    simulation.executed_decks.retain(ExecutedDeck {
+    simulation.retained.runs = vec![sealed_run(7, 0xc0)].into();
+    simulation.retained.next_run_id = 7;
+    simulation.retained.executed_decks.retain(ExecutedDeck {
         run_id: 7,
         points: vec![
             point("TT 27C", &nominal),
@@ -106,6 +106,7 @@ fn a_runs_executed_decks_round_trip_and_stay_shared_between_its_points() {
         .expect("the persisted results restore");
 
     let record = reloaded
+        .retained
         .executed_decks
         .get(7)
         .expect("the reopened project holds the run's decks");
@@ -175,7 +176,7 @@ fn a_project_stating_no_executed_decks_loads_with_none() {
 fn a_run_the_history_no_longer_holds_writes_no_deck() {
     let mut simulation = swept_state();
     let orphan: std::sync::Arc<str> = std::sync::Arc::from("dropped deck\n.end\n");
-    simulation.executed_decks.retain(ExecutedDeck {
+    simulation.retained.executed_decks.retain(ExecutedDeck {
         run_id: 9,
         points: vec![point("TT 27C", &orphan)],
     });
@@ -237,10 +238,10 @@ fn a_point_referencing_a_source_the_file_does_not_carry_is_refused() {
 #[test]
 fn more_retained_decks_than_a_session_could_hold_fails_closed_on_load() {
     let mut simulation = SimulationState::default();
-    simulation.runs = (1..=5)
+    simulation.retained.runs = (1..=5)
         .map(|sequence| sealed_run(sequence, 0x10 * sequence as u8))
         .collect();
-    simulation.next_run_id = 5;
+    simulation.retained.next_run_id = 5;
     let mut written = crate::io::capture_simulation_results(&simulation);
     // Written by hand rather than by the archive, which would have evicted
     // the oldest before a fifth could be retained. This is the shape of the
@@ -266,7 +267,7 @@ fn more_retained_decks_than_a_session_could_hold_fails_closed_on_load() {
         .expect_err("a file over the archive's ceiling was not written by a session");
     assert!(error.contains("exceed the archive limit of 4"), "{error}");
     assert!(
-        reloaded.executed_decks.get(1).is_none(),
+        reloaded.retained.executed_decks.get(1).is_none(),
         "and nothing from a refused file is installed"
     );
 }

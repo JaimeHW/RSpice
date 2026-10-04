@@ -57,7 +57,7 @@ pub(crate) fn open(app: &mut RSpiceApp) {
         .state
         .simulation
         .active_run()
-        .or_else(|| app.state.simulation.runs.last())
+        .or_else(|| app.state.simulation.retained.runs.last())
         .map(|run| run.dataset_id);
     let family = ResultDocumentFamily::WaveformWorksheet;
     let viewer_id =
@@ -149,6 +149,7 @@ impl CreateDocumentHost for CreateDocumentSources<'_> {
     fn datasets(&self) -> impl Iterator<Item = (DatasetId, String)> {
         self.0
             .simulation
+            .retained
             .runs
             .iter()
             .map(|run| (run.dataset_id, dataset_label(run)))
@@ -186,6 +187,7 @@ impl CreateDocumentHost for CreateDocumentSources<'_> {
 fn retained_run(state: &AppState, dataset_id: DatasetId) -> Option<&SimulationRun> {
     state
         .simulation
+        .retained
         .runs
         .iter()
         .find(|run| run.dataset_id == dataset_id)
@@ -1003,7 +1005,11 @@ fn document_tracking(
 /// Revalidate and commit the current draft into the project authority.
 pub(crate) fn commit(app: &mut RSpiceApp) -> Result<ResultDocumentId, CreateResultDocumentError> {
     let resolved = resolve_draft(&app.state, &app.state.workbench.create_result_document)?;
-    let tracking = document_tracking(&app.state.simulation.runs, resolved.run, resolved.analysis);
+    let tracking = document_tracking(
+        &app.state.simulation.retained.runs,
+        resolved.run,
+        resolved.analysis,
+    );
     let document = build_document(resolved, tracking)?;
     let previous_documents_dirty = app.state.workspace.content.visualization_documents_dirty;
     let previous_workspace = app.state.workbench.workspace;
@@ -1082,7 +1088,7 @@ mod tests {
         let transient_id = transient.dataset_id;
         let ac = retained_run_with(AnalysisType::Ac);
         let ac_id = ac.dataset_id;
-        app.state.simulation.runs = vec![transient, ac].into();
+        app.state.simulation.retained.runs = vec![transient, ac].into();
 
         assert_eq!(
             first_compatible_viewer(
@@ -1107,7 +1113,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let run = retained_run_with(AnalysisType::Transient);
         let dataset_id = run.dataset_id;
-        app.state.simulation.runs = vec![run].into();
+        app.state.simulation.retained.runs = vec![run].into();
         let family = ResultDocumentFamily::WaveformWorksheet;
         assert!(viewer_is_creatable(
             &app.state,
@@ -1136,7 +1142,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let run = retained_run_with(AnalysisType::Transient);
         let dataset_id = run.dataset_id;
-        app.state.simulation.runs = vec![run].into();
+        app.state.simulation.retained.runs = vec![run].into();
         app.state.workbench.create_result_document = CreateResultDocumentDialogState {
             open: true,
             name: "Transient review".to_owned(),
@@ -1199,7 +1205,7 @@ mod tests {
         run.lifecycle = SimulationRunLifecycle::Completed;
         run.analyses.push(analysis);
         let dataset_id = run.dataset_id;
-        app.state.simulation.runs = vec![run].into();
+        app.state.simulation.retained.runs = vec![run].into();
         app.state.workbench.create_result_document = CreateResultDocumentDialogState {
             open: true,
             name: "Typed OP datasheet".to_owned(),
@@ -1222,7 +1228,7 @@ mod tests {
         assert_eq!(document.axes().len(), 2);
         assert!(document.traces().is_empty());
         assert!(
-            app.state.simulation.runs[0].analyses[0]
+            app.state.simulation.retained.runs[0].analyses[0]
                 .waveforms
                 .is_empty()
         );
@@ -1336,7 +1342,7 @@ mod tests {
             run.lifecycle = SimulationRunLifecycle::Completed;
             run.analyses.push(analysis);
             let dataset_id = run.dataset_id;
-            app.state.simulation.runs = vec![run].into();
+            app.state.simulation.retained.runs = vec![run].into();
             app.state.workbench.create_result_document = CreateResultDocumentDialogState {
                 open: true,
                 name: format!("{viewer_id} review"),
@@ -1367,7 +1373,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let run = retained_run_with(AnalysisType::Transient);
         let dataset_id = run.dataset_id;
-        app.state.simulation.runs = vec![run].into();
+        app.state.simulation.retained.runs = vec![run].into();
         let draft = CreateResultDocumentDialogState {
             open: true,
             name: "Transient review".to_owned(),

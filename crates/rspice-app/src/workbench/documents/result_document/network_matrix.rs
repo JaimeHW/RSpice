@@ -49,7 +49,11 @@ impl NetworkMatrixState {
     }
 
     fn bind(&mut self, key: AnalysisPresentationKey, simulation: &crate::state::SimulationState) {
-        let source = (key, simulation.runs.revision(), simulation.data_version);
+        let source = (
+            key,
+            simulation.retained.runs.revision(),
+            simulation.view.data_version,
+        );
         if self.source.as_ref() != Some(&source) {
             self.source = Some(source);
             self.controls.reset_source();
@@ -258,17 +262,17 @@ pub(crate) mod tests {
         let mut run = SimulationRun::new(1);
         let key = AnalysisPresentationKey::new(run.dataset_id, &analysis);
         run.add_analysis(analysis);
-        simulation.runs.push(run);
+        simulation.retained.runs.push(run);
         let mut controls = NetworkMatrixState::default();
         controls.bind(key, &simulation);
         controls.controls.diagnostic = Some((0, 0, "old evidence".to_owned()));
         controls.bind(key, &simulation.clone());
         assert!(controls.controls.diagnostic.is_some());
-        simulation.data_version = simulation.data_version.wrapping_add(1);
+        simulation.view.data_version = simulation.view.data_version.wrapping_add(1);
         controls.bind(key, &simulation);
         assert!(controls.controls.diagnostic.is_none());
         controls.controls.diagnostic = Some((0, 0, "old evidence".to_owned()));
-        simulation.runs[0].analyses[0] = fixture(false);
+        simulation.retained.runs[0].analyses[0] = fixture(false);
         controls.bind(key, &simulation);
         assert!(controls.controls.diagnostic.is_none());
     }
@@ -357,7 +361,7 @@ pub(crate) mod tests {
             let mut app = crate::workbench::AppState::default();
             let mut run = SimulationRun::new(1);
             run.add_analysis(fixture(true));
-            app.simulation.runs.push(run);
+            app.simulation.retained.runs.push(run);
             assert!(app.simulation.select_run(0));
             let before = app
                 .simulation
@@ -416,15 +420,15 @@ pub(crate) mod tests {
             );
 
             let cached = Arc::downgrade(app.ui.results.network_matrix.layout.as_ref().unwrap());
-            let discarded = app.simulation.runs[0].dataset_id;
-            let version = app.simulation.data_version;
+            let discarded = app.simulation.retained.runs[0].dataset_id;
+            let version = app.simulation.view.data_version;
             let controls = &mut app.ui.results.network_matrix.controls;
             controls.representation = 2;
             controls.transpose = true;
             controls.heatmap = false;
             controls.floor_db = -120.0;
             controls.diagnostic = Some((0, 0, "retained diagnostic".to_owned()));
-            app.simulation.runs.push(SimulationRun::new(2));
+            app.simulation.retained.runs.push(SimulationRun::new(2));
             app.ui.results.reconcile_retained_datasets(&app.simulation);
             assert!(cached.upgrade().is_some());
             assert!(app.ui.results.network_matrix.open_trace);
@@ -433,10 +437,11 @@ pub(crate) mod tests {
             app.ui.results.session.viewer =
                 rspice_results::result_presentation::ResultViewer::Table;
             app.simulation
+                .retained
                 .runs
                 .retain(|run| run.dataset_id != discarded);
             app.ui.results.reconcile_retained_datasets(&app.simulation);
-            assert_eq!(app.simulation.data_version, version);
+            assert_eq!(app.simulation.view.data_version, version);
             assert!(
                 cached.upgrade().is_none(),
                 "discarding the dataset must release its matrix layout without another matrix frame"
@@ -458,7 +463,7 @@ pub(crate) mod tests {
             let mut app = crate::workbench::AppState::default();
             let mut run = SimulationRun::new(1);
             run.add_analysis(fixture(true));
-            app.simulation.runs.push(run);
+            app.simulation.retained.runs.push(run);
             assert!(app.simulation.select_run(0));
             let before = app
                 .simulation
@@ -501,7 +506,7 @@ pub(crate) mod tests {
             let mut app = crate::workbench::AppState::default();
             let mut run = SimulationRun::new(1);
             run.add_analysis(fixture(true));
-            app.simulation.runs.push(run);
+            app.simulation.retained.runs.push(run);
             assert!(app.simulation.select_run(0));
             if open_plot {
                 let run = app.simulation.active_run().unwrap();

@@ -64,10 +64,10 @@ pub(crate) fn history(analysis: crate::state::AnalysisResult) -> crate::state::S
     run.finish_lifecycle(rspice_results::run::SimulationRunLifecycle::Completed)
         .unwrap();
     let mut state = crate::state::SimulationState::default();
-    state.runs.push(run);
-    state.next_run_id = 1;
-    state.active_run_idx = Some(0);
-    state.active_analysis_idx = Some(0);
+    state.retained.runs.push(run);
+    state.retained.next_run_id = 1;
+    state.view.active_run_idx = Some(0);
+    state.view.active_analysis_idx = Some(0);
     state
 }
 
@@ -102,7 +102,7 @@ fn dc_project_round_trip_preserves_coordinates_units_selection_and_immutable_own
     let restored: ProjectSimulationResults = serde_json::from_value(serialized.clone()).unwrap();
     let mut state = crate::state::SimulationState::default();
     crate::io::restore_simulation_results(restored, &mut state).unwrap();
-    let analysis = &state.runs[0].analyses[0];
+    let analysis = &state.retained.runs[0].analyses[0];
     assert_eq!(evidence(analysis), &original);
     assert_eq!(analysis.result_data_digest(), digest);
     assert_eq!(analysis.waveforms.len(), 12);
@@ -148,9 +148,11 @@ fn schema_21_dc_history_authenticates_without_inventing_traversal() {
         .result_data_ref()
         .digest(rspice_results::result_digest::ResultDigestEncoding::V12);
     let history = history(legacy);
-    let old_dataset_digest = history.runs[0].data.dataset_content_digest_with_encoding(
-        rspice_results::result_digest::ResultDigestEncoding::V12,
-    );
+    let old_dataset_digest = history.retained.runs[0]
+        .data
+        .dataset_content_digest_with_encoding(
+            rspice_results::result_digest::ResultDigestEncoding::V12,
+        );
     let mut snapshot = crate::io::capture_simulation_results(&history);
     snapshot.schema_version = 21;
     snapshot.runs[0].analyses[0].result_data_digest =
@@ -172,8 +174,15 @@ fn schema_21_dc_history_authenticates_without_inventing_traversal() {
         .unwrap();
     let mut restored = crate::state::SimulationState::default();
     crate::io::restore_simulation_results(snapshot, &mut restored).unwrap();
-    assert!(restored.runs[0].analyses[0].result_payload.is_none());
-    assert_eq!(restored.runs[0].analyses[0].result_data_digest(), digest);
+    assert!(
+        restored.retained.runs[0].analyses[0]
+            .result_payload
+            .is_none()
+    );
+    assert_eq!(
+        restored.retained.runs[0].analyses[0].result_data_digest(),
+        digest
+    );
 }
 
 #[test]

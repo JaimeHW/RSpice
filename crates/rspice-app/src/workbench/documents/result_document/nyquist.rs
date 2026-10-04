@@ -28,7 +28,7 @@ pub struct NyquistDerived {
 }
 
 fn derived(state: &mut AppState) -> Option<NyquistDerived> {
-    let version = state.simulation.data_version;
+    let version = state.simulation.view.data_version;
     if let Some(cached) = state.ui.results.nyquist
         && cached.version == version
     {
@@ -149,7 +149,7 @@ mod tests {
             .analysis
             .nyquist_state
             .load_data(NyquistData::from_arrays("L(jω)", &[1.0], &[-1.0], &[2.0]));
-        state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
+        state.simulation.view.data_version = state.simulation.view.data_version.wrapping_add(1);
         let second = derived(&mut state).expect("the replacement locus is derived afresh");
         assert_eq!(second.stability.min_distance, Some(2.0));
     }

@@ -177,6 +177,7 @@ pub(super) fn plan_catalog_records(app: &RSpiceApp) -> Vec<PlanCatalogRecord> {
     let result_count = |id: SimulationPlanId| {
         app.state
             .simulation
+            .retained
             .runs
             .iter()
             .filter(|run| {

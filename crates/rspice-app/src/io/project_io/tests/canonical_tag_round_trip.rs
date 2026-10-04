@@ -94,8 +94,8 @@ fn sealed_rf_results(retained: usize) -> ProjectSimulationResults {
         .expect("the fixture run seals explicitly");
 
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run].into();
-    simulation.next_run_id = 77;
+    simulation.retained.runs = vec![run].into();
+    simulation.retained.next_run_id = 77;
     crate::io::capture_simulation_results(&simulation)
 }
 
@@ -113,7 +113,7 @@ fn a_run_using_the_whole_tag_protocol_survives_write_validate_and_restore() {
     crate::io::restore_simulation_results(decoded, &mut restored)
         .expect("the written run restores into a session");
 
-    let run = restored.runs.first().expect("one restored run");
+    let run = restored.retained.runs.first().expect("one restored run");
     let Some(SimulationRunProvenance::Prepared(receipt)) = run.provenance() else {
         panic!("the restored run keeps its prepared receipt");
     };

@@ -227,7 +227,7 @@ fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: usize, height: f32) 
                 ConsolePage::Interactive => app.state.script_console.history.len(),
                 ConsolePage::Problems => problems,
                 ConsolePage::Measurements => active_measurement_count(&app.state.simulation),
-                ConsolePage::TaskLog => app.state.simulation.runs.len(),
+                ConsolePage::TaskLog => app.state.simulation.retained.runs.len(),
                 ConsolePage::Console => 0,
             };
             let count_tone = match page {
@@ -449,7 +449,7 @@ fn paint_trash(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) 
 
 fn console_context(ui: &mut Ui, app: &RSpiceApp) {
     let t = Tokens::get(ui.ctx());
-    let text = if app.state.simulation.has_active_execution() {
+    let text = if app.state.simulation.execution.has_active_execution() {
         let activity = if app.state.simulation.cancellation_is_pending() {
             "cancellation in progress"
         } else {
@@ -457,10 +457,10 @@ fn console_context(ui: &mut Ui, app: &RSpiceApp) {
         };
         format!(
             "Active job · {}% · {activity}",
-            simulation_progress_percent(app.state.simulation.progress),
+            simulation_progress_percent(app.state.simulation.execution.progress),
         )
-    } else if let Some(index) = app.state.simulation.active_run_idx {
-        app.state.simulation.runs.get(index).map_or_else(
+    } else if let Some(index) = app.state.simulation.view.active_run_idx {
+        app.state.simulation.retained.runs.get(index).map_or_else(
             || "No retained result selected".to_owned(),
             |run| {
                 format!(
@@ -796,6 +796,7 @@ fn execute_project_query(input: &str, app: &RSpiceApp) -> Option<CommandOutput> 
             let runs = app
                 .state
                 .simulation
+                .retained
                 .runs
                 .iter()
                 .map(|run| {
@@ -894,7 +895,7 @@ fn measurement_query(app: &RSpiceApp, run_selector: &str, measurement: &str) -> 
     let run_number = run_selector
         .strip_prefix("Run ")
         .and_then(|value| value.parse::<u64>().ok());
-    let run = app.state.simulation.runs.iter().find(|run| {
+    let run = app.state.simulation.retained.runs.iter().find(|run| {
         run.label.eq_ignore_ascii_case(run_selector)
             || run_number.is_some_and(|number| run.id == number)
     });
@@ -1304,18 +1305,18 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
     ScrollArea::vertical()
         .id_salt("workbench.task_log")
         .show(ui, |ui| {
-            if app.state.simulation.runs.is_empty() {
+            if app.state.simulation.retained.runs.is_empty() {
                 muted(ui, "Queued, active, cancelled, and completed simulation tasks will appear here.");
             }
-            for run in &app.state.simulation.runs {
-                let active = app.state.simulation.active_execution
+            for run in &app.state.simulation.retained.runs {
+                let active = app.state.simulation.execution.active_execution
                     == run.execution_identity()
                     && !run.lifecycle.is_terminal();
                 let (status, tone) = run_lifecycle_presentation(run.lifecycle);
                 let progress = if active {
                     format!(
                         " · {}%",
-                        simulation_progress_percent(app.state.simulation.progress)
+                        simulation_progress_percent(app.state.simulation.execution.progress)
                     )
                 } else {
                     String::new()
@@ -1337,7 +1338,7 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
                     false,
                 );
             }
-            if !app.state.simulation.has_active_execution() {
+            if !app.state.simulation.execution.has_active_execution() {
                 issue_row(
                     ui,
                     "IDLE",
@@ -1414,9 +1415,10 @@ fn active_measurement_rows(
     // vectors are whatever the engine emitted before it gave up, and a margin
     // read off them is not a measurement — which matters more here than on
     // the sheet, because a specification binds to these rows.
-    if let Some(summary) =
-        crate::state::ac_bode_summary_for_selection(run, app.state.simulation.active_analysis_idx)
-        && let Some(analysis) = run.analyses.get(summary.analysis_index)
+    if let Some(summary) = crate::state::ac_bode_summary_for_selection(
+        run,
+        app.state.simulation.view.active_analysis_idx,
+    ) && let Some(analysis) = run.analyses.get(summary.analysis_index)
         && analysis.success
     {
         let label = analysis.label.as_str();

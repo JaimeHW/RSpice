@@ -834,7 +834,7 @@ fn manual_deck_trigger_runs_deck_analysis_without_enabled_run_set() {
         .expect("the sole run-set analysis disables");
     state.workspace.content.netlist_source =
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
-    state.simulation.request_manual_deck_run();
+    state.simulation.execution.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
         .validate_manual_deck_document(&state)
@@ -848,8 +848,8 @@ fn manual_deck_trigger_runs_deck_analysis_without_enabled_run_set() {
         .as_ref()
         .map(AnalysisResultProvenance::source_domain);
     let cached_netlist = controller.cached_netlist.clone().unwrap_or_default();
-    let run_count = state.simulation.runs.len();
-    let status = state.simulation.status.clone();
+    let run_count = state.simulation.retained.runs.len();
+    let status = state.simulation.execution.status.clone();
     controller.abort();
 
     assert_eq!(total_analyses, 1);
@@ -874,7 +874,7 @@ fn controller_manual_run_receipt_remains_authoritative_if_result_provenance_is_s
     state.workspace.content.netlist_source =
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let project_revision = state.workspace.content.project.revision();
-    state.simulation.request_manual_deck_run();
+    state.simulation.execution.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
         .validate_manual_deck_document(&state)
@@ -943,7 +943,7 @@ fn controller_manual_run_receipt_survives_production_project_round_trip() {
     let mut state = AppState::default();
     state.workspace.content.netlist_source =
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
-    state.simulation.request_manual_deck_run();
+    state.simulation.execution.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
         .validate_manual_deck_document(&state)
@@ -975,7 +975,7 @@ fn controller_manual_run_receipt_survives_production_project_round_trip() {
     );
     let restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
         .expect("controller manual history restores");
-    let run = &restored.runs[0];
+    let run = &restored.retained.runs[0];
     let receipt = run.prepared_receipt().expect("manual receipt retained");
     let result_provenance = run.analyses[0]
         .provenance
@@ -1013,7 +1013,7 @@ fn manual_deck_run_preserves_editor_source_without_ui_option_injection() {
     state.sim_setup.options.reltol = 1.0e-4;
     state.workspace.content.netlist_source =
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
-    state.simulation.request_manual_deck_run();
+    state.simulation.execution.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
         .validate_manual_deck_document(&state)
@@ -1031,7 +1031,7 @@ fn manual_deck_run_preserves_editor_source_without_ui_option_injection() {
 #[test]
 fn manual_deck_runs_use_imported_netlist_origin_for_relative_includes() {
     let mut state = AppState::default();
-    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.schematic.session.current_file = Some(PathBuf::from("schematics").join("amp.rsch"));
     state.workspace.content.netlist_source =
         Some("deck\n.include models.lib\nV1 out 0 1\n.op\n.end\n".to_string());
@@ -1046,7 +1046,7 @@ fn manual_deck_runs_use_imported_netlist_origin_for_relative_includes() {
 #[test]
 fn manual_deck_runs_do_not_fall_back_to_schematic_path() {
     let mut state = AppState::default();
-    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.schematic.session.current_file = Some(PathBuf::from("schematics").join("amp.rsch"));
     state.workspace.content.netlist_source = Some("deck\nV1 out 0 1\n.op\n.end\n".to_string());
 
@@ -1073,12 +1073,12 @@ fn simulate_run_set_does_not_run_manual_deck_source() {
     assert_eq!(plan.instances()[0].id(), op_id);
     state.workspace.content.netlist_source =
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
-    state.simulation.request_simulate_run_set();
+    state.simulation.execution.request_simulate_run_set();
     let mut controller = SimulationController::new();
 
     controller.start_simulation(&mut state);
-    let status = state.simulation.status.clone();
-    let run_count = state.simulation.runs.len();
+    let status = state.simulation.execution.status.clone();
+    let run_count = state.simulation.retained.runs.len();
     let total_analyses = controller.total_analyses;
     controller.abort();
 
@@ -1091,7 +1091,7 @@ fn simulate_run_set_does_not_run_manual_deck_source() {
 fn successful_manual_deck_run_promotes_pending_baseline() {
     let mut state = AppState::default();
     let mut controller = SimulationController::new();
-    state.simulation.netlist_content =
+    state.simulation.source.netlist_content =
         "deck\n.param r=1k cl = 2p expr={x}\n.op\n.end\n".to_string();
     let run_id = state.simulation.start_run().id;
     bind_test_run_running(&mut state, &mut controller, run_id);
@@ -1142,6 +1142,7 @@ fn batch_without_exact_run_ownership_does_not_modify_selected_history() {
     let historical_id = state.simulation.start_run().id;
     let historical_lifecycle = state
         .simulation
+        .retained
         .run_by_sequence(historical_id)
         .expect("historical run")
         .lifecycle;
@@ -1152,11 +1153,12 @@ fn batch_without_exact_run_ownership_does_not_modify_selected_history() {
 
     let historical = state
         .simulation
+        .retained
         .run_by_sequence(historical_id)
         .expect("historical run remains");
     assert!(historical.success);
     assert_eq!(historical.lifecycle, historical_lifecycle);
-    assert_eq!(state.simulation.status, "Completed with errors");
+    assert_eq!(state.simulation.execution.status, "Completed with errors");
 }
 
 #[test]
@@ -1165,6 +1167,7 @@ fn disappeared_batch_target_does_not_reselect_the_active_historical_analysis() {
     let historical_id = state.simulation.start_run().id;
     let historical = state
         .simulation
+        .retained
         .run_by_sequence_mut(historical_id)
         .expect("historical run");
     historical.add_analysis(AnalysisResult::new(1, AnalysisType::DcOp, "first"));
@@ -1453,7 +1456,7 @@ fn live_transient_accumulator_compacts_aligned_source_traces() {
 fn successful_manual_deck_run_preserves_post_launch_diff_pips() {
     let mut state = AppState::default();
     let mut controller = SimulationController::new();
-    state.simulation.netlist_content = "deck\n.op\nR1 out 0 2k\n.end\n".to_string();
+    state.simulation.source.netlist_content = "deck\n.op\nR1 out 0 2k\n.end\n".to_string();
     let run_id = state.simulation.start_run().id;
     bind_test_run_running(&mut state, &mut controller, run_id);
     state.ui.netlist.pending_manual_run_id = Some(run_id);
@@ -1537,6 +1540,7 @@ fn a_corner_declarations_turn_assembles_its_family_without_reaching_the_runner()
     .with_pvt_point(point.pvt_point().cloned());
     state
         .simulation
+        .retained
         .run_by_sequence_mut(run_sequence)
         .expect("active run")
         .add_analysis(
@@ -1562,6 +1566,7 @@ fn a_corner_declarations_turn_assembles_its_family_without_reaching_the_runner()
     );
     let run = state
         .simulation
+        .retained
         .run_by_sequence(run_sequence)
         .expect("completed run remains");
     assert_eq!(run.analyses.len(), 2);
@@ -1773,8 +1778,8 @@ fn sealing_an_aborted_run_declares_a_new_dataset_generation() {
     controller.current_run_id = Some(run_sequence);
     assert!(state.simulation.select_run(0));
 
-    let before = state.simulation.data_version;
-    let digest_before = state.simulation.runs[0]
+    let before = state.simulation.view.data_version;
+    let digest_before = state.simulation.retained.runs[0]
         .dataset_content_digest()
         .to_string();
 
@@ -1787,20 +1792,20 @@ fn sealing_an_aborted_run_declares_a_new_dataset_generation() {
         )),
     );
 
-    assert!(!state.simulation.runs[0].success);
+    assert!(!state.simulation.retained.runs[0].success);
     assert_eq!(
-        state.simulation.runs[0].lifecycle,
+        state.simulation.retained.runs[0].lifecycle,
         SimulationRunLifecycle::Aborted
     );
     assert_ne!(
-        state.simulation.runs[0]
+        state.simulation.retained.runs[0]
             .dataset_content_digest()
             .to_string(),
         digest_before,
         "the fixture must actually change the retained evidence"
     );
     assert_ne!(
-        state.simulation.data_version, before,
+        state.simulation.view.data_version, before,
         "the aborted run was sealed at the generation the memos already describe"
     );
 }

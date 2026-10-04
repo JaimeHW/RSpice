@@ -474,6 +474,7 @@ impl PaletteEntry {
                 let run_index = app
                     .state
                     .simulation
+                    .retained
                     .runs
                     .iter()
                     .position(|run| run.dataset_id == entry.dataset_id)
@@ -483,14 +484,14 @@ impl PaletteEntry {
                             entry.name
                         )
                     })?;
-                let analysis_index = app.state.simulation.runs[run_index]
+                let analysis_index = app.state.simulation.retained.runs[run_index]
                     .analyses
                     .iter()
                     .position(|analysis| analysis.id == entry.analysis_id)
                     .ok_or_else(|| {
                         format!("Analysis for signal '{}' is no longer loaded", entry.name)
                     })?;
-                let waveform_matches = app.state.simulation.runs[run_index].analyses
+                let waveform_matches = app.state.simulation.retained.runs[run_index].analyses
                     [analysis_index]
                     .waveforms
                     .get(entry.waveform_index)
@@ -504,15 +505,20 @@ impl PaletteEntry {
 
                 app.state.simulation.select_run(run_index);
                 app.state.simulation.select_analysis(analysis_index);
-                app.state.simulation.runs[run_index].analyses[analysis_index].waveforms
+                app.state.simulation.retained.runs[run_index].analyses[analysis_index].waveforms
                     [entry.waveform_index]
                     .visible = true;
-                if let Some(waveform) = app.state.simulation.waveforms.get_mut(entry.waveform_index)
+                if let Some(waveform) = app
+                    .state
+                    .simulation
+                    .view
+                    .waveforms
+                    .get_mut(entry.waveform_index)
                 {
                     waveform.visible = true;
                 }
-                app.state.simulation.data_version =
-                    app.state.simulation.data_version.wrapping_add(1);
+                app.state.simulation.view.data_version =
+                    app.state.simulation.view.data_version.wrapping_add(1);
                 app.state.ui.results.session.viewer = crate::workbench::ResultViewer::Waves;
                 app.state
                     .ui

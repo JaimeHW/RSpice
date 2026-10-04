@@ -148,7 +148,10 @@ impl ResultsState {
     /// boundary. A repeated display version cannot authorize cached data from
     /// a restored history, and nested source edits cannot bypass invalidation.
     pub(super) fn synchronize_wave_caches(&mut self, simulation: &crate::state::SimulationState) {
-        let source = (simulation.runs.revision(), simulation.data_version);
+        let source = (
+            simulation.retained.runs.revision(),
+            simulation.view.data_version,
+        );
         if self.wave_cache_source.as_ref() == Some(&source) {
             return;
         }
@@ -156,7 +159,9 @@ impl ResultsState {
         self.models.invalidate();
         self.session.cache.invalidate();
         self.session.derived = DerivedSeries::default();
-        self.session.derived.ensure_version(simulation.data_version);
+        self.session
+            .derived
+            .ensure_version(simulation.view.data_version);
         self.analysis_expr_cache.clear();
     }
 
@@ -296,6 +301,7 @@ impl ResultsState {
         analysis: AnalysisPresentationKey,
     ) -> bool {
         simulation
+            .retained
             .runs
             .iter()
             .any(|run| run.dataset_id == analysis.dataset_id())
@@ -417,13 +423,17 @@ impl ResultsState {
         &mut self,
         simulation: &crate::state::SimulationState,
     ) {
-        let revision = simulation.runs.revision();
+        let revision = simulation.retained.runs.revision();
         if self.retained_history_revision.as_ref() == Some(&revision) {
             return;
         }
         frame_work::note(frame_work::DatasetWalk::RetainedHistoryScan);
-        let retained: HashSet<DatasetId> =
-            simulation.runs.iter().map(|run| run.dataset_id).collect();
+        let retained: HashSet<DatasetId> = simulation
+            .retained
+            .runs
+            .iter()
+            .map(|run| run.dataset_id)
+            .collect();
         if retained == self.retained_datasets {
             self.retained_history_revision = Some(revision);
             return;

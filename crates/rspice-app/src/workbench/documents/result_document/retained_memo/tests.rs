@@ -41,13 +41,13 @@ fn retained_state(kind: AnalysisType, samples: usize) -> AppState {
         .workbench
         .documents
         .activate(WorkspaceDocumentId::ResultDataset(
-            state.simulation.runs[0].dataset_id,
+            state.simulation.retained.runs[0].dataset_id,
         ));
     state
 }
 
 fn key(state: &AppState) -> AnalysisPresentationKey {
-    let run = &state.simulation.runs[0];
+    let run = &state.simulation.retained.runs[0];
     AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
 }
 
@@ -55,11 +55,11 @@ fn key(state: &AppState) -> AnalysisPresentationKey {
 fn retained_memo_validity_tracks_corruption_and_repair_without_a_version_bump() {
     let mut state = retained_state(AnalysisType::Transient, 3);
     let key = key(&state);
-    let version = state.simulation.data_version;
+    let version = state.simulation.view.data_version;
     assert!(retained_evidence_is_valid(&state, key));
-    Arc::make_mut(&mut state.simulation.runs[0].analyses[0].waveforms[0].y).pop();
+    Arc::make_mut(&mut state.simulation.retained.runs[0].analyses[0].waveforms[0].y).pop();
     assert!(
-        state.simulation.runs[0].analyses[0]
+        state.simulation.retained.runs[0].analyses[0]
             .validate_retained_evidence()
             .is_err()
     );
@@ -67,52 +67,52 @@ fn retained_memo_validity_tracks_corruption_and_repair_without_a_version_bump() 
         !retained_evidence_is_valid(&state, key),
         "a stale success hid corrupt evidence"
     );
-    Arc::make_mut(&mut state.simulation.runs[0].analyses[0].waveforms[0].y).push(1.0);
+    Arc::make_mut(&mut state.simulation.retained.runs[0].analyses[0].waveforms[0].y).push(1.0);
     assert!(
         retained_evidence_is_valid(&state, key),
         "a stale failure hid repaired evidence"
     );
-    assert_eq!(state.simulation.data_version, version);
+    assert_eq!(state.simulation.view.data_version, version);
 }
 
 #[test]
 fn retained_memo_absent_analysis_becomes_available_without_frame_preparation() {
     let mut state = retained_state(AnalysisType::Transient, 3);
     let next = analysis(AnalysisType::Transient, 2, 3);
-    let key = AnalysisPresentationKey::new(state.simulation.runs[0].dataset_id, &next);
+    let key = AnalysisPresentationKey::new(state.simulation.retained.runs[0].dataset_id, &next);
     assert!(!retained_evidence_is_valid(&state, key));
-    let version = state.simulation.data_version;
-    state.simulation.runs[0].analyses.push(next);
+    let version = state.simulation.view.data_version;
+    state.simulation.retained.runs[0].analyses.push(next);
     assert!(
         retained_evidence_is_valid(&state, key),
         "a cached absence hid the retained analysis"
     );
-    assert_eq!(state.simulation.data_version, version);
+    assert_eq!(state.simulation.view.data_version, version);
 }
 
 fn gate_tracks_coordinates(kind: AnalysisType, gate: StructuralGate) {
     let mut state = retained_state(kind, 3);
     let answer = |state: &AppState| {
-        let run = &state.simulation.runs[0];
+        let run = &state.simulation.retained.runs[0];
         analysis_answers_structural_gate(state, run.dataset_id, &run.analyses[0], gate)
     };
     assert!(answer(&state));
-    let version = state.simulation.data_version;
-    Arc::make_mut(&mut state.simulation.runs[0].analyses[0].waveforms[0].x)[0] = -1.0;
+    let version = state.simulation.view.data_version;
+    Arc::make_mut(&mut state.simulation.retained.runs[0].analyses[0].waveforms[0].x)[0] = -1.0;
     assert!(!structural_gate_is_answered_directly(
         gate,
-        &state.simulation.runs[0].analyses[0]
+        &state.simulation.retained.runs[0].analyses[0]
     ));
     assert!(
         !answer(&state),
         "the gate kept accepting an invalid frequency grid"
     );
-    Arc::make_mut(&mut state.simulation.runs[0].analyses[0].waveforms[0].x)[0] = 1.0;
+    Arc::make_mut(&mut state.simulation.retained.runs[0].analyses[0].waveforms[0].x)[0] = 1.0;
     assert!(
         answer(&state),
         "the gate kept rejecting the repaired frequency grid"
     );
-    assert_eq!(state.simulation.data_version, version);
+    assert_eq!(state.simulation.view.data_version, version);
 }
 
 #[test]
@@ -131,14 +131,17 @@ fn retained_memo_restored_history_invalidates_an_older_resolved_view() {
     let old = view_context::resolve_displayed_result_view(&state).unwrap();
     assert!(old.run(&state).is_some());
     let mut incoming = state.simulation.clone();
-    Arc::make_mut(&mut incoming.runs[0].analyses[0].waveforms[0].y).fill(2.0);
+    Arc::make_mut(&mut incoming.retained.runs[0].analyses[0].waveforms[0].y).fill(2.0);
     let restored =
         crate::io::simulation_state_from_results(crate::io::capture_simulation_results(&incoming))
             .unwrap();
-    assert_eq!(state.simulation.data_version, restored.data_version);
     assert_eq!(
-        state.simulation.runs[0].dataset_id,
-        restored.runs[0].dataset_id
+        state.simulation.view.data_version,
+        restored.view.data_version
+    );
+    assert_eq!(
+        state.simulation.retained.runs[0].dataset_id,
+        restored.retained.runs[0].dataset_id
     );
     state.simulation = restored;
     assert!(
@@ -159,7 +162,7 @@ fn retained_memo_immutable_pane_binding_rejects_changed_source_content() {
             open: true,
             name: "Pinned evidence".to_owned(),
             name_touched: true,
-            dataset_id: Some(app.state.simulation.runs[0].dataset_id),
+            dataset_id: Some(app.state.simulation.retained.runs[0].dataset_id),
             family_id: "waveform-worksheet".to_owned(),
             viewer_id: "viewer-waveform".to_owned(),
             layout_id: "single-pane".to_owned(),
@@ -170,17 +173,17 @@ fn retained_memo_immutable_pane_binding_rejects_changed_source_content() {
     assert!(
         matches!(bound.owner, view_context::ResultViewOwner::VisualizationPane { document_id, .. } if document_id == document)
     );
-    let version = app.state.simulation.data_version;
-    Arc::make_mut(&mut app.state.simulation.runs[0].analyses[0].waveforms[0].y).fill(2.0);
+    let version = app.state.simulation.view.data_version;
+    Arc::make_mut(&mut app.state.simulation.retained.runs[0].analyses[0].waveforms[0].y).fill(2.0);
     let error = view_context::resolve_displayed_result_view(&app.state)
         .expect_err("the immutable pane must reject changed content even before the next frame");
     assert!(error.contains("immutable binding"), "{error}");
     assert!(bound.run(&app.state).is_none());
-    assert_eq!(app.state.simulation.data_version, version);
+    assert_eq!(app.state.simulation.view.data_version, version);
 }
 
 fn read_all(state: &AppState) {
-    let run = &state.simulation.runs[0];
+    let run = &state.simulation.retained.runs[0];
     assert!(retained_evidence_is_valid(state, key(state)));
     let _ = retained_dataset_digest(state, run);
     assert!(analysis_answers_structural_gate(
@@ -201,7 +204,7 @@ fn read_all(state: &AppState) {
 fn retained_memo_unchanged_clones_reuse_their_evidence_without_dataset_walks() {
     for samples in [3, 100_000] {
         let mut state = retained_state(AnalysisType::Transient, samples);
-        state.simulation.runs[0].analyses.extend([
+        state.simulation.retained.runs[0].analyses.extend([
             analysis(AnalysisType::Noise, 2, samples),
             analysis(AnalysisType::Disto, 3, samples),
         ]);
@@ -215,14 +218,14 @@ fn retained_memo_unchanged_clones_reuse_their_evidence_without_dataset_walks() {
             read_all(&clone);
         }
         assert_eq!(work.since().total(), 0);
-        let digest = retained_dataset_digest(&state, &state.simulation.runs[0]);
-        Arc::make_mut(&mut clone.simulation.runs[0].analyses[0].waveforms[0].y).fill(2.0);
+        let digest = retained_dataset_digest(&state, &state.simulation.retained.runs[0]);
+        Arc::make_mut(&mut clone.simulation.retained.runs[0].analyses[0].waveforms[0].y).fill(2.0);
         assert_eq!(
-            retained_dataset_digest(&state, &state.simulation.runs[0]),
+            retained_dataset_digest(&state, &state.simulation.retained.runs[0]),
             digest
         );
         assert_ne!(
-            retained_dataset_digest(&clone, &clone.simulation.runs[0]),
+            retained_dataset_digest(&clone, &clone.simulation.retained.runs[0]),
             digest
         );
     }

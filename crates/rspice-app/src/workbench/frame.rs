@@ -210,7 +210,7 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
     use crate::state::SimulationRunLifecycle as Lifecycle;
     use crate::ui::widgets::ToastKind;
 
-    let Some(newest) = app.state.simulation.runs.first() else {
+    let Some(newest) = app.state.simulation.retained.runs.first() else {
         app.state.ui.observed_newest_run = None;
         return;
     };
@@ -460,6 +460,7 @@ fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
     let retained_runs: Vec<(u64, usize)> = app
         .state
         .simulation
+        .retained
         .runs
         .iter()
         .map(|run| (run.id, run.analyses.len()))
@@ -705,8 +706,8 @@ mod tests {
                 }
                 run.lifecycle = Lifecycle::Running;
                 announce_run_completion(&ctx, &mut app);
-                app.state.simulation.runs[0].success = false;
-                app.state.simulation.runs[0]
+                app.state.simulation.retained.runs[0].success = false;
+                app.state.simulation.retained.runs[0]
                     .finish_lifecycle(lifecycle)
                     .unwrap();
                 announce_run_completion(&ctx, &mut app);
@@ -741,8 +742,8 @@ mod tests {
             .simulation
             .start_run()
             .add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "tran"));
-        app.state.simulation.runs[0].lifecycle = SimulationRunLifecycle::Completed;
-        app.state.simulation.runs[0].success = true;
+        app.state.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Completed;
+        app.state.simulation.retained.runs[0].success = true;
 
         announce_run_completion(&ctx, &mut app);
         assert!(
@@ -750,11 +751,11 @@ mod tests {
             "a run that was already finished when first seen did not just complete"
         );
 
-        app.state.simulation.runs[0].lifecycle = SimulationRunLifecycle::Running;
+        app.state.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Running;
         announce_run_completion(&ctx, &mut app);
         assert!(app.state.ui.toasts.activity().is_empty());
 
-        app.state.simulation.runs[0].lifecycle = SimulationRunLifecycle::Completed;
+        app.state.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Completed;
         announce_run_completion(&ctx, &mut app);
         let activity = app.state.ui.toasts.activity();
         assert_eq!(
@@ -796,13 +797,13 @@ mod tests {
             .simulation
             .start_run()
             .add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "tran"));
-        app.state.simulation.runs[0].lifecycle = SimulationRunLifecycle::Running;
+        app.state.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Running;
         announce_run_completion(&ctx, &mut app);
 
         // What `finish_simulation_batch` leaves behind: a sealed lifecycle
         // and an anchored console line naming the run it sealed.
-        app.state.simulation.runs[0].lifecycle = SimulationRunLifecycle::Completed;
-        app.state.simulation.runs[0].success = true;
+        app.state.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Completed;
+        app.state.simulation.retained.runs[0].success = true;
         app.state.log_buffer.log_anchored(
             LogSeverity::Info,
             LogSource::Simulation,
@@ -855,10 +856,10 @@ mod tests {
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
         app.state.simulation.start_run();
-        app.state.simulation.runs[0].lifecycle = SimulationRunLifecycle::Running;
+        app.state.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Running;
         announce_run_completion(&ctx, &mut app);
-        app.state.simulation.runs[0].lifecycle = SimulationRunLifecycle::Failed;
-        app.state.simulation.runs[0].success = false;
+        app.state.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Failed;
+        app.state.simulation.retained.runs[0].success = false;
         // Exactly what `finish_simulation_batch` leaves behind for a run that
         // sealed with nothing retained.
         app.state.log_buffer.log_anchored(

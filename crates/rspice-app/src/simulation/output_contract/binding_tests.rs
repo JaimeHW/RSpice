@@ -351,14 +351,14 @@ fn scoped_deferred_probes_resolve_after_project_reload() {
         let run = execute(HIERARCHY, spec, &outputs);
         run.validate_provenance().unwrap();
         let mut state = crate::state::SimulationState::default();
-        state.next_run_id = run.id;
-        state.runs = vec![run].into();
+        state.retained.next_run_id = run.id;
+        state.retained.runs = vec![run].into();
         let snapshot = crate::io::capture_simulation_results(&state);
         snapshot.validate().unwrap();
         let restored: crate::io::project_io::ProjectSimulationResults =
             serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
         crate::io::restore_simulation_results(restored, &mut state).unwrap();
-        let mut analysis = state.runs[0].analyses[0].clone();
+        let mut analysis = state.retained.runs[0].analyses[0].clone();
         for index in 0..outputs.len() {
             assert_eq!(
                 analysis.saved_output_receipts[index].status,
@@ -456,8 +456,8 @@ fn deferred_op_outputs_use_physical_tables_after_renaming_and_project_reload() {
                 check_value(&run, 0, if source.starts_with('I') { -0.004 } else { 4.0 });
                 for reload in [false, true] {
                     let mut state = SimulationState::default();
-                    state.next_run_id = run.id;
-                    state.runs = vec![run.clone()].into();
+                    state.retained.next_run_id = run.id;
+                    state.retained.runs = vec![run.clone()].into();
                     if reload {
                         let snapshot = crate::io::capture_simulation_results(&state);
                         snapshot.validate().unwrap();
@@ -469,14 +469,15 @@ fn deferred_op_outputs_use_physical_tables_after_renaming_and_project_reload() {
                     assert!(state.select_run(0));
                     let before =
                         serde_json::to_vec(&crate::io::capture_simulation_results(&state)).unwrap();
-                    let visible_before = state.waveforms.clone();
-                    let version_before = state.data_version;
+                    let visible_before = state.view.waveforms.clone();
+                    let version_before = state.view.data_version;
                     let result =
                         state.materialize_deferred_saved_output(run.run_id, run.analyses[0].id, 1);
                     if let Some(expected) = expected {
                         result.unwrap();
-                        check_value(&state.runs[0], 1, expected);
+                        check_value(&state.retained.runs[0], 1, expected);
                         let visible = state
+                            .view
                             .waveforms
                             .iter()
                             .find(|wave| wave.name == "Deferred physical signal")
@@ -484,15 +485,15 @@ fn deferred_op_outputs_use_physical_tables_after_renaming_and_project_reload() {
                         close(visible.y[0], expected);
                     } else {
                         assert!(result.is_err(), "{kind:?}: {query}, reload={reload}");
-                        assert_eq!(state.data_version, version_before);
-                        assert_eq!(state.waveforms, visible_before);
+                        assert_eq!(state.view.data_version, version_before);
+                        assert_eq!(state.view.waveforms, visible_before);
                         assert_eq!(
                             serde_json::to_vec(&crate::io::capture_simulation_results(&state))
                                 .unwrap(),
                             before
                         );
                     }
-                    state.runs[0].validate_provenance().unwrap();
+                    state.retained.runs[0].validate_provenance().unwrap();
                     crate::io::capture_simulation_results(&state)
                         .validate()
                         .unwrap();

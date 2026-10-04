@@ -139,8 +139,8 @@ fn report_plan_binds_initial_pages_to_the_active_immutable_dataset() {
     ));
     let expected_binding =
         crate::product::DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
-    app.state.simulation.runs = vec![run].into();
-    app.state.simulation.active_run_idx = Some(0);
+    app.state.simulation.retained.runs = vec![run].into();
+    app.state.simulation.view.active_run_idx = Some(0);
     app.state.workbench.report_authoring.create_document_title = "Verification report".to_owned();
 
     commit_create_document(&mut app);
@@ -322,8 +322,8 @@ fn report_element_catalog_commits_every_non_plot_block_kind() {
         crate::state::AnalysisType::Transient,
         "retained transient",
     ));
-    app.state.simulation.runs = vec![run].into();
-    app.state.simulation.active_run_idx = Some(0);
+    app.state.simulation.retained.runs = vec![run].into();
+    app.state.simulation.view.active_run_idx = Some(0);
     app.state.workbench.report_authoring.create_document_title = "Verification report".to_owned();
     commit_create_document(&mut app);
 
@@ -664,7 +664,7 @@ fn changing_active_run_does_not_mutate_the_project_report_document() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.report_authoring.create_document_title = "Verification report".to_owned();
     commit_create_document(&mut app);
-    app.state.simulation.runs = vec![
+    app.state.simulation.retained.runs = vec![
         crate::state::SimulationRun::new(2),
         crate::state::SimulationRun::new(1),
     ]
@@ -672,8 +672,8 @@ fn changing_active_run_does_not_mutate_the_project_report_document() {
     let document = active_document(&app.state)
         .expect("report document")
         .clone();
-    app.state.simulation.active_run_idx = Some(0);
-    app.state.simulation.active_run_idx = Some(1);
+    app.state.simulation.view.active_run_idx = Some(0);
+    app.state.simulation.view.active_run_idx = Some(1);
     assert_eq!(active_document(&app.state), Some(&document));
 }
 
@@ -782,8 +782,8 @@ fn report_summary_uses_verified_spec_and_exact_corner_evidence() {
     let mut run = crate::state::SimulationRun::new(1);
     run.add_analysis(checks);
     run.add_analysis(corners);
-    app.state.simulation.runs = vec![run].into();
-    app.state.simulation.active_run_idx = Some(0);
+    app.state.simulation.retained.runs = vec![run].into();
+    app.state.simulation.view.active_run_idx = Some(0);
 
     let metrics = ReportSummaryMetrics::from_state(&app.state);
     assert_eq!(metrics.checks_passing, 1);

@@ -62,7 +62,7 @@ fn monte_carlo_checkpoint_retention_seals_abort_and_final_completion_drain() {
     let (mut controller, mut state) = controller_fixture(request.clone());
     (_, controller.runner) = start_checkpoint_run(&source);
     wait_until_finished_unpolled(&controller.runner);
-    let before = state.simulation.data_version;
+    let before = state.simulation.view.data_version;
     controller.publish_monte_carlo_checkpoint(&mut state);
     let live = state.simulation.active_analysis().unwrap();
     assert!(live.is_live_partial());
@@ -72,7 +72,7 @@ fn monte_carlo_checkpoint_retention_seals_abort_and_final_completion_drain() {
         live.monte_carlo_checkpoint.as_ref().unwrap().bytes(),
         &*bytes
     );
-    assert_ne!(state.simulation.data_version, before);
+    assert_ne!(state.simulation.view.data_version, before);
     let mut without = live.clone();
     without.monte_carlo_checkpoint = None;
     assert_ne!(live.result_data_digest(), without.result_data_digest());
@@ -245,7 +245,7 @@ fn monte_carlo_checkpoint_controls_resolve_evidence_before_preparation() {
     );
     let input = task.monte_carlo_resumes()[0].input();
     assert_eq!(input.digest(), digest);
-    state.simulation.runs.clear();
+    state.simulation.retained.runs.clear();
     assert_eq!(
         input.decode().unwrap().completed_trials(),
         1,
@@ -260,6 +260,7 @@ fn monte_carlo_checkpoint_controls_resolve_evidence_before_preparation() {
     let imported = crate::state::MonteCarloCheckpointEvidence::from_bytes(bytes).unwrap();
     state
         .simulation
+        .retained
         .imported_monte_carlo_checkpoints
         .insert("import.rspice-mc".into(), imported)
         .unwrap();

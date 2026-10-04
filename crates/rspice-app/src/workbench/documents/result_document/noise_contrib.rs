@@ -160,7 +160,7 @@ mod tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(first);
         run.add_analysis(second);
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         assert!(state.simulation.select_analysis(1));
 

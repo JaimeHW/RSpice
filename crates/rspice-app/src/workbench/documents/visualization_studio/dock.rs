@@ -52,7 +52,7 @@ fn normalize_add_pane_draft(state: &mut AppState) {
         draft_dataset
             .zip(draft_analysis)
             .is_some_and(|(dataset_id, analysis_sequence)| {
-                state.simulation.runs.iter().any(|run| {
+                state.simulation.retained.runs.iter().any(|run| {
                     run.dataset_id == dataset_id
                         && run
                             .analyses
@@ -73,7 +73,7 @@ fn normalize_add_pane_draft(state: &mut AppState) {
                 .map(|analysis| (run.dataset_id, analysis.id))
         })
         .or_else(|| {
-            state.simulation.runs.iter().find_map(|run| {
+            state.simulation.retained.runs.iter().find_map(|run| {
                 run.analyses
                     .first()
                     .map(|analysis| (run.dataset_id, analysis.id))
@@ -90,6 +90,7 @@ fn selected_draft_analysis(state: &AppState) -> Option<&crate::state::AnalysisRe
     let analysis_sequence = studio.draft_analysis_sequence?;
     state
         .simulation
+        .retained
         .runs
         .iter()
         .find(|run| run.dataset_id == dataset_id)?
@@ -284,6 +285,7 @@ fn comparison_source_projection_edits(
         }
         let run = state
             .simulation
+            .retained
             .runs
             .iter()
             .find(|run| run.dataset_id == binding.dataset_id)
@@ -317,6 +319,7 @@ fn comparison_signal_names_for_baseline(
         .ok_or_else(|| "No candidate analysis is selected.".to_owned())?;
     let baseline_run = state
         .simulation
+        .retained
         .runs
         .iter()
         .find(|run| run.dataset_id == baseline_id)
@@ -333,6 +336,7 @@ pub(super) fn compatible_comparison_dataset_ids(
 ) -> Vec<DatasetId> {
     let Some(candidate_run) = state
         .simulation
+        .retained
         .runs
         .iter()
         .find(|run| run.dataset_id == candidate_dataset_id)
@@ -348,6 +352,7 @@ pub(super) fn compatible_comparison_dataset_ids(
     };
     state
         .simulation
+        .retained
         .runs
         .iter()
         .filter(|run| run.dataset_id != candidate_dataset_id)
@@ -477,6 +482,7 @@ pub(super) fn execute_comparison_draft_with_differences(
     let baseline_run = app
         .state
         .simulation
+        .retained
         .runs
         .iter()
         .find(|run| run.dataset_id == baseline_id)

@@ -104,8 +104,8 @@ fn history(policy: ComplexExpressionPolicy, deferred: bool) -> ProjectSimulation
         run.analyses[0].error_message
     );
     let mut state = SimulationState::default();
-    state.next_run_id = run.id;
-    state.runs = vec![run].into();
+    state.retained.next_run_id = run.id;
+    state.retained.runs = vec![run].into();
     crate::io::capture_simulation_results(&state)
 }
 
@@ -118,7 +118,7 @@ fn complex_saved_outputs_keep_policy_and_components_after_reload_and_deferred_ev
             let json = serde_json::to_vec(&stored).unwrap();
             let reopened: ProjectSimulationResults = serde_json::from_slice(&json).unwrap();
             let mut state = crate::io::simulation_state_from_results(reopened).unwrap();
-            let analysis = &mut state.runs[0].analyses[0];
+            let analysis = &mut state.retained.runs[0].analyses[0];
             assert_eq!(analysis.saved_output_receipts[0].complex_policy, policy);
             if deferred {
                 materialize_deferred_saved_output(analysis, 0).unwrap();
@@ -141,7 +141,7 @@ fn complex_saved_outputs_keep_policy_and_components_after_reload_and_deferred_ev
                 }
             }
             check_value(
-                &state.runs[0],
+                &state.retained.runs[0],
                 0,
                 if policy.is_legacy() { 0.0 } else { 2.0 },
             );
@@ -185,7 +185,7 @@ fn complex_policy_is_bound_to_prepared_contract_and_retained_digest() {
 fn complex_schema_24_migration_authenticates_before_preserving_legacy_arithmetic() {
     let current = history(ComplexExpressionPolicy::LegacyMagnitude, true);
     let state = crate::io::simulation_state_from_results(current.clone()).unwrap();
-    let run = &state.runs[0];
+    let run = &state.retained.runs[0];
     let analysis_digest = run.analyses[0]
         .result_data_ref()
         .digest(rspice_results::result_digest::ResultDigestEncoding::V13);
@@ -233,11 +233,11 @@ fn complex_schema_24_migration_authenticates_before_preserving_legacy_arithmetic
         crate::io::project_io::ProjectSimulationResults::default().schema_version
     );
     let mut state = crate::io::simulation_state_from_results(historical).unwrap();
-    let analysis = &mut state.runs[0].analyses[0];
+    let analysis = &mut state.retained.runs[0].analyses[0];
     assert_eq!(
         analysis.saved_output_receipts[0].complex_policy,
         ComplexExpressionPolicy::LegacyMagnitude
     );
     materialize_deferred_saved_output(analysis, 0).unwrap();
-    check_value(&state.runs[0], 0, 0.0);
+    check_value(&state.retained.runs[0], 0, 0.0);
 }

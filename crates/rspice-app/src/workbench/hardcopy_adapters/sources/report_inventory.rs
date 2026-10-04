@@ -63,7 +63,7 @@ pub(super) fn reference_inventory(
     document: &ReportDocument,
 ) -> Result<ReportReferenceInventory, HardcopySourceError> {
     let mut available_datasets = Vec::new();
-    for run in &state.simulation.runs {
+    for run in &state.simulation.retained.runs {
         let binding = DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
         retain_available_dataset(&mut available_datasets, binding)?;
     }
@@ -293,6 +293,7 @@ fn unique_run_for_dataset<'a>(
 ) -> Result<&'a crate::state::SimulationRun, HardcopySourceError> {
     let mut matching = state
         .simulation
+        .retained
         .runs
         .iter()
         .filter(|run| run.dataset_id == dataset_id);

@@ -223,7 +223,7 @@ pub(super) fn owned_source_save_ready(app: &RSpiceApp) -> bool {
     {
         return false;
     }
-    let digest = crate::state::content_digest(&app.state.simulation.netlist_content);
+    let digest = crate::state::content_digest(&app.state.simulation.source.netlist_content);
     app.state.ui.netlist.externally_saved_content_digest != Some(digest)
 }
 
@@ -240,7 +240,7 @@ pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp
 
     let mut dialog = app.state.ui.netlist.save_dialog.clone();
     let messages = app.state.ui.messages();
-    let current_digest = crate::state::content_digest(&app.state.simulation.netlist_content);
+    let current_digest = crate::state::content_digest(&app.state.simulation.source.netlist_content);
     let browser_copy = cfg!(target_arch = "wasm32");
     let message_valid = browser_copy || {
         let message = dialog.message.trim();

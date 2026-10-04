@@ -249,9 +249,9 @@ fn global_app_resolver_rejects_stale_results_registry() {
             WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#00ffff"),
         ]),
     );
-    state.simulation.runs.push(run);
-    state.simulation.active_run_idx = Some(0);
-    state.simulation.active_analysis_idx = Some(0);
+    state.simulation.retained.runs.push(run);
+    state.simulation.view.active_run_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
     state.workbench.activate(Workspace::Results);
     state
         .workbench

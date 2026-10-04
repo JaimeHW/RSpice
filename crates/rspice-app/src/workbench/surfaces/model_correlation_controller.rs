@@ -625,6 +625,7 @@ fn retained_simulation_dataset(
     let run = app
         .state
         .simulation
+        .retained
         .run_by_stable_id(run_id)
         .ok_or_else(|| "The selected retained simulation run no longer exists".to_owned())?;
     if run.lifecycle != SimulationRunLifecycle::Completed || !run.success {

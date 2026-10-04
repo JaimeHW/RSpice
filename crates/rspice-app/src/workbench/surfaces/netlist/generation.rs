@@ -57,9 +57,9 @@ pub(super) fn reconcile_documents(app: &mut RSpiceApp) {
             ActiveNetlistDocument::RunSnapshot => app.state.ui.netlist.last_run_buffer.clone(),
         });
     if let Some(projected) = projected
-        && app.state.simulation.netlist_content != projected
+        && app.state.simulation.source.netlist_content != projected
     {
-        app.state.simulation.netlist_content = projected;
+        app.state.simulation.source.netlist_content = projected;
         app.state.ui.netlist.revision = app.state.ui.netlist.revision.wrapping_add(1);
         crate::workbench::documents::netlist_document::invalidate_source_evidence(
             &mut app.state.ui.netlist,

@@ -46,8 +46,8 @@ pub(in crate::workbench::documents::result_document) struct MismatchPlan {
 }
 fn mismatch_plan(state: &mut AppState) -> Option<Arc<MismatchPlan>> {
     let source = (
-        state.simulation.runs.revision(),
-        state.simulation.data_version,
+        state.simulation.retained.runs.revision(),
+        state.simulation.view.data_version,
     );
     let run = state.simulation.active_run()?;
     let analysis_key =
@@ -97,7 +97,7 @@ mod tests {
         let mut state = AppState::default();
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         state
     }
@@ -151,7 +151,7 @@ mod tests {
         let mut state = AppState::default();
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
 
         assert!(!serves_active_analysis(&state));

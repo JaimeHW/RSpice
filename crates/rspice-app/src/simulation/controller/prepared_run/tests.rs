@@ -35,10 +35,10 @@ fn standalone_connection_directive_is_an_authenticated_prepared_dependency() {
 #[test]
 fn exhausted_run_sequence_blocks_dispatch_without_starting_a_batch() {
     let mut state = AppState::default();
-    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.workspace.content.netlist_source =
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
-    state.simulation.next_run_id = u64::MAX;
+    state.simulation.retained.next_run_id = u64::MAX;
     let baseline = crate::io::capture_simulation_results(&state.simulation);
     let mut controller = SimulationController::new();
     let snapshot =
@@ -51,13 +51,13 @@ fn exhausted_run_sequence_blocks_dispatch_without_starting_a_batch() {
 
     controller.start_authorized_snapshot(&mut state);
 
-    assert_eq!(state.simulation.status, "Run blocked");
+    assert_eq!(state.simulation.execution.status, "Run blocked");
     assert!(!controller.has_active_batch());
     assert!(controller.runner.can_accept_prepared_task());
     assert!(controller.cached_netlist.is_none());
-    assert!(state.simulation.active_execution.is_none());
+    assert!(state.simulation.execution.active_execution.is_none());
     assert!(state.ui.netlist.pending_manual_run_id.is_none());
-    assert_eq!(state.simulation.next_run_id, u64::MAX);
+    assert_eq!(state.simulation.retained.next_run_id, u64::MAX);
     assert_eq!(
         crate::io::capture_simulation_results(&state.simulation),
         baseline
@@ -264,7 +264,7 @@ fn prepared_project_run_materializes_exact_signed_pdk_reference_models() {
 fn receipt_backed_manual_project_deck_uses_signed_pdk_models_without_host_paths() {
     let mut state = AppState::default();
     state.provision_test_project_technology_contract();
-    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.workspace.content.netlist_source =
         Some("signed project deck\nV1 d 0 1\nM1 d d 0 0 nmos_demo\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
@@ -289,7 +289,7 @@ fn receipt_backed_manual_project_deck_uses_signed_pdk_models_without_host_paths(
 fn governed_manual_deck_dispatches_signed_pdk_veriloga_runtime_without_host_paths() {
     let mut state = AppState::default();
     state.provision_test_project_veriloga_technology_contract();
-    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.workspace.content.netlist_source =
         Some("signed Verilog-A project deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
@@ -455,7 +455,7 @@ fn automatic_touchstone_export_policy_captures_live_dialog_and_path_once() {
 #[test]
 fn manual_touchstone_export_uses_imported_deck_origin_not_stale_schematic_path() {
     let mut state = AppState::default();
-    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.schematic.session.current_file = Some(PathBuf::from("stale").join("schematic.rsch"));
     state.workspace.content.netlist_source_path =
         Some(PathBuf::from("imported").join("rf_fixture.cir"));
@@ -492,7 +492,7 @@ fn manual_touchstone_export_uses_imported_deck_origin_not_stale_schematic_path()
 #[test]
 fn manual_fourier_is_topologically_bound_to_its_exact_transient_task() {
     let mut state = AppState::default();
-    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.workspace.content.netlist_source = Some(
         "Fourier deck\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.four 1k V(out)\n.tran 10u 5m\n.end\n"
             .to_owned(),
@@ -584,7 +584,7 @@ fn campaign_freezes_distinct_plan_members_without_switching_the_live_editor() {
         crate::io::project_io::load_project_text(&json, None).expect("campaign member reloads");
     let restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
         .expect("campaign result history restores");
-    let restored_membership = restored.runs[0]
+    let restored_membership = restored.retained.runs[0]
         .campaign_membership()
         .expect("campaign identity survives project round trip");
     assert_eq!(restored_membership.campaign_id(), receipt.campaign_id);
@@ -685,7 +685,7 @@ fn deferred_outputs_share_one_sealed_engine_source_budget_per_analysis() {
 #[test]
 fn manual_periodic_analyses_are_topologically_bound_to_seed_and_pss() {
     let mut state = AppState::default();
-    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.workspace.content.netlist_source = Some(
         "Periodic deck\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\nLPROBE out sensed 1n\nR2 sensed 0 1k\n.pss fund=1Meg points=128 harms=8\n.pac dec 20 1k 100Meg input=V1 out=out\n.pnoise dec 10 1 1Meg out=out\n.pxf dec 10 1k 10Meg input=V1 out=out outsideband=1\n.pstb probe=LPROBE maxharm=8 nmults=6\n.end\n"
             .to_owned(),
@@ -1177,7 +1177,7 @@ fn every_materialized_corner_binding_is_audited_before_dispatch() {
 #[test]
 fn active_batch_reentry_preserves_prepared_authorization_and_batch_metadata() {
     let mut state = AppState::default();
-    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.workspace.content.netlist_source =
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
@@ -1207,7 +1207,7 @@ fn active_batch_reentry_preserves_prepared_authorization_and_batch_metadata() {
         controller.cached_netlist.as_deref(),
         Some("existing sealed batch")
     );
-    assert_eq!(state.simulation.runs.len(), 1);
+    assert_eq!(state.simulation.retained.runs.len(), 1);
     assert_eq!(
         controller
             .run_authorization
@@ -1220,7 +1220,7 @@ fn active_batch_reentry_preserves_prepared_authorization_and_batch_metadata() {
 #[test]
 fn unpolled_completion_reentry_does_not_consume_or_replace_authorization() {
     let mut state = AppState::default();
-    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.workspace.content.netlist_source =
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
@@ -1239,7 +1239,7 @@ fn unpolled_completion_reentry_does_not_consume_or_replace_authorization() {
 
     controller.start_authorized_snapshot(&mut state);
 
-    assert!(state.simulation.runs.is_empty());
+    assert!(state.simulation.retained.runs.is_empty());
     assert_eq!(controller.total_analyses, 0);
     assert_eq!(
         controller
@@ -1254,7 +1254,7 @@ fn unpolled_completion_reentry_does_not_consume_or_replace_authorization() {
 #[test]
 fn direct_manual_run_cannot_bypass_internal_prepare_and_permit_consumption() {
     let mut state = AppState::default();
-    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.workspace.content.netlist_source =
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
@@ -1291,7 +1291,7 @@ fn included_source_mutation_after_prepare_is_rejected() {
     fs::write(&origin, source).expect("write deck origin");
 
     let mut state = AppState::default();
-    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.workspace.content.netlist_source = Some(source.to_owned());
     state.workspace.content.netlist_source_path = Some(origin);
     let mut controller = SimulationController::new();
@@ -1323,7 +1323,7 @@ fn dispatched_include_closure_never_reopens_mutated_source_files() {
     fs::write(&origin, source).expect("write deck origin");
 
     let mut state = AppState::default();
-    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.workspace.content.netlist_source = Some(source.to_owned());
     state.workspace.content.netlist_source_path = Some(origin);
     let mut controller = SimulationController::new();
@@ -1478,7 +1478,7 @@ fn insert_enabled_draft(
 
 fn manual_deck_state(deck: &str) -> AppState {
     let mut state = AppState::default();
-    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.workspace.content.netlist_source = Some(deck.to_owned());
     state
 }

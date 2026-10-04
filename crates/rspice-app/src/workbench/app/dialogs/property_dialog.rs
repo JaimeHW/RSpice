@@ -842,7 +842,7 @@ fn component_operating_point_context(
     let run = state.simulation.active_run()?;
     let current = run.prepared_receipt().is_some_and(|receipt| {
         receipt.project_revision() == state.workspace.content.project.revision()
-    }) && state.simulation.cross_probe.is_current_for(
+    }) && state.simulation.source.cross_probe.is_current_for(
         &state.workspace.content.active_view,
         state.schematic.topology_version(),
     );

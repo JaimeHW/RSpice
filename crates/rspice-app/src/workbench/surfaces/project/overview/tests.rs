@@ -239,13 +239,13 @@ fn overview_run_without_a_dataset_returns_to_analyses() {
 #[test]
 fn overview_run_action_opens_the_plan_without_starting_execution() {
     let mut app = RSpiceApp::test_instance();
-    let retained_runs = app.state.simulation.runs.len();
+    let retained_runs = app.state.simulation.retained.runs.len();
 
     run_plan_intent().execute(&mut app);
 
     assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
-    assert_eq!(app.state.simulation.runs.len(), retained_runs);
-    assert!(!app.state.simulation.is_running);
+    assert_eq!(app.state.simulation.retained.runs.len(), retained_runs);
+    assert!(!app.state.simulation.execution.is_running);
 }
 
 #[test]

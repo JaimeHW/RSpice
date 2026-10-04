@@ -764,7 +764,7 @@ fn a_removal_costing_only_retained_runs_still_stages_and_commits() {
             .expect("test provenance is valid"),
         ),
     );
-    app.state.simulation.runs = vec![run].into();
+    app.state.simulation.retained.runs = vec![run].into();
 
     remove_analysis_instance(&mut app, ac);
     assert_eq!(

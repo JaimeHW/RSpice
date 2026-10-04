@@ -549,7 +549,7 @@ fn specification_mapping_does_not_claim_execution_without_an_active_dataset() {
             unit: "V/V".to_owned(),
             scope: crate::state::SpecPointScope::AllPoints,
         });
-    app.state.simulation.active_run_idx = None;
+    app.state.simulation.view.active_run_idx = None;
 
     let coverage = verification_coverage(&app);
 
@@ -602,8 +602,8 @@ fn finite_goal_miss_counts_as_executed_but_not_passed() {
         );
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
-    app.state.simulation.runs = vec![run].into();
-    app.state.simulation.active_run_idx = Some(0);
+    app.state.simulation.retained.runs = vec![run].into();
+    app.state.simulation.view.active_run_idx = Some(0);
 
     let coverage = verification_coverage(&app);
     assert_eq!(coverage.executed, 1);
@@ -634,8 +634,14 @@ fn mc_sample_trail_is_visible_only_for_its_active_provenance_dataset() {
     let source_dataset_id = source.dataset_id;
     let other = SimulationRun::new(2);
     let mut simulation = SimulationState {
-        runs: vec![source, other].into(),
-        active_run_idx: Some(0),
+        retained: crate::state::RetainedSimulationState {
+            runs: vec![source, other].into(),
+            ..Default::default()
+        },
+        view: crate::state::SimulationViewState {
+            active_run_idx: Some(0),
+            ..Default::default()
+        },
         ..SimulationState::default()
     };
     simulation.replace_yield_evidence(
@@ -651,9 +657,9 @@ fn mc_sample_trail_is_visible_only_for_its_active_provenance_dataset() {
     );
 
     assert_eq!(active_mc_sample_trail(&simulation), 3);
-    simulation.active_run_idx = Some(1);
+    simulation.view.active_run_idx = Some(1);
     assert_eq!(active_mc_sample_trail(&simulation), 0);
-    simulation.active_run_idx = None;
+    simulation.view.active_run_idx = None;
     assert_eq!(active_mc_sample_trail(&simulation), 0);
 }
 
@@ -693,26 +699,26 @@ fn result_navigator_app() -> RSpiceApp {
     let mut run = SimulationRun::new(1);
     run.add_analysis(transient);
     run.add_analysis(ac);
-    app.state.simulation.runs = vec![run].into();
-    app.state.simulation.active_run_idx = None;
-    app.state.simulation.active_analysis_idx = None;
+    app.state.simulation.retained.runs = vec![run].into();
+    app.state.simulation.view.active_run_idx = None;
+    app.state.simulation.view.active_analysis_idx = None;
     app
 }
 
 #[test]
 fn result_navigator_selection_preserves_dataset_and_visibility_invariants() {
     let mut app = result_navigator_app();
-    let dataset_id = app.state.simulation.runs[0].dataset_id;
+    let dataset_id = app.state.simulation.retained.runs[0].dataset_id;
 
     assert!(select_result_dataset(&mut app, 0));
-    assert_eq!(app.state.simulation.active_run_idx, Some(0));
-    assert_eq!(app.state.simulation.active_analysis_idx, Some(0));
+    assert_eq!(app.state.simulation.view.active_run_idx, Some(0));
+    assert_eq!(app.state.simulation.view.active_analysis_idx, Some(0));
     assert_eq!(
         app.state.workbench.documents.active(Workspace::Results),
         Some(&crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id))
     );
 
-    let was_visible = app.state.simulation.runs[0].analyses[0].waveforms[0].visible;
+    let was_visible = app.state.simulation.retained.runs[0].analyses[0].waveforms[0].visible;
     assert!(select_result_signal(&mut app, 0, 0, 0));
     let selected = app
         .state
@@ -732,13 +738,13 @@ fn result_navigator_selection_preserves_dataset_and_visibility_invariants() {
         "the first Results render after activation must retain the navigator selection"
     );
     assert_eq!(
-        app.state.simulation.runs[0].analyses[0].waveforms[0].visible,
+        app.state.simulation.retained.runs[0].analyses[0].waveforms[0].visible,
         was_visible
     );
 
     assert!(select_result_analysis(&mut app, 0, 1));
-    assert_eq!(app.state.simulation.active_run_idx, Some(0));
-    assert_eq!(app.state.simulation.active_analysis_idx, Some(1));
+    assert_eq!(app.state.simulation.view.active_run_idx, Some(0));
+    assert_eq!(app.state.simulation.view.active_analysis_idx, Some(1));
     assert!(
         app.state
             .ui
@@ -784,7 +790,12 @@ fn quantity_metadata_names_the_kind_under_derived_projections() {
 #[test]
 fn analysis_groups_default_to_disclosing_only_the_active_analysis() {
     let ctx = egui::Context::default();
-    let run = result_navigator_app().state.simulation.runs.remove(0);
+    let run = result_navigator_app()
+        .state
+        .simulation
+        .retained
+        .runs
+        .remove(0);
     let first = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
     let second = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[1]);
     assert!(super::result_browser_group_expanded(&ctx, first, true));
@@ -806,7 +817,7 @@ fn analysis_groups_default_to_disclosing_only_the_active_analysis() {
 fn batch_plot_action_moves_only_the_checked_quantities() {
     let mut app = result_navigator_app();
     assert!(select_result_dataset(&mut app, 0));
-    let run = &app.state.simulation.runs[0];
+    let run = &app.state.simulation.retained.runs[0];
     let checked_key = SourceWaveformPresentationKey::new(
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
         "V(out)",
@@ -840,7 +851,7 @@ fn batch_plot_action_moves_only_the_checked_quantities() {
         "an unchecked quantity in another analysis is not disturbed"
     );
     assert_eq!(
-        app.state.simulation.runs[0].analyses[0].waveforms[0].visible, source_default,
+        app.state.simulation.retained.runs[0].analyses[0].waveforms[0].visible, source_default,
         "browser presentation never mutates immutable retained evidence"
     );
 
@@ -915,12 +926,12 @@ fn browser_facets_stay_paired_across_the_whole_dock_range() {
 #[test]
 fn exact_browser_copy_uses_round_trip_values_and_source_provenance() {
     let app = result_navigator_app();
-    let run = &app.state.simulation.runs[0];
+    let run = &app.state.simulation.retained.runs[0];
     let key = SourceWaveformPresentationKey::new(
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
         "V(out)",
     );
-    let tsv = super::exact_result_signal_tsv(&key, &app.state.simulation.runs)
+    let tsv = super::exact_result_signal_tsv(&key, &app.state.simulation.retained.runs)
         .expect("exact source waveform resolves");
     assert!(tsv.contains(&format!("# dataset\t{}", run.dataset_id)));
     assert!(tsv.contains("# analysis\tTRAN"));
@@ -928,7 +939,7 @@ fn exact_browser_copy_uses_round_trip_values_and_source_provenance() {
     assert!(tsv.contains("sample\tx\ty\n"));
     assert!(tsv.contains("1\t1.00000000000000000e0\t1.00000000000000000e0"));
 
-    let last = super::exact_result_signal_last_sample(&key, &app.state.simulation.runs)
+    let last = super::exact_result_signal_last_sample(&key, &app.state.simulation.retained.runs)
         .expect("last retained sample exists");
     assert_eq!(
         last,
@@ -939,13 +950,13 @@ fn exact_browser_copy_uses_round_trip_values_and_source_provenance() {
 #[test]
 fn exact_browser_copy_fails_closed_on_incoherent_vectors() {
     let mut app = result_navigator_app();
-    let run = &mut app.state.simulation.runs[0];
+    let run = &mut app.state.simulation.retained.runs[0];
     run.analyses[0].waveforms[0].y = std::sync::Arc::new(vec![0.0]);
     let key = SourceWaveformPresentationKey::new(
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
         "V(out)",
     );
-    let error = super::exact_result_signal_tsv(&key, &app.state.simulation.runs)
+    let error = super::exact_result_signal_tsv(&key, &app.state.simulation.retained.runs)
         .expect_err("mismatched exact vectors must not be truncated");
     assert!(
         error.contains("retained waveform 'V(out)' has 2 coordinates but 1 values"),
@@ -956,7 +967,7 @@ fn exact_browser_copy_fails_closed_on_incoherent_vectors() {
 #[test]
 fn browser_range_selection_uses_stable_filtered_order() {
     let mut app = result_navigator_app();
-    let run = &app.state.simulation.runs[0];
+    let run = &app.state.simulation.retained.runs[0];
     let first = SourceWaveformPresentationKey::new(
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
         "V(out)",
@@ -1428,7 +1439,7 @@ fn the_artifact_menu_opens_from_the_keyboard_on_the_focused_row() {
     let mut app = result_navigator_app();
     let mut values = std::collections::BTreeMap::new();
     values.insert("settling_time".to_owned(), 0.5);
-    app.state.simulation.runs[0].analyses[0].result_payload =
+    app.state.simulation.retained.runs[0].analyses[0].result_payload =
         Some(AnalysisResultPayload::ScalarMeasurements { values });
     assert!(select_result_dataset(&mut app, 0));
 

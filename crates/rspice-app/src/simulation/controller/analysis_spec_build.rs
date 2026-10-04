@@ -13,7 +13,7 @@ pub(super) fn analysis_inputs(state: &AppState) -> AnalysisInputs<'_> {
         sim_setup: &state.sim_setup,
         schematic: state.schematic.document(),
         selected_components: &state.schematic.session.editor.selection.components,
-        runs: &state.simulation.runs,
+        runs: &state.simulation.retained.runs,
         active_run: state.simulation.active_run().map(|run| &run.data),
         project_revision: state.workspace.content.project.revision(),
         plan_payloads: &state.workspace.content.simulation_plan_payloads,

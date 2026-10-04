@@ -550,6 +550,7 @@ pub(super) fn validate_analysis_instance(app: &mut AppState, id: AnalysisInstanc
 fn retained_runs_for_analysis(app: &RSpiceApp, id: AnalysisInstanceId) -> usize {
     app.state
         .simulation
+        .retained
         .runs
         .iter()
         .filter(|run| run.find_analysis_by_source_instance(id).is_some())
@@ -692,6 +693,7 @@ fn commit_analysis_removal(app: &mut RSpiceApp, id: AnalysisInstanceId) {
     let prior_run_ids = app
         .state
         .simulation
+        .retained
         .runs
         .iter()
         .filter(|run| run.find_analysis_by_source_instance(id).is_some())

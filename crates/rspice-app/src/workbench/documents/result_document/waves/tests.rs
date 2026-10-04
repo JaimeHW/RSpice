@@ -240,7 +240,7 @@ fn a_pane_states_how_many_runs_it_draws() {
             WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
         ]),
     );
-    let first = state.simulation.runs[0].dataset_id;
+    let first = state.simulation.retained.runs[0].dataset_id;
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 4.0], "#fff"),
@@ -258,7 +258,7 @@ fn a_pane_states_how_many_runs_it_draws() {
 
     // Overlaying the earlier run makes the pane draw the same signal twice.
     // `models_fingerprint` hashes `display_runs`, so the cache reruns itself.
-    state.simulation.overlay_dataset_ids.push(first);
+    state.simulation.view.overlay_dataset_ids.push(first);
     let (_, _, overlaid) = active_pane_identity(&Tokens::default(), &mut state);
 
     assert_eq!(overlaid, Some(2), "the active run plus one overlay");
@@ -361,7 +361,7 @@ fn a_copied_noise_density_never_takes_a_second_prefix() {
 #[test]
 fn hidden_unit_signals_keep_a_pane_available_for_reactivation() {
     let mut state = marker_fixture();
-    state.simulation.runs[0].analyses[0].waveforms[0].visible = false;
+    state.simulation.retained.runs[0].analyses[0].waveforms[0].visible = false;
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
         &state.simulation,
@@ -378,9 +378,10 @@ fn hidden_unit_signals_keep_a_pane_available_for_reactivation() {
 #[test]
 fn quick_view_visibility_never_mutates_retained_or_live_waveforms() {
     let mut state = marker_fixture();
-    let retained_default = state.simulation.runs[0].analyses[0].waveforms[0].visible;
+    let retained_default = state.simulation.retained.runs[0].analyses[0].waveforms[0].visible;
     let live_default = state
         .simulation
+        .view
         .waveforms
         .first()
         .map(|waveform| waveform.visible);
@@ -388,12 +389,13 @@ fn quick_view_visibility_never_mutates_retained_or_live_waveforms() {
     toggle_visibility(&mut state, 0, 0);
 
     assert_eq!(
-        state.simulation.runs[0].analyses[0].waveforms[0].visible, retained_default,
+        state.simulation.retained.runs[0].analyses[0].waveforms[0].visible, retained_default,
         "quick-view presentation must not rewrite the retained dataset"
     );
     assert_eq!(
         state
             .simulation
+            .view
             .waveforms
             .first()
             .map(|waveform| waveform.visible),
@@ -419,7 +421,7 @@ fn quick_view_visibility_never_mutates_retained_or_live_waveforms() {
     toggle_visibility(&mut state, 0, 0);
     assert!(state.ui.results.session.waveform_visibility.is_empty());
     assert_eq!(
-        state.simulation.runs[0].analyses[0].waveforms[0].visible,
+        state.simulation.retained.runs[0].analyses[0].waveforms[0].visible,
         retained_default
     );
 }
@@ -1087,10 +1089,16 @@ fn family_policy_expands_stable_styles_and_preserves_overlay_sources() {
     overlay.add_analysis(family_analysis(vec![11.0, 21.0, 31.0, 41.0, 51.0, 61.0]));
     let overlay_dataset = overlay.dataset_id;
     let simulation = SimulationState {
-        runs: vec![active, overlay].into(),
-        active_run_idx: Some(0),
-        active_analysis_idx: Some(0),
-        overlay_dataset_ids: vec![overlay_dataset],
+        retained: crate::state::RetainedSimulationState {
+            runs: vec![active, overlay].into(),
+            ..Default::default()
+        },
+        view: crate::state::SimulationViewState {
+            active_run_idx: Some(0),
+            active_analysis_idx: Some(0),
+            overlay_dataset_ids: vec![overlay_dataset],
+            ..Default::default()
+        },
         ..SimulationState::default()
     };
     let mut derived = DerivedSeries::default();
@@ -1142,7 +1150,7 @@ fn family_policy_expands_stable_styles_and_preserves_overlay_sources() {
     assert!(model.traces.last().unwrap().overlay);
     assert_eq!(model.traces.last().unwrap().x.as_slice(), &[3.0, 4.0]);
 
-    let source = &simulation.runs[0].analyses[0].waveforms[0];
+    let source = &simulation.retained.runs[0].analyses[0].waveforms[0];
     assert_eq!(
         source.x.as_slice(),
         &[101.0, 102.0, 103.0, 104.0, 105.0, 106.0]
@@ -1215,7 +1223,7 @@ fn family_policy_expands_stable_styles_and_preserves_overlay_sources() {
             .iter()
             .any(|trace| trace.overlay && trace.visible)
     );
-    assert!(simulation.runs[0].analyses[0].waveforms[0].visible);
+    assert!(simulation.retained.runs[0].analyses[0].waveforms[0].visible);
     results.set_sample_selection(None);
     assert!(results.session.hidden_family_traces.is_empty());
 }
@@ -1246,9 +1254,15 @@ fn incompatible_family_overlay_is_visibly_rejected_without_drawing_native_x() {
     overlay.add_analysis(incompatible);
     let overlay_dataset = overlay.dataset_id;
     let simulation = SimulationState {
-        runs: vec![active, overlay].into(),
-        active_run_idx: Some(0),
-        overlay_dataset_ids: vec![overlay_dataset],
+        retained: crate::state::RetainedSimulationState {
+            runs: vec![active, overlay].into(),
+            ..Default::default()
+        },
+        view: crate::state::SimulationViewState {
+            active_run_idx: Some(0),
+            overlay_dataset_ids: vec![overlay_dataset],
+            ..Default::default()
+        },
         ..SimulationState::default()
     };
 
@@ -1315,9 +1329,15 @@ fn filtered_overlay_uses_typed_ast_and_ignores_excluded_duplicate_x_rows() {
     overlay.add_analysis(overlay_analysis);
     let overlay_dataset = overlay.dataset_id;
     let simulation = SimulationState {
-        runs: vec![active, overlay].into(),
-        active_run_idx: Some(0),
-        overlay_dataset_ids: vec![overlay_dataset],
+        retained: crate::state::RetainedSimulationState {
+            runs: vec![active, overlay].into(),
+            ..Default::default()
+        },
+        view: crate::state::SimulationViewState {
+            active_run_idx: Some(0),
+            overlay_dataset_ids: vec![overlay_dataset],
+            ..Default::default()
+        },
         ..SimulationState::default()
     };
 
@@ -1373,9 +1393,15 @@ fn overlays_pair_two_same_kind_results_by_exact_source_instance() {
     let overlay_dataset_id = overlay.dataset_id;
 
     let mut simulation = SimulationState {
-        runs: vec![active, overlay].into(),
-        active_run_idx: Some(0),
-        overlay_dataset_ids: vec![overlay_dataset_id],
+        retained: crate::state::RetainedSimulationState {
+            runs: vec![active, overlay].into(),
+            ..Default::default()
+        },
+        view: crate::state::SimulationViewState {
+            active_run_idx: Some(0),
+            overlay_dataset_ids: vec![overlay_dataset_id],
+            ..Default::default()
+        },
         ..SimulationState::default()
     };
     assert!(simulation.select_analysis(0));

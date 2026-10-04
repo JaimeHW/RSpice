@@ -757,7 +757,7 @@ mod tests {
         let mut state = AppState::default();
         let mut run = SimulationRun::new(1);
         run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         let stale = state.active_specialized_viewer_cache_provenance().unwrap();
         let mut controller = SimulationController::new();
@@ -767,7 +767,7 @@ mod tests {
         // Reuse the display indices and sequence numbers in the replacement design.
         let mut replacement = SimulationRun::new(1);
         replacement.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
-        state.simulation.runs = vec![replacement].into();
+        state.simulation.retained.runs = vec![replacement].into();
         assert!(state.simulation.select_run(0));
         let active = state.active_specialized_viewer_cache_provenance().unwrap();
         assert_ne!(active, stale);
@@ -861,7 +861,7 @@ mod tests {
         let mut state = AppState::default();
         let mut run = SimulationRun::new(1);
         run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
 
         state.analysis.fft_state.window = WindowFunction::Rectangular;
@@ -917,7 +917,7 @@ mod tests {
         let mut state = AppState::default();
         let mut run = SimulationRun::new(1);
         run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
 
         state.analysis.fft_state.window = WindowFunction::Rectangular;

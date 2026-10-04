@@ -350,7 +350,7 @@ fn toolbar_outer_gap(viewport_width: f32) -> f32 {
 fn run_control_label(app: &RSpiceApp, layout: LayoutSpec) -> String {
     if app.state.simulation.cancellation_is_pending() {
         "Stopping…".to_owned()
-    } else if app.state.simulation.has_active_execution() {
+    } else if app.state.simulation.execution.has_active_execution() {
         "Stop".to_owned()
     } else if layout.compact_shell {
         format!(
@@ -973,8 +973,14 @@ fn current_result_source_digest(app: &RSpiceApp) -> Option<ContentDigest> {
     (netlist.generation_error.is_none()
         && netlist.generated_input_digest.is_some()
         && netlist.generated_input_digest == netlist.current_generation_input_digest
-        && !app.state.simulation.netlist_content.trim().is_empty())
-    .then(|| crate::state::content_digest(&app.state.simulation.netlist_content))
+        && !app
+            .state
+            .simulation
+            .source
+            .netlist_content
+            .trim()
+            .is_empty())
+    .then(|| crate::state::content_digest(&app.state.simulation.source.netlist_content))
 }
 
 fn run_has_current_success_authority(
@@ -999,6 +1005,7 @@ fn results_document_is_historical(app: &RSpiceApp) -> bool {
         Some(WorkspaceDocumentId::ResultDataset(dataset_id)) => app
             .state
             .simulation
+            .retained
             .runs
             .iter()
             .filter(|run| run_has_current_success_authority(run, project_revision, source_digest))
@@ -1029,7 +1036,7 @@ fn results_document_is_historical(app: &RSpiceApp) -> bool {
             };
             app.state
                 .simulation
-                .runs
+                .retained.runs
                 .iter()
                 .filter(|run| {
                     run_has_current_success_authority(run, project_revision, source_digest)
@@ -1535,7 +1542,7 @@ fn context_separator(ui: &mut egui::Ui, layout: LayoutSpec) {
 }
 
 fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    let execution_active = app.state.simulation.has_active_execution();
+    let execution_active = app.state.simulation.execution.has_active_execution();
     let cancellation_pending = app.state.simulation.cancellation_is_pending();
     let command = if execution_active {
         Command::StopSimulation
@@ -2076,19 +2083,19 @@ mod tests {
         let source = "R1 1 0 1k\n";
         let source_digest = crate::state::content_digest(source);
         let generation_input = digest(0x81);
-        app.state.simulation.netlist_content = source.to_owned();
+        app.state.simulation.source.netlist_content = source.to_owned();
         app.state.ui.netlist.generated_input_digest = Some(generation_input);
         app.state.ui.netlist.current_generation_input_digest = Some(generation_input);
         let revision = app.state.workspace.content.project.revision();
         let run = completed_prepared_run(revision, source_digest);
         let dataset_id = run.dataset_id;
-        app.state.simulation.runs = vec![run].into();
+        app.state.simulation.retained.runs = vec![run].into();
         app.state.workbench.documents.activate(
             crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id),
         );
 
         assert!(!results_document_is_historical(&app));
-        app.state.simulation.runs[0].lifecycle = SimulationRunLifecycle::Running;
+        app.state.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Running;
         assert!(results_document_is_historical(&app));
     }
 
@@ -2099,7 +2106,7 @@ mod tests {
         let revision = app.state.workspace.content.project.revision();
         let run = completed_prepared_run(revision, digest(0x83));
         let dataset_id = run.dataset_id;
-        app.state.simulation.runs = vec![run].into();
+        app.state.simulation.retained.runs = vec![run].into();
         app.state.workbench.documents.activate(
             crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id),
         );
@@ -2126,8 +2133,8 @@ mod tests {
             .start_run()
             .execution_identity()
             .expect("current run has execution identity");
-        app.state.simulation.active_execution = Some(identity);
-        app.state.simulation.is_running = false;
+        app.state.simulation.execution.active_execution = Some(identity);
+        app.state.simulation.execution.is_running = false;
         assert_eq!(run_control_label(&app, desktop), "Stop");
 
         app.state.simulation.request_abort_active_run().unwrap();

@@ -870,7 +870,7 @@ mod tests {
         ));
 
         let project_id = state.workspace.content.project.id();
-        state.simulation.is_running = true;
+        state.simulation.execution.is_running = true;
         assert!(!crate::workbench::workflows::project_workflow::close_project_discard(&mut state));
         assert!(state.project_lifecycle.is_open());
         assert_eq!(state.workspace.content.project.id(), project_id);

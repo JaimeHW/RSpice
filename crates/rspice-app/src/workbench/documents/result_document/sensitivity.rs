@@ -57,8 +57,8 @@ pub(super) struct SensitivityPlan {
 }
 fn sensitivity_plan(state: &mut AppState) -> Option<Arc<SensitivityPlan>> {
     let source = (
-        state.simulation.runs.revision(),
-        state.simulation.data_version,
+        state.simulation.retained.runs.revision(),
+        state.simulation.view.data_version,
     );
     let run = state.simulation.active_run()?;
     let analysis_key =
@@ -136,7 +136,7 @@ mod tests {
         for analysis in analyses {
             run.add_analysis(analysis);
         }
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         state
     }
@@ -238,8 +238,8 @@ mod tests {
     fn retained_view_source_sensitivity_rebuilds_shortened_rows_and_rejects_invalid_evidence() {
         let mut state = ranked_state(64);
         let original = sensitivity_plan(&mut state).unwrap();
-        let version = state.simulation.data_version;
-        state.simulation.runs[0].analyses[0] = sensitivity_result(
+        let version = state.simulation.view.data_version;
+        state.simulation.retained.runs[0].analyses[0] = sensitivity_result(
             1,
             "SENS",
             vec![SensitivityResultRow {
@@ -263,11 +263,11 @@ mod tests {
                 right_panel(ui, &mut state);
             });
         });
-        state.simulation.runs[0].analyses[0].success = false;
+        state.simulation.retained.runs[0].analyses[0].success = false;
         assert!(sensitivity_plan(&mut state).is_none());
-        state.simulation.runs[0].analyses[0].success = true;
+        state.simulation.retained.runs[0].analyses[0].success = true;
         assert_eq!(sensitivity_plan(&mut state).unwrap().display.order(), [0]);
-        assert_eq!(state.simulation.data_version, version);
+        assert_eq!(state.simulation.view.data_version, version);
     }
     #[test]
     fn the_ranking_is_sorted_once_per_dataset_generation() {
@@ -291,7 +291,7 @@ mod tests {
                 .fold(0.0_f64, f64::max)
         );
 
-        state.simulation.runs[0].analyses[0].result_payload =
+        state.simulation.retained.runs[0].analyses[0].result_payload =
             Some(AnalysisResultPayload::Sensitivity {
                 output: "V(out)".to_owned(),
                 result_mode: SensitivityResultMode::Dc,
@@ -301,7 +301,7 @@ mod tests {
                     normalized: (2.0).into(),
                 }],
             });
-        state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
+        state.simulation.view.data_version = state.simulation.view.data_version.wrapping_add(1);
 
         let after = sensitivity_plan(&mut state).expect("a ranked sensitivity plan");
         assert_eq!(after.display.order(), [0]);

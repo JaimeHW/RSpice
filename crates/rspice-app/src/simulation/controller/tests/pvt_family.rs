@@ -39,8 +39,8 @@ fn a_temperature_run_is_an_authentic_prefix_of_its_receipt_and_survives_a_projec
         .expect_err("a result with no authenticated task cannot be retained");
 
     let mut simulation = crate::state::SimulationState::default();
-    simulation.next_run_id = run.id;
-    simulation.runs = vec![run].into();
+    simulation.retained.next_run_id = run.id;
+    simulation.retained.runs = vec![run].into();
 
     let persisted = crate::io::capture_simulation_results(&simulation);
     persisted
@@ -51,8 +51,15 @@ fn a_temperature_run_is_an_authentic_prefix_of_its_receipt_and_survives_a_projec
     crate::io::restore_simulation_results(persisted, &mut reloaded)
         .expect("a saved temperature run reopens");
 
-    let restored = reloaded.runs.first().expect("the run survives the reload");
-    assert_eq!(restored.analyses.len(), simulation.runs[0].analyses.len());
+    let restored = reloaded
+        .retained
+        .runs
+        .first()
+        .expect("the run survives the reload");
+    assert_eq!(
+        restored.analyses.len(),
+        simulation.retained.runs[0].analyses.len()
+    );
     assert!(
         restored.analyses.iter().any(
             |analysis| analysis.analysis_type == AnalysisType::Parametric
@@ -94,8 +101,8 @@ fn a_changed_pvt_basis_keeps_successful_points_and_the_failed_family_after_reloa
                 rspice_results::run::SimulationRunLifecycle::Failed,
             );
             let mut state = crate::state::SimulationState::default();
-            state.next_run_id = run.id;
-            state.runs = vec![run].into();
+            state.retained.next_run_id = run.id;
+            state.retained.runs = vec![run].into();
             let persisted = crate::io::capture_simulation_results(&state);
             persisted
                 .validate()
@@ -103,7 +110,7 @@ fn a_changed_pvt_basis_keeps_successful_points_and_the_failed_family_after_reloa
             let decoded = serde_json::from_slice(&serde_json::to_vec(&persisted).unwrap()).unwrap();
             let mut restored = crate::state::SimulationState::default();
             crate::io::restore_simulation_results(decoded, &mut restored).unwrap();
-            let restored = &restored.runs[0];
+            let restored = &restored.retained.runs[0];
             assert_eq!(restored.analyses.len(), 3);
             assert!(restored.analyses[..2].iter().all(|point| point.success));
             let family = &restored.analyses[2];

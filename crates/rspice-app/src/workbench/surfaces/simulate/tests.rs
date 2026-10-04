@@ -135,7 +135,7 @@ fn dependency_source_catalog_uses_the_configured_design_not_the_open_netlist_doc
     let mut app = RSpiceApp::test_instance();
     app.state.provision_test_project_technology_contract();
     crate::workbench::examples::load_example("CMOS Inverter", &mut app.state.schematic);
-    app.state.simulation.netlist_content =
+    app.state.simulation.source.netlist_content =
         "stale document\nVSTALE stale 0 PULSE(0 1 0 1n 1n 1u 2u)\n.end\n".to_owned();
 
     let catalog = build_envelope_source_catalog(&app.state);
@@ -149,7 +149,7 @@ fn dependency_source_catalog_uses_the_configured_design_not_the_open_netlist_doc
 fn dependency_source_cache_ignores_document_switches_and_tracks_design_commits() {
     let mut app = RSpiceApp::test_instance();
     let original = envelope_source_catalog_input_digest(&app.state);
-    app.state.simulation.netlist_content = "unrelated editor document".to_owned();
+    app.state.simulation.source.netlist_content = "unrelated editor document".to_owned();
     assert_eq!(envelope_source_catalog_input_digest(&app.state), original);
 
     app.state.design_execution_epoch = app.state.design_execution_epoch.wrapping_add(1);
@@ -1204,6 +1204,7 @@ fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
     let retained_runs_before = app
         .state
         .simulation
+        .retained
         .runs
         .iter()
         .map(|run| (run.run_id, run.dataset_id, run.id))
@@ -1243,6 +1244,7 @@ fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
     assert_eq!(
         app.state
             .simulation
+            .retained
             .runs
             .iter()
             .map(|run| (run.run_id, run.dataset_id, run.id))
@@ -1369,8 +1371,8 @@ fn output_specifications_never_mix_measurements_across_retained_datasets() {
 
     let selected_dataset = selected.dataset_id;
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![older, selected].into();
-    simulation.active_run_idx = Some(1);
+    simulation.retained.runs = vec![older, selected].into();
+    simulation.view.active_run_idx = Some(1);
 
     let run = selected_output_dataset(&simulation).expect("selected dataset");
     assert_eq!(run.dataset_id, selected_dataset);
@@ -1633,7 +1635,7 @@ fn output_specifications_require_an_explicit_active_dataset() {
             .with_measurements(vec![rspice_core::MeasureResult::success("gain", 12.0)]),
     );
     let mut simulation = SimulationState::default();
-    simulation.runs.push(run);
+    simulation.retained.runs.push(run);
 
     assert!(selected_output_dataset(&simulation).is_none());
 }

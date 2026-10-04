@@ -829,7 +829,11 @@ mod tests {
             .ensure_active_plan_data(retired)
             .saved_outputs
             .push(retained_output());
-        app.state.simulation.runs.push(run_referencing(retired));
+        app.state
+            .simulation
+            .retained
+            .runs
+            .push(run_referencing(retired));
         let before = record_for(&app, retired);
         assert_eq!(
             (before.results, before.saved_outputs),

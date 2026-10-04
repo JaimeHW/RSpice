@@ -44,7 +44,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         .show_separator_line(true)
         .show(root, |ui| {
             if app.state.workbench.workspace == Workspace::Results {
-                app.state.ui.results_seen_version = app.state.simulation.data_version;
+                app.state.ui.results_seen_version = app.state.simulation.view.data_version;
             }
             ui.spacing_mut().item_spacing.x = 0.0;
             ui.horizontal(|ui| {
@@ -70,9 +70,9 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                     let new_result_count = usize::from(
                         workspace == Workspace::Results
                             && !active
-                            && app.state.simulation.has_results()
+                            && app.state.simulation.retained.has_results()
                             && app.state.ui.results_seen_version
-                                != app.state.simulation.data_version,
+                                != app.state.simulation.view.data_version,
                     );
                     let command = Command::OpenWorkspace(workspace);
                     let response = ui
@@ -90,7 +90,8 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         .inner;
                     if response.clicked() {
                         if workspace == Workspace::Results {
-                            app.state.ui.results_seen_version = app.state.simulation.data_version;
+                            app.state.ui.results_seen_version =
+                                app.state.simulation.view.data_version;
                         }
                         command.execute(app);
                     }

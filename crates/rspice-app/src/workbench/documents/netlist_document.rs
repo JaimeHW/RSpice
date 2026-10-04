@@ -122,7 +122,7 @@ pub(crate) fn owned_netlist_publication_state(
 pub(crate) fn visible_source_index(
     state: &mut AppState,
 ) -> std::sync::Arc<crate::state::NetlistSourceIndex> {
-    let source = state.simulation.netlist_content.as_str();
+    let source = state.simulation.source.netlist_content.as_str();
     if !state.ui.netlist.source_index.describes(source) {
         state.ui.netlist.source_index =
             std::sync::Arc::new(crate::state::NetlistSourceIndex::parse(source));
@@ -565,7 +565,7 @@ fn replace_owned_sources_atomically_impl(
     candidate.workspace.content.netlist_source_dirty = true;
     candidate.ui.netlist.owned_document = Some(next_document.clone());
     if candidate.ui.netlist.active_document == ActiveNetlistDocument::OwnedSource {
-        candidate.simulation.netlist_content = candidate
+        candidate.simulation.source.netlist_content = candidate
             .ui
             .netlist
             .active_dependency_identity
@@ -780,7 +780,7 @@ pub(crate) fn apply_live_owned_source(state: &mut AppState, source: String) -> b
     if candidate.ui.netlist.active_document == ActiveNetlistDocument::OwnedSource
         && candidate.ui.netlist.active_dependency_identity.is_none()
     {
-        candidate.simulation.netlist_content = source;
+        candidate.simulation.source.netlist_content = source;
     }
     if let Some(document) = next_document {
         if let Some(descriptor) = candidate.workspace.content.netlist_descriptor.as_mut() {
@@ -826,7 +826,7 @@ fn replace_owned_source_unlocked(state: &mut AppState, source: String) -> bool {
     {
         return false;
     }
-    candidate.simulation.netlist_content = source;
+    candidate.simulation.source.netlist_content = source;
     if let Some(document) = next_document {
         if let Some(descriptor) = candidate.workspace.content.netlist_descriptor.as_mut() {
             prune_owned_include_authority(descriptor, &document);
@@ -929,9 +929,9 @@ pub(crate) fn working_deck_source(state: &AppState) -> &str {
             .content
             .netlist_source
             .as_deref()
-            .unwrap_or(state.simulation.netlist_content.as_str())
+            .unwrap_or(state.simulation.source.netlist_content.as_str())
     } else {
-        state.simulation.netlist_content.as_str()
+        state.simulation.source.netlist_content.as_str()
     }
 }
 
@@ -986,7 +986,7 @@ pub(crate) fn open_netlist_dependency_from_root(
     state.ui.netlist.active_dependency_identity = Some(logical_identity.to_owned());
     state.workbench.netlist_open_documents.insert(tab);
     state.ui.netlist.active_document_initialized = true;
-    state.simulation.netlist_content = source;
+    state.simulation.source.netlist_content = source;
     state.ui.netlist.requested_line = None;
     state.ui.netlist.cursor_line = 0;
     state.ui.netlist.edited_lines.clear();
@@ -1004,7 +1004,7 @@ pub fn close_active_dependency(state: &mut AppState) -> bool {
     };
     state.ui.netlist.active_dependency_identity = None;
     state.ui.netlist.active_document = root;
-    state.simulation.netlist_content = match root {
+    state.simulation.source.netlist_content = match root {
         ActiveNetlistDocument::Generated => state.ui.netlist.generated_source.clone(),
         ActiveNetlistDocument::OwnedSource => state
             .ui
@@ -1179,7 +1179,7 @@ pub fn replace_owned_dependency_source(state: &mut AppState, source: String) -> 
     candidate.workspace.content.netlist_document = Some(next_document.clone());
     candidate.workspace.content.netlist_source_dirty = true;
     candidate.ui.netlist.owned_document = Some(next_document);
-    candidate.simulation.netlist_content = source;
+    candidate.simulation.source.netlist_content = source;
     candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
     invalidate_source_evidence(&mut candidate.ui.netlist);
     clear_netlist_edit_journal(&mut candidate.ui.netlist);
@@ -1213,7 +1213,7 @@ pub fn open_generated_primary(state: &mut AppState) -> bool {
     state.ui.netlist.active_dependency_root = None;
     state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
     state.ui.netlist.active_document_initialized = true;
-    state.simulation.netlist_content = state.ui.netlist.generated_source.clone();
+    state.simulation.source.netlist_content = state.ui.netlist.generated_source.clone();
     state.ui.netlist.completion_open = false;
     state.ui.netlist.completion_dismissed_at = None;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
@@ -1240,7 +1240,7 @@ pub(crate) fn open_owned_primary(state: &mut AppState) -> bool {
     // leaves a visibly validated manual deck unable to run.
     if state.ui.netlist.active_document == ActiveNetlistDocument::OwnedSource
         && state.ui.netlist.active_dependency_identity.is_none()
-        && state.simulation.netlist_content == document.source()
+        && state.simulation.source.netlist_content == document.source()
     {
         return true;
     }
@@ -1249,7 +1249,7 @@ pub(crate) fn open_owned_primary(state: &mut AppState) -> bool {
     state.ui.netlist.active_dependency_identity = None;
     state.ui.netlist.active_dependency_root = None;
     state.ui.netlist.active_document_initialized = true;
-    state.simulation.netlist_content = source;
+    state.simulation.source.netlist_content = source;
     state.ui.netlist.completion_open = false;
     state.ui.netlist.completion_dismissed_at = None;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
@@ -1724,7 +1724,7 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
                 candidate.ui.netlist.active_document = ActiveNetlistDocument::Generated;
                 candidate.ui.netlist.active_dependency_identity = None;
                 candidate.ui.netlist.active_dependency_root = None;
-                candidate.simulation.netlist_content =
+                candidate.simulation.source.netlist_content =
                     candidate.ui.netlist.generated_source.clone();
                 candidate.ui.netlist.externally_saved_content_digest = None;
             }
@@ -1833,7 +1833,7 @@ pub(crate) fn install_active_top_deck(
     state.ui.netlist.active_dependency_identity = None;
     state.ui.netlist.active_dependency_root = None;
     state.ui.netlist.active_document_initialized = true;
-    state.simulation.netlist_content = source;
+    state.simulation.source.netlist_content = source;
     if state.is_netlist_first_without_schematic() {
         // The bootstrap schematic is an implementation detail, not a second
         // design authority. Retaining its DRC receipt would leak stale
@@ -2409,7 +2409,7 @@ impl NetlistDocumentState {
 
 /// Reconcile queued execution and diff state before rendering the document.
 pub fn prepare(state: &mut AppState) {
-    if state.ui.netlist.rerun_queued && !state.simulation.has_active_execution() {
+    if state.ui.netlist.rerun_queued && !state.simulation.execution.has_active_execution() {
         state.ui.netlist.rerun_queued = false;
         if let Some(reason) = state.manual_deck_run_block_reason() {
             state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
@@ -2420,14 +2420,16 @@ pub fn prepare(state: &mut AppState) {
         }
     }
 
-    let data_version = state.simulation.data_version;
+    let data_version = state.simulation.view.data_version;
     if state.ui.netlist.seen_data_version == data_version {
         return;
     }
     state.ui.netlist.seen_data_version = data_version;
     if let Some(baseline) = state.ui.netlist.last_run_buffer.as_deref() {
-        state.ui.netlist.edited_lines =
-            baseline::changed_lines_against_baseline(&state.simulation.netlist_content, baseline);
+        state.ui.netlist.edited_lines = baseline::changed_lines_against_baseline(
+            &state.simulation.source.netlist_content,
+            baseline,
+        );
     }
 }
 
@@ -2435,8 +2437,10 @@ pub(super) fn refresh_diff_pips_from_baseline(state: &mut AppState) {
     let Some(baseline) = state.ui.netlist.last_run_buffer.as_deref() else {
         return;
     };
-    state.ui.netlist.edited_lines =
-        baseline::changed_lines_against_baseline(&state.simulation.netlist_content, baseline);
+    state.ui.netlist.edited_lines = baseline::changed_lines_against_baseline(
+        &state.simulation.source.netlist_content,
+        baseline,
+    );
 }
 
 #[cfg(test)]

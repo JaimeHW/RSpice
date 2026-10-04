@@ -171,7 +171,9 @@ pub fn cancel_automation_workflow(app: &mut RSpiceApp) {
         .runtime_execution
         .clone()
     {
-        if app.state.simulation.has_active_execution() || app.state.simulation.trigger_simulation {
+        if app.state.simulation.execution.has_active_execution()
+            || app.state.simulation.execution.trigger_simulation
+        {
             if let Some(session_id) = pending.session_id
                 && let Err(error) = app
                     .automation_runtime
@@ -199,10 +201,10 @@ pub fn cancel_automation_workflow(app: &mut RSpiceApp) {
     }
     match app.state.ui.code_workspace.automation.execution.clone() {
         AutomationExecutionState::AwaitingDispatch { .. }
-            if app.state.simulation.trigger_simulation
-                && !app.state.simulation.has_active_execution() =>
+            if app.state.simulation.execution.trigger_simulation
+                && !app.state.simulation.execution.has_active_execution() =>
         {
-            app.state.simulation.trigger_simulation = false;
+            app.state.simulation.execution.trigger_simulation = false;
             app.invalidate_simulation_preflight();
             let runtime = &mut app.state.ui.code_workspace.automation;
             runtime.execution = AutomationExecutionState::Cancelled;
@@ -1336,6 +1338,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
     let prior_run_ids = app
         .state
         .simulation
+        .retained
         .runs
         .iter()
         .map(|run| run.run_id)
@@ -1646,6 +1649,7 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
             let matching_run_ids = app
                 .state
                 .simulation
+                .retained
                 .runs
                 .iter()
                 .filter(|run| {
@@ -1661,7 +1665,7 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
                 return;
             }
             if let Some(run_id) = matching_run_ids.first().copied() {
-                if app.state.simulation.has_active_execution() {
+                if app.state.simulation.execution.has_active_execution() {
                     app.state.ui.code_workspace.automation.execution =
                         AutomationExecutionState::Running {
                             token,
@@ -1672,8 +1676,8 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
                 } else {
                     finish_run(app, token, &plan, run_id, &snapshot);
                 }
-            } else if !app.state.simulation.trigger_simulation
-                && !app.state.simulation.has_active_execution()
+            } else if !app.state.simulation.execution.trigger_simulation
+                && !app.state.simulation.execution.has_active_execution()
             {
                 fail(
                     app,
@@ -1686,7 +1690,7 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
             plan,
             run_id,
             snapshot,
-        } if !app.state.simulation.has_active_execution() => {
+        } if !app.state.simulation.execution.has_active_execution() => {
             if app.state.ui.code_workspace.automation.cancel_requested {
                 let runtime = &mut app.state.ui.code_workspace.automation;
                 runtime.execution = AutomationExecutionState::Cancelled;
@@ -1866,7 +1870,13 @@ fn finish_run(
         fail(app, &error);
         return;
     }
-    let Some(candidate) = app.state.simulation.run_by_stable_id(run_id).cloned() else {
+    let Some(candidate) = app
+        .state
+        .simulation
+        .retained
+        .run_by_stable_id(run_id)
+        .cloned()
+    else {
         fail(
             app,
             "The workflow run is no longer retained in project history.",
@@ -2031,6 +2041,7 @@ fn baseline_run(app: &RSpiceApp, plan_id: SimulationPlanId) -> Result<Simulation
     let run = app
         .state
         .simulation
+        .retained
         .run_by_stable_id(run_id)
         .ok_or_else(|| "The active plan's baseline run is no longer retained.".to_owned())?;
     validate_baseline_run(run, plan_id)?;
@@ -2155,6 +2166,7 @@ fn dispatch_snapshot_is_current(
     let current_baseline = app
         .state
         .simulation
+        .retained
         .run_by_stable_id(snapshot.baseline_run.run_id)
         .ok_or_else(|| "The dispatched baseline run is no longer retained.".to_owned())?;
     let current_digest = simulation_run_digest(current_baseline)?;

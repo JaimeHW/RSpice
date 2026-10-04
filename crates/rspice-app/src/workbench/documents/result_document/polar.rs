@@ -68,7 +68,7 @@ fn seed_cursors(context: &mut SheetContext<'_>, locus: &PolarLocus) {
     let (Some(first), Some(last)) = (first, last) else {
         return;
     };
-    context.results.session.cursor_strip = context.simulation.active_analysis_idx;
+    context.results.session.cursor_strip = context.simulation.view.active_analysis_idx;
     context.results.session.cursors.a = Some(locus.frequencies()[first]);
     context.results.session.cursors.b = Some(locus.frequencies()[last]);
 }
@@ -147,7 +147,7 @@ fn apply_canvas_input(
 fn snap_nearer_cursor(context: &mut SheetContext<'_>, locus: &PolarLocus, index: usize) {
     let frequency = locus.frequencies()[index];
     let cursors = context.results.session.cursors;
-    context.results.session.cursor_strip = context.simulation.active_analysis_idx;
+    context.results.session.cursor_strip = context.simulation.view.active_analysis_idx;
     match (cursors.a, cursors.b) {
         (None, _) => context.results.session.cursors.a = Some(frequency),
         (Some(_), None) => context.results.session.cursors.b = Some(frequency),
@@ -173,7 +173,7 @@ fn nudge_cursor(context: &mut SheetContext<'_>, locus: &PolarLocus, cursor_b: bo
     let last = locus.frequencies().len().saturating_sub(1) as i64;
     let moved = (index as i64 + steps).clamp(0, last) as usize;
     let frequency = locus.frequencies()[moved];
-    context.results.session.cursor_strip = context.simulation.active_analysis_idx;
+    context.results.session.cursor_strip = context.simulation.view.active_analysis_idx;
     if cursor_b {
         context.results.session.cursors.b = Some(frequency);
     } else {
@@ -231,7 +231,7 @@ mod tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
         let mut simulation = crate::state::SimulationState::default();
-        simulation.runs = vec![run].into();
+        simulation.retained.runs = vec![run].into();
         assert!(simulation.select_run(0));
         assert!(simulation.select_analysis(0));
         (simulation, ResultsState::default())

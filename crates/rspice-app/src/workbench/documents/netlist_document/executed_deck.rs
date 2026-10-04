@@ -31,6 +31,7 @@ pub(crate) fn run_snapshot_source(state: &AppState) -> String {
     };
     state
         .simulation
+        .retained
         .executed_decks
         .get(selection.run_id)
         .and_then(|deck| deck.point(selection.point))
@@ -75,10 +76,11 @@ impl ExecutedDeckVerification {
     /// — so it is the one thing a retained deck can be checked against.
     #[must_use]
     pub fn of(state: &AppState, run_id: u64, point: usize) -> Option<Self> {
-        let record = state.simulation.executed_decks.get(run_id)?;
+        let record = state.simulation.retained.executed_decks.get(run_id)?;
         let selected = record.point(point)?;
         let Some(receipt) = state
             .simulation
+            .retained
             .run_by_sequence(run_id)
             .and_then(crate::state::SimulationRun::prepared_receipt)
         else {

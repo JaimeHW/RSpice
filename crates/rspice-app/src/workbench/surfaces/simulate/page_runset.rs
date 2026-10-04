@@ -1731,6 +1731,7 @@ pub(super) fn family_target(app: &RSpiceApp) -> Result<usize, &'static str> {
     let active = app
         .state
         .simulation
+        .view
         .active_analysis_idx
         .filter(|index| {
             run.analyses

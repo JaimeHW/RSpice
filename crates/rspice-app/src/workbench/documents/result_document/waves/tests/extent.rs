@@ -63,7 +63,7 @@ fn hiding_a_trace_moves_the_strip_extent() {
     );
     assert_eq!(before[0].x_range, Some((0.0, 40.0)));
 
-    state.simulation.runs[0].analyses[0].waveforms[1].visible = false;
+    state.simulation.retained.runs[0].analyses[0].waveforms[1].visible = false;
     let after = cached_models(
         &state.simulation,
         &mut state.ui.results,
@@ -102,7 +102,7 @@ fn hiding_a_trace_through_the_override_map_moves_the_strip_extent() {
 
     toggle_visibility(&mut state, 0, 1);
     assert!(
-        state.simulation.runs[0].analyses[0].waveforms[1].visible,
+        state.simulation.retained.runs[0].analyses[0].waveforms[1].visible,
         "the override path must not rewrite the retained data flag"
     );
 
@@ -229,9 +229,15 @@ fn family_envelopes_are_memoized_against_the_models_that_produced_them() {
         .with_family_presentation(&manifest, &family_policy())
         .unwrap();
     let simulation = SimulationState {
-        runs: vec![active].into(),
-        active_run_idx: Some(0),
-        active_analysis_idx: Some(0),
+        retained: crate::state::RetainedSimulationState {
+            runs: vec![active].into(),
+            ..Default::default()
+        },
+        view: crate::state::SimulationViewState {
+            active_run_idx: Some(0),
+            active_analysis_idx: Some(0),
+            ..Default::default()
+        },
         ..SimulationState::default()
     };
     let mut derived = DerivedSeries::default();

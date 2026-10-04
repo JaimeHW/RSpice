@@ -127,7 +127,7 @@ fn plot_expression(ctx: &Context, app: &mut RSpiceApp) {
     if expression.is_empty() {
         return;
     }
-    let Some(analysis_index) = app.state.simulation.active_analysis_idx else {
+    let Some(analysis_index) = app.state.simulation.view.active_analysis_idx else {
         app.state
             .push_user_message(crate::diagnostics::ConsoleMessage::warning(
                 "Select a retained result analysis before plotting an expression.",
@@ -209,7 +209,7 @@ mod tests {
                 ]);
         let mut run = crate::state::SimulationRun::new(1);
         run.add_analysis(analysis);
-        app.state.simulation.runs = vec![run].into();
+        app.state.simulation.retained.runs = vec![run].into();
         assert!(app.state.simulation.select_run(0));
         app.state.dialogs.waveform_calculator_dialog = true;
         app.state.calculator_panel.expression = "V(out)/V(in)".to_owned();

@@ -1287,7 +1287,7 @@ pub(crate) fn prepare_revert_active_document(
 ) -> Result<RevertReviewToken, ProjectLifecycleError> {
     require_open_project(state)?;
     let id = active_document(state);
-    if state.simulation.has_active_execution()
+    if state.simulation.execution.has_active_execution()
         && matches!(
             id,
             ProjectDocumentId::SimulationPlan
@@ -1444,13 +1444,13 @@ fn revert_document_in_place(
             state.workspace.content.project_sources_dirty = false;
             state.ui.netlist = Default::default();
             state.workbench.netlist_open_documents.clear();
-            state.simulation.netlist_content = state
+            state.simulation.source.netlist_content = state
                 .workspace
                 .content
                 .netlist_source
                 .clone()
                 .unwrap_or_default();
-            state.simulation.trigger_simulation = false;
+            state.simulation.execution.trigger_simulation = false;
             state.ui.netlist.rerun_queued = false;
             state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
         }
@@ -1496,7 +1496,7 @@ pub(crate) fn close_active_document(state: &mut AppState) -> Result<(), ProjectL
 pub(crate) fn begin_project_replacement(
     state: &mut AppState,
 ) -> Result<TransactionId, ProjectLifecycleError> {
-    if state.simulation.has_active_execution() {
+    if state.simulation.execution.has_active_execution() {
         return Err(ProjectLifecycleError::ActiveRun);
     }
     state
@@ -1522,7 +1522,7 @@ pub(crate) fn validate_project_replacement(
     state: &AppState,
     id: TransactionId,
 ) -> Result<(), ProjectLifecycleError> {
-    if state.simulation.has_active_execution() {
+    if state.simulation.execution.has_active_execution() {
         return Err(ProjectLifecycleError::ActiveRun);
     }
     state

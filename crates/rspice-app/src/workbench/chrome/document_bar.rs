@@ -293,6 +293,7 @@ fn available_documents_for_workspace(
         Workspace::Stimulus => Vec::new(),
         Workspace::Results => state
             .simulation
+            .retained
             .runs
             .iter()
             .map(|run| WorkspaceDocument {
@@ -727,11 +728,13 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
         // an unguarded re-selection made those states impossible to hold.
         WorkspaceDocumentId::ResultDataset(dataset_id) => state
             .simulation
+            .retained
             .runs
             .iter()
             .position(|run| run.dataset_id == *dataset_id)
             .is_some_and(|index| {
-                state.simulation.active_run_idx == Some(index) || state.simulation.select_run(index)
+                state.simulation.view.active_run_idx == Some(index)
+                    || state.simulation.select_run(index)
             }),
         WorkspaceDocumentId::NetlistGenerated(document_id) => {
             let available = state
@@ -1238,7 +1241,7 @@ mod tests {
         state.ui.netlist.owned_document = Some(owned.clone());
         state.workspace.content.netlist_source = Some(ROOT.to_owned());
         state.workspace.content.netlist_document = Some(owned);
-        state.simulation.netlist_content = ROOT.to_owned();
+        state.simulation.source.netlist_content = ROOT.to_owned();
         state
     }
 
@@ -1363,14 +1366,14 @@ mod tests {
         state.workbench.workspace = Workspace::Results;
         let run = SimulationRun::new(7);
         let dataset = run.dataset_id;
-        state.simulation.runs.push(run);
+        state.simulation.retained.runs.push(run);
 
         assert!(activate_document(
             &mut state,
             &WorkspaceDocumentId::ResultDataset(dataset)
         ));
         assert_eq!(state.workbench.workspace, Workspace::Results);
-        assert_eq!(state.simulation.active_run_idx, Some(0));
+        assert_eq!(state.simulation.view.active_run_idx, Some(0));
     }
 
     /// The document bar re-activates the open document every frame. Doing so
@@ -1394,10 +1397,10 @@ mod tests {
             "AC",
         ));
         let dataset = first.dataset_id;
-        state.simulation.runs = vec![first].into();
+        state.simulation.retained.runs = vec![first].into();
         assert!(state.simulation.select_run(0));
         assert!(state.simulation.select_analysis(1));
-        let version = state.simulation.data_version;
+        let version = state.simulation.view.data_version;
 
         for _ in 0..3 {
             assert!(activate_document_by_id(
@@ -1407,11 +1410,11 @@ mod tests {
         }
 
         assert_eq!(
-            state.simulation.data_version, version,
+            state.simulation.view.data_version, version,
             "re-activating the active dataset must not advance the data version"
         );
         assert_eq!(
-            state.simulation.active_analysis_idx,
+            state.simulation.view.active_analysis_idx,
             Some(1),
             "re-activation must not snap the analysis selection back to the first"
         );
@@ -1425,7 +1428,7 @@ mod tests {
         let first_dataset = first.dataset_id;
         let second = SimulationRun::new(2);
         let second_dataset = second.dataset_id;
-        state.simulation.runs = vec![first, second].into();
+        state.simulation.retained.runs = vec![first, second].into();
         assert!(state.simulation.select_run(1));
         let documents = visible_documents(&state);
 
@@ -1435,11 +1438,11 @@ mod tests {
             &documents
         ));
         assert_eq!(
-            state.simulation.runs.len(),
+            state.simulation.retained.runs.len(),
             2,
             "closing never deletes result data"
         );
-        assert_eq!(state.simulation.active_run_idx, Some(0));
+        assert_eq!(state.simulation.view.active_run_idx, Some(0));
         assert_eq!(
             state.simulation.active_run().unwrap().dataset_id,
             first_dataset
@@ -1463,7 +1466,7 @@ mod tests {
         let second_dataset = second.dataset_id;
         let third = SimulationRun::new(3);
         let third_dataset = third.dataset_id;
-        state.simulation.runs = vec![first, second, third].into();
+        state.simulation.retained.runs = vec![first, second, third].into();
         assert!(state.simulation.select_run(0));
 
         assert!(cycle_document(&mut state, false));
@@ -1478,7 +1481,7 @@ mod tests {
                 .documents
                 .is_closed(&WorkspaceDocumentId::ResultDataset(third_dataset))
         );
-        assert_eq!(state.simulation.runs.len(), 3);
+        assert_eq!(state.simulation.retained.runs.len(), 3);
 
         assert_eq!(close_all_documents(&mut state), 1);
         assert_eq!(
@@ -1491,7 +1494,7 @@ mod tests {
                 .documents
                 .is_closed(&WorkspaceDocumentId::ResultDataset(second_dataset))
         );
-        assert_eq!(state.simulation.runs.len(), 3);
+        assert_eq!(state.simulation.retained.runs.len(), 3);
     }
 
     #[test]

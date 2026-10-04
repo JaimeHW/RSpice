@@ -49,9 +49,9 @@ fn quick_view_state(analysis: AnalysisResult, viewer: ResultViewer) -> AppState 
     let mut run = SimulationRun::new(1);
     run.lifecycle = SimulationRunLifecycle::Completed;
     run.analyses.push(analysis);
-    state.simulation.runs.push(run);
-    state.simulation.active_run_idx = Some(0);
-    state.simulation.active_analysis_idx = Some(0);
+    state.simulation.retained.runs.push(run);
+    state.simulation.view.active_run_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
     state.ui.results.session.viewer = viewer;
     state
 }
@@ -76,7 +76,7 @@ fn resolve_studio_viewer(
     run.analyses.push(analysis);
     let dataset_id = run.dataset_id;
     let mut simulation = SimulationState::default();
-    simulation.runs.push(run);
+    simulation.retained.runs.push(run);
     let mut studio = VisualizationStudioState::default();
     studio.revision = 1;
     studio.panes.push(StudioPane {
@@ -437,7 +437,7 @@ fn linked_report_table_requires_exact_source_and_dataset_inventory() {
     run.lifecycle = SimulationRunLifecycle::Completed;
     let dataset_id = run.dataset_id;
     let dataset_digest = run.dataset_content_digest();
-    app.simulation.runs.push(run);
+    app.simulation.retained.runs.push(run);
     let binding = DatasetBinding::new(dataset_id, dataset_digest);
     let snapshot = ReportReferenceSnapshot::new(
         ReportSourceId::Dataset { dataset_id },
@@ -1154,9 +1154,9 @@ fn waves_quick_view_selects_retained_transient_when_another_analysis_is_active()
             WaveformData::new("V(time)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
         ]),
     );
-    state.simulation.runs.push(run);
-    state.simulation.active_run_idx = Some(0);
-    state.simulation.active_analysis_idx = Some(0);
+    state.simulation.retained.runs.push(run);
+    state.simulation.view.active_run_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
     state.ui.results.session.viewer = ResultViewer::Waves;
 
     let resolved = resolve_quick_view(&state).expect("transient Waves semantic hardcopy");
@@ -1193,9 +1193,9 @@ fn production_figure_preparation_uses_the_open_dataset_not_the_global_run_select
         ]),
     );
 
-    state.simulation.runs = vec![displayed, background].into();
-    state.simulation.active_run_idx = Some(1);
-    state.simulation.active_analysis_idx = Some(0);
+    state.simulation.retained.runs = vec![displayed, background].into();
+    state.simulation.view.active_run_idx = Some(1);
+    state.simulation.view.active_analysis_idx = Some(0);
     state.ui.results.session.viewer = ResultViewer::Waves;
     state.workbench.workspace = Workspace::Results;
     state
@@ -1259,9 +1259,9 @@ fn production_manifest_hardcopy_retains_the_complete_displayed_dataset_through_w
     background
         .restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
         .expect("background fixture has explicit legacy provenance");
-    state.simulation.runs = vec![displayed, background].into();
-    state.simulation.active_run_idx = Some(1);
-    state.simulation.active_analysis_idx = Some(0);
+    state.simulation.retained.runs = vec![displayed, background].into();
+    state.simulation.view.active_run_idx = Some(1);
+    state.simulation.view.active_analysis_idx = Some(0);
     state.ui.results.session.viewer = ResultViewer::Manifest;
     state.workbench.workspace = Workspace::Results;
     state
@@ -1313,9 +1313,9 @@ fn production_stacked_results_hardcopy_retains_every_displayed_analysis() {
     run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
         .expect("terminal fixture has explicit legacy provenance");
     let dataset_id = run.dataset_id;
-    state.simulation.runs = vec![run].into();
-    state.simulation.active_run_idx = Some(0);
-    state.simulation.active_analysis_idx = Some(0);
+    state.simulation.retained.runs = vec![run].into();
+    state.simulation.view.active_run_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
     state.ui.results.session.viewer = ResultViewer::Waves;
     state.workbench.workspace = Workspace::Results;
     state
@@ -1381,9 +1381,9 @@ fn production_specs_hardcopy_judges_the_complete_dataset() {
     run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
         .expect("terminal fixture has explicit legacy provenance");
     let dataset_id = run.dataset_id;
-    state.simulation.runs = vec![run].into();
-    state.simulation.active_run_idx = Some(0);
-    state.simulation.active_analysis_idx = Some(0);
+    state.simulation.retained.runs = vec![run].into();
+    state.simulation.view.active_run_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
     state.workspace.content.specs = vec![
         crate::state::SpecEntry {
             measurement: "gain".to_owned(),
@@ -1503,9 +1503,9 @@ fn signed_off_specification_workspace() -> (AppState, String) {
 
     let dataset_id = run.dataset_id;
     let mut state = AppState::default();
-    state.simulation.runs = vec![run].into();
-    state.simulation.active_run_idx = Some(0);
-    state.simulation.active_analysis_idx = Some(0);
+    state.simulation.retained.runs = vec![run].into();
+    state.simulation.view.active_run_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
     state.ui.results.session.viewer = ResultViewer::Specs;
     state.workbench.workspace = Workspace::Results;
     state
@@ -1595,10 +1595,10 @@ fn quick_view_reads_exact_active_retained_waveform_without_report_reference() {
             ),
         ]),
     );
-    state.simulation.runs.push(run);
-    state.simulation.active_run_idx = Some(0);
-    state.simulation.active_analysis_idx = Some(0);
-    state.simulation.data_version = 9;
+    state.simulation.retained.runs.push(run);
+    state.simulation.view.active_run_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
+    state.simulation.view.data_version = 9;
     state.ui.results.session.viewer = ResultViewer::Waves;
 
     let resolved = resolve_results_quick_view_source(ResultsQuickViewHardcopySource {
@@ -1737,7 +1737,7 @@ fn studio_adapter_reads_retained_dataset_and_places_markers_without_report_refer
     );
     let dataset_id = run.dataset_id;
     let mut simulation = SimulationState::default();
-    simulation.runs.push(run);
+    simulation.retained.runs.push(run);
     let mut studio = VisualizationStudioState::default();
     studio.revision = 4;
     studio.panes.push(StudioPane {
@@ -1815,20 +1815,20 @@ fn studio_adapter_reads_retained_dataset_and_places_markers_without_report_refer
         Err(HardcopySourceError::UnsupportedVisualizationViewer(_))
     ));
     studio.panes[0].viewer = ResultViewer::Waves;
-    let duplicate = simulation.runs[0].clone();
-    simulation.runs.push(duplicate);
+    let duplicate = simulation.retained.runs[0].clone();
+    simulation.retained.runs.push(duplicate);
     assert!(matches!(
         resolve(&studio, &simulation),
         Err(HardcopySourceError::AmbiguousRetainedDataset(_))
     ));
-    simulation.runs.pop();
-    simulation.runs[0].lifecycle = SimulationRunLifecycle::Running;
+    simulation.retained.runs.pop();
+    simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Running;
     assert!(matches!(
         resolve(&studio, &simulation),
         Err(HardcopySourceError::UnretainedResult(_))
     ));
-    simulation.runs[0].lifecycle = SimulationRunLifecycle::Completed;
-    simulation.runs[0].analyses[0].waveforms[0] =
+    simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Completed;
+    simulation.retained.runs[0].analyses[0].waveforms[0] =
         WaveformData::new("V(out)", vec![0.0, 1.0], vec![1.0], "#00ffff");
     assert!(matches!(
         resolve(&studio, &simulation),
@@ -1920,7 +1920,7 @@ fn all_visualization_panes_preserve_retained_pane_order() {
         .expect("terminal fixture has explicit legacy provenance");
     let dataset_id = run.dataset_id;
     let mut simulation = SimulationState::default();
-    simulation.runs.push(run);
+    simulation.retained.runs.push(run);
     let mut studio = VisualizationStudioState::default();
     studio.revision = 7;
     studio.panes = vec![

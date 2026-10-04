@@ -16,7 +16,7 @@ fn marker_project(state: &AppState) -> ProjectSnapshot {
 
 fn marker_state(id: u32) -> (AppState, AnalysisPresentationKey) {
     let mut state = transient_state();
-    let run = &mut state.simulation.runs[0];
+    let run = &mut state.simulation.retained.runs[0];
     run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
         .unwrap();
     run.mark_running().unwrap();
@@ -112,7 +112,7 @@ fn marker_anchor_must_name_the_same_analysis_as_the_marker() {
     let mut project = marker_project(&state);
     project.file.result_presentation.markers[0].anchor.analysis = AnalysisPresentationKey::new(
         crate::product::DatasetId::new(),
-        &state.simulation.runs[0].analyses[0],
+        &state.simulation.retained.runs[0].analyses[0],
     );
     assert!(
         project.file.validate().is_err(),
@@ -194,7 +194,7 @@ fn invalid_marker_placement_does_not_consume_an_identity_or_mutate_annotations()
     }
     let foreign = AnalysisPresentationKey::new(
         crate::product::DatasetId::new(),
-        &state.simulation.runs[0].analyses[0],
+        &state.simulation.retained.runs[0].analyses[0],
     );
     assert!(
         state

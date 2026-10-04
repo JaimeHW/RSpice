@@ -98,14 +98,14 @@ struct RunRow {
 impl RunRow {
     fn from_run(state: &AppState, run: &SimulationRun, active: bool) -> Self {
         let executor_owned = active && !run.lifecycle.is_terminal();
-        let current_analysis_progress = state.simulation.progress.clamp(0.0, 1.0) as f32;
+        let current_analysis_progress = state.simulation.execution.progress.clamp(0.0, 1.0) as f32;
         let (status, tone) = match run.lifecycle {
             SimulationRunLifecycle::LegacyUnknown => {
                 ("Legacy status not retained".to_owned(), RunTone::Neutral)
             }
             SimulationRunLifecycle::Preparing => ("Preparing".to_owned(), RunTone::Active),
             SimulationRunLifecycle::Running => {
-                let detail = state.simulation.status.trim();
+                let detail = state.simulation.execution.status.trim();
                 (
                     if active && !detail.is_empty() {
                         detail.to_owned()
@@ -175,6 +175,7 @@ impl RunRow {
         let task_count = tasks.len().max(run.analyses.len());
         let executed_deck_points = state
             .simulation
+            .retained
             .executed_decks
             .get(run.id)
             .map_or(0, |deck| deck.points.len());
@@ -233,6 +234,7 @@ impl JobsSnapshot {
     fn capture(state: &AppState, requested: Option<RunId>, scope: JobsPlanScope) -> Self {
         let active_run_id = state
             .simulation
+            .execution
             .active_execution
             .map(|execution| execution.run_id);
         let active_plan_id = state
@@ -242,6 +244,7 @@ impl JobsSnapshot {
             .map(|plan| plan.id());
         let rows = state
             .simulation
+            .retained
             .runs
             .iter()
             .map(|run| RunRow::from_run(state, run, Some(run.run_id) == active_run_id))
@@ -292,6 +295,7 @@ impl JobsSnapshot {
             cancelling: active_run_id.is_some_and(|run_id| {
                 state
                     .simulation
+                    .retained
                     .run_by_stable_id(run_id)
                     .is_some_and(|run| run.lifecycle == SimulationRunLifecycle::Cancelling)
             }),
@@ -420,6 +424,7 @@ fn open_run_in_results(app: &mut RSpiceApp, run_id: RunId) {
     let Some(index) = app
         .state
         .simulation
+        .retained
         .runs
         .iter()
         .position(|run| run.run_id == run_id)
@@ -1565,7 +1570,8 @@ fn format_duration(seconds: f64) -> String {
 
 fn export_selected_manifest(app: &mut RSpiceApp) {
     let selected_id = app.state.workbench.jobs_manager.selected_run_id;
-    let Some(run) = selected_id.and_then(|id| app.state.simulation.run_by_stable_id(id)) else {
+    let Some(run) = selected_id.and_then(|id| app.state.simulation.retained.run_by_stable_id(id))
+    else {
         app.state.push_user_message(ConsoleMessage::warning(
             "No retained run is selected for manifest export.",
         ));
@@ -1785,7 +1791,7 @@ mod tests {
             .workbench
             .activate(crate::workbench::state::Workspace::Simulate);
         let first = app.state.simulation.start_run().run_id;
-        app.state.simulation.runs[0]
+        app.state.simulation.retained.runs[0]
             .analyses
             .push(AnalysisResult::new(
                 1,
@@ -1813,7 +1819,11 @@ mod tests {
         app.state
             .workbench
             .activate(crate::workbench::state::Workspace::Simulate);
-        app.state.simulation.runs.retain(|run| run.run_id != second);
+        app.state
+            .simulation
+            .retained
+            .runs
+            .retain(|run| run.run_id != second);
         let before = app.state.log_buffer.revision();
         open_run_in_results(&mut app, second);
         assert_eq!(
@@ -1830,17 +1840,23 @@ mod tests {
         let first = state.simulation.start_run().run_id;
         state
             .simulation
+            .view
             .active_run_idx
             .expect("first run is selected");
         let second = state.simulation.start_run().run_id;
-        state.simulation.active_execution = state
+        state.simulation.execution.active_execution = state
             .simulation
+            .retained
             .run_by_stable_id(second)
             .and_then(SimulationRun::execution_identity);
         let snapshot = JobsSnapshot::capture(&state, Some(first), JobsPlanScope::AllPlans);
         assert_eq!(snapshot.selected_run_id, Some(first));
 
-        state.simulation.runs.retain(|run| run.run_id != first);
+        state
+            .simulation
+            .retained
+            .runs
+            .retain(|run| run.run_id != first);
         let snapshot = JobsSnapshot::capture(&state, Some(first), JobsPlanScope::AllPlans);
         assert_eq!(snapshot.selected_run_id, Some(second));
     }

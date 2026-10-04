@@ -174,6 +174,7 @@ fn tuning_baseline_run(app: &RSpiceApp) -> Option<&crate::state::SimulationRun> 
     let run_id = app.state.workbench.verification.tuning_baseline_run?;
     app.state
         .simulation
+        .retained
         .runs
         .iter()
         .find(|run| run.run_id == run_id)

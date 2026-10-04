@@ -77,7 +77,7 @@ fn manual(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
         serde_json::to_value(&spec).unwrap(),
         "fixture authoring must preserve every typed analysis control"
     );
-    state.simulation.run_intent = super::SimulationRunIntent::ManualDeck;
+    state.simulation.execution.run_intent = super::SimulationRunIntent::ManualDeck;
     state.workspace.content.netlist_source = Some(source);
     let mut controller = super::SimulationController::new();
     controller.validate_manual_deck_document(&state).unwrap();

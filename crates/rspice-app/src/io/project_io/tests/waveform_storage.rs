@@ -15,14 +15,14 @@ pub(super) fn complex_history() -> SimulationState {
     run.finish_lifecycle(SimulationRunLifecycle::Completed)
         .unwrap();
     let mut state = SimulationState::default();
-    state.runs.push(run);
+    state.retained.runs.push(run);
     state
 }
 
 #[test]
 fn waveform_storage_is_shared_by_capture_clone_and_restore() {
     let state = complex_history();
-    let source = &state.runs[0].analyses[0].waveforms[0];
+    let source = &state.retained.runs[0].analyses[0].waveforms[0];
     let snapshot = crate::io::capture_simulation_results(&state);
     let captured = &snapshot.runs[0].analyses[0].waveforms[0];
     assert_eq!(
@@ -52,7 +52,7 @@ fn waveform_storage_is_shared_by_capture_clone_and_restore() {
         captured_complex.imag.as_ptr()
     );
     let restored = crate::io::simulation_state_from_results(candidate).unwrap();
-    let restored = &restored.runs[0].analyses[0].waveforms[0];
+    let restored = &restored.retained.runs[0].analyses[0].waveforms[0];
     assert_eq!(restored.x.as_ptr(), source.x.as_ptr());
     assert_eq!(restored.y.as_ptr(), source.y.as_ptr());
     assert_eq!(
@@ -79,7 +79,7 @@ fn waveform_storage_detaches_edits_without_changing_accepted_samples_or_wire_for
             "complex": {"source_name": "V(out)", "real": [5.0, 6.0], "imag": [7.0, 8.0]}
         })
     );
-    let live = &mut state.runs[0].analyses[0].waveforms[0];
+    let live = &mut state.retained.runs[0].analyses[0].waveforms[0];
     std::sync::Arc::make_mut(&mut live.x)[1] = 2.5;
     std::sync::Arc::make_mut(&mut live.y)[1] = 4.5;
     let complex = live.complex.as_mut().unwrap();

@@ -282,6 +282,7 @@ fn regression_baseline_picker(ctx: &egui::Context, app: &mut RSpiceApp) {
     let mut candidates = app
         .state
         .simulation
+        .retained
         .runs
         .iter()
         .filter(|run| {
@@ -638,12 +639,13 @@ impl TableCell {
 fn verification_run_index(app: &RSpiceApp) -> Option<usize> {
     app.state
         .simulation
+        .view
         .active_run_idx
-        .filter(|index| *index < app.state.simulation.runs.len())
+        .filter(|index| *index < app.state.simulation.retained.runs.len())
 }
 
 fn verification_run(app: &RSpiceApp) -> Option<&crate::state::SimulationRun> {
-    verification_run_index(app).and_then(|index| app.state.simulation.runs.get(index))
+    verification_run_index(app).and_then(|index| app.state.simulation.retained.runs.get(index))
 }
 
 fn verification_yield_results(app: &RSpiceApp) -> &[rspice_results::yield_analysis::YieldResult] {
@@ -651,6 +653,7 @@ fn verification_yield_results(app: &RSpiceApp) -> &[rspice_results::yield_analys
         .and_then(|run| {
             app.state
                 .simulation
+                .retained
                 .yield_results_for_dataset(run.dataset_id)
         })
         .unwrap_or(&[])
@@ -687,7 +690,7 @@ fn specification_evidence(app: &RSpiceApp, run_index: Option<usize>) -> Vec<Spec
     // are answered by nothing, and the strip names the reason.
     let run = domain
         .answers_a_plan_limit()
-        .then(|| run_index.and_then(|index| app.state.simulation.runs.get(index)))
+        .then(|| run_index.and_then(|index| app.state.simulation.retained.runs.get(index)))
         .flatten();
     let specs = plan_id.map_or_else(
         || app.state.workspace.content.specs.clone(),
@@ -1191,7 +1194,7 @@ fn run_margin_matrix(
     run_index: Option<usize>,
     evidence: &[SpecificationEvidence],
 ) {
-    let run = run_index.and_then(|index| app.state.simulation.runs.get(index));
+    let run = run_index.and_then(|index| app.state.simulation.retained.runs.get(index));
     table_section_header(
         ui,
         "Active dataset · specification margin",
@@ -2005,7 +2008,7 @@ fn request_analysis_run(
         app.state.workbench.active_analysis_instance = Some(id);
     }
     crate::workbench::preflight::run_and_queue(app);
-    if app.state.simulation.trigger_simulation {
+    if app.state.simulation.execution.trigger_simulation {
         Ok(())
     } else {
         Err(

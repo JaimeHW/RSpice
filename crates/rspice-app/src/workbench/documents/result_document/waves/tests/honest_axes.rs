@@ -71,15 +71,19 @@ fn swept_current_source() -> AppState {
             WaveformData::new("V(out)", vec![0.0, 1.0e-3], vec![0.0, 5.0], "#fff"),
         ]),
     );
-    let run_id = state.simulation.runs[0].id;
-    state.simulation.executed_decks.retain(ExecutedDeck {
-        run_id,
-        points: vec![ExecutedDeckPoint {
-            label: "DC".to_owned(),
-            deck: "* bias sweep\nIbias 0 in DC 0\n.dc Ibias 0 1m 10u\n.end\n".into(),
-            model_sources: Vec::new(),
-        }],
-    });
+    let run_id = state.simulation.retained.runs[0].id;
+    state
+        .simulation
+        .retained
+        .executed_decks
+        .retain(ExecutedDeck {
+            run_id,
+            points: vec![ExecutedDeckPoint {
+                label: "DC".to_owned(),
+                deck: "* bias sweep\nIbias 0 in DC 0\n.dc Ibias 0 1m 10u\n.end\n".into(),
+                model_sources: Vec::new(),
+            }],
+        });
     state.ui.results.session.viewer = super::super::super::ResultViewer::DcSweep;
     state
 }
@@ -137,7 +141,7 @@ fn a_solved_current_source_sweep_keeps_amperes_without_an_executed_deck() {
 fn a_dc_sweep_without_a_retained_deck_keeps_the_analysis_default() {
     let mut state = swept_current_source();
     assert_eq!(model_axis(&mut state), ("Ibias".to_owned(), "A".to_owned()));
-    state.simulation.executed_decks = Default::default();
+    state.simulation.retained.executed_decks = Default::default();
     assert_eq!(model_axis(&mut state), ("x".to_owned(), "V".to_owned()));
 }
 
@@ -153,13 +157,13 @@ fn an_expression_chip_takes_the_palette_slot_its_curve_draws_in() {
             WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
         ]),
     );
-    let earlier = state.simulation.runs[0].dataset_id;
+    let earlier = state.simulation.retained.runs[0].dataset_id;
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
         ]),
     );
-    state.simulation.overlay_dataset_ids.push(earlier);
+    state.simulation.view.overlay_dataset_ids.push(earlier);
 
     let tokens = Tokens::default();
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -219,13 +223,13 @@ fn an_overlay_row_names_the_run_it_came_from() {
             WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
         ]),
     );
-    let earlier = state.simulation.runs[0].dataset_id;
+    let earlier = state.simulation.retained.runs[0].dataset_id;
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
         ]),
     );
-    state.simulation.overlay_dataset_ids.push(earlier);
+    state.simulation.view.overlay_dataset_ids.push(earlier);
     state.ui.results.session.cursor_strip = Some(0);
 
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -323,7 +327,7 @@ fn qpnoise_result_plot_preserves_physical_frequencies_and_separate_noise_units()
     assert!(result.success);
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(result);
-    state.simulation.active_analysis_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
     state.ui.results.session.viewer = super::super::super::ResultViewer::NoiseContrib;
     assert!(super::super::super::view_context::analysis_supports_viewer(
         state.ui.results.session.viewer,

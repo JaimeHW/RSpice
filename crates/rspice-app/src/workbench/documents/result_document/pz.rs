@@ -116,11 +116,11 @@ mod tests {
         let mut state = AppState::default();
         let mut run = SimulationRun::new(1);
         run.add_analysis(AnalysisResult::new(7, AnalysisType::PoleZero, "PZ 7"));
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         assert!(active_data(&state).is_none());
 
-        state.simulation.runs[0].analyses[0] =
+        state.simulation.retained.runs[0].analyses[0] =
             AnalysisResult::new(7, AnalysisType::PoleZero, "PZ 7").with_result_payload(
                 AnalysisResultPayload::PoleZero {
                     poles: vec![

@@ -136,7 +136,7 @@ pub(crate) struct ResultsQuickViewHardcopySource<'a> {
 fn captured_results_run(state: &AppState) -> Option<&SimulationRun> {
     match state.workbench.documents.active(Workspace::Results) {
         Some(WorkspaceDocumentId::ResultDataset(dataset_id)) => {
-            state.simulation.run_by_dataset_id(*dataset_id)
+            state.simulation.retained.run_by_dataset_id(*dataset_id)
         }
         _ => state.simulation.active_run(),
     }
@@ -277,7 +277,7 @@ pub(crate) fn enumerate_retained_hardcopy_sources(
 
     if let Some(WorkspaceDocumentId::ResultDataset(dataset_id)) =
         state.workbench.documents.active(Workspace::Results)
-        && let Some(run) = state.simulation.run_by_dataset_id(*dataset_id)
+        && let Some(run) = state.simulation.retained.run_by_dataset_id(*dataset_id)
     {
         let availability = quick_result_availability(state, run);
         descriptors.push(RetainedHardcopySourceDescriptor {
@@ -785,6 +785,7 @@ fn prepared_runs_for_panes(simulation: &SimulationState, panes: &[StudioPane]) -
         .map(|pane| (pane.dataset_id, pane.analysis_sequence))
         .collect::<std::collections::HashSet<_>>();
     simulation
+        .retained
         .runs
         .iter()
         .filter(|run| dataset_ids.contains(&run.dataset_id))
@@ -817,6 +818,7 @@ pub(crate) fn active_app_hardcopy_source_available(state: &AppState) -> bool {
         SurfaceId::Results => match state.workbench.documents.active(Workspace::Results) {
             Some(WorkspaceDocumentId::ResultDataset(dataset)) => state
                 .simulation
+                .retained
                 .run_by_dataset_id(*dataset)
                 .is_some_and(|run| quick_result_availability(state, run).is_available()),
             Some(WorkspaceDocumentId::VisualizationDocument(document_id)) => {
@@ -1104,13 +1106,14 @@ fn quick_result_analysis_index(
     run: &SimulationRun,
     viewer: ResultViewer,
 ) -> Option<usize> {
-    let globally_selected = (state.simulation.active_run_idx
+    let globally_selected = (state.simulation.view.active_run_idx
         == state
             .simulation
+            .retained
             .runs
             .iter()
             .position(|candidate| candidate.dataset_id == run.dataset_id))
-    .then_some(state.simulation.active_analysis_idx)
+    .then_some(state.simulation.view.active_analysis_idx)
     .flatten();
     match viewer {
         ResultViewer::Waves => globally_selected
@@ -1205,7 +1208,7 @@ fn studio_pane_availability(
     pane: &StudioPane,
 ) -> RetainedHardcopySourceAvailability {
     let unavailable = |reason: String| RetainedHardcopySourceAvailability::Unavailable { reason };
-    let Some(run) = state.simulation.run_by_dataset_id(pane.dataset_id) else {
+    let Some(run) = state.simulation.retained.run_by_dataset_id(pane.dataset_id) else {
         return unavailable(format!("dataset {} is not retained", pane.dataset_id));
     };
     if !run.lifecycle.is_terminal() {

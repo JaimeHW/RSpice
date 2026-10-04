@@ -440,6 +440,7 @@ fn evidence_binding_label(state: &AppState, evidence_binding: ReportPageEvidence
         }
         ReportPageEvidenceBinding::ExactDataset { binding } => state
             .simulation
+            .retained
             .runs
             .iter()
             .find(|run| {
@@ -465,6 +466,7 @@ fn evidence_binding_options(
 ) -> Vec<(String, ReportPageEvidenceBinding)> {
     let mut options = state
         .simulation
+        .retained
         .runs
         .iter()
         .filter(|run| !run.analyses.is_empty())
@@ -623,17 +625,19 @@ fn report_reference_resolves(state: &AppState, reference: &ReportReferenceMode) 
                         .content_digest()
                         .is_ok_and(|digest| digest == snapshot.content_digest)
             }),
-        ReportSourceId::Dataset { dataset_id } => state.simulation.runs.iter().any(|run| {
-            run.dataset_id == *dataset_id
-                && run.dataset_content_digest() == snapshot.content_digest
-                && snapshot.dataset_bindings.iter().any(|binding| {
-                    binding.dataset_id == *dataset_id
-                        && binding.content_digest == snapshot.content_digest
-                })
-        }),
+        ReportSourceId::Dataset { dataset_id } => {
+            state.simulation.retained.runs.iter().any(|run| {
+                run.dataset_id == *dataset_id
+                    && run.dataset_content_digest() == snapshot.content_digest
+                    && snapshot.dataset_bindings.iter().any(|binding| {
+                        binding.dataset_id == *dataset_id
+                            && binding.content_digest == snapshot.content_digest
+                    })
+            })
+        }
         ReportSourceId::VerificationEvidence { .. } => {
             snapshot.dataset_bindings.iter().all(|binding| {
-                state.simulation.runs.iter().any(|run| {
+                state.simulation.retained.runs.iter().any(|run| {
                     run.dataset_id == binding.dataset_id
                         && run.dataset_content_digest() == binding.content_digest
                 })
@@ -663,6 +667,7 @@ fn report_bound_result_label(state: &AppState, document: &ReportDocument) -> (St
     };
     let label = state
         .simulation
+        .retained
         .runs
         .iter()
         .find(|run| {
@@ -727,8 +732,9 @@ fn commit_create_document(app: &mut RSpiceApp) {
         .or_else(|| {
             app.state
                 .simulation
+                .retained
                 .newest_retained_result_run_index()
-                .and_then(|index| app.state.simulation.runs.get(index))
+                .and_then(|index| app.state.simulation.retained.runs.get(index))
         })
         .map(|run| ReportPageEvidenceBinding::ExactDataset {
             binding: crate::product::DatasetBinding::new(
@@ -856,6 +862,7 @@ fn report_dataset_snapshot(
 ) -> Result<(ReportReferenceSnapshot, crate::product::DatasetBinding), String> {
     let run = state
         .simulation
+        .retained
         .runs
         .iter()
         .filter(|run| !run.analyses.is_empty())

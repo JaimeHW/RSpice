@@ -198,7 +198,7 @@ mod tests {
             .document_mut_for_test()
             .wires
             .push(Wire::new(91, vec![a, b]));
-        state.simulation.cross_probe.update(
+        state.simulation.source.cross_probe.update(
             state.workspace.content.active_view.clone(),
             HashMap::from([(a, "OUT".to_owned()), (b, "OUT".to_owned())]),
             HashMap::from([("OUT".to_owned(), vec![a, b])]),
@@ -294,7 +294,11 @@ mod tests {
     #[test]
     fn a_run_anchor_opens_its_dataset_and_refuses_once_the_run_is_gone() {
         let mut app = RSpiceApp::test_instance();
-        app.state.simulation.runs.push(SimulationRun::new(7));
+        app.state
+            .simulation
+            .retained
+            .runs
+            .push(SimulationRun::new(7));
         let anchor = crate::diagnostics::LogAnchor::ResultRun { run_sequence: 7 };
         assert!(
             app.state.log_anchor_refusal(&anchor).is_none(),
@@ -307,7 +311,7 @@ mod tests {
             crate::workbench::state::Workspace::Results
         );
 
-        app.state.simulation.runs.clear();
+        app.state.simulation.retained.runs.clear();
         let refusal = app
             .state
             .log_anchor_refusal(&anchor)

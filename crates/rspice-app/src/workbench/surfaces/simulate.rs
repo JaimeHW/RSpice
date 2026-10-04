@@ -1004,7 +1004,7 @@ fn instance_run_states(app: &RSpiceApp) -> Vec<(AnalysisInstanceId, InstanceRunS
     let Some(PriorPlanRun { index, .. }) = prior_plan_run(app) else {
         return Vec::new();
     };
-    let Some(run) = app.state.simulation.runs.get(index) else {
+    let Some(run) = app.state.simulation.retained.runs.get(index) else {
         return Vec::new();
     };
     let Some(receipt) = run.prepared_receipt() else {
@@ -1140,22 +1140,22 @@ fn prior_plan_run(app: &RSpiceApp) -> Option<PriorPlanRun> {
         .ok()
         .map(|plan| plan.id())?;
     let simulation = &app.state.simulation;
-    let index = simulation.runs.iter().position(|run| {
+    let index = simulation.retained.runs.iter().position(|run| {
         !run.analyses.is_empty()
             && run
                 .prepared_receipt()
                 .and_then(crate::state::PreparedRunReceipt::simulation_plan_id)
                 == Some(plan_id)
     })?;
-    let run = &simulation.runs[index];
+    let run = &simulation.retained.runs[index];
     // Identity first, selection only as the fallback `has_active_execution`
     // itself falls back on: `is_running` without a sealed identity is the
     // runner's instantaneous activity, and the run being written is then the
     // one history has selected.
-    let executing = simulation.has_active_execution()
-        && match simulation.active_execution {
+    let executing = simulation.execution.has_active_execution()
+        && match simulation.execution.active_execution {
             Some(identity) => run.execution_identity() == Some(identity),
-            None => simulation.active_run_idx == Some(index),
+            None => simulation.view.active_run_idx == Some(index),
         };
     Some(PriorPlanRun {
         index,
@@ -2248,10 +2248,12 @@ fn analysis_form_body(
     let previous_state = app
         .state
         .simulation
+        .retained
         .has_retained_op_state(project_revision, false);
     let compatible_previous_state = app
         .state
         .simulation
+        .retained
         .has_retained_op_state(project_revision, true);
     let soa_violations = app
         .state

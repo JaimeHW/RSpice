@@ -618,7 +618,7 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
     );
     let active_dataset_id = active_run.dataset_id;
 
-    app.state.simulation.runs = vec![stale_run, active_run].into();
+    app.state.simulation.retained.runs = vec![stale_run, active_run].into();
     assert!(app.state.simulation.select_run(1));
     assert!(
         app.palette_rows(
@@ -650,12 +650,12 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
     app.state.ui.results.session.viewer = crate::workbench::ResultViewer::Bode;
     let hidden_strip = crate::workbench::documents::result_document::AnalysisPresentationKey::new(
         active_dataset_id,
-        &app.state.simulation.runs[1].analyses[1],
+        &app.state.simulation.retained.runs[1].analyses[1],
     );
     let maximized_strip =
         crate::workbench::documents::result_document::AnalysisPresentationKey::new(
             active_dataset_id,
-            &app.state.simulation.runs[1].analyses[0],
+            &app.state.simulation.retained.runs[1].analyses[0],
         );
     app.state
         .ui
@@ -664,15 +664,18 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
         .hidden_strips
         .insert(hidden_strip);
     app.state.ui.results.session.maximized_strip = Some(maximized_strip);
-    let version_before = app.state.simulation.data_version;
+    let version_before = app.state.simulation.view.data_version;
     entry.execute(&mut app).expect("open real result signal");
 
-    assert_eq!(app.state.simulation.active_run_idx, Some(1));
-    assert_eq!(app.state.simulation.active_analysis_idx, Some(1));
-    assert_eq!(app.state.simulation.runs[1].dataset_id, active_dataset_id);
-    assert!(app.state.simulation.runs[1].analyses[1].waveforms[0].visible);
-    assert!(app.state.simulation.waveforms[0].visible);
-    assert!(app.state.simulation.data_version > version_before);
+    assert_eq!(app.state.simulation.view.active_run_idx, Some(1));
+    assert_eq!(app.state.simulation.view.active_analysis_idx, Some(1));
+    assert_eq!(
+        app.state.simulation.retained.runs[1].dataset_id,
+        active_dataset_id
+    );
+    assert!(app.state.simulation.retained.runs[1].analyses[1].waveforms[0].visible);
+    assert!(app.state.simulation.view.waveforms[0].visible);
+    assert!(app.state.simulation.view.data_version > version_before);
     assert_eq!(
         app.state.ui.results.session.viewer,
         crate::workbench::ResultViewer::Waves

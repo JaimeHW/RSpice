@@ -192,10 +192,10 @@ fn histogram_publication_renders_every_mode_after_worker_transfer() {
 #[test]
 fn histogram_publication_keeps_the_named_measurement_after_reorder_and_rejects_removal() {
     let (mut state, key) = distribution();
-    let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) = state.simulation.runs[0]
-        .analyses[0]
-        .family_metadata
-        .as_mut()
+    let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
+        state.simulation.retained.runs[0].analyses[0]
+            .family_metadata
+            .as_mut()
     else {
         unreachable!()
     };
@@ -211,10 +211,10 @@ fn histogram_publication_keeps_the_named_measurement_after_reorder_and_rejects_r
     let onscreen = crate::workbench::documents::result_document::active_histogram(&state).unwrap();
     assert_eq!(onscreen.name, "gain");
     assert_eq!(onscreen.data_max, 2.0);
-    let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) = state.simulation.runs[0]
-        .analyses[0]
-        .family_metadata
-        .as_mut()
+    let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
+        state.simulation.retained.runs[0].analyses[0]
+            .family_metadata
+            .as_mut()
     else {
         unreachable!()
     };

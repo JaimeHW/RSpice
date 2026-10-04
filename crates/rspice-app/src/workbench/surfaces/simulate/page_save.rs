@@ -415,6 +415,7 @@ fn retention_ledger(
         held: 0,
     };
     for (index, run) in simulation
+        .retained
         .runs
         .iter()
         .filter(|run| {
@@ -429,6 +430,7 @@ fn retention_ledger(
         // whichever half of the ledger prints that run, so the two printed
         // figures partition the same measurement instead of sampling it twice.
         let deck_bytes = simulation
+            .retained
             .executed_decks
             .run_bytes(run.id)
             .map(|bytes| bytes as u64);
@@ -475,9 +477,9 @@ fn retention_contract(ui: &mut Ui, state: &mut AppState) {
         );
         return;
     };
-    let retained = simulation.retained_plan_dataset_count(plan_id);
+    let retained = simulation.retained.retained_plan_dataset_count(plan_id);
     let limit = state.sim_setup.save_policy.retained_dataset_limit;
-    let pinned = simulation.pinned_plan_run_count(plan_id);
+    let pinned = simulation.retained.pinned_plan_run_count(plan_id);
     // Pinning can put the limit out of reach entirely. The card states that
     // rather than a count that reads as a policy still being enforced.
     let unenforceable = pinned >= limit;
@@ -513,6 +515,7 @@ fn retention_contract(ui: &mut Ui, state: &mut AppState) {
     // dataset retained yet" while another page cited one was reporting two
     // different facts under one sentence.
     let unattributed = simulation
+        .retained
         .runs
         .iter()
         .filter(|run| {
@@ -827,6 +830,7 @@ mod tests {
         for (sequence, bytes) in &retained {
             let deck: std::sync::Arc<str> = std::sync::Arc::from("d".repeat(*bytes));
             simulation
+                .retained
                 .executed_decks
                 .retain(crate::state::ExecutedDeck {
                     run_id: *sequence,

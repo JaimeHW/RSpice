@@ -22,8 +22,8 @@ pub(crate) struct ManifestPlan {
 }
 pub(crate) fn active_manifest(state: &mut AppState) -> Option<Arc<ManifestPlan>> {
     let source = (
-        state.simulation.runs.revision(),
-        state.simulation.data_version,
+        state.simulation.retained.runs.revision(),
+        state.simulation.view.data_version,
     );
     let run_id = state.simulation.active_run()?.id;
     if let Some(plan) = state.ui.results.plans.manifest.as_ref()
@@ -72,6 +72,7 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
         });
     let executed_deck_points = state
         .simulation
+        .retained
         .executed_decks
         .get(run_sequence)
         .map_or(0, |deck| deck.points.len());
@@ -159,7 +160,7 @@ mod tests {
             ]),
         );
         let mut state = AppState::default();
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         state
     }
@@ -227,14 +228,14 @@ mod tests {
             .unwrap();
         state.simulation.complete_run();
         let original = active_manifest(&mut state).unwrap();
-        let version = state.simulation.data_version;
+        let version = state.simulation.view.data_version;
         let mut replacement = state.simulation.clone();
-        replacement.runs[0].analyses[0].waveforms[0].y = Arc::new(vec![0.0, 9.0]);
+        replacement.retained.runs[0].analyses[0].waveforms[0].y = Arc::new(vec![0.0, 9.0]);
         state.simulation = crate::io::simulation_state_from_results(
             crate::io::capture_simulation_results(&replacement),
         )
         .unwrap();
-        assert_eq!(state.simulation.data_version, version);
+        assert_eq!(state.simulation.view.data_version, version);
         let restored = active_manifest(&mut state).unwrap();
         assert_eq!(restored.model.dataset_id, original.model.dataset_id);
         assert_ne!(restored.model.dataset_digest, original.model.dataset_digest);
@@ -243,7 +244,7 @@ mod tests {
             manifest_for_run(state.simulation.active_run().unwrap())
         );
 
-        state.simulation.runs[0].analyses[0]
+        state.simulation.retained.runs[0].analyses[0]
             .waveforms
             .push(WaveformData::new(
                 "I(V1)",
@@ -257,12 +258,12 @@ mod tests {
             manifest_for_run(state.simulation.active_run().unwrap())
         );
         assert_ne!(edited.model, restored.model);
-        assert_eq!(state.simulation.data_version, version);
+        assert_eq!(state.simulation.view.data_version, version);
     }
     #[test]
     fn retained_view_source_manifest_reuses_large_unchanged_history_clones() {
         let mut state = state_with_run("Transient");
-        state.simulation.runs[0].analyses[0].waveforms = vec![WaveformData::new(
+        state.simulation.retained.runs[0].analyses[0].waveforms = vec![WaveformData::new(
             "V(out)",
             (0..100_000).map(f64::from).collect::<Vec<_>>(),
             vec![2.0; 100_000],
@@ -284,7 +285,7 @@ mod tests {
             ));
         }
         assert_eq!(work.since().total(), 0);
-        other.simulation.runs[0].analyses[0].waveforms[0].y = Arc::new(vec![3.0; 100_000]);
+        other.simulation.retained.runs[0].analyses[0].waveforms[0].y = Arc::new(vec![3.0; 100_000]);
         assert_ne!(
             active_manifest(&mut other).unwrap().model.dataset_digest,
             original.model.dataset_digest
@@ -326,8 +327,9 @@ mod tests {
         let before = active_manifest(&mut state).expect("a manifest for the active run");
         let before_digest = before.model.dataset_digest.clone();
 
-        state.simulation.runs[0].analyses[0].waveforms[0].y = std::sync::Arc::new(vec![0.0, 9.0]);
-        state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
+        state.simulation.retained.runs[0].analyses[0].waveforms[0].y =
+            std::sync::Arc::new(vec![0.0, 9.0]);
+        state.simulation.view.data_version = state.simulation.view.data_version.wrapping_add(1);
 
         let after = active_manifest(&mut state).expect("a manifest for the active run");
         assert_ne!(
@@ -336,7 +338,7 @@ mod tests {
         );
         assert_eq!(
             after.model.dataset_digest,
-            state.simulation.runs[0]
+            state.simulation.retained.runs[0]
                 .dataset_content_digest()
                 .to_string()
         );
@@ -356,7 +358,7 @@ mod tests {
                 WaveformData::new("V(out)", vec![0.0, 1.0], vec![5.0, 6.0], "#ffbd2e"),
             ]),
         );
-        state.simulation.runs.push(second);
+        state.simulation.retained.runs.push(second);
         assert!(state.simulation.select_run(1));
 
         let after = active_manifest(&mut state).expect("a manifest for the active run");

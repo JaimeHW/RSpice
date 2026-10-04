@@ -456,9 +456,15 @@ fn owned_netlist_history_compare_and_restore_are_persisted_and_monotonic() {
 
     crate::workbench::documents::netlist_document::compare_owned_revision(&mut state, 0)
         .expect("comparison opens");
-    assert!(state.simulation.netlist_content.contains("-V1 out 0 1"));
+    assert!(
+        state
+            .simulation
+            .source
+            .netlist_content
+            .contains("-V1 out 0 1")
+    );
     crate::workbench::documents::netlist_document::close_revision_comparison(&mut state);
-    assert_eq!(state.simulation.netlist_content, modified);
+    assert_eq!(state.simulation.source.netlist_content, modified);
 
     crate::workbench::documents::netlist_document::restore_owned_revision(&mut state, 0)
         .expect("history restore commits");
@@ -1255,7 +1261,7 @@ fn narrow_override_rejects_generated_base_without_end_terminator() {
 fn imported_netlist_becomes_dirty_manual_source_without_deleting_retained_runs() {
     let mut state = AppState::default();
     state.simulation.start_run();
-    assert!(state.simulation.has_results());
+    assert!(state.simulation.retained.has_results());
 
     let imported = apply_imported_netlist(
         &mut state,
@@ -1294,8 +1300,8 @@ fn imported_netlist_becomes_dirty_manual_source_without_deleting_retained_runs()
         .content
         .validate_simulation_configuration()
         .expect("imported canonical source must satisfy project persistence invariants");
-    assert!(state.simulation.has_results());
-    assert_eq!(state.simulation.runs.len(), 1);
+    assert!(state.simulation.retained.has_results());
+    assert_eq!(state.simulation.retained.runs.len(), 1);
     assert!(state.recent_files.is_empty());
 }
 
@@ -1323,7 +1329,7 @@ fn opening_a_netlist_commits_an_independent_netlist_first_project() {
 
     assert_ne!(state.workspace.content.project.id(), original_project_id);
     assert_eq!(state.workspace.content.project.name(), "bias");
-    assert!(!state.simulation.has_results());
+    assert!(!state.simulation.retained.has_results());
     assert_eq!(
         state.workspace.content.netlist_source_path.as_deref(),
         Some(std::path::Path::new("bias.cir"))
@@ -1550,7 +1556,7 @@ fn narrow_strategy_dependencies_attach_to_the_source_that_owns_the_directives() 
     app.state.ui.netlist.active_document =
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
     app.state.ui.netlist.active_document_initialized = true;
-    app.state.simulation.netlist_content = parameter_source.to_owned();
+    app.state.simulation.source.netlist_content = parameter_source.to_owned();
 
     assert!(validate_visible_netlist_source(&mut app));
     let parameter_document = app
@@ -1589,7 +1595,7 @@ fn narrow_strategy_dependencies_attach_to_the_source_that_owns_the_directives() 
     app.state.ui.netlist.active_document =
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
     app.state.ui.netlist.active_document_initialized = true;
-    app.state.simulation.netlist_content = include_source.to_owned();
+    app.state.simulation.source.netlist_content = include_source.to_owned();
 
     assert!(validate_visible_netlist_source(&mut app));
     let include_document = app
@@ -1618,7 +1624,7 @@ fn empty_netlist_import_is_rejected_without_clearing_existing_state() {
     let mut state = AppState::default();
     state.workspace.content.netlist_source = Some("existing\n.op\n.end\n".to_owned());
     state.workspace.content.netlist_source_path = Some(std::path::PathBuf::from("existing.cir"));
-    state.simulation.netlist_content = "existing\n.op\n.end\n".to_owned();
+    state.simulation.source.netlist_content = "existing\n.op\n.end\n".to_owned();
 
     let imported = apply_imported_netlist(&mut state, " \n\t".to_owned(), None, "empty.cir");
 
@@ -1631,7 +1637,10 @@ fn empty_netlist_import_is_rejected_without_clearing_existing_state() {
         state.workspace.content.netlist_source_path.as_deref(),
         Some(std::path::Path::new("existing.cir"))
     );
-    assert_eq!(state.simulation.netlist_content, "existing\n.op\n.end\n");
+    assert_eq!(
+        state.simulation.source.netlist_content,
+        "existing\n.op\n.end\n"
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]

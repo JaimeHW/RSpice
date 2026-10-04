@@ -205,6 +205,7 @@ struct ProbeMaterializationStatuses {
 fn probe_visual_statuses(state: &AppState) -> ProbeMaterializationStatuses {
     let hidden_waveforms = state
         .simulation
+        .view
         .waveforms
         .iter()
         .filter(|waveform| !waveform.visible)
@@ -340,7 +341,7 @@ fn occurrence_cross_probe_index(state: &AppState) -> Option<CrossProbeIndex> {
         .simulation
         .active_run()
         .and_then(crate::state::SimulationRun::prepared_receipt)
-        .map(|receipt| CrossProbeIndex::from_receipt(receipt, &state.simulation.cross_probe))
+        .map(|receipt| CrossProbeIndex::from_receipt(receipt, &state.simulation.source.cross_probe))
 }
 
 /// Where one solved node sits on the drawing, read at the active tab's
@@ -368,7 +369,7 @@ fn occurrence_net_points<'a>(
     let occurrence = state.workspace.content.occurrence_path();
     let selected = match index {
         Some(index) => index.for_occurrence(&occurrence),
-        None if occurrence.is_root() => std::slice::from_ref(&state.simulation.cross_probe),
+        None if occurrence.is_root() => std::slice::from_ref(&state.simulation.source.cross_probe),
         None => &[],
     };
     selected.iter().find_map(|mapping| {
@@ -387,8 +388,8 @@ fn occurrence_net_points<'a>(
 /// falsely attach values to a different solve.
 fn operating_point_annotations(state: &AppState) -> Vec<OperatingPointCanvasAnnotation> {
     if state.ui.schematic_visibility.annotations != SchematicAnnotationVisibility::OperatingPoint
-        || !state.simulation.cross_probe.is_populated()
-        || !state.simulation.cross_probe.is_current_for(
+        || !state.simulation.source.cross_probe.is_populated()
+        || !state.simulation.source.cross_probe.is_current_for(
             &state.workspace.content.active_view,
             state.schematic.topology_version(),
         )
@@ -889,7 +890,7 @@ mod tests {
             .document_mut_for_test()
             .junctions
             .push(Junction::new(2, point));
-        state.simulation.cross_probe.update(
+        state.simulation.source.cross_probe.update(
             state.workspace.content.active_view.clone(),
             HashMap::from([(point, "OUT".to_owned())]),
             HashMap::from([("OUT".to_owned(), vec![Point::new(30, 10), point])]),
@@ -912,9 +913,9 @@ mod tests {
                 power_dissipation: Vec::new(),
             }),
         );
-        state.simulation.runs.insert(0, run);
-        state.simulation.active_run_idx = Some(0);
-        state.simulation.active_analysis_idx = Some(0);
+        state.simulation.retained.runs.insert(0, run);
+        state.simulation.view.active_run_idx = Some(0);
+        state.simulation.view.active_analysis_idx = Some(0);
         state
     }
 
@@ -940,7 +941,7 @@ mod tests {
         let mut state = state_with_operating_point();
         let scalar = Point::new(20, 10);
         let bit = Point::new(20, 30);
-        state.simulation.cross_probe.update(
+        state.simulation.source.cross_probe.update(
             state.workspace.content.active_view.clone(),
             HashMap::from([(scalar, "OUT".to_owned()), (bit, "DATA#3".to_owned())]),
             HashMap::from([
@@ -951,9 +952,12 @@ mod tests {
             state.schematic.topology_version(),
         );
 
-        assert_eq!(state.simulation.cross_probe.engine_name("OUT"), Some("out"));
         assert_eq!(
-            state.simulation.cross_probe.engine_name("DATA#3"),
+            state.simulation.source.cross_probe.engine_name("OUT"),
+            Some("out")
+        );
+        assert_eq!(
+            state.simulation.source.cross_probe.engine_name("DATA#3"),
             Some("data#3"),
             "the deck's bus-bit spelling resolves to an engine name"
         );
@@ -973,7 +977,7 @@ mod tests {
     #[test]
     fn power_detail_is_rendered_only_when_the_session_requests_it() {
         let mut state = state_with_operating_point();
-        state.simulation.runs[0].analyses[0]
+        state.simulation.retained.runs[0].analyses[0]
             .dc_op
             .as_mut()
             .expect("fixture dc op")
@@ -997,7 +1001,7 @@ mod tests {
         use crate::state::*;
 
         let mut state = state_with_operating_point();
-        let analysis = &mut state.simulation.runs[0].analyses[0];
+        let analysis = &mut state.simulation.retained.runs[0].analyses[0];
         analysis.result_payload = Some(AnalysisResultPayload::OperatingPoint {
             temperature_mode: OperatingPointTemperatureEvidence::PvtRunSet,
             temperature_celsius: 27.0,
@@ -1090,7 +1094,7 @@ mod tests {
         let master = CellViewRef::new("user", "amp", "schematic");
         let point = Point::new(10, 20);
         let mut state = AppState::default();
-        state.simulation.cross_probe.update(
+        state.simulation.source.cross_probe.update(
             master.clone(),
             HashMap::from([(point, "n1".to_owned())]),
             HashMap::from([("n1".to_owned(), vec![point])]),
@@ -1115,8 +1119,8 @@ mod tests {
         );
 
         let run = SimulationRun::new_prepared(1, receipt_for_two_occurrences(&master));
-        state.simulation.runs.insert(0, run);
-        state.simulation.active_run_idx = Some(0);
+        state.simulation.retained.runs.insert(0, run);
+        state.simulation.view.active_run_idx = Some(0);
         let index = occurrence_cross_probe_index(&state).expect("a prepared run names its map");
         assert_eq!(index.for_occurrence(&InstancePath::root()).len(), 1);
         assert_eq!(
@@ -1176,7 +1180,7 @@ mod tests {
     #[test]
     fn annotations_follow_only_the_explicitly_selected_operating_point() {
         let mut state = state_with_operating_point();
-        state.simulation.runs[0].add_analysis(
+        state.simulation.retained.runs[0].add_analysis(
             AnalysisResult::new(2, AnalysisType::DcOp, "OP hot").with_dc_op(DcOpResult {
                 node_voltages: vec![OperatingPointValue {
                     name: "V(out)".to_owned(),
@@ -1192,12 +1196,12 @@ mod tests {
             }),
         );
 
-        state.simulation.active_analysis_idx = Some(1);
+        state.simulation.view.active_analysis_idx = Some(1);
         let hot = operating_point_annotations(&state);
         assert!(hot[0].label.contains("2.5"), "{hot:?}");
         assert!(hot[1].label.contains("4m"), "{hot:?}");
 
-        state.simulation.active_analysis_idx = Some(0);
+        state.simulation.view.active_analysis_idx = Some(0);
         let nominal = operating_point_annotations(&state);
         assert!(nominal[0].label.contains("1.25"));
         assert!(nominal[1].label.contains("2m"));

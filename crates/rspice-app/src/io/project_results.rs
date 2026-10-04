@@ -18,32 +18,46 @@ impl From<&SimulationRun> for ProjectSimulationRun {
     }
 }
 pub(crate) fn capture_simulation_results(state: &SimulationState) -> ProjectSimulationResults {
-    if state.runs.is_empty() {
+    if state.retained.runs.is_empty() {
         // Clearing datasets preserves both their allocation history and
         // the project's retention decision across save and session restore.
         return ProjectSimulationResultsData {
-            imported_monte_carlo_checkpoints: state.imported_monte_carlo_checkpoints.clone(),
-            next_run_id: state.next_run_id,
-            retained_dataset_limit: state.retained_dataset_limit,
+            imported_monte_carlo_checkpoints: state
+                .retained
+                .imported_monte_carlo_checkpoints
+                .clone(),
+            next_run_id: state.retained.next_run_id,
+            retained_dataset_limit: state.retained.retained_dataset_limit,
             ..ProjectSimulationResultsData::default()
         }
         .into();
     }
 
-    let runs: Vec<_> = state.runs.iter().map(ProjectSimulationRun::from).collect();
-    let max_run_id = state.runs.iter().map(|run| run.id).max().unwrap_or(0);
+    let runs: Vec<_> = state
+        .retained
+        .runs
+        .iter()
+        .map(ProjectSimulationRun::from)
+        .collect();
+    let max_run_id = state
+        .retained
+        .runs
+        .iter()
+        .map(|run| run.id)
+        .max()
+        .unwrap_or(0);
     ProjectSimulationResultsData {
         runs,
-        imported_monte_carlo_checkpoints: state.imported_monte_carlo_checkpoints.clone(),
-        next_run_id: state.next_run_id.max(max_run_id),
-        retained_dataset_limit: state.retained_dataset_limit,
+        imported_monte_carlo_checkpoints: state.retained.imported_monte_carlo_checkpoints.clone(),
+        next_run_id: state.retained.next_run_id.max(max_run_id),
+        retained_dataset_limit: state.retained.retained_dataset_limit,
         active_run_stable_id: state.active_run().map(|run| run.run_id),
         active_dataset_id: state.active_run().map(|run| run.dataset_id),
         active_analysis_sequence: state.active_analysis().map(|analysis| analysis.id),
-        overlay_dataset_ids: state.overlay_dataset_ids.clone(),
+        overlay_dataset_ids: state.view.overlay_dataset_ids.clone(),
         executed_decks: ProjectExecutedDecks::from_archive(
-            &state.executed_decks,
-            state.runs.iter().map(|run| run.id),
+            &state.retained.executed_decks,
+            state.retained.runs.iter().map(|run| run.id),
         ),
         active_run_id: None,
         active_analysis_id: None,
@@ -70,7 +84,7 @@ pub(crate) fn restore_simulation_results(
         .into_iter()
         .map(SimulationRun::from_restored)
         .collect();
-    state.retained_dataset_limit = data.retained_dataset_limit;
+    state.retained.retained_dataset_limit = data.retained_dataset_limit;
     state.restore_run_history(
         runs,
         data.next_run_id,
@@ -81,8 +95,8 @@ pub(crate) fn restore_simulation_results(
     );
     // After the history, because restoring it drops whatever decks this
     // session was holding for a different project.
-    state.executed_decks = data.executed_decks;
-    state.imported_monte_carlo_checkpoints = data.imported_monte_carlo_checkpoints;
+    state.retained.executed_decks = data.executed_decks;
+    state.retained.imported_monte_carlo_checkpoints = data.imported_monte_carlo_checkpoints;
     Ok(())
 }
 fn restore_analysis(analysis: ProjectAnalysisResult) -> Result<AnalysisResult, String> {

@@ -120,7 +120,7 @@ fn selecting_a_golden_regression_baseline_pins_its_dataset_atomically() {
         AnalysisResult::new(1, AnalysisType::Ac, "candidate")
             .with_measurements(vec![rspice_core::MeasureResult::success("gain", 1.0)]),
     );
-    app.state.simulation.runs = vec![candidate, baseline].into();
+    app.state.simulation.retained.runs = vec![candidate, baseline].into();
     assert!(app.state.simulation.select_run(0));
 
     commit_regression_baseline(&mut app, baseline_id).expect("baseline commits");
@@ -128,6 +128,7 @@ fn selecting_a_golden_regression_baseline_pins_its_dataset_atomically() {
     assert!(
         app.state
             .simulation
+            .retained
             .run_by_stable_id(baseline_id)
             .expect("baseline remains retained")
             .retention()
@@ -344,7 +345,7 @@ fn tuning_commit_is_one_plan_revision_and_queues_the_required_run() {
         .unwrap();
     assert_eq!(variable.expression, "620 ohm");
     assert_eq!(variable.revision, ObjectRevision::INITIAL.next().unwrap());
-    assert!(app.state.simulation.trigger_simulation);
+    assert!(app.state.simulation.execution.trigger_simulation);
     assert!(!tuning_is_dirty(&app));
 }
 
@@ -475,7 +476,7 @@ fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
         app.state.schematic.undo_description(),
         Some("bind RLOAD to RLOAD_VALUE")
     );
-    assert!(app.state.simulation.trigger_simulation);
+    assert!(app.state.simulation.execution.trigger_simulation);
     assert!(
         app.state
             .workbench
@@ -564,7 +565,7 @@ fn tuning_commit_rechecks_live_schematic_authority_after_staging() {
     );
     assert_eq!(app.state.schematic.can_undo(), can_undo_before);
     assert!(tuning_is_dirty(&app));
-    assert!(!app.state.simulation.trigger_simulation);
+    assert!(!app.state.simulation.execution.trigger_simulation);
 }
 
 #[test]
@@ -620,7 +621,7 @@ fn failed_literal_value_run_preparation_rolls_back_plan_and_schematic() {
     );
     assert!(app.state.workbench.preflight.open);
     assert!(tuning_is_dirty(&app));
-    assert!(!app.state.simulation.trigger_simulation);
+    assert!(!app.state.simulation.execution.trigger_simulation);
 }
 
 #[test]
@@ -645,7 +646,7 @@ fn invalid_tuning_candidate_never_mutates_authoritative_plan_data() {
 
     assert!(tuning::commit_tuning_and_run(&mut app).is_err());
     assert_eq!(serde_json::to_vec(&app.state.workspace).unwrap(), before);
-    assert!(!app.state.simulation.trigger_simulation);
+    assert!(!app.state.simulation.execution.trigger_simulation);
 }
 
 #[test]
@@ -701,7 +702,7 @@ fn blocked_tuning_run_rolls_back_plan_workspace_and_preflight_state() {
         Some("Retain this preflight state")
     );
     assert!(tuning_is_dirty(&app));
-    assert!(!app.state.simulation.trigger_simulation);
+    assert!(!app.state.simulation.execution.trigger_simulation);
 }
 
 #[test]
@@ -914,8 +915,14 @@ fn specification_editor_never_falls_through_to_an_inactive_dataset() {
     ));
     let active_dataset = active.dataset_id;
     let mut simulation = SimulationState {
-        runs: vec![inactive, active].into(),
-        active_run_idx: Some(1),
+        retained: crate::state::RetainedSimulationState {
+            runs: vec![inactive, active].into(),
+            ..Default::default()
+        },
+        view: crate::state::SimulationViewState {
+            active_run_idx: Some(1),
+            ..Default::default()
+        },
         ..SimulationState::default()
     };
 
@@ -929,7 +936,7 @@ fn specification_editor_never_falls_through_to_an_inactive_dataset() {
     );
     assert_eq!(active_dataset_measurement(&simulation, "gain"), None);
 
-    simulation.active_run_idx = None;
+    simulation.view.active_run_idx = None;
     assert_eq!(active_dataset_measurement(&simulation, "bandwidth"), None);
     assert_eq!(active_dataset_measurement(&simulation, "gain"), None);
 }
@@ -937,8 +944,12 @@ fn specification_editor_never_falls_through_to_an_inactive_dataset() {
 #[test]
 fn verification_requires_an_explicit_active_run_selection() {
     let mut app = RSpiceApp::test_instance();
-    app.state.simulation.runs.push(SimulationRun::new(1));
-    app.state.simulation.active_run_idx = None;
+    app.state
+        .simulation
+        .retained
+        .runs
+        .push(SimulationRun::new(1));
+    app.state.simulation.view.active_run_idx = None;
 
     assert_eq!(verification_run_index(&app), None);
     assert!(verification_run(&app).is_none());
@@ -1877,7 +1888,7 @@ fn app_retaining_soa_evidence() -> RSpiceApp {
         9,
         soa_evidence_analysis(),
     );
-    app.state.simulation.runs = vec![run].into();
+    app.state.simulation.retained.runs = vec![run].into();
     assert!(app.state.simulation.select_run(0));
     app
 }
@@ -1937,7 +1948,7 @@ fn the_soa_pane_validate_retained_evidence_once_per_dataset_generation() {
 #[test]
 fn the_soa_evidence_gate_rejects_source_edits_before_a_version_bump() {
     let mut app = app_retaining_soa_evidence();
-    let version = app.state.simulation.data_version;
+    let version = app.state.simulation.view.data_version;
     assert!(
         latest_validated_analysis(&app, AnalysisType::Soa).is_some(),
         "the fixture retains validated SOA evidence"
@@ -1945,7 +1956,7 @@ fn the_soa_evidence_gate_rejects_source_edits_before_a_version_bump() {
 
     // A retained waveform with more coordinates than values is exactly what
     // `validate_retained_evidence` exists to refuse.
-    let analysis = app.state.simulation.runs[0]
+    let analysis = app.state.simulation.retained.runs[0]
         .analyses
         .iter_mut()
         .find(|analysis| analysis.analysis_type == AnalysisType::Soa)
@@ -1958,9 +1969,9 @@ fn the_soa_evidence_gate_rejects_source_edits_before_a_version_bump() {
         latest_validated_analysis(&app, AnalysisType::Soa).is_none(),
         "the gate kept a valid verdict after its retained source was corrupted"
     );
-    assert_eq!(app.state.simulation.data_version, version);
+    assert_eq!(app.state.simulation.view.data_version, version);
 
-    app.state.simulation.data_version = app.state.simulation.data_version.wrapping_add(1);
+    app.state.simulation.view.data_version = app.state.simulation.view.data_version.wrapping_add(1);
 
     assert!(
         latest_validated_analysis(&app, AnalysisType::Soa).is_none(),

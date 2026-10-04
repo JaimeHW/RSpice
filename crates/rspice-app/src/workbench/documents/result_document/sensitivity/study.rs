@@ -46,8 +46,8 @@ pub(in crate::workbench::documents::result_document) struct StudyPlan {
 }
 fn study_plan(state: &mut AppState) -> Option<Arc<StudyPlan>> {
     let source = (
-        state.simulation.runs.revision(),
-        state.simulation.data_version,
+        state.simulation.retained.runs.revision(),
+        state.simulation.view.data_version,
     );
     let run = state.simulation.active_run()?;
     let analysis_key =
@@ -121,7 +121,7 @@ mod tests {
                 },
             ),
         );
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         assert!(state.simulation.select_analysis(0));
         state
@@ -163,7 +163,7 @@ mod tests {
         assert!(serves_active_analysis(&state));
         assert!(active_payload_is_valid(&state));
 
-        state.simulation.runs[0].analyses[0].success = false;
+        state.simulation.retained.runs[0].analyses[0].success = false;
         assert!(serves_active_analysis(&state), "the payload is still there");
         assert!(matches!(active_study(&state), ActiveStudy::Invalid));
         assert!(study_plan(&mut state).is_none());

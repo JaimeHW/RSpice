@@ -267,14 +267,14 @@ fn saved_op_selection_requires_explicit_compatible_revision_policy() {
     run.finish_lifecycle(SimulationRunLifecycle::Completed)
         .unwrap();
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run].into();
-    simulation.next_run_id = 1;
+    simulation.retained.runs = vec![run].into();
+    simulation.retained.next_run_id = 1;
     let persisted = crate::io::capture_simulation_results(&simulation);
     let json = serde_json::to_string(&persisted).unwrap();
     let restored: ProjectSimulationResults = serde_json::from_str(&json).unwrap();
     let simulation = crate::io::simulation_state_from_results(restored).unwrap();
     let same = rspice_results::run_history::newest_retained_op_state(
-        simulation.runs.iter().map(|run| &run.data),
+        simulation.retained.runs.iter().map(|run| &run.data),
         ObjectRevision::INITIAL,
         false,
     )
@@ -282,22 +282,22 @@ fn saved_op_selection_requires_explicit_compatible_revision_policy() {
     assert_eq!(same.producer_snapshot_digest, snapshot);
     assert_eq!(
         same.producer_result_digest,
-        simulation.runs[0].analyses[0].result_data_digest()
+        simulation.retained.runs[0].analyses[0].result_data_digest()
     );
     let revision = ObjectRevision::INITIAL.next().unwrap();
-    assert!(!simulation.has_retained_op_state(revision, false));
+    assert!(!simulation.retained.has_retained_op_state(revision, false));
     assert!(
         rspice_results::run_history::newest_retained_op_state(
-            simulation.runs.iter().map(|run| &run.data),
+            simulation.retained.runs.iter().map(|run| &run.data),
             revision,
             false
         )
         .is_none()
     );
-    assert!(simulation.has_retained_op_state(revision, true));
+    assert!(simulation.retained.has_retained_op_state(revision, true));
     assert_eq!(
         rspice_results::run_history::newest_retained_op_state(
-            simulation.runs.iter().map(|run| &run.data),
+            simulation.retained.runs.iter().map(|run| &run.data),
             revision,
             true
         ),
@@ -1227,10 +1227,10 @@ fn project_file_round_trips_persisted_simulation_results() {
     seal_legacy_unattributed(&mut run);
     let expected_run_id = run.run_id;
     let expected_dataset_id = run.dataset_id;
-    simulation.runs = vec![run].into();
-    simulation.next_run_id = 12;
-    simulation.active_run_idx = Some(0);
-    simulation.active_analysis_idx = Some(0);
+    simulation.retained.runs = vec![run].into();
+    simulation.retained.next_run_id = 12;
+    simulation.view.active_run_idx = Some(0);
+    simulation.view.active_analysis_idx = Some(0);
 
     let project = ProjectSnapshot::new_with_simulation_results(
         workspace,
@@ -1244,7 +1244,7 @@ fn project_file_round_trips_persisted_simulation_results() {
     let restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
         .expect("validated project results restore");
 
-    assert_eq!(restored.run_count(), 1);
+    assert_eq!(restored.retained.run_count(), 1);
     assert_eq!(
         restored.active_run().map(|run| run.run_id),
         Some(expected_run_id)
@@ -1269,7 +1269,7 @@ fn project_file_round_trips_persisted_simulation_results() {
     assert_eq!(analysis.analysis_type, AnalysisType::Ac);
     assert_eq!(analysis.measurements[0].name, "gain");
     assert_eq!(analysis.waveforms[0].complex.as_ref().unwrap().imag[2], 0.3);
-    assert_eq!(restored.waveforms[0].name, "|V(out)|");
+    assert_eq!(restored.view.waveforms[0].name, "|V(out)|");
 }
 
 #[test]
@@ -1299,9 +1299,9 @@ fn project_file_round_trips_exact_pac_branch_current_trace() {
         AnalysisResult::new(8, AnalysisType::Ac, "PAC fixture").with_waveforms(vec![current]),
     );
     seal_legacy_unattributed(&mut run);
-    simulation.runs = vec![run].into();
-    simulation.active_run_idx = Some(0);
-    simulation.active_analysis_idx = Some(0);
+    simulation.retained.runs = vec![run].into();
+    simulation.view.active_run_idx = Some(0);
+    simulation.view.active_analysis_idx = Some(0);
 
     let project = ProjectSnapshot::new_with_simulation_results(
         workspace,
@@ -1343,9 +1343,9 @@ fn project_results_round_trip_sp_noise_reference_authority() {
     );
     seal_legacy_unattributed(&mut run);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run].into();
-    simulation.active_run_idx = Some(0);
-    simulation.active_analysis_idx = Some(0);
+    simulation.retained.runs = vec![run].into();
+    simulation.view.active_run_idx = Some(0);
+    simulation.view.active_analysis_idx = Some(0);
 
     let persisted = crate::io::capture_simulation_results(&simulation);
     let json = serde_json::to_string(&persisted).expect("S-parameter results serialize");
@@ -1379,8 +1379,8 @@ fn retained_result_data_digests_round_trip_and_reject_sample_tampering() {
     let expected_analysis_digest = run.analyses[0].result_data_digest();
     let expected_dataset_digest = run.dataset_content_digest();
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run].into();
-    simulation.next_run_id = 2;
+    simulation.retained.runs = vec![run].into();
+    simulation.retained.next_run_id = 2;
 
     let persisted = crate::io::capture_simulation_results(&simulation);
     assert_eq!(
@@ -1401,6 +1401,7 @@ fn retained_result_data_digests_round_trip_and_reject_sample_tampering() {
     restored.validate().expect("retained digests validate");
     let restored_run = crate::io::simulation_state_from_results(restored)
         .expect("retained result data restores")
+        .retained
         .runs
         .remove(0);
     assert_eq!(
@@ -1590,10 +1591,10 @@ fn typed_result_payloads_round_trip_and_reject_payload_tampering() {
     seal_legacy_unattributed(&mut run);
     let dataset_id = run.dataset_id;
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run].into();
-    simulation.next_run_id = 31;
-    simulation.active_run_idx = Some(0);
-    simulation.active_analysis_idx = Some(1);
+    simulation.retained.runs = vec![run].into();
+    simulation.retained.next_run_id = 31;
+    simulation.view.active_run_idx = Some(0);
+    simulation.view.active_analysis_idx = Some(1);
 
     let persisted = crate::io::capture_simulation_results(&simulation);
     let json = serde_json::to_string(&persisted).expect("typed payloads serialize");
@@ -1611,35 +1612,37 @@ fn typed_result_payloads_round_trip_and_reject_payload_tampering() {
         Some(2)
     );
     assert_eq!(
-        restored.runs[0].analyses[0].result_payload,
-        simulation.runs[0].analyses[0].result_payload
+        restored.retained.runs[0].analyses[0].result_payload,
+        simulation.retained.runs[0].analyses[0].result_payload
     );
     assert_eq!(
-        restored.runs[0].analyses[1].result_payload,
-        simulation.runs[0].analyses[1].result_payload
+        restored.retained.runs[0].analyses[1].result_payload,
+        simulation.retained.runs[0].analyses[1].result_payload
     );
     assert_eq!(
-        restored.runs[0].analyses[2].result_payload,
-        simulation.runs[0].analyses[2].result_payload
+        restored.retained.runs[0].analyses[2].result_payload,
+        simulation.retained.runs[0].analyses[2].result_payload
     );
     assert!(matches!(
-        restored.runs[0].analyses[2].result_payload.as_ref(),
+        restored.retained.runs[0].analyses[2]
+            .result_payload
+            .as_ref(),
         Some(AnalysisResultPayload::TransferFunction {
             input_resistance: Some(crate::state::TransferFunctionScalarEvidence::PositiveInfinity),
             ..
         })
     ));
     assert_eq!(
-        restored.runs[0].analyses[3].result_payload,
-        simulation.runs[0].analyses[3].result_payload
+        restored.retained.runs[0].analyses[3].result_payload,
+        simulation.retained.runs[0].analyses[3].result_payload
     );
     assert_eq!(
-        restored.runs[0].analyses[4].result_payload,
-        simulation.runs[0].analyses[4].result_payload
+        restored.retained.runs[0].analyses[4].result_payload,
+        simulation.retained.runs[0].analyses[4].result_payload
     );
     assert_eq!(
-        restored.runs[0].analyses[5].result_payload,
-        simulation.runs[0].analyses[5].result_payload
+        restored.retained.runs[0].analyses[5].result_payload,
+        simulation.retained.runs[0].analyses[5].result_payload
     );
 
     let mut tampered: serde_json::Value = serde_json::from_str(&json).expect("project JSON");
@@ -1729,8 +1732,8 @@ fn schema_v8_digests_are_authenticated_before_v9_resealing() {
     );
     seal_legacy_unattributed(&mut run);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run].into();
-    simulation.next_run_id = 32;
+    simulation.retained.runs = vec![run].into();
+    simulation.retained.next_run_id = 32;
     let mut v8 = crate::io::capture_simulation_results(&simulation);
     v8.schema_version = 8;
     for analysis in &mut v8.runs[0].analyses {
@@ -1812,8 +1815,8 @@ fn schema_v9_digests_are_authenticated_before_current_resealing() {
     );
     seal_legacy_unattributed(&mut run);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run].into();
-    simulation.next_run_id = 33;
+    simulation.retained.runs = vec![run].into();
+    simulation.retained.next_run_id = 33;
     let mut v9 = crate::io::capture_simulation_results(&simulation);
     v9.schema_version = 9;
     for analysis in &mut v9.runs[0].analyses {
@@ -1955,8 +1958,8 @@ fn schema_v10_digests_are_authenticated_before_v11_tf_resealing() {
     seal_legacy_unattributed(&mut run);
 
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run].into();
-    simulation.next_run_id = 34;
+    simulation.retained.runs = vec![run].into();
+    simulation.retained.next_run_id = 34;
     let mut v10 = crate::io::capture_simulation_results(&simulation);
     v10.schema_version = 10;
     for analysis in &mut v10.runs[0].analyses {
@@ -2056,8 +2059,8 @@ fn schema_v7_digest_migration_is_deterministic_and_rejects_anachronistic_fields(
     );
     seal_legacy_unattributed(&mut run);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run].into();
-    simulation.next_run_id = 3;
+    simulation.retained.runs = vec![run].into();
+    simulation.retained.next_run_id = 3;
     let mut legacy = crate::io::capture_simulation_results(&simulation);
     legacy.schema_version = 7;
     legacy.runs[0].dataset_content_digest = PersistedField::Missing;
@@ -2251,8 +2254,8 @@ m1 d g 0 0 irfmod W=0.386 L=2.5u
         );
 
         let mut simulation = SimulationState::default();
-        simulation.next_run_id = 61;
-        simulation.runs = vec![run_retaining(report.clone())].into();
+        simulation.retained.next_run_id = 61;
+        simulation.retained.runs = vec![run_retaining(report.clone())].into();
 
         let persisted = crate::io::capture_simulation_results(&simulation);
         persisted
@@ -2263,7 +2266,7 @@ m1 d g 0 0 irfmod W=0.386 L=2.5u
         crate::io::restore_simulation_results(persisted, &mut reloaded)
             .unwrap_or_else(|error| panic!("a saved {family} operating point reopens: {error}"));
 
-        let restored = reloaded.runs[0].analyses[0]
+        let restored = reloaded.retained.runs[0].analyses[0]
             .device_op
             .as_ref()
             .expect("the reopened run still carries its operating-point report");
@@ -2303,8 +2306,8 @@ fn an_operating_point_label_outside_the_vocabulary_is_still_refused() {
         }],
     };
     let mut simulation = SimulationState::default();
-    simulation.next_run_id = 61;
-    simulation.runs = vec![run_retaining(report)].into();
+    simulation.retained.next_run_id = 61;
+    simulation.retained.runs = vec![run_retaining(report)].into();
 
     let error = crate::io::capture_simulation_results(&simulation)
         .validate()
@@ -2409,8 +2412,8 @@ q1 c b 0 qmod
         }
 
         let mut simulation = SimulationState::default();
-        simulation.next_run_id = 62;
-        simulation.runs = vec![run_retaining_noise(summary.clone())].into();
+        simulation.retained.next_run_id = 62;
+        simulation.retained.runs = vec![run_retaining_noise(summary.clone())].into();
 
         let persisted = crate::io::capture_simulation_results(&simulation);
         persisted
@@ -2421,7 +2424,7 @@ q1 c b 0 qmod
         crate::io::restore_simulation_results(persisted, &mut reloaded)
             .unwrap_or_else(|error| panic!("a saved {family} noise summary reopens: {error}"));
 
-        let restored = reloaded.runs[0].analyses[0]
+        let restored = reloaded.retained.runs[0].analyses[0]
             .noise_summary
             .as_ref()
             .expect("the reopened run still carries its noise summary");
@@ -2466,8 +2469,8 @@ fn a_noise_mechanism_outside_the_persistable_shape_is_still_refused() {
             band: (1.0, 1.0e5),
         };
         let mut simulation = SimulationState::default();
-        simulation.next_run_id = 62;
-        simulation.runs = vec![run_retaining_noise(summary)].into();
+        simulation.retained.next_run_id = 62;
+        simulation.retained.runs = vec![run_retaining_noise(summary)].into();
 
         let error = crate::io::capture_simulation_results(&simulation)
             .validate()

@@ -769,7 +769,7 @@ pub(crate) fn open_project_location(
 
 pub(crate) fn go_to_definition_at_cursor(state: &mut AppState) -> Result<String, String> {
     let symbol = symbol_at_cursor(
-        &state.simulation.netlist_content,
+        &state.simulation.source.netlist_content,
         state.ui.netlist.cursor_char_index,
     )
     .ok_or_else(|| {
@@ -806,7 +806,7 @@ pub(crate) fn go_to_declaration_at_cursor(state: &mut AppState) -> Result<String
 }
 
 pub(crate) fn show_signature_help_at_cursor(state: &mut AppState) -> Result<String, String> {
-    let source = state.simulation.netlist_content.clone();
+    let source = state.simulation.source.netlist_content.clone();
     let cursor = state.ui.netlist.cursor_char_index;
     let (title, detail) = if let Some((title, detail)) =
         super::completion::directive_signature_at(&source, cursor)
@@ -874,7 +874,7 @@ pub(crate) fn apply_preferred_quick_fix(state: &mut AppState) -> Result<String, 
     }
     let fix = preferred_quick_fix(state)
         .ok_or_else(|| "No preferred quick fix is available at the caret.".to_owned())?;
-    let source = state.simulation.netlist_content.clone();
+    let source = state.simulation.source.netlist_content.clone();
     if fix.span.start > fix.span.end
         || fix.span.end > source.len()
         || !source.is_char_boundary(fix.span.start)
@@ -908,7 +908,7 @@ fn preferred_quick_fix(state: &AppState) -> Option<super::diagnostics::Diagnosti
 
 pub(crate) fn find_references_at_cursor(state: &mut AppState) -> Result<String, String> {
     let symbol = symbol_at_cursor(
-        &state.simulation.netlist_content,
+        &state.simulation.source.netlist_content,
         state.ui.netlist.cursor_char_index,
     )
     .ok_or_else(|| {
@@ -928,7 +928,7 @@ pub(crate) fn find_references_at_cursor(state: &mut AppState) -> Result<String, 
 
 pub(crate) fn begin_rename_at_cursor(state: &mut AppState) -> Result<(), String> {
     let symbol = symbol_at_cursor(
-        &state.simulation.netlist_content,
+        &state.simulation.source.netlist_content,
         state.ui.netlist.cursor_char_index,
     )
     .ok_or_else(|| "Place the caret on a model or subcircuit name.".to_owned())?;
@@ -1722,7 +1722,7 @@ M1 d g s b nch W={w} L={l*2}\n\
 
     fn hover_state() -> AppState {
         let mut state = AppState::default();
-        state.simulation.netlist_content = HOVER_DECK.to_owned();
+        state.simulation.source.netlist_content = HOVER_DECK.to_owned();
         state
     }
 
@@ -1907,7 +1907,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         state.ui.netlist.generated_document = Some(generated);
         state.ui.netlist.owned_document = Some(owned);
         state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-        state.simulation.netlist_content = root.to_owned();
+        state.simulation.source.netlist_content = root.to_owned();
         state.ui.netlist.cursor_char_index = root.find("cell gain").unwrap() + 2;
 
         begin_rename_at_cursor(&mut state).unwrap();

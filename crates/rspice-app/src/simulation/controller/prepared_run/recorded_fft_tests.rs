@@ -344,7 +344,7 @@ fn a_hand_written_fft_deck_is_read_as_the_fft_analysis() {
     const DECK: &str = "recorded fft deck\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.tran 10u 8m\n\
          .fft V(out) NP=256 WINDOW=HANN\n.fft V(out) NP=512 WINDOW=RECT FORMAT=UNORM\n.end\n";
     let mut state = AppState::default();
-    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.workspace.content.netlist_source = Some(DECK.to_owned());
     let tasks = dispatch_tasks(&mut state, SimulationRunIntent::ManualDeck);
     let transient = tasks
@@ -377,7 +377,7 @@ fn a_hand_written_fft_deck_is_read_as_the_fft_analysis() {
 #[test]
 fn a_hand_written_fft_binds_the_first_transient_as_the_engine_does() {
     let mut state = AppState::default();
-    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     // Two transients, which the Studio refuses for `.FOUR` and the engine
     // accepts for `.FFT`: the card belongs to the first one.
     state.workspace.content.netlist_source = Some(
@@ -401,7 +401,7 @@ fn a_hand_written_fft_binds_the_first_transient_as_the_engine_does() {
 #[test]
 fn a_hand_written_fft_without_a_transient_is_refused_in_the_engine_s_words() {
     let mut state = AppState::default();
-    state.simulation.run_intent = SimulationRunIntent::ManualDeck;
+    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.workspace.content.netlist_source = Some(
         "fft with no transient\nV1 out 0 dc 0 ac 1\nR1 out 0 1k\n.ac dec 10 1 1k\n\
          .fft V(out) NP=256 WINDOW=RECT\n.end\n"

@@ -410,7 +410,7 @@ fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
         .document_mut_for_test()
         .wires
         .push(crate::state::Wire::new(91, vec![a, b]));
-    app.state.simulation.cross_probe.update(
+    app.state.simulation.source.cross_probe.update(
         app.state.workspace.content.active_view.clone(),
         std::collections::HashMap::from([(a, "OUT".to_owned()), (b, "OUT".to_owned())]),
         std::collections::HashMap::from([("OUT".to_owned(), vec![a, b])]),
@@ -543,7 +543,7 @@ fn split_cross_probe_keeps_the_canonical_result_document_beside_design() {
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     assert!(app.state.workbench.results_split_visible(
         app.state.project_lifecycle.is_open(),
-        app.state.simulation.has_retained_result_dataset(),
+        app.state.simulation.retained.has_retained_result_dataset(),
     ));
 }
 
@@ -639,10 +639,10 @@ fn historical_result_revision_cannot_cross_probe_current_geometry() {
             "#ffbd2e",
         )]),
     );
-    app.state.simulation.runs[0] = stale_run;
+    app.state.simulation.retained.runs[0] = stale_run;
     app.state.ui.results.session.selected_trace = Some(
         rspice_results_ui::selection::SelectedResultTrace::from_run_indices(
-            &app.state.simulation.runs[0],
+            &app.state.simulation.retained.runs[0],
             0,
             0,
         )
@@ -778,9 +778,9 @@ fn generated_provenance_never_claims_source_mapping_without_evidence() {
 #[test]
 fn owned_provenance_requires_exact_saved_and_validated_bytes() {
     let mut state = AppState::default();
-    state.simulation.netlist_content = "owned\n.end\n".to_owned();
+    state.simulation.source.netlist_content = "owned\n.end\n".to_owned();
     let project_revision = state.workspace.content.project.revision().get();
-    let digest = crate::state::content_digest(&state.simulation.netlist_content);
+    let digest = crate::state::content_digest(&state.simulation.source.netlist_content);
     state.ui.netlist.externally_saved_content_digest = Some(digest);
     state.ui.netlist.validation = Some(
         crate::workbench::documents::netlist_document::NetlistValidationReceipt {
@@ -802,8 +802,8 @@ fn owned_provenance_requires_exact_saved_and_validated_bytes() {
         owned_source_state(&state, digest),
         "externally synchronized · validated · project modified"
     );
-    state.simulation.netlist_content.push_str("* edit\n");
-    let edited = crate::state::content_digest(&state.simulation.netlist_content);
+    state.simulation.source.netlist_content.push_str("* edit\n");
+    let edited = crate::state::content_digest(&state.simulation.source.netlist_content);
     assert_eq!(
         owned_source_state(&state, edited),
         "modified · validation required"

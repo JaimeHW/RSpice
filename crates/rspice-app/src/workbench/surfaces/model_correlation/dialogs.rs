@@ -222,6 +222,7 @@ pub(super) fn retained_run_options(app: &RSpiceApp) -> Vec<RetainedRunOption> {
     };
     app.state
         .simulation
+        .retained
         .runs
         .iter()
         .filter(|run| {

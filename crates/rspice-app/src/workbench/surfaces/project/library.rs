@@ -574,14 +574,14 @@ fn library_detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let governance_write_allowed = state.project_lifecycle.is_open()
                         && !state.workbench.safe_mode.project_read_only()
-                        && !state.simulation.has_active_execution();
+                        && !state.simulation.execution.has_active_execution();
                     let rollback = Button::new("Rollback\u{2026}")
                         .enabled(
                             governance_write_allowed
                                 && !state.workspace.content.project.library_publications().is_empty(),
                         )
                         .show(ui)
-                        .on_disabled_hover_text(if state.simulation.has_active_execution() {
+                        .on_disabled_hover_text(if state.simulation.execution.has_active_execution() {
                             "Library rollback is unavailable while a simulation is running."
                         } else if state.workbench.safe_mode.project_read_only() {
                             "Library rollback is unavailable while the project is read-only."
@@ -594,7 +594,7 @@ fn library_detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
                     let publish = Button::new("Publish\u{2026}")
                         .enabled(governance_write_allowed)
                         .show(ui)
-                        .on_disabled_hover_text(if state.simulation.has_active_execution() {
+                        .on_disabled_hover_text(if state.simulation.execution.has_active_execution() {
                             "Library publication is unavailable while a simulation is running."
                         } else {
                             "Library publication is unavailable while the project is read-only."

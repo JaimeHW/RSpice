@@ -266,34 +266,35 @@ impl SimulationController {
         self.reset_if_design_replaced(state);
 
         // Handle simulation trigger
-        if state.simulation.trigger_simulation {
+        if state.simulation.execution.trigger_simulation {
             log::info!(
                 "Simulation triggered ({} analyses enabled)",
                 state.sim_setup.enabled_analysis_instance_count()
             );
-            state.simulation.trigger_simulation = false;
+            state.simulation.execution.trigger_simulation = false;
             self.start_simulation(state);
         }
 
         // Handle abort trigger
-        if state.simulation.trigger_abort {
+        if state.simulation.execution.trigger_abort {
             log::info!("Simulation abort triggered!");
-            state.simulation.trigger_abort = false;
-            let requested_execution = state.simulation.abort_request.take();
+            state.simulation.execution.trigger_abort = false;
+            let requested_execution = state.simulation.execution.abort_request.take();
             let controller_execution = self.current_run_id.and_then(|run_sequence| {
                 state
                     .simulation
+                    .retained
                     .run_by_sequence(run_sequence)
                     .and_then(|run| run.execution_identity())
             });
             let bound_request = requested_execution.filter(|requested| {
                 Some(*requested) == controller_execution
-                    && Some(*requested) == state.simulation.active_execution
+                    && Some(*requested) == state.simulation.execution.active_execution
             });
             if let Some(requested_execution) = bound_request {
                 let cancellation_result = state
                     .simulation
-                    .run_by_stable_id_mut(requested_execution.run_id)
+                    .retained.run_by_stable_id_mut(requested_execution.run_id)
                     .ok_or_else(|| {
                         "The active simulation run disappeared before cancellation could be acknowledged"
                             .to_owned()
@@ -314,7 +315,7 @@ impl SimulationController {
                         campaign.pending.clear();
                         campaign.cancelled = true;
                     }
-                    state.simulation.status = "Cancelling".to_owned();
+                    state.simulation.execution.status = "Cancelling".to_owned();
                     state.push_sim_message(ConsoleMessage::warning(
                         "Simulation cancellation requested".to_owned(),
                     ));
@@ -340,9 +341,9 @@ impl SimulationController {
 
         // Update running state
         let is_running = self.runner.is_running();
-        state.simulation.progress =
+        state.simulation.execution.progress =
             Self::ui_progress_fraction(self.runner.progress_fraction(), is_running);
-        state.simulation.is_running = is_running;
+        state.simulation.execution.is_running = is_running;
     }
 
     pub(crate) fn engine_availability(&self) -> super::status::EngineAvailability {
@@ -396,7 +397,7 @@ impl SimulationController {
         log::info!("start_simulation called");
         self.design_execution_epoch = state.design_execution_epoch;
 
-        match state.simulation.run_intent {
+        match state.simulation.execution.run_intent {
             SimulationRunIntent::SimulateRunSet => self.start_simulate_run_set(state),
             SimulationRunIntent::ManualDeck => self.start_manual_deck_simulation(state),
         }
@@ -414,11 +415,11 @@ impl SimulationController {
         let dispatch = match self.consume_snapshot_for_dispatch(state) {
             Ok(dispatch) => dispatch,
             Err(error) => {
-                if state.simulation.run_intent == SimulationRunIntent::SimulateRunSet {
+                if state.simulation.execution.run_intent == SimulationRunIntent::SimulateRunSet {
                     state.workbench.preflight.invalidate();
                 }
                 state.push_sim_message(ConsoleMessage::warning(error.to_string()));
-                state.simulation.status = "Run blocked".to_owned();
+                state.simulation.execution.status = "Run blocked".to_owned();
                 return;
             }
         };
@@ -430,7 +431,7 @@ impl SimulationController {
         }
         if let Err(error) = self.start_authorized_dispatch(state, dispatch, None) {
             state.push_sim_message(ConsoleMessage::error(error.to_string()));
-            state.simulation.status = "Run blocked".to_owned();
+            state.simulation.execution.status = "Run blocked".to_owned();
         }
     }
 
@@ -485,7 +486,7 @@ impl SimulationController {
         if let Some(cross_probe) = dispatch.take_cross_probe()
             && campaign_membership.is_none()
         {
-            state.simulation.cross_probe.update(
+            state.simulation.source.cross_probe.update(
                 cross_probe.source_reference,
                 cross_probe.point_to_net,
                 cross_probe.nets,
@@ -520,8 +521,8 @@ impl SimulationController {
             state.simulation.prune_plan_runs(plan_id, limit);
         }
         self.current_run_id = Some(run_id);
-        state.simulation.active_execution = Some(execution_identity);
-        state.simulation.abort_request = None;
+        state.simulation.execution.active_execution = Some(execution_identity);
+        state.simulation.execution.abort_request = None;
         // Every run's decks, whatever asked for it. The source one point
         // solved is the only artifact that settles what that point solved, and
         // it exists exactly once — here, between authorization and the queue
@@ -530,6 +531,7 @@ impl SimulationController {
         // working copy is diffed against.
         state
             .simulation
+            .retained
             .executed_decks
             .retain(crate::state::ExecutedDeck {
                 run_id,
@@ -581,7 +583,7 @@ impl SimulationController {
 
     #[cfg(test)]
     fn analysis_source_path(state: &AppState) -> Option<PathBuf> {
-        match state.simulation.run_intent {
+        match state.simulation.execution.run_intent {
             SimulationRunIntent::ManualDeck => state.workspace.content.netlist_source_path.clone(),
             SimulationRunIntent::SimulateRunSet => state.schematic.session.current_file.clone(),
         }
@@ -595,6 +597,7 @@ impl SimulationController {
         let interrupted = self.current_run_id.filter(|run_sequence| {
             state
                 .simulation
+                .retained
                 .run_by_sequence(*run_sequence)
                 .is_some_and(|run| !run.lifecycle.is_terminal())
         });
@@ -622,9 +625,9 @@ impl SimulationController {
             }
         }
         self.reset_for_design_replacement();
-        state.simulation.active_execution = None;
-        state.simulation.abort_request = None;
-        state.simulation.trigger_abort = false;
+        state.simulation.execution.active_execution = None;
+        state.simulation.execution.abort_request = None;
+        state.simulation.execution.trigger_abort = false;
         state.ui.netlist.pending_manual_run_id = None;
         state.ui.netlist.pending_run_buffer = None;
         self.design_execution_epoch = state.design_execution_epoch;
@@ -861,7 +864,7 @@ impl SimulationController {
         } else {
             analysis_name.clone()
         };
-        state.simulation.status = status_msg.clone();
+        state.simulation.execution.status = status_msg.clone();
 
         // Log to console
         state.push_sim_message(ConsoleMessage::info(format!(
@@ -898,7 +901,7 @@ impl SimulationController {
             Self::report_seal_errors(state, errors);
             self.pending_analyses.clear();
             self.finish_simulation_batch(state);
-            state.simulation.status = "Error".to_string();
+            state.simulation.execution.status = "Error".to_string();
             return;
         }
 
@@ -948,7 +951,7 @@ impl SimulationController {
         match start_result {
             Ok(()) => {
                 if let Some(run_id) = self.target_run_id(state)
-                    && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
+                    && let Some(run) = state.simulation.retained.run_by_sequence_mut(run_id)
                     && let Err(error) = run.mark_running()
                 {
                     log::error!("Failed to advance simulation run lifecycle: {error}");
@@ -1010,7 +1013,7 @@ impl SimulationController {
         let declaration = provenance.source_instance_id();
         let target_run_id = self.target_run_id(state);
         let assembled = target_run_id
-            .and_then(|run_id| state.simulation.run_by_sequence(run_id))
+            .and_then(|run_id| state.simulation.retained.run_by_sequence(run_id))
             .ok_or_else(|| "PVT family has no target simulation run".to_owned())
             .and_then(|run| self.point_families.family_for(declaration, run));
         let mut analysis = match assembled {
@@ -1083,6 +1086,7 @@ impl SimulationController {
         let analysis = analysis.with_provenance(provenance);
         let run = state
             .simulation
+            .retained
             .run_by_sequence_mut(run_id)
             .ok_or_else(|| format!("completed analysis target run {run_id} does not exist"))?;
         self.retain_analysis_under_current_policy(run, analysis)?;
@@ -1148,7 +1152,7 @@ impl SimulationController {
         let Some(run_id) = target_run_id else {
             return errors;
         };
-        let Some(run) = state.simulation.run_by_sequence_mut(run_id) else {
+        let Some(run) = state.simulation.retained.run_by_sequence_mut(run_id) else {
             return errors;
         };
         if let Some(failed) = failed
@@ -1177,7 +1181,7 @@ impl SimulationController {
         {
             errors.push(error);
         }
-        state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
+        state.simulation.view.data_version = state.simulation.view.data_version.wrapping_add(1);
         errors
     }
 
@@ -1335,6 +1339,7 @@ impl SimulationController {
         };
         let retained = state
             .simulation
+            .retained
             .run_by_sequence_mut(run_id)
             .ok_or_else(|| format!("live transient target run {run_id} does not exist"))
             .and_then(|run| {
@@ -1415,13 +1420,13 @@ impl SimulationController {
         let completed_run_id = self.target_run_id(state);
         self.point_families.clear();
         let run_success = completed_run_id
-            .and_then(|run_id| state.simulation.run_by_sequence(run_id))
+            .and_then(|run_id| state.simulation.retained.run_by_sequence(run_id))
             .map(|run| run.success)
             .unwrap_or(false);
         self.live_transient.clear();
 
         if let Some(run_id) = completed_run_id
-            && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
+            && let Some(run) = state.simulation.retained.run_by_sequence_mut(run_id)
         {
             let terminal = if run_success {
                 SimulationRunLifecycle::Completed
@@ -1475,10 +1480,10 @@ impl SimulationController {
         self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
         self.current_analysis_idx = 0;
         self.total_analyses = 0;
-        state.simulation.active_execution = None;
-        state.simulation.abort_request = None;
+        state.simulation.execution.active_execution = None;
+        state.simulation.execution.abort_request = None;
 
-        state.simulation.status = if run_success {
+        state.simulation.execution.status = if run_success {
             "Complete".to_string()
         } else {
             "Completed with errors".to_string()
@@ -1528,7 +1533,7 @@ impl SimulationController {
         state.ui.netlist.pending_manual_run_id = None;
 
         if run_success && let Some(buffer) = pending_buffer {
-            let current_buffer = state.simulation.netlist_content.clone();
+            let current_buffer = state.simulation.source.netlist_content.clone();
             let param_values = Self::manual_deck_param_values(&buffer);
             state.ui.netlist.last_run_buffer = Some(buffer);
             // The deck and the run it belongs to are sealed together; nothing
@@ -1703,24 +1708,25 @@ impl SimulationController {
         let status = self.runner.status();
         let cancellation_pending = state
             .simulation
+            .execution
             .active_execution
-            .and_then(|identity| state.simulation.run_by_stable_id(identity.run_id))
+            .and_then(|identity| state.simulation.retained.run_by_stable_id(identity.run_id))
             .is_some_and(|run| run.lifecycle == SimulationRunLifecycle::Cancelling);
         if cancellation_pending {
-            state.simulation.status = "Cancelling".to_owned();
+            state.simulation.execution.status = "Cancelling".to_owned();
         } else if !matches!(status, SimulationStatus::Idle)
             && !matches!(status, SimulationStatus::Completed { .. })
         {
             // Show progress-aware status
             if self.total_analyses > 1 {
-                state.simulation.status = format!(
+                state.simulation.execution.status = format!(
                     "Analysis {}/{}: {}",
                     self.current_analysis_idx,
                     self.total_analyses,
                     status.display_name()
                 );
             } else {
-                state.simulation.status = status.display_name().to_string();
+                state.simulation.execution.status = status.display_name().to_string();
             }
         }
 

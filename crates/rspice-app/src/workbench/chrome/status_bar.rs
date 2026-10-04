@@ -74,14 +74,14 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 t.color.warn
             } else if availability == EngineAvailability::Restartable {
                 t.color.text_dim
-            } else if app.state.simulation.has_active_execution() {
+            } else if app.state.simulation.execution.has_active_execution() {
                 t.color.accent
             } else {
                 t.color.ok
             };
             let engine_wash = if availability == EngineAvailability::Ready
                 && !cancellation_pending
-                && app.state.simulation.has_active_execution()
+                && app.state.simulation.execution.has_active_execution()
             {
                 t.color.accent_dim
             } else {
@@ -210,13 +210,13 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         // next, so the chip is the route to it rather than a
                         // label about it.
                         let can_retry = (availability == EngineAvailability::Restartable || availability.failure_reason().is_some())
-                            && !app.state.simulation.has_active_execution();
+                            && !app.state.simulation.execution.has_active_execution();
                         let can_open = availability == EngineAvailability::Ready
                             && app.state.project_lifecycle.is_open()
                             && app
                                 .state
                                 .simulation
-                                .newest_retained_result_run_index()
+                                .retained.newest_retained_result_run_index()
                                 .is_some();
                         let engine_response = ui
                             .scope(|ui| {
@@ -437,7 +437,7 @@ fn simulation_engine_status(
     if *availability == EngineAvailability::Starting && !simulation.cancellation_is_pending() {
         return ("Engine starting".to_owned(), false);
     }
-    if !simulation.has_active_execution() {
+    if !simulation.execution.has_active_execution() {
         return (
             if *availability == EngineAvailability::Restartable {
                 "Engine stopped"
@@ -470,7 +470,7 @@ fn simulation_engine_status(
     (
         format!(
             "Engine {phase} · {}%",
-            simulation_progress_percent(simulation.progress)
+            simulation_progress_percent(simulation.execution.progress)
         ),
         cancellation_pending,
     )
@@ -635,8 +635,9 @@ fn results_view_summary(
     }
     app.state
         .simulation
+        .view
         .active_run_idx
-        .and_then(|index| app.state.simulation.runs.get(index))
+        .and_then(|index| app.state.simulation.retained.runs.get(index))
         .map_or_else(
             // The selection segment beside this one already reports that no
             // dataset is chosen. This segment answers a different question —
@@ -674,8 +675,9 @@ fn selection_summary(app: &RSpiceApp) -> String {
         return app
             .state
             .simulation
+            .view
             .active_run_idx
-            .and_then(|index| app.state.simulation.runs.get(index))
+            .and_then(|index| app.state.simulation.retained.runs.get(index))
             .map_or_else(
                 || "No result dataset selected".to_owned(),
                 |run| {
@@ -1184,9 +1186,9 @@ mod tests {
             .start_run()
             .execution_identity()
             .expect("current run has execution identity");
-        simulation.active_execution = Some(identity);
-        simulation.progress = 0.375;
-        simulation.is_running = false;
+        simulation.execution.active_execution = Some(identity);
+        simulation.execution.progress = 0.375;
+        simulation.execution.is_running = false;
 
         assert_eq!(
             simulation_engine_status(&simulation, &EngineAvailability::Ready),
@@ -1223,8 +1225,8 @@ mod tests {
     fn backend_startup_and_failure_do_not_advertise_running_progress() {
         let mut simulation = crate::state::SimulationState::default();
         let identity = simulation.start_run().execution_identity().unwrap();
-        simulation.active_execution = Some(identity);
-        simulation.progress = 0.375;
+        simulation.execution.active_execution = Some(identity);
+        simulation.execution.progress = 0.375;
         assert_eq!(
             simulation_engine_status(&simulation, &EngineAvailability::Starting),
             ("Engine starting".to_owned(), false)

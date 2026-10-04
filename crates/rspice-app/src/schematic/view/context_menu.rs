@@ -668,7 +668,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
                 .find(|wire| wire.id == id)
                 .and_then(|wire| {
                     wire.points.iter().find_map(|point| {
-                        state.simulation.cross_probe.net_at_in(
+                        state.simulation.source.cross_probe.net_at_in(
                             &state.workspace.content.active_view,
                             state.schematic.topology_version(),
                             *point,

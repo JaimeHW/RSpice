@@ -283,6 +283,7 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
     let point = state.ui.netlist.executed_deck_view.and_then(|selection| {
         state
             .simulation
+            .retained
             .executed_decks
             .get(selection.run_id)
             .and_then(|deck| deck.point(selection.point))
@@ -290,6 +291,7 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
     });
     let receipt = state
         .simulation
+        .retained
         .run_by_sequence(run_id)?
         .prepared_receipt()
         .filter(|receipt| {
@@ -301,6 +303,7 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
     // the hop to its task decks can be offered at all.
     let tasks = state
         .simulation
+        .retained
         .executed_decks
         .get(run_id)
         .map_or(0, |deck| deck.points.len());
@@ -819,7 +822,7 @@ fn format_owned_netlist(ctx: &egui::Context, app: &mut RSpiceApp) {
     {
         return;
     }
-    let source = app.state.simulation.netlist_content.clone();
+    let source = app.state.simulation.source.netlist_content.clone();
     let dependency_document = app.state.ui.netlist.active_dependency_identity.is_some();
     if dependency_document {
         let has_errors = app.state.ui.netlist.diagnostics.iter().any(|diagnostic| {
@@ -1180,7 +1183,7 @@ mod tests {
         let mut state = AppState::default();
         retain_generated(&mut state, "generated\n.end\n");
         let retained_generated = state.ui.netlist.generated_source.clone();
-        state.simulation.netlist_content = state.ui.netlist.generated_source.clone();
+        state.simulation.source.netlist_content = state.ui.netlist.generated_source.clone();
 
         ownership::create_owned_source(
             &mut state,
@@ -1200,7 +1203,7 @@ mod tests {
         );
 
         assert!(crate::workbench::documents::netlist_document::open_generated_primary(&mut state));
-        assert_eq!(state.simulation.netlist_content, retained_generated);
+        assert_eq!(state.simulation.source.netlist_content, retained_generated);
         assert_eq!(
             state.workspace.content.netlist_source.as_deref(),
             Some("owned edit\n.end\n")
@@ -1215,7 +1218,10 @@ mod tests {
         state.workspace.content.netlist_source = Some("retained owned\n.end\n".to_owned());
 
         assert!(ownership::open_owned_source(&mut state));
-        assert_eq!(state.simulation.netlist_content, "retained owned\n.end\n");
+        assert_eq!(
+            state.simulation.source.netlist_content,
+            "retained owned\n.end\n"
+        );
         assert_eq!(
             state.workspace.content.netlist_source.as_deref(),
             Some("retained owned\n.end\n")
@@ -1360,13 +1366,13 @@ mod tests {
             receipt,
         )))
         .expect("fresh run accepts its receipt");
-        state.simulation.runs.push(run);
+        state.simulation.retained.runs.push(run);
     }
 
     fn ran_owned_deck(deck: &str) -> AppState {
         let mut state = AppState::default();
         state.workspace.content.netlist_source = Some(deck.to_owned());
-        state.simulation.netlist_content = deck.to_owned();
+        state.simulation.source.netlist_content = deck.to_owned();
         state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
         state.ui.netlist.active_document_initialized = true;
         state.ui.netlist.last_run_buffer = Some(deck.to_owned());
@@ -1397,7 +1403,7 @@ mod tests {
     fn run_strip_warns_once_the_working_deck_moves_past_the_run() {
         let mut state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
         state.workspace.content.netlist_source = Some("deck\nR1 out 0 2k\n.op\n.end\n".to_owned());
-        state.simulation.netlist_content = "deck\nR1 out 0 2k\n.op\n.end\n".to_owned();
+        state.simulation.source.netlist_content = "deck\nR1 out 0 2k\n.op\n.end\n".to_owned();
 
         assert_eq!(
             run_strip_projection(&state).map(|projection| projection.phase),
@@ -1421,7 +1427,7 @@ mod tests {
     #[test]
     fn run_strip_is_silent_without_a_retained_manual_run() {
         let mut state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
-        state.simulation.runs.clear();
+        state.simulation.retained.runs.clear();
 
         assert!(run_strip_projection(&state).is_none());
     }
@@ -1484,13 +1490,17 @@ mod tests {
                 deck,
             }
         };
-        state.simulation.executed_decks.retain(ExecutedDeck {
-            run_id: 7,
-            points: vec![
-                point("TT 27C", DECK),
-                point("SS 27C", "deck\n.lib cmos.lib ss\nR1 out 0 1k\n.op\n.end\n"),
-            ],
-        });
+        state
+            .simulation
+            .retained
+            .executed_decks
+            .retain(ExecutedDeck {
+                run_id: 7,
+                points: vec![
+                    point("TT 27C", DECK),
+                    point("SS 27C", "deck\n.lib cmos.lib ss\nR1 out 0 1k\n.op\n.end\n"),
+                ],
+            });
 
         let held = run_strip_projection(&state).expect("the run still owns the strip");
         assert_eq!(held.tasks, 2);
@@ -1542,7 +1552,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
         app.state.workspace.content.netlist_source = Some(DECK.to_owned());
-        app.state.simulation.netlist_content = DECK.to_owned();
+        app.state.simulation.source.netlist_content = DECK.to_owned();
         app.state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
         app.state.ui.netlist.active_document_initialized = true;
         app.state.ui.netlist.last_run_buffer = Some(DECK.to_owned());
@@ -1559,7 +1569,7 @@ mod tests {
             }
             RunStripPhase::Edited => {
                 app.state.workspace.content.netlist_source = Some(EDITED.to_owned());
-                app.state.simulation.netlist_content = EDITED.to_owned();
+                app.state.simulation.source.netlist_content = EDITED.to_owned();
             }
             RunStripPhase::Running => {
                 seal_manual_run(&mut app.state, 8, 0xCD, 5);
@@ -1612,6 +1622,7 @@ mod tests {
         let deck: std::sync::Arc<str> = std::sync::Arc::from(EXECUTED);
         app.state
             .simulation
+            .retained
             .executed_decks
             .retain(crate::state::ExecutedDeck {
                 run_id: 7,

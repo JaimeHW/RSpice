@@ -28,8 +28,8 @@ fn artifact_text(
     key: &super::ResultArtifactPresentationKey,
 ) -> Option<std::sync::Arc<ArtifactTextPlan>> {
     let source = (
-        state.simulation.runs.revision(),
-        state.simulation.data_version,
+        state.simulation.retained.runs.revision(),
+        state.simulation.view.data_version,
     );
     if let Some(plan) = state.ui.results.plans.artifact.as_ref()
         && plan.source == source
@@ -37,7 +37,7 @@ fn artifact_text(
     {
         return Some(std::sync::Arc::clone(plan));
     }
-    let text = exact_result_artifact_text(key, &state.simulation.runs);
+    let text = exact_result_artifact_text(key, &state.simulation.retained.runs);
     let lines = text.as_ref().map_or_else(
         |_| Vec::new(),
         |text| {
@@ -274,9 +274,9 @@ mod tests {
                 .unwrap()
                 .contains("0.3333333333333333")
         );
-        let version = state.simulation.data_version;
+        let version = state.simulation.view.data_version;
         let mut replacement = state.simulation.clone();
-        replacement.runs[0].analyses[0].result_payload =
+        replacement.retained.runs[0].analyses[0].result_payload =
             Some(AnalysisResultPayload::ScalarMeasurements {
                 values: std::collections::BTreeMap::from([
                     ("settling_time".to_owned(), 0.125),
@@ -290,7 +290,7 @@ mod tests {
         let restored = artifact_text(&mut state, &key).unwrap();
         assert_eq!(
             restored.text,
-            exact_result_artifact_text(&key, &state.simulation.runs)
+            exact_result_artifact_text(&key, &state.simulation.retained.runs)
         );
         assert_ne!(restored.text, original.text);
         let text = restored.text.as_ref().unwrap();
@@ -303,18 +303,20 @@ mod tests {
                 .collect::<Vec<_>>(),
             text.lines().collect::<Vec<_>>()
         );
-        let payload = state.simulation.runs[0].analyses[0].result_payload.take();
+        let payload = state.simulation.retained.runs[0].analyses[0]
+            .result_payload
+            .take();
         let missing = artifact_text(&mut state, &key).unwrap();
         assert!(missing.text.is_err());
         assert!(missing.lines.is_empty());
-        state.simulation.runs[0].analyses[0].result_payload = payload;
+        state.simulation.retained.runs[0].analyses[0].result_payload = payload;
         let repaired = artifact_text(&mut state, &key).unwrap();
         assert_eq!(repaired.text, restored.text);
         assert!(std::sync::Arc::ptr_eq(
             &repaired,
             &artifact_text(&mut state, &key).unwrap()
         ));
-        assert_eq!(state.simulation.data_version, version);
+        assert_eq!(state.simulation.view.data_version, version);
     }
 
     #[test]

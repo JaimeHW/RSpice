@@ -1382,7 +1382,7 @@ fn effective_deck(state: &AppState) -> Option<NetlistSection> {
         .or(state.workspace.content.netlist_source.as_deref())
         .filter(|deck| !deck.trim().is_empty())
         .or_else(|| {
-            let live = state.simulation.netlist_content.as_str();
+            let live = state.simulation.source.netlist_content.as_str();
             (!live.trim().is_empty()).then_some(live)
         })?;
     let deck = raw.replace("\r\n", "\n").replace('\r', "\n");
@@ -1769,7 +1769,8 @@ mod tests {
     #[test]
     fn deck_line_endings_normalize_to_canonical_form() {
         let mut state = AppState::default();
-        state.simulation.netlist_content = "* RSpice Netlist\r\nR1 a b 1k\r\n.end".to_string();
+        state.simulation.source.netlist_content =
+            "* RSpice Netlist\r\nR1 a b 1k\r\n.end".to_string();
         let deck = effective_deck(&state).expect("deck").deck;
         assert!(!deck.contains('\r'));
         assert_eq!(deck.lines().count(), 3);
@@ -1778,7 +1779,7 @@ mod tests {
     #[test]
     fn authored_presentation_and_disclosure_choices_are_sealed() {
         let mut state = AppState::default();
-        state.simulation.netlist_content = "* Filter\nR1 in out 1k\n.end".to_string();
+        state.simulation.source.netlist_content = "* Filter\nR1 in out 1k\n.end".to_string();
         let snapshot = build_publication_snapshot(
             &state,
             &PublicationDraft {
@@ -2084,7 +2085,8 @@ mod tests {
     #[test]
     fn run_results_and_deck_build_a_valid_snapshot() {
         let mut state = AppState::default();
-        state.simulation.netlist_content = "* RSpice Netlist\nR1 in out 1k\n.end".to_string();
+        state.simulation.source.netlist_content =
+            "* RSpice Netlist\nR1 in out 1k\n.end".to_string();
         let mut run = crate::state::SimulationRun::new(1);
         run.analyses.push({
             let mut result = analysis(
@@ -2107,8 +2109,8 @@ mod tests {
             result
         });
         run.success = true;
-        state.simulation.runs.push(run);
-        state.simulation.active_run_idx = Some(0);
+        state.simulation.retained.runs.push(run);
+        state.simulation.view.active_run_idx = Some(0);
 
         let snapshot = build_publication_snapshot(
             &state,

@@ -35,8 +35,8 @@ pub(super) struct OptimizationPlan {
 /// the cell hands back the same verdict rather than recomputing it.
 fn optimization_plan(state: &AppState) -> Option<Arc<OptimizationPlan>> {
     let source = (
-        state.simulation.runs.revision(),
-        state.simulation.data_version,
+        state.simulation.retained.runs.revision(),
+        state.simulation.view.data_version,
     );
     let run = state.simulation.active_run()?;
     let analysis = state.simulation.active_analysis()?;
@@ -190,7 +190,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         );
         return;
     };
-    if state.simulation.active_analysis_idx != Some(analysis_index) {
+    if state.simulation.view.active_analysis_idx != Some(analysis_index) {
         state.ui.results.session.selected_optimization = None;
         section_header(ui, "Candidate selection", None);
         panel_note(
@@ -271,9 +271,9 @@ mod tests {
         let mut run = SimulationRun::new(5);
         run.add_analysis(analysis);
         let mut state = AppState::default();
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
-        state.simulation.active_analysis_idx = Some(0);
+        state.simulation.view.active_analysis_idx = Some(0);
         state
     }
 
@@ -282,13 +282,15 @@ mod tests {
         let mut state = optimization_state(64);
         let original = optimization_plan(&state).unwrap();
         assert_eq!(original.located.as_ref().unwrap().best_index(), 63);
-        let version = state.simulation.data_version;
-        state.simulation.runs[0].analyses[0].waveforms.remove(1);
+        let version = state.simulation.view.data_version;
+        state.simulation.retained.runs[0].analyses[0]
+            .waveforms
+            .remove(1);
         assert!(!active_metadata_is_valid(&state));
         assert!(optimization_plan(&state).unwrap().located.is_none());
 
-        state.simulation.runs[0].analyses[0] =
-            optimization_state(3).simulation.runs[0].analyses[0].clone();
+        state.simulation.retained.runs[0].analyses[0] =
+            optimization_state(3).simulation.retained.runs[0].analyses[0].clone();
         assert!(active_metadata_is_valid(&state));
         let repaired = optimization_plan(&state).unwrap();
         assert_eq!(repaired.analysis, original.analysis);
@@ -297,7 +299,7 @@ mod tests {
         assert_eq!(view.cost.y.len(), 3);
         assert_eq!(view.variables[0].0, "GAIN");
         assert_eq!(original.located.as_ref().unwrap().best_index(), 63);
-        assert_eq!(state.simulation.data_version, version);
+        assert_eq!(state.simulation.view.data_version, version);
     }
 
     /// Locating the history verifies every candidate series against the
@@ -312,7 +314,7 @@ mod tests {
         assert!(Arc::ptr_eq(&first, &again));
 
         // The projection through the memo is the projection it replaced.
-        let analysis = &state.simulation.runs[0].analyses[0];
+        let analysis = &state.simulation.retained.runs[0].analyses[0];
         let direct = locate_optimization(analysis, true)
             .and_then(|indices| indices.view(analysis))
             .expect("a direct projection");
@@ -334,10 +336,10 @@ mod tests {
         );
 
         let mut state = state;
-        state.simulation.runs[0].analyses[0]
+        state.simulation.retained.runs[0].analyses[0]
             .waveforms
             .retain(|waveform| waveform.name != "OPT_GAIN");
-        state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
+        state.simulation.view.data_version = state.simulation.view.data_version.wrapping_add(1);
         let after = optimization_plan(&state).expect("a plan for the new generation");
         assert!(
             after.located.is_none(),
@@ -389,7 +391,7 @@ mod tests {
             OptimizationObjectiveGoal, OptimizationObjectiveObservation, OptimizationObjectiveTerm,
         };
         let mut state = optimization_state(4);
-        let analysis = &mut state.simulation.runs[0].analyses[0];
+        let analysis = &mut state.simulation.retained.runs[0].analyses[0];
         let AnalysisResultFamilyMetadata::Optimization {
             best_objectives, ..
         } = analysis.family_metadata.as_mut().unwrap()
@@ -432,7 +434,7 @@ mod tests {
             OptimizationConstraint, OptimizationConstraintObservation,
         };
         let mut state = optimization_state(4);
-        let analysis = &mut state.simulation.runs[0].analyses[0];
+        let analysis = &mut state.simulation.retained.runs[0].analyses[0];
         let AnalysisResultFamilyMetadata::Optimization {
             best_constraints,
             converged,

@@ -291,7 +291,7 @@ fn split_selected_trace_is_inspected(app: &RSpiceApp) -> bool {
     app.state.workbench.workspace == Workspace::Design
         && app.state.workbench.results_split_visible(
             app.state.project_lifecycle.is_open(),
-            app.state.simulation.has_retained_result_dataset(),
+            app.state.simulation.retained.has_retained_result_dataset(),
         )
         && app
             .state
@@ -1229,7 +1229,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         .session
         .selected_result_artifact
         .clone()
-        .filter(|key| key.resolve(&app.state.simulation.runs).is_some());
+        .filter(|key| key.resolve(&app.state.simulation.retained.runs).is_some());
 
     // What is being read comes before where it came from: a reader adjusting
     // a pane needs its axes and bindings first, and the dataset provenance
@@ -1249,6 +1249,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         let executed = app
             .state
             .simulation
+            .retained
             .executed_decks
             .get(run.id)
             .map(crate::state::ExecutedDeck::model_sources);
@@ -1272,7 +1273,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         property_row(
             ui,
             "Available runs",
-            &app.state.simulation.runs.len().to_string(),
+            &app.state.simulation.retained.runs.len().to_string(),
         );
         result_authority::result_qualification_gaps(ui);
     }
@@ -1298,14 +1299,14 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
 
     // The analysis's own provenance belongs to the same folded record as the
     // dataset's, even though a different owner draws it.
-    if let Some(index) = app.state.simulation.active_analysis_idx
+    if let Some(index) = app.state.simulation.view.active_analysis_idx
         && let Some(analysis) = run.analyses.get(index)
     {
         result_authority::result_convergence(ui, analysis);
         result_authority::result_dc_sweep(ui, analysis);
     }
     if inspector_disclosure_open(ui.ctx(), "result-provenance")
-        && let Some(index) = app.state.simulation.active_analysis_idx
+        && let Some(index) = app.state.simulation.view.active_analysis_idx
         && let Some(analysis) = run.analyses.get(index)
     {
         section_header(ui, "Active analysis provenance", None);
@@ -1415,10 +1416,11 @@ fn selected_result_artifact(
 ) {
     use crate::state::SimulationRunLifecycle;
 
-    let Some((run_index, _, analysis)) = selected.resolve(&app.state.simulation.runs) else {
+    let Some((run_index, _, analysis)) = selected.resolve(&app.state.simulation.retained.runs)
+    else {
         return;
     };
-    let run = &app.state.simulation.runs[run_index];
+    let run = &app.state.simulation.retained.runs[run_index];
     let analysis_identity = analysis.provenance().map_or_else(
         || format!("legacy-{}", analysis.id),
         |provenance| provenance.source_instance_id().to_string(),
@@ -1615,7 +1617,7 @@ fn active_result_pane(
                 .resolve(run)
                 .map(|(analysis_index, _, _, _)| analysis_index)
         })
-        .or(app.state.simulation.active_analysis_idx)
+        .or(app.state.simulation.view.active_analysis_idx)
         .unwrap_or(0);
     let Some(analysis) = run.analyses.get(analysis_index) else {
         return;
@@ -1835,11 +1837,15 @@ fn set_selected_trace_color(
     color: Color32,
 ) {
     let color = format!("#{:02x}{:02x}{:02x}", color.r(), color.g(), color.b());
-    let Some(run_index) = state.simulation.active_run_idx else {
+    let Some(run_index) = state.simulation.view.active_run_idx else {
         return;
     };
-    let Some((analysis_index, waveform_index)) =
-        state.simulation.runs.get(run_index).and_then(|run| {
+    let Some((analysis_index, waveform_index)) = state
+        .simulation
+        .retained
+        .runs
+        .get(run_index)
+        .and_then(|run| {
             selected
                 .resolve(run)
                 .map(|(analysis_index, waveform_index, _, _)| (analysis_index, waveform_index))
@@ -1849,6 +1855,7 @@ fn set_selected_trace_color(
     };
     if let Some(waveform) = state
         .simulation
+        .retained
         .runs
         .get_mut(run_index)
         .and_then(|run| run.analyses.get_mut(analysis_index))
@@ -1859,9 +1866,10 @@ fn set_selected_trace_color(
     } else {
         return;
     }
-    if state.simulation.active_analysis_idx == Some(analysis_index)
+    if state.simulation.view.active_analysis_idx == Some(analysis_index)
         && let Some(waveform) = state
             .simulation
+            .view
             .waveforms
             .iter_mut()
             .find(|waveform| waveform.name == selected.source_name())
@@ -1885,7 +1893,7 @@ fn schematic_cross_probe_unavailability(
             "{signal} is a device current or derived quantity; no single schematic net carries it."
         ));
     };
-    let map = &state.simulation.cross_probe;
+    let map = &state.simulation.source.cross_probe;
     let topology = state.schematic.topology_version();
     if !map.is_current_for(&state.workspace.content.active_view, topology) {
         return Some(
@@ -2070,12 +2078,12 @@ fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
             property_row(
                 ui,
                 "Retained runs",
-                &app.state.simulation.runs.len().to_string(),
+                &app.state.simulation.retained.runs.len().to_string(),
             );
             property_row(
                 ui,
                 "Baseline",
-                if app.state.simulation.runs.len() >= 2 {
+                if app.state.simulation.retained.runs.len() >= 2 {
                     "selectable immutable run"
                 } else {
                     "unavailable"
@@ -2107,7 +2115,7 @@ fn verified_analysis(
 fn yield_details(ui: &mut Ui, app: &RSpiceApp) {
     let run = app.state.simulation.active_run();
     let evidence = app.state.simulation.yield_results_for_active_dataset();
-    let provenance = evidence.and(app.state.simulation.yield_provenance());
+    let provenance = evidence.and(app.state.simulation.retained.yield_provenance());
     let results = evidence.unwrap_or_default();
 
     let status = if provenance.is_some() {
@@ -2783,7 +2791,7 @@ fn generated_provenance(ui: &mut Ui, state: &AppState) {
 fn owned_source_provenance(ui: &mut Ui, state: &AppState) {
     let project = &state.workspace.content;
     design_section_header(ui, "Owned source provenance", None);
-    let source = &state.simulation.netlist_content;
+    let source = &state.simulation.source.netlist_content;
     let source_digest = crate::state::content_digest(source);
     property_row(
         ui,

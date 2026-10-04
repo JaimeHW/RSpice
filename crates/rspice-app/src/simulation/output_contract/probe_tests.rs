@@ -172,7 +172,7 @@ fn hb_device_current_saved_terminal_probes_preserve_hierarchy_phase_and_receipts
     let loaded: crate::io::project_io::ProjectSimulationResults =
         serde_json::from_str(&serde_json::to_string(&stored).unwrap()).unwrap();
     let mut state = crate::io::simulation_state_from_results(loaded).unwrap();
-    let run = &mut state.runs[0];
+    let run = &mut state.retained.runs[0];
     materialize_deferred_saved_output(&mut run.analyses[0], 3).unwrap();
     let gate = materialized(run, "Gate", 1)[0];
     let drain = materialized(run, "Drain", 1)[0];
@@ -550,14 +550,14 @@ fn ground_and_spaced_probes_evaluate_after_project_reload() {
         let run = execute(spec, &[output]);
         run.validate_provenance().unwrap();
         let mut state = crate::state::SimulationState::default();
-        state.next_run_id = run.id;
-        state.runs = vec![run].into();
+        state.retained.next_run_id = run.id;
+        state.retained.runs = vec![run].into();
         let snapshot = crate::io::capture_simulation_results(&state);
         snapshot.validate().unwrap();
         let restored: crate::io::project_io::ProjectSimulationResults =
             serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
         crate::io::restore_simulation_results(restored, &mut state).unwrap();
-        let mut analysis = state.runs[0].analyses[0].clone();
+        let mut analysis = state.retained.runs[0].analyses[0].clone();
         materialize_deferred_saved_output(&mut analysis, 0).unwrap();
         analysis.validate_retained_evidence().unwrap();
         let names = analysis.saved_output_receipts[0]

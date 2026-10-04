@@ -56,8 +56,8 @@ fn event_order(state: &mut AppState) -> Option<Arc<EventOrder>> {
     let analysis = state.simulation.active_analysis()?;
     let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
     let source = (
-        state.simulation.runs.revision(),
-        state.simulation.data_version,
+        state.simulation.retained.runs.revision(),
+        state.simulation.view.data_version,
     );
     let expanded = &state.ui.results.session.expanded_event_buses;
     if let Some(cache) = &state.ui.results.event_order_cache
@@ -229,6 +229,7 @@ fn event_selection_block(
     let Some((analysis_index, _)) = selection.analysis.resolve(run) else {
         if state
             .simulation
+            .retained
             .runs
             .iter()
             .any(|run| selection.analysis.resolve(run).is_some())
@@ -237,7 +238,7 @@ fn event_selection_block(
         }
         return block(SelectionAbsence::UnretainedAnalysis, true);
     };
-    if state.simulation.active_analysis_idx != Some(analysis_index) {
+    if state.simulation.view.active_analysis_idx != Some(analysis_index) {
         return block(SelectionAbsence::OtherAnalysis, false);
     }
     let Some(order) = event_order(state) else {
@@ -375,7 +376,7 @@ mod tests {
             })
         );
 
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         assert!(state.simulation.select_analysis(0));
 
@@ -464,7 +465,7 @@ mod availability_tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
         let mut state = AppState::default();
-        state.simulation.runs = vec![run].into();
+        state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
         assert!(
             !active_analysis_is_renderable(&state),

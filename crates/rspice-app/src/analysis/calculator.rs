@@ -80,7 +80,7 @@ impl<'a> SimulationContext<'a> {
     /// - Wrapped match: "out" matches "V(out)" or "I(out)"
     /// - Case-insensitive matching
     fn find_waveform(&self, signal: &str) -> Option<&RetainedWaveform> {
-        find_waveform(&self.simulation.waveforms, signal)
+        find_waveform(&self.simulation.view.waveforms, signal)
     }
 }
 
@@ -107,7 +107,7 @@ impl<'a> EvaluationContext for SimulationContext<'a> {
         match signal.to_uppercase().as_str() {
             "TIME" | "T" => {
                 // Look for any transient waveform and return its X axis as time
-                if let Some(wf) = self.simulation.waveforms.first() {
+                if let Some(wf) = self.simulation.view.waveforms.first() {
                     let x: Vec<f64> = wf.x.to_vec();
                     let y = x.clone(); // TIME returns x as both x and y
                     return Ok(CalcValue::create_waveform(x, y));
@@ -118,7 +118,7 @@ impl<'a> EvaluationContext for SimulationContext<'a> {
             }
             "FREQ" | "FREQUENCY" => {
                 // Look for AC waveform and return its X axis as frequency
-                if let Some(wf) = self.simulation.waveforms.first() {
+                if let Some(wf) = self.simulation.view.waveforms.first() {
                     let x: Vec<f64> = wf.x.to_vec();
                     let y = x.clone();
                     return Ok(CalcValue::create_waveform(x, y));
@@ -130,9 +130,10 @@ impl<'a> EvaluationContext for SimulationContext<'a> {
             _ => {}
         }
 
-        if let Some(value) =
-            canonical_ground_value(signal, self.simulation.waveforms.first().map(AsRef::as_ref))
-        {
+        if let Some(value) = canonical_ground_value(
+            signal,
+            self.simulation.view.waveforms.first().map(AsRef::as_ref),
+        ) {
             return value;
         }
 
@@ -155,11 +156,14 @@ mod tests {
     #[test]
     fn complex_missing_phase_allows_only_explicit_magnitude_projections() {
         let simulation = SimulationState {
-            waveforms: vec![waveform("|V(out)|", 2.0)],
+            view: crate::state::SimulationViewState {
+                waveforms: vec![waveform("|V(out)|", 2.0)],
+                ..Default::default()
+            },
             ..Default::default()
         };
         let live = SimulationContext::new(&simulation);
-        let retained = WaveformsContext::new(&simulation.waveforms);
+        let retained = WaveformsContext::new(&simulation.view.waveforms);
         for context in [&live as &dyn EvaluationContext, &retained] {
             assert!(matches!(
                 context.get_waveform("V(out)", None),
@@ -231,7 +235,10 @@ mod tests {
     #[test]
     fn live_context_resolves_case_insensitive_wrappers_from_bare_names() {
         let simulation = SimulationState {
-            waveforms: vec![waveform("v(OUT)", 1.25), waveform("i(VdD)", 2.5)],
+            view: crate::state::SimulationViewState {
+                waveforms: vec![waveform("v(OUT)", 1.25), waveform("i(VdD)", 2.5)],
+                ..Default::default()
+            },
             ..SimulationState::default()
         };
         let context = SimulationContext::new(&simulation);
@@ -253,11 +260,14 @@ mod tests {
     #[test]
     fn both_contexts_resolve_only_canonical_voltage_ground_on_their_own_axis() {
         let simulation = SimulationState {
-            waveforms: vec![waveform("V(00)", 2.0), waveform("I(0)", 3.0)],
+            view: crate::state::SimulationViewState {
+                waveforms: vec![waveform("V(00)", 2.0), waveform("I(0)", 3.0)],
+                ..Default::default()
+            },
             ..SimulationState::default()
         };
         let live = SimulationContext::new(&simulation);
-        let retained = WaveformsContext::new(&simulation.waveforms);
+        let retained = WaveformsContext::new(&simulation.view.waveforms);
         for context in [&live as &dyn EvaluationContext, &retained] {
             assert_eq!(context.get_waveform("V(0)", None).unwrap(), expected(0.0));
             assert_eq!(context.get_waveform("V(00)", None).unwrap(), expected(2.0));
@@ -275,18 +285,21 @@ mod tests {
     #[test]
     fn live_and_retained_calculators_bind_scopes_without_crossing_quantity_namespaces() {
         let simulation = SimulationState {
-            waveforms: vec![
-                waveform("V(X1.out)", 2.0),
-                waveform("I(X1.out)", 3.0),
-                waveform("V(X1:out)", 4.0),
-                waveform("V(out)", 5.0),
-                waveform("X2.out", 6.0),
-                waveform("I(X2.out)", 7.0),
-            ],
+            view: crate::state::SimulationViewState {
+                waveforms: vec![
+                    waveform("V(X1.out)", 2.0),
+                    waveform("I(X1.out)", 3.0),
+                    waveform("V(X1:out)", 4.0),
+                    waveform("V(out)", 5.0),
+                    waveform("X2.out", 6.0),
+                    waveform("I(X2.out)", 7.0),
+                ],
+                ..Default::default()
+            },
             ..SimulationState::default()
         };
         let live = SimulationContext::new(&simulation);
-        let retained = WaveformsContext::new(&simulation.waveforms);
+        let retained = WaveformsContext::new(&simulation.view.waveforms);
         for context in [&live as &dyn EvaluationContext, &retained] {
             for (signal, value) in [
                 ("V(/X1/out)", 2.0),
@@ -318,7 +331,10 @@ fn complex_physical_difference_uses_retained_phase_in_both_contexts() {
             .with_complex_components("V(b)", vec![-1.0; 2], vec![0.0; 2]),
     ];
     let simulation = SimulationState {
-        waveforms: waves,
+        view: crate::state::SimulationViewState {
+            waveforms: waves,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let expression = parser::try_parse("abs(V(a)-V(b))").unwrap();
@@ -328,7 +344,11 @@ fn complex_physical_difference_uses_retained_phase_in_both_contexts() {
         expected
     );
     assert_eq!(
-        evaluator::evaluate(&expression, &WaveformsContext::new(&simulation.waveforms)).unwrap(),
+        evaluator::evaluate(
+            &expression,
+            &WaveformsContext::new(&simulation.view.waveforms)
+        )
+        .unwrap(),
         expected
     );
 }

@@ -147,7 +147,10 @@ pub type RunHistory = rspice_results::run_history::RunHistory<SimulationRun>;
 pub(crate) use rspice_results::run_history::RunHistoryRevision;
 pub use rspice_results_ui::waveform::{DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, WaveformData};
 pub use rspice_simulation::execution::SimulationRunIntent;
-pub use state_model::SimulationState;
+pub use state_model::{
+    RetainedSimulationState, SimulationExecutionState, SimulationSourceState, SimulationState,
+    SimulationViewState,
+};
 
 pub use rspice_results::monte_carlo_checkpoint::{
     MonteCarloCheckpointEvidence, MonteCarloCheckpointLibrary,

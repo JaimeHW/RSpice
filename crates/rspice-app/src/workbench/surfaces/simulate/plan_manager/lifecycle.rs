@@ -476,7 +476,11 @@ mod tests {
             .content
             .migrate_inactive_plan_data(active);
         app.state.sim_setup = setup;
-        app.state.simulation.runs.push(run_referencing(retained));
+        app.state
+            .simulation
+            .retained
+            .runs
+            .push(run_referencing(retained));
         (app, active, retained)
     }
 
@@ -515,7 +519,7 @@ mod tests {
             "a result stopped resolving to the renamed plan"
         );
         assert_eq!(
-            app.state.simulation.runs[0]
+            app.state.simulation.retained.runs[0]
                 .prepared_receipt()
                 .and_then(PreparedRunReceipt::simulation_plan_id),
             Some(retained),

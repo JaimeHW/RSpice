@@ -105,7 +105,7 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
         let source = dependency.source()?;
         let owned = active_dependency_is_owned(state);
         let root = state.ui.netlist.active_dependency_root?;
-        if root != active || state.simulation.netlist_content != source {
+        if root != active || state.simulation.source.netlist_content != source {
             return None;
         }
         let root_document = match root {
@@ -160,7 +160,7 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
             ActiveNetlistDocument::Generated => {
                 let document = state.ui.netlist.generated_document.as_ref()?;
                 if state.ui.netlist.generated_source != document.source()
-                    || state.simulation.netlist_content != document.source()
+                    || state.simulation.source.netlist_content != document.source()
                 {
                     return None;
                 }
@@ -179,7 +179,7 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
                 let descriptor = state.workspace.content.netlist_descriptor.as_ref()?;
                 let canonical = state.workspace.content.netlist_document.as_ref()?;
                 if state.workspace.content.netlist_source.as_deref() != Some(document.source())
-                    || state.simulation.netlist_content != document.source()
+                    || state.simulation.source.netlist_content != document.source()
                     || canonical.id() != document.id()
                     || canonical.revision() != document.revision()
                     || canonical.source() != document.source()
@@ -201,7 +201,8 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
                 if state.ui.netlist.generated_diff_source.is_empty() {
                     return None;
                 }
-                if state.simulation.netlist_content != state.ui.netlist.generated_diff_source {
+                if state.simulation.source.netlist_content != state.ui.netlist.generated_diff_source
+                {
                     return None;
                 }
                 (
@@ -222,11 +223,12 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
                 let run_id =
                     crate::workbench::documents::netlist_document::run_deck_snapshot_run_id(state)?;
                 let snapshot = state.ui.netlist.last_run_buffer.as_deref()?;
-                if state.simulation.netlist_content != snapshot {
+                if state.simulation.source.netlist_content != snapshot {
                     return None;
                 }
                 let revision = state
                     .simulation
+                    .retained
                     .run_by_sequence(run_id)?
                     .prepared_receipt()?
                     .project_revision()

@@ -136,7 +136,7 @@ pub(super) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
             Some(crate::state::SimulationRunLifecycle::Preparing)
         ) {
             "Preparing"
-        } else if app.state.simulation.has_active_execution() {
+        } else if app.state.simulation.execution.has_active_execution() {
             "Running"
         } else {
             "Ready"

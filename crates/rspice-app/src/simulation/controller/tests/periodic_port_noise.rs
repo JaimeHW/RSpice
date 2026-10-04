@@ -165,8 +165,8 @@ fn periodic_port_noise_project_round_trip_preserves_covariance_and_temperature_u
             .unwrap();
         let original_digest = retained.result_data_digest();
         let mut state = SimulationState::default();
-        state.next_run_id = run.id;
-        state.runs = vec![run].into();
+        state.retained.next_run_id = run.id;
+        state.retained.runs = vec![run].into();
         let snapshot = crate::io::capture_simulation_results(&state);
         snapshot.validate().unwrap();
         let json = serde_json::to_string(&snapshot).unwrap();
@@ -174,7 +174,7 @@ fn periodic_port_noise_project_round_trip_preserves_covariance_and_temperature_u
             serde_json::from_str::<ProjectSimulationResults>(&json).unwrap(),
         )
         .unwrap();
-        let run = &restored.runs[0];
+        let run = &restored.retained.runs[0];
         run.validate_provenance().unwrap();
         let result = run
             .analyses

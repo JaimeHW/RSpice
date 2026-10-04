@@ -17,8 +17,8 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
     let session = &mut results.session;
     results.models.get_or_build(
         ModelCacheInput {
-            active_run_idx: simulation.active_run_idx,
-            overlay_dataset_ids: &simulation.overlay_dataset_ids,
+            active_run_idx: simulation.view.active_run_idx,
+            overlay_dataset_ids: &simulation.view.overlay_dataset_ids,
             viewer: session.viewer,
             projection: ProjectionOptions {
                 phase_continuous: session.phase_continuous,
@@ -28,7 +28,7 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
             },
             waveform_visibility: &session.waveform_visibility,
         },
-        &simulation.executed_decks,
+        &simulation.retained.executed_decks,
         t,
         &mut results.plans.envelopes,
         |projection, visibility| {

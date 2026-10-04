@@ -789,9 +789,9 @@ fn state_with_reported_device_op(device: &str) -> AppState {
     });
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
-    state.simulation.runs.insert(0, run);
-    state.simulation.active_run_idx = Some(0);
-    state.simulation.active_analysis_idx = Some(0);
+    state.simulation.retained.runs.insert(0, run);
+    state.simulation.view.active_run_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
     state
 }
 
@@ -856,11 +856,12 @@ fn operating_point_hop_selects_the_operating_point_analysis() {
     let transient = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
     state
         .simulation
+        .retained
         .runs
         .first_mut()
         .expect("the fixture run is retained")
         .add_analysis(transient);
-    state.simulation.active_analysis_idx = Some(1);
+    state.simulation.view.active_analysis_idx = Some(1);
     assert_eq!(
         state
             .simulation

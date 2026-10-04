@@ -121,7 +121,7 @@ pub(crate) fn create_new_project_with(
     state: &mut AppState,
     params: &NewProjectParams,
 ) -> Result<(), String> {
-    if state.simulation.has_active_execution() {
+    if state.simulation.execution.has_active_execution() {
         lifecycle_error(
             state,
             ProjectLifecycleError::ActiveRun,
@@ -929,7 +929,7 @@ pub(crate) fn request_close_project(state: &mut AppState) -> bool {
     state
         .workbench
         .begin_project_close(ProjectCloseDestination::EmptyWorkbench);
-    let nothing_to_protect = !state.simulation.has_active_execution()
+    let nothing_to_protect = !state.simulation.execution.has_active_execution()
         && !state.workbench.model_editor_has_unsaved_changes()
         && crate::workbench::lifecycle::project_lifecycle::dirty_documents(state).is_empty();
     if nothing_to_protect {
@@ -940,7 +940,7 @@ pub(crate) fn request_close_project(state: &mut AppState) -> bool {
 }
 
 pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
-    if state.simulation.has_active_execution() {
+    if state.simulation.execution.has_active_execution() {
         lifecycle_error(
             state,
             ProjectLifecycleError::ActiveRun,

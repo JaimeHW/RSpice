@@ -166,7 +166,7 @@ fn result_import_block_reason(state: &AppState) -> Option<String> {
     if state.workbench.safe_mode.project_read_only() {
         return Some("The project is read-only; result history cannot be changed.".to_owned());
     }
-    if state.simulation.has_active_execution() {
+    if state.simulation.execution.has_active_execution() {
         return Some(
             "Wait for the active simulation execution to finish before importing result data."
                 .to_owned(),
@@ -1293,7 +1293,7 @@ mod tests {
     fn touchstone_noise_import_commits_independent_axes_and_persists_units() {
         let mut state = loaded_project_state();
         apply_imported_result_dataset(&mut state, "noise.ts", b"[Version] 2.0\n# MHz S RI R 75\n[Number of Ports] 2\n[Two-Port Data Order] 21_12\n[Number of Frequencies] 2\n[Number of Noise Frequencies] 1\n[Reference] 25 100\n[Network Data]\n1 0 0 1 0 0 0 0 0\n3 0 0 1 0 0 0 0 0\n[Noise Data]\n2 3 0 0 15\n[End]\n").unwrap();
-        let analysis = &state.simulation.runs.last().unwrap().analyses[0];
+        let analysis = &state.simulation.retained.runs.last().unwrap().analyses[0];
         analysis.validate_retained_evidence().unwrap();
         assert_eq!(analysis.waveforms.len(), 7);
         let rn = analysis
@@ -1436,7 +1436,7 @@ mod tests {
     #[test]
     fn exhausted_run_sequence_retains_the_import_draft_and_existing_dataset() {
         let mut state = loaded_project_state();
-        state.simulation.next_run_id = u64::MAX - 1;
+        state.simulation.retained.next_run_id = u64::MAX - 1;
         apply_imported_result_dataset(&mut state, "last.csv", b"time [s],V(out) [V]\n0,0\n1,1\n")
             .expect("the last sequence can be imported");
         assert_eq!(state.simulation.active_run().unwrap().id, u64::MAX);
@@ -1557,7 +1557,7 @@ mod tests {
     #[test]
     fn staging_and_discarding_import_never_mutates_retained_history() {
         let mut state = loaded_project_state();
-        let initial_run_count = state.simulation.runs.len();
+        let initial_run_count = state.simulation.retained.runs.len();
         let initial_workspace = state.workbench.workspace;
 
         stage_imported_result_dataset(
@@ -1572,7 +1572,7 @@ mod tests {
             state.workbench.result_import.stage,
             ResultImportStage::Detect
         );
-        assert_eq!(state.simulation.runs.len(), initial_run_count);
+        assert_eq!(state.simulation.retained.runs.len(), initial_run_count);
         assert_eq!(state.workbench.workspace, initial_workspace);
         assert!(
             !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state),
@@ -1581,7 +1581,7 @@ mod tests {
 
         discard_result_import_draft(&mut state);
         assert!(!state.workbench.result_import.open);
-        assert_eq!(state.simulation.runs.len(), initial_run_count);
+        assert_eq!(state.simulation.retained.runs.len(), initial_run_count);
         assert_eq!(state.workbench.workspace, initial_workspace);
         assert!(!crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state));
     }
@@ -1600,7 +1600,7 @@ mod tests {
         let error = commit_result_import_draft(&mut state).expect_err("empty mapping rejected");
         assert!(error.contains("at least one signal"), "{error}");
         assert!(state.workbench.result_import.open);
-        assert!(state.simulation.runs.is_empty());
+        assert!(state.simulation.retained.runs.is_empty());
         assert!(!crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state));
     }
 
@@ -1636,6 +1636,6 @@ mod tests {
 
         let error = commit_result_import_draft(&mut state).expect_err("invalid frequency rejected");
         assert!(error.contains("greater than zero"), "{error}");
-        assert!(state.simulation.runs.is_empty());
+        assert!(state.simulation.retained.runs.is_empty());
     }
 }

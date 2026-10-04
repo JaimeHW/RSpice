@@ -130,7 +130,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     // Take the buffer out so the layouter and the post-edit bookkeeping
     // don't fight over `state`.
-    let mut buffer = std::mem::take(&mut state.simulation.netlist_content);
+    let mut buffer = std::mem::take(&mut state.simulation.source.netlist_content);
     let requested_line = state
         .ui
         .netlist
@@ -289,7 +289,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     if !source_changed {
         // The buffer was taken at the beginning of the frame; restore it on
         // unchanged and generated-document frames.
-        state.simulation.netlist_content = buffer;
+        state.simulation.source.netlist_content = buffer;
     }
     if source_changed && state.ui.netlist.active_dependency_identity.is_none() {
         super::refresh_diff_pips_from_baseline(state);
@@ -524,7 +524,7 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
         return;
     }
 
-    let buffer = state.simulation.netlist_content.clone();
+    let buffer = state.simulation.source.netlist_content.clone();
     let materialized = if state.ui.netlist.active_dependency_identity.is_some() {
         Ok(buffer.clone())
     } else if state.ui.netlist.active_document == super::ActiveNetlistDocument::OwnedSource {
@@ -1089,7 +1089,7 @@ M1 d g s b nch W={w} L={l*2}\n\
     ) {
         let mut state = AppState::default();
         state.workspace.content.netlist_source = Some(HOVER_DECK.to_owned());
-        state.simulation.netlist_content = HOVER_DECK.to_owned();
+        state.simulation.source.netlist_content = HOVER_DECK.to_owned();
         state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
         state.ui.netlist.active_document_initialized = true;
 
@@ -1224,7 +1224,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         let mut state = AppState::default();
         let source = "test deck\n.tr";
         state.workspace.content.netlist_source = Some(source.to_owned());
-        state.simulation.netlist_content = source.to_owned();
+        state.simulation.source.netlist_content = source.to_owned();
         state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
         state.ui.netlist.active_document_initialized = true;
         assert!(
@@ -1977,7 +1977,7 @@ M1 d g s b nch W={w} L={l*2}\n\
     #[test]
     fn editor_commit_rejects_generated_artifact_mutation() {
         let mut state = AppState::default();
-        state.simulation.netlist_content = "generated\n.op\n.end\n".to_owned();
+        state.simulation.source.netlist_content = "generated\n.op\n.end\n".to_owned();
         state.ui.netlist.revision = 4;
 
         assert!(!commit_owned_source_edit(
@@ -1987,7 +1987,10 @@ M1 d g s b nch W={w} L={l*2}\n\
             2.5,
         ));
         assert!(state.workspace.content.netlist_source.is_none());
-        assert_eq!(state.simulation.netlist_content, "generated\n.op\n.end\n");
+        assert_eq!(
+            state.simulation.source.netlist_content,
+            "generated\n.op\n.end\n"
+        );
         assert!(!state.workspace.content.netlist_source_dirty);
         assert_eq!(state.ui.netlist.revision, 4);
         assert!(state.ui.netlist.edited_lines.is_empty());
@@ -2000,7 +2003,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
         state.workspace.content.netlist_source_path =
             Some(std::path::PathBuf::from("imported/owned.cir"));
-        state.simulation.netlist_content = "owned\n.op\n.end\n".to_owned();
+        state.simulation.source.netlist_content = "owned\n.op\n.end\n".to_owned();
         state.ui.netlist.revision = 9;
 
         assert!(commit_owned_source_edit(
@@ -2014,7 +2017,7 @@ M1 d g s b nch W={w} L={l*2}\n\
             Some("owned\n.tran 1n 1u\n.end\n")
         );
         assert_eq!(
-            state.simulation.netlist_content,
+            state.simulation.source.netlist_content,
             "owned\n.tran 1n 1u\n.end\n"
         );
         assert_eq!(

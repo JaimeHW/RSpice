@@ -27,6 +27,7 @@ fn monte_carlo_checkpoint_file_actions_preserve_owner_and_project_storage() {
     assert!(
         app.state
             .simulation
+            .retained
             .imported_monte_carlo_checkpoints
             .is_empty(),
         "stale picker cannot import into a replacement design"
@@ -74,6 +75,7 @@ fn monte_carlo_checkpoint_file_actions_preserve_owner_and_project_storage() {
     assert_eq!(
         restored
             .simulation
+            .retained
             .imported_monte_carlo_checkpoints
             .get(checkpoint.digest()),
         Some(&checkpoint)

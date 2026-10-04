@@ -67,6 +67,7 @@ fn selected_phase_noise_analysis_index(state: &AppState) -> Option<usize> {
     };
     state
         .simulation
+        .view
         .active_analysis_idx
         .filter(|&index| run.analyses.get(index).is_some_and(&renderable))
         .or_else(|| run.analyses.iter().position(renderable))
@@ -108,7 +109,7 @@ fn active_periodic_noise_without_phase_trace(state: &AppState) -> bool {
     let Some(run) = state.simulation.active_run() else {
         return false;
     };
-    let Some(index) = state.simulation.active_analysis_idx else {
+    let Some(index) = state.simulation.view.active_analysis_idx else {
         return false;
     };
     let Some(analysis) = run.analyses.get(index) else {

@@ -179,15 +179,15 @@ fn population_cache_refreshes_restored_same_identity_content() {
     let workspace = workspace_with_limit(Some(1.0), None);
     let mut results = super::super::ResultsState::default();
     let original = cached_population(&simulation, &workspace, &mut results).unwrap();
-    let version = simulation.data_version;
+    let version = simulation.view.data_version;
     let mut replacement = simulation.clone();
-    replacement.runs[0].analyses[0] =
+    replacement.retained.runs[0].analyses[0] =
         monte_carlo(vec![trial(0, 10.0), trial(1, 20.0)], vec![10.0, 20.0]);
     simulation = crate::io::simulation_state_from_results(crate::io::capture_simulation_results(
         &replacement,
     ))
     .unwrap();
-    assert_eq!(simulation.data_version, version);
+    assert_eq!(simulation.view.data_version, version);
     let restored = cached_population(&simulation, &workspace, &mut results).unwrap();
     assert_eq!(restored.analysis, original.analysis);
     assert_eq!(restored.trial_count(), 2);
@@ -209,10 +209,12 @@ fn population_cache_rejects_corrupted_evidence_and_accepts_repair_without_a_fram
     let workspace = workspace_with_limit(Some(1.0), None);
     let mut results = super::super::ResultsState::default();
     let original = cached_population(&simulation, &workspace, &mut results).unwrap();
-    let version = simulation.data_version;
-    let retained = simulation.runs[0].analyses[0].clone();
+    let version = simulation.view.data_version;
+    let retained = simulation.retained.runs[0].analyses[0].clone();
     if let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
-        simulation.runs[0].analyses[0].family_metadata.as_mut()
+        simulation.retained.runs[0].analyses[0]
+            .family_metadata
+            .as_mut()
     {
         variables[0].samples[0] = f64::NAN;
     } else {
@@ -220,10 +222,10 @@ fn population_cache_rejects_corrupted_evidence_and_accepts_repair_without_a_fram
     }
     assert!(cached_population(&simulation, &workspace, &mut results).is_none());
 
-    simulation.runs[0].analyses[0] = retained;
+    simulation.retained.runs[0].analyses[0] = retained;
     let repaired = cached_population(&simulation, &workspace, &mut results).unwrap();
     assert_eq!(repaired.status, original.status);
-    assert_eq!(simulation.data_version, version);
+    assert_eq!(simulation.view.data_version, version);
 }
 
 #[test]
@@ -248,7 +250,7 @@ fn population_cache_reuses_unchanged_clones_and_isolates_nested_edits() {
         if let Some(AnalysisResultFamilyMetadata::MonteCarlo {
             member_measurements,
             ..
-        }) = cloned_simulation.runs[0].analyses[0]
+        }) = cloned_simulation.retained.runs[0].analyses[0]
             .family_metadata
             .as_mut()
         {
@@ -347,7 +349,7 @@ fn prepared_population_contract(
     let mut run = SimulationRun::new_prepared(1, receipt);
     run.add_analysis(analysis);
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run].into();
+    simulation.retained.runs = vec![run].into();
     assert!(simulation.select_run(0));
     assert!(simulation.select_analysis(0));
     (simulation, workspace)
@@ -372,7 +374,7 @@ fn population_contract_nominal_requires_the_retained_point_attribution() {
         let (mut simulation, workspace) = prepared_population(&[0.0, 1.0, 2.0], |spec| {
             spec.scope = SpecPointScope::Nominal
         });
-        let analysis = &mut simulation.runs[0].analyses[0];
+        let analysis = &mut simulation.retained.runs[0].analyses[0];
         let provenance = analysis
             .provenance()
             .unwrap()
@@ -427,12 +429,14 @@ fn population_contract_uses_the_frozen_requirement_and_ignores_later_drafts() {
         &plan,
         &cached_population(&simulation, &workspace, &mut results).unwrap()
     ));
-    simulation.runs[0].mark_running().unwrap();
-    simulation.runs[0]
+    simulation.retained.runs[0].mark_running().unwrap();
+    simulation.retained.runs[0]
         .finish_lifecycle(crate::state::SimulationRunLifecycle::Completed)
         .unwrap();
     simulation.complete_run();
-    let sealed = simulation.runs[0].specification_verdicts().unwrap();
+    let sealed = simulation.retained.runs[0]
+        .specification_verdicts()
+        .unwrap();
     assert_eq!(sealed[0].passing_evidence_count(), 1);
     simulation = crate::io::simulation_state_from_results(crate::io::capture_simulation_results(
         &simulation,
@@ -555,7 +559,9 @@ fn population_contract_keeps_missing_measurements_in_the_trial_verdict() {
     if let Some(AnalysisResultFamilyMetadata::MonteCarlo {
         member_measurements,
         ..
-    }) = simulation.runs[0].analyses[0].family_metadata.as_mut()
+    }) = simulation.retained.runs[0].analyses[0]
+        .family_metadata
+        .as_mut()
     {
         member_measurements[0].measurements[0].passed = false;
     }

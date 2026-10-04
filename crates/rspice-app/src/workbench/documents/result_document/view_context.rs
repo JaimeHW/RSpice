@@ -51,10 +51,15 @@ impl ResolvedResultView {
     /// Resolve the retained run after state changes without trusting an old
     /// vector ordinal on its own.
     pub(crate) fn run<'a>(&self, state: &'a AppState) -> Option<&'a SimulationRun> {
-        state.simulation.runs.get(self.run_index).filter(|run| {
-            run.dataset_id == self.dataset_id
-                && super::retained_dataset_digest(state, run) == self.dataset_digest
-        })
+        state
+            .simulation
+            .retained
+            .runs
+            .get(self.run_index)
+            .filter(|run| {
+                run.dataset_id == self.dataset_id
+                    && super::retained_dataset_digest(state, run) == self.dataset_digest
+            })
     }
 
     pub(crate) fn primary_analysis<'a>(&self, state: &'a AppState) -> Option<&'a AnalysisResult> {
@@ -96,11 +101,12 @@ fn resolve_dataset_view(
 ) -> Result<ResolvedResultView, String> {
     let run_index = state
         .simulation
+        .retained
         .runs
         .iter()
         .position(|run| run.dataset_id == dataset_id)
         .ok_or_else(|| "The active result dataset is no longer retained.".to_owned())?;
-    let run = &state.simulation.runs[run_index];
+    let run = &state.simulation.retained.runs[run_index];
     let viewer = state.ui.results.session.viewer;
     let mut analysis_indices = run
         .analyses
@@ -158,8 +164,8 @@ fn selected_primary_index(
         .and_then(|key| key.resolve(run).map(|(index, _)| index))
         .filter(|index| candidates.contains(index))
         .or_else(|| {
-            (state.simulation.active_run_idx == Some(run_index))
-                .then_some(state.simulation.active_analysis_idx)
+            (state.simulation.view.active_run_idx == Some(run_index))
+                .then_some(state.simulation.view.active_analysis_idx)
                 .flatten()
                 .filter(|index| candidates.contains(index))
         })
@@ -206,11 +212,12 @@ fn resolve_visualization_pane(
         .ok_or_else(|| "The selected result pane has no immutable dataset binding.".to_owned())?;
     let run_index = state
         .simulation
+        .retained
         .runs
         .iter()
         .position(|run| run.dataset_id == binding.dataset.dataset_id)
         .ok_or_else(|| "The pane's immutable result dataset is no longer retained.".to_owned())?;
-    let run = &state.simulation.runs[run_index];
+    let run = &state.simulation.retained.runs[run_index];
     if super::retained_dataset_digest(state, run) != binding.dataset.content_digest {
         return Err("The retained dataset does not match the pane's immutable binding.".to_owned());
     }
@@ -461,9 +468,9 @@ mod tests {
         }
         let dataset_id = run.dataset_id;
         let mut state = AppState::default();
-        state.simulation.runs = vec![run].into();
-        state.simulation.active_run_idx = Some(0);
-        state.simulation.active_analysis_idx = Some(0);
+        state.simulation.retained.runs = vec![run].into();
+        state.simulation.view.active_run_idx = Some(0);
+        state.simulation.view.active_analysis_idx = Some(0);
         state
             .workbench
             .documents

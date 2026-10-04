@@ -51,6 +51,7 @@ impl SimulationController {
         let checkpoint = MonteCarloCheckpointEvidence::from_bytes(bytes)?;
         let run = state
             .simulation
+            .retained
             .run_by_sequence_mut(run_id)
             .ok_or("checkpoint target run no longer exists")?;
         if let Some(previous) =

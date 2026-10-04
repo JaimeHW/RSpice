@@ -24,7 +24,7 @@ fn cleared_run_sequence_is_dirty_and_survives_scoped_and_all_saves() {
         let solver_input = generated_netlist_input_digest(&state).unwrap();
         assert_eq!(state.simulation.start_run().id, 1);
         state.simulation.clear_runs();
-        assert!(state.simulation.runs.is_empty());
+        assert!(state.simulation.retained.runs.is_empty());
         assert!(active_document_is_dirty(&state));
         assert_eq!(dirty_document_count(&state), 1);
         assert_eq!(
@@ -45,7 +45,7 @@ fn cleared_run_sequence_is_dirty_and_survives_scoped_and_all_saves() {
         assert_eq!(saved.file.simulation_results.next_run_id, 1);
         let mut restored =
             crate::io::simulation_state_from_results(saved.file.simulation_results).unwrap();
-        assert!(restored.runs.is_empty());
+        assert!(restored.retained.runs.is_empty());
         assert_eq!(restored.start_run().id, 2);
         remove_project_artifacts(&path);
     }
@@ -69,7 +69,7 @@ pub(super) fn retained_results() -> (AppState, AnalysisPresentationKey) {
     run.finish_lifecycle(crate::state::SimulationRunLifecycle::Completed)
         .unwrap();
     let key = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
-    state.simulation.runs.push(run);
+    state.simulation.retained.runs.push(run);
     assert!(state.simulation.select_run(0));
     state
         .workbench

@@ -176,8 +176,8 @@ fn attach_run(
         .expect("prepared fixture seals explicitly");
 
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run].into();
-    simulation.next_run_id = RUN_ID + 1;
+    simulation.retained.runs = vec![run].into();
+    simulation.retained.next_run_id = RUN_ID + 1;
     project.file.simulation_results = crate::io::capture_simulation_results(&simulation);
 }
 
@@ -291,7 +291,7 @@ fn a_declared_corner_space_round_trips_with_its_base_analysis_tag() {
     // the runtime owner with real point solves.
     let mut simulation =
         crate::io::simulation_state_from_results(project.file.simulation_results.clone()).unwrap();
-    let family = &mut simulation.runs[0].analyses[2];
+    let family = &mut simulation.retained.runs[0].analyses[2];
     family.family_metadata = Some(AnalysisResultFamilyMetadata::Corner {
         x_values: vec![0.0, 1.0],
         x_label: "Corner Index".into(),
@@ -347,9 +347,9 @@ fn a_declared_corner_space_round_trips_with_its_base_analysis_tag() {
     assert!(loaded.file.simulation_results_warning.is_none());
     let restored =
         crate::io::simulation_state_from_results(loaded.file.simulation_results).unwrap();
-    restored.runs[0].validate_provenance().unwrap();
-    let before = &simulation.runs[0].analyses[2];
-    let after = &restored.runs[0].analyses[2];
+    restored.retained.runs[0].validate_provenance().unwrap();
+    let before = &simulation.retained.runs[0].analyses[2];
+    let after = &restored.retained.runs[0].analyses[2];
     after.validate_retained_evidence().unwrap();
     assert_eq!(after.result_data_digest(), before.result_data_digest());
     assert_eq!(after.family_metadata, before.family_metadata);

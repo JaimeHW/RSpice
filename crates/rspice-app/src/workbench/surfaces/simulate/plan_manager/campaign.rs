@@ -533,7 +533,9 @@ pub(super) fn commit_simulation_campaign(
     name: &str,
     member_ids: &[SimulationPlanId],
 ) -> Result<String, String> {
-    if app.state.simulation.has_active_execution() || app.state.simulation.trigger_simulation {
+    if app.state.simulation.execution.has_active_execution()
+        || app.state.simulation.execution.trigger_simulation
+    {
         return Err("A simulation is already running or waiting to start".to_owned());
     }
     app.state.sync_active_schematic_to_workspace();

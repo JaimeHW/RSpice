@@ -1317,7 +1317,7 @@ mod tests {
         let (mut app, key, ids) = governed_app_with_sheets(1);
         let topology = app.state.schematic.topology_version();
         let drc_version = app.state.dialogs.drc_checked_version;
-        let retained_runs = app.state.simulation.runs.len();
+        let retained_runs = app.state.simulation.retained.runs.len();
         open_drawing_sheet_setup(&mut app);
         app.state.dialogs.drawing_sheet_setup.draft.margin_top = "12".to_owned();
         let expected = app
@@ -1351,7 +1351,7 @@ mod tests {
         assert!(app.state.workspace.content.project_metadata_dirty);
         assert_eq!(app.state.schematic.topology_version(), topology);
         assert_eq!(app.state.dialogs.drc_checked_version, drc_version);
-        assert_eq!(app.state.simulation.runs.len(), retained_runs);
+        assert_eq!(app.state.simulation.retained.runs.len(), retained_runs);
         let receipt = app
             .state
             .workspace

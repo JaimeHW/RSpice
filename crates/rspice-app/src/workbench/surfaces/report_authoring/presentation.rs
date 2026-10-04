@@ -181,6 +181,7 @@ impl rspice_results_ui::report::dialogs::DialogHost for ReportHost<'_> {
         self.0
             .state
             .simulation
+            .retained
             .runs
             .iter()
             .filter(|run| !run.analyses.is_empty())

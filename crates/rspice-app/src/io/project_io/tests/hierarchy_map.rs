@@ -72,8 +72,8 @@ fn sealed_results(hierarchy_map: Vec<HierarchyMapRow>) -> ProjectSimulationResul
         .expect("the fixture run seals explicitly");
 
     let mut simulation = SimulationState::default();
-    simulation.runs = vec![run].into();
-    simulation.next_run_id = 41;
+    simulation.retained.runs = vec![run].into();
+    simulation.retained.next_run_id = 41;
     crate::io::capture_simulation_results(&simulation)
 }
 

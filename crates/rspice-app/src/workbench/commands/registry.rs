@@ -1128,7 +1128,7 @@ impl Command {
                 "the active simulation plan has no stable analysis identity to add to"
             }
             Self::OpenNetlist | Self::ImportNetlist
-                if app.state.simulation.has_active_execution() =>
+                if app.state.simulation.execution.has_active_execution() =>
             {
                 "an active simulation execution still owns the project"
             }
@@ -1136,7 +1136,7 @@ impl Command {
                 "the project is open read-only"
             }
             Self::StopSimulation
-                if app.state.simulation.has_active_execution()
+                if app.state.simulation.execution.has_active_execution()
                     && !crate::simulation::execution::execution_target_supports_cancellation() =>
             {
                 "cancellation is unavailable for the current execution target"
@@ -1144,20 +1144,20 @@ impl Command {
             Self::StopSimulation if app.state.simulation.cancellation_is_pending() => {
                 "simulation cancellation is already in progress"
             }
-            Self::StopSimulation if app.state.simulation.has_active_execution() => {
+            Self::StopSimulation if app.state.simulation.execution.has_active_execution() => {
                 "the active simulation execution cannot accept cancellation"
             }
             Self::StopSimulation => "no simulation is running",
-            Self::ClearResults if app.state.simulation.has_active_execution() => {
+            Self::ClearResults if app.state.simulation.execution.has_active_execution() => {
                 "an active simulation execution still owns result history"
             }
-            Self::ImportResultDataset if app.state.simulation.has_active_execution() => {
+            Self::ImportResultDataset if app.state.simulation.execution.has_active_execution() => {
                 "an active simulation execution still owns result history"
             }
             Self::ImportResultDataset if app.state.workbench.safe_mode.project_read_only() => {
                 "the project is open read-only"
             }
-            Self::ExportWaveformsCsv if app.state.simulation.has_results() => {
+            Self::ExportWaveformsCsv if app.state.simulation.retained.has_results() => {
                 "open a result document in Results"
             }
             Self::ClearResults | Self::ExportWaveformsCsv => "no result dataset is available",

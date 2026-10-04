@@ -42,7 +42,10 @@ impl<K: Eq + Hash, V: Clone> RetainedMemo<K, V> {
         key: K,
         compute: impl FnOnce() -> V,
     ) -> V {
-        let source = (simulation.runs.revision(), simulation.data_version);
+        let source = (
+            simulation.retained.runs.revision(),
+            simulation.view.data_version,
+        );
         let mut entries = self.inner.borrow_mut();
         if entries.source.as_ref() != Some(&source) {
             entries.source = Some(source);

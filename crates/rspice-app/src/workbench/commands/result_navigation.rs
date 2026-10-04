@@ -21,7 +21,7 @@ use super::vocabulary::Command;
 pub(super) fn dataset_export_is_resolvable(state: &crate::workbench::AppState) -> bool {
     use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
-    state.simulation.has_results()
+    state.simulation.retained.has_results()
         && matches!(
             state.workbench.documents.active(Workspace::Results),
             Some(
@@ -38,7 +38,12 @@ pub(super) fn dataset_export_is_resolvable(state: &crate::workbench::AppState) -
 /// one. Returns false when there is none, so the caller states that rather
 /// than navigating to an empty document.
 pub(crate) fn open_newest_retained_run(app: &mut RSpiceApp) -> bool {
-    let Some(index) = app.state.simulation.newest_retained_result_run_index() else {
+    let Some(index) = app
+        .state
+        .simulation
+        .retained
+        .newest_retained_result_run_index()
+    else {
         return false;
     };
     if !app.state.simulation.select_run(index) {
@@ -99,7 +104,14 @@ pub(crate) fn task_deck_hop(app: &RSpiceApp) -> Result<u64, &'static str> {
         .simulation
         .active_run()
         .ok_or("no run is selected")?;
-    if app.state.simulation.executed_decks.get(run.id).is_none() {
+    if app
+        .state
+        .simulation
+        .retained
+        .executed_decks
+        .get(run.id)
+        .is_none()
+    {
         return Err(crate::state::absent_deck_reason());
     }
     Ok(run.id)
@@ -140,7 +152,7 @@ pub(crate) fn producer_log_hop(app: &RSpiceApp) -> Result<(String, String), &'st
         1 => checked.iter().next().expect("one check-marked quantity"),
         _ => return Err("check-mark exactly one Data Browser quantity"),
     };
-    let runs = &app.state.simulation.runs;
+    let runs = &app.state.simulation.retained.runs;
     let (Ok(path), Ok(quantity)) = (
         crate::workbench::documents::result_document::result_browser_selection_stable_path(
             key, runs,

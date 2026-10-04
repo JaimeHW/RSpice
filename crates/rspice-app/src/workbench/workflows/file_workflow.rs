@@ -530,7 +530,7 @@ mod tests {
     fn browser_import_applies_schematic_clears_runs_and_skips_recents() {
         let mut state = AppState::default();
         state.simulation.start_run();
-        assert!(state.simulation.has_results());
+        assert!(state.simulation.retained.has_results());
 
         let schematic = SchematicState::default();
 
@@ -542,7 +542,7 @@ mod tests {
 
         assert!(imported);
         assert!(state.schematic.session.current_file.is_none());
-        assert!(!state.simulation.has_results());
+        assert!(!state.simulation.retained.has_results());
         assert!(state.recent_files.is_empty());
         assert!(state.log_buffer.entries().any(|entry| {
             entry
@@ -605,12 +605,13 @@ mod tests {
 
     fn seed_stale_design_execution_context(state: &mut AppState) {
         state.workspace.content.netlist_source = Some("old manual deck\n.end\n".to_owned());
-        state.simulation.netlist_content = "old generated deck\n.end\n".to_owned();
+        state.simulation.source.netlist_content = "old generated deck\n.end\n".to_owned();
         state
             .simulation
+            .retained
             .runs
             .push(crate::state::SimulationRun::new(1));
-        state.simulation.active_run_idx = Some(0);
+        state.simulation.view.active_run_idx = Some(0);
         state.ui.netlist.last_run_buffer = Some("last manual run\n.end\n".to_owned());
         state.ui.netlist.pending_run_buffer = Some("pending manual run\n.end\n".to_owned());
         state.ui.netlist.pending_manual_run_id = Some(1);
@@ -621,8 +622,8 @@ mod tests {
 
     fn assert_design_execution_context_cleared(state: &AppState) {
         assert!(state.workspace.content.netlist_source.is_none());
-        assert!(state.simulation.netlist_content.is_empty());
-        assert!(!state.simulation.has_results());
+        assert!(state.simulation.source.netlist_content.is_empty());
+        assert!(!state.simulation.retained.has_results());
         assert!(state.ui.netlist.last_run_buffer.is_none());
         assert!(state.ui.netlist.pending_run_buffer.is_none());
         assert!(state.ui.netlist.pending_manual_run_id.is_none());

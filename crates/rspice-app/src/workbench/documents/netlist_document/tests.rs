@@ -70,7 +70,7 @@ fn owned_dependency_state() -> AppState {
     state.ui.netlist.owned_document = Some(owned);
     state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
     state.ui.netlist.active_document_initialized = true;
-    state.simulation.netlist_content = ROOT.to_owned();
+    state.simulation.source.netlist_content = ROOT.to_owned();
     state
         .workspace
         .content
@@ -129,14 +129,14 @@ fn reactivating_the_active_owned_root_preserves_validation_evidence() {
 
     assert_eq!(state.ui.netlist.revision, 9);
     assert_eq!(state.ui.netlist.validation, validation);
-    assert_eq!(state.simulation.netlist_content, ROOT);
+    assert_eq!(state.simulation.source.netlist_content, ROOT);
 }
 
 #[test]
 fn dependency_is_read_only_until_copy_then_edits_the_execution_closure() {
     let mut state = owned_dependency_state();
     open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
-    assert_eq!(state.simulation.netlist_content, ORIGINAL_INCLUDE);
+    assert_eq!(state.simulation.source.netlist_content, ORIGINAL_INCLUDE);
     assert!(!active_dependency_is_owned(&state));
     assert!(!replace_owned_dependency_source(
         &mut state,
@@ -205,7 +205,7 @@ fn canonical_diagnostic_navigation_opens_the_exact_include_and_line() {
     );
     assert_eq!(state.ui.netlist.cursor_line, 17);
     assert_eq!(state.ui.netlist.requested_line, Some(18));
-    assert_eq!(state.simulation.netlist_content, ORIGINAL_INCLUDE);
+    assert_eq!(state.simulation.source.netlist_content, ORIGINAL_INCLUDE);
 }
 
 #[test]
@@ -349,7 +349,7 @@ fn secondary_document_limit_refusal_leaves_the_active_document_unchanged() {
             },
         );
     }
-    let before_source = state.simulation.netlist_content.clone();
+    let before_source = state.simulation.source.netlist_content.clone();
     let before_document = state.ui.netlist.active_document;
 
     let error = open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap_err();
@@ -357,7 +357,7 @@ fn secondary_document_limit_refusal_leaves_the_active_document_unchanged() {
     assert_eq!(state.ui.netlist.active_document, before_document);
     assert!(state.ui.netlist.active_dependency_root.is_none());
     assert!(state.ui.netlist.active_dependency_identity.is_none());
-    assert_eq!(state.simulation.netlist_content, before_source);
+    assert_eq!(state.simulation.source.netlist_content, before_source);
 }
 
 #[test]
@@ -388,7 +388,7 @@ fn workspace_replacement_commits_root_and_owned_include_together() {
     assert_eq!(document.source(), edited_root);
     assert_eq!(document.dependencies()[0].source(), Some(EDITED_INCLUDE));
     assert_eq!(
-        state.simulation.netlist_content, EDITED_INCLUDE,
+        state.simulation.source.netlist_content, EDITED_INCLUDE,
         "the visible owned include follows the atomic commit"
     );
     let include = state
@@ -498,7 +498,7 @@ fn workspace_replacement_rejects_stale_include_without_partial_root_edit() {
         state.workspace.content.netlist_source.as_deref(),
         Some(ROOT)
     );
-    assert_eq!(state.simulation.netlist_content, EDITED_INCLUDE);
+    assert_eq!(state.simulation.source.netlist_content, EDITED_INCLUDE);
 }
 
 #[test]
@@ -553,7 +553,7 @@ fn ordinary_root_edit_replaces_include_edge_atomically_and_requires_relink() {
             .owned_includes
             .is_empty()
     );
-    assert_eq!(state.simulation.netlist_content, changed_include);
+    assert_eq!(state.simulation.source.netlist_content, changed_include);
 }
 
 #[test]
@@ -646,9 +646,9 @@ fn revision_restore_restores_include_bytes_and_ownership_as_one_snapshot() {
 #[test]
 fn dependency_transitions_fail_closed_for_stale_or_generated_ownership() {
     let mut state = owned_dependency_state();
-    let before = state.simulation.netlist_content.clone();
+    let before = state.simulation.source.netlist_content.clone();
     assert!(open_netlist_dependency(&mut state, "missing.inc").is_err());
-    assert_eq!(state.simulation.netlist_content, before);
+    assert_eq!(state.simulation.source.netlist_content, before);
     assert!(state.ui.netlist.active_dependency_identity.is_none());
 
     open_generated_primary(&mut state);
@@ -1054,7 +1054,7 @@ fn run_deck_snapshot_projects_the_sealed_deck_and_leaves_the_working_deck_alone(
 
     let mut state = owned_dependency_state();
     state.workspace.content.netlist_source = Some(EDITED.to_owned());
-    state.simulation.netlist_content = EDITED.to_owned();
+    state.simulation.source.netlist_content = EDITED.to_owned();
     state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
     state.ui.netlist.active_document_initialized = true;
     state.ui.netlist.last_run_buffer = Some(RAN.to_owned());
@@ -1065,7 +1065,7 @@ fn run_deck_snapshot_projects_the_sealed_deck_and_leaves_the_working_deck_alone(
         state.ui.netlist.active_document,
         ActiveNetlistDocument::RunSnapshot
     );
-    assert_eq!(state.simulation.netlist_content, RAN);
+    assert_eq!(state.simulation.source.netlist_content, RAN);
     assert!(!active_netlist_source_is_editable(&state));
     assert_eq!(
         state.workspace.content.netlist_source.as_deref(),
@@ -1078,7 +1078,7 @@ fn run_deck_snapshot_projects_the_sealed_deck_and_leaves_the_working_deck_alone(
         state.ui.netlist.active_document,
         ActiveNetlistDocument::OwnedSource
     );
-    assert_eq!(state.simulation.netlist_content, EDITED);
+    assert_eq!(state.simulation.source.netlist_content, EDITED);
 }
 
 #[test]
@@ -1088,7 +1088,7 @@ fn run_deck_snapshot_comparison_reports_the_edits_made_since_the_run() {
 
     let mut state = owned_dependency_state();
     state.workspace.content.netlist_source = Some(EDITED.to_owned());
-    state.simulation.netlist_content = EDITED.to_owned();
+    state.simulation.source.netlist_content = EDITED.to_owned();
     state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
     state.ui.netlist.active_document_initialized = true;
     state.ui.netlist.last_run_buffer = Some(RAN.to_owned());
@@ -1150,17 +1150,21 @@ fn an_executed_deck_opens_read_only_at_the_point_it_was_asked_for() {
             deck,
         }
     };
-    state.simulation.executed_decks.retain(ExecutedDeck {
-        run_id: 4,
-        points: vec![point("TT 27C", NOMINAL), point("TT 125C", HOT)],
-    });
+    state
+        .simulation
+        .retained
+        .executed_decks
+        .retain(ExecutedDeck {
+            run_id: 4,
+            points: vec![point("TT 27C", NOMINAL), point("TT 125C", HOT)],
+        });
 
     assert!(reveal_executed_deck(&mut state, 4, 1));
     assert_eq!(
         state.ui.netlist.active_document,
         ActiveNetlistDocument::RunSnapshot
     );
-    assert_eq!(state.simulation.netlist_content, HOT);
+    assert_eq!(state.simulation.source.netlist_content, HOT);
     assert!(
         !active_netlist_source_is_editable(&state),
         "an executed deck is a viewer, never a buffer"
@@ -1168,6 +1172,7 @@ fn an_executed_deck_opens_read_only_at_the_point_it_was_asked_for() {
     assert_eq!(
         state
             .simulation
+            .retained
             .executed_decks
             .get(4)
             .map(crate::state::ExecutedDeck::model_sources),
@@ -1182,7 +1187,7 @@ fn an_executed_deck_opens_read_only_at_the_point_it_was_asked_for() {
     // A point past the end resolves to one the run actually has rather than
     // to an empty document under a header naming the run.
     assert!(reveal_executed_deck(&mut state, 4, 40));
-    assert_eq!(state.simulation.netlist_content, HOT);
+    assert_eq!(state.simulation.source.netlist_content, HOT);
 
     assert!(
         !reveal_executed_deck(&mut state, 5, 0),
@@ -1261,10 +1266,14 @@ fn an_executed_deck_claims_verification_only_when_it_reproduces_the_sealed_diges
 
     let mut state = owned_dependency_state();
     let sequence = seal(&mut state, SEALED);
-    state.simulation.executed_decks.retain(ExecutedDeck {
-        run_id: sequence,
-        points: vec![point("TT 27C", SEALED), point("SS 27C", CORNER)],
-    });
+    state
+        .simulation
+        .retained
+        .executed_decks
+        .retain(ExecutedDeck {
+            run_id: sequence,
+            points: vec![point("TT 27C", SEALED), point("SS 27C", CORNER)],
+        });
 
     assert_eq!(
         ExecutedDeckVerification::of(&state, sequence, 0),
@@ -1292,10 +1301,14 @@ fn an_executed_deck_claims_verification_only_when_it_reproduces_the_sealed_diges
 
     // Every retained byte rewritten: nothing this run holds reproduces what
     // its receipt sealed, and the viewer must not soften that into "unsealed".
-    state.simulation.executed_decks.retain(ExecutedDeck {
-        run_id: sequence,
-        points: vec![point("TT 27C", "rewritten deck\n.end\n")],
-    });
+    state
+        .simulation
+        .retained
+        .executed_decks
+        .retain(ExecutedDeck {
+            run_id: sequence,
+            points: vec![point("TT 27C", "rewritten deck\n.end\n")],
+        });
     assert_eq!(
         ExecutedDeckVerification::of(&state, sequence, 0),
         Some(ExecutedDeckVerification::Unmatched),
@@ -1307,11 +1320,15 @@ fn an_executed_deck_claims_verification_only_when_it_reproduces_the_sealed_diges
     legacy
         .restore_provenance(SimulationRunProvenance::LegacyUnattributed)
         .expect("legacy history is explicitly classified");
-    unsealed.simulation.runs = vec![legacy].into();
-    unsealed.simulation.executed_decks.retain(ExecutedDeck {
-        run_id: 3,
-        points: vec![point("TT 27C", SEALED)],
-    });
+    unsealed.simulation.retained.runs = vec![legacy].into();
+    unsealed
+        .simulation
+        .retained
+        .executed_decks
+        .retain(ExecutedDeck {
+            run_id: 3,
+            points: vec![point("TT 27C", SEALED)],
+        });
     assert_eq!(
         ExecutedDeckVerification::of(&unsealed, 3, 0),
         Some(ExecutedDeckVerification::NotRecorded),
