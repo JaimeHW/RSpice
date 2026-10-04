@@ -1,12 +1,10 @@
 # rspice-app
 
-The graphical front end for RSpice: schematic capture, netlist editing,
-simulation setup and control, and result viewing in one egui/eframe
-application with wgpu rendering. The same crate builds for the desktop
-(Linux/macOS/Windows, multi-threaded engine with the Verilog-A JIT) and for
-`wasm32-unknown-unknown` (single-threaded engine in the browser); the
-platform split is handled entirely through target-specific dependencies in
-`Cargo.toml`.
+The desktop and browser application host for RSpice, built with egui/eframe
+and wgpu. It composes schematic capture, source editing, simulation setup,
+and result viewing over shared domain libraries. Native execution uses
+`rspice-simulation`; browser execution runs in the independent `rspice-worker`
+package. Target-specific dependencies and host adapters provide platform access.
 
 ## What the application is
 
@@ -34,15 +32,10 @@ Desktop, browser, and tablet use the same workbench state and command
 registry. Layout composition adapts to available width and pointer capability;
 document engines never create a second application shell.
 
-Result viewers live in `src/workbench/documents/result_document/`: waveform
-strips with
-expression traces and A/B cursors (`waves.rs`, `strip.rs`), Bode
-(`bode.rs`), FFT spectrum (`fft.rs`), eye diagram (`eye.rs`), histogram
-(`hist.rs`), operating-point inspector (`op_inspector.rs`), noise
-contributor ranking (`noise_contrib.rs`), a measurement/spec matrix
-(`specs.rs`), Nyquist (`nyquist.rs`), Smith chart (`smith.rs`), and
-pole-zero (`pz.rs`). The data/state side of these viewers lives in
-`src/analysis/`.
+Result viewers and their display sessions live in `rspice-results-ui`;
+exact datasets, calculations, and report documents live in `rspice-results`.
+`src/workbench/documents/result_document/` connects those viewers to project
+selection, simulation, export, and navigation.
 
 Other user-facing machinery, all verified in source:
 
@@ -50,10 +43,9 @@ Other user-facing machinery, all verified in source:
   matching, match-character highlighting, a recents section, and
   hierarchy verbs (descend/ascend) that are dimmed with a reason when
   unavailable.
-- **Checks**: a schematic rule checker (`services/drc/`: rule engine, net
-  extraction and connectivity, violation types) surfaced through the Check
-  menu and toolbar/docbar pills, plus safe-operating-area checking
-  (`services/safety/`).
+- **Checks**: design-rule checking from `rspice-design` and retained
+  safe-operating-area evidence from `rspice-results`, surfaced through the
+  workbench's check and result controls.
 - **About dialog** with version, 9-character build hash (injected by
   `build.rs` via `git rev-parse --short=9 HEAD`, `"unknown"` outside a git
   checkout), engine info, license status, and a copy-diagnostics button.
@@ -356,36 +348,35 @@ Generic parameter tolerances replay the preceding random draws without solving t
 
 The CLI and Python execution of authored `.MC` cards honor START. Core callers can use `MonteCarloRunConfig.first_trial` with `Engine::run_monte_carlo_voltages_with_abort`, or `MonteCarloStudyConfig.first_trial` for configured measurement studies. Existing convenience entry points retain their original first index of zero. Nonzero starting indices are also retained as the `first_trial` scalar in shared result documents.
 
-## Module map
+## Ownership
 
-| Module | Contents |
+| Package | Responsibility |
 | :--- | :--- |
-| `workbench/` | The `RSpiceApp` application type (the egui `App` impl) and everything around it: contract-driven responsive chrome, typed command registry and command palette, dialogs, project launcher, preflight, workspace surfaces, docks and drawers, `documents/` (netlist document and the result-document viewers) |
-| `schematic/` | Schematic rendering: canvas view (pan/zoom/interaction), SVG symbol library, component palette, source labels, SVG export |
-| `state/` | Application state: schematic state (components, wires, nets, selection, snap, clipboard, undo history, symbol generation), simulation state (runs, waveforms, cross-probing), workspace, library browser, model library, property registry, PDK config |
-| `simulation/` | Simulation control: the controller state machine, `engine_bridge/` (the rspice-core adapter: parsing, per-analysis dispatch, result conversion, abort handling), netlist generation from the schematic, multi-run batching, optimizer, options translation, automation, netlist viewer |
-| `services/` | Backend services: `drc/` rule checking, `license.rs`, `safety/` SOA checks, `simulation_runner/` per-analysis launchers (AC, DC, transient, HB, PSS, noise, pole-zero, sensitivity, Monte Carlo, sweeps, optimization, distortion, transfer function, pnoise sidebands, PAC/PXF), `yield_manager.rs` |
-| `analysis/` | Result-viewer data and state: Bode, FFT, histogram, Nyquist, pole-zero, Smith chart, eye diagram, phase noise, HB tones, waveform calculator |
-| `io/` | File formats: schematic JSON, project files, SPICE `.lib` parsing, netlist export, waveform I/O, Cadence PSF (including binary) |
-| `properties/` | Property editing: engineering-notation value parsing/formatting, model browser, PWL editor, tabbed property dialog, property bridge |
-| `results/` | Result-set ownership and the projection each viewer reads |
-| `hardcopy/` | The print and export pipeline: page geometry in integral micrometres, sheet composition, hand-off to the publication contract |
-| `automation_runtime`, `automation_workflow/` | The Automation worker host, native and browser, over [`rspice-automation-protocol`](../rspice-automation-protocol), and the workflows built on it |
-| `product/` | Edition, entitlement, and feature-availability gating |
-| `quantity/` | Typed physical quantities and their formatting |
-| `output_spec`, `diagnostics/` | Authored output selection, and the typed diagnostics surface |
-| `ui/` | The RSpice design system: mockup-governed semantic tokens and dark/light palettes, mode/density preferences, embedded IBM Plex fonts, vector icon set, the widget vocabulary (buttons, chips, dialogs, docbar, forms, pills, tables, toasts, trees…), and the strip-plot engine (axes, scales, traces, cursors, min/max decimation, SI formatting) |
-| `time_compat` | Validated wall timestamps and monotonic elapsed time on native, browser, and worker targets |
+| `rspice-app` | Workbench, commands, navigation, host lifecycle, and cross-feature coordination |
+| `rspice-app-types` | Shared identities, revisions, hierarchy grammar, and quantity policy |
+| `rspice-design` | Design documents, source registry, connectivity, and edit transactions |
+| `rspice-model-library` | Model/PDK records, retained sources, trust, and validation |
+| `rspice-project-contract`, `rspice-project` | Portable project contracts, aggregate, lifecycle, and persistence |
+| `rspice-simulation-contract`, `rspice-simulation` | Authored plans and transport contracts; preparation, compilation, and execution |
+| `rspice-results` | Exact datasets, retained evidence, calculations, and result/report documents |
+| `rspice-formats` | Engineering-data import and export codecs |
+| `rspice-hardcopy-contract`, `rspice-hardcopy` | Persisted print contracts; frozen-source scenes and rendering |
+| `rspice-ui-kit`, `rspice-schematic-editor`, `rspice-results-ui` | Shared egui controls, editor interactions, and result presentation |
+| `rspice-worker` | Independent browser worker host and JavaScript transfer adapters |
+
+Within the app, `workbench/` owns the shell and workflows, `state/` composes
+domain owners with editor sessions, and `simulation/` coordinates execution.
+Simulation state separates execution, retained results, source buffers, and
+viewer state. `io/` and `services/` provide application and platform adapters;
+cloud, licensing, collaboration, and Automation retain explicit service boundaries.
 
 ## Engine integration
 
-The UI never calls `rspice-core` from a surface or widget. Execution enters
-through `src/simulation/runner/`: config-backed SPICE analyses are adapted by
-`src/simulation/engine_bridge/`, while specialized RF, periodic, statistical,
-optimization and sweep analyses are adapted by
-`src/services/simulation_runner/`. Both adapters consume the same
-preflight-sealed netlist and abort signal and convert engine results into the
-UI's waveform containers. Platform differences are set in `Cargo.toml`:
+Application controllers dispatch sealed requests through `rspice-simulation`,
+which owns source preparation, engine adapters, scheduling, and result
+conversion. Native and browser hosts share those services and identity-bound
+cancellation. Platform dependencies are selected in the app, simulation, and
+worker manifests:
 
 - **Desktop** (`cfg(not(target_arch = "wasm32"))`): `rspice-core` with
   default features (parallel + SIMD solver paths) plus `veriloga-native`
