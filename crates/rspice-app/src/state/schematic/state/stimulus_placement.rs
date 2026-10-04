@@ -13,9 +13,9 @@
 
 use super::super::component::Component;
 use super::super::component_type::ComponentType;
-use super::super::point::Point;
 use super::SchematicState;
 use crate::state::stimulus_library::definition::StimulusDefinition;
+use rspice_design_model::Point;
 
 pub use rspice_schematic_editor::session::stimulus_placement::PendingStimulusPlacement;
 

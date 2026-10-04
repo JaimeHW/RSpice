@@ -1621,7 +1621,7 @@ fn an_enabled_corner_analysis_without_a_technology_blocks_preparation() {
             );
         }
     }
-    let corner = crate::simulation::dialog::corner::CornerDialogState::default();
+    let corner = rspice_simulation_contract::corner_draft::CornerDialogState::default();
     insert_enabled_draft(
         &mut state,
         crate::simulation::plan::AnalysisDraft::Corner(corner),

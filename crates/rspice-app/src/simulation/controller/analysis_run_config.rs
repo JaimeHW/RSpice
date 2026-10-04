@@ -17,7 +17,7 @@ mod pvt_base_tests {
             base_analysis: rspice_simulation_contract::temp_draft::TempBaseAnalysis::Transient,
             ..Default::default()
         };
-        let corner = crate::simulation::dialog::corner::CornerConfig::default();
+        let corner = rspice_simulation_contract::corner_config::CornerConfig::default();
         let sealed = state
             .model_library_manager
             .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)

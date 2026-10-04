@@ -1022,7 +1022,7 @@ fn names(field: &str, reference: &str) -> bool {
 ///
 /// Two drafts hold a list rather than one reference, and each splits it in its
 /// own `to_config`: `PssDialogState::tone_sources` on `,`, `;` and whitespace
-/// (`simulation::dialog::pss::parse_tone_sources`), and
+/// (`rspice_simulation_contract::pss_draft::parse_tone_sources`), and
 /// `EnvelopeDialogState::modulation_sources` on `,`, `;` and newline before
 /// trimming (`simulation::dialog::envelope::parse_source_list`). Splitting on
 /// the union and then on whitespace accepts exactly what both accept, because

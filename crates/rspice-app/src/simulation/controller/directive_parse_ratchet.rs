@@ -154,7 +154,7 @@ fn the_harmonic_balance_directive_carries_the_tones_it_was_given() {
     };
     assert_eq!(
         &card.frequencies,
-        &[crate::simulation::dialog::hb::HbConfig::default().fundamental_freq]
+        &[rspice_simulation_contract::hb_draft::HbConfig::default().fundamental_freq]
     );
 }
 

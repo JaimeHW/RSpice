@@ -113,7 +113,7 @@ impl RunSpaceContext<'_> {
 /// that lets this instance own its temperatures instead.
 pub(super) fn temperature_form(
     ui: &mut Ui,
-    setup: &mut crate::simulation::dialog::temp::TempDialogState,
+    setup: &mut rspice_simulation_contract::temp_draft::TempDialogState,
     context: &RunSpaceContext<'_>,
     route: &mut Option<SimulationPage>,
     policy: crate::quantity::QuantityPresentationPolicy,
@@ -133,7 +133,7 @@ pub(super) fn temperature_form(
         );
     }
 
-    use crate::simulation::dialog::temp::TempAxisMode;
+    use rspice_simulation_contract::temp_draft::TempAxisMode;
 
     let labels: Vec<&str> = TempAxisMode::ALL
         .iter()
@@ -219,10 +219,10 @@ const DC_BASE_TRAVELS_ONCE_NOTE: &str = "The DC base retains both sweep axes, li
 /// of temperatures from the one the plan declares.
 fn axis_state(
     context: &RunSpaceContext<'_>,
-    setup: &crate::simulation::dialog::temp::TempDialogState,
+    setup: &rspice_simulation_contract::temp_draft::TempDialogState,
     declared: &Option<Vec<f64>>,
 ) -> String {
-    use crate::simulation::dialog::temp::TempAxisMode;
+    use rspice_simulation_contract::temp_draft::TempAxisMode;
 
     let Some(declared) = declared else {
         return "declared axis has a value that is not a temperature".to_owned();
@@ -263,7 +263,7 @@ fn axis_state(
 /// editor.
 pub(super) fn corner_form(
     ui: &mut Ui,
-    setup: &mut crate::simulation::dialog::corner::CornerDialogState,
+    setup: &mut rspice_simulation_contract::corner_draft::CornerDialogState,
     context: &RunSpaceContext<'_>,
     route: &mut Option<SimulationPage>,
     study_bases: &[(crate::product::AnalysisInstanceId, String)],

@@ -2,10 +2,10 @@
 
 use crate::product::AnalysisInstanceId;
 use crate::product::ProcessCorner;
-use crate::simulation::dialog::corner::CornerDialogState;
 use crate::simulation::plan::AnalysisDraft;
 use crate::workbench::app_state::AppState;
 use rspice_simulation::preparation::{TechnologyDemand, TechnologyDemandReason};
+use rspice_simulation_contract::corner_draft::CornerDialogState;
 use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
 fn insert_corner(state: &mut AppState, corner: CornerDialogState) -> AnalysisInstanceId {

@@ -1415,8 +1415,8 @@ fn a_plan_written_before_per_analysis_numerics_still_loads() {
 #[test]
 fn the_applies_to_control_is_built_from_the_declared_run_set() {
     use crate::product::ProcessCorner;
-    use crate::simulation::dialog::corner::{CornerBaseAnalysis, CornerConfig};
     use crate::state::{SpecEntry, SpecPointScope};
+    use rspice_simulation_contract::corner_config::{CornerBaseAnalysis, CornerConfig};
     use rspice_simulation_contract::run_set::RunSetState;
 
     fn spec(scope: SpecPointScope) -> SpecEntry {

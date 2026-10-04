@@ -432,7 +432,7 @@ fn an_enabled_corner_analysis_demands_the_plans_non_typical_sections() {
     plan.insert_draft_with_id(
         crate::product::AnalysisInstanceId::new(),
         crate::simulation::plan::AnalysisDraft::Corner(
-            crate::simulation::dialog::corner::CornerDialogState::default(),
+            rspice_simulation_contract::corner_draft::CornerDialogState::default(),
         ),
         true,
         position,

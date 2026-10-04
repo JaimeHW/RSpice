@@ -44,7 +44,6 @@ pub(crate) mod named_net;
 use rspice_design::schematic::net_label;
 use rspice_schematic_editor::session::net_highlight;
 use rspice_schematic_editor::session::placement_authority;
-mod point;
 mod port;
 use rspice_design::schematic::probe;
 use rspice_design::schematic::replacement;
@@ -108,7 +107,6 @@ pub use net_highlight::NetHighlightState;
 pub use net_label::Junction;
 pub use net_label::{NetLabel, NetLabelKind};
 pub use placement_authority::PlacementAuthority;
-pub use point::Point;
 #[cfg(test)]
 pub use port::{PendingPortPlacement, PortDirectionType, PortSignalType};
 pub use port::{PendingPortSequence, PortContract, PortDirection, PortDiscipline, PortSpec};
@@ -122,6 +120,7 @@ pub use replacement::{
 pub use rotation::Rotation;
 #[cfg(test)]
 pub use rspice_design::schematic::wire::WireConnection;
+pub use rspice_design_model::Point;
 pub use selection::{
     DuplicateExternalNets, JunctionSelection, SchematicSelectionFilter, Selection,
 };

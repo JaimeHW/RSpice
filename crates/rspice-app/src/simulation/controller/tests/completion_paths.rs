@@ -662,7 +662,7 @@ fn incomplete_soa_results_fail_closed_without_retained_payloads() {
 fn sensitivity_spec_projects_frequency_only_in_ac_mode() {
     let mut state = AppState::default();
     state.sim_setup.sens = crate::simulation::dialog::SensDialogState::from_config(
-        &crate::simulation::dialog::sens::SensConfig::default(),
+        &rspice_simulation_contract::sens_draft::SensConfig::default(),
     );
     state.sim_setup.sens.ac_freq = "invalid".to_owned();
     assert!(matches!(

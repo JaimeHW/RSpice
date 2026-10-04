@@ -273,7 +273,7 @@ mod tests {
     #[test]
     fn toolbar_pvt_summary_uses_the_global_run_set_exactly_once() {
         use crate::product::ProcessCorner;
-        use crate::simulation::dialog::corner::{CornerBaseAnalysis, CornerConfig};
+        use rspice_simulation_contract::corner_config::{CornerBaseAnalysis, CornerConfig};
 
         let mut app = RSpiceApp::test_instance();
         app.state.sim_setup.run_set =

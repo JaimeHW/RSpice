@@ -48,12 +48,12 @@ use crate::simulation::config::NoiseSweepType;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::simulation::dialog::hb::HbConfig;
-#[cfg(not(target_arch = "wasm32"))]
 use crate::simulation::dialog::{HbDialogState, PssConfig, PssDialogState};
 use crate::simulation::plan::AnalysisKind;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::simulation::plan::NoiseDraft;
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_simulation_contract::hb_draft::HbConfig;
 
 #[test]
 fn operating_point_startup_choices_match_the_execution_contract() {
@@ -220,7 +220,7 @@ fn corner_form_height(run_set: &rspice_simulation_contract::run_set::RunSetState
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut height = 0.0;
-    let mut corner = crate::simulation::dialog::corner::CornerDialogState::default();
+    let mut corner = rspice_simulation_contract::corner_draft::CornerDialogState::default();
     let _ = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(

@@ -20,7 +20,6 @@ use super::document::SchematicDocument;
 use super::documentation_shape::DocumentationShape;
 #[cfg(test)]
 use super::net_label::{Junction, NetLabel};
-use super::point::Point;
 #[cfg(test)]
 use super::rotation::Rotation;
 use super::selection::Selection;
@@ -29,6 +28,7 @@ use super::snap::SnapEngine;
 use super::tool::Tool;
 #[cfg(test)]
 use rspice_design::schematic::wire::{Wire, WireConnection};
+use rspice_design_model::Point;
 
 mod components;
 mod editor_ops;

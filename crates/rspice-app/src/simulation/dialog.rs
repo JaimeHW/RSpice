@@ -13,66 +13,40 @@
 //! - **Sweep**: Temperature
 //! - **Post-Processing**: Fourier, Envelope
 
-// Core
-pub(crate) mod op;
-
-// Transfer/Stability
-pub(crate) mod pz;
-pub(crate) mod sens;
-pub(crate) mod stb;
-
-// Steady-state
-pub(crate) mod hb;
-pub(crate) mod pss;
-
-// Periodic small-signal
-pub(crate) mod pac;
-pub(crate) mod pnoise;
-pub(crate) mod pstb;
-pub(crate) mod pxf;
-
 // RF/Microwave
 pub(crate) mod sp;
 
-// Transfer function
-pub(crate) mod xf;
-
 // Statistical/Parametric
-pub(crate) mod corner;
 pub(crate) mod mc;
-
-// Sweep
-pub(crate) mod temp;
 
 // Envelope/Fourier
 pub(crate) mod envelope;
-pub(crate) mod fourier;
 pub(crate) mod optimization;
 pub(crate) mod soa;
 
 // Options
 pub(crate) mod options;
 
-pub use op::OpDialogState;
 #[cfg(test)]
 pub use rspice_simulation_contract::config::OpHomotopy;
 #[cfg(test)]
 pub use rspice_simulation_contract::config::{OpConfig, OpInitialGuess, OpNodeInitialization};
+pub use rspice_simulation_contract::op_draft::OpDialogState;
 
 // Re-exports. Each analysis re-exports the dialog state its panel owns. The
 // matching `*Config` types are deliberately absent: a dialog's config is its
 // own business, and execution takes `simulation::config` types instead, so
 // re-exporting both here only invited the two to be confused.
-pub use hb::HbDialogState;
+pub use rspice_simulation_contract::hb_draft::HbDialogState;
 #[cfg(test)]
-pub use pss::PssConfig;
-pub use pss::PssDialogState;
+pub use rspice_simulation_contract::pss_draft::PssConfig;
+pub use rspice_simulation_contract::pss_draft::PssDialogState;
 
 // Re-exports - Periodic Small-Signal
-pub use pac::PacDialogState;
-pub use pnoise::{NoiseReferenceType, PnoiseDialogState};
-pub use pstb::PstbDialogState;
-pub use pxf::PxfDialogState;
+pub use rspice_simulation_contract::pac_draft::PacDialogState;
+pub use rspice_simulation_contract::pnoise_draft::{NoiseReferenceType, PnoiseDialogState};
+pub use rspice_simulation_contract::pstb_draft::PstbDialogState;
+pub use rspice_simulation_contract::pxf_draft::PxfDialogState;
 
 // Re-exports - RF/Microwave
 #[cfg(test)]
@@ -82,12 +56,12 @@ pub use sp::TOUCHSTONE_VERSIONS;
 pub use sp::{SpDialogState, SpPortSource, TOUCHSTONE_VERSION_LABELS};
 
 // Re-exports - Transfer Function
-pub use pz::PzDialogState;
-pub use xf::XfDialogState;
+pub use rspice_simulation_contract::pz_draft::PzDialogState;
+pub use rspice_simulation_contract::xf_draft::XfDialogState;
 
 // Re-exports - Stability/Sensitivity
-pub use sens::SensDialogState;
-pub use stb::{StbDialogState, StbProbeReference};
+pub use rspice_simulation_contract::sens_draft::SensDialogState;
+pub use rspice_simulation_contract::stb_draft::{StbDialogState, StbProbeReference};
 
 // Re-exports - Statistical/Parametric
 pub use mc::McDialogState;
@@ -98,8 +72,8 @@ pub use mc::McVariationSource;
 
 // Re-exports - Envelope/Fourier
 pub use envelope::EnvelopeDialogState;
-pub use fourier::FourierDialogState;
 pub use optimization::OptimizationDialogState;
+pub use rspice_simulation_contract::fourier_draft::FourierDialogState;
 pub use soa::SoaDialogState;
 
 // Re-exports - Framework

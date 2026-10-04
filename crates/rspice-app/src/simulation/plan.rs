@@ -8,7 +8,6 @@
 mod config;
 #[cfg(test)]
 mod model_app_tests;
-mod numeric_override;
 
 pub use config::{
     AcDataDraft, AnalysisDependencyRepairContext, AnalysisDraft, DcMismatchDraft, DistoDraft,
@@ -17,13 +16,13 @@ pub use config::{
     QpssDraft, QpxfSidebandSelection, QpxfSourceSelection, QuasiPeriodicAcDraft,
     QuasiPeriodicNoiseDraft, QuasiPeriodicTransferDraft, TransientNoiseDraft,
 };
+pub use rspice_simulation_contract::analysis_kind::{AnalysisAvailability, AnalysisKind};
 #[cfg(test)]
-pub use numeric_override::OverrideValue;
-pub use numeric_override::{
+pub use rspice_simulation_contract::numeric_override::OverrideValue;
+pub use rspice_simulation_contract::numeric_override::{
     AnalysisNumericOverride, NumericOverrideOption, OverrideSection, OverrideValueKind,
     SolverOwnership,
 };
-pub use rspice_simulation_contract::analysis_kind::{AnalysisAvailability, AnalysisKind};
 #[cfg(test)]
 pub use rspice_simulation_contract::plan_model::FrozenAnalysisInstance;
 pub use rspice_simulation_contract::plan_model::{

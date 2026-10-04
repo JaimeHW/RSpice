@@ -40,9 +40,9 @@ impl OperationCancelState {
 #[cfg(test)]
 mod tests {
     use super::super::component_type::ComponentType;
-    use super::super::point::Point;
     use super::super::state::SchematicState;
     use super::*;
+    use rspice_design_model::Point;
 
     fn capture(state: &SchematicState) -> SchematicSnapshot {
         SchematicSnapshot::capture(&state.design.document())

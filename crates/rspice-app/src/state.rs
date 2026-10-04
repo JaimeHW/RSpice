@@ -6,7 +6,6 @@
 use rspice_design::configuration_set;
 use rspice_design::connectivity_contract;
 pub(crate) mod engineering_table;
-mod hierarchy_path;
 pub(crate) mod library_browser;
 mod model_bound_symbol;
 pub(crate) mod model_hub;
@@ -50,12 +49,6 @@ pub use engineering_table::{
     EngineeringDataset, EngineeringFilterGrammar, EngineeringSortRule, EngineeringTableView,
     EngineeringViewScope, EngineeringVirtualizationPolicy, FrozenIdentifierPolicy,
     SavedEngineeringTableView, SortDirection,
-};
-// The one hierarchical path grammar. Every consumer of an instance path,
-// pattern, or probe target names these types; nothing else may split a path.
-pub use hierarchy_path::{
-    HierarchyPathError, InstancePath, InstancePathPattern, MAX_INSTANCE_PATH_BYTES,
-    MAX_INSTANCE_PATH_DEPTH, PatternSegment, ProbeTarget,
 };
 pub use library_browser::{
     Cell, Library, LibraryCellPlacementCandidate, LibraryManager, ProjectLibraryLockAuthority,
@@ -116,6 +109,10 @@ pub(crate) use project_sources::{
 pub use property_types::{
     ContractStrength, DisplayMode, PropertyDefinition, PropertySheet, PropertyType, PropertyValue,
     SourceContractFinding, format_engineering, format_engineering_display,
+};
+pub use rspice_app_types::hierarchy_path::{
+    HierarchyPathError, InstancePath, InstancePathPattern, MAX_INSTANCE_PATH_BYTES,
+    MAX_INSTANCE_PATH_DEPTH, PatternSegment, ProbeTarget,
 };
 // The design-management model is a crate of its own so the offline
 // drawing-sheet publisher can link it without linking the GUI. It is

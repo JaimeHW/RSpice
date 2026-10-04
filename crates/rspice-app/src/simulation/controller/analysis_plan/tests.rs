@@ -955,12 +955,9 @@ fn pss_study_freezes_its_exact_op_producer_and_complete_shooting_configuration()
 
 #[test]
 fn hb_study_freezes_the_selected_instance_and_authenticates_its_native_settings() {
-    use crate::simulation::dialog::{
-        HbDialogState, McDialogState,
-        hb::{HbConfig, HbSolverType, HbToneConfig},
-        mc::McConfig,
-    };
+    use crate::simulation::dialog::{HbDialogState, McDialogState, mc::McConfig};
     use rspice_simulation::study::StudyAnalysis;
+    use rspice_simulation_contract::hb_draft::{HbConfig, HbSolverType, HbToneConfig};
     let mut state = AppState::default();
     let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
     let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
@@ -1278,7 +1275,7 @@ fn spectral_study_freezes_the_bound_transient_and_all_postprocess_settings() {
         plan.edit(spectrum, |draft| match draft {
             AnalysisDraft::Fourier(draft) => {
                 *draft = crate::simulation::dialog::FourierDialogState::from_config(
-                    &crate::simulation::dialog::fourier::FourierConfig {
+                    &rspice_simulation_contract::fourier_draft::FourierConfig {
                         fundamental_freq: 1000.0,
                         num_harmonics: 5,
                         num_periods: 1,

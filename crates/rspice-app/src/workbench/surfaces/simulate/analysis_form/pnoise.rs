@@ -96,7 +96,7 @@ pub(super) fn fields(
 
 fn edge_fields(
     ui: &mut Ui,
-    edge: &mut crate::simulation::dialog::pnoise::sampling::EdgeDraft,
+    edge: &mut rspice_simulation_contract::pnoise_draft::sampling::EdgeDraft,
     reference: bool,
 ) {
     let prefix = if reference { "Ref " } else { "" };
