@@ -1235,7 +1235,7 @@
           "reference_captures": 0
         },
         "execution_paranoia": {
-          "decks": 199,
+          "decks": 200,
           "reference_captures": 138
         },
         "gf180mcu": {
@@ -1427,7 +1427,7 @@
       "note": "canonical checkpoint text size for a fixed first segment",
       "tolerance": 0.1,
       "unit": "bytes",
-      "value": 2660.0
+      "value": 2978.0
     },
     {
       "metric": "checkpoint.packed_over_unpacked",
