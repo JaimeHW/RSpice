@@ -31,7 +31,7 @@ base64.workspace = true
 # Keep system font discovery disabled; rendering uses the pinned workspace fonts.
 usvg.workspace = true
 krilla = { version = "0.8.2", default-features = false, features = ["raster-images", "simple-text"] }
-resvg = { version = "0.47", default-features = false, features = ["text"] }
+resvg = { version = "0.48", default-features = false, features = ["text"] }
 tiff = { version = "0.11.3", default-features = false, features = ["deflate"] }
 ttf-parser = "0.25.1"
 
