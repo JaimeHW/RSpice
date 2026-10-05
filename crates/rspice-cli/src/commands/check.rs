@@ -47,8 +47,8 @@ pub fn execute(
     }
 
     let resource_limits = config.resources.limits();
-    let parsed =
-        crate::commands::parse_netlist_input(&args.input, resource_limits).and_then(|netlist| {
+    let parsed = crate::commands::parse_netlist_input(&args.input, &args.netlist_options, config)
+        .and_then(|netlist| {
             rspice_core::netlist::validate_output_symbols(&netlist)
                 .map_err(crate::commands::map_parse_error)?;
             Ok(netlist)
@@ -550,6 +550,7 @@ mod tests {
         let result = execute(
             CheckArgs {
                 input: path.clone(),
+                netlist_options: Default::default(),
                 connectivity: true,
                 models: true,
                 strict: false,
@@ -596,6 +597,7 @@ mod tests {
         let result = execute(
             CheckArgs {
                 input: path.clone(),
+                netlist_options: Default::default(),
                 connectivity: true,
                 models: true,
                 strict: false,

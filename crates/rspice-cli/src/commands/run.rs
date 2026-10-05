@@ -78,7 +78,7 @@ use rspice_core::{
 use std::path::PathBuf;
 use std::time::Instant;
 
-fn cancellation_cli_error(timeout_seconds: Option<f64>) -> CliError {
+pub(super) fn cancellation_cli_error(timeout_seconds: Option<f64>) -> CliError {
     match crate::abort::reason() {
         Some(crate::abort::AbortReason::Interrupt) => CliError::Interrupted,
         Some(crate::abort::AbortReason::Timeout) => CliError::TimedOut {
