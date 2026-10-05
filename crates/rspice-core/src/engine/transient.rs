@@ -7102,11 +7102,22 @@ impl Engine {
             // an owned arrival. Fit the still-unaccepted interval so its next
             // gap is representable and respects the minimum; never consume
             // the arrival early or manufacture a subminimum follow-up step.
+            // Xyce's floor grows with accepted time. Reserve the floor at the
+            // deadline, which bounds every intervening point's floor, rather
+            // than leaving a gap that only satisfies the current clock.
+            let physical_event_min_dt =
+                physical_event_time.map_or(timestep.hard_min_dt(), |time| {
+                    if self.config.spice_dialect == SpiceDialect::Xyce {
+                        timestep.hard_min_dt().max(xyce_hard_min_timestep(time))
+                    } else {
+                        timestep.hard_min_dt()
+                    }
+                });
             if locked_grid.is_none()
                 && pending_exact_event_time == physical_event_time
                 && let Some(deadline) = physical_event_time.filter(|deadline| {
                     *deadline > candidate_step_time
-                        && *deadline - candidate_step_time < timestep.hard_min_dt()
+                        && *deadline - candidate_step_time < physical_event_min_dt
                 })
             {
                 let bound = timestep.max_dt().min(max_step);
@@ -7114,7 +7125,7 @@ impl Engine {
                     t,
                     deadline,
                     dt,
-                    timestep.hard_min_dt(),
+                    physical_event_min_dt,
                     max_step,
                     bound,
                     false,
