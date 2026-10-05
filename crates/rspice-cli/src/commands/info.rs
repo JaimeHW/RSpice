@@ -11,7 +11,7 @@ pub fn execute(
     _verbose: bool,
     quiet: bool,
 ) -> Result<(), CliError> {
-    let netlist = crate::commands::parse_netlist_input(&args.input, config.resources.limits())?;
+    let netlist = crate::commands::parse_netlist_input(&args.input, &args.netlist_options, config)?;
 
     if args.json {
         print_json(&netlist, &args)?;

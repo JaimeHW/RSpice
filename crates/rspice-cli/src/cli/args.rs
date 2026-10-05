@@ -268,6 +268,26 @@ pub struct HealthArgs {
     pub json: bool,
 }
 
+/// Parsing options shared by simulation, validation and inspection.
+#[derive(Args, Debug, Clone, Default)]
+pub struct NetlistOptions {
+    /// Additional search directories for .include/.lib directives (repeatable)
+    #[arg(short = 'I', long = "include", value_name = "DIR")]
+    pub includes: Vec<PathBuf>,
+
+    /// Override or define a root-scope netlist parameter (repeatable)
+    #[arg(short = 'D', long = "define", value_name = "NAME=VALUE")]
+    pub defines: Vec<String>,
+
+    /// Select a consistent parsing and simulation compatibility dialect
+    #[arg(long, value_enum, value_name = "DIALECT")]
+    pub spice_dialect: Option<SpiceDialectArg>,
+
+    /// Xyce-compatible policy for repeated .PARAM definitions
+    #[arg(long = "redefined-params", value_enum, value_name = "MODE")]
+    pub redefined_params: Option<RedefinedParamsMode>,
+}
+
 /// Arguments for the `run` subcommand
 #[derive(Args, Debug)]
 pub struct RunArgs {
@@ -290,9 +310,8 @@ pub struct RunArgs {
     #[arg(long, value_name = "TEMP", value_parser = spice_value)]
     pub temp: Option<f64>,
 
-    /// Select a consistent parsing and simulation compatibility dialect
-    #[arg(long, value_enum, value_name = "DIALECT")]
-    pub spice_dialect: Option<SpiceDialectArg>,
+    #[command(flatten)]
+    pub netlist_options: NetlistOptions,
 
     /// Print .MEAS measurement results
     #[arg(long)]
@@ -416,18 +435,6 @@ pub struct RunArgs {
     /// .SAVE/.PROBE/.PRINT/.PLOT selection), e.g. --save "V(out)" --save "I(v1)"
     #[arg(long = "save", value_name = "SIGNAL")]
     pub saves: Vec<String>,
-
-    /// Additional search directories for .include/.lib directives (repeatable)
-    #[arg(short = 'I', long = "include", value_name = "DIR")]
-    pub includes: Vec<PathBuf>,
-
-    /// Override or define a netlist parameter (repeatable)
-    #[arg(short = 'D', long = "define", value_name = "NAME=VALUE")]
-    pub defines: Vec<String>,
-
-    /// Xyce-compatible policy for repeated .PARAM definitions
-    #[arg(long = "redefined-params", value_enum, value_name = "MODE")]
-    pub redefined_params: Option<RedefinedParamsMode>,
 
     /// Number of Monte Carlo iterations (enables Monte Carlo mode)
     #[arg(long, value_name = "N")]
@@ -601,6 +608,9 @@ pub struct InfoArgs {
     #[arg(value_name = "NETLIST")]
     pub input: PathBuf,
 
+    #[command(flatten)]
+    pub netlist_options: NetlistOptions,
+
     /// Show detailed element information
     #[arg(short, long)]
     pub detailed: bool,
@@ -656,6 +666,9 @@ pub struct CheckArgs {
     /// Input netlist file
     #[arg(value_name = "NETLIST")]
     pub input: PathBuf,
+
+    #[command(flatten)]
+    pub netlist_options: NetlistOptions,
 
     /// Check connectivity (warn about floating nodes)
     #[arg(long)]
@@ -870,7 +883,10 @@ mod tests {
             let Commands::Run(args) = cli.command else {
                 panic!("run command changed")
             };
-            let actual = args.redefined_params.expect("mode retained");
+            let actual = args
+                .netlist_options
+                .redefined_params
+                .expect("mode retained");
             assert_eq!(actual, expected_mode);
             assert_eq!(actual.parse_policies(), expected_policies);
         }
@@ -896,7 +912,10 @@ mod tests {
             let Commands::Run(args) = cli.command else {
                 panic!("run command changed")
             };
-            let actual = args.spice_dialect.expect("dialect retained");
+            let actual = args
+                .netlist_options
+                .spice_dialect
+                .expect("dialect retained");
             assert_eq!(actual.expression_dialect(), expression);
             assert_eq!(actual.simulation_dialect(), simulation);
         }

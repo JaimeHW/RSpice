@@ -22,6 +22,7 @@ pub mod convert;
 pub(crate) mod export_table;
 pub mod health;
 pub mod info;
+pub(crate) mod input;
 pub mod models;
 pub(crate) mod publish;
 pub mod run;
@@ -100,41 +101,24 @@ pub(crate) fn read_stdin_source_with_limits_and_abort(
 /// Parse a netlist argument, treating `-` as stdin (includes resolve
 /// against the working directory).
 pub(crate) fn parse_netlist_input(
-    input: &std::path::Path,
-    resource_limits: rspice_core::ResourceLimits,
+    path: &std::path::Path,
+    args: &crate::cli::NetlistOptions,
+    config: &crate::cli::Config,
 ) -> Result<rspice_core::Netlist, crate::cli::CliError> {
-    use rspice_core::Netlist;
-    let options = rspice_core::netlist::NetlistParseOptions {
-        resource_limits,
-        ..rspice_core::netlist::NetlistParseOptions::default()
-    };
-
-    if is_stdin(input) {
-        let source =
-            match read_stdin_source_with_limits_and_abort(resource_limits, &rspice_core::NoAbort) {
-                Ok(source) => source,
-                Err(rspice_core::netlist::ParseWithAbortError::Parse(error)) => {
-                    return Err(map_parse_error(error));
-                }
-                Err(rspice_core::netlist::ParseWithAbortError::Aborted) => {
-                    unreachable!("NoAbort cannot cancel stdin ingestion")
-                }
-            };
-        return Netlist::parse_with_path_and_options(
-            &source,
-            std::path::Path::new("stdin.sp"),
+    crate::abort::install_interrupt_handler();
+    let limits = config.resources.limits();
+    let options = input::parse_options(args, limits, true);
+    let source = if is_stdin(path) {
+        read_stdin_source_with_limits_and_abort(limits, &crate::abort::ProcessAbort)
+    } else {
+        rspice_core::Netlist::read_source_with_options_and_abort(
+            path,
             options,
+            &crate::abort::ProcessAbort,
         )
-        .map_err(map_parse_error);
     }
-
-    if !input.exists() {
-        return Err(crate::cli::CliError::InputNotFound {
-            path: input.to_path_buf(),
-            source: std::io::Error::new(std::io::ErrorKind::NotFound, "File not found"),
-        });
-    }
-    Netlist::parse_file_with_options(input, options).map_err(map_parse_error)
+    .map_err(|error| input::map_error(error, path, None))?;
+    input::parse_source(&source, path, args, config, options, None)
 }
 
 /// Preserve typed semantic context when crossing the core/CLI boundary.

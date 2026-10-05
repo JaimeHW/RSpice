@@ -2080,6 +2080,46 @@ impl Netlist {
         ))
     }
 
+    /// Parse a frontend's root source with include search paths and root-scope
+    /// parameter overrides. Overrides are bindings applied before expression
+    /// and conditional evaluation, independently of authored .PARAM duplicate
+    /// policy. Subcircuit-local bindings retain their normal scope.
+    pub fn parse_with_root_parameter_overrides_and_abort(
+        input: &str,
+        path: &std::path::Path,
+        search_paths: &[std::path::PathBuf],
+        options: NetlistParseOptions,
+        parameters: &[(String, crate::Value)],
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        ensure_parse_not_aborted(abort)?;
+        let overrides: Vec<_> = parameters
+            .iter()
+            .map(|(name, value)| parser::ParameterOverride {
+                name: name.clone(),
+                value: *value,
+                global: false,
+                direction: false,
+            })
+            .collect();
+        if search_paths.is_empty() {
+            Self::parse_with_path_execution_dir_options_and_abort(
+                input, path, None, options, &overrides, abort,
+            )
+        } else {
+            let execution_dir = std::env::current_dir().map_err(ParseError::Io)?;
+            Self::parse_with_search_paths_execution_dir_options_and_abort(
+                input,
+                path,
+                search_paths,
+                &execution_dir,
+                options,
+                &overrides,
+                abort,
+            )
+        }
+    }
+
     /// Parse source text with search paths, explicit options, and cancellation.
     pub fn parse_with_search_paths_and_options_and_abort(
         input: &str,
