@@ -1527,7 +1527,9 @@ pub(in crate::engine) fn dynamic_state_descriptor_gaps(
                 }
                 F::TransmissionLine => {
                     for line in &circuit.tlines {
-                        if !tline_has_sampled_periodic_history(line) {
+                        // A sampled periodic history can represent a delay for
+                        // shooting, but cannot make exp(-s*TD) rational for PZ.
+                        if !line.is_memoryless_two_port() {
                             gaps.push(CapabilityGap::new(
                                 family,
                                 format!("transmission line '{}': {condition}", line.name),
@@ -1836,6 +1838,22 @@ mod tests {
                 assert_eq!(gaps.is_empty(), supported, "{name}: {parameters}");
             }
         }
+    }
+
+    #[test]
+    fn lossless_delay_is_periodic_but_has_no_finite_rational_descriptor() {
+        let deck = crate::Netlist::parse(
+            "delayed line\nV1 in 0 1\nT1 in 0 out 0 Z0=50 TD=1n\nR1 out 0 50\n.end\n",
+        )
+        .unwrap();
+        let circuit = crate::engine::Engine::default()
+            .build_circuit(&deck)
+            .unwrap();
+        assert!(periodic_descriptor_gaps(&circuit).is_empty());
+        assert!(pss_state_gaps(&circuit).is_empty());
+        let gaps = dynamic_state_descriptor_gaps(&circuit);
+        assert_eq!(gaps.len(), 1);
+        assert_eq!(gaps[0].family, PeriodicDeviceFamily::TransmissionLine);
     }
 
     #[test]
