@@ -8,7 +8,7 @@
 
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
-use crate::hdf5::read_hdf5;
+use crate::hdf5::read_hdf5_with_limits;
 use std::io::Read;
 use std::path::Path;
 
@@ -876,7 +876,13 @@ fn load_hdf5(
         metadata_bytes,
         resource_limits.max_external_data_bytes,
     )?;
-    let data = read_hdf5(path).map_err(|e| conversion_error(path, e))?;
+    let data = read_hdf5_with_limits(path, resource_limits).map_err(|error| match error {
+        crate::hdf5::Hdf5Error::ResourceLimit(source) => CliError::ResourceLimit {
+            path: path.to_path_buf(),
+            source,
+        },
+        error => conversion_error(path, error),
+    })?;
 
     let from_section = |section: crate::hdf5::Hdf5WaveformSection, analysis: &str| ExportTable {
         analysis: analysis.to_string(),

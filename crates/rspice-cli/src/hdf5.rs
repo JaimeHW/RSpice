@@ -19,6 +19,8 @@ use thiserror::Error;
 use std::collections::HashMap;
 use std::path::Path;
 
+mod admission;
+
 /// The document version this build reads. The writer's half of the same
 /// number lives with the layout, so a reader and a writer cannot drift.
 const SCHEMA_VERSION: &str = rspice_core::io::HDF5_SCHEMA_VERSION;
@@ -26,6 +28,8 @@ const FFT_SECTION_SCHEMA_VERSION: &str = "3";
 
 #[derive(Debug, Error)]
 pub enum Hdf5Error {
+    #[error(transparent)]
+    ResourceLimit(#[from] rspice_core::ResourceLimitError),
     #[error(transparent)]
     Backend(#[from] rustyhdf5::Error),
     #[error("invalid HDF5 schema: {0}")]
@@ -1139,7 +1143,21 @@ fn write_hdf5_staged(
     })
 }
 
-pub fn read_hdf5(path: &Path) -> Result<Hdf5SimulationData> {
+#[cfg(test)]
+pub(crate) fn read_hdf5(path: &Path) -> Result<Hdf5SimulationData> {
+    read_hdf5_with_limits(path, rspice_core::ResourceLimits::default())
+}
+
+pub fn read_hdf5_with_limits(
+    path: &Path,
+    limits: rspice_core::ResourceLimits,
+) -> Result<Hdf5SimulationData> {
+    let bytes = std::fs::metadata(path).map_err(rustyhdf5::Error::Io)?.len();
+    admission::admit(
+        rspice_core::ResourceKind::ExternalDataBytes,
+        usize::try_from(bytes).unwrap_or(usize::MAX),
+        limits.max_external_data_bytes,
+    )?;
     let file = Hdf5File::open(path)?;
     let root = file.root();
     let root_attrs = root.attrs()?;
@@ -1149,6 +1167,7 @@ pub fn read_hdf5(path: &Path) -> Result<Hdf5SimulationData> {
             "unsupported HDF5 schema version '{schema_version}', expected '{SCHEMA_VERSION}'"
         )));
     }
+    admission::validate(&file, limits)?;
 
     let title = read_string_attr(&root_attrs, "title")?.unwrap_or_default();
     let identity = read_string_attr(&root_attrs, "analysis_id")?.map(|analysis_id| {
@@ -1235,7 +1254,10 @@ fn read_waveform_section(file: &Hdf5File, group_name: &str) -> Result<Hdf5Wavefo
     let attrs = group.attrs()?;
 
     let independent_name = read_required_string_attr(&attrs, "independent_name")?;
-    let signal_count = read_required_i64_attr(&attrs, "signal_count")? as usize;
+    let signal_count = non_negative_count(
+        read_required_i64_attr(&attrs, "signal_count")?,
+        "signal_count",
+    )?;
     let independent_values = group.dataset("independent")?.read_f64()?;
 
     let mut signals = Vec::with_capacity(signal_count);
@@ -1285,7 +1307,10 @@ fn add_ac_section(document: &mut Hdf5Document, name: &str, section: &Hdf5AcSecti
 fn read_ac_section(file: &Hdf5File, group_name: &str) -> Result<Hdf5AcSection> {
     let group = file.group(group_name)?;
     let attrs = group.attrs()?;
-    let signal_count = read_required_i64_attr(&attrs, "signal_count")? as usize;
+    let signal_count = non_negative_count(
+        read_required_i64_attr(&attrs, "signal_count")?,
+        "signal_count",
+    )?;
     let frequency = group.dataset("frequency")?.read_f64()?;
 
     let mut signals = Vec::with_capacity(signal_count);
@@ -1924,7 +1949,10 @@ fn add_measurements(document: &mut Hdf5Document, measurements: &[Hdf5Measurement
 fn read_measurements(file: &Hdf5File) -> Result<Vec<Hdf5Measurement>> {
     let group = file.group("measurements")?;
     let attrs = group.attrs()?;
-    let measurement_count = read_required_i64_attr(&attrs, "measurement_count")? as usize;
+    let measurement_count = non_negative_count(
+        read_required_i64_attr(&attrs, "measurement_count")?,
+        "measurement_count",
+    )?;
 
     let mut measurements = Vec::with_capacity(measurement_count);
     for index in 0..measurement_count {
