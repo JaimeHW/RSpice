@@ -127,6 +127,8 @@ struct DeckOutcome {
 }
 
 pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Result<(), CliError> {
+    let quiet = quiet || args.summary.as_deref() == Some(std::path::Path::new("-"));
+    let verbose = verbose && !quiet;
     let from_stdin = crate::commands::is_stdin(&args.input);
     if !from_stdin && !args.input.exists() {
         return Err(CliError::InputNotFound {

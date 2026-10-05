@@ -63,17 +63,19 @@ pub(super) fn run_tf_from_command(
     // RSpice's unchanged.
     let probe = result.output.to_lowercase();
     let source = result.input.to_lowercase();
-    let gain = format_spice_exponent(result.gain);
-    let zin = format_spice_exponent(result.input_impedance);
-    let zout = format_spice_exponent(result.output_impedance);
-    println!("Transfer function information:");
-    println!("transfer_function = {gain}");
-    if output_is_current {
-        println!("{source}#input_impedance = {zin}");
-        println!("{}#output_impedance = {zout}", output_node.to_lowercase());
-    } else {
-        println!("output_impedance_at_{probe} = {zout}");
-        println!("{source}#input_impedance = {zin}");
+    if !ctx.quiet {
+        let gain = format_spice_exponent(result.gain);
+        let zin = format_spice_exponent(result.input_impedance);
+        let zout = format_spice_exponent(result.output_impedance);
+        println!("Transfer function information:");
+        println!("transfer_function = {gain}");
+        if output_is_current {
+            println!("{source}#input_impedance = {zin}");
+            println!("{}#output_impedance = {zout}", output_node.to_lowercase());
+        } else {
+            println!("output_impedance_at_{probe} = {zout}");
+            println!("{source}#input_impedance = {zin}");
+        }
     }
 
     if let Some(output) = ctx.resolve_output("tf") {

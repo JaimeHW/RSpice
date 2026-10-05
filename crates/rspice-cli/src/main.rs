@@ -118,7 +118,43 @@ fn print_cli_error(error: &cli::CliError, format: cli::ErrorFormat) {
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let arguments: Vec<_> = std::env::args_os().collect();
+    let cli = match Cli::try_parse_from(&arguments) {
+        Ok(cli) => cli,
+        Err(error) => {
+            // Clap cannot produce the full CLI on a usage error. Still honor
+            // the explicitly requested diagnostic format, up to `--`.
+            let mut json = false;
+            let mut arguments = arguments.iter().skip(1);
+            while let Some(argument) = arguments.next() {
+                if argument == "--" {
+                    break;
+                }
+                if argument == "--error-format" {
+                    json = arguments.next().is_some_and(|value| value == "json");
+                } else if let Some(value) = argument
+                    .to_str()
+                    .and_then(|value| value.strip_prefix("--error-format="))
+                {
+                    json = value == "json";
+                }
+            }
+            if !json
+                || matches!(
+                    error.kind(),
+                    clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+                )
+            {
+                error.exit();
+            }
+            let error = cli::CliError::InvalidArgument {
+                message: error.to_string(),
+                suggestion: Some("run rspice --help for available commands and options".into()),
+            };
+            print_cli_error(&error, cli::ErrorFormat::Json);
+            return error.exit_code().into();
+        }
+    };
     let error_format = cli.error_format;
 
     // Quiet execution has no observable log records, so avoid constructing
