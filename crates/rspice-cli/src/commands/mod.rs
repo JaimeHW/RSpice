@@ -44,7 +44,10 @@ pub(crate) fn is_stdin(path: &std::path::Path) -> bool {
 }
 
 /// Read stdin in bounded chunks under the same root-source byte policy used
-/// for files, observing cooperative cancellation between reads.
+/// for files. A bounded reader channel lets the caller observe cancellation
+/// while an upstream pipe remains open without delivering bytes. The reader
+/// owns only stdin and at most two chunks; if cancelled during a blocking OS
+/// read it is retired when this one-command process exits.
 pub(crate) fn read_stdin_source_with_limits_and_abort(
     resource_limits: rspice_core::ResourceLimits,
     abort: &dyn rspice_core::AbortSignal,
@@ -53,16 +56,40 @@ pub(crate) fn read_stdin_source_with_limits_and_abort(
 
     const READ_CHUNK_BYTES: usize = 64 * 1024;
     let mut bytes = Vec::new();
-    let mut chunk = [0_u8; READ_CHUNK_BYTES];
-    let stdin = std::io::stdin();
-    let mut stdin = stdin.lock();
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .name("rspice-stdin".into())
+        .spawn(move || {
+            let stdin = std::io::stdin();
+            let mut stdin = stdin.lock();
+            loop {
+                let mut chunk = vec![0_u8; READ_CHUNK_BYTES];
+                let read = stdin.read(&mut chunk).map(|count| {
+                    chunk.truncate(count);
+                    chunk
+                });
+                let finished = read.as_ref().map_or(true, |chunk| chunk.is_empty());
+                if sender.send(read).is_err() || finished {
+                    break;
+                }
+            }
+        })
+        .map_err(rspice_core::netlist::ParseError::Io)?;
     loop {
         if abort.is_aborted() {
             return Err(rspice_core::netlist::ParseWithAbortError::Aborted);
         }
-        let count = stdin
-            .read(&mut chunk)
-            .map_err(rspice_core::netlist::ParseError::Io)?;
+        let chunk = match receiver.recv_timeout(std::time::Duration::from_millis(10)) {
+            Ok(read) => read.map_err(rspice_core::netlist::ParseError::Io)?,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(rspice_core::netlist::ParseError::Io(std::io::Error::other(
+                    "stdin reader stopped before end of input",
+                ))
+                .into());
+            }
+        };
+        let count = chunk.len();
         if count == 0 {
             break;
         }

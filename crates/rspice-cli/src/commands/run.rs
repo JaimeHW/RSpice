@@ -151,7 +151,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     // Held for the whole cancellable region. Dropping it on any exit path
     // closes the completion latch, so a deadline that expires after the run
     // is already over cannot announce a cancellation that never happened.
-    let _timeout = args.timeout.map(crate::abort::arm_timeout);
+    let _timeout = args.timeout.map(crate::abort::arm_timeout).transpose()?;
 
     // A run that was killed (rather than cancelled) cannot clean up after
     // itself, so its staging files stay in the output directory. Reclaim the

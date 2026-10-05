@@ -63,7 +63,9 @@ fn monte_carlo_timeout_is_typed_prompt_and_does_not_publish_an_artifact() {
         "advanced timeout must retain the typed timeout exit code\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("timed out") || stderr.contains("Timeout"),
+        stderr.contains("timed out")
+            || stderr.contains("Timeout")
+            || stderr.contains("time budget expired"),
         "timeout diagnostic must remain explicit:\n{stderr}"
     );
     assert!(
