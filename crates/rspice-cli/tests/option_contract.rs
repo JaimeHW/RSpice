@@ -32,3 +32,28 @@ fn options_cannot_be_silently_ignored() {
         assert!(output.status.success(), "{output:?}");
     }
 }
+
+#[test]
+fn alternative_analysis_modes_cannot_silently_override_each_other() {
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "--error-format",
+            "json",
+            "run",
+            "-",
+            "--corners",
+            "tt",
+            "--hb-freq",
+            "1meg",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("cannot be used with")
+    );
+}

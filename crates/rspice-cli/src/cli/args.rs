@@ -290,6 +290,9 @@ pub struct NetlistOptions {
 
 /// Arguments for the `run` subcommand
 #[derive(Args, Debug, Clone)]
+#[command(group(clap::ArgGroup::new("analysis_mode")
+    .args(["monte_carlo", "pss_freq", "hb_freq", "pz_input", "sens_output", "sparam", "corners"])
+    .multiple(false)))]
 pub struct RunArgs {
     /// Input netlist file (.sp, .cir, .net, .spice)
     #[arg(value_name = "NETLIST")]
