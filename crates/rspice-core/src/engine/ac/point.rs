@@ -21,6 +21,29 @@ pub(in crate::engine) struct AcExcitation {
 }
 
 impl AcExcitation {
+    /// Inject one ampere into `positive` and withdraw it from `negative`,
+    /// with every independent voltage source held at zero small-signal drive.
+    pub(in crate::engine) fn current_probe(
+        circuit: &CircuitData,
+        positive: usize,
+        negative: usize,
+    ) -> Result<Self, SimulationError> {
+        let projection =
+            AcVoltageConstraintProjection::with_excitation(circuit, |_| Complex64::new(0.0, 0.0))?;
+        let mut rhs = vec![Complex64::new(0.0, 0.0); circuit.matrix_size()];
+        for (node, value) in [(positive, 1.0), (negative, -1.0)] {
+            if node > 0 {
+                let entry = rhs.get_mut(node - 1).ok_or_else(|| {
+                    SimulationError::Circuit(
+                        "AC current probe lies outside the solved system".into(),
+                    )
+                })?;
+                *entry += Complex64::new(value, 0.0);
+            }
+        }
+        Ok(Self { rhs, projection })
+    }
+
     fn new(circuit: &CircuitData) -> Result<Self, SimulationError> {
         Ok(Self {
             projection: AcVoltageConstraintProjection::new(circuit)?,
@@ -38,19 +61,19 @@ impl AcExcitation {
             .iter()
             .position(|name| name.eq_ignore_ascii_case(source))
             .ok_or_else(|| {
-                SimulationError::Circuit(format!("SP voltage source '{source}' was not found"))
+                SimulationError::Circuit(format!("AC voltage source '{source}' was not found"))
             })?;
         let projection = AcVoltageConstraintProjection::with_excitation(circuit, |candidate| {
             Complex64::new(if candidate == index { 1.0 } else { 0.0 }, 0.0)
         })?;
         let branch = circuit.get_branch_matrix_index(sources.branch_indices[index]);
         let row = branch.checked_sub(1).ok_or_else(|| {
-            SimulationError::Circuit(format!("SP voltage source '{source}' has no equation row"))
+            SimulationError::Circuit(format!("AC voltage source '{source}' has no equation row"))
         })?;
         let mut rhs = vec![Complex64::new(0.0, 0.0); circuit.matrix_size()];
         let entry = rhs.get_mut(row).ok_or_else(|| {
             SimulationError::Circuit(format!(
-                "SP voltage source '{source}' equation lies outside the solved system"
+                "AC voltage source '{source}' equation lies outside the solved system"
             ))
         })?;
         *entry = Complex64::new(1.0, 0.0);
@@ -74,7 +97,19 @@ impl Engine {
     pub(in crate::engine) fn prepare_ac_circuit(
         &self,
         netlist: &Netlist,
+        circuit: CircuitData,
+        abort: &dyn AbortSignal,
+    ) -> Result<PreparedAc, SimulationError> {
+        self.prepare_ac_circuit_with_excitation(netlist, circuit, None, abort)
+    }
+
+    /// An explicit excitation suppresses authored AC drives after elaboration,
+    /// without changing the netlist, device topology, or operating point.
+    pub(in crate::engine) fn prepare_ac_circuit_with_excitation(
+        &self,
+        netlist: &Netlist,
         mut circuit: CircuitData,
+        excitation: Option<AcExcitation>,
         abort: &dyn AbortSignal,
     ) -> Result<PreparedAc, SimulationError> {
         circuit
@@ -101,7 +136,10 @@ impl Engine {
             self.build_matrix(&circuit)?
         };
         circuit.link_indices(&matrix);
-        let excitation = AcExcitation::new(&circuit)?;
+        let excitation = match excitation {
+            Some(excitation) => excitation,
+            None => AcExcitation::new(&circuit)?,
+        };
 
         // Get DC operating point
         let has_nonlinear = circuit.has_nonlinear_devices();

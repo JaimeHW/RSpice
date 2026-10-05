@@ -11,16 +11,14 @@
 //! 2. Drive the probe with a unit AC current (input source's AC cleared):
 //!    the probe voltage is the output impedance.
 
+use super::ac::{AcExcitation, PreparedAc};
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::TransferFunctionResult;
 use crate::analysis::ac::AcResult;
-use crate::netlist::{Element, ElementKind, SourceSpec};
+use crate::solver::ComplexMatrix;
+use crate::{CircuitData, Complex64};
 use crate::{Netlist, Value};
-
-/// Name of the temporary probe source injected for the output-impedance
-/// solve; chosen to stay clear of any plausible user element name.
-const ZOUT_PROBE_NAME: &str = "ITF_ZOUT_PROBE_INTERNAL";
 
 /// ngspice's sentinel for an effectively infinite impedance (tfanal.c
 /// reports 1e20 for the output impedance of branch-current probes).
@@ -64,91 +62,123 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        // Base deck: every independent source's AC excitation cleared, so
-        // each solve below is driven purely by its own unit excitation.
-        let mut base = netlist.clone();
-        for element in &mut base.elements {
-            if let ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) =
-                &mut element.kind
-            {
-                *spec = spec.clone().with_ac(0.0, 0.0);
-            }
-        }
-
-        let input_kind = independent_source_kind(&base, input_source).ok_or_else(|| {
-            SimulationError::Netlist(format!(
-                ".TF input `{input_source}` is not an independent V/I source in the netlist"
-            ))
-        })?;
-
-        // Solve 1: unit drive at the input source.
-        let mut driven = base.clone();
-        set_source_ac(&mut driven, input_source, 1.0, 0.0);
-        let drive_solution = self.single_zero_hz_solve_with_abort(&driven, abort)?;
-        abort.observe_progress(0.5);
-
-        let gain = if output_is_current {
-            branch_current(&drive_solution, output_node).ok_or_else(|| {
-                SimulationError::Netlist(format!(
-                    ".TF output element `{output_node}` has no branch current; probe a \
-                     voltage source or inductor"
-                ))
-            })?
+        let engine = self.resolved_for_netlist(netlist);
+        engine.ensure_analysis_points(1)?;
+        let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
+        let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
+        Self::ensure_model_run_active(abort)?;
+        let circuit = engine.build_circuit_with_abort(netlist, abort)?;
+        let voltage_input = circuit
+            .voltage_sources
+            .names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(input_source));
+        let current_input = circuit
+            .current_sources
+            .names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(input_source));
+        let excitation = if voltage_input.is_some() {
+            AcExcitation::for_port(&circuit, input_source)?
+        } else if let Some(index) = current_input {
+            AcExcitation::current_probe(
+                &circuit,
+                circuit.current_sources.node_neg[index],
+                circuit.current_sources.node_pos[index],
+            )?
         } else {
-            voltage_difference(&drive_solution, output_node, reference_node)?
+            return Err(SimulationError::Netlist(format!(
+                ".TF input `{input_source}` is not an independent V/I source in the elaborated circuit"
+            )));
         };
-
-        let input_impedance = match input_kind {
-            InputKind::Voltage => {
-                // SPICE convention: a voltage source's branch current is
-                // positive flowing from its + node through the source, so a
-                // passive load yields a negative branch current and
-                // Zin = -V/I is positive.
-                let current = branch_current(&drive_solution, input_source).ok_or_else(|| {
+        let node_id = |name: &str| {
+            let name = netlist.ground_policy().canonical_node(name);
+            circuit.get_node_by_name(name).ok_or_else(|| {
+                SimulationError::Netlist(format!(".TF references unknown node `{name}`"))
+            })
+        };
+        let output_probe = if output_is_current {
+            if circuit.get_branch_by_name(output_node).is_none() {
+                return Err(SimulationError::Netlist(format!(
+                    ".TF output element `{output_node}` has no branch current"
+                )));
+            }
+            None
+        } else {
+            Some(AcExcitation::current_probe(
+                &circuit,
+                node_id(output_node)?,
+                node_id(reference_node.unwrap_or("0"))?,
+            )?)
+        };
+        // One elaboration and bias state, with independent right-hand sides.
+        // Authored excitations at every hierarchy level are excluded, and no
+        // synthetic source name can collide with an authored element.
+        let PreparedAc {
+            mut circuit,
+            mut matrix,
+            linearization,
+            excitation,
+        } = engine.prepare_ac_circuit_with_excitation(netlist, circuit, Some(excitation), abort)?;
+        engine.ensure_result_shape(1, 3)?;
+        let mut workspace = ComplexMatrix::from_real_structure(&matrix);
+        let solve = |circuit: &mut CircuitData, final_step| {
+            linearization.prepare_frequency(circuit, &mut workspace, 0.0, final_step, abort)?;
+            let solution = linearization.solve(&mut workspace, &excitation, abort)?;
+            let drive = ac_result(circuit, solution);
+            abort.observe_progress(0.5);
+            let gain = if output_is_current {
+                branch_current(&drive, output_node).ok_or_else(|| {
                     SimulationError::Netlist(format!(
-                        ".TF input source `{input_source}` has no branch current in the AC solution"
+                        ".TF output `{output_node}` has no branch current"
+                    ))
+                })?
+            } else {
+                voltage_difference(&drive, output_node, reference_node)?
+            };
+            let input_impedance = if voltage_input.is_some() {
+                let current = branch_current(&drive, input_source).ok_or_else(|| {
+                    SimulationError::Netlist(format!(
+                        ".TF input `{input_source}` has no branch current"
                     ))
                 })?;
-                if current.abs() < 1e-300 {
+                if current == 0.0 {
                     Value::INFINITY
                 } else {
                     -1.0 / current
                 }
-            }
-            InputKind::Current => {
-                // A unit current source injects 1 A into its negative node;
-                // the voltage developed across it is the input impedance.
-                let (pos, neg) = source_nodes(&base, input_source)?;
-                voltage_difference(&drive_solution, &neg, Some(&pos))?
-            }
+            } else {
+                let index = current_input.expect("validated independent current source");
+                let value = |node: usize| {
+                    if node == 0 {
+                        0.0
+                    } else {
+                        drive.voltages[node - 1].re
+                    }
+                };
+                value(circuit.current_sources.node_neg[index])
+                    - value(circuit.current_sources.node_pos[index])
+            };
+            let output_impedance = if let Some(probe) = &output_probe {
+                let solution = linearization.solve(&mut workspace, probe, abort)?;
+                voltage_difference(&ac_result(circuit, solution), output_node, reference_node)?
+            } else {
+                NGSPICE_INFINITE_IMPEDANCE
+            };
+            Ok((gain, input_impedance, output_impedance))
         };
-
-        // Solve 2: unit current injected at the probe, input AC cleared.
-        // For branch-current outputs ngspice reports the output impedance
-        // as its 1e20 "infinite" sentinel rather than solving; match that.
-        let output_impedance = if output_is_current {
-            NGSPICE_INFINITE_IMPEDANCE
-        } else {
-            // The parser canonicalizes node names to upper case; the probe
-            // element must match or it lands on a new, disconnected node.
-            let probe_pos = output_node.to_ascii_uppercase();
-            let probe_neg = reference_node.unwrap_or("0").to_ascii_uppercase();
-            let mut zout_deck = base;
-            zout_deck.elements.push(Element {
-                name: ZOUT_PROBE_NAME.to_string(),
-                kind: ElementKind::CurrentSource(SourceSpec::Ac {
-                    magnitude: 1.0,
-                    phase: 0.0,
-                }),
-                // Current flows n+ -> n- inside the source, i.e. 1 A is
-                // injected into the probe's positive node.
-                nodes: vec![probe_neg.clone(), probe_pos.clone()],
-                provenance: crate::netlist::ElementProvenance::Authored,
-            });
-            let zout_solution = self.single_zero_hz_solve_with_abort(&zout_deck, abort)?;
-            voltage_difference(&zout_solution, &probe_pos, Some(&probe_neg))?
-        };
-
+        let (gain, input_impedance, output_impedance) = Self::solve_accepted_frequency_point(
+            &mut circuit,
+            &mut matrix,
+            &linearization.bias,
+            super::analog_tasks::FrequencyModelPoint {
+                analysis: 1,
+                frequency: 0.0,
+                final_step: true,
+            },
+            abort,
+            solve,
+        )?;
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -171,62 +201,20 @@ impl Engine {
             output_impedance,
         ))
     }
-
-    /// Linearize at the DC operating point and solve once at 0 Hz.
-    fn single_zero_hz_solve_with_abort(
-        &self,
-        netlist: &Netlist,
-        abort: &dyn AbortSignal,
-    ) -> Result<AcResult, SimulationError> {
-        self.run_ac_with_abort(netlist, &[0.0], abort)?
-            .pop()
-            .ok_or_else(|| {
-                SimulationError::Circuit(
-                    "transfer-function AC solve produced no sample at 0 Hz".to_string(),
-                )
-            })
-    }
 }
 
-enum InputKind {
-    Voltage,
-    Current,
-}
-
-fn independent_source_kind(netlist: &Netlist, name: &str) -> Option<InputKind> {
-    netlist
-        .elements
-        .iter()
-        .find(|element| element.name.eq_ignore_ascii_case(name))
-        .and_then(|element| match &element.kind {
-            ElementKind::VoltageSource(_) => Some(InputKind::Voltage),
-            ElementKind::CurrentSource(_) => Some(InputKind::Current),
-            _ => None,
-        })
-}
-
-fn set_source_ac(netlist: &mut Netlist, name: &str, magnitude: Value, phase: Value) {
-    for element in &mut netlist.elements {
-        if element.name.eq_ignore_ascii_case(name)
-            && let ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) =
-                &mut element.kind
-        {
-            *spec = spec.clone().with_ac(magnitude, phase);
-        }
-    }
-}
-
-fn source_nodes(netlist: &Netlist, name: &str) -> Result<(String, String), SimulationError> {
-    let element = netlist
-        .elements
-        .iter()
-        .find(|element| element.name.eq_ignore_ascii_case(name))
-        .ok_or_else(|| SimulationError::Netlist(format!(".TF element `{name}` not found")))?;
-    match element.nodes.as_slice() {
-        [pos, neg, ..] => Ok((pos.clone(), neg.clone())),
-        _ => Err(SimulationError::Netlist(format!(
-            ".TF element `{name}` does not have two terminals"
-        ))),
+fn ac_result(circuit: &CircuitData, solution: Vec<Complex64>) -> AcResult {
+    let num_nodes = circuit.num_nodes();
+    let mut currents = solution[num_nodes..].to_vec();
+    circuit
+        .capacitors
+        .project_complex_ic_branch_currents(&solution, &mut currents, 0.0);
+    AcResult {
+        frequency: 0.0,
+        node_names: circuit.node_names_sorted(),
+        branch_names: circuit.branch_names_sorted(),
+        voltages: solution[..num_nodes].to_vec(),
+        currents,
     }
 }
 

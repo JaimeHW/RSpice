@@ -1,7 +1,7 @@
 //! End-to-end tests for `.TF` — the dot-command front door and the engine
 //! analysis behind it.
 //!
-//! Every expected number below was produced by the official ngspice-46
+//! The original parity cases below were produced by the official ngspice-46
 //! release binary on the identical deck (transfer_function, input
 //! impedance, output impedance), so these tests pin ngspice parity, not
 //! self-consistency.
@@ -17,6 +17,59 @@ fn assert_close(actual: f64, expected: f64, what: &str) {
         (actual - expected).abs() <= TOL * scale,
         "{what}: got {actual}, ngspice oracle {expected}"
     );
+}
+
+#[test]
+fn tf_suppresses_hierarchical_ac_drives() {
+    let netlist = Netlist::parse(
+        "hierarchical TF\n\
+        Vin in 0 DC 0 AC 7\nR1 in out 1k\nX1 out load\n\
+        .subckt load o\nVaux a 0 DC 0 AC 1\nR2 o a 1k\n\
+        Iaux 0 o DC 0 AC 3\n.ends\n.end\n",
+    )
+    .unwrap();
+    let result = Engine::new(SimulationConfig::default())
+        .run_transfer_function(&netlist, "out", None, false, "vin")
+        .unwrap();
+    // Two equal series resistors; all other independent drives are zero.
+    assert_close(result.gain, 0.5, "hierarchical divider gain");
+    assert_close(
+        result.input_impedance,
+        2000.0,
+        "hierarchical input impedance",
+    );
+    assert_close(
+        result.output_impedance,
+        500.0,
+        "hierarchical output impedance",
+    );
+}
+
+#[test]
+fn tf_can_drive_hierarchical_sources_without_probe_name_collisions() {
+    let engine = Engine::new(SimulationConfig::default());
+    for (source, device, gain, impedance) in [
+        ("X1.Vin", "Vin o 0 DC 0 AC 9", 1.0, 0.0),
+        ("X1.Iin", "Iin 0 o DC 0 AC 9", 1000.0, 1000.0),
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "hierarchical input\n\
+            X1 out input\nRload out 0 1k\n\
+            ITF_ZOUT_PROBE_INTERNAL 0 out DC 0 AC 8\n\
+            .subckt input o\n{device}\n.ends\n.end\n"
+        ))
+        .unwrap();
+        let result = engine
+            .run_transfer_function(&netlist, "out", None, false, source)
+            .unwrap();
+        assert_close(result.gain, gain, "hierarchical source gain");
+        assert_close(
+            result.input_impedance,
+            1000.0,
+            "hierarchical source impedance",
+        );
+        assert_close(result.output_impedance, impedance, "output impedance");
+    }
 }
 
 #[test]
