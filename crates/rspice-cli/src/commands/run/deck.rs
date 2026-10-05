@@ -336,7 +336,11 @@ pub(super) fn preflight_deck_run_count(
         DeckPlan::from_netlist_with_abort(netlist, &resource_limits, &crate::abort::ProcessAbort)
             .map_err(|error| map_deck_plan_error(error, args))?;
     if canonical_plan.axes().is_empty() {
-        return Ok(1);
+        return Ok(if args.corners.is_some() {
+            corners::names(args, resource_limits)?.len()
+        } else {
+            1
+        });
     }
 
     let base_signature = step_analysis_signature(netlist);

@@ -23,6 +23,7 @@ mod axis;
 mod basic;
 mod context;
 mod control;
+mod corners;
 mod deck;
 mod document;
 mod fft_document;
@@ -42,8 +43,7 @@ use axis::{
     canonical_coordinate_description, map_deck_plan_error, map_materialized_run_error, run_deck,
 };
 use context::{
-    ArtifactCoordinate, ElaboratedDeckPaths, PlannedAnalysisIdentities, RunContext,
-    RunContextSettings, RunIdentity, run_requested_mode,
+    ArtifactCoordinate, PlannedAnalysisIdentities, RunContext, RunIdentity, run_requested_mode,
 };
 use deck::{
     analyses_in_execution_order, build_sim_config, load_netlist_from_source,
@@ -277,7 +277,17 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
             plan.par_iter()
                 .map(|deck| {
                     let netlist = load_netlist_from_source(&deck.source, &args, config, false)?;
-                    run_deck(&netlist, &args, config, false, true, deck.label.as_deref())
+                    // The outer pool owns the process worker budget.
+                    let mut child_args = args.clone();
+                    child_args.jobs = 1;
+                    run_deck(
+                        &netlist,
+                        &child_args,
+                        config,
+                        false,
+                        true,
+                        deck.label.as_deref(),
+                    )
                 })
                 .collect()
         });
@@ -368,7 +378,15 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
             passed,
             abort_reason,
             resource_limits,
-            workers,
+            if workers > 1 || args.corners.is_none() {
+                workers
+            } else {
+                effective_jobs(
+                    args.jobs,
+                    corners::names(&args, resource_limits)?.len(),
+                    resource_limits.max_parallel_workers,
+                )?
+            },
         )?;
     }
 

@@ -289,7 +289,7 @@ pub struct NetlistOptions {
 }
 
 /// Arguments for the `run` subcommand
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct RunArgs {
     /// Input netlist file (.sp, .cir, .net, .spice)
     #[arg(value_name = "NETLIST")]

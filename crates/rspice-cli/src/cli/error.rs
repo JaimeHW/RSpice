@@ -323,7 +323,7 @@ pub enum CliError {
     #[error("Simulation interrupted")]
     Interrupted,
 
-    #[error("Failed to write output: {path}")]
+    #[error("Failed to write output {path}: {source}")]
     OutputError {
         path: PathBuf,
         #[source]
@@ -336,14 +336,14 @@ pub enum CliError {
         source: rspice_core::netlist::XyceAddResistorsMaterializationError,
     },
 
-    #[error("Failed to write Xyce ADDRESISTORS derived netlist: {path}")]
+    #[error("Failed to write Xyce ADDRESISTORS derived netlist {path}: {source}")]
     AddResistorsArtifactIo {
         path: PathBuf,
         #[source]
         source: AtomicArtifactError<std::io::Error>,
     },
 
-    #[error("Failed to serialize output: {path}")]
+    #[error("Failed to serialize output {path}: {source}")]
     OutputSerializationError {
         path: PathBuf,
         #[source]
@@ -478,7 +478,7 @@ impl CliError {
     /// about what kind of failure this was.
     pub fn details(&self) -> ErrorDetails {
         let category = self.category().as_str();
-        match self {
+        let mut details = match self {
             Self::ControlScriptError { source, origin } => {
                 use rspice_core::execution::control::ControlErrorKind;
                 let code = match source.kind {
@@ -519,6 +519,9 @@ impl CliError {
                     details.limit = Some(limit.limit);
                 }
                 match source {
+                    rspice_core::SimulationError::OutputCommitFailed(error) => {
+                        details.path = Some(error.path.display().to_string());
+                    }
                     rspice_core::SimulationError::BehavioralReference(error) => {
                         details.instance_name = Some(error.owner_name.clone());
                         details.canonical_instance_name = Some(error.canonical_owner_name.clone());
@@ -592,7 +595,19 @@ impl CliError {
             }
             Self::InternalError { .. } => ErrorDetails::new("internal_error", category, false),
             Self::Reported { details, .. } => (**details).clone(),
+        };
+        match self {
+            Self::InputNotFound { path, .. }
+            | Self::InputReadError { path, .. }
+            | Self::OutputError { path, .. }
+            | Self::OutputSerializationError { path, .. }
+            | Self::AddResistorsArtifactIo { path, .. }
+            | Self::ResourceLimit { path, .. } => {
+                details.path = Some(path.display().to_string());
+            }
+            _ => {}
         }
+        details
     }
 
     /// Replay a failure a run report already recorded as the process status.

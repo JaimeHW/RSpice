@@ -282,68 +282,6 @@ impl<'a> RunContext<'a> {
         })
     }
 
-    /// Context for a deck this process elaborated itself rather than received
-    /// from the deck planner: one `--corners` variant, whose artifact paths
-    /// the caller has already namespaced by corner.
-    ///
-    /// The corner deck is re-parsed, so it gets its own canonical plan and
-    /// therefore names its analyses exactly as the nominal deck does.
-    pub(super) fn for_elaborated_deck(
-        engine: &'a Engine,
-        netlist: &'a Netlist,
-        args: &'a RunArgs,
-        format: OutputFormat,
-        paths: ElaboratedDeckPaths,
-        source: &RunContextSettings,
-    ) -> Result<Self, CliError> {
-        let plan = DeckPlan::from_netlist_with_abort(
-            netlist,
-            &engine.config().resource_limits,
-            &crate::abort::ProcessAbort,
-        )
-        .map_err(|error| CliError::InternalError {
-            message: format!("re-elaborated deck cannot be planned: {error}"),
-        })?;
-        let planned = PlannedAnalysisIdentities::from_plan(&plan, netlist);
-        Ok(Self {
-            engine,
-            netlist,
-            args,
-            format,
-            output: paths.output,
-            checkpoint: paths.checkpoint,
-            resume: paths.resume,
-            show_progress: source.show_progress,
-            compress: source.compress,
-            compress_tol: source.compress_tol,
-            multi_analysis: source.coordinate.is_some()
-                || netlist.analyses.len() > 1
-                || !netlist.fft_analyses.is_empty(),
-            coordinate: source.coordinate.clone(),
-            output_tag_multiplicities: analysis_output_tag_multiplicities(netlist),
-            planned_output_ids: std::cell::RefCell::new(planned.output_ids),
-            planned_transient_ids: planned.transient_ids,
-            planned_upstreams: planned.upstreams,
-            planned_fft_ids: planned_fft_ids(&planned.post_processes, netlist)?,
-            planned_post_processes: planned.post_processes,
-            planned_namespace_error: std::cell::RefCell::new(None),
-            // A corner is a re-elaborated deck: it owns no plan coordinate,
-            // and its topology is its own, computed on demand.
-            run_coordinate: None,
-            topology: std::cell::RefCell::new(None),
-            published: std::cell::RefCell::new(Vec::new()),
-            verbose: source.verbose,
-            quiet: source.quiet,
-            measurements: std::cell::RefCell::new(Vec::new()),
-            evaluated_meas: std::cell::RefCell::new(std::collections::HashSet::new()),
-            outputs: std::cell::RefCell::new(Vec::new()),
-            retained_transients: std::cell::RefCell::new(Vec::new()),
-            periodic: std::cell::RefCell::default(),
-            next_transient_ordinal: std::cell::Cell::new(0),
-            next_fourier_ordinal: std::cell::Cell::new(0),
-        })
-    }
-
     /// Record evaluated .MEAS results: print them under `--meas` and keep
     /// them for report files and the exit status.
     pub(super) fn record_measurements(
@@ -1223,25 +1161,6 @@ pub(super) struct PeriodicArtifact {
     pub(super) path: Option<PathBuf>,
 }
 
-/// Artifact paths one re-elaborated deck publishes under, already namespaced
-/// by the caller.
-pub(crate) struct ElaboratedDeckPaths {
-    pub(crate) output: Option<PathBuf>,
-    pub(crate) checkpoint: Option<PathBuf>,
-    pub(crate) resume: Option<PathBuf>,
-}
-
-/// Reporting and compression settings a re-elaborated deck inherits from the
-/// run that spawned it.
-pub(crate) struct RunContextSettings {
-    pub(crate) show_progress: bool,
-    pub(crate) compress: bool,
-    pub(crate) compress_tol: f64,
-    pub(crate) coordinate: Option<ArtifactCoordinate>,
-    pub(crate) verbose: bool,
-    pub(crate) quiet: bool,
-}
-
 /// What one concrete deck run publishes under: its canonical analysis
 /// identities and, for an axis-expanded run, its coordinate.
 pub(super) struct RunIdentity<'a> {
@@ -1259,7 +1178,6 @@ pub(super) struct RunIdentity<'a> {
 pub(super) enum RequestedModeOutcome {
     NotRequested,
     RanNeedsMeasurementFinalization,
-    RanManagedMeasurements,
 }
 
 impl RequestedModeOutcome {
@@ -1349,11 +1267,6 @@ pub(super) fn run_requested_mode(
     if let Some(ports) = ctx.args.sparam.as_deref() {
         advanced::run_sparam(ctx, ports, ctx.args.sparam_z0.unwrap_or(50.0))?;
         return Ok(RequestedModeOutcome::RanNeedsMeasurementFinalization);
-    }
-
-    if let Some(corners_str) = ctx.args.corners.as_deref() {
-        advanced::run_corner_sweep(ctx, corners_str)?;
-        return Ok(RequestedModeOutcome::RanManagedMeasurements);
     }
 
     Ok(RequestedModeOutcome::NotRequested)

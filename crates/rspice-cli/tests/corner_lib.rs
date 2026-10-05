@@ -184,9 +184,13 @@ fn nominal_corners_record_measurements_per_corner() {
     let json: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&summary).expect("summary file"))
             .expect("valid json");
-    let measurements = json["runs"][0]["measurements"]
+    let measurements: Vec<_> = json["runs"]
         .as_array()
-        .expect("measurements array");
+        .unwrap()
+        .iter()
+        .flat_map(|run| run["measurements"].as_array().unwrap())
+        .collect();
+    assert_eq!(json["counts"]["runs"], 2);
     let names: Vec<&str> = measurements
         .iter()
         .map(|m| m["name"].as_str().expect("measurement name"))
