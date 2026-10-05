@@ -111,20 +111,13 @@ fn map_multi_run_error(
     if error.is_aborted() {
         return cancellation_cli_error(timeout_seconds);
     }
-    let suggestion = error.resource_limit_error().map_or_else(
-        || Some("fix the .DATA table or its DATA=<name> reference".to_string()),
-        |limit| {
-            Some(format!(
-                "reduce the workload or raise resources.max_{} above {}",
-                limit.resource.as_str(),
-                limit.requested
-            ))
-        },
-    );
+    if let Some(limit) = error.resource_limit_error() {
+        return rspice_core::SimulationError::ResourceLimit(limit).into();
+    }
     CliError::ParseError {
         message: error.to_string(),
         line: None,
-        suggestion,
+        suggestion: Some("fix the .DATA table or its DATA=<name> reference".to_string()),
     }
 }
 
@@ -158,7 +151,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     // Held for the whole cancellable region. Dropping it on any exit path
     // closes the completion latch, so a deadline that expires after the run
     // is already over cannot announce a cancellation that never happened.
-    let _timeout = args.timeout.map(crate::abort::arm_timeout);
+    let _timeout = args.timeout.map(crate::abort::arm_timeout).transpose()?;
 
     // A run that was killed (rather than cancelled) cannot clean up after
     // itself, so its staging files stay in the output directory. Reclaim the

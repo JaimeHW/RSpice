@@ -4409,7 +4409,8 @@ pub fn flatten_netlist_with_models_with_abort(
     flatten_netlist_with_models_config_with_abort(netlist, FlattenerConfig::default(), abort)
 }
 
-pub(crate) fn flatten_netlist_with_models_config_with_abort(
+/// Flatten with explicit hierarchy/element limits and cooperative cancellation.
+pub fn flatten_netlist_with_models_config_with_abort(
     netlist: &Netlist,
     config: FlattenerConfig,
     abort: &dyn AbortSignal,

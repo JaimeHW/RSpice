@@ -567,16 +567,26 @@ fn resource_policy_applies_to_run_check_and_info_ingestion() {
             "--config",
             config.to_str().unwrap(),
             "--quiet",
+            "--error-format",
+            "json",
             subcommand,
             deck.to_str().unwrap(),
         ]);
         assert_eq!(
             output.status.code(),
-            Some(65),
+            Some(75),
             "{subcommand} must apply the same ingestion policy; stdout: {}; stderr: {}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
+        let json: serde_json::Value =
+            serde_json::from_slice(&output.stderr).expect("typed resource failure");
+        assert_eq!(json["error"]["category"], "resource_limit");
+        assert_eq!(json["error"]["resource"], "netlist_bytes");
+        assert_eq!(json["error"]["limit"], 8);
+        assert!(json["error"]["requested"].as_u64().unwrap() > 8);
+        // An unchanged retry cannot succeed until the budget or workload changes.
+        assert_eq!(json["error"]["retryable"], false);
         assert!(
             String::from_utf8_lossy(&output.stderr).contains("netlist_bytes limit exceeded"),
             "{subcommand} must preserve typed resource diagnostics"

@@ -127,7 +127,9 @@ fn reachable_temperature_axis_timeout_is_typed_and_publishes_no_artifact() {
         "temperature timeout must use the stable timeout exit code\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("timed out") || stderr.contains("Timeout"),
+        stderr.contains("timed out")
+            || stderr.contains("Timeout")
+            || stderr.contains("time budget expired"),
         "timeout diagnostic must remain explicit:\n{stderr}"
     );
     assert!(

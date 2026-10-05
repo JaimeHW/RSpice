@@ -42,7 +42,7 @@ pub fn execute(
     _verbose: bool,
     quiet: bool,
 ) -> Result<(), CliError> {
-    if !quiet {
+    if !quiet && !args.json {
         println!("Checking: {}", args.input.display());
     }
 
@@ -51,9 +51,19 @@ pub fn execute(
         .and_then(|netlist| {
             rspice_core::netlist::validate_output_symbols(&netlist)
                 .map_err(crate::commands::map_parse_error)?;
-            Ok(netlist)
+            let flattened = rspice_core::netlist::flatten_netlist_with_models_config_with_abort(
+                &netlist,
+                rspice_core::netlist::FlattenerConfig {
+                    max_depth: resource_limits.max_hierarchy_depth,
+                    max_elements: resource_limits.max_flattened_elements,
+                    ..Default::default()
+                },
+                &crate::abort::ProcessAbort,
+            )
+            .map_err(|error| crate::commands::input::map_error(error, &args.input, None))?;
+            Ok((netlist, flattened))
         });
-    let netlist = match parsed {
+    let (netlist, flattened) = match parsed {
         Ok(n) => n,
         Err(e @ CliError::InputNotFound { .. } | e @ CliError::InputReadError { .. }) => {
             return Err(e);
@@ -81,11 +91,11 @@ pub fn execute(
 
     // Always-on topology checks: these decks produce singular systems, so
     // catching them statically beats a NaN at runtime.
-    check_topology(&netlist, &mut result);
+    check_topology(&netlist, &flattened.elements, &mut result);
     check_xspice_build(&netlist, &mut result, resource_limits)?;
 
     if args.connectivity {
-        check_connectivity(&netlist, &mut result);
+        check_connectivity(&netlist, &flattened.elements, &mut result);
     }
 
     if args.models {
@@ -279,7 +289,11 @@ impl rspice_core::xspice::DigitalCosimRuntime for CheckDigitalCosimRuntime {
 /// Detect circuit topologies that make the MNA matrix singular:
 /// loops of ideal voltage sources (and DC-shorted inductors), and nodes
 /// whose only connections are current sources.
-fn check_topology(netlist: &Netlist, result: &mut ValidationResult) {
+fn check_topology(
+    netlist: &Netlist,
+    elements: &[rspice_core::netlist::Element],
+    result: &mut ValidationResult,
+) {
     use rspice_core::netlist::ElementKind;
 
     let ground_policy = netlist.ground_policy();
@@ -305,7 +319,7 @@ fn check_topology(netlist: &Netlist, result: &mut ValidationResult) {
         }
     }
 
-    for elem in &netlist.elements {
+    for elem in elements {
         let is_vsrc_edge = matches!(
             elem.kind,
             ElementKind::VoltageSource(_) | ElementKind::Inductor { .. }
@@ -334,7 +348,7 @@ fn check_topology(netlist: &Netlist, result: &mut ValidationResult) {
     // A node touched only by current sources has no element defining its
     // voltage; KCL there may even be unsatisfiable.
     let mut only_current: HashMap<String, bool> = HashMap::new();
-    for elem in &netlist.elements {
+    for elem in elements {
         let is_current_source = matches!(elem.kind, ElementKind::CurrentSource(_));
         for node in &elem.nodes {
             let node = canonical(node);
@@ -382,11 +396,12 @@ fn add_parser_diagnostics(netlist: &Netlist, result: &mut ValidationResult) {
     }
 }
 
-fn check_connectivity(netlist: &Netlist, result: &mut ValidationResult) {
-    if let Ok(flattened) = rspice_core::netlist::flatten_netlist_with_models(netlist)
-        && let Ok(diagnostics) =
-            rspice_core::netlist::analyze_xyce_connectivity(&flattened.elements)
-    {
+fn check_connectivity(
+    netlist: &Netlist,
+    elements: &[rspice_core::netlist::Element],
+    result: &mut ValidationResult,
+) {
+    if let Ok(diagnostics) = rspice_core::netlist::analyze_xyce_connectivity(elements) {
         for node in diagnostics.one_device_terminal_nodes {
             result.warnings.push(ValidationIssue {
                 message: format!("Voltage Node ({node}) connected to only 1 device Terminal"),
@@ -399,7 +414,7 @@ fn check_connectivity(netlist: &Netlist, result: &mut ValidationResult) {
         // Xyce's lead groups so that this command agrees with the engine: a
         // node reported here is exactly one that would make an operating point
         // refuse to run.
-        if let Ok(dc_paths) = rspice_core::netlist::analyze_dc_ground_paths(&flattened.elements) {
+        if let Ok(dc_paths) = rspice_core::netlist::analyze_dc_ground_paths(elements) {
             for node in dc_paths.no_dc_path_nodes {
                 result.warnings.push(ValidationIssue {
                     message: format!("Voltage Node ({node}) does not have a DC path to ground"),
@@ -413,7 +428,7 @@ fn check_connectivity(netlist: &Netlist, result: &mut ValidationResult) {
     }
 
     // Model-specific XSPICE lead groups are not available to the core
-    // analyzer. Preserve the older top-level adjacency check as a conservative
+    // analyzer. Use flattened adjacency as a conservative
     // fallback instead of silently omitting connectivity feedback.
     let mut node_connections: HashMap<String, usize> = HashMap::new();
     let mut node_elements: HashMap<String, Vec<String>> = HashMap::new();
@@ -421,7 +436,7 @@ fn check_connectivity(netlist: &Netlist, result: &mut ValidationResult) {
     let ground_policy = netlist.ground_policy();
 
     // Element.nodes contains the node connections directly
-    for elem in &netlist.elements {
+    for elem in elements {
         for node in &elem.nodes {
             if !ground_policy.is_ground(node) {
                 *node_connections.entry(node.clone()).or_insert(0) += 1;
@@ -633,7 +648,7 @@ mod tests {
         )
         .expect("Xyce false-mode deck parses");
         let mut false_result = ValidationResult::default();
-        check_topology(&false_mode, &mut false_result);
+        check_topology(&false_mode, &false_mode.elements, &mut false_result);
         assert!(false_result.errors.is_empty());
 
         let replace_mode = Netlist::parse(
@@ -646,7 +661,7 @@ mod tests {
         )
         .expect("Xyce replacement deck parses");
         let mut replace_result = ValidationResult::default();
-        check_topology(&replace_mode, &mut replace_result);
+        check_topology(&replace_mode, &replace_mode.elements, &mut replace_result);
         assert_eq!(replace_result.errors.len(), 1);
     }
 
