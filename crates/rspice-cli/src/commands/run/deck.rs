@@ -260,6 +260,19 @@ pub(super) fn validate_step_frontend_compatibility(
     netlist: &Netlist,
     args: &RunArgs,
 ) -> Result<(), CliError> {
+    let transient_option =
+        args.checkpoint.is_some() || args.resume.is_some() || args.tran_stop.is_some();
+    let runs_authored_transient = netlist
+        .analyses
+        .iter()
+        .any(|analysis| matches!(analysis, AnalysisCommand::Tran { .. }))
+        && requested_mode_name(args).is_none_or(|mode| mode == "--corners");
+    if transient_option && !runs_authored_transient && netlist.control_script.is_none() {
+        return Err(CliError::InvalidArgument {
+            message: "--checkpoint, --resume and --tran-stop require an executed .TRAN analysis".into(),
+            suggestion: Some("add a .TRAN card and remove overriding analysis modes, or remove the transient options".into()),
+        });
+    }
     let steps = step_commands(netlist);
     let has_temperature_axis = netlist
         .analyses

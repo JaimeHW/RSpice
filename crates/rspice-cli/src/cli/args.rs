@@ -307,7 +307,7 @@ pub struct RunArgs {
     pub format: Option<OutputFormat>,
 
     /// Override simulation temperature (Celsius)
-    #[arg(long, value_name = "TEMP", value_parser = spice_value)]
+    #[arg(long, value_name = "TEMP", value_parser = spice_value, allow_hyphen_values = true)]
     pub temp: Option<f64>,
 
     #[command(flatten)]
@@ -517,7 +517,7 @@ pub struct RunArgs {
     #[arg(long, value_name = "N", default_value = "9", requires = "hb_freq")]
     pub hb_harmonics: usize,
 
-    /// PZ (Pole-Zero) analysis input node (name or index)
+    /// PZ (Pole-Zero) analysis input node (name)
     #[arg(
         long,
         value_name = "NODE",
@@ -526,7 +526,7 @@ pub struct RunArgs {
     )]
     pub pz_input: Option<String>,
 
-    /// PZ (Pole-Zero) analysis output node (name or index)
+    /// PZ (Pole-Zero) analysis output node (name)
     #[arg(long, value_name = "NODE", requires = "pz_input")]
     pub pz_output: Option<String>,
 
@@ -534,10 +534,11 @@ pub struct RunArgs {
     #[arg(long, value_enum, value_name = "TYPE", requires = "pz_input")]
     pub pz_transfer: Option<PzTransferMode>,
 
-    /// Sensitivity analysis output node (name or index)
+    /// Sensitivity analysis output node (name)
     #[arg(
         long,
         value_name = "NODE",
+        requires = "sens_param",
         help = "Output node for sensitivity analysis"
     )]
     pub sens_output: Option<String>,
@@ -547,7 +548,7 @@ pub struct RunArgs {
     pub sens_param: Option<String>,
 
     /// Sensitivity analysis parameter nominal value
-    #[arg(long, value_name = "VALUE", requires = "sens_param", value_parser = spice_value)]
+    #[arg(long, value_name = "VALUE", requires = "sens_param", value_parser = spice_value, allow_hyphen_values = true)]
     pub sens_value: Option<f64>,
 
     // =========================================================================
