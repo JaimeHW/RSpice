@@ -463,11 +463,21 @@ impl CliError {
     }
 
     /// Get a suggestion for fixing this error, if available
-    pub fn suggestion(&self) -> Option<&str> {
+    pub fn suggestion(&self) -> Option<std::borrow::Cow<'_, str>> {
         match self {
-            CliError::ParseError { suggestion, .. } => suggestion.as_deref(),
-            CliError::InvalidArgument { suggestion, .. } => suggestion.as_deref(),
-            _ => None,
+            CliError::ParseError { suggestion, .. }
+            | CliError::InvalidArgument { suggestion, .. } => {
+                suggestion.as_deref().map(std::borrow::Cow::Borrowed)
+            }
+            _ => {
+                let details = self.details();
+                details.resource.map(|resource| {
+                    std::borrow::Cow::Owned(format!(
+                        "reduce the workload or raise resources.max_{resource} to at least {}",
+                        details.requested.unwrap_or(0)
+                    ))
+                })
+            }
         }
     }
 

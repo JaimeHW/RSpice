@@ -438,8 +438,8 @@ fn configured_batch_limit_rejects_multi_run_before_execution() {
 
     assert_eq!(
         output.status.code(),
-        Some(65),
-        "resource rejection must be an input-policy error; stdout: {}; stderr: {}",
+        Some(75),
+        "resource rejection must retain its resource category; stdout: {}; stderr: {}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -619,7 +619,7 @@ fn resource_environment_override_takes_precedence_over_config_file() {
         &[("RSPICE_MAX_BATCH_RUNS", "1")],
     );
 
-    assert_eq!(output.status.code(), Some(65));
+    assert_eq!(output.status.code(), Some(75));
     assert!(
         String::from_utf8_lossy(&output.stderr)
             .contains("batch_runs limit exceeded: requested 2, limit 1")
