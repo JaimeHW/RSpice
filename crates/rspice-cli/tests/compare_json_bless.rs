@@ -16,7 +16,6 @@ fn json_bless_reports_accepted_mismatch_consistently() {
 
     let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
         .args([
-            "--quiet",
             "compare",
             result.to_str().unwrap(),
             golden.to_str().unwrap(),
@@ -70,4 +69,64 @@ fn json_bless_reports_accepted_mismatch_consistently() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn bootstrap_bless_reports_a_single_json_document_without_quiet() {
+    let dir = test_dir("bootstrap_json");
+    let result = dir.join("result.csv");
+    let golden = dir.join("golden.csv");
+    std::fs::write(&result, "time,V(out)\n0,1\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .arg("compare")
+        .arg(&result)
+        .arg(&golden)
+        .args(["--json", "--bless"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["accepted"], true);
+    assert_eq!(json["blessed"], true);
+    assert_eq!(json["comparison_passed"], false);
+    assert_eq!(
+        std::fs::read(result).unwrap(),
+        std::fs::read(golden).unwrap()
+    );
+}
+
+#[test]
+fn cross_format_bless_never_replaces_or_creates_a_mislabelled_golden() {
+    let dir = test_dir("cross_format_bless");
+    let csv = dir.join("source.csv");
+    let raw = dir.join("source.raw");
+    std::fs::write(&csv, "time,V(out)\n0,1\n").unwrap();
+    let converted = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "convert"])
+        .arg(&csv)
+        .arg(&raw)
+        .args(["--to", "raw"])
+        .output()
+        .unwrap();
+    assert!(converted.status.success(), "{converted:?}");
+    for existing in [false, true] {
+        let golden = dir.join(format!("golden-{existing}.csv"));
+        let original = b"time,V(out)\n0,2\n";
+        if existing {
+            std::fs::write(&golden, original).unwrap();
+        }
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "compare"])
+            .arg(&raw)
+            .arg(&golden)
+            .arg("--bless")
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        if existing {
+            assert_eq!(std::fs::read(&golden).unwrap(), original);
+        } else {
+            assert!(!golden.exists());
+        }
+    }
 }

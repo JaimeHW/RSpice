@@ -105,6 +105,7 @@ pub fn execute(
 ) -> Result<(), CliError> {
     validate_compare_tolerance("--abstol", args.abstol)?;
     validate_compare_tolerance("--reltol", args.reltol)?;
+    let quiet = quiet || args.format == OutputFormat::Json;
 
     // Validate files exist
     if !args.result.exists() {
@@ -118,8 +119,16 @@ pub fn execute(
             // Missing-golden bootstrap is still a promotion of a result
             // artifact. Validate the result before copying so malformed CSV,
             // JSON, RAW, etc. cannot become the accepted baseline.
-            let _ = load_waveform_data(&args.result, config.resources.limits())?;
+            let data = load_waveform_data(&args.result, config.resources.limits())?;
             bless_golden(&args.result, &args.golden, quiet, "no golden file yet")?;
+            if args.format == OutputFormat::Json {
+                let mut comparison = compare_waveforms(&data, &data, &args)?;
+                comparison.passed = false;
+                comparison
+                    .problems
+                    .push("golden file did not exist".to_string());
+                output_json(&comparison, true);
+            }
             return Ok(());
         }
         return Err(CliError::InputNotFound {
@@ -209,6 +218,15 @@ fn bless_golden(
     quiet: bool,
     why: &str,
 ) -> Result<(), CliError> {
+    if detect_format(result) != detect_format(golden) {
+        return Err(CliError::InvalidArgument {
+            message: "--bless requires the result and golden to use the same file format"
+                .to_string(),
+            suggestion: Some(
+                "convert the result to the golden's format before blessing it".to_string(),
+            ),
+        });
+    }
     let mut source = std::fs::File::open(result).map_err(|source| CliError::InputReadError {
         path: result.to_path_buf(),
         source,
