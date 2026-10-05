@@ -129,6 +129,7 @@ pub(crate) fn map_parse_error(error: rspice_core::error::ParseError) -> crate::c
     if matches!(
         error,
         rspice_core::netlist::ParseError::UnsupportedCapability { .. }
+            | rspice_core::netlist::ParseError::ResourceLimit(_)
     ) {
         return crate::cli::CliError::from(error);
     }

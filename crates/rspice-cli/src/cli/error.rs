@@ -694,6 +694,9 @@ impl From<std::io::Error> for CliError {
 
 impl From<rspice_core::error::ParseError> for CliError {
     fn from(err: rspice_core::error::ParseError) -> Self {
+        if let rspice_core::error::ParseError::ResourceLimit(source) = err {
+            return rspice_core::SimulationError::ResourceLimit(source).into();
+        }
         // A construct the grammar recognized and this build declines to lower
         // is a capability gap, not a malformed deck. Routing it through the
         // engine's typed refusal keeps the token, the span, and the exit code

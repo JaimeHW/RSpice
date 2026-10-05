@@ -111,20 +111,13 @@ fn map_multi_run_error(
     if error.is_aborted() {
         return cancellation_cli_error(timeout_seconds);
     }
-    let suggestion = error.resource_limit_error().map_or_else(
-        || Some("fix the .DATA table or its DATA=<name> reference".to_string()),
-        |limit| {
-            Some(format!(
-                "reduce the workload or raise resources.max_{} above {}",
-                limit.resource.as_str(),
-                limit.requested
-            ))
-        },
-    );
+    if let Some(limit) = error.resource_limit_error() {
+        return rspice_core::SimulationError::ResourceLimit(limit).into();
+    }
     CliError::ParseError {
         message: error.to_string(),
         line: None,
-        suggestion,
+        suggestion: Some("fix the .DATA table or its DATA=<name> reference".to_string()),
     }
 }
 
