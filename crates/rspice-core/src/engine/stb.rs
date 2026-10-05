@@ -70,9 +70,9 @@ fn map_stb_analysis_error(error: StbAnalysisError) -> SimulationError {
         StbAnalysisError::InvalidConfiguration(error) => {
             SimulationError::Circuit(format!("Invalid STB config: {error}"))
         }
-        StbAnalysisError::CapacityOverflow { .. } | StbAnalysisError::Allocation { .. } => {
-            SimulationError::Circuit(error.to_string())
-        }
+        StbAnalysisError::InvalidSample { .. }
+        | StbAnalysisError::CapacityOverflow { .. }
+        | StbAnalysisError::Allocation { .. } => SimulationError::Circuit(error.to_string()),
     }
 }
 

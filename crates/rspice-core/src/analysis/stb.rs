@@ -504,12 +504,16 @@ impl StbResult {
 
     /// Check if stable
     pub fn is_stable(&self) -> bool {
-        self.margins.is_stable()
+        self.success && self.margins.is_stable()
     }
 
     /// Get stability assessment
     pub fn assessment(&self) -> String {
-        self.margins.assessment()
+        if self.success {
+            self.margins.assessment()
+        } else {
+            "ANALYSIS FAILED".into()
+        }
     }
 }
 
@@ -539,6 +543,13 @@ pub enum StbAnalysisError {
     InvalidConfiguration(StbConfigError),
     /// The requested frequencies cannot be represented as a finite grid.
     FrequencyGrid(FrequencyGridError),
+    /// A sample cannot support a finite, ordered Bode sweep.
+    InvalidSample {
+        /// Zero-based position in the supplied sweep.
+        index: usize,
+        /// Invalid quantity or shape.
+        reason: &'static str,
+    },
     /// A checked retained shape exceeded the platform address space.
     CapacityOverflow {
         /// Result or workspace whose shape overflowed.
@@ -562,6 +573,9 @@ impl std::fmt::Display for StbAnalysisError {
                 write!(formatter, "invalid STB configuration: {error}")
             }
             Self::FrequencyGrid(error) => write!(formatter, "invalid STB frequency grid: {error}"),
+            Self::InvalidSample { index, reason } => {
+                write!(formatter, "invalid STB sample {index}: {reason}")
+            }
             Self::CapacityOverflow { object } => {
                 write!(formatter, "{object} exceeds addressable capacity")
             }
@@ -656,12 +670,45 @@ impl StbAnalyzer {
             });
         }
 
+        self.config.validate()?;
+        if frequencies.len() < 2 {
+            return Err(StbAnalysisError::InvalidSample {
+                index: 0,
+                reason: "at least two frequency samples are required",
+            });
+        }
+        // Unwrap one continuous path. Independently wrapping each endpoint
+        // around -180 degrees invents crossings near zero phase.
+        let mut previous_phase = None;
         // Build Bode points
         for (index, (&frequency, &loop_gain)) in frequencies.iter().zip(loop_gains).enumerate() {
             poll_abort(abort, index)?;
-            result
-                .bode_points
-                .push(BodePoint::from_loop_gain(frequency, loop_gain));
+            if !frequency.is_finite()
+                || frequency <= 0.0
+                || (index > 0 && frequency <= frequencies[index - 1])
+            {
+                return Err(StbAnalysisError::InvalidSample {
+                    index,
+                    reason: "frequencies must be finite, positive, and strictly increasing",
+                });
+            }
+            let mut point = BodePoint::from_loop_gain(frequency, loop_gain);
+            if !loop_gain.re.is_finite()
+                || !loop_gain.im.is_finite()
+                || !point.magnitude_db.is_finite()
+            {
+                return Err(StbAnalysisError::InvalidSample {
+                    index,
+                    reason: "loop gain must have finite components and finite nonzero magnitude",
+                });
+            }
+            if let Some(previous) = previous_phase {
+                point.phase_deg = previous
+                    + super::phase::difference(previous, point.phase_deg, 360.0)
+                        .expect("validated finite phases");
+            }
+            previous_phase = Some(point.phase_deg);
+            result.bode_points.push(point);
         }
 
         // Build Nyquist points if configured
@@ -773,8 +820,15 @@ impl StbAnalyzer {
             let v0 = extractor(&window[0]);
             let v1 = extractor(&window[1]);
 
-            // Check for sign change
-            if (v0 > 0.0 && v1 <= 0.0) || (v0 <= 0.0 && v1 > 0.0) {
+            if v0 == 0.0 && (index == 0 || extractor(&points[index - 1]) != 0.0) {
+                crossings.count += 1;
+                crossings.first_frequency.get_or_insert(window[0].frequency);
+            }
+            if index + 2 == points.len() && v1 == 0.0 && v0 != 0.0 {
+                crossings.count += 1;
+                crossings.first_frequency.get_or_insert(window[1].frequency);
+            }
+            if (v0 > 0.0 && v1 < 0.0) || (v0 < 0.0 && v1 > 0.0) {
                 // Linear interpolation for crossing frequency
                 let f0 = window[0].frequency;
                 let f1 = window[1].frequency;
@@ -806,20 +860,22 @@ impl StbAnalyzer {
             let p0 = window[0].phase_deg;
             let p1 = window[1].phase_deg;
 
-            // Unwrap phase for proper detection
-            let p0_unwrap = self.unwrap_phase(p0, target_phase);
-            let p1_unwrap = self.unwrap_phase(p1, target_phase);
-
-            // Check for crossing
-            if (p0_unwrap > target_phase && p1_unwrap <= target_phase)
-                || (p0_unwrap <= target_phase && p1_unwrap > target_phase)
-            {
+            // A negative-real-axis crossing is an odd half-turn on this
+            // continuous segment, including an exact sampled endpoint.
+            let target = target_phase + 360.0 * ((p0.min(p1) - target_phase) / 360.0).ceil();
+            if p0 == target {
+                return Ok(Some(window[0].frequency));
+            }
+            if p1 == target {
+                return Ok(Some(window[1].frequency));
+            }
+            if target > p0.min(p1) && target < p0.max(p1) {
                 let f0 = window[0].frequency;
                 let f1 = window[1].frequency;
 
                 let log_f0 = f0.log10();
                 let log_f1 = f1.log10();
-                let alpha = (target_phase - p0_unwrap) / (p1_unwrap - p0_unwrap);
+                let alpha = (target - p0) / (p1 - p0);
                 let log_f_cross = log_f0 + alpha * (log_f1 - log_f0);
                 let f_cross = 10.0_f64.powf(log_f_cross);
 
@@ -828,18 +884,6 @@ impl StbAnalyzer {
         }
 
         Ok(None)
-    }
-
-    /// Unwrap phase for proper crossing detection
-    fn unwrap_phase(&self, phase: Value, target: Value) -> Value {
-        let mut p = phase;
-        while p - target > 180.0 {
-            p -= 360.0;
-        }
-        while p - target < -180.0 {
-            p += 360.0;
-        }
-        p
     }
 
     /// Interpolate value at specific frequency

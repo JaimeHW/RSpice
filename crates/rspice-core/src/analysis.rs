@@ -42,6 +42,7 @@ pub mod measurements;
 pub mod monte_carlo;
 pub mod noise;
 pub mod pac;
+mod phase;
 pub mod pnoise;
 pub mod pole_zero;
 pub mod post_processing;
