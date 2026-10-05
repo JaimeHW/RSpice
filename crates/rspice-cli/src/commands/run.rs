@@ -191,12 +191,13 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
 
     // HSPICE `.ALTER` / `.DATA` constructs expand into several concrete
     // runs; a plain deck passes through as a single unlabeled run.
-    let plan = rspice_core::netlist::multi_run::try_expand_multi_run_with_limits_and_abort(
+    let mut plan = rspice_core::netlist::multi_run::try_expand_multi_run_with_limits_and_abort(
         &source,
         resource_limits,
         &crate::abort::ProcessAbort,
     )
     .map_err(|error| map_multi_run_error(error, args.timeout))?;
+    naming::disambiguate_run_labels(&mut plan);
     let multi_run = plan.len() > 1;
     if multi_run {
         // One Xyce-compatible sibling name cannot safely represent several

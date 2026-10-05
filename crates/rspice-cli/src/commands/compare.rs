@@ -105,6 +105,7 @@ pub fn execute(
 ) -> Result<(), CliError> {
     validate_compare_tolerance("--abstol", args.abstol)?;
     validate_compare_tolerance("--reltol", args.reltol)?;
+    let quiet = quiet || args.format == OutputFormat::Json;
 
     // Validate files exist
     if !args.result.exists() {
@@ -118,8 +119,16 @@ pub fn execute(
             // Missing-golden bootstrap is still a promotion of a result
             // artifact. Validate the result before copying so malformed CSV,
             // JSON, RAW, etc. cannot become the accepted baseline.
-            let _ = load_waveform_data(&args.result, config.resources.limits())?;
+            let data = load_waveform_data(&args.result, config.resources.limits())?;
             bless_golden(&args.result, &args.golden, quiet, "no golden file yet")?;
+            if args.format == OutputFormat::Json {
+                let mut comparison = compare_waveforms(&data, &data, &args)?;
+                comparison.passed = false;
+                comparison
+                    .problems
+                    .push("golden file did not exist".to_string());
+                output_json(&comparison, true);
+            }
             return Ok(());
         }
         return Err(CliError::InputNotFound {
@@ -209,6 +218,15 @@ fn bless_golden(
     quiet: bool,
     why: &str,
 ) -> Result<(), CliError> {
+    if detect_format(result) != detect_format(golden) {
+        return Err(CliError::InvalidArgument {
+            message: "--bless requires the result and golden to use the same file format"
+                .to_string(),
+            suggestion: Some(
+                "convert the result to the golden's format before blessing it".to_string(),
+            ),
+        });
+    }
     let mut source = std::fs::File::open(result).map_err(|source| CliError::InputReadError {
         path: result.to_path_buf(),
         source,
@@ -250,11 +268,7 @@ struct ParsedVariableName {
 }
 
 fn parsed_variable_names_match(left: &ParsedVariableName, right: &ParsedVariableName) -> bool {
-    left.key.part == right.key.part
-        && left
-            .aliases
-            .iter()
-            .any(|alias| right.aliases.iter().any(|candidate| candidate == alias))
+    left.key == right.key
 }
 
 fn variable_name_matches(left: &str, right: &str) -> bool {
@@ -319,9 +333,12 @@ fn resample_onto_golden(
 
     let low = result_scale[0];
     let high = result_scale[result_scale.len() - 1];
-    let slack = (high - low).abs().max(1.0) * 1e-9;
+    // Permit only a few representable rounding steps at either endpoint,
+    // never an allowance measured in fixed seconds/hertz or a fraction of 1.
+    let lower_bound = (0..4).fold(low, |value, _| value.next_down());
+    let upper_bound = (0..4).fold(high, |value, _| value.next_up());
     for &point in golden_scale {
-        if point < low - slack || point > high + slack {
+        if point < lower_bound || point > upper_bound {
             return Err(invalid(format!(
                 "golden scale point {point:e} lies outside the result range                  [{low:e}, {high:e}]; interpolation would extrapolate"
             )));
@@ -430,10 +447,13 @@ fn requested_variable_matches(
     if request.key.part.is_some() && request.key.part != candidate.key.part {
         return false;
     }
-    request
-        .aliases
-        .iter()
-        .any(|alias| candidate.aliases.iter().any(|candidate| candidate == alias))
+    // Quantity-qualified requests retain their meaning. A bare selector may
+    // use a signal's alias, subject to the ambiguity check below.
+    if signal_inner_name(&request.key.base).is_some() {
+        request.key.base == candidate.key.base
+    } else {
+        candidate.aliases.contains(&request.key.base)
+    }
 }
 
 fn explicit_variable_pairs(
@@ -472,6 +492,24 @@ fn explicit_variable_pairs(
                 requested_variable_matches(&request, parsed).then_some(index)
             })
             .collect();
+
+        if signal_inner_name(&request.key.base).is_none() {
+            let meanings: HashSet<_> = result_indices
+                .iter()
+                .map(|&index| &result_names[index].key.base)
+                .chain(
+                    golden_indices
+                        .iter()
+                        .map(|&index| &golden_names[index].key.base),
+                )
+                .collect();
+            if meanings.len() > 1 {
+                cmp_result.problems.push(format!(
+                    "variable selector '{requested}' is ambiguous; use a quantity-qualified name such as V({requested}) or I({requested})"
+                ));
+                continue;
+            }
+        }
 
         if result_indices.is_empty() || golden_indices.is_empty() {
             if !args.ignore_missing {
@@ -610,11 +648,25 @@ fn compare_waveforms(
             let gv = golden_vals[i];
 
             let abs_diff = (rv - gv).abs();
-            let rel_diff = if gv.abs() > 1e-20 {
+            let rel_diff = if rv == gv {
+                0.0
+            } else if gv == 0.0 {
+                f64::INFINITY
+            } else if abs_diff.is_finite() {
                 abs_diff / gv.abs()
             } else {
-                abs_diff
+                // Finite operands can overflow the subtraction. Their ratio
+                // can still establish a finite relative error.
+                (rv / gv - 1.0).abs()
             };
+
+            // Track the two maxima independently, including the sample that
+            // causes a --fail-fast return.
+            if abs_diff > cmp_result.max_abs_diff {
+                cmp_result.max_abs_diff = abs_diff;
+                cmp_result.max_diff_variable = var_name.clone();
+            }
+            cmp_result.max_rel_diff = cmp_result.max_rel_diff.max(rel_diff);
 
             // Check if within tolerance
             let within_abstol = abs_diff <= args.abstol;
@@ -634,13 +686,6 @@ fn compare_waveforms(
                 if args.fail_fast {
                     return Ok(cmp_result);
                 }
-            }
-
-            // Track maximum differences
-            if abs_diff > cmp_result.max_abs_diff {
-                cmp_result.max_abs_diff = abs_diff;
-                cmp_result.max_rel_diff = rel_diff;
-                cmp_result.max_diff_variable = var_name.clone();
             }
         }
     }

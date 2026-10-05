@@ -1,5 +1,5 @@
-//! Helpers shared by the `run` analysis modules: node lookup by name or
-//! index, `.STEP`/frequency sweep point generation, HDF5 error mapping, and
+//! Helpers shared by the `run` analysis modules: authored node lookup,
+//! `.STEP`/frequency sweep point generation, HDF5 error mapping, and
 //! the non-finite result guard behind `--allow-nonfinite`.
 
 use crate::cli::CliError;
@@ -41,8 +41,7 @@ impl NodeResolver {
             // node flag reached it and 69 when an analysis card did. This
             // failure never reaches the run report - the requested-mode
             // dispatch propagates it straight out - so the stop the report
-            // would have re-labelled has to be re-labelled here, exactly as
-            // the sibling resolver in `frequency.rs` does.
+            // would have re-labelled has to be re-labelled here as well.
             if matches!(source, rspice_core::SimulationError::Aborted) {
                 super::cancellation_cli_error(timeout_seconds)
             } else {

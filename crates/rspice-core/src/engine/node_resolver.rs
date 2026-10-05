@@ -59,8 +59,8 @@ impl NodeResolver {
     /// Resolve one authored node name.
     ///
     /// The deck's own ground policy decides which spellings are node zero, a
-    /// bare integer is taken as the index it spells, and anything else must
-    /// name a node the elaborated circuit actually has. `role` names the card
+    /// numeric labels are names just like alphabetic labels, and every other
+    /// name must exist in the elaborated circuit. `role` names the card
     /// port in the failure so an operator knows which of a `.PZ` card's four
     /// ports was wrong.
     pub fn resolve(&self, node: &str, role: &str) -> Result<usize, SimulationError> {
@@ -72,9 +72,6 @@ impl NodeResolver {
         }
         if self.ground.is_ground(node) {
             return Ok(0);
-        }
-        if let Ok(index) = node.parse::<usize>() {
-            return Ok(index);
         }
         self.indices
             .get(&node.to_ascii_uppercase())
@@ -147,6 +144,22 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains(".SENS output"), "{message}");
         assert!(message.contains("nowhere"), "{message}");
+    }
+
+    #[test]
+    fn numeric_labels_are_authored_names_not_internal_indices() {
+        let engine = Engine::new(SimulationConfig::default());
+        for (input, output) in [("2", "1"), ("10", "20")] {
+            let netlist = Netlist::parse(&format!(
+                "Numeric nodes\nV1 {input} 0 1\nR1 {input} {output} 1k\nR2 {output} 0 1k\n.end\n"
+            ))
+            .expect("deck parses");
+            let resolver = NodeResolver::build_with_abort(&engine, &netlist, &NoAbort)
+                .expect("resolver builds");
+            assert_eq!(resolver.resolve(input, "input").expect("input"), 1);
+            assert_eq!(resolver.resolve(output, "output").expect("output"), 2);
+            assert!(resolver.resolve("3", "absent numeric node").is_err());
+        }
     }
 
     #[test]

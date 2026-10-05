@@ -8,7 +8,7 @@
 
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
-use crate::hdf5::read_hdf5;
+use crate::hdf5::read_hdf5_with_limits;
 use std::io::Read;
 use std::path::Path;
 
@@ -246,14 +246,34 @@ fn load_rawfile(
         ));
     }
 
-    let mut waveforms = data.waveforms.into_iter();
-    let Some(scale) = waveforms.next() else {
+    let operating_point = matches!(
+        data.header.plotname.trim().to_ascii_lowercase().as_str(),
+        "dc op" | "operating point" | "dc operating point"
+    );
+    let mut waveforms = data.waveforms.into_iter().peekable();
+    let Some(first) = waveforms.peek() else {
         return Err(conversion_error(path, "rawfile contains no variables"));
     };
-    let scale_variable = data.variables.first();
+    let (scale_name, scale_type, scale) = if operating_point {
+        (
+            "point".to_string(),
+            "index".to_string(),
+            (0..first.y.len()).map(|index| index as f64).collect(),
+        )
+    } else {
+        let first = waveforms.next().expect("first waveform was checked");
+        (
+            first.name,
+            data.variables
+                .first()
+                .map(|v| v.var_type.clone())
+                .unwrap_or_else(|| "time".to_string()),
+            first.y,
+        )
+    };
 
     let columns = waveforms
-        .zip(data.variables.iter().skip(1))
+        .zip(data.variables.iter().skip(usize::from(!operating_point)))
         .map(|(waveform, variable)| ExportColumn {
             name: waveform.name,
             var_type: variable.var_type.clone(),
@@ -274,11 +294,9 @@ fn load_rawfile(
         } else {
             data.header.plotname
         },
-        scale_name: scale.name,
-        scale_type: scale_variable
-            .map(|v| v.var_type.clone())
-            .unwrap_or_else(|| "time".to_string()),
-        scale: scale.y,
+        scale_name,
+        scale_type,
+        scale,
         columns,
     })
 }
@@ -678,7 +696,16 @@ fn result_document_table(
     document: &rspice_core::execution::AnalysisResultDocument,
     resource_limits: rspice_core::ResourceLimits,
 ) -> Result<ExportTable, CliError> {
-    use rspice_core::execution::result_document::{AxisValues, SeriesValues};
+    use rspice_core::execution::result_document::{
+        AxisValues, ResultPayload, ScalarValue, SeriesValues,
+    };
+
+    if document.axes().len() > 1 {
+        return Err(conversion_error(
+            path,
+            "a multi-axis result cannot be represented by a single flat table",
+        ));
+    }
 
     let (scale_name, scale): (String, Vec<f64>) = match document.axes().first() {
         Some(axis) => (
@@ -695,9 +722,13 @@ fn result_document_table(
     enforce_resource_limit(
         path,
         rspice_core::ResourceKind::ExternalDataValues,
-        scale
-            .len()
-            .saturating_mul(document.signals().len().saturating_add(1)),
+        scale.len().saturating_mul(
+            document
+                .signals()
+                .len()
+                .saturating_add(document.scalars().len())
+                .saturating_add(1),
+        ),
         resource_limits.max_external_data_values,
     )?;
 
@@ -763,6 +794,59 @@ fn result_document_table(
         });
     }
 
+    for scalar in document.scalars() {
+        let unsupported = || {
+            conversion_error(
+                path,
+                format!(
+                    "scalar '{}' cannot be represented exactly by a numeric flat table",
+                    scalar.name()
+                ),
+            )
+        };
+        let data = match scalar.value() {
+            ScalarValue::Real { value: Some(value) } => ColumnData::Real(vec![*value; scale.len()]),
+            ScalarValue::Complex { value: Some(value) } => ColumnData::Complex {
+                real: vec![value.real; scale.len()],
+                imag: vec![value.imaginary; scale.len()],
+            },
+            ScalarValue::Integer { value } if value.unsigned_abs() <= (1u64 << 53) => {
+                ColumnData::Real(vec![*value as f64; scale.len()])
+            }
+            ScalarValue::Count { value } if *value <= (1u64 << 53) => {
+                ColumnData::Real(vec![*value as f64; scale.len()])
+            }
+            ScalarValue::Boolean { value } => {
+                ColumnData::Real(vec![u8::from(*value) as f64; scale.len()])
+            }
+            _ => return Err(unsupported()),
+        };
+        // Keep the established .TF table names so formats emitted by the same
+        // analysis also compare against one another.
+        let name = match document.payload() {
+            ResultPayload::Tf(payload) => match scalar.name() {
+                "transfer_gain" => "transfer_function".to_string(),
+                "input_impedance" => format!("{}#input_impedance", payload.input.to_lowercase()),
+                "output_impedance" => {
+                    format!("output_impedance_at_{}", payload.output.to_lowercase())
+                }
+                _ => scalar.name().to_string(),
+            },
+            _ => scalar.name().to_string(),
+        };
+        columns.push(ExportColumn {
+            name,
+            var_type: "scalar".to_string(),
+            data,
+        });
+    }
+    if columns.is_empty() {
+        return Err(conversion_error(
+            path,
+            "result contains no retained numeric quantities that a flat table can represent",
+        ));
+    }
+
     Ok(ExportTable {
         analysis: document.result_kind().tag().to_string(),
         plot_name: format!("{} ({})", document.result_kind().tag(), document.analysis()),
@@ -792,7 +876,13 @@ fn load_hdf5(
         metadata_bytes,
         resource_limits.max_external_data_bytes,
     )?;
-    let data = read_hdf5(path).map_err(|e| conversion_error(path, e))?;
+    let data = read_hdf5_with_limits(path, resource_limits).map_err(|error| match error {
+        crate::hdf5::Hdf5Error::ResourceLimit(source) => CliError::ResourceLimit {
+            path: path.to_path_buf(),
+            source,
+        },
+        error => conversion_error(path, error),
+    })?;
 
     let from_section = |section: crate::hdf5::Hdf5WaveformSection, analysis: &str| ExportTable {
         analysis: analysis.to_string(),

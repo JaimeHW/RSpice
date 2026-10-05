@@ -260,6 +260,35 @@ pub(super) fn sanitize_run_tag(label: &str) -> String {
     tag.trim_matches('_').to_string()
 }
 
+/// Preserve ordinary readable labels, but give colliding labels stable run
+/// ordinals before any artifacts (including checkpoints) are resolved. Reserve
+/// the original tags too, so an authored label cannot collide with a generated
+/// disambiguator. Reports retain the author's label alongside the ordinal.
+pub(super) fn disambiguate_run_labels(decks: &mut [rspice_core::netlist::multi_run::RunDeck]) {
+    use std::collections::{HashMap, HashSet};
+    let mut counts = HashMap::new();
+    for label in decks.iter().filter_map(|deck| deck.label.as_deref()) {
+        *counts.entry(sanitize_run_tag(label)).or_insert(0usize) += 1;
+    }
+    let mut reserved: HashSet<_> = counts.keys().cloned().collect();
+    for (index, deck) in decks.iter_mut().enumerate() {
+        let Some(label) = &deck.label else {
+            continue;
+        };
+        let tag = sanitize_run_tag(label);
+        if !tag.is_empty() && counts[&tag] == 1 {
+            continue;
+        }
+        let mut candidate = format!("{label} run {}", index + 1);
+        let mut attempt = 1usize;
+        while !reserved.insert(sanitize_run_tag(&candidate)) {
+            candidate = format!("{label} run {} {attempt}", index + 1);
+            attempt += 1;
+        }
+        deck.label = Some(candidate);
+    }
+}
+
 /// Resolve `-o` against config `output.output_directory`.
 ///
 /// Relative output paths are placed inside the configured directory (created
