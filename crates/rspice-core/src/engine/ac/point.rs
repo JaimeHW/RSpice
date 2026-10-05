@@ -55,18 +55,38 @@ impl AcExcitation {
         circuit: &CircuitData,
         source: &str,
     ) -> Result<Self, SimulationError> {
-        let sources = &circuit.voltage_sources;
-        let index = sources
+        if !circuit
+            .voltage_sources
             .names
             .iter()
-            .position(|name| name.eq_ignore_ascii_case(source))
-            .ok_or_else(|| {
-                SimulationError::Circuit(format!("AC voltage source '{source}' was not found"))
-            })?;
-        let projection = AcVoltageConstraintProjection::with_excitation(circuit, |candidate| {
-            Complex64::new(if candidate == index { 1.0 } else { 0.0 }, 0.0)
+            .any(|name| name.eq_ignore_ascii_case(source))
+        {
+            return Err(SimulationError::Circuit(format!(
+                "AC voltage source '{source}' was not found"
+            )));
+        }
+        Self::for_branch(circuit, source)
+    }
+
+    /// Unit voltage across a branch equation, including current-output TF probes.
+    pub(in crate::engine) fn for_branch(
+        circuit: &CircuitData,
+        source: &str,
+    ) -> Result<Self, SimulationError> {
+        let ordinal = circuit.get_branch_by_name(source).ok_or_else(|| {
+            SimulationError::Circuit(format!("AC branch '{source}' was not found"))
         })?;
-        let branch = circuit.get_branch_matrix_index(sources.branch_indices[index]);
+        let projection = AcVoltageConstraintProjection::with_excitation(circuit, |candidate| {
+            Complex64::new(
+                if circuit.voltage_sources.branch_indices[candidate] == ordinal {
+                    1.0
+                } else {
+                    0.0
+                },
+                0.0,
+            )
+        })?;
+        let branch = circuit.get_branch_matrix_index(ordinal);
         let row = branch.checked_sub(1).ok_or_else(|| {
             SimulationError::Circuit(format!("AC voltage source '{source}' has no equation row"))
         })?;

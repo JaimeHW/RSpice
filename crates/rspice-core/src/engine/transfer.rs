@@ -21,7 +21,7 @@ use crate::{CircuitData, Complex64};
 use crate::{Netlist, Value};
 
 /// ngspice's sentinel for an effectively infinite impedance (tfanal.c
-/// reports 1e20 for the output impedance of branch-current probes).
+/// clamps nonpositive branch-probe conductance to 1e-20).
 const NGSPICE_INFINITE_IMPEDANCE: Value = 1.0e20;
 
 impl Engine {
@@ -67,6 +67,13 @@ impl Engine {
         let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
         let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
         Self::ensure_model_run_active(abort)?;
+        let output_node = if output_is_current {
+            output_node
+        } else {
+            netlist.ground_policy().canonical_node(output_node)
+        };
+        let reference_node =
+            reference_node.map(|node| netlist.ground_policy().canonical_node(node));
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
         let voltage_input = circuit
             .voltage_sources
@@ -98,18 +105,13 @@ impl Engine {
             })
         };
         let output_probe = if output_is_current {
-            if circuit.get_branch_by_name(output_node).is_none() {
-                return Err(SimulationError::Netlist(format!(
-                    ".TF output element `{output_node}` has no branch current"
-                )));
-            }
-            None
+            AcExcitation::for_branch(&circuit, output_node)?
         } else {
-            Some(AcExcitation::current_probe(
+            AcExcitation::current_probe(
                 &circuit,
                 node_id(output_node)?,
                 node_id(reference_node.unwrap_or("0"))?,
-            )?)
+            )?
         };
         // One elaboration and bias state, with independent right-hand sides.
         // Authored excitations at every hierarchy level are excluded, and no
@@ -124,7 +126,11 @@ impl Engine {
         let mut workspace = ComplexMatrix::from_real_structure(&matrix);
         let solve = |circuit: &mut CircuitData, final_step| {
             linearization.prepare_frequency(circuit, &mut workspace, 0.0, final_step, abort)?;
-            let solution = linearization.solve(&mut workspace, &excitation, abort)?;
+            let solution = if circuit.matrix_size() == 0 {
+                Vec::new()
+            } else {
+                linearization.solve(&mut workspace, &excitation, abort)?
+            };
             let drive = ac_result(circuit, solution);
             abort.observe_progress(0.5);
             let gain = if output_is_current {
@@ -159,12 +165,29 @@ impl Engine {
                 value(circuit.current_sources.node_neg[index])
                     - value(circuit.current_sources.node_pos[index])
             };
-            let output_impedance = if let Some(probe) = &output_probe {
-                let solution = linearization.solve(&mut workspace, probe, abort)?;
-                voltage_difference(&ac_result(circuit, solution), output_node, reference_node)?
-            } else {
-                NGSPICE_INFINITE_IMPEDANCE
-            };
+            let output_impedance =
+                if output_is_current && output_node.eq_ignore_ascii_case(input_source) {
+                    // ngspice reuses Zin when the input and current probe are the
+                    // same source, before applying its general branch sentinel.
+                    input_impedance
+                } else {
+                    let solution = if circuit.matrix_size() == 0 {
+                        Vec::new()
+                    } else {
+                        linearization.solve(&mut workspace, &output_probe, abort)?
+                    };
+                    let output = ac_result(circuit, solution);
+                    if output_is_current {
+                        let current = branch_current(&output, output_node).ok_or_else(|| {
+                            SimulationError::Netlist(format!(
+                                ".TF output `{output_node}` has no branch current"
+                            ))
+                        })?;
+                        1.0 / current.max(1.0 / NGSPICE_INFINITE_IMPEDANCE)
+                    } else {
+                        voltage_difference(&output, output_node, reference_node)?
+                    }
+                };
             Ok((gain, input_impedance, output_impedance))
         };
         let (gain, input_impedance, output_impedance) = Self::solve_accepted_frequency_point(

@@ -230,3 +230,42 @@ r2 out 0 2k
         ".tf with a resistor as input source must be rejected"
     );
 }
+
+#[test]
+fn tf_current_probe_impedance_matches_ngspice_branch_rules() {
+    let engine = Engine::new(SimulationConfig::default());
+    let passive = Netlist::parse("same-source TF\nVin in 0 0\nR1 in 0 1k\n.end\n").unwrap();
+    let result = engine
+        .run_transfer_function(&passive, "vin", None, true, "VIN")
+        .unwrap();
+    // ngspice tfanal.c reuses Zin for a probe of the input voltage source.
+    assert_close(result.input_impedance, 1000.0, "input impedance");
+    assert_close(
+        result.output_impedance,
+        1000.0,
+        "same-source output impedance",
+    );
+
+    let active = Netlist::parse(
+        "active branch TF\nVin in 0 0\nRin in 0 1k\n\
+        Vprobe out 0 0\nGnegative 0 out out 0 0.001\n.end\n",
+    )
+    .unwrap();
+    let result = engine
+        .run_transfer_function(&active, "Vprobe", None, true, "Vin")
+        .unwrap();
+    // A unit branch drive draws +1 mA from this negative conductance.
+    // ngspice returns 1 / max(1e-20, Iprobe), not an unconditional sentinel.
+    assert_close(result.output_impedance, 1000.0, "active output impedance");
+}
+
+#[test]
+fn tf_ground_only_probe_has_zero_response() {
+    let netlist = Netlist::parse("ground-only transfer\nIin 0 0 0\n.end\n").unwrap();
+    let result = Engine::new(SimulationConfig::default())
+        .run_transfer_function(&netlist, "0", None, false, "Iin")
+        .unwrap();
+    assert_eq!(result.gain, 0.0);
+    assert_eq!(result.input_impedance, 0.0);
+    assert_eq!(result.output_impedance, 0.0);
+}
