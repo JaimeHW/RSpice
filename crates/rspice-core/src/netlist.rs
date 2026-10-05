@@ -62,9 +62,10 @@ pub use expr::{
 pub use flattener::{
     FlattenedNetlist, Flattener, FlattenerConfig, InstanceMetadata, XspiceAutoBridgeNodeHint,
     flatten_netlist, flatten_netlist_with_models, flatten_netlist_with_models_with_abort,
+    flatten_netlist_with_models_config_with_abort,
 };
 pub(crate) use flattener::{
-    flatten_netlist_with_models_config_with_abort, flatten_netlist_with_parameter_direction,
+    flatten_netlist_with_parameter_direction,
     materialize_passive_initial_condition,
 };
 pub use hierarchy_path::{HierarchyPath, HierarchyPathConfig};
