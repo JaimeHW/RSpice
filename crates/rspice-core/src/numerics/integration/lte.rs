@@ -711,7 +711,6 @@ impl LteEstimator {
 
     /// Seed both Xyce reference state and the accepted t0 predictor history.
     pub(crate) fn seed_initial_solution(&mut self, solution: &[Value]) {
-        self.update_signal_reference_prefix(solution, solution.len());
         self.restart_history_from(solution);
     }
 
@@ -1567,6 +1566,10 @@ impl LteEstimator {
     /// signal-history reference maxima.
     pub fn restart_history_from(&mut self, accepted_solution: &[Value]) {
         self.restart_history();
+        // A physical startup/event projection can change the accepted vector.
+        // Restart both its predictor and point reference; the signal reference
+        // update preserves historical maxima while including the new boundary.
+        self.update_signal_reference_prefix(accepted_solution, accepted_solution.len());
         self.prev_solution.extend_from_slice(accepted_solution);
         self.history_count = 1;
     }
@@ -1599,6 +1602,31 @@ impl LteEstimator {
 #[cfg(test)]
 mod lte_estimator_tests {
     use super::*;
+
+    #[test]
+    fn projected_restart_keeps_checkpoint_references_on_the_accepted_boundary() {
+        for reference in [
+            TransientLteReference::PointLocal,
+            TransientLteReference::PointGlobal,
+            TransientLteReference::SignalLocal,
+            TransientLteReference::SignalGlobal,
+        ] {
+            let mut estimator = LteEstimator::with_tolerances_and_reference(0.1, 1e-6, reference);
+            estimator.seed_initial_solution(&[10.0, 0.0]);
+            let projected = [1.0, -0.0];
+            estimator.restart_history_from(&projected);
+            let checkpoint = estimator
+                .capture_accepted_boundary_checkpoint(&projected)
+                .unwrap();
+            assert_eq!(checkpoint.history_count, 1);
+            if reference == TransientLteReference::SignalGlobal {
+                assert_eq!(checkpoint.signal_global_reference, 10.0);
+            }
+            if reference == TransientLteReference::SignalLocal {
+                assert_eq!(checkpoint.signal_local_reference, [10.0, 0.0]);
+            }
+        }
+    }
 
     fn accepted_estimator(
         reference: TransientLteReference,
