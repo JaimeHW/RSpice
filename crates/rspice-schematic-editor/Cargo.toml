@@ -17,7 +17,7 @@ test-support = []
 
 [dependencies]
 log.workspace = true
-egui = { version = "0.35.0", default-features = false }
+egui = { version = "0.36.2", default-features = false }
 rspice-app-types.workspace = true
 rspice-design = { workspace = true, features = ["symbol-artwork"] }
 rspice-design-model.workspace = true
