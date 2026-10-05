@@ -47,23 +47,19 @@ impl AcTransferPoint {
         }
     }
 
-    /// Group delay contribution between this point and next
+    /// Group delay between ordered samples; NaN for invalid or undefined phase data.
+    /// Adjacent phases must be sampled within half a turn of each other.
     pub fn group_delay(&self, next: &AcTransferPoint) -> Value {
-        let df = next.frequency - self.frequency;
-        if df.abs() < 1e-15 {
-            return 0.0;
+        if self.transfer == Complex64::new(0.0, 0.0) || next.transfer == Complex64::new(0.0, 0.0) {
+            return Value::NAN;
         }
-
-        let mut dphi = next.phase_rad - self.phase_rad;
-        // Unwrap phase
-        while dphi > PI {
-            dphi -= 2.0 * PI;
-        }
-        while dphi < -PI {
-            dphi += 2.0 * PI;
-        }
-
-        -dphi / (2.0 * PI * df)
+        crate::analysis::phase::group_delay(
+            self.frequency,
+            self.phase_rad,
+            next.frequency,
+            next.phase_rad,
+        )
+        .unwrap_or(Value::NAN)
     }
 }
 
@@ -172,13 +168,37 @@ impl AcTransferResult {
             .windows(2)
             .map(|w| {
                 let gd = w[0].group_delay(&w[1]);
-                ((w[0].frequency + w[1].frequency) / 2.0, gd)
+                (w[0].frequency + (w[1].frequency - w[0].frequency) / 2.0, gd)
             })
             .collect()
     }
 
     /// Compute filter characteristics from data
     pub fn compute_characteristics(&mut self) {
+        self.dc_gain = None;
+        self.dc_gain_db = None;
+        self.peak_frequency = None;
+        self.peak_gain_db = None;
+        self.cutoff_low = None;
+        self.cutoff_high = None;
+        self.bandwidth = None;
+        self.q_factor = None;
+        self.unity_gain_frequency = None;
+        self.phase_margin = None;
+        if self.points.iter().any(|p| {
+            !p.frequency.is_finite()
+                || p.frequency < 0.0
+                || !p.magnitude.is_finite()
+                || p.magnitude < 0.0
+                || p.magnitude_db.is_nan()
+                || p.magnitude_db == Value::INFINITY
+        }) || self
+            .points
+            .windows(2)
+            .any(|w| w[1].frequency <= w[0].frequency)
+        {
+            return;
+        }
         if self.points.is_empty() {
             return;
         }
@@ -202,9 +222,9 @@ impl AcTransferResult {
         self.peak_gain_db = Some(peak_db);
         self.peak_frequency = Some(self.points[peak_idx].frequency);
 
-        // DC gain (from lowest frequency if < 100 Hz)
+        // DC gain is available only when the sweep actually contains DC.
         if let Some(first) = self.points.first()
-            && first.frequency < 100.0
+            && first.frequency == 0.0
         {
             self.dc_gain = Some(first.magnitude);
             self.dc_gain_db = Some(first.magnitude_db);
@@ -241,7 +261,7 @@ impl AcTransferResult {
 
     /// Find frequency where magnitude crosses threshold before index
     fn find_crossing_before(&self, before_idx: usize, threshold: Value) -> Option<Value> {
-        for i in (1..before_idx).rev() {
+        for i in (1..=before_idx).rev() {
             let db0 = self.points[i - 1].magnitude_db;
             let db1 = self.points[i].magnitude_db;
             let f0_raw = self.points[i - 1].frequency;
@@ -348,33 +368,22 @@ impl AcTransferResult {
         if !freq.is_finite() || freq <= 0.0 {
             return None;
         }
-        for i in 0..self.points.len() - 1 {
-            if self.points[i].frequency <= freq && self.points[i + 1].frequency >= freq {
-                let f0_raw = self.points[i].frequency;
-                let f1_raw = self.points[i + 1].frequency;
-                let p0 = self.points[i].phase_deg;
-                let p1 = self.points[i + 1].phase_deg;
-                if !f0_raw.is_finite()
-                    || !f1_raw.is_finite()
-                    || !p0.is_finite()
-                    || !p1.is_finite()
-                    || f0_raw <= 0.0
-                    || f1_raw <= 0.0
-                {
-                    continue;
+        let mut phase = self.points.first()?.phase_deg;
+        for window in self.points.windows(2) {
+            let [left, right] = window else {
+                unreachable!()
+            };
+            let delta = crate::analysis::phase::difference(left.phase_deg, right.phase_deg, 360.0)?;
+            if left.frequency <= freq && right.frequency >= freq {
+                if left.frequency <= 0.0 || right.frequency <= left.frequency {
+                    return None;
                 }
-                let f0 = f0_raw.log10();
-                let f1 = f1_raw.log10();
-                let denom = f1 - f0;
-                if denom.abs() < 1e-15 {
-                    continue;
-                }
-                let alpha = (freq.log10() - f0) / denom;
-                let phase = p0 + alpha * (p1 - p0);
-                if phase.is_finite() {
-                    return Some(phase);
-                }
+                let alpha = (freq.log10() - left.frequency.log10())
+                    / (right.frequency.log10() - left.frequency.log10());
+                let value = phase + alpha * delta;
+                return value.is_finite().then_some(value);
             }
+            phase += delta;
         }
         None
     }
