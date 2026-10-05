@@ -52,10 +52,10 @@ impl Mosfet {
             if rate_nodes.is_none() {
                 return Ok([0.0; 3]);
             }
-        } else if let Some(nodes) = rate_nodes {
-            if nodes.iter().all(|&node| node > 0 && node <= solution.len()) {
-                return Ok(nodes.map(|node| solution[node - 1] / RATE_TIME_SCALE));
-            }
+        } else if let Some(nodes) = rate_nodes
+            && nodes.iter().all(|&node| node > 0 && node <= solution.len())
+        {
+            return Ok(nodes.map(|node| solution[node - 1] / RATE_TIME_SCALE));
         }
         Err(format!(
             "MOSFET '{}': invalid periodic Meyer rate coordinates",

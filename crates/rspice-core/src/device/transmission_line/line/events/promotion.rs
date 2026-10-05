@@ -45,21 +45,20 @@ impl TransmissionLine {
         edges: &[[Value; 3]],
         endpoint_rates: Option<[Value; 2]>,
     ) -> Result<(), String> {
-        if let Some(rates) = endpoint_rates {
-            if rates.iter().any(|rate| !rate.is_finite())
+        if let Some(rates) = endpoint_rates
+            && (rates.iter().any(|rate| !rate.is_finite())
                 || !edges.last().is_some_and(|edge| {
                     edge[0] == edge[2]
                         && self
                             .state_history
                             .back()
                             .is_some_and(|sample| sample.time == edge[0])
-                })
-            {
-                return Err(format!(
-                    "transmission line '{}': invalid sampled endpoint rate owner",
-                    self.name
-                ));
-            }
+                }))
+        {
+            return Err(format!(
+                "transmission line '{}': invalid sampled endpoint rate owner",
+                self.name
+            ));
         }
         if edges.is_empty() {
             return Ok(());

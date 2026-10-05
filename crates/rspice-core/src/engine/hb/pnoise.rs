@@ -388,17 +388,16 @@ impl Engine {
         index: usize,
     ) -> String {
         let name = &circuit.resistors.names[index];
-        if let Some((owner, suffix)) = name.rsplit_once(".__") {
-            if let Some(device) = circuit
+        if let Some((owner, suffix)) = name.rsplit_once(".__")
+            && let Some(device) = circuit
                 .mosfets
                 .devices
                 .iter()
                 .find(|device| device.name.eq_ignore_ascii_case(owner))
-            {
-                for mechanism in ["RD", "RS"] {
-                    if suffix.eq_ignore_ascii_case(mechanism) {
-                        return format!("{}:{mechanism}", device.name);
-                    }
+        {
+            for mechanism in ["RD", "RS"] {
+                if suffix.eq_ignore_ascii_case(mechanism) {
+                    return format!("{}:{mechanism}", device.name);
                 }
             }
         }

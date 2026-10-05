@@ -587,11 +587,11 @@ pub(crate) fn transition(
         })
         .collect::<Vec<_>>();
     let charge = charge_spectra(circuit, grid.clone(), &outgoing, storage, abort)?;
-    for r in 0..n {
+    for (r, charge_row) in charge.iter().enumerate().take(n) {
         check_abort(abort)?;
-        for k in 0..grid.len() {
-            let mut residual = previous.charge[r][k] - charge[r][k];
-            let mut scale = previous.charge[r][k].norm() + charge[r][k].norm();
+        for (k, &charge_value) in charge_row.iter().enumerate().take(grid.len()) {
+            let mut residual = previous.charge[r][k] - charge_value;
+            let mut scale = previous.charge[r][k].norm() + charge_value.norm();
             for &(row, col, value) in &topology.incidence {
                 if row == r {
                     residual += value * impulses[col][k];

@@ -105,10 +105,6 @@ fn compare(
 /// BDF2 uses its embedded backward-Euler difference as a conservative local
 /// indicator. BE startup/restarts use two half steps and twice their difference
 /// from the full step, estimating the error of the accepted full BE step.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "state, scheduling, tolerance and resource inputs are independent"
-)]
 pub fn advance_spectral_envelope_with_abort<F>(
     previous: &SpectralEnvelopeState,
     requested_step: Value,

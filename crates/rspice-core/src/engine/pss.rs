@@ -2917,15 +2917,19 @@ impl Engine {
                 for (interval, pair) in indices.windows(2).enumerate() {
                     let left = fine.time[pair[0]];
                     let width = fine.time[pair[1]] - left;
-                    for point in pair[0] + 1..pair[1] {
+                    for (point, &fine_value) in fine_values
+                        .iter()
+                        .enumerate()
+                        .take(pair[1])
+                        .skip(pair[0] + 1)
+                    {
                         if point & 0x3ff == 0 && abort.is_aborted() {
                             return Err(SimulationError::Aborted);
                         }
                         let weight = (fine.time[point] - left) / width;
                         let interpolated = (1.0 - weight) * (coarse_values[interval] / scale)
                             + weight * (coarse_values[interval + 1] / scale);
-                        error = error
-                            .max((interpolated - fine_values[point] / scale).abs() / tolerance);
+                        error = error.max((interpolated - fine_value / scale).abs() / tolerance);
                     }
                 }
             }

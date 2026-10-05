@@ -2,23 +2,23 @@
 use super::*;
 use crate::ResourceLimits;
 use crate::analysis::quasi_periodic::{
-    SpectralEnvelopeControl, SpectralEnvelopeMethod, SpectralEnvelopeState,
-    SpectralEnvelopeEventConfig, advance_spectral_envelope_with_abort,
+    SpectralEnvelopeControl, SpectralEnvelopeEventConfig, SpectralEnvelopeMethod,
+    SpectralEnvelopeState, advance_spectral_envelope_with_abort,
 };
 use crate::circuit::SourceTimeSide;
 use crate::engine::PeriodicDcOperatingPointSeed;
 use crate::engine::transient::source_events::{PhysicalSourceEvents, PhysicalSourceOwner};
-mod events;
-mod event_topology;
 mod event_tolerances;
+mod event_topology;
+mod events;
 pub use event_tolerances::EnvelopeEventTolerances;
 mod mission;
+pub use events::EnvelopeSourceEvent;
+pub use events::NetlistEnvelopeEvent;
 pub use mission::{
     NetlistEnvelopeMission, NetlistEnvelopeSample, NetlistEnvelopeTransition,
     SpectralEnvelopeMissionConfig, SpectralEnvelopeStepping,
 };
-pub use events::EnvelopeSourceEvent;
-pub use events::NetlistEnvelopeEvent;
 
 #[cfg(test)]
 mod tests;
@@ -537,10 +537,6 @@ impl PreparedSpectralEnvelope {
         Ok(self.bind(numerical, side))
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "physical time, method, source side and trial limits are independent"
-    )]
     fn trial(
         &mut self,
         previous: &SpectralEnvelopeState,
@@ -568,10 +564,6 @@ impl PreparedSpectralEnvelope {
     /// `deadline_side` selects the source value; interior probes use the
     /// published waveform. The caller must handle event algebraic jumps and
     /// restart multistep history before continuing past a discontinuity.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "accepted state, controller and event endpoint are independent"
-    )]
     pub fn advance_with_abort(
         &mut self,
         previous: &NetlistEnvelopeState,
