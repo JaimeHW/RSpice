@@ -596,7 +596,7 @@ pub struct ModelsArgs {
     #[arg(long, value_name = "TEXT")]
     pub search: Option<String>,
 
-    /// Restrict the listing to packs whose metadata says redistributable
+    /// Restrict every query to redistributable packs and unrestricted definitions
     #[arg(long)]
     pub shippable_only: bool,
 

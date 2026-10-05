@@ -44,20 +44,44 @@ pub fn models(args: ModelsArgs, _verbose: bool, quiet: bool) -> Result<(), CliEr
         ));
     };
 
-    if let Some(part) = &args.part {
-        return show_part(&index, part, quiet);
-    }
-    if let Some(device) = &args.device {
+    if args.part.is_some() || args.device.is_some() || args.search.is_some() {
+        let packs: std::collections::HashSet<_> = index
+            .redistributable_packs()
+            .map(|pack| pack.id.as_str())
+            .collect();
+        let search = args
+            .search
+            .as_ref()
+            .map(|search| search.to_ascii_lowercase());
         let hits = index
-            .parts_by_device(device, BROWSE_LIMIT)
+            .matching_parts(
+                if args.part.is_some() {
+                    usize::MAX
+                } else {
+                    BROWSE_LIMIT
+                },
+                |entry| {
+                    (!args.shippable_only
+                        || (!entry.restricted && packs.contains(entry.pack.as_str())))
+                        && args
+                            .part
+                            .as_ref()
+                            .is_none_or(|part| entry.name.eq_ignore_ascii_case(part))
+                        && args
+                            .device
+                            .as_ref()
+                            .is_none_or(|device| entry.device.eq_ignore_ascii_case(device))
+                        && search
+                            .as_ref()
+                            .is_none_or(|search| entry.name.to_ascii_lowercase().contains(search))
+                },
+            )
             .map_err(catalog_err)?;
-        return browse(hits, quiet);
-    }
-    if let Some(search) = &args.search {
-        let hits = index
-            .search_parts(search, BROWSE_LIMIT)
-            .map_err(catalog_err)?;
-        return browse(hits, quiet);
+        return if let Some(part) = &args.part {
+            show_part(&index, part, hits, quiet)
+        } else {
+            browse(hits, quiet)
+        };
     }
 
     list_packs(&index, args.shippable_only, quiet)
@@ -113,11 +137,15 @@ fn list_packs(
     Ok(())
 }
 
-fn show_part(index: &SpiceLibraryIndex, part: &str, quiet: bool) -> Result<(), CliError> {
-    let matches = index.find_part(part).map_err(catalog_err)?;
+fn show_part(
+    index: &SpiceLibraryIndex,
+    part: &str,
+    matches: Vec<CatalogEntry>,
+    quiet: bool,
+) -> Result<(), CliError> {
     if matches.is_empty() {
         return Err(invalid(
-            format!("no definition named '{part}' in any pack"),
+            format!("no eligible definition named '{part}' in the selected packs"),
             Some("try --search for a substring match"),
         ));
     }

@@ -749,6 +749,27 @@ impl SpiceLibraryIndex {
             .collect())
     }
 
+    /// Stream addressable definitions through a caller's predicate, applying
+    /// the result limit after every filter. This avoids collecting a complete
+    /// catalog or truncating candidates before a product-specific filter.
+    pub fn matching_parts(
+        &self,
+        limit: usize,
+        mut matches: impl FnMut(&CatalogEntry) -> bool,
+    ) -> io::Result<Vec<CatalogEntry>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let mut found = Vec::new();
+        self.for_each_catalog_entry(|entry| {
+            if entry.scope.is_addressable() && matches(&entry) {
+                found.push(entry);
+            }
+            found.len() < limit
+        })?;
+        Ok(found)
+    }
+
     /// The whole selected catalog, nested definitions included. Prefer the
     /// search methods for a full developer corpus.
     pub fn load_catalog(&self) -> io::Result<Vec<CatalogEntry>> {
