@@ -1359,7 +1359,7 @@ pub(super) fn run_requested_mode(
     Ok(RequestedModeOutcome::NotRequested)
 }
 
-/// Resolve a node given by name or index for analysis flags.
+/// Resolve an authored node name for analysis flags.
 pub(super) fn resolve_node(
     ctx: &RunContext<'_>,
     node: &str,
@@ -1370,7 +1370,7 @@ pub(super) fn resolve_node(
         .resolve_node(node)
         .ok_or_else(|| CliError::InvalidArgument {
             message: format!("unknown node '{node}' for {flag}"),
-            suggestion: Some("pass a node name from the netlist or a node index".to_string()),
+            suggestion: Some("pass a node name from the netlist".to_string()),
         })
 }
 
@@ -1380,8 +1380,14 @@ fn resolve_node_pair(
     second: &str,
     flag: &str,
 ) -> Result<(usize, usize), CliError> {
-    Ok((
-        resolve_node(ctx, first, flag)?,
-        resolve_node(ctx, second, flag)?,
-    ))
+    let resolver = shared::NodeResolver::from_netlist(ctx.engine, ctx.netlist, ctx.args.timeout)?;
+    let resolve = |node| {
+        resolver
+            .resolve_node(node)
+            .ok_or_else(|| CliError::InvalidArgument {
+                message: format!("unknown node '{node}' for {flag}"),
+                suggestion: Some("pass a node name from the netlist".to_string()),
+            })
+    };
+    Ok((resolve(first)?, resolve(second)?))
 }

@@ -9,7 +9,7 @@
 //! and reject `-f hdf5` rather than write a misleading file.
 
 use super::RunContext;
-use super::shared::{generate_frequency_sweep, map_hdf5_output_error};
+use super::shared::{self, generate_frequency_sweep, map_hdf5_output_error};
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::run_signals::{ComplexSignal, ac_signals, voltage_display_name};
 use crate::hdf5::{
@@ -30,50 +30,6 @@ fn map_frequency_error(
             source,
             analysis: Some(analysis.to_string()),
         }
-    }
-}
-
-/// Node lookup for analyses whose core entrypoint still accepts numerical
-/// ports. Unlike the older shared resolver, construction is cancellable, so a
-/// large hierarchy cannot make a frequency-analysis timeout wait for
-/// elaboration to finish.
-struct FrequencyNodeResolver {
-    node_name_to_index: std::collections::HashMap<String, usize>,
-    ground_policy: rspice_core::netlist::GroundPolicy,
-}
-
-impl FrequencyNodeResolver {
-    fn from_context(ctx: &RunContext<'_>) -> Result<Self, CliError> {
-        let circuit = ctx
-            .engine
-            .build_circuit_with_abort(ctx.netlist, &crate::abort::ProcessAbort)
-            .map_err(|source| map_frequency_error(ctx, "Node Resolution", source))?;
-        let node_name_to_index = circuit
-            .node_names_sorted()
-            .iter()
-            .enumerate()
-            .map(|(index, name)| (name.to_ascii_uppercase(), index + 1))
-            .collect();
-        Ok(Self {
-            node_name_to_index,
-            ground_policy: ctx.netlist.ground_policy(),
-        })
-    }
-
-    fn resolve_node(&self, node: &str) -> Option<usize> {
-        let node = node.trim();
-        if node.is_empty() {
-            return None;
-        }
-        if self.ground_policy.is_ground(node) {
-            return Some(0);
-        }
-        if let Ok(index) = node.parse::<usize>() {
-            return Some(index);
-        }
-        self.node_name_to_index
-            .get(&node.to_ascii_uppercase())
-            .copied()
     }
 }
 
@@ -1437,7 +1393,7 @@ pub(super) fn run_pz_from_command(
     transfer_type: rspice_core::netlist::PoleZeroTransferType,
     analysis_type: rspice_core::netlist::PoleZeroAnalysisType,
 ) -> Result<(), CliError> {
-    let resolver = FrequencyNodeResolver::from_context(ctx)?;
+    let resolver = shared::NodeResolver::from_netlist(ctx.engine, ctx.netlist, ctx.args.timeout)?;
 
     let resolve = |node: &str| {
         resolver
@@ -1550,7 +1506,7 @@ pub(super) fn run_sensitivity_from_command(
     filters: &[String],
     ac_sweep: Option<rspice_core::netlist::SensitivityAcSweep>,
 ) -> Result<(), CliError> {
-    let resolver = FrequencyNodeResolver::from_context(ctx)?;
+    let resolver = shared::NodeResolver::from_netlist(ctx.engine, ctx.netlist, ctx.args.timeout)?;
     let out_pos = if output_is_current {
         0
     } else {
