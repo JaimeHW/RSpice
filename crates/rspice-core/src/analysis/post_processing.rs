@@ -1,27 +1,62 @@
 //! Post-Processing Utilities Module
 //!
-//! Provides commercial-grade post-processing functions for simulation results:
+//! Checked THD, SFDR, group-delay, SNR, and sample RMS measurements.
 //!
-//! - **THD**: Total Harmonic Distortion calculation
-//! - **SFDR**: Spurious-Free Dynamic Range
-//! - **IMD**: Intermodulation Distortion (IP2, IP3)
-//! - **Group Delay**: Phase derivative vs frequency
-//! - **Bode Analysis**: Gain/phase extraction with margin markers
-//! - **SNR**: Signal-to-Noise Ratio calculations
-//!
-//! These utilities process raw waveform or frequency-domain data to extract
-//! standardized performance metrics used in analog/RF design.
+//! Invalid inputs and unavailable measurements return errors. Waveform THD
+//! uses the same whole-period integration as `.FOUR`; adjacent phase samples
+//! must resolve changes within half a turn for group-delay unwrapping.
 
+use super::fourier::{FourierAnalysis, FourierConfig, FourierError};
 use crate::Value;
 use num_complex::Complex64;
-use std::f64::consts::PI;
+
+/// Invalid data, unavailable evidence, or an unrepresentable measurement.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[non_exhaustive]
+pub enum PostProcessingError {
+    /// The measurement's input contract was not met.
+    #[error("invalid measurement input: {0}")]
+    InvalidInput(&'static str),
+    /// The supplied data cannot define the requested measurement.
+    #[error("measurement is undefined: {0}")]
+    Undefined(&'static str),
+    /// Finite input produced a quantity outside the representable range.
+    #[error("measurement is not representable: {0}")]
+    Unrepresentable(&'static str),
+    /// Workspace allocation failed.
+    #[error("cannot allocate measurement workspace: {0}")]
+    Allocation(&'static str),
+    /// Shared Fourier qualification or integration failed.
+    #[error(transparent)]
+    Fourier(#[from] FourierError),
+}
+
+fn validate_frequencies(frequencies: &[Value]) -> Result<(), PostProcessingError> {
+    if frequencies.is_empty()
+        || frequencies.iter().any(|f| !f.is_finite() || *f < 0.0)
+        || frequencies.windows(2).any(|w| w[1] <= w[0])
+    {
+        return Err(PostProcessingError::InvalidInput(
+            "frequencies must be finite, nonnegative, and strictly increasing",
+        ));
+    }
+    Ok(())
+}
+
+fn workspace<T>(length: usize, name: &'static str) -> Result<Vec<T>, PostProcessingError> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(length)
+        .map_err(|_| PostProcessingError::Allocation(name))?;
+    Ok(values)
+}
 
 //=============================================================================
 // THD (Total Harmonic Distortion)
 //=============================================================================
 
 /// Total Harmonic Distortion analysis result
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ThdResult {
     /// Fundamental frequency (Hz)
     pub fundamental_freq: Value,
@@ -29,7 +64,7 @@ pub struct ThdResult {
     /// Fundamental amplitude (linear)
     pub fundamental_amplitude: Value,
 
-    /// THD as ratio (0-1)
+    /// THD as a nonnegative ratio (may exceed one)
     pub thd_ratio: Value,
 
     /// THD in percent
@@ -54,76 +89,75 @@ impl ThdResult {
     /// # Arguments
     /// * `harmonics` - Vector of harmonic amplitudes [fundamental, 2nd, 3rd, ...]
     /// * `fundamental_freq` - Frequency of the fundamental
-    pub fn from_harmonics(harmonics: &[Value], fundamental_freq: Value) -> Self {
-        if harmonics.is_empty() {
-            return Self::default();
+    pub fn from_harmonics(
+        harmonics: &[Value],
+        fundamental_freq: Value,
+    ) -> Result<Self, PostProcessingError> {
+        if !fundamental_freq.is_finite()
+            || fundamental_freq <= 0.0
+            || harmonics.is_empty()
+            || harmonics.iter().any(|h| !h.is_finite() || *h < 0.0)
+        {
+            return Err(PostProcessingError::InvalidInput(
+                "positive finite fundamental frequency and finite nonnegative harmonic amplitudes are required",
+            ));
         }
-
         let fundamental = harmonics[0];
-        if fundamental <= 0.0 {
-            return Self::default();
+        if fundamental == 0.0 {
+            return Err(PostProcessingError::Undefined("zero fundamental amplitude"));
         }
-
-        // Sum of squares of harmonics (excluding fundamental)
-        let harmonic_power: Value = harmonics.iter().skip(1).map(|h| h * h).sum();
-        let thd_ratio = (harmonic_power / (fundamental * fundamental)).sqrt();
-
-        Self {
+        // Scale before accumulation: neither squared amplitudes nor their
+        // unnormalized Euclidean norm need fit into a floating-point value.
+        let scale = harmonics.iter().skip(1).copied().fold(0.0, Value::max);
+        let norm = if scale == 0.0 {
+            0.0
+        } else {
+            harmonics
+                .iter()
+                .skip(1)
+                .fold(0.0_f64, |norm, h| norm.hypot(h / scale))
+        };
+        let thd_ratio = (scale / fundamental) * norm;
+        let thd_percent = thd_ratio * 100.0;
+        if !thd_percent.is_finite() || (scale > 0.0 && thd_ratio == 0.0) {
+            return Err(PostProcessingError::Unrepresentable(
+                "total harmonic distortion",
+            ));
+        }
+        let mut retained = workspace(harmonics.len(), "harmonic amplitudes")?;
+        retained.extend_from_slice(harmonics);
+        Ok(Self {
             fundamental_freq,
             fundamental_amplitude: fundamental,
             thd_ratio,
-            thd_percent: thd_ratio * 100.0,
+            thd_percent,
             thd_db: 20.0 * thd_ratio.log10(),
-            harmonics: harmonics.to_vec(),
+            harmonics: retained,
             num_harmonics: harmonics.len(),
             thd_plus_noise: None,
-        }
+        })
     }
 
-    /// Calculate THD from time-domain waveform using FFT
-    pub fn from_waveform(samples: &[Value], sample_rate: Value, fundamental_freq: Value) -> Self {
-        let n = samples.len();
-        if n < 4 {
-            return Self::default();
-        }
-
-        // Simple DFT for harmonic extraction
-        let harmonics = Self::extract_harmonics(samples, sample_rate, fundamental_freq, 10);
-        Self::from_harmonics(&harmonics, fundamental_freq)
-    }
-
-    /// Extract harmonic amplitudes using DFT
-    fn extract_harmonics(
+    /// Measure harmonics 1 through 10 over the last complete fundamental
+    /// period, using the same integration and sampling checks as `.FOUR`.
+    /// Short or under-resolved records are rejected, not zero-padded.
+    pub fn from_waveform(
         samples: &[Value],
         sample_rate: Value,
-        fundamental: Value,
-        max_harmonics: usize,
-    ) -> Vec<Value> {
-        let n = samples.len();
-        let mut harmonics = Vec::with_capacity(max_harmonics);
-
-        for h in 1..=max_harmonics {
-            let freq = h as Value * fundamental;
-            let bin = (freq * n as Value / sample_rate).round() as usize;
-
-            if bin >= n / 2 {
-                break;
-            }
-
-            // DFT at specific bin
-            let mut re = 0.0;
-            let mut im = 0.0;
-            for (i, &sample) in samples.iter().enumerate() {
-                let angle = 2.0 * PI * bin as f64 * i as f64 / n as f64;
-                re += sample * angle.cos();
-                im += sample * angle.sin();
-            }
-
-            let amplitude = 2.0 * (re * re + im * im).sqrt() / n as f64;
-            harmonics.push(amplitude);
+        fundamental_freq: Value,
+    ) -> Result<Self, PostProcessingError> {
+        if !sample_rate.is_finite() || sample_rate <= 0.0 {
+            return Err(PostProcessingError::InvalidInput(
+                "sample rate must be positive and finite",
+            ));
         }
-
-        harmonics
+        let mut times = workspace(samples.len(), "waveform time axis")?;
+        times.extend((0..samples.len()).map(|i| i as Value / sample_rate));
+        let result = FourierAnalysis::new(FourierConfig::new(fundamental_freq).with_harmonics(10))
+            .analyze(&times, samples)?;
+        let mut harmonics = workspace(10, "harmonic amplitudes")?;
+        harmonics.extend(result.harmonics.iter().skip(1).map(|h| h.magnitude));
+        Self::from_harmonics(&harmonics, fundamental_freq)
     }
 }
 
@@ -132,7 +166,7 @@ impl ThdResult {
 //=============================================================================
 
 /// SFDR analysis result
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SfdrResult {
     /// Carrier (signal) frequency
     pub signal_freq: Value,
@@ -149,10 +183,10 @@ pub struct SfdrResult {
     /// SFDR in dB (signal - largest_spur)
     pub sfdr_db: Value,
 
-    /// SFDR referenced to full-scale (dBFS)
-    pub sfdr_dbfs: Value,
+    /// Full-scale dynamic range, present only for explicitly dBFS input.
+    pub sfdr_dbfs: Option<Value>,
 
-    /// Number of spurs found above noise floor
+    /// Number of finite out-of-band bins (no noise-floor estimate is implied)
     pub num_spurs: usize,
 
     /// All spur frequencies and levels
@@ -172,85 +206,69 @@ impl SfdrResult {
         magnitudes_db: &[Value],
         signal_freq: Value,
         signal_bw: Value,
-    ) -> Self {
-        if frequencies.len() != magnitudes_db.len() || frequencies.is_empty() {
-            return Self::default();
+    ) -> Result<Self, PostProcessingError> {
+        validate_frequencies(frequencies)?;
+        if frequencies.len() != magnitudes_db.len()
+            || magnitudes_db
+                .iter()
+                .any(|m| m.is_nan() || *m == Value::INFINITY)
+            || !signal_freq.is_finite()
+            || signal_freq <= 0.0
+            || !signal_bw.is_finite()
+            || signal_bw <= 0.0
+        {
+            return Err(PostProcessingError::InvalidInput(
+                "matching spectrum lengths, finite levels (or -infinity for zero), and positive finite carrier frequency/bandwidth are required",
+            ));
         }
-
-        // Find signal peak (within bandwidth of expected)
-        let signal_indices: Vec<usize> = frequencies
+        let in_carrier_band = |frequency: Value| (frequency - signal_freq).abs() <= signal_bw / 2.0;
+        let signal_idx = frequencies
             .iter()
             .enumerate()
-            .filter(|(_, f)| (*f - signal_freq).abs() < signal_bw / 2.0)
+            .filter(|(i, f)| in_carrier_band(**f) && magnitudes_db[*i].is_finite())
+            .max_by(|(a, _), (b, _)| magnitudes_db[*a].total_cmp(&magnitudes_db[*b]))
             .map(|(i, _)| i)
-            .collect();
-
-        let signal_idx = signal_indices
-            .iter()
-            .max_by(|a, b| {
-                let lhs = magnitudes_db[**a];
-                let rhs = magnitudes_db[**b];
-                let lhs = if lhs.is_finite() {
-                    lhs
-                } else {
-                    f64::NEG_INFINITY
-                };
-                let rhs = if rhs.is_finite() {
-                    rhs
-                } else {
-                    f64::NEG_INFINITY
-                };
-                lhs.total_cmp(&rhs)
-            })
-            .copied()
-            .unwrap_or(0);
-
-        let signal_level = magnitudes_db
-            .get(signal_idx)
-            .copied()
-            .filter(|level| level.is_finite())
-            .unwrap_or(0.0);
-        let actual_signal_freq = frequencies
-            .get(signal_idx)
-            .copied()
-            .filter(|freq| freq.is_finite())
-            .unwrap_or(signal_freq);
-
-        // Find all spurs (exclude DC and signal region)
-        let mut spurs: Vec<(Value, Value)> = Vec::new();
-        let exclude_start = actual_signal_freq - signal_bw;
-        let exclude_end = actual_signal_freq + signal_bw;
-
-        for (i, mag) in magnitudes_db.iter().enumerate() {
-            let freq = frequencies[i];
-            if !freq.is_finite() || !mag.is_finite() {
-                continue;
+            .ok_or(PostProcessingError::Undefined(
+                "no finite carrier in the requested band",
+            ))?;
+        let mut spurs = workspace(frequencies.len(), "spectrum spurs")?;
+        for (&frequency, &level) in frequencies.iter().zip(magnitudes_db) {
+            if frequency > 0.0 && !in_carrier_band(frequency) && level.is_finite() {
+                spurs.push((frequency, level));
             }
-            // Exclude DC bin and signal region
-            if freq.abs() < frequencies.get(1).copied().unwrap_or(1.0) {
-                continue;
-            }
-            if freq >= exclude_start && freq <= exclude_end {
-                continue;
-            }
-            spurs.push((freq, *mag));
         }
-
-        // Sort by level (descending)
-        spurs.sort_by(|a, b| b.1.total_cmp(&a.1));
-
-        let (spur_freq, spur_level) = spurs.first().copied().unwrap_or((0.0, -200.0));
-
-        Self {
-            signal_freq: actual_signal_freq,
-            signal_level_db: signal_level,
+        spurs.sort_unstable_by(|a, b| b.1.total_cmp(&a.1));
+        let (spur_freq, spur_level_db) = spurs
+            .first()
+            .copied()
+            .ok_or(PostProcessingError::Undefined("no finite out-of-band spur"))?;
+        let signal_level_db = magnitudes_db[signal_idx];
+        let sfdr_db = signal_level_db - spur_level_db;
+        if !sfdr_db.is_finite() {
+            return Err(PostProcessingError::Unrepresentable("SFDR"));
+        }
+        Ok(Self {
+            signal_freq: frequencies[signal_idx],
+            signal_level_db,
             spur_freq,
-            spur_level_db: spur_level,
-            sfdr_db: signal_level - spur_level,
-            sfdr_dbfs: -spur_level, // Assuming 0 dBFS reference
+            spur_level_db,
+            sfdr_db,
+            sfdr_dbfs: None,
             num_spurs: spurs.len(),
             spurs,
-        }
+        })
+    }
+
+    /// Calculate from levels explicitly referenced to full scale (dBFS).
+    pub fn from_spectrum_dbfs(
+        frequencies: &[Value],
+        magnitudes_dbfs: &[Value],
+        signal_freq: Value,
+        signal_bw: Value,
+    ) -> Result<Self, PostProcessingError> {
+        let mut result = Self::from_spectrum(frequencies, magnitudes_dbfs, signal_freq, signal_bw)?;
+        result.sfdr_dbfs = Some(-result.spur_level_db);
+        Ok(result)
     }
 }
 
@@ -258,8 +276,9 @@ impl SfdrResult {
 // IMD (Intermodulation Distortion)
 //=============================================================================
 
-/// Intermodulation distortion result
-#[derive(Debug, Clone, Default)]
+/// Container for externally computed intermodulation distortion measurements.
+/// This type does not implement an IMD or intercept-point estimator.
+#[derive(Debug, Clone)]
 pub struct ImdResult {
     /// First input frequency
     pub f1: Value,
@@ -292,14 +311,12 @@ pub struct ImdResult {
     pub gain_db: Value,
 }
 
-impl ImdResult {}
-
 //=============================================================================
 // Group Delay
 //=============================================================================
 
 /// Group delay calculation from phase data
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct GroupDelayResult {
     /// Frequency points
     pub frequencies: Vec<Value>,
@@ -328,78 +345,71 @@ impl GroupDelayResult {
     /// # Arguments
     /// * `frequencies` - Frequency points (Hz)
     /// * `phases` - Phase values (radians)
-    pub fn from_phase_data(frequencies: &[Value], phases: &[Value]) -> Self {
-        if frequencies.len() < 2 || frequencies.len() != phases.len() {
-            return Self::default();
+    pub fn from_phase_data(
+        frequencies: &[Value],
+        phases: &[Value],
+    ) -> Result<Self, PostProcessingError> {
+        validate_frequencies(frequencies)?;
+        if frequencies.len() < 2
+            || frequencies.len() != phases.len()
+            || phases.iter().any(|p| !p.is_finite())
+        {
+            return Err(PostProcessingError::InvalidInput(
+                "at least two matching finite phase/frequency samples are required",
+            ));
         }
-
-        let n = frequencies.len();
-        let mut result_freqs = Vec::with_capacity(n - 1);
-        let mut delays = Vec::with_capacity(n - 1);
-
-        for i in 0..n - 1 {
-            if !frequencies[i].is_finite()
-                || !frequencies[i + 1].is_finite()
-                || !phases[i].is_finite()
-                || !phases[i + 1].is_finite()
-            {
-                continue;
-            }
-
-            let df = frequencies[i + 1] - frequencies[i];
-            if df.abs() < 1e-15 {
-                continue;
-            }
-
-            // Unwrap phase difference
-            let mut dphi = phases[i + 1] - phases[i];
-            while dphi > PI {
-                dphi -= 2.0 * PI;
-            }
-            while dphi < -PI {
-                dphi += 2.0 * PI;
-            }
-
-            // τ = -dφ/(2π·df)
-            let tau = -dphi / (2.0 * PI * df);
-            if !tau.is_finite() {
-                continue;
-            }
-
-            result_freqs.push((frequencies[i] + frequencies[i + 1]) / 2.0);
-            delays.push(tau);
+        let mut result_freqs = workspace(frequencies.len() - 1, "group delay frequencies")?;
+        let mut delays = workspace(frequencies.len() - 1, "group delays")?;
+        for (f, p) in frequencies.windows(2).zip(phases.windows(2)) {
+            let delay = super::phase::group_delay(f[0], p[0], f[1], p[1])
+                .ok_or(PostProcessingError::Unrepresentable("group delay"))?;
+            result_freqs.push(f[0] + (f[1] - f[0]) / 2.0);
+            delays.push(delay);
         }
-
-        if delays.is_empty() {
-            return Self::default();
-        }
-
-        let average = delays.iter().sum::<Value>() / delays.len() as Value;
-
-        let max_delay = delays.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        let min_delay = delays.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max_idx = (0..delays.len())
+            .max_by(|&a, &b| delays[a].total_cmp(&delays[b]))
+            .expect("nonempty delays");
+        let max_delay = delays[max_idx];
+        let min_delay = delays.iter().copied().fold(Value::INFINITY, Value::min);
+        let scale = max_delay.abs().max(min_delay.abs());
+        let average_delay = if scale == 0.0 {
+            0.0
+        } else {
+            // Normalize before summing to avoid overflow in an otherwise finite mean.
+            scale
+                * (delays.iter().map(|delay| delay / scale).sum::<Value>() / delays.len() as Value)
+        };
         let ripple = max_delay - min_delay;
-
-        let max_idx = delays
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.total_cmp(b))
-            .map(|(i, _)| i)
-            .unwrap_or(0);
-
-        Self {
-            frequencies: result_freqs.clone(),
-            delays,
-            average_delay: average,
-            ripple,
-            max_delay_freq: result_freqs.get(max_idx).copied().unwrap_or(0.0),
-            max_delay,
+        if !ripple.is_finite() || !average_delay.is_finite() {
+            return Err(PostProcessingError::Unrepresentable(
+                "group delay statistics",
+            ));
         }
+        let max_delay_freq = result_freqs[max_idx];
+        Ok(Self {
+            frequencies: result_freqs,
+            delays,
+            average_delay,
+            ripple,
+            max_delay_freq,
+            max_delay,
+        })
     }
 
-    /// Calculate from complex transfer function data
-    pub fn from_transfer_function(frequencies: &[Value], h: &[Complex64]) -> Self {
-        let phases: Vec<Value> = h.iter().map(|c| c.arg()).collect();
+    /// Calculate from finite, nonzero complex transfer-function samples.
+    pub fn from_transfer_function(
+        frequencies: &[Value],
+        h: &[Complex64],
+    ) -> Result<Self, PostProcessingError> {
+        if h.iter()
+            .any(|c| !c.re.is_finite() || !c.im.is_finite() || *c == Complex64::new(0.0, 0.0))
+        {
+            return Err(PostProcessingError::InvalidInput(
+                "group delay requires finite nonzero transfer values",
+            ));
+        }
+        let mut phases = workspace(h.len(), "transfer phases")?;
+        phases.extend(h.iter().map(|c| c.arg()));
         Self::from_phase_data(frequencies, &phases)
     }
 }
@@ -409,7 +419,7 @@ impl GroupDelayResult {
 //=============================================================================
 
 /// SNR analysis result
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SnrResult {
     /// Signal power (linear, watts or V²)
     pub signal_power: Value,
@@ -432,21 +442,34 @@ pub struct SnrResult {
 
 impl SnrResult {
     /// Calculate SNR from signal and noise powers
-    pub fn from_powers(signal_power: Value, noise_power: Value) -> Self {
-        let snr_db = if noise_power > 0.0 {
-            10.0 * (signal_power / noise_power).log10()
-        } else {
-            f64::INFINITY
-        };
-
-        Self {
+    pub fn from_powers(
+        signal_power: Value,
+        noise_power: Value,
+    ) -> Result<Self, PostProcessingError> {
+        if !signal_power.is_finite()
+            || !noise_power.is_finite()
+            || signal_power < 0.0
+            || noise_power < 0.0
+        {
+            return Err(PostProcessingError::InvalidInput(
+                "powers must be finite and nonnegative",
+            ));
+        }
+        if signal_power == 0.0 && noise_power == 0.0 {
+            return Err(PostProcessingError::Undefined(
+                "both signal and noise powers are zero",
+            ));
+        }
+        // Subtract logarithms so a finite dB result survives ratio overflow.
+        let snr_db = 10.0 * (signal_power.log10() - noise_power.log10());
+        Ok(Self {
             signal_power,
             noise_power,
             snr_db,
             sinad_db: None,
             enob: None,
             noise_bandwidth: 0.0,
-        }
+        })
     }
 }
 
@@ -454,15 +477,19 @@ impl SnrResult {
 // RMS and Power Calculations
 //=============================================================================
 
-/// Calculate RMS value of a waveform
-pub fn rms(samples: &[Value]) -> Value {
-    if samples.is_empty() {
-        return 0.0;
+/// Equal-weight sample RMS. For irregularly sampled waveforms use the
+/// time-weighted measurement API instead. Empty/non-finite input is rejected.
+pub fn rms(samples: &[Value]) -> Result<Value, PostProcessingError> {
+    if samples.is_empty() || samples.iter().any(|s| !s.is_finite()) {
+        return Err(PostProcessingError::InvalidInput(
+            "RMS requires nonempty finite samples",
+        ));
     }
-    let sum_sq: Value = samples.iter().map(|s| s * s).sum();
-    (sum_sq / samples.len() as Value).sqrt()
+    let scale = samples.iter().map(|s| s.abs()).fold(0.0, Value::max);
+    if scale == 0.0 {
+        return Ok(0.0);
+    }
+    let mean_square =
+        samples.iter().map(|s| (s / scale).powi(2)).sum::<Value>() / samples.len() as Value;
+    Ok(scale * mean_square.sqrt())
 }
-
-//=============================================================================
-// Tests
-//=============================================================================
