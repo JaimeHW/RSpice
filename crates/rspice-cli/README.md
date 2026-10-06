@@ -543,6 +543,8 @@ When they contain multiple results, `compare` and tabular `convert` require
 one-based index from the available-section list in the diagnostic. This
 selector applies to container inputs; a CSV or other single-table reference
 still supplies its sole result. Repeated RAW plot names require an index.
+`--section` is rejected when no input supports sections, including conversion
+of a single CSV, TSV, JSON or VCD document.
 Comparison JSON identifies the selected section. Section selection cannot
 be combined with `--bless`, which replaces an entire reference file.
 

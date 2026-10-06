@@ -8,7 +8,9 @@
 use crate::cli::{CliError, Config, OutputFormat, map_atomic_output_error};
 use crate::commands::export_table::ColumnData;
 use crate::commands::publish;
-use crate::commands::waveform_io::{ImportedResult, detect_format, load_result_selected};
+use crate::commands::waveform_io::{
+    ImportedResult, detect_format, load_result_selected, supports_sections,
+};
 
 mod fft;
 use std::collections::HashSet;
@@ -110,6 +112,15 @@ pub fn execute(
 ) -> Result<(), CliError> {
     validate_compare_tolerance("--abstol", args.abstol)?;
     validate_compare_tolerance("--reltol", args.reltol)?;
+    if args.section.is_some()
+        && !supports_sections(detect_format(&args.result))
+        && !supports_sections(detect_format(&args.golden))
+    {
+        return Err(CliError::InvalidArgument {
+            message: "--section requires at least one RAW, HDF5 or Touchstone input".into(),
+            suggestion: Some("omit --section when comparing single-document formats".into()),
+        });
+    }
     let quiet = quiet || args.format == OutputFormat::Json;
 
     // Validate files exist
@@ -382,7 +393,10 @@ fn load_comparison_data(
     resource_limits: rspice_core::ResourceLimits,
     section: Option<&str>,
 ) -> Result<ComparisonData, CliError> {
-    let table = match load_result_selected(path, detect_format(path), resource_limits, section)? {
+    let format = detect_format(path);
+    // A selected container may be compared against an already extracted table.
+    let section = section.filter(|_| supports_sections(format));
+    let table = match load_result_selected(path, format, resource_limits, section)? {
         ImportedResult::Table(table) => table,
         ImportedResult::Fft(fft) => return Ok(ComparisonData::Fft(Box::new(fft))),
     };
