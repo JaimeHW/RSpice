@@ -21,6 +21,7 @@ impl<'a> PreparedEventCircuit<'a> {
                 | BehavioralSource
                 | Vcvs
                 | Vccs
+                | Cccs
                 | Bjt
                 | InductorCoupling
                 | CoupledInductorPair
@@ -355,6 +356,33 @@ impl<'a> PreparedEventCircuit<'a> {
                 )));
             }
         }
+        let controlled_current = &circuit.cccs;
+        aligned(
+            "CCCS",
+            controlled_current.len(),
+            &[
+                controlled_current.node_pos.len(),
+                controlled_current.node_neg.len(),
+                controlled_current.ctrl_branch.len(),
+                controlled_current.gains.len(),
+            ],
+        )?;
+        for index in 0..controlled_current.len() {
+            check_abort(abort)?;
+            terminals(
+                controlled_current.node_pos[index],
+                controlled_current.node_neg[index],
+            )?;
+            if controlled_current.ctrl_branch[index] == 0
+                || controlled_current.ctrl_branch[index] > size - nodes
+                || !controlled_current.gains[index].is_finite()
+            {
+                return Err(error(format!(
+                    "CCCS '{}' has invalid control or gain",
+                    controlled_current.names[index]
+                )));
+            }
+        }
         for (magnetic, count) in [(false, rb.len()), (true, l.len())] {
             for index in 0..count {
                 if index % 64 == 0 {
@@ -456,13 +484,64 @@ impl<'a> PreparedEventCircuit<'a> {
             .into_iter()
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| error("MNA branch has no physical event owner"))?;
-        Ok(Self {
+        let mut prepared = Self {
             circuit,
             forward_charge_limits: vec![false; models.len()],
             models,
             ports,
             equations,
             constant_sources,
-        })
+            current_structure: None,
+        };
+        if !circuit.cccs.is_empty() {
+            // Coefficients and charge incidence are constant for this prepared
+            // owner. Compile once; time-dependent voltage values/rates remain
+            // in each event's ordinary source descriptors.
+            let topology = prepared.topology(0.0, SourceTimeSide::RightLimit, options, abort)?;
+            ResourceLimitError::ensure(
+                ResourceKind::ResultValues,
+                size.saturating_mul(64)
+                    .saturating_add(circuit.cccs.len().saturating_mul(8)),
+                options.limits.max_result_values,
+            )?;
+            let mut controls = Vec::with_capacity(circuit.cccs.len());
+            for index in 0..circuit.cccs.len() {
+                check_abort(abort)?;
+                let branch = nodes + circuit.cccs.ctrl_branch[index] - 1;
+                if topology.source_columns[branch] {
+                    controls.push(EventCurrentControl {
+                        positive: circuit.cccs.node_pos[index],
+                        negative: circuit.cccs.node_neg[index],
+                        branch,
+                        gain: circuit.cccs.gains[index],
+                    });
+                }
+            }
+            let retained = prepared
+                .models
+                .len()
+                .saturating_mul(std::mem::size_of::<Bjt>().div_ceil(8))
+                .saturating_add(
+                    prepared
+                        .constant_sources
+                        .len()
+                        .saturating_mul(SOURCE_STORAGE_VALUES),
+                )
+                .saturating_add(prepared.ports.len().saturating_mul(2))
+                .saturating_add(circuit.cccs.len().saturating_mul(8));
+            let basis = with_retained_values(options, retained, |bounded| {
+                CurrentConservation::new(
+                    nodes,
+                    size,
+                    &prepared.ports,
+                    &topology.sources,
+                    &controls,
+                    bounded,
+                    abort,
+                )
+            })?;
+            prepared.current_structure = Some(Arc::new(basis));
+        }
+        Ok(prepared)
     }
 }

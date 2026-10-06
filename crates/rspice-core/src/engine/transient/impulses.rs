@@ -25,6 +25,7 @@ pub(super) struct Plan {
     solved_branches: usize,
     capacitors: Vec<Option<usize>>,
     bjt_terminals: Vec<[usize; 4]>,
+    controlled_currents: Vec<Vec<(usize, Value)>>,
 }
 
 pub(super) fn initialize(
@@ -56,6 +57,20 @@ pub(super) fn initialize(
     let mut added_values = result.branch_names.iter().fold(0usize, |count, name| {
         count.saturating_add(bytes(name.len()))
     });
+    let controlled_count = derived
+        .iter()
+        .filter(|branch| {
+            matches!(
+                branch.kind,
+                DerivedTransientBranchCurrentKind::CurrentControlledCurrentSource
+            )
+        })
+        .count();
+    if controlled_count != 0 {
+        added_values = added_values
+            .saturating_add(solved_branches.saturating_mul(3))
+            .saturating_add(controlled_count.saturating_mul(8));
+    }
     for model in &circuit.bjts.devices {
         added_values = added_values
             .saturating_add(bytes(model.name.len().saturating_add(2)).saturating_mul(4));
@@ -84,8 +99,26 @@ pub(super) fn initialize(
     }
     let mut capacitors = allocated(circuit.capacitors.len())?;
     capacitors.resize(circuit.capacitors.len(), None);
+    let mut controlled_currents = allocated(if controlled_count == 0 {
+        0
+    } else {
+        solved_branches
+    })?;
+    if controlled_count != 0 {
+        controlled_currents.resize_with(solved_branches, Vec::new);
+    }
     for (ordinal, branch) in derived.iter().enumerate() {
         match branch.kind {
+            DerivedTransientBranchCurrentKind::CurrentControlledCurrentSource => {
+                let source = &circuit.cccs;
+                let control = source.ctrl_branch.get(branch.index).copied()
+                    .and_then(|branch| branch.checked_sub(1))
+                    .filter(|&branch| branch < solved_branches)
+                    .ok_or_else(|| failure("CCCS control has no physical branch owner"))?;
+                let fanout = &mut controlled_currents[control];
+                fanout.try_reserve(1).map_err(failure)?;
+                fanout.push((solved_branches + ordinal, source.gains[branch.index]));
+            }
             DerivedTransientBranchCurrentKind::LinearCapacitor => {
                 let target = capacitors
                     .get_mut(branch.index)
@@ -143,6 +176,7 @@ pub(super) fn initialize(
             solved_branches,
             capacitors,
             bjt_terminals,
+            controlled_currents,
         },
         added_values,
     ))
@@ -178,9 +212,25 @@ impl Plan {
                 (capacitors, bjt_terminals)
             }
         };
-        let sources = event
-            .impulses()
-            .map(|(coordinate, charge)| self.source_index(coordinate).map(|index| (index, charge)));
+        let sources = event.impulses().flat_map(|(coordinate, charge)| {
+            let source = self.source_index(coordinate);
+            let fanout = source
+                .as_ref()
+                .ok()
+                .and_then(|&index| self.controlled_currents.get(index))
+                .map_or(&[][..], Vec::as_slice);
+            std::iter::once(source.map(|index| (index, charge))).chain(fanout.iter().map(
+                move |&(owner, gain)| {
+                    let charge = rspice_veriloga_runtime::arithmetic::sum_products(
+                        [(charge, gain)].into_iter(),
+                    )
+                    .map_err(|error| {
+                        failure(format!("CCCS impulse is unrepresentable: {error:?}"))
+                    })?;
+                    Ok((owner, charge))
+                },
+            ))
+        });
         let capacitors = capacitors
             .iter()
             .enumerate()
@@ -446,6 +496,7 @@ mod tests {
             solved_branches: 2,
             capacitors: Vec::new(),
             bjt_terminals: Vec::new(),
+            controlled_currents: Vec::new(),
         };
         assert_eq!(plan.source_index(1).unwrap(), 0);
         assert_eq!(plan.source_index(2).unwrap(), 1);

@@ -39,6 +39,32 @@ impl Vccs {
     }
 }
 
+impl Cccs {
+    pub(crate) fn current_at_control_current(
+        &self,
+        index: usize,
+        control: Value,
+    ) -> Result<Value, ArithmeticError> {
+        sum_products([(control, self.gains[index])].into_iter())
+    }
+
+    pub(crate) fn stamp_physical_current(
+        &self,
+        index: usize,
+        control: Value,
+        nodes: usize,
+        stamp: &mut impl crate::device::MatrixStamper,
+    ) -> Result<(), ArithmeticError> {
+        let current = self.current_at_control_current(index, control)?;
+        let column = nodes + self.ctrl_branch[index];
+        for (row, sign) in [(self.node_pos[index], 1.0), (self.node_neg[index], -1.0)] {
+            stamp.stamp_rhs(row, -sign * current);
+            stamp.stamp(row, column, sign * self.gains[index]);
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

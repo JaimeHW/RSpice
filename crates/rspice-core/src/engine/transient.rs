@@ -841,6 +841,7 @@ enum DerivedTransientBranchCurrentKind {
     LinearCapacitor,
     IndependentCurrentSource,
     VoltageControlledCurrentSource,
+    CurrentControlledCurrentSource,
     NativeDiode,
     #[cfg(feature = "veriloga-builtins-base")]
     GeneratedVerilogA,
@@ -1808,6 +1809,7 @@ impl Engine {
                 .saturating_add(circuit.capacitors.names.len())
                 .saturating_add(circuit.current_sources.names.len())
                 .saturating_add(circuit.vccs.names.len())
+                .saturating_add(circuit.cccs.names.len())
                 .saturating_add(circuit.diodes.devices.len())
                 .saturating_add({
                     #[cfg(feature = "veriloga-builtins-base")]
@@ -1877,6 +1879,15 @@ impl Engine {
                 name,
                 DerivedTransientBranchCurrent {
                     kind: DerivedTransientBranchCurrentKind::VoltageControlledCurrentSource,
+                    index,
+                },
+            );
+        }
+        for (index, name) in circuit.cccs.names.iter().enumerate() {
+            consider(
+                name,
+                DerivedTransientBranchCurrent {
+                    kind: DerivedTransientBranchCurrentKind::CurrentControlledCurrentSource,
                     index,
                 },
             );
@@ -1974,6 +1985,9 @@ impl Engine {
             DerivedTransientBranchCurrentKind::VoltageControlledCurrentSource => {
                 &circuit.vccs.names[branch.index]
             }
+            DerivedTransientBranchCurrentKind::CurrentControlledCurrentSource => {
+                &circuit.cccs.names[branch.index]
+            }
             DerivedTransientBranchCurrentKind::NativeDiode => {
                 &circuit.diodes.devices[branch.index].name
             }
@@ -2060,6 +2074,18 @@ impl Engine {
                     .map_err(|error| {
                         SimulationError::Circuit(format!(
                             "VCCS '{}' current output failed: {error:?}",
+                            source.names[branch.index]
+                        ))
+                    })?
+            }
+            DerivedTransientBranchCurrentKind::CurrentControlledCurrentSource => {
+                let source = &circuit.cccs;
+                let coordinate = circuit.num_nodes() + source.ctrl_branch[branch.index] - 1;
+                source
+                    .current_at_control_current(branch.index, solution[coordinate])
+                    .map_err(|error| {
+                        SimulationError::Circuit(format!(
+                            "CCCS '{}' current output failed: {error:?}",
                             source.names[branch.index]
                         ))
                     })?

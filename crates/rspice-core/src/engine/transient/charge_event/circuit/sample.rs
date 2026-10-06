@@ -32,6 +32,24 @@ impl PreparedEventCircuit<'_> {
         options: &EventOptions,
         abort: &dyn AbortSignal,
     ) -> Result<EventSample> {
+        let retained = self
+            .current_structure
+            .as_ref()
+            .map_or(0, |basis| basis.retained_values);
+        with_retained_values(options, retained, |bounded| {
+            self.sample_inner(time, source_side, state, phase, bounded, abort)
+        })
+    }
+
+    fn sample_inner(
+        &mut self,
+        time: Value,
+        source_side: SourceTimeSide,
+        state: &[Value],
+        phase: &[Option<EventPhase<'_>>],
+        options: &EventOptions,
+        abort: &dyn AbortSignal,
+    ) -> Result<EventSample> {
         check_abort(abort)?;
         options.validate()?;
         ResourceLimitError::ensure(
@@ -89,6 +107,25 @@ impl PreparedEventCircuit<'_> {
                     &mut sample.f,
                 )
                 .map_err(|failure| error(format!("VCCS '{}': {failure:?}", source.names[index])))?;
+        }
+        for index in 0..self.circuit.cccs.len() {
+            check_abort(abort)?;
+            let source = &self.circuit.cccs;
+            let column = nodes + source.ctrl_branch[index] - 1;
+            // Ideal-source currents have independent impulse and finite
+            // coefficients in the prepared incidence. Other controlling MNA
+            // currents remain ordinary constitutive coordinates here.
+            if !self
+                .current_structure
+                .as_ref()
+                .is_some_and(|basis| basis.source_columns[column])
+            {
+                source
+                    .stamp_physical_current(index, state[column], nodes, &mut sample.f)
+                    .map_err(|failure| {
+                        error(format!("CCCS '{}': {failure:?}", source.names[index]))
+                    })?;
+            }
         }
         let line_side = match source_side {
             SourceTimeSide::LeftLimit => crate::device::TransmissionLineTimeSide::Incoming,

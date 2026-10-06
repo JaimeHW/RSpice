@@ -3,8 +3,8 @@
 //! This operator consumes a prepared charge-incidence topology and physical
 //! F/Q stamps. It does not infer device support or modify accepted history.
 //! Non-nodal flux equations preserve physical linkage at finite-voltage
-//! events. Voltage impulses and current-controlled source impulse paths
-//! still need a descriptor transition with independently prepared topology.
+//! events. CCCS fanout has weighted current/impulse conservation. Voltage
+//! impulses and CCVS constraints still need a full descriptor transition.
 
 use super::{AbortSignal, SimulationError, Value};
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
@@ -12,8 +12,11 @@ use crate::solver::{SolverOptions, StaticMatrix};
 
 mod stamp;
 pub(super) use stamp::{EventSample, EventStamp};
+mod conservation;
 mod rows;
+use conservation::{CurrentConservation, EventCurrentControl, with_retained_values};
 pub(super) use rows::EventBranchEquation;
+use std::sync::Arc;
 pub(super) mod circuit;
 mod solve;
 #[cfg(test)]
@@ -43,7 +46,7 @@ fn sum(terms: impl Iterator<Item = (Value, Value)> + Clone) -> Result<Value> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub(super) struct EventVoltageControl {
     pub positive: usize,
     pub negative: usize,
@@ -79,6 +82,7 @@ impl EventVoltageSource {
     }
 }
 
+#[derive(Clone)]
 pub(super) struct EventOptions {
     pub limits: ResourceLimits,
     pub solver: SolverOptions,
@@ -144,7 +148,8 @@ pub(super) struct ChargeEventTopology {
     source_columns: Vec<bool>,
     /// Sparse source incidence for nodal audits; scanning every source for
     /// every node would make validation quadratic on source-rich circuits.
-    source_incidence: Vec<Vec<(usize, Value)>>,
+    source_incidence: Arc<Vec<Vec<(usize, Value)>>>,
+    weighted: Option<Arc<CurrentConservation>>,
     branch_equations: Vec<EventBranchEquation>,
 }
 
@@ -168,7 +173,17 @@ impl ChargeEventTopology {
         if positive > self.nodes || negative > self.nodes {
             return Err(error("current event port outside the node population"));
         }
-        Ok(if self.roots[positive] == self.roots[negative] {
+        // Equal charge components cancel in every weighted law. For other
+        // components conservatively retain coupling; rounded coefficient
+        // equality cannot certify an exact cancellation.
+        let cancels = self.weighted.as_ref().map_or_else(
+            || self.roots[positive] == self.roots[negative],
+            |basis| {
+                basis.charge_roots[positive] == basis.charge_roots[negative]
+                    || basis.rows.iter().all(Vec::is_empty)
+            },
+        );
+        Ok(if cancels {
             CurrentJumpCoupling::Cancels
         } else {
             CurrentJumpCoupling::Present
@@ -318,13 +333,18 @@ impl ChargeEventTopology {
             roots,
             groups,
             source_columns,
-            source_incidence,
+            source_incidence: Arc::new(source_incidence),
+            weighted: None,
             branch_equations,
         })
     }
 
     fn is_group_row(&self, row: usize) -> bool {
-        row < self.nodes && self.roots[row + 1] == row + 1
+        row < self.nodes
+            && self.weighted.as_ref().map_or_else(
+                || self.roots[row + 1] == row + 1,
+                |basis| !basis.rows[row].is_empty(),
+            )
     }
 
     fn storage_tolerance(&self, row: usize, options: &EventOptions) -> Option<Value> {
@@ -389,8 +409,8 @@ impl ChargeEventTopology {
                 check_abort(abort)?;
             }
             if self.is_group_row(row) {
-                for &node in &self.groups[row + 1] {
-                    equations.add_row(row, &sample.f, node)?;
+                for (node, weight) in self.conservation_terms(row) {
+                    equations.add_weighted_row(row, &sample.f, node, weight)?;
                 }
                 equations.absolute[row] = options.current_tolerance;
             } else if let Some(tolerance) = self.storage_tolerance(row, options) {
@@ -404,13 +424,16 @@ impl ChargeEventTopology {
                 equations.absolute[row] = self.branch_equations[row - self.nodes].jump_tolerance();
             }
         }
-        for source in &self.sources {
-            for (node, sign) in [(source.positive, 1.0), (source.negative, -1.0)] {
-                if node != 0 && !self.is_group_row(node - 1) {
-                    equations.add(node - 1, source.branch, sign)?;
-                    equations.add_value(node - 1, sign * trial[source.branch])?;
+        for row in 0..self.nodes {
+            check_abort(abort)?;
+            if !self.is_group_row(row) {
+                for &(branch, coefficient) in &self.source_incidence[row] {
+                    equations.add(row, branch, coefficient)?;
+                    equations.add_value(row, sum([(trial[branch], coefficient)].into_iter())?)?;
                 }
             }
+        }
+        for source in &self.sources {
             equations.source_row(source, source.value, options.voltage_tolerance)?;
             equations.values[source.branch] = sum(source
                 .voltage_terms()
@@ -442,12 +465,12 @@ impl ChargeEventTopology {
                 check_abort(abort)?;
             }
             if self.is_group_row(row) {
-                for &node in &self.groups[row + 1] {
-                    equations.add_row(row, &sample.f, node)?;
+                for (node, weight) in self.conservation_terms(row) {
+                    equations.add_weighted_row(row, &sample.f, node, weight)?;
                 }
-                equations.values[row] = sum(self.groups[row + 1]
-                    .iter()
-                    .map(|&node| (sample.f_time[node], 1.0)))?;
+                equations.values[row] = sum(self
+                    .conservation_terms(row)
+                    .map(|(node, weight)| (sample.f_time[node], weight)))?;
             } else if self.storage_tolerance(row, options).is_some() {
                 equations.add_row(row, &sample.q, row)?;
                 equations.values[row] =
@@ -462,12 +485,15 @@ impl ChargeEventTopology {
                 equations.values[row] = sample.f_time[row];
             }
         }
-        for source in &self.sources {
-            for (node, sign) in [(source.positive, 1.0), (source.negative, -1.0)] {
-                if node != 0 && !self.is_group_row(node - 1) {
-                    equations.add(node - 1, source.branch, sign)?;
+        for row in 0..self.nodes {
+            check_abort(abort)?;
+            if !self.is_group_row(row) {
+                for &(branch, coefficient) in &self.source_incidence[row] {
+                    equations.add(row, branch, coefficient)?;
                 }
             }
+        }
+        for source in &self.sources {
             // A differentiated constraint has units per second; its audit
             // uses componentwise relative backward error, not volt/amp floors.
             equations.source_row(source, source.slope, 0.0)?;
@@ -525,6 +551,24 @@ impl Equations {
         self.scales[row] = self.scales[row].max(stamp.scales[source]);
         for &(column, value) in &stamp.rows[source] {
             self.add(row, column, value)?;
+        }
+        Ok(())
+    }
+    fn add_weighted_row(
+        &mut self,
+        row: usize,
+        stamp: &EventStamp,
+        source: usize,
+        weight: Value,
+    ) -> Result<()> {
+        if weight == 1.0 {
+            return self.add_row(row, stamp, source);
+        }
+        self.add_value(row, sum([(stamp.values[source], weight)].into_iter())?)?;
+        self.scales[row] =
+            self.scales[row].max(sum([(stamp.scales[source], weight.abs())].into_iter())?);
+        for &(column, value) in &stamp.rows[source] {
+            self.add(row, column, sum([(value, weight)].into_iter())?)?;
         }
         Ok(())
     }

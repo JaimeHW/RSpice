@@ -29,6 +29,7 @@ pub(in crate::engine::transient) struct PreparedEventCircuit<'a> {
     equations: Vec<EventBranchEquation>,
     /// Fixed-coefficient, zero-offset constraints: zero R/L branches and VCVS.
     constant_sources: Vec<EventVoltageSource>,
+    current_structure: Option<Arc<CurrentConservation>>,
 }
 
 fn side(side: SourceTimeSide) -> Result<DelayTimeSide> {
@@ -69,6 +70,22 @@ impl PreparedEventCircuit<'_> {
     }
 
     pub(in crate::engine::transient) fn topology(
+        &self,
+        time: Value,
+        source_side: SourceTimeSide,
+        options: &EventOptions,
+        abort: &dyn AbortSignal,
+    ) -> Result<ChargeEventTopology> {
+        with_retained_values(
+            options,
+            self.current_structure
+                .as_ref()
+                .map_or(0, |basis| basis.retained_values),
+            |bounded| self.topology_inner(time, source_side, bounded, abort),
+        )
+    }
+
+    fn topology_inner(
         &self,
         time: Value,
         source_side: SourceTimeSide,
@@ -142,7 +159,7 @@ impl PreparedEventCircuit<'_> {
                 slope,
             });
         }
-        ChargeEventTopology::new(
+        let mut topology = ChargeEventTopology::new(
             self.circuit.num_nodes(),
             self.circuit.matrix_size(),
             &self.ports,
@@ -150,7 +167,11 @@ impl PreparedEventCircuit<'_> {
             self.equations.clone(),
             options,
             abort,
-        )
+        )?;
+        if let Some(prepared) = &self.current_structure {
+            topology.install_current_conservation(Arc::clone(prepared))?;
+        }
+        Ok(topology)
     }
 
     pub(in crate::engine::transient) fn forward_inputs(

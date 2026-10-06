@@ -22,6 +22,8 @@ mod coverage_gaps;
 mod behavioral;
 #[path = "gp_phase_regimes/controlled.rs"]
 mod controlled;
+#[path = "gp_phase_regimes/current_controlled.rs"]
+mod current_controlled;
 #[path = "gp_phase_regimes/private_nodes.rs"]
 mod private_nodes;
 #[path = "gp_phase_regimes/static_private.rs"]

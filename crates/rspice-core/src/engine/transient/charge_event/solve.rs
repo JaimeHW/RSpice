@@ -122,6 +122,22 @@ impl ChargeEventTopology {
         abort: &dyn AbortSignal,
         sample: &mut impl FnMut(&[Value], &dyn AbortSignal) -> Result<EventSample>,
     ) -> Result<ChargeEventState> {
+        with_retained_values(
+            options,
+            self.weighted
+                .as_ref()
+                .map_or(0, |basis| basis.retained_values),
+            |bounded| self.solve_coordinates_inner(coordinates, bounded, abort, sample),
+        )
+    }
+
+    fn solve_coordinates_inner(
+        &self,
+        coordinates: (&[Value], &[Value], CoordinatePolicy<'_>),
+        options: &EventOptions,
+        abort: &dyn AbortSignal,
+        sample: &mut impl FnMut(&[Value], &dyn AbortSignal) -> Result<EventSample>,
+    ) -> Result<ChargeEventState> {
         let (incoming, incoming_q, policy) = coordinates;
         check_abort(abort)?;
         options.validate()?;
@@ -154,6 +170,9 @@ impl ChargeEventTopology {
             ));
         }
         let mut trial = self.physical_probe(incoming);
+        if matches!(policy, CoordinatePolicy::Project) {
+            self.project_current_controlled_voltage_seed(incoming, &mut trial, abort)?;
+        }
         for iteration in 0..options.iterations {
             check_abort(abort)?;
             let physical = sample(&self.physical_probe(&trial), abort)?;
@@ -280,29 +299,12 @@ impl ChargeEventTopology {
         reference: Option<RateReference<'_>>,
     ) -> Result<ChargeEventState> {
         let mut equations = self.rate_equations(&physical, options, abort)?;
-        let mut group_budget = Vec::new();
-        if reference.is_some_and(|reference| reference.storage_currents.is_some()) {
-            group_budget.resize(self.nodes + 1, Value::INFINITY);
-            // Charge and ideal-source currents sum to zero in each floating
-            // component. A correction to its retained storage rows also
-            // changes the omitted row's KCL residual. Share its remaining
-            // physical budget and reserve half for factorization roundoff.
-            for (root, group) in self.groups.iter().enumerate().skip(1) {
-                if root % 64 == 0 {
-                    check_abort(abort)?;
-                }
-                if group.is_empty() {
-                    continue;
-                }
-                let residual = sum(group.iter().flat_map(|&row| {
-                    [(physical.f.values[row], 1.0), (physical.q_time[row], 1.0)]
-                }))?;
-                let tolerance = options.current_tolerance
-                    + options.relative_tolerance * physical.f.scales[root - 1];
-                group_budget[root] =
-                    0.5 * (tolerance - residual.abs()).max(0.0) / group.len() as Value;
-            }
-        }
+        let group_budget =
+            if reference.is_some_and(|reference| reference.storage_currents.is_some()) {
+                self.integration_reference_budgets(&physical, options, abort)?
+            } else {
+                Vec::new()
+            };
         if let Some(RateReference {
             solution,
             storage_currents: currents,
@@ -335,7 +337,7 @@ impl ChargeEventTopology {
                                 .max(equations.values[row].abs())
                                 .max(physical.f.scales[row]);
                     if currents.is_some() && row < self.nodes {
-                        tolerance = tolerance.min(group_budget[self.roots[row + 1]]);
+                        tolerance = tolerance.min(group_budget[row]);
                     }
                     if currents.is_none() || difference.abs() <= tolerance {
                         equations.values[row] = reference;

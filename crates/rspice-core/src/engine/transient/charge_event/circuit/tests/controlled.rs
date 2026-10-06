@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn prepared_current_control_uses_finite_inductor_state_and_its_rate() {
+    let circuit =
+        build("finite current control\nV1 n 0 1\nL1 n 0 1u\nF1 out 0 L1 2\nR1 out 0 1k\n.end\n");
+    let options = options();
+    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let topology = sampler
+        .topology(0.0, SourceTimeSide::RightLimit, &options, &NoAbort)
+        .unwrap();
+    let state = topology
+        .solve(
+            &vec![0.0; circuit.matrix_size()],
+            &vec![0.0; circuit.matrix_size()],
+            &options,
+            &NoAbort,
+            |state, abort| {
+                sampler.sample(0.0, SourceTimeSide::RightLimit, state, &[], &options, abort)
+            },
+        )
+        .unwrap();
+    let branch = circuit.num_nodes() + circuit.inductors.branch_indices[0] - 1;
+    let output = circuit.get_node_by_name("out").unwrap() - 1;
+    close(state.solution[branch], 0.0, 1e-16);
+    close(state.solution[output], 0.0, 1e-12);
+    close(state.coordinate_rates[branch].unwrap(), 1e6, 1e-6);
+    close(state.coordinate_rates[output].unwrap(), -2e9, 1e-4);
+}
+
+#[test]
 fn prepared_controlled_sources_transfer_constraint_rates_and_current_jacobians() {
     let circuit = build(
         "controlled event\nV1 ctrl 0 PWL(0 1 1 2)\nE1 n 0 ctrl 0 -2\nG1 m 0 n 0 .003\nRM m 0 2k\nCN n 0 1u\nRN n 0 1k\n.end\n",

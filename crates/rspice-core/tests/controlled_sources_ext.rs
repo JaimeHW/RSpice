@@ -9,6 +9,31 @@ use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::{ElementKind, Netlist, flatten_netlist};
 
 #[test]
+fn native_cccs_transient_current_is_selectable_without_physical_events() {
+    use rspice_core::SpiceDialect;
+    let source = Netlist::parse("F observation\nV1 n 0 PWL(0 0 1n 1 2n 0)\nR1 n 0 1k\nF1 out 0 V1 -2\nR2 out 0 1k\n.options GMIN=0\n.save v(out) i(f1)\n.end\n").unwrap();
+    for dialect in [
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+        SpiceDialect::BestAvailable,
+    ] {
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        let result = engine.run_tran(&source, 2e-9, 1e-11).unwrap();
+        let currents = result.try_branch_current_waveform_named("f1").unwrap();
+        let voltages = result.try_voltage_waveform_named("out").unwrap();
+        for ((&time, &current), &voltage) in result.time.iter().zip(currents).zip(voltages) {
+            let control = if time <= 1e-9 {
+                time / 1e-9
+            } else {
+                (2e-9 - time) / 1e-9
+            };
+            assert!((current - 0.002 * control).abs() < 1e-12);
+            assert!((voltage + 2.0 * control).abs() < 1e-9);
+        }
+    }
+}
+
+#[test]
 fn native_vccs_transient_current_is_selectable_without_physical_events() {
     use rspice_core::SpiceDialect;
     let source=Netlist::parse("G observation\nVREF ref 0 2\nV1 ctrl ref PWL(0 0 1n 1 2n 0)\nG1 out 0 ctrl ref -2m\nR1 out 0 1k\n.options GMIN=0\n.save v(out) i(g1)\n.end\n").unwrap();

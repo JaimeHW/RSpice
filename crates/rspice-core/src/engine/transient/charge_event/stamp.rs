@@ -99,7 +99,8 @@ impl MatrixStamper for EventStamp {
     }
 }
 
-/// F and Q exclude ideal voltage-source currents and their equations.
+/// F and Q exclude ideal voltage-source currents, their prepared CCCS fanout,
+/// and their equations.
 /// The prepared owner must certify this structural independence, not infer
 /// it from a zero derivative at one bias. Its history endpoint is immutable.
 pub(in crate::engine::transient) struct EventSample {
