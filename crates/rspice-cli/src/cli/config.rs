@@ -477,7 +477,7 @@ impl Config {
 
     /// Apply environment variable overrides
     fn apply_env(&mut self) -> Result<(), ConfigError> {
-        if let Ok(temp) = std::env::var("RSPICE_TEMPERATURE") {
+        if let Some(temp) = text_env("RSPICE_TEMPERATURE")? {
             let t = temp
                 .parse::<f64>()
                 .map_err(|e| ConfigError::EnvironmentError {
@@ -495,7 +495,7 @@ impl Config {
             self.simulation.temperature = t;
         }
 
-        if let Ok(format) = std::env::var("RSPICE_OUTPUT_FORMAT") {
+        if let Some(format) = text_env("RSPICE_OUTPUT_FORMAT")? {
             self.output.format = format;
         }
 
@@ -649,7 +649,7 @@ mod tests {
 }
 
 fn parse_usize_env(variable: &str) -> Result<Option<usize>, ConfigError> {
-    let Ok(raw) = std::env::var(variable) else {
+    let Some(raw) = text_env(variable)? else {
         return Ok(None);
     };
     raw.parse::<usize>()
@@ -659,6 +659,20 @@ fn parse_usize_env(variable: &str) -> Result<Option<usize>, ConfigError> {
             value: raw,
             message: error.to_string(),
         })
+}
+
+/// A present malformed value must not silently disable an override. Path-list
+/// variables deliberately use `var_os` instead so native paths remain lossless.
+pub(crate) fn text_env(variable: &str) -> Result<Option<String>, ConfigError> {
+    match std::env::var(variable) {
+        Ok(value) => Ok(Some(value)),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(value)) => Err(ConfigError::EnvironmentError {
+            variable: variable.to_owned(),
+            value: value.to_string_lossy().into_owned(),
+            message: "must contain valid Unicode text".into(),
+        }),
+    }
 }
 
 fn validate_positive(field: &str, value: f64) -> Result<(), ConfigError> {
