@@ -79,7 +79,9 @@ pub struct CompareResult {
     pub max_rel_diff: f64,
     /// Variable with maximum difference
     pub max_diff_variable: String,
-    /// Differences found
+    /// Total mismatching values, including those beyond the displayed examples.
+    pub num_differences: usize,
+    /// First ten differences, the largest report preview any output format uses.
     pub differences: Vec<Difference>,
     /// Structural failures: missing variables, point-count mismatches.
     /// These fail the comparison even when every overlapping value matches,
@@ -102,6 +104,53 @@ pub struct Difference {
     pub abs_diff: f64,
     /// Relative difference
     pub rel_diff: f64,
+}
+
+impl CompareResult {
+    /// Record exact totals and extrema while retaining only reportable examples.
+    /// Waveforms and FFT coefficients use the same tolerance calculation.
+    fn compare_number(
+        &mut self,
+        result: f64,
+        golden: f64,
+        variable: &str,
+        index: usize,
+        args: &CompareArgs,
+    ) -> bool {
+        let abs_diff = (result - golden).abs();
+        let rel_diff = if result == golden {
+            0.0
+        } else if golden == 0.0 {
+            f64::INFINITY
+        } else if abs_diff.is_finite() {
+            abs_diff / golden.abs()
+        } else {
+            // Finite operands can overflow subtraction while their ratio
+            // still establishes a finite relative error.
+            (result / golden - 1.0).abs()
+        };
+        if abs_diff > self.max_abs_diff {
+            self.max_abs_diff = abs_diff;
+            self.max_diff_variable = variable.to_string();
+        }
+        self.max_rel_diff = self.max_rel_diff.max(rel_diff);
+        let differs = abs_diff > args.abstol && rel_diff > args.reltol;
+        if differs {
+            self.passed = false;
+            self.num_differences += 1;
+            if self.differences.len() < 10 {
+                self.differences.push(Difference {
+                    variable: variable.to_string(),
+                    index,
+                    result_value: result,
+                    golden_value: golden,
+                    abs_diff,
+                    rel_diff,
+                });
+            }
+        }
+        differs
+    }
 }
 
 /// Execute the compare command
@@ -211,12 +260,10 @@ pub fn execute(
         Ok(())
     } else {
         let mut parts = Vec::new();
-        if !cmp_result.differences.is_empty() {
+        if cmp_result.num_differences > 0 {
             parts.push(format!(
                 "{} value difference(s), max {:.2e} ({})",
-                cmp_result.differences.len(),
-                cmp_result.max_abs_diff,
-                cmp_result.max_diff_variable
+                cmp_result.num_differences, cmp_result.max_abs_diff, cmp_result.max_diff_variable
             ));
         }
         if !cmp_result.problems.is_empty() {
@@ -671,6 +718,7 @@ fn compare_waveforms(
         max_abs_diff: 0.0,
         max_rel_diff: 0.0,
         max_diff_variable: String::new(),
+        num_differences: 0,
         differences: Vec::new(),
         problems: Vec::new(),
     };
@@ -780,45 +828,8 @@ fn compare_waveforms(
             };
             let gv = golden_vals[i];
 
-            let abs_diff = (rv - gv).abs();
-            let rel_diff = if rv == gv {
-                0.0
-            } else if gv == 0.0 {
-                f64::INFINITY
-            } else if abs_diff.is_finite() {
-                abs_diff / gv.abs()
-            } else {
-                // Finite operands can overflow the subtraction. Their ratio
-                // can still establish a finite relative error.
-                (rv / gv - 1.0).abs()
-            };
-
-            // Track the two maxima independently, including the sample that
-            // causes a --fail-fast return.
-            if abs_diff > cmp_result.max_abs_diff {
-                cmp_result.max_abs_diff = abs_diff;
-                cmp_result.max_diff_variable = var_name.clone();
-            }
-            cmp_result.max_rel_diff = cmp_result.max_rel_diff.max(rel_diff);
-
-            // Check if within tolerance
-            let within_abstol = abs_diff <= args.abstol;
-            let within_reltol = rel_diff <= args.reltol;
-
-            if !within_abstol && !within_reltol {
-                cmp_result.passed = false;
-                cmp_result.differences.push(Difference {
-                    variable: var_name.clone(),
-                    index: i,
-                    result_value: rv,
-                    golden_value: gv,
-                    abs_diff,
-                    rel_diff,
-                });
-
-                if args.fail_fast {
-                    return Ok(cmp_result);
-                }
+            if cmp_result.compare_number(rv, gv, var_name, i, args) && args.fail_fast {
+                return Ok(cmp_result);
             }
         }
     }
@@ -844,7 +855,7 @@ fn output_json(result: &CompareResult, blessed: bool, section: Option<&str>) {
         "max_abs_diff": result.max_abs_diff,
         "max_rel_diff": result.max_rel_diff,
         "max_diff_variable": result.max_diff_variable,
-        "num_differences": result.differences.len(),
+        "num_differences": result.num_differences,
         "problems": result.problems,
         "differences": result.differences.iter().take(10).map(|d| {
             serde_json::json!({
@@ -883,7 +894,7 @@ fn output_text(result: &CompareResult, quiet: bool) {
         for problem in &result.problems {
             println!("  {}", problem);
         }
-        println!("  {} differences found", result.differences.len());
+        println!("  {} differences found", result.num_differences);
 
         // Show first few differences
         for (i, d) in result.differences.iter().take(5).enumerate() {
@@ -897,8 +908,32 @@ fn output_text(result: &CompareResult, quiet: bool) {
                 d.abs_diff
             );
         }
-        if result.differences.len() > 5 {
-            println!("  ... and {} more", result.differences.len() - 5);
+        if result.num_differences > 5 {
+            println!("  ... and {} more", result.num_differences - 5);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn comparison_retains_only_the_report_preview_for_large_failures() {
+        let waveform = |values: Vec<f64>| WaveformData {
+            variables: vec!["time".into(), "V(out)".into()],
+            variable_types: vec!["time".into(), "voltage".into()],
+            units: vec![None, None],
+            values: vec![(0..values.len()).map(|i| i as f64).collect(), values],
+        };
+        let result = waveform((2..=100_001).map(f64::from).collect());
+        let golden = waveform(vec![1.0; 100_000]);
+        let comparison = compare_waveforms(&result, &golden, &CompareArgs::default()).unwrap();
+        assert!(!comparison.passed);
+        assert_eq!(comparison.num_differences, 100_000);
+        assert_eq!(comparison.differences.len(), 10);
+        assert_eq!(comparison.max_abs_diff, 100_000.0);
+        assert_eq!(comparison.max_rel_diff, 100_000.0);
+        assert_eq!(comparison.differences.last().unwrap().index, 9);
     }
 }

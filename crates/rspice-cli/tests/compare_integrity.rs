@@ -271,3 +271,24 @@ fn a_wide_result_can_compare_on_a_dense_golden_grid_within_the_input_budget() {
     assert_eq!(report["num_points"], 2048);
     assert_eq!(report["num_differences"], 0);
 }
+
+#[test]
+fn mismatch_previews_keep_full_counts_and_late_extrema() {
+    let mut result = String::from("time,V(x)\n");
+    let mut golden = String::from("time,V(x)\n");
+    for i in 0..1000 {
+        result.push_str(&format!("{i},{}\n", i + 2));
+        golden.push_str(&format!("{i},1\n"));
+    }
+    let report = failed(compare(&result, &golden, &[]));
+    assert_eq!(report["num_differences"], 1000);
+    let differences = report["differences"].as_array().unwrap();
+    assert_eq!(differences.len(), 10);
+    assert_eq!(differences[0]["index"], 0);
+    assert_eq!(differences[9]["index"], 9);
+    assert_eq!(report["max_abs_diff"], 1000.0);
+    assert_eq!(report["max_rel_diff"], 1000.0);
+    let fast = failed(compare(&result, &golden, &["--fail-fast"]));
+    assert_eq!(fast["num_differences"], 1);
+    assert_eq!(fast["max_abs_diff"], 1.0);
+}

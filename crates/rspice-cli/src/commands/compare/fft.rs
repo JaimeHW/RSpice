@@ -16,6 +16,7 @@ pub(super) fn compare(
         max_abs_diff: 0.0,
         max_rel_diff: 0.0,
         max_diff_variable: String::new(),
+        num_differences: 0,
         differences: Vec::new(),
         problems: Vec::new(),
     };
@@ -193,30 +194,5 @@ fn compare_number(
     if args.fail_fast && (!comparison.passed || !comparison.problems.is_empty()) {
         return;
     }
-    let abs_diff = (rv - gv).abs();
-    let rel_diff = if rv == gv {
-        0.0
-    } else if gv == 0.0 {
-        f64::INFINITY
-    } else if abs_diff.is_finite() {
-        abs_diff / gv.abs()
-    } else {
-        (rv / gv - 1.0).abs()
-    };
-    if abs_diff > comparison.max_abs_diff {
-        comparison.max_abs_diff = abs_diff;
-        comparison.max_diff_variable = path.into();
-    }
-    comparison.max_rel_diff = comparison.max_rel_diff.max(rel_diff);
-    if abs_diff > args.abstol && rel_diff > args.reltol {
-        comparison.passed = false;
-        comparison.differences.push(Difference {
-            variable: path.into(),
-            index,
-            result_value: rv,
-            golden_value: gv,
-            abs_diff,
-            rel_diff,
-        });
-    }
+    comparison.compare_number(rv, gv, path, index, args);
 }

@@ -537,7 +537,10 @@ through the table form `convert` builds from it, on its own event ticks. The
 golden file defines the contract: golden variables missing from the result
 fail, point-count mismatches fail (a result truncated by a crashed run cannot
 pass on the overlap it wrote), and NaN never matches anything. `--bless`
-accepts the result as the new reference.
+accepts the result as the new reference after verifying that it satisfies the
+requested variable selection and comparison options. An invalid selection
+cannot create or replace a baseline. Reports retain exact mismatch counts and
+maximum errors; JSON shows the first ten differences, and text shows five.
 
 JSON, HDF5 and RSpice RAW table conversion preserve explicitly declared signal
 and coordinate units. Comparison requires matching units, including the case
