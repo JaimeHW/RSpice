@@ -16,6 +16,9 @@ use std::io::{BufRead, BufReader, Cursor, Read};
 use std::path::Path;
 use thiserror::Error;
 
+mod table_metadata;
+pub use table_metadata::write_raw_table_metadata;
+
 use crate::resource::{
     ResourceKind, ResourceLimitError, ResourceLimits, ResourceReadError, read_bytes_limited,
     read_file_bytes_limited,
@@ -311,7 +314,7 @@ fn parse_plot(
     })?;
 
     // Parse data
-    let (waveforms, actual_points, data_length) = if header.is_binary {
+    let (mut waveforms, actual_points, data_length) = if header.is_binary {
         parse_binary_data(data_bytes, &header, &variables, resource_limits)?
     } else {
         parse_ascii_data(data_bytes, &header, &variables, resource_limits)?
@@ -319,6 +322,7 @@ fn parse_plot(
     if header.no_points == 0 {
         header.no_points = actual_points;
     }
+    table_metadata::restore_real_columns(&header, &mut waveforms)?;
 
     Ok((
         RawWaveformData {
