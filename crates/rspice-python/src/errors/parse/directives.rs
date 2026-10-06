@@ -87,8 +87,7 @@ pub(super) fn analysis_card_attributes(
 ) -> ParseErrorAttributes {
     let mut attributes = ParseErrorAttributes::new("analysis_card");
     attributes.category = Some("analysis_card_validation");
-    attributes.line = Some(error.line);
-    attributes.primary_line = Some(error.line);
+    attributes.set_primary(&error.source_location());
     attributes.output_directive = Some(error.card.directive().to_string());
     attributes.reason = Some(analysis_card_issue_kind(&error.issue).to_string());
     attributes.parameter_name = analysis_card_field(&error.issue);
@@ -103,6 +102,25 @@ mod tests {
         DuplicateModelParameterError, NetlistSourceLocation, ParameterDefinitionKind,
         ParameterRedefinitionError, StartupDirectiveConflictError, StartupDirectiveKind,
     };
+
+    #[test]
+    fn analysis_card_projection_keeps_the_physical_origin_and_issue() {
+        use rspice_core::netlist::{AnalysisCard, AnalysisCardError, AnalysisCardIssue};
+        let mut error = AnalysisCardError::new(
+            AnalysisCard::Pss,
+            4,
+            AnalysisCardIssue::MissingField { field: "FUND" },
+        );
+        error.origin = Some(NetlistSourceLocation::in_file("analysis.inc", 4));
+        let attributes = analysis_card_attributes(&error);
+        assert_eq!(attributes.kind, "analysis_card");
+        assert_eq!(attributes.line, Some(4));
+        assert_eq!(attributes.primary_line, Some(4));
+        assert_eq!(attributes.source.as_deref(), Some("analysis.inc"));
+        assert_eq!(attributes.primary_source.as_deref(), Some("analysis.inc"));
+        assert_eq!(attributes.parameter_name.as_deref(), Some("FUND"));
+        assert_eq!(attributes.output_directive.as_deref(), Some(".PSS"));
+    }
 
     #[test]
     fn parameter_redefinition_exposes_both_origins_and_public_tags() {
