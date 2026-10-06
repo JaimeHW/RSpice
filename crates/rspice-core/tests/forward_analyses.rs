@@ -134,7 +134,7 @@ fn ready_pending_and_nonanalysis_outputs_keep_authored_order() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
-fn root_numeric_families_reuse_the_literal_card_grammar() {
+fn root_and_scoped_numeric_families_reuse_the_literal_card_grammar() {
     for dialect in DIALECTS {
         for (card, value) in [
             (".AC LIN @ 1 10", "2"),
@@ -173,32 +173,34 @@ fn root_numeric_families_reuse_the_literal_card_grammar() {
             (".PSS FUND=1G\n.PSTB PROBE=V1 MAXHARM=@", "2"),
             (".HB 1G\n.ENVELOPE TSTOP=@", "1u"),
         ] {
-            let deferred = parse(
-                &format!(
-                    "Forward grammar\n{}\n.param later={value}\n.end\n",
-                    card.replace('@', "{later}")
-                ),
-                dialect,
-            );
-            let literal = parse(
-                &format!("Literal grammar\n{}\n.end\n", card.replace('@', value)),
-                dialect,
-            );
-            assert_eq!(
-                format!("{:?}", deferred.analyses),
-                format!("{:?}", literal.analyses),
-                "{dialect:?}: {card}"
-            );
-            assert_eq!(
-                format!("{:?}", deferred.lin_analysis),
-                format!("{:?}", literal.lin_analysis),
-                "{card}"
-            );
-            assert_eq!(
-                format!("{:?}", deferred.fft_analyses),
-                format!("{:?}", literal.fft_analyses),
-                "{card}"
-            );
+            for (opening, closing) in [("", ""), (".subckt child p\n", ".ends\n")] {
+                let deferred = parse(
+                    &format!(
+                        "Forward grammar\n{opening}{}\n.param later={{base}}\n.param base={value}\n{closing}.end\n",
+                        card.replace('@', "{later}")
+                    ),
+                    dialect,
+                );
+                let literal = parse(
+                    &format!("Literal grammar\n{}\n.end\n", card.replace('@', value)),
+                    dialect,
+                );
+                assert_eq!(
+                    format!("{:?}", deferred.analyses),
+                    format!("{:?}", literal.analyses),
+                    "{dialect:?}: {card}"
+                );
+                assert_eq!(
+                    format!("{:?}", deferred.lin_analysis),
+                    format!("{:?}", literal.lin_analysis),
+                    "{card}"
+                );
+                assert_eq!(
+                    format!("{:?}", deferred.fft_analyses),
+                    format!("{:?}", literal.fft_analyses),
+                    "{card}"
+                );
+            }
         }
     }
 }
@@ -424,6 +426,25 @@ fn deferred_included_cards_keep_physical_errors_and_warnings() {
     .unwrap();
     let netlist = Netlist::parse_with_path("Include warnings\n.DC V1 0 {later} .1\n.include analysis.inc\n.param count=32 later=1\n.end\n", &directory.join("root.cir")).unwrap();
     let physical_child = child.canonicalize().unwrap();
+    std::fs::write(&child, ".subckt child p\n.DC V1 0 {missing} .1\n.ends\n").unwrap();
+    let error = Netlist::parse_with_path(
+        "Scoped include\n.include analysis.inc\n.end\n",
+        &directory.join("root.cir"),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("analysis.inc:2:"), "{error}");
+    std::fs::write(&child, ".subckt child p\n.FFT V(out) START=-1 NP={count}\n.param count={base}\n.param base=32\n.ends\n").unwrap();
+    let scoped = Netlist::parse_with_path(
+        "Scoped warnings\n.include analysis.inc\n.end\n",
+        &directory.join("root.cir"),
+    )
+    .unwrap();
+    assert_eq!(scoped.diagnostics.len(), 1);
+    assert_eq!(scoped.diagnostics[0].origin.as_ref().unwrap().line, 2);
+    assert_eq!(
+        scoped.diagnostics[0].origin.as_ref().unwrap().path.as_ref(),
+        Some(&physical_child)
+    );
     std::fs::remove_dir_all(&directory).unwrap();
     assert_eq!(netlist.diagnostics.len(), 2);
     for (index, warning) in netlist.diagnostics.iter().enumerate() {
@@ -434,5 +455,194 @@ fn deferred_included_cards_keep_physical_errors_and_warnings() {
             .expect("staged warning has an owner");
         assert_eq!(origin.line, index + 1);
         assert_eq!(origin.path.as_ref(), Some(&physical_child));
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn scoped_operands_bind_local_header_parent_and_later_root_declarations() {
+    for dialect in DIALECTS {
+        for source in [
+            "Scoped\n.subckt child p\n.DC V1 -stop +stop .5\n.param stop={later}\n.param later=1\n.ends\n.end\n",
+            "Header\n.param stop=90\n.subckt child p params: stop={later}\n.DC V1 -stop +stop .5\n.param later=1\n.ends\n.end\n",
+            "Parent\n.subckt parent p\n.subckt child q\n.DC V1 -stop +stop .5\n.ends\n.param stop={later}\n.param later=1\n.ends\n.end\n",
+            "Root\n.subckt child p\n.DC V1 -stop +stop .5\n.ends\n.param stop={later}\n.param later=1\n.end\n",
+        ] {
+            let netlist = parse(source, dialect);
+            assert!(
+                matches!(
+                    netlist.analyses[0],
+                    AnalysisCommand::Dc {
+                        start: -1.0,
+                        stop: 1.0,
+                        step: 0.5,
+                        ..
+                    }
+                ),
+                "{:?}",
+                netlist.analyses
+            );
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn scoped_numeric_resumption_preserves_owner_samples_and_operand_order() {
+    for dialect in DIALECTS {
+        let netlist = parse(
+            "Scoped samples\n.options seed=73\n.subckt parent p\n.param alias={base+aunif(0,1)}\n.subckt child q\n.param base=100\n.DC V1 {aunif(0,1)+alias+aunif(0,1)} {limit} 1\n.param limit=100\n.ends\n.subckt sibling q\n.DC V1 0 {alias} 1\n.ends\n.DC V1 0 {alias} 1\n.param base=5\n.ends\n.end\n",
+            dialect,
+        );
+        let mut expected = ParamContext::new();
+        expected.set_expression_dialect(dialect);
+        expected.set_random_seed(73);
+        let first = eval_expression("aunif(0,1)", &expected).unwrap();
+        let alias = 5.0 + eval_expression("aunif(0,1)", &expected).unwrap();
+        let last = eval_expression("aunif(0,1)", &expected).unwrap();
+        let AnalysisCommand::Dc { start, stop, .. } = netlist.analyses[0] else {
+            panic!("DC")
+        };
+        assert_eq!(start, (first + alias) + last);
+        assert_eq!(stop, 100.0);
+        for card in &netlist.analyses[1..] {
+            let AnalysisCommand::Dc { stop, .. } = card else {
+                panic!("DC")
+            };
+            assert_eq!(*stop, alias);
+        }
+        assert_eq!(
+            eval_expression("aunif(0,1)", &netlist.params).unwrap(),
+            eval_expression("aunif(0,1)", &expected).unwrap()
+        );
+        assert_eq!(netlist.params.get("alias"), None);
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn scoped_binding_is_demand_driven_and_keeps_instance_overrides() {
+    for dialect in DIALECTS {
+        let netlist = parse(
+            "Instance scopes\nV1 in 0 1\nX1 in out cell gain=3\nRload out 0 1k\n.subckt cell a b params: gain=1\n.param unused={instance_only+missing}\n.param resistance={gain*base}\nR1 a b {resistance}\n.DC V1 0 {if(1,stop,unused)} .5\n.param stop=1 base=1k\n.ends\n.end\n",
+            dialect,
+        );
+        let AnalysisCommand::Dc {
+            source,
+            start,
+            stop,
+            step,
+            ..
+        } = &netlist.analyses[0]
+        else {
+            panic!("DC")
+        };
+        // An unused invalid body parameter is deliberately retained. Prove
+        // parsing did not force it; elaborate a valid unused body below.
+        assert_eq!((*start, *stop, *step), (0.0, 1.0, 0.5));
+        assert_eq!(source.to_ascii_uppercase(), "V1");
+        let valid = parse(
+            "Instance scopes\nV1 in 0 1\nX1 in out cell gain=3\nRload out 0 1k\n.subckt cell a b params: gain=1\n.param resistance={gain*base}\nR1 a b {resistance}\n.DC V1 0 {stop} .5\n.param stop=1 base=1k\n.ends\n.end\n",
+            dialect,
+        );
+        let points = Engine::default()
+            .run_dc_sweep(&valid, "V1", 0.0, 1.0, 0.5)
+            .unwrap();
+        assert_eq!(points.len(), 3);
+        for (voltage, point) in points {
+            assert!((point.try_voltage_named("out").unwrap() - voltage / 4.0).abs() < 1e-10);
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn scoped_pending_cards_keep_captured_complex_functions_and_sibling_separation() {
+    for dialect in DIALECTS {
+        let netlist = parse(
+            "Scope captures\n.subckt parent p\n.param known=2 z={3+4j}\n.func scale(x) {known*x}\n.DC V1 {scale(2)+img(z)} {later} 1\n.param known=20 z={30+40j}\n.func scale(x) {100*x}\n.param later=10\n.ends\n.subckt sibling p\n.DC V1 0 {later} 1\n.param later=30\n.ends\n.end\n",
+            dialect,
+        );
+        assert!(matches!(
+            netlist.analyses[0],
+            AnalysisCommand::Dc {
+                start: 8.0,
+                stop: 10.0,
+                ..
+            }
+        ));
+        assert!(matches!(
+            netlist.analyses[1],
+            AnalysisCommand::Dc { stop: 30.0, .. }
+        ));
+        let invalid = "No sibling binding\n.subckt first p\n.DC V1 0 {only_second} 1\n.ends\n.subckt second p\n.param only_second=10\n.ends\n.end\n";
+        assert!(
+            Netlist::parse_with_options(
+                invalid,
+                NetlistParseOptions {
+                    expression_dialect: dialect,
+                    ..Default::default()
+                }
+            )
+            .is_err()
+        );
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn suspended_scoped_operands_do_not_replay_earlier_fields_or_lazy_draws() {
+    for dialect in DIALECTS {
+        let mut expected = ParamContext::new();
+        expected.set_expression_dialect(dialect);
+        expected.set_random_seed(73);
+        let start = eval_expression("aunif(0,1)", &expected).unwrap();
+        assert!(eval_expression("aunif(1,.1)", &expected).unwrap() > 0.0);
+        let stop = 9.0 + eval_expression("aunif(0,1)", &expected).unwrap();
+        let step = eval_expression("abs(aunif(0,1))+.01", &expected).unwrap();
+        let netlist = parse(
+            "Operand suspension\n.options seed=73\n.subckt cell p\n.param z={3+4j}\n.param shared={base+img(z)+aunif(0,1)}\n.param unused={missing}\n.DC V1 {aunif(0,1)} {if(aunif(1,.1)>0,shared,unused)} {abs(aunif(0,1))+.01}\n.param base=5\n.ends\n.end\n",
+            dialect,
+        );
+        let AnalysisCommand::Dc {
+            start: actual_start,
+            stop: actual_stop,
+            step: actual_step,
+            ..
+        } = netlist.analyses[0]
+        else {
+            panic!("DC")
+        };
+        assert_eq!(
+            (actual_start, actual_stop, actual_step),
+            (start, stop, step)
+        );
+        assert_eq!(
+            eval_expression("aunif(0,1)", &netlist.params).unwrap(),
+            eval_expression("aunif(0,1)", &expected).unwrap()
+        );
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn owner_cache_does_not_replace_an_inherited_child_snapshot() {
+    for dialect in DIALECTS {
+        let netlist = parse(
+            "Inherited snapshot\n.options seed=73\n.subckt parent p\n.param shared=2\n.subckt child q\n.param local={other+shared}\n.DC V1 0 {local} 1\n.ends\n.param shared={base+aunif(0,1)}\n.param other={shared+1}\n.param base=5\n.ends\n.end\n",
+            dialect,
+        );
+        let mut expected = ParamContext::new();
+        expected.set_expression_dialect(dialect);
+        expected.set_random_seed(73);
+        let shared = 5.0 + eval_expression("aunif(0,1)", &expected).unwrap();
+        let AnalysisCommand::Dc { stop, .. } = netlist.analyses[0] else {
+            panic!("DC")
+        };
+        assert_eq!(stop, (shared + 1.0) + 2.0);
+        assert_eq!(
+            eval_expression("aunif(0,1)", &netlist.params).unwrap(),
+            eval_expression("aunif(0,1)", &expected).unwrap()
+        );
     }
 }

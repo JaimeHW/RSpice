@@ -78,5 +78,5 @@ pub(crate) use eval::{
 };
 pub use eval::{evaluate, evaluate_complex};
 pub(crate) use parameter_direction::ComplexDirection;
-pub(crate) use resolution::{ParameterResolutionError, ParameterResolver};
+pub(crate) use resolution::{ParameterEnvironment, ParameterResolutionError, ParameterResolver};
 pub use types::{BinOpKind, Expr, UnaryOpKind, is_real};

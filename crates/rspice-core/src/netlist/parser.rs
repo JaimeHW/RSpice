@@ -13,7 +13,7 @@ use super::expr::{
     prepare_behavioral_expression,
 };
 use super::include::{ExpandedSource, ExpandedSourceItem};
-use super::lexer::{LexError, TokenKind, TokenStream, parse_spice_value, tokenize};
+use super::lexer::{LexError, TokenKind, parse_spice_value, tokenize};
 use super::mutual_inductor::{
     MutualInductorSemanticRecord, validate_mutual_inductor_semantic_records_with_abort,
 };
@@ -56,6 +56,8 @@ mod chebyshev_synthesis;
 mod command_parsers;
 mod commands;
 mod temperature;
+mod stream;
+use stream::TokenStream;
 
 use temperature::{
     ParserTemperatures, apply_replayed_temperature, parse_with_consistent_temperatures,

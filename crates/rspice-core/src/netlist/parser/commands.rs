@@ -74,7 +74,6 @@ pub(super) fn parse_command(
             diagnostics,
             options,
         },
-        matches!(startup_scope, StartupDirectiveScope::TopLevel),
     )? {
         return Ok(());
     }

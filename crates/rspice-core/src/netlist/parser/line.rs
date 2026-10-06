@@ -230,6 +230,16 @@ pub(super) fn process_line(
         for (name, value) in &subckt.params {
             local_params.set(name, *value);
         }
+        for (name, expression) in &subckt.expr_params {
+            if !subckt
+                .params
+                .iter()
+                .any(|(numeric, _)| numeric.eq_ignore_ascii_case(name))
+            {
+                local_params.define_parameter_expression(name, expression, None);
+                local_params.retain_expression_origin(name, false, origin);
+            }
+        }
         for (name, value) in &subckt.string_params {
             local_params.set_string(name, value.clone());
         }
@@ -246,6 +256,7 @@ pub(super) fn process_line(
                 debug_assert!(acceptance.authoritative);
             }
         }
+        state.analysis_cards.open_scope();
         state.subckt_stack.push(SubcktFrame {
             def: subckt,
             qualified_name,
@@ -317,6 +328,7 @@ pub(super) fn process_line(
         let original_name = frame.def.name.to_ascii_uppercase();
         frame.def.name = frame.qualified_name.clone();
         let finalized = frame.def;
+        state.analysis_cards.close_scope(frame.local_params);
 
         if let Some(parent) = state.subckt_stack.last_mut() {
             parent

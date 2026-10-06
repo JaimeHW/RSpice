@@ -1,10 +1,13 @@
-//! Ordered root analysis bindings. Ready cards keep their eager values; failed
-//! cards retry the same grammar after the root parameter scope is complete.
+//! Ordered analysis bindings. Ready cards keep their eager values; failed
+//! cards bind in their authored scope after declarations are complete.
 use super::*;
+
+mod scopes;
 
 #[derive(Debug, Default)]
 pub(in crate::netlist::parser) struct AnalysisCardPlan {
     entries: Vec<Entry>,
+    scopes: scopes::AnalysisScopes,
 }
 
 #[derive(Debug)]
@@ -24,6 +27,7 @@ enum Card {
 
 #[derive(Debug)]
 struct PendingCard {
+    scope: usize,
     command: String,
     stream: TokenStream,
     logical_line: String,
@@ -34,7 +38,12 @@ struct PendingCard {
 }
 
 impl PendingCard {
-    fn capture(command: &str, stream: TokenStream, context: AnalysisCardContext<'_>) -> Self {
+    fn capture(
+        scope: usize,
+        command: &str,
+        stream: TokenStream,
+        context: AnalysisCardContext<'_>,
+    ) -> Self {
         let mut values = context
             .params
             .all_params()
@@ -49,6 +58,7 @@ impl PendingCard {
             }
         }
         Self {
+            scope,
             command: command.to_owned(),
             stream,
             logical_line: context.logical_line.to_owned(),
@@ -77,13 +87,19 @@ impl PendingCard {
 }
 
 impl AnalysisCardPlan {
+    pub(in crate::netlist::parser) fn open_scope(&mut self) {
+        self.scopes.open();
+    }
+    pub(in crate::netlist::parser) fn close_scope(&mut self, params: ParamContext) {
+        self.scopes.close(params);
+    }
+
     pub(in crate::netlist::parser) fn parse(
         &mut self,
         command: &str,
         stream: &mut TokenStream,
         context: AnalysisCardContext<'_>,
         sink: AnalysisCardSink<'_>,
-        root_scope: bool,
     ) -> Result<bool, ParseError> {
         if AnalysisHead::parse(command).is_none() {
             return Ok(false);
@@ -107,8 +123,9 @@ impl AnalysisCardPlan {
             // completes (notably optional values and typed periodic fields).
             // Retain the original tokens and run the authoritative grammar
             // again, instead of classifying human-readable error strings.
-            Err(error) if root_scope && !matches!(error, ParseError::ResourceLimit(_)) => {
+            Err(error) if !matches!(error, ParseError::ResourceLimit(_)) => {
                 Card::Pending(Box::new(PendingCard::capture(
+                    self.scopes.retain(),
                     command,
                     stream.clone(),
                     context,
@@ -147,6 +164,19 @@ impl AnalysisCardPlan {
                         .map_err(|error| located_error(error, entry.line, &entry.origin))?;
                     *card
                 }
+                Card::Pending(pending) if pending.scope != 0 => self.scopes.bind(
+                    &pending,
+                    AnalysisCardContext {
+                        line_num: entry.line,
+                        logical_line: &pending.logical_line,
+                        params,
+                        max_analysis_points: pending.max_analysis_points,
+                        origin: &entry.origin,
+                        lin_exists,
+                        current_noise,
+                    },
+                    abort,
+                )?,
                 Card::Pending(pending) => {
                     let bound = pending.context(params);
                     ParsedAnalysisCard::parse(
@@ -208,6 +238,57 @@ impl AnalysisCardPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_scoped_binding_does_not_draw_or_publish_partial_effects() {
+        for cancel in [false, true] {
+            let mut state = ParseState::new();
+            state.params.set_random_seed(73);
+            for (index, line) in [
+                ".subckt child p",
+                ".DC V1 {aunif(0,1)+stop} 100 1 invalid",
+                ".param stop={base+aunif(0,1)}",
+                ".param base=5",
+                ".ends",
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                process_line(
+                    line,
+                    index + 2,
+                    &NetlistSourceLocation::in_memory(index + 2),
+                    &mut state,
+                )
+                .unwrap();
+            }
+            let expected = state.params.isolated_random_clone();
+            let cancelled = crate::abort_signal::CountingAbort::new(5);
+            let abort: &dyn AbortSignal = if cancel { &cancelled } else { &NoAbort };
+            let result = state.analysis_cards.complete(
+                &state.params,
+                AnalysisCardSink {
+                    analyses: &mut state.analyses,
+                    monte_carlo_source_cards: &mut state.monte_carlo_source_cards,
+                    lin_analysis: &mut state.lin_analysis,
+                    fft_analyses: &mut state.fft_analyses,
+                    output_requests: &mut state.output_requests,
+                    diagnostics: &mut state.diagnostics,
+                    options: &mut state.options,
+                },
+                abort,
+            );
+            assert!(result.is_err());
+            assert_eq!(matches!(result, Err(ParseWithAbortError::Aborted)), cancel);
+            assert_eq!(cancelled.polls_after_abort(), 0);
+            assert!(state.analyses.is_empty());
+            assert!(state.output_requests.is_empty());
+            assert_eq!(
+                eval_expression("aunif(0,1)", &state.params).unwrap(),
+                eval_expression("aunif(0,1)", &expected).unwrap()
+            );
+        }
+    }
 
     #[test]
     fn cancellation_precedes_deferred_binding_and_publication() {

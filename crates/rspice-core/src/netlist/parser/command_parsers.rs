@@ -1076,7 +1076,8 @@ fn parse_sp_card_port(
 mod quoted_path_tests {
     use super::quoted_path_lexeme;
     use crate::netlist::Netlist;
-    use crate::netlist::lexer::{TokenStream, tokenize};
+    use crate::netlist::lexer::tokenize;
+    use super::TokenStream;
     use crate::netlist::measure::MeasureType;
 
     fn taken(source: &str) -> (Option<String>, bool) {

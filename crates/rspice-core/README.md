@@ -410,12 +410,19 @@ An ordered parser plan merges primary analyses, `.LIN`/`.FFT` auxiliaries,
 Fourier/FFT outputs, Monte Carlo source identities and diagnostics back into
 their original positions. LIN uniqueness and transient-noise consistency are
 checked in authored order, including when an earlier card was pending. Root
-cards do not inherit child-local bindings. Forward analysis operands inside
-subcircuit definitions remain unfinished; resolving unused instance-dependent
-body declarations eagerly would change their semantics.
+cards do not inherit child-local bindings.
 
-General dependency planning remains incomplete: eager analysis cards and
-references to an enclosing scope that is still incomplete need further work.
+Deferred subcircuit analysis operands resolve only demanded dependencies in
+their declaring scopes, including later parent/root declarations and unresolved
+header defaults. Siblings remain isolated. Known inherited values retain their
+snapshot when a parent is later redefined. Suspended numeric operands preserve
+lazy branches and random-draw order across grammar retries; shared dependencies
+sample once in their owner. Original subcircuit bodies remain available for
+per-instance overrides and evaluation. Only scopes needed by pending cards are
+retained beyond `.ENDS`.
+
+General dependency planning remains incomplete: temperature options that read
+an enclosing scope still incomplete at `.ENDS` need further work.
 An early expression invalid at the provisional temperature can also fail before
 replay in the ngspice dialect.
 These cases remain in the implementation plan.

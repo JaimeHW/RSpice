@@ -13,6 +13,8 @@
 //! seed ([`DEFAULT_RANDOM_SEED`] unless overridden).
 
 use super::*;
+
+mod lexical;
 use crate::config::ExpressionDialect;
 use std::collections::BTreeSet;
 use std::sync::Arc;

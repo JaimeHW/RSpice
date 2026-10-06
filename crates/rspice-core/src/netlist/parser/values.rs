@@ -1968,9 +1968,13 @@ pub(super) fn expect_value_capturing_direction(
         }
         TokenKind::Expression(expr) => {
             let expr = expr.clone();
+            let value = if direction.is_some() {
+                evaluate_value_capturing_direction(&expr, params, direction.as_deref_mut())
+            } else {
+                stream.numeric_expression(&expr, params)
+            }
+            .map_err(|e| ParseError::InvalidValue(e.to_string()))?;
             stream.advance();
-            let value = evaluate_value_capturing_direction(&expr, params, direction.as_deref_mut())
-                .map_err(|e| ParseError::InvalidValue(e.to_string()))?;
             if let Some(direction) = direction {
                 *direction = std::mem::replace(direction, Ok(0.0.into())).map(|value| value * sign);
             }
@@ -1992,6 +1996,12 @@ pub(super) fn expect_value_capturing_direction(
             } else if let Ok(v) = crate::netlist::lexer::parse_spice_value(s) {
                 stream.advance();
                 Ok(v * sign)
+            } else if stream.binding_numeric_values() {
+                let name = s.clone();
+                let value = stream.numeric_expression(&name, params)
+                    .map_err(|error| ParseError::InvalidValue(error.to_string()))?;
+                stream.advance();
+                Ok(value * sign)
             } else {
                 Err(ParseError::Syntax {
                     line: line_num,
@@ -2092,7 +2102,11 @@ pub(super) fn try_signed_value(stream: &mut TokenStream, params: &ParamContext) 
         _ => None,
     };
     if let Some(sign) = sign
-        && token_is_value_like(&stream.peek_n(1).kind, params)
+        && (token_is_value_like(&stream.peek_n(1).kind, params)
+            || (stream.binding_numeric_values()
+                && matches!(&stream.peek_n(1).kind, TokenKind::Ident(name)
+                    if params.has_parameter_binding(name)
+                        || params.get_global_expression(name).is_some())))
     {
         stream.advance();
         if let Some(magnitude) = try_value_unsigned(stream, params) {
@@ -2145,7 +2159,13 @@ fn try_value_unsigned(stream: &mut TokenStream, params: &ParamContext) -> Option
             // A failed optional value is still an authored operand. Leave it
             // for the caller's error/forward-binding path instead of silently
             // treating it as an omitted field.
-            let value = eval_expression(expr, params).ok()?;
+            let value = if stream.binding_numeric_values() {
+                let expression = expr.clone();
+                stream.numeric_expression(&expression, params)
+            } else {
+                eval_expression(expr, params)
+            }
+            .ok()?;
             stream.advance();
             Some(value)
         }
@@ -2159,6 +2179,13 @@ fn try_value_unsigned(stream: &mut TokenStream, params: &ParamContext) -> Option
             } else if let Ok(v) = crate::netlist::lexer::parse_spice_value(s) {
                 stream.advance();
                 Some(v)
+            } else if stream.binding_numeric_values()
+                && (params.has_parameter_binding(s) || params.get_global_expression(s).is_some())
+            {
+                let name = s.clone();
+                let value = stream.numeric_expression(&name, params).ok()?;
+                stream.advance();
+                Some(value)
             } else {
                 None
             }
@@ -2410,9 +2437,10 @@ pub(super) fn lex_to_parse_error(e: LexError, line_num: usize) -> ParseError {
 
 #[cfg(test)]
 mod tests {
+    use super::TokenStream;
     use crate::Netlist;
     use crate::netlist::expr::ParamContext;
-    use crate::netlist::lexer::{TokenKind, TokenStream, tokenize};
+    use crate::netlist::lexer::{TokenKind, tokenize};
 
     fn coalesce(line: &str) -> Vec<String> {
         super::coalesce_assignment_fields(super::split_spice_fields(line))
