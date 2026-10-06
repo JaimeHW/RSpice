@@ -11,6 +11,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
+    // Control-script dispatch, transient integration, and checkpointing can
+    // exceed MSVC's default 1 MiB main-thread stack even for a small RC deck.
+    // Reserve 8 MiB for the executable; Windows commits pages only on demand.
+    // Test harness threads and other host binaries retain their own policy.
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        println!("cargo:rustc-link-arg-bin=rspice=/STACK:8388608");
+    }
     println!(
         "cargo:rustc-env=RSPICE_BUILD_TARGET={}",
         std::env::var("TARGET").unwrap_or_default()
