@@ -16,7 +16,7 @@ cargo build --release -p rspice-cli
 | Command | Purpose |
 | :--- | :--- |
 | `run` | Execute the analyses a netlist requests, or one requested from the command line |
-| `check` | Validate netlist syntax, output symbols, topology, and XSPICE construction |
+| `check` | Validate netlist and control syntax, analysis requests, output symbols, topology, and XSPICE construction |
 | `info` | Summarize a netlist without simulating it |
 | `models` | List the shipped SPICE model packs and look up parts in them |
 | `compare` | Compare a result against a golden reference |
@@ -41,7 +41,8 @@ These combinations remain explicitly unsupported:
 
 | Feature | CLI boundary |
 | :--- | :--- |
-| FFT comparison and partial-spectrum conversion | Waveform comparison and `--variables`/`--start`/`--stop` selection cannot represent a complete typed transform and are rejected |
+| Strict Verilog-A LRM checking | `compile-va --strict` returns an unsupported-capability error until strict checking is implemented |
+| Partial-spectrum conversion | `convert --variables`/`--start`/`--stop` cannot represent a complete typed transform and are rejected |
 
 These are feature gaps, not a claim of parity with other commercial simulators.
 Passing crate tests does not qualify every device model or platform. Desktop,
@@ -358,7 +359,16 @@ identity, sampling and window settings, complex bins, ranked harmonics,
 metrics, and incomplete-history evidence. It validates the whole input before
 publishing the destination. Gaussian and Kaiser windows retain their `ALFA`
 parameters. FFT bundles require whole-transform conversion; waveform clipping,
-variable selection, VCD output, and generic waveform comparison are refused.
+variable selection and VCD output are refused.
+
+FFT comparison accepts all six FFT encodings and compares each request by its
+canonical identity. It checks sampling, normalization, window, physical quantity,
+coordinate, and source contracts before comparing bins and metrics using the
+requested tolerances. `--variables` selects signal names or canonical FFT request
+IDs. Incomplete spectra cannot pass a numerical comparison, even against another
+incomplete spectrum. Discrete FFT grids cannot use waveform interpolation.
+Cartesian coefficients carry phase comparison; derived phase angles do not
+create false differences at wrap boundaries or at effectively zero amplitude.
 
 ### `csv`, `tsv`, `raw`, `ascii`: the flat authored projection
 
@@ -559,9 +569,16 @@ declaration saying that N of its columns are one word. Columns are named
 its first change a logic signal reads `0.5`; a real signal, which has no
 unknown to show, holds its first value backwards.
 
-**`compile-va`** searches includes in order: `-I` directories, then config
-`paths.veriloga_includes`, then the source file's own directory. Terminals,
-internal node count, and the parameter table always print to stdout.
+**`compile-va`** resolves includes relative to the including source first,
+then searches source directories discovered by preprocessing, `-I` directories,
+and config `paths.veriloga_includes`. Built-in standard headers are the fallback.
+Use `--module NAME` to select a module in a multi-module source. Root bytes and
+lines, total dependency bytes, include depth, and expanded bytes obey the
+configured resource limits; compilation supports Ctrl-C cancellation.
+The interface table prints unless `--quiet` is set. Quiet also suppresses
+`--detailed` and `--show-usage` text, while `-o FILE` still writes a versioned
+JSON interface summary. `--strict` returns an unsupported-capability error:
+strict LRM compliance checking is not yet implemented.
 
 **`health`** is a deployment probe. The default readiness mode validates the
 effective engine configuration and executes a deterministic, bounded in-memory

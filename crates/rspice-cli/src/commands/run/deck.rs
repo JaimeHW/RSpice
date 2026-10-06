@@ -277,7 +277,16 @@ pub(super) fn validate_step_frontend_compatibility(
     let has_temperature_axis = netlist
         .analyses
         .iter()
-        .any(|analysis| matches!(analysis, AnalysisCommand::Temp { .. }));
+        .any(|analysis| matches!(analysis, AnalysisCommand::Temp { .. }))
+        || steps
+            .iter()
+            .any(|step| step.target == rspice_core::netlist::StepTarget::Temp);
+    if has_temperature_axis && args.temp.is_some() {
+        return Err(CliError::InvalidArgument {
+            message: "--temp conflicts with an authored .TEMP or .STEP TEMP axis".into(),
+            suggestion: Some("remove --temp to execute the authored temperatures, or remove the temperature axis to use one override".into()),
+        });
+    }
     if steps.is_empty() && !has_temperature_axis {
         return Ok(());
     }
@@ -339,11 +348,19 @@ pub(super) fn preflight_deck_run_count(
         DeckPlan::from_netlist_with_abort(netlist, &resource_limits, &crate::abort::ProcessAbort)
             .map_err(|error| map_deck_plan_error(error, args))?;
     if canonical_plan.axes().is_empty() {
+        if requested_mode_name(args).is_none() {
+            crate::commands::preflight::netlist(
+                netlist,
+                &args.input,
+                resource_limits,
+                args.tran_stop,
+            )?;
+        }
         return Ok(1);
     }
 
     let base_signature = step_analysis_signature(netlist);
-    let engine = Engine::try_new(build_sim_config(args, config, netlist))?;
+    let engine = build_engine(args, config, netlist)?;
     let materializer = engine
         .prepare_deck_plan_materializer_with_abort(
             netlist,
@@ -420,18 +437,7 @@ pub(super) fn load_netlist_from_source(
                 spec,
             ));
         }
-        saves.apply_ground_policy(netlist.ground_policy());
-        netlist.saves = saves;
-        netlist.output_requests.retain(|request| {
-            !matches!(
-                request.directive,
-                rspice_core::netlist::OutputDirectiveKind::Save
-                    | rspice_core::netlist::OutputDirectiveKind::Probe
-                    | rspice_core::netlist::OutputDirectiveKind::Print
-                    | rspice_core::netlist::OutputDirectiveKind::Plot
-            )
-        });
-        netlist.output_requests.extend(override_requests);
+        netlist.override_output_selection(saves, override_requests);
     }
 
     rspice_core::netlist::validate_output_symbols_with_abort(&netlist, &crate::abort::ProcessAbort)
@@ -455,11 +461,19 @@ pub(super) fn parse_format_name(name: &str) -> Result<OutputFormat, CliError> {
     })
 }
 
-pub(super) fn build_sim_config(
+/// Construct every CLI run engine from the authoritative configuration once.
+/// Analyses must not apply deck options over explicit CLI overrides again.
+pub(super) fn build_engine(
     args: &RunArgs,
     config: &Config,
     netlist: &Netlist,
-) -> SimulationConfig {
+) -> Result<Engine, CliError> {
+    Ok(Engine::try_new_with_resolved_config(build_sim_config(
+        args, config, netlist,
+    ))?)
+}
+
+fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> SimulationConfig {
     let base = config.core_simulation_config();
 
     let convergence_mode = args

@@ -164,6 +164,12 @@ pub(super) fn preflight_step_coordinates(
                     ),
                 )
             })?;
+        crate::commands::preflight::netlist(
+            materialized.netlist(),
+            &args.input,
+            engine.config().resource_limits,
+            args.tran_stop,
+        )?;
         let signature = step_analysis_signature(materialized.netlist());
         if signature != base_signature {
             return Err(CliError::InvalidArgument {
@@ -346,8 +352,7 @@ fn run_implicit_step_op_table(
                 ),
             });
         }
-        let coordinate_engine =
-            Engine::try_new(build_sim_config(args, config, materialized.netlist()))?;
+        let coordinate_engine = build_engine(args, config, materialized.netlist())?;
         let topology = materialized.topology_fingerprint();
         // The device operating-point report is taken at every coordinate, not
         // only for a scalar deck: it is what carries the complete typed
@@ -922,8 +927,7 @@ pub(super) fn run_deck(
     }
 
     let base_signature = step_analysis_signature(netlist);
-    let sim_config = build_sim_config(args, config, netlist);
-    let engine = Engine::try_new(sim_config)?;
+    let engine = build_engine(args, config, netlist)?;
     let materializer = engine
         .prepare_deck_plan_materializer_with_abort(
             netlist,

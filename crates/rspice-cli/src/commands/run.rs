@@ -48,7 +48,7 @@ use context::{
     ArtifactCoordinate, PlannedAnalysisIdentities, RunContext, RunIdentity, run_requested_mode,
 };
 use deck::{
-    analyses_in_execution_order, build_sim_config, load_netlist_from_source,
+    analyses_in_execution_order, build_engine, load_netlist_from_source,
     materialize_addresistors_artifact, parse_format_name, parse_options_for_run,
     preflight_deck_run_count, step_analysis_signature, validate_pss_flag_conflict,
     validate_run_numeric_args, validate_step_frontend_compatibility,
@@ -654,8 +654,7 @@ fn run_concrete_deck(
         println!("Analyses: {}", netlist.analyses.len());
     }
 
-    let sim_config = build_sim_config(args, config, netlist);
-    let engine = Engine::try_new(sim_config)?;
+    let engine = build_engine(args, config, netlist)?;
     let ctx = RunContext::new(
         &engine, netlist, args, config, verbose, quiet, run_label, identity,
     )?;

@@ -315,5 +315,11 @@ pub(super) fn resolve_output_path(
         path: dir.clone(),
         source: e,
     })?;
-    Ok(Some(dir.join(path)))
+    let resolved = dir.join(path);
+    std::path::absolute(&resolved)
+        .map(Some)
+        .map_err(|source| CliError::OutputError {
+            path: resolved,
+            source,
+        })
 }

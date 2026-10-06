@@ -24,6 +24,7 @@ pub mod health;
 pub mod info;
 pub(crate) mod input;
 pub mod models;
+pub(crate) mod preflight;
 pub(crate) mod publish;
 pub mod run;
 mod run_signals;

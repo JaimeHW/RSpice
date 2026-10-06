@@ -6,8 +6,11 @@
 //! and relative tolerances.
 
 use crate::cli::{CliError, Config, OutputFormat, map_atomic_output_error};
+use crate::commands::export_table::ColumnData;
 use crate::commands::publish;
-use crate::commands::waveform_io::{detect_format, load_table_selected};
+use crate::commands::waveform_io::{ImportedResult, detect_format, load_result_selected};
+
+mod fft;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -121,14 +124,14 @@ pub fn execute(
             // Missing-golden bootstrap is still a promotion of a result
             // artifact. Validate the result before copying so malformed CSV,
             // JSON, RAW, etc. cannot become the accepted baseline.
-            let data = load_waveform_data(
+            let data = load_comparison_data(
                 &args.result,
                 config.resources.limits(),
                 args.section.as_deref(),
             )?;
             bless_golden(&args.result, &args.golden, quiet, "no golden file yet")?;
             if args.format == OutputFormat::Json {
-                let mut comparison = compare_waveforms(&data, &data, &args)?;
+                let mut comparison = compare_data(&data, &data, &args)?;
                 comparison.passed = false;
                 comparison
                     .problems
@@ -156,25 +159,28 @@ pub fn execute(
     }
 
     // Load and parse files
-    let result_data = load_waveform_data(
+    let result_data = load_comparison_data(
         &args.result,
         config.resources.limits(),
         args.section.as_deref(),
     )?;
-    let golden_data = load_waveform_data(
+    let golden_data = load_comparison_data(
         &args.golden,
         config.resources.limits(),
         args.section.as_deref(),
     )?;
 
     let result_data = if args.interpolate {
-        resample_onto_golden(result_data, &golden_data)?
+        match (result_data, &golden_data) {
+            (ComparisonData::Waveform(result), ComparisonData::Waveform(golden)) => ComparisonData::Waveform(resample_onto_golden(result, golden)?),
+            _ => return Err(CliError::InvalidArgument { message: "FFT comparison requires matching discrete transform grids; --interpolate is only available for waveforms".into(), suggestion: None }),
+        }
     } else {
         result_data
     };
 
     // Perform comparison
-    let cmp_result = compare_waveforms(&result_data, &golden_data, &args)?;
+    let cmp_result = compare_data(&result_data, &golden_data, &args)?;
 
     let blessed = !cmp_result.passed && args.bless;
 
@@ -257,10 +263,64 @@ fn bless_golden(
     Ok(())
 }
 
+enum ComparisonData {
+    Waveform(WaveformData),
+    Fft(Box<crate::commands::run::FftBundle>),
+}
+
+fn compare_data(
+    result: &ComparisonData,
+    golden: &ComparisonData,
+    args: &CompareArgs,
+) -> Result<CompareResult, CliError> {
+    match (result, golden) {
+        (ComparisonData::Waveform(result), ComparisonData::Waveform(golden)) => {
+            compare_waveforms(result, golden, args)
+        }
+        (ComparisonData::Fft(result), ComparisonData::Fft(golden)) => {
+            fft::compare(result, golden, args)
+        }
+        _ => Err(CliError::VerificationFailed {
+            message: "result kinds differ: a typed FFT cannot be compared to a waveform table"
+                .into(),
+        }),
+    }
+}
+
 /// Waveform data structure for comparison
 struct WaveformData {
     variables: Vec<String>,
+    variable_types: Vec<String>,
     values: Vec<Vec<f64>>,
+}
+
+fn quantity_type(value: &str) -> Option<String> {
+    // SI symbols are case-sensitive: S (siemens) is not s (seconds).
+    if value.trim() == "S" {
+        return Some("conductance".into());
+    }
+    let normalized = match value.trim().to_ascii_lowercase().as_str() {
+        "" | "value" | "unknown" | "parameter" => return None,
+        "v" | "volt" | "volts" | "voltage" => "voltage",
+        "a" | "amp" | "ampere" | "amperes" | "current" => "current",
+        "s" | "sec" | "second" | "seconds" | "time" => "time",
+        "hz" | "hertz" | "frequency" => "frequency",
+        "ohm" | "ohms" | "resistance" | "impedance" => "resistance",
+        "siemens" | "mho" | "conductance" => "conductance",
+        "1" | "scalar" | "ratio" | "dimensionless" => "dimensionless",
+        "logic" | "digital" => "digital",
+        other => return Some(other.to_owned()),
+    };
+    Some(normalized.to_owned())
+}
+
+fn types_compatible(left: &str, right: &str) -> bool {
+    match (quantity_type(left), quantity_type(right)) {
+        (Some(left), Some(right)) => left == right,
+        // Legacy table formats cannot declare every quantity. Unknown is
+        // allowed, but two explicitly incompatible quantities never match.
+        _ => true,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -305,14 +365,35 @@ fn find_variable_index(variables: &[String], requested: &str) -> Option<usize> {
 ///
 /// The scale becomes the first compared series; complex signals expand to
 /// `Re(name)` / `Im(name)` so AC results compare value-for-value.
-fn load_waveform_data(
+fn load_comparison_data(
     path: &std::path::Path,
     resource_limits: rspice_core::ResourceLimits,
     section: Option<&str>,
-) -> Result<WaveformData, CliError> {
-    let table = load_table_selected(path, detect_format(path), resource_limits, section)?;
-    let (variables, values): (Vec<String>, Vec<Vec<f64>>) =
-        table.to_real_series().into_iter().unzip();
+) -> Result<ComparisonData, CliError> {
+    let table = match load_result_selected(path, detect_format(path), resource_limits, section)? {
+        ImportedResult::Table(table) => table,
+        ImportedResult::Fft(fft) => return Ok(ComparisonData::Fft(Box::new(fft))),
+    };
+    let mut variables = vec![table.scale_name];
+    let mut variable_types = vec![table.scale_type];
+    let mut values = vec![table.scale];
+    for column in table.columns {
+        match column.data {
+            ColumnData::Real(series) => {
+                variables.push(column.name);
+                variable_types.push(column.var_type);
+                values.push(series);
+            }
+            ColumnData::Complex { real, imag } => {
+                variables.extend([
+                    format!("Re({})", column.name),
+                    format!("Im({})", column.name),
+                ]);
+                variable_types.extend([column.var_type.clone(), column.var_type]);
+                values.extend([real, imag]);
+            }
+        }
+    }
     let mut seen = HashSet::new();
     for variable in &variables {
         if !seen.insert(parse_variable_name(variable).key) {
@@ -324,13 +405,19 @@ fn load_waveform_data(
             });
         }
     }
-    Ok(WaveformData { variables, values })
+    Ok(ComparisonData::Waveform(WaveformData {
+        variables,
+        variable_types,
+        values,
+    }))
 }
 
-/// Linearly resample the result's series onto the golden file's scale so
+/// Resample the result's series onto the golden file's scale so
 /// runs with different time grids compare point-for-point. The scale is
 /// each file's first series; the result scale must be strictly increasing
 /// and must cover the golden range — interpolation never extrapolates.
+/// Analog signals are linear; event signals hold their last value until the
+/// next event, including the new value at the exact transition time.
 fn resample_onto_golden(
     result: WaveformData,
     golden: &WaveformData,
@@ -341,6 +428,12 @@ fn resample_onto_golden(
         return Err(invalid(format!(
             "independent coordinates differ: '{}' versus '{}'",
             result.variables[0], golden.variables[0]
+        )));
+    }
+    if !types_compatible(&result.variable_types[0], &golden.variable_types[0]) {
+        return Err(invalid(format!(
+            "independent coordinate types differ: '{}' versus '{}'",
+            result.variable_types[0], golden.variable_types[0]
         )));
     }
 
@@ -380,7 +473,7 @@ fn resample_onto_golden(
     }
 
     let interp_at =
-        |series: &[f64], x: f64| -> Result<f64, CliError> {
+        |series: &[f64], x: f64, held: bool| -> Result<f64, CliError> {
             // Index of the first scale point >= x (the scale is sorted).
             let upper = result_scale.partition_point(|&s| s < x);
             if upper == 0 {
@@ -395,30 +488,47 @@ fn resample_onto_golden(
             }
             let (x0, x1) = (result_scale[upper - 1], result_scale[upper]);
             let (y0, y1) = (series[upper - 1], series[upper]);
-            if x1 == x0 {
+            if x == x1 {
+                return Ok(y1);
+            }
+            if held {
                 return Ok(y0);
             }
-            Ok(y0 + (y1 - y0) * (x - x0) / (x1 - x0))
+            // Evaluate (y0 * (x1 - x) + y1 * (x - x0)) / (x1 - x0)
+            // with a single rounding. Both differences and intermediate products
+            // can overflow, while even a normalized weight can underflow before
+            // multiplication by a large signal. Reuse the shared exact arithmetic.
+            rspice_veriloga_runtime::arithmetic::sum_products_ratio(
+                [(y0, x1), (-y0, x), (y1, x), (-y1, x0)].into_iter(),
+                [(x1, 1.0), (x0, -1.0)].into_iter(),
+            )
+            .map_err(|error| invalid(format!("cannot interpolate at {x:e}: {error:?}")))
         };
 
     let mut values = Vec::with_capacity(result.values.len());
     values.push(golden_scale.clone());
-    for series in result.values.iter().skip(1) {
+    for (index, series) in result.values.iter().enumerate().skip(1) {
         if series.len() != result_scale.len() {
             return Err(invalid(
                 "result series lengths disagree with its scale; cannot interpolate".to_string(),
             ));
         }
+        // D/E are the event column contract shared by the rawfile, CSV and
+        // VCD projections. Typed logic may also use an arbitrary display name.
+        let held = quantity_type(&result.variable_types[index]).as_deref() == Some("digital")
+            || strip_outer_call(&result.variables[index], "D").is_some()
+            || strip_outer_call(&result.variables[index], "E").is_some();
         values.push(
             golden_scale
                 .iter()
-                .map(|&x| interp_at(series, x))
+                .map(|&x| interp_at(series, x, held))
                 .collect::<Result<Vec<_>, _>>()?,
         );
     }
 
     Ok(WaveformData {
         variables: result.variables,
+        variable_types: result.variable_types,
         values,
     })
 }
@@ -669,6 +779,17 @@ fn compare_waveforms(
 
     for (var_idx, golden_idx) in pairs {
         let var_name = &result.variables[var_idx];
+
+        if !types_compatible(
+            &result.variable_types[var_idx],
+            &golden.variable_types[golden_idx],
+        ) {
+            cmp_result.problems.push(format!(
+                "'{var_name}': quantity types differ: '{}' versus '{}'",
+                result.variable_types[var_idx], golden.variable_types[golden_idx]
+            ));
+            continue;
+        }
 
         cmp_result.num_variables += 1;
 

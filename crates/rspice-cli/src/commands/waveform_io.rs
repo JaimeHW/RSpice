@@ -524,7 +524,7 @@ fn load_operating_point_report(
         analysis: "dc_op".to_string(),
         plot_name: "DC Operating Point".to_string(),
         scale_name: "point".to_string(),
-        scale_type: "voltage".to_string(),
+        scale_type: "index".to_string(),
         scale: vec![0.0],
         columns,
     }))
@@ -1268,8 +1268,10 @@ fn signal_var_type(name: &str) -> String {
         "digital".to_string()
     } else if upper.starts_with("I(") {
         "current".to_string()
-    } else {
+    } else if upper.starts_with("V(") {
         "voltage".to_string()
+    } else {
+        "value".to_string()
     }
 }
 
@@ -1284,11 +1286,13 @@ fn hdf5_signal_var_type(signal: &crate::hdf5::Hdf5Signal) -> String {
 
 fn scale_var_type(name: &str) -> String {
     let lower = name.to_ascii_lowercase();
-    if lower.contains("freq") {
-        "frequency".to_string()
-    } else {
-        "time".to_string()
+    match lower.as_str() {
+        "frequency" | "freq" | "frequency_hz" | "hz" => "frequency",
+        "time" | "time_s" | "t" => "time",
+        "point" | "index" | "tuple_index" => "index",
+        _ => "value",
     }
+    .to_string()
 }
 
 #[cfg(test)]
