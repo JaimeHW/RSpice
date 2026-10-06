@@ -3,7 +3,7 @@
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::cli::LogFormat;
+use crate::cli::{CliError, LogFormat};
 
 static MACHINE_DIAGNOSTICS: OnceLock<bool> = OnceLock::new();
 
@@ -60,9 +60,38 @@ pub fn envelope(schema: &str, mut payload: serde_json::Value) -> serde_json::Val
 }
 
 /// Initialize the process logger once using the requested production format.
-pub fn init(level: &str, format: LogFormat) {
-    let mut builder =
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(level));
+pub fn init(level: Option<&str>, format: LogFormat) -> Result<(), CliError> {
+    let config_error = |error: crate::cli::config::ConfigError| CliError::ConfigError {
+        message: error.to_string(),
+    };
+    // Select the filter before parsing it: environment module directives and
+    // regexes must not weaken an explicit CLI level or --verbose override.
+    let filter = match level {
+        Some(level) => level.to_owned(),
+        None => crate::cli::config::text_env("RUST_LOG")
+            .map_err(config_error)?
+            .unwrap_or_else(|| "warn".into()),
+    };
+    // env_logger's compatibility parser prints warnings directly to stderr and
+    // silently discards invalid directives. Validate with its underlying parser
+    // first so malformed filters use the selected CLI diagnostic format.
+    env_filter::Builder::new()
+        .try_parse(&filter)
+        .map_err(|error| CliError::ConfigError {
+            message: format!("Invalid RUST_LOG filter {filter:?}: {error}"),
+        })?;
+    let mut builder = env_logger::Builder::new();
+    builder.parse_filters(&filter);
+    if let Some(style) = crate::cli::config::text_env("RUST_LOG_STYLE").map_err(config_error)? {
+        if !matches!(style.as_str(), "auto" | "always" | "never") {
+            return Err(CliError::ConfigError {
+                message: format!(
+                    "Invalid RUST_LOG_STYLE={style:?}: expected auto, always, or never"
+                ),
+            });
+        }
+        builder.parse_write_style(&style);
+    }
 
     if format == LogFormat::Json {
         let correlation_id = run_id().to_string();
@@ -88,7 +117,9 @@ pub fn init(level: &str, format: LogFormat) {
         });
     }
 
-    builder.init();
+    builder.try_init().map_err(|error| CliError::InternalError {
+        message: format!("failed to initialize diagnostic logging: {error}"),
+    })
 }
 
 #[cfg(test)]

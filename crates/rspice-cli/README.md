@@ -674,6 +674,13 @@ so a bare `--device diode` does not spool tens of thousands of lines.
 
 ## Observability
 
+Logging uses `--log-level` first, then debug logging for `--verbose`, then
+`RUST_LOG`, and finally `warn`. `RUST_LOG` supports module directives and
+message regexes, such as `rspice=info/Loading`. `RUST_LOG_STYLE` accepts `auto`,
+`always`, or `never`; JSON logs remain free of terminal color codes. Invalid
+active logging settings fail with configuration exit code 78 in the selected
+diagnostic format. `--quiet` skips logging and its environment settings.
+
 `rspice --version` reports the crate version, build target, profile, and exact
 source commit. The same commit appears in health documents, structured fatal
 diagnostics, and run summaries so operators can correlate an installed binary
@@ -695,7 +702,9 @@ Configuration is loaded and merged in order of increasing priority: built-in
 defaults, user config (`~/.config/rspice/config.toml`, falling back to
 `~/.rspicerc`), project config (`./.rspicerc`), environment variables, then
 command-line arguments. `--config <FILE>` replaces the user and project layers
-with that single file. Scalar keys override the layer below; the `[paths]`
+with that single file. Only absent default config files are skipped; unreadable
+files and broken config symlinks fail with the path and filesystem reason.
+Scalar keys override the layer below; the `[paths]`
 lists accumulate, so a project file adds search directories rather than
 discarding the user's.
 

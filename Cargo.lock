@@ -5399,6 +5399,7 @@ dependencies = [
  "clap_complete",
  "ctrlc",
  "dirs",
+ "env_filter",
  "env_logger",
  "indicatif",
  "log",
