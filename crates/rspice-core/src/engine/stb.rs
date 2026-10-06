@@ -64,15 +64,16 @@ fn stb_retained_result_value_count(
 fn map_stb_analysis_error(error: StbAnalysisError) -> SimulationError {
     match error {
         StbAnalysisError::Aborted => SimulationError::Aborted,
-        StbAnalysisError::FrequencyGrid(error) => {
-            error.into_simulation_error("STB frequency grid")
-        }
+        StbAnalysisError::FrequencyGrid(error) => error.into_simulation_error("STB frequency grid"),
         StbAnalysisError::InvalidConfiguration(error) => {
             SimulationError::Circuit(format!("Invalid STB config: {error}"))
         }
-        StbAnalysisError::InvalidSample { .. }
-        | StbAnalysisError::CapacityOverflow { .. }
-        | StbAnalysisError::Allocation { .. } => SimulationError::Circuit(error.to_string()),
+        StbAnalysisError::Allocation { object, source, .. } => {
+            SimulationError::Allocation { object, source }
+        }
+        StbAnalysisError::InvalidSample { .. } | StbAnalysisError::CapacityOverflow { .. } => {
+            SimulationError::Circuit(error.to_string())
+        }
     }
 }
 
@@ -83,17 +84,17 @@ fn try_reserve_stb_values<T>(
 ) -> Result<(), SimulationError> {
     values
         .try_reserve_exact(requested)
-        .map_err(|_| map_stb_analysis_error(StbAnalysisError::Allocation { object, requested }))
+        .map_err(|source| SimulationError::Allocation { object, source })
 }
 
 fn try_owned_probe_name(probe: &str) -> Result<String, SimulationError> {
     let mut owned = String::new();
-    owned.try_reserve_exact(probe.len()).map_err(|_| {
-        map_stb_analysis_error(StbAnalysisError::Allocation {
+    owned
+        .try_reserve_exact(probe.len())
+        .map_err(|source| SimulationError::Allocation {
             object: "STB probe name",
-            requested: probe.len(),
-        })
-    })?;
+            source,
+        })?;
     owned.push_str(probe);
     Ok(owned)
 }
@@ -339,6 +340,54 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::analysis::stb::StbSweepType;
+
+    #[test]
+    fn stb_projection_allocation_failure_keeps_object_and_allocator_cause() {
+        use std::error::Error;
+        let error = StbResult::try_with_capacity(usize::MAX, true).unwrap_err();
+        let cause = error
+            .source()
+            .unwrap()
+            .downcast_ref::<std::collections::TryReserveError>()
+            .unwrap()
+            .clone();
+        let error = map_stb_analysis_error(error);
+        assert_eq!(
+            error.descriptor().code,
+            crate::SimulationErrorCode::AllocationFailed
+        );
+        assert_eq!(
+            error.descriptor().category,
+            crate::SimulationErrorCategory::ResourceLimit
+        );
+        let SimulationError::Allocation { object, source } = error else {
+            panic!("STB projection allocation failure was reported as a circuit error");
+        };
+        assert_eq!(object, "STB Bode result");
+        assert_eq!(source, cause);
+    }
+
+    #[test]
+    fn stb_workspace_reservation_failure_preserves_existing_values_and_reuse() {
+        let mut values = vec![Complex64::new(2.0, 3.0)];
+        let error = try_reserve_stb_values(&mut values, usize::MAX, "STB test workspace").unwrap_err();
+        assert_eq!(
+            error.descriptor().code,
+            crate::SimulationErrorCode::AllocationFailed
+        );
+        let SimulationError::Allocation { object, source } = error else {
+            panic!("STB workspace allocation failure was reported as a circuit error");
+        };
+        assert_eq!(object, "STB test workspace");
+        let expected = Vec::<Complex64>::new()
+            .try_reserve_exact(usize::MAX)
+            .unwrap_err();
+        assert_eq!(source, expected);
+        assert_eq!(values, [Complex64::new(2.0, 3.0)]);
+        try_reserve_stb_values(&mut values, 2, "STB test workspace").unwrap();
+        values.push(Complex64::new(4.0, 5.0));
+        assert_eq!(values, [Complex64::new(2.0, 3.0), Complex64::new(4.0, 5.0)]);
+    }
 
     const RESOURCE_LIMIT_DECK: &str = "STB retained-result resource limit\n\
          EAMP out 0 in 0 10\n\

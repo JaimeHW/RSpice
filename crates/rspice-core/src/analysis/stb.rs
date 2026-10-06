@@ -557,6 +557,8 @@ pub enum StbAnalysisError {
         object: &'static str,
         /// Number of elements requested from the allocator.
         requested: usize,
+        /// Original allocator refusal, including capacity overflow.
+        source: std::collections::TryReserveError,
     },
     /// The caller cancelled the projection.
     Aborted,
@@ -568,17 +570,21 @@ impl std::fmt::Display for StbAnalysisError {
             Self::InvalidConfiguration(error) => {
                 write!(formatter, "invalid STB configuration: {error}")
             }
-            Self::FrequencyGrid(error) => write!(formatter, "invalid STB frequency grid: {error}"),
+            Self::FrequencyGrid(error) => write!(formatter, "STB frequency grid: {error}"),
             Self::InvalidSample { index, reason } => {
                 write!(formatter, "invalid STB sample {index}: {reason}")
             }
             Self::CapacityOverflow { object } => {
                 write!(formatter, "{object} exceeds addressable capacity")
             }
-            Self::Allocation { object, requested } => {
+            Self::Allocation {
+                object,
+                requested,
+                source,
+            } => {
                 write!(
                     formatter,
-                    "unable to allocate {requested} elements for {object}"
+                    "unable to allocate {requested} elements for {object}: {source}"
                 )
             }
             Self::Aborted => formatter.write_str("STB result projection was aborted"),
@@ -591,6 +597,7 @@ impl std::error::Error for StbAnalysisError {
         match self {
             Self::FrequencyGrid(source) => Some(source),
             Self::InvalidConfiguration(source) => Some(source),
+            Self::Allocation { source, .. } => Some(source),
             _ => None,
         }
     }
@@ -937,16 +944,21 @@ fn try_reserve_exact<T>(
 ) -> Result<(), StbAnalysisError> {
     values
         .try_reserve_exact(requested)
-        .map_err(|_| StbAnalysisError::Allocation { object, requested })
+        .map_err(|source| StbAnalysisError::Allocation {
+            object,
+            requested,
+            source,
+        })
 }
 
 fn try_owned_message(message: &str, object: &'static str) -> Result<String, StbAnalysisError> {
     let mut owned = String::new();
     owned
         .try_reserve_exact(message.len())
-        .map_err(|_| StbAnalysisError::Allocation {
+        .map_err(|source| StbAnalysisError::Allocation {
             object,
             requested: message.len(),
+            source,
         })?;
     owned.push_str(message);
     Ok(owned)
@@ -965,9 +977,10 @@ fn multiple_crossover_warning(count: usize) -> Result<String, StbAnalysisError> 
     let mut warning = String::new();
     warning
         .try_reserve_exact(capacity)
-        .map_err(|_| StbAnalysisError::Allocation {
+        .map_err(|source| StbAnalysisError::Allocation {
             object: "STB warning",
             requested: capacity,
+            source,
         })?;
     write!(&mut warning, "{PREFIX}{count})").map_err(|_| StbAnalysisError::CapacityOverflow {
         object: "STB warning",
@@ -1118,13 +1131,29 @@ mod tests {
 
     #[test]
     fn result_projection_preallocation_reports_unallocatable_capacity() {
-        assert!(matches!(
-            StbResult::try_with_capacity(usize::MAX, true),
-            Err(StbAnalysisError::Allocation {
-                object: "STB Bode result",
-                requested: usize::MAX
-            })
-        ));
+        use std::error::Error;
+        let error = StbResult::try_with_capacity(usize::MAX, true).unwrap_err();
+        let expected = Vec::<BodePoint>::new()
+            .try_reserve_exact(usize::MAX)
+            .unwrap_err();
+        assert_eq!(
+            error
+                .source()
+                .unwrap()
+                .downcast_ref::<std::collections::TryReserveError>(),
+            Some(&expected)
+        );
+        assert!(error.to_string().contains(&expected.to_string()));
+        let StbAnalysisError::Allocation {
+            object,
+            requested,
+            source,
+        } = error
+        else {
+            panic!("projection allocation failure lost its cause");
+        };
+        assert_eq!((object, requested), ("STB Bode result", usize::MAX));
+        assert_eq!(source, expected);
     }
 
     #[test]

@@ -326,6 +326,11 @@ exposes that cause, including through STB and PXF wrappers. Conversion into
 configured point limits and cancellation remain distinct. Malformed sweep
 diagnostics retain their analysis or input context.
 
+STB result and workspace reservations also retain their allocator cause in
+`StbAnalysisError::Allocation { object, requested, source }` or
+`SimulationError::Allocation { object, source }`. Callers can inspect the
+failed buffer's identity and the error chain without parsing diagnostic text.
+
 SDK migration: `FrequencyGridError` and `StbAnalysisError` implement `Clone`
 and are no longer `Copy`. Borrow or explicitly clone errors when reusing them;
 match allocation variants with `..` when their cause is not needed. These
