@@ -16,6 +16,7 @@ fn comparison_retains_quantity_and_coordinate_types_in_every_typed_format() {
         ("current", "time", "current"),
         ("frequency", "frequency", "voltage"),
         ("alias", "s", "V"),
+        ("conductance", "S", "voltage"),
     ] {
         std::fs::write(
             dir.join(format!("{name}.json")),
@@ -24,7 +25,7 @@ fn comparison_retains_quantity_and_coordinate_types_in_every_typed_format() {
         .unwrap();
     }
     for (format, extension) in [("json", "json"), ("raw", "raw"), ("hdf5", "h5")] {
-        for name in ["golden", "current", "frequency", "alias"] {
+        for name in ["golden", "current", "frequency", "alias", "conductance"] {
             if format != "json" {
                 let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
                     .args(["--quiet", "convert"])
@@ -41,6 +42,7 @@ fn comparison_retains_quantity_and_coordinate_types_in_every_typed_format() {
             ("frequency", false, 3),
             ("frequency", true, 3),
             ("alias", true, 0),
+            ("conductance", true, 3),
         ] {
             let mut command = Command::new(env!("CARGO_BIN_EXE_rspice"));
             command

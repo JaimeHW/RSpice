@@ -295,6 +295,10 @@ struct WaveformData {
 }
 
 fn quantity_type(value: &str) -> Option<String> {
+    // SI symbols are case-sensitive: S (siemens) is not s (seconds).
+    if value.trim() == "S" {
+        return Some("conductance".into());
+    }
     let normalized = match value.trim().to_ascii_lowercase().as_str() {
         "" | "value" | "unknown" | "parameter" => return None,
         "v" | "volt" | "volts" | "voltage" => "voltage",
@@ -302,6 +306,7 @@ fn quantity_type(value: &str) -> Option<String> {
         "s" | "sec" | "second" | "seconds" | "time" => "time",
         "hz" | "hertz" | "frequency" => "frequency",
         "ohm" | "ohms" | "resistance" | "impedance" => "resistance",
+        "siemens" | "mho" | "conductance" => "conductance",
         "1" | "scalar" | "ratio" | "dimensionless" => "dimensionless",
         "logic" | "digital" => "digital",
         other => return Some(other.to_owned()),
