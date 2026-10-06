@@ -356,6 +356,14 @@ fn analysis_warnings_merge_with_parameter_diagnostics_in_source_order() {
             .collect::<Vec<_>>(),
         [2, 4, 5, 6]
     );
+    for warning in &netlist.diagnostics {
+        assert_eq!(
+            warning.origin,
+            Some(rspice_core::netlist::NetlistSourceLocation::in_memory(
+                warning.line
+            ))
+        );
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -391,7 +399,7 @@ fn deferred_monte_carlo_keeps_authenticated_reporting_spans() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn deferred_included_errors_keep_physical_source_locations() {
+fn deferred_included_cards_keep_physical_errors_and_warnings() {
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -408,6 +416,23 @@ fn deferred_included_errors_keep_physical_source_locations() {
         &directory.join("root.cir"),
     )
     .unwrap_err();
-    std::fs::remove_dir_all(&directory).unwrap();
     assert!(error.to_string().contains("analysis.inc:1:"), "{error}");
+    std::fs::write(
+        &child,
+        ".FFT V(out) START=-1 NP={count}\n.FFT V(out) START=-1 NP=32\n",
+    )
+    .unwrap();
+    let netlist = Netlist::parse_with_path("Include warnings\n.DC V1 0 {later} .1\n.include analysis.inc\n.param count=32 later=1\n.end\n", &directory.join("root.cir")).unwrap();
+    let physical_child = child.canonicalize().unwrap();
+    std::fs::remove_dir_all(&directory).unwrap();
+    assert_eq!(netlist.diagnostics.len(), 2);
+    for (index, warning) in netlist.diagnostics.iter().enumerate() {
+        assert_eq!(warning.line, index + 1);
+        let origin = warning
+            .origin
+            .as_ref()
+            .expect("staged warning has an owner");
+        assert_eq!(origin.line, index + 1);
+        assert_eq!(origin.path.as_ref(), Some(&physical_child));
+    }
 }

@@ -385,6 +385,7 @@ impl ParsedAnalysisCard {
             }
         }
         reject_unconsumed_command_tokens(stream, line_num, command)?;
+        source_map_diagnostics(&mut collected_diagnostics, origin);
         let card = Self {
             analysis,
             lin_analysis,

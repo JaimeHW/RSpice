@@ -3091,14 +3091,23 @@ fn flush_pending_logical_line(
         source_is_included,
         abort,
     )?;
-    for diagnostic in &mut state.diagnostics[first_new_diagnostic..] {
-        if diagnostic.origin.is_none() {
-            diagnostic.line = logical_origin.line;
-            diagnostic.origin = Some(logical_origin.clone());
-        }
-    }
+    source_map_diagnostics(
+        &mut state.diagnostics[first_new_diagnostic..],
+        &logical_origin,
+    );
     continuation.clear();
     Ok(())
+}
+
+/// Attribute diagnostics while their physical owner is available, including
+/// staged analysis diagnostics that will be published after this line closes.
+fn source_map_diagnostics(diagnostics: &mut [ParseDiagnostic], origin: &NetlistSourceLocation) {
+    for diagnostic in diagnostics {
+        if diagnostic.origin.is_none() {
+            diagnostic.line = origin.line;
+            diagnostic.origin = Some(origin.clone());
+        }
+    }
 }
 
 /// Preserve the physical owner of ordinary-card syntax failures after include
