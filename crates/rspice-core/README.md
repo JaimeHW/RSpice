@@ -923,6 +923,21 @@ exact-delay samples, event sides, and derivative-order records count toward
 `ResourceLimits::max_result_values` along with the waveform and other checkpoint
 state.
 
+`ResourceLimits::max_transport_history_bytes` separately bounds native GP
+exact-delay record storage across the analysis (256 MiB by default). It includes
+spare capacity, event sides, derivative-order records, and simultaneous live and
+retained checkpoint copies. Initialization, acceptance, capture, and restore
+check the requested storage before allocating it. Resume applies the new
+caller's budget to the restored copy; the caller-owned input checkpoint is
+outside this analysis's ownership. Fixed device state, other model providers,
+and solver workspaces are outside this specific record-storage budget.
+
+These policy refusals carry `ResourceKind::TransportHistoryBytes`. Fallible GP
+transport initialization, growth, and BJT history copies preserve
+`SimulationError::Allocation` and the stable `allocation_failed` code,
+including through capture and restore.
+Both belong to the resource-error category and are not automatically retried.
+
 The GP exact-transport path tracks all unknown events and
 known discontinuities through derivative order two. Solver-certified C2
 inputs retain their delay-history knots and interpolation error control but

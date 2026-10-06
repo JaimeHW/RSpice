@@ -1,0 +1,175 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C03",
+  "status": "partial",
+  "source_revision": "4006fa60a1fa5e0e0aa47433578d59e4b6f01468",
+  "source_state": "Per-run source scope is recorded below. No package closure, full-suite pass, or final release qualification is claimed.",
+  "host": "x86_64-pc-windows-msvc",
+  "toolchain": {
+    "rustc": "1.94.0 (4a4ef493e 2026-03-02)",
+    "cargo": "1.94.0 (85eff7c80 2026-01-15)",
+    "llvm": "21.1.8",
+    "toolchain_file_sha256": "d6dadd139dac178482d6cca3a8945b8a7e0f7df1f0733872657cbc420b2d82e6",
+    "cargo_lock_sha256": "c1866fb24400c03e40833775e5003baa48c5147f0e9368b8749900a4251542d7"
+  },
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "reason": "Avoid the previously reproduced Rust 1.94 incremental CacheEncoder::encode_span ICE."
+  },
+  "implementation_commits": [
+    "3fb1e860d0ce3b27d0b42702736314cbc721a0ec",
+    "5dffb50d37ee781db1f214ad61a858dfac0cac89",
+    "e0bb0477fd8308dee7223cec09e25a2480366ed8",
+    "4006fa60a1fa5e0e0aa47433578d59e4b6f01468"
+  ],
+  "runs": [
+    {
+      "command": "cargo test -p rspice-veriloga-runtime --locked --lib --tests",
+      "log": "target/core-qualification/gp-storage-sizing-runtime.log",
+      "log_sha256": "669bf7eed093bac598e4d173220438a8958ec93366c9a787876104d46f565425",
+      "passed": 194,
+      "failed": 0,
+      "ignored": 0,
+      "evidence_kind": "Executed correctness tests",
+      "source_revision": "5dffb50d37ee781db1f214ad61a858dfac0cac89",
+      "source_state": "Final storage-sizing implementation tested before commit, then committed unchanged.",
+      "features": "default",
+      "profile": "test"
+    },
+    {
+      "command": "cargo test -p rspice-core --locked --lib -- engine::transient:: resource::tests analysis::error::tests engine::pss engine::hb",
+      "log": "target/core-qualification/gp-memory-unit.log",
+      "log_sha256": "a632e70b8c59698ba7ed261202ffdbb78ffa1677ff18f312f0ef9a7ba00304ca",
+      "passed": 758,
+      "failed": 0,
+      "ignored": 1,
+      "evidence_kind": "Executed correctness tests",
+      "implementation_revision": "4006fa60a1fa5e0e0aa47433578d59e4b6f01468",
+      "features": "default",
+      "profile": "test",
+      "source_state": "Development validation of the transport implementation subsequently committed in 4006fa60a1fa5e0e0aa47433578d59e4b6f01468; plan/README and ledger qualification prose were uncommitted. This run preceded the added startup-refusal test and the separate materialization helper repair; those are covered by the focused run below."
+    },
+    {
+      "command": "cargo test -p rspice-core --locked --lib -- execution::materialized::tests engine::transient::history::storage::tests gp_event_memory physical_startup_transport",
+      "log": "target/core-qualification/gp-memory-final-atomicity.log",
+      "log_sha256": "e8f535704419bdcf93d8302e4519ac6eb8c122d99992fe4ed51000ab5f4353b8",
+      "passed": 15,
+      "failed": 0,
+      "ignored": 0,
+      "evidence_kind": "Executed correctness tests",
+      "implementation_revision": "4006fa60a1fa5e0e0aa47433578d59e4b6f01468",
+      "features": "default",
+      "profile": "test",
+      "source_state": "Development validation of the transport implementation subsequently committed in 4006fa60a1fa5e0e0aa47433578d59e4b6f01468; plan/README and ledger qualification prose were uncommitted. Includes the new startup-refusal test, two strengthened allocation-fault tests, growth atomicity, and 11 materialization tests; overlaps the preceding unit set."
+    },
+    {
+      "command": "cargo test -p rspice-core --locked --test gp_history_resources --test bjt_excess_phase_transient --test checkpoint_encoding --test transient_checkpoint --test simulation_error_contract --test qualification_baseline --test resource_and_commit_faults",
+      "log": "target/core-qualification/gp-memory-integration.log",
+      "log_sha256": "a8ad4d984bf5014ad359a7cc2800aa99370efb25a0ded252f156dda4a2ecf836",
+      "passed": 75,
+      "failed": 0,
+      "ignored": 0,
+      "evidence_kind": "Executed correctness tests",
+      "implementation_revision": "4006fa60a1fa5e0e0aa47433578d59e4b6f01468",
+      "features": "default",
+      "profile": "test",
+      "source_state": "Development validation of the transport implementation subsequently committed in 4006fa60a1fa5e0e0aa47433578d59e4b6f01468; plan/README and ledger qualification prose were uncommitted. Ran after integration c6b35c657; the final tested Rust source and fixtures were committed unchanged."
+    },
+    {
+      "command": "cargo clippy -p rspice-core --locked --lib --test gp_history_resources -- -D warnings",
+      "log": "target/core-qualification/gp-memory-integrated-clippy.log",
+      "log_sha256": "ae37bd5e3d5f5277876ecb91f05b5bb6a9184ad5f8daed67dc5672ffc72e4aa2",
+      "exit_code": 0,
+      "evidence_kind": "Strict static checks",
+      "implementation_revision": "4006fa60a1fa5e0e0aa47433578d59e4b6f01468",
+      "features": "default",
+      "source_state": "Development validation of the transport implementation subsequently committed in 4006fa60a1fa5e0e0aa47433578d59e4b6f01468; plan/README and ledger qualification prose were uncommitted."
+    },
+    {
+      "command": "target/debug/deps/rspice_core-2830b6cee3b31a0f.exe engine::requirements::",
+      "log": "target/core-qualification/gp-memory-requirements.log",
+      "log_sha256": "1516bca3dfa01eed491ee953267651dd698fab6bbdf72fe0e736b74c5ef61c4b",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "evidence_kind": "Executed correctness tests",
+      "reproduction_command": "cargo test -p rspice-core --locked --lib engine::requirements::",
+      "implementation_revision": "4006fa60a1fa5e0e0aa47433578d59e4b6f01468",
+      "features": "default",
+      "profile": "test",
+      "source_state": "Same test binary as the 15-test focused run; includes the updated ledger qualification prose. Checks ownership, analysis/control dispositions, and periodic declarations."
+    },
+    {
+      "command": "cargo test -p rspice-core --locked --no-default-features --test bjt_excess_phase_transient --test gp_history_resources",
+      "log": "target/core-qualification/gp-memory-no-default.log",
+      "log_sha256": "cb1c4d032c17dae9aa7a44ec3bd8522470ebe298fc19ae4bbfe5cb4b26535f0e",
+      "passed": 14,
+      "failed": 0,
+      "ignored": 0,
+      "evidence_kind": "Executed correctness tests",
+      "source_revision": "4006fa60a1fa5e0e0aa47433578d59e4b6f01468",
+      "features": "no default features",
+      "profile": "test",
+      "source_state": "Production Rust code and integration fixtures were committed at 4006fa60a1fa5e0e0aa47433578d59e4b6f01468. Only plan/README and ledger qualification prose remained uncommitted; this is scoped implementation qualification, not a clean full-release audit."
+    },
+    {
+      "command": "cargo test -p rspice-core --locked --release --test bjt_excess_phase_transient --test gp_history_resources",
+      "log": "target/core-qualification/gp-memory-release.log",
+      "log_sha256": "ddfc457948425b6f92d03cab950c428be089ea4fff891245790a257765b5d861",
+      "passed": 14,
+      "failed": 0,
+      "ignored": 0,
+      "evidence_kind": "Executed correctness tests",
+      "source_revision": "4006fa60a1fa5e0e0aa47433578d59e4b6f01468",
+      "features": "default",
+      "profile": "release",
+      "source_state": "Production Rust code and integration fixtures were committed at 4006fa60a1fa5e0e0aa47433578d59e4b6f01468. Only plan/README and ledger qualification prose remained uncommitted; this is scoped implementation qualification, not a clean full-release audit."
+    },
+    {
+      "command": "cargo check -p rspice-cli -p rspice-wasm --locked",
+      "log": "target/core-qualification/gp-memory-dependent-check.log",
+      "log_sha256": "b3d9faaf3ddcd38b2b6b10f47cf8bb7741b57e286674fe0f77d6c04e83a792ae",
+      "exit_code": 0,
+      "evidence_kind": "Compile check of dependent crates on the native host; no WebAssembly-target execution or application qualification",
+      "source_revision": "4006fa60a1fa5e0e0aa47433578d59e4b6f01468",
+      "source_state": "Production Rust code and integration fixtures were committed at 4006fa60a1fa5e0e0aa47433578d59e4b6f01468. Only plan/README and ledger qualification prose remained uncommitted; this is scoped implementation qualification, not a clean full-release audit."
+    }
+  ],
+  "delivered_contracts": [
+    "Fallible GP history operations retain a typed SimulationError::Allocation, allocator source, stable allocation_failed code, and nonretryable resource classification through capture and restore.",
+    "Delay-buffer sizing explicitly projects ordinary samples, event sides, known derivative-order records, spare capacity and compact copies; tests compare predictions to backing capacity after wrap/prune/copy.",
+    "The native GP exact-delay record quota defaults to 256 MiB and aggregates all engine-owned live histories and retained checkpoint copies.",
+    "Initialization, accepted growth, physical startup, periodic boundary copy preparation, scheduled/final capture and restoration preflight the appropriate simultaneously owned record buffers.",
+    "Public resource tests cover multiple devices, OP/UIC, zero phase, Weil without exact-delay records, waveform-only/compressed output, retained scheduled copies and stricter resume budgets.",
+    "Fault injection targets actual final capture after counting startup copies; failed capture/restore preserves typed errors, input checkpoints and repeatable subsequent execution.",
+    "Resource refusals before growth/startup commit preserve all accepted participants; zero-budget restoration refuses before the first injected copy allocation.",
+    "Materialization uses a shared checked coordinate lookup and borrows when an owned coordinate is not required."
+  ],
+  "budget_scope": {
+    "resource_kind": "transport_history_bytes",
+    "configuration": "ResourceLimits::max_transport_history_bytes",
+    "default_bytes": 268435456,
+    "included": [
+      "Native GP exact-delay backing records including spare capacity",
+      "Event-side and derivative-order records",
+      "Simultaneously live engine-owned transport histories and retained checkpoint copies"
+    ],
+    "excluded": [
+      "Caller-owned input checkpoints",
+      "Fixed-size BJT/device lanes",
+      "Other model providers",
+      "Solver workspaces",
+      "Whole-process allocator overhead"
+    ]
+  },
+  "open_evidence": [
+    "Fixed BJT initialization lanes and owned initialization scratch remain infallible and require C01/C03 completion.",
+    "The hard per-site runtime record ceiling still returns a string; structured resource diagnostics must replace that loss of classification.",
+    "Other model histories and runtime VM acceptance need their own allocation/rollback qualification.",
+    "Remaining feature/target combinations, larger parameter/topology corpora, measured cancellation latency and repeatable performance/memory evidence remain open. The 14 release tests are not a full optimized-profile suite.",
+    "GP periodic and envelope support remains C06 work. Accounting at shared preparation paths does not enable missing periodic device equations.",
+    "C00-C14 remain open; typed errors and support declarations do not substitute for missing implementations."
+  ],
+  "retention": "Raw logs are ignored local artifacts; their hashes, commands, outcomes and source scope are retained here. Overlapping runs are not a unique-test count. Test durations are not benchmarks."
+}
