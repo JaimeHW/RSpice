@@ -796,14 +796,14 @@ pub(crate) fn select_and_clip(
     let mut notes = Vec::new();
     if !requested.is_empty() {
         let names = column_names(document);
+        let mut keep = vec![false; document.signals.len()];
         for want in requested {
-            let mut found = false;
-            for (signal, name) in document.signals.iter().zip(&names) {
+            let mut matches = Vec::new();
+            for (index, (signal, name)) in document.signals.iter().zip(&names).enumerate() {
                 match signal_selection(signal, name, want) {
                     Selection::No => continue,
-                    Selection::Whole => found = true,
+                    Selection::Whole => {}
                     Selection::WholeBusForOneBit { bus } => {
-                        found = true;
                         notes.push(format!(
                             "'{want}' names one bit of digital bus '{bus}', and a VCD vector is \
                              written whole or not at all, so the whole bus is kept; convert to a \
@@ -811,24 +811,29 @@ pub(crate) fn select_and_clip(
                         ));
                     }
                 }
+                matches.push(index);
             }
-            if !found {
+            if matches.is_empty() {
                 return Err(CliError::InvalidArgument {
                     message: format!("variable '{want}' not found in input"),
                     suggestion: Some(format!("available variables: {}", names.join(", "))),
                 });
             }
+            if matches.len() > 1 {
+                return Err(CliError::InvalidArgument {
+                    message: format!("variable selector '{want}' is ambiguous"),
+                    suggestion: Some(format!(
+                        "use a full signal name: {}",
+                        matches
+                            .iter()
+                            .map(|&index| names[index].as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )),
+                });
+            }
+            keep[matches[0]] = true;
         }
-        let keep: Vec<bool> = document
-            .signals
-            .iter()
-            .zip(&names)
-            .map(|(signal, name)| {
-                requested
-                    .iter()
-                    .any(|want| signal_selection(signal, name, want) != Selection::No)
-            })
-            .collect();
         let mut keep = keep.into_iter();
         document.signals.retain(|_| keep.next().unwrap_or(false));
     }
@@ -854,6 +859,17 @@ enum Selection {
 
 /// Whether one `--variables` name selects this signal, and what it cost.
 fn signal_selection(signal: &VcdSignal, column: &str, want: &str) -> Selection {
+    let want = want.trim();
+    if inner_name(want, DIGITAL_COLUMN_PREFIX)
+        .or_else(|| inner_name(want, REAL_COLUMN_PREFIX))
+        .is_some()
+    {
+        return if column.eq_ignore_ascii_case(want) {
+            Selection::Whole
+        } else {
+            Selection::No
+        };
+    }
     if signal_matches(signal, column, want) {
         return Selection::Whole;
     }

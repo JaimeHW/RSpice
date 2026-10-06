@@ -641,6 +641,13 @@ one `convert` reads it back from. An *empty* coordinate is not a result and is
 refused when the file is read, naming the coordinate rather than blaming a flag
 that was not given.
 
+`convert --variables` matches names without case sensitivity. A qualified name
+such as `V(out)` or `D(clk)` selects that exact signal. Bare aliases must be
+unambiguous: if both `V(out)` and `I(out)` exist, use their full names instead
+of `out`. The same rule applies to VCD signals sharing a short name across
+scopes. Repeat `--variables` to select multiple signals. Invalid selections
+leave an existing destination unchanged, including in-place conversions.
+
 `--to vcd` writes an event dump rather than a table. A rawfile carrying event
 plots and a typed JSON result document both hold the timelines themselves and
 convert exactly, producing the file `run -f vcd` publishes. Any other source is
