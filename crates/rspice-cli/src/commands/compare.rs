@@ -13,6 +13,7 @@ use crate::commands::waveform_io::{
 };
 
 mod fft;
+mod interpolation;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -184,15 +185,6 @@ pub fn execute(
         args.section.as_deref(),
     )?;
 
-    let result_data = if args.interpolate {
-        match (result_data, &golden_data) {
-            (ComparisonData::Waveform(result), ComparisonData::Waveform(golden)) => ComparisonData::Waveform(resample_onto_golden(result, golden)?),
-            _ => return Err(CliError::InvalidArgument { message: "FFT comparison requires matching discrete transform grids; --interpolate is only available for waveforms".into(), suggestion: None }),
-        }
-    } else {
-        result_data
-    };
-
     // Perform comparison
     let cmp_result = compare_data(&result_data, &golden_data, &args)?;
 
@@ -290,6 +282,17 @@ fn compare_data(
     golden: &ComparisonData,
     args: &CompareArgs,
 ) -> Result<CompareResult, CliError> {
+    if args.interpolate
+        && !matches!(
+            (result, golden),
+            (ComparisonData::Waveform(_), ComparisonData::Waveform(_))
+        )
+    {
+        return Err(CliError::InvalidArgument {
+            message: "FFT comparison requires matching discrete transform grids; --interpolate is only available for waveforms".into(),
+            suggestion: None,
+        });
+    }
     match (result, golden) {
         (ComparisonData::Waveform(result), ComparisonData::Waveform(golden)) => {
             compare_waveforms(result, golden, args)
@@ -464,133 +467,6 @@ fn load_comparison_data(
         units,
         values,
     }))
-}
-
-/// Resample the result's series onto the golden file's scale so
-/// runs with different time grids compare point-for-point. The scale is
-/// each file's first series; the result scale must be strictly increasing
-/// and must cover the golden range — interpolation never extrapolates.
-/// Analog signals are linear; event signals hold their last value until the
-/// next event, including the new value at the exact transition time.
-fn resample_onto_golden(
-    result: WaveformData,
-    golden: &WaveformData,
-) -> Result<WaveformData, CliError> {
-    let invalid = |message: String| CliError::VerificationFailed { message };
-
-    if !variable_name_matches(&result.variables[0], &golden.variables[0]) {
-        return Err(invalid(format!(
-            "independent coordinates differ: '{}' versus '{}'",
-            result.variables[0], golden.variables[0]
-        )));
-    }
-    if !types_compatible(&result.variable_types[0], &golden.variable_types[0]) {
-        return Err(invalid(format!(
-            "independent coordinate types differ: '{}' versus '{}'",
-            result.variable_types[0], golden.variable_types[0]
-        )));
-    }
-    if !units_compatible(&result, 0, golden, 0) {
-        return Err(invalid(
-            "independent coordinate units differ; cannot interpolate".into(),
-        ));
-    }
-
-    let result_scale = result
-        .values
-        .first()
-        .ok_or_else(|| invalid("result file has no data to interpolate".to_string()))?
-        .clone();
-    let golden_scale = golden
-        .values
-        .first()
-        .ok_or_else(|| invalid("golden file has no data to interpolate against".to_string()))?;
-
-    if result_scale.len() < 2 {
-        return Err(invalid(
-            "result needs at least two points to interpolate".to_string(),
-        ));
-    }
-    if result_scale.windows(2).any(|pair| pair[1] <= pair[0]) {
-        return Err(invalid(
-            "result scale is not strictly increasing; cannot interpolate".to_string(),
-        ));
-    }
-
-    let low = result_scale[0];
-    let high = result_scale[result_scale.len() - 1];
-    // Permit only a few representable rounding steps at either endpoint,
-    // never an allowance measured in fixed seconds/hertz or a fraction of 1.
-    let lower_bound = (0..4).fold(low, |value, _| value.next_down());
-    let upper_bound = (0..4).fold(high, |value, _| value.next_up());
-    for &point in golden_scale {
-        if point < lower_bound || point > upper_bound {
-            return Err(invalid(format!(
-                "golden scale point {point:e} lies outside the result range                  [{low:e}, {high:e}]; interpolation would extrapolate"
-            )));
-        }
-    }
-
-    let interp_at =
-        |series: &[f64], x: f64, held: bool| -> Result<f64, CliError> {
-            // Index of the first scale point >= x (the scale is sorted).
-            let upper = result_scale.partition_point(|&s| s < x);
-            if upper == 0 {
-                return series.first().copied().ok_or_else(|| {
-                    invalid("result series is empty; cannot interpolate".to_string())
-                });
-            }
-            if upper >= result_scale.len() {
-                return series.last().copied().ok_or_else(|| {
-                    invalid("result series is empty; cannot interpolate".to_string())
-                });
-            }
-            let (x0, x1) = (result_scale[upper - 1], result_scale[upper]);
-            let (y0, y1) = (series[upper - 1], series[upper]);
-            if x == x1 {
-                return Ok(y1);
-            }
-            if held {
-                return Ok(y0);
-            }
-            // Evaluate (y0 * (x1 - x) + y1 * (x - x0)) / (x1 - x0)
-            // with a single rounding. Both differences and intermediate products
-            // can overflow, while even a normalized weight can underflow before
-            // multiplication by a large signal. Reuse the shared exact arithmetic.
-            rspice_veriloga_runtime::arithmetic::sum_products_ratio(
-                [(y0, x1), (-y0, x), (y1, x), (-y1, x0)].into_iter(),
-                [(x1, 1.0), (x0, -1.0)].into_iter(),
-            )
-            .map_err(|error| invalid(format!("cannot interpolate at {x:e}: {error:?}")))
-        };
-
-    let mut values = Vec::with_capacity(result.values.len());
-    values.push(golden_scale.clone());
-    for (index, series) in result.values.iter().enumerate().skip(1) {
-        if series.len() != result_scale.len() {
-            return Err(invalid(
-                "result series lengths disagree with its scale; cannot interpolate".to_string(),
-            ));
-        }
-        // D/E are the event column contract shared by the rawfile, CSV and
-        // VCD projections. Typed logic may also use an arbitrary display name.
-        let held = quantity_type(&result.variable_types[index]).as_deref() == Some("logic")
-            || strip_outer_call(&result.variables[index], "D").is_some()
-            || strip_outer_call(&result.variables[index], "E").is_some();
-        values.push(
-            golden_scale
-                .iter()
-                .map(|&x| interp_at(series, x, held))
-                .collect::<Result<Vec<_>, _>>()?,
-        );
-    }
-
-    Ok(WaveformData {
-        variables: result.variables,
-        variable_types: result.variable_types,
-        units: result.units,
-        values,
-    })
 }
 
 fn parse_variable_name(name: &str) -> ParsedVariableName {
@@ -781,6 +657,13 @@ fn compare_waveforms(
     golden: &WaveformData,
     args: &CompareArgs,
 ) -> Result<CompareResult, CliError> {
+    // The imported files are already bounded and shape-checked. Interpolate
+    // only matched samples, borrowing both grids instead of allocating the
+    // result-column by golden-row cross product (including unused probes).
+    let interpolation = args
+        .interpolate
+        .then(|| interpolation::Interpolation::new(result, golden))
+        .transpose()?;
     let mut cmp_result = CompareResult {
         passed: true,
         num_variables: 0,
@@ -863,7 +746,10 @@ fn compare_waveforms(
         let result_vals = &result.values[var_idx];
         let golden_vals = &golden.values[golden_idx];
 
-        if result_vals.len() != golden_vals.len() && !args.allow_truncated {
+        if interpolation.is_none()
+            && result_vals.len() != golden_vals.len()
+            && !args.allow_truncated
+        {
             cmp_result.problems.push(format!(
                 "'{var_name}': result has {} points, golden has {} \
                  (--allow-truncated compares the overlap)",
@@ -872,11 +758,26 @@ fn compare_waveforms(
             ));
         }
 
-        let num_points = result_vals.len().min(golden_vals.len());
+        let num_points = if interpolation.is_some() {
+            golden_vals.len()
+        } else {
+            result_vals.len().min(golden_vals.len())
+        };
         cmp_result.num_points = cmp_result.num_points.max(num_points);
+        let held = quantity_type(&result.variable_types[var_idx]).as_deref() == Some("logic")
+            || strip_outer_call(var_name, "D").is_some()
+            || strip_outer_call(var_name, "E").is_some();
 
         for i in 0..num_points {
-            let rv = result_vals[i];
+            let rv = if let Some(interpolation) = &interpolation {
+                if var_idx == 0 {
+                    interpolation.target[i]
+                } else {
+                    interpolation.sample(result_vals, i, held)?
+                }
+            } else {
+                result_vals[i]
+            };
             let gv = golden_vals[i];
 
             let abs_diff = (rv - gv).abs();

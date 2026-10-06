@@ -172,3 +172,26 @@ fn bless_requires_the_candidate_to_satisfy_its_own_variable_selection() {
         }
     }
 }
+
+#[test]
+fn bootstrap_bless_validates_interpolation_before_creating_a_golden() {
+    for json in [false, true] {
+        let dir = test_dir("invalid_bless_interpolation");
+        let result = dir.join("result.csv");
+        let golden = dir.join("golden.csv");
+        std::fs::write(&result, "time,V(x)\n1,1\n0,0\n").unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_rspice"));
+        command
+            .args(["--quiet", "compare"])
+            .arg(&result)
+            .arg(&golden)
+            .args(["--bless", "--interpolate"]);
+        if json {
+            command.arg("--json");
+        }
+        let output = command.output().unwrap();
+        assert_eq!(output.status.code(), Some(3), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("strictly increasing"));
+        assert!(!golden.exists());
+    }
+}
