@@ -50,6 +50,26 @@ impl VoltageSources {
         order: usize,
         context: Option<TransientSourceContext>,
     ) -> Option<Value> {
+        Self::higher_time_derivative_on_side(
+            spec,
+            time,
+            order,
+            context,
+            None,
+            SourceTimeSide::Published,
+        )
+    }
+
+    /// Finite derivatives on the selected side. This never supplies the
+    /// distributional impulses associated with a discontinuous waveform.
+    pub(super) fn higher_time_derivative_on_side(
+        spec: &crate::netlist::SourceSpec,
+        time: Value,
+        order: usize,
+        context: Option<TransientSourceContext>,
+        pwl: Option<&crate::device::pwl_file::PwlWaveform>,
+        side: SourceTimeSide,
+    ) -> Option<Value> {
         use crate::netlist::SourceSpec;
         use rspice_veriloga_runtime::arithmetic::ScaledValue as S;
         if Self::constant_waveform_over_orbit(spec, time, context, None) {
@@ -100,12 +120,12 @@ impl VoltageSources {
         match spec {
             SourceSpec::Dc(_) | SourceSpec::Ac { .. } | SourceSpec::DcAc { .. } => Some(0.0),
             SourceSpec::Distortion { inner, .. } => {
-                Self::higher_time_derivative(inner, time, order, context)
+                Self::higher_time_derivative_on_side(inner, time, order, context, pwl, side)
             }
             SourceSpec::DcTransient { transient, .. }
             | SourceSpec::AcTransient { transient, .. }
             | SourceSpec::DcAcTransient { transient, .. } => {
-                Self::higher_time_derivative(transient, time, order, context)
+                Self::higher_time_derivative_on_side(transient, time, order, context, pwl, side)
             }
             SourceSpec::Sin {
                 amplitude,
@@ -114,16 +134,22 @@ impl VoltageSources {
                 damping,
                 phase,
                 ..
-            } => tone(
-                *amplitude,
-                std::f64::consts::TAU * Self::resolve_sin_frequency(*frequency, context),
-                *phase,
-                *damping,
-                time - delay,
-                1,
-            ),
+            } => {
+                if time == *delay && side == SourceTimeSide::LeftLimit {
+                    return Some(0.0);
+                }
+                tone(
+                    *amplitude,
+                    std::f64::consts::TAU * Self::resolve_sin_frequency(*frequency, context),
+                    *phase,
+                    *damping,
+                    time - delay,
+                    1,
+                )
+            }
             SourceSpec::RfPort { inner, port } => {
-                let base = Self::higher_time_derivative(inner, time, order, context)?;
+                let base =
+                    Self::higher_time_derivative_on_side(inner, time, order, context, pwl, side)?;
                 let drive = match port.drive_tone() {
                     Some((amplitude, frequency, phase)) => tone(
                         amplitude,
@@ -142,6 +168,9 @@ impl VoltageSources {
             }
             // Discontinuous derivatives cannot be replaced by zero between
             // knots; doing so would lose an impulse in a constrained state.
+            _ if side != SourceTimeSide::Published => {
+                Self::affine_side_higher_derivative(spec, pwl)
+            }
             _ => None,
         }
     }
@@ -908,6 +937,45 @@ mod tests {
                         "{dialect:?}, {spec}, t={time:e}: {analytic:e} versus {numerical:e}"
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn sinusoidal_higher_derivatives_preserve_exact_left_and_right_startup_limits() {
+        let phase = 0.7_f64;
+        let frequency = 2.0;
+        let amplitude = 1.3;
+        let source = crate::netlist::SourceSpec::Sin {
+            offset: 0.2,
+            amplitude,
+            frequency,
+            delay: 0.1,
+            damping: 0.0,
+            phase,
+        };
+        let omega = std::f64::consts::TAU * frequency;
+        for (order, expected) in [
+            (2, -amplitude * omega.powi(2) * phase.sin()),
+            (3, -amplitude * omega.powi(3) * phase.cos()),
+        ] {
+            assert_eq!(
+                VoltageSources::higher_time_derivative_on_side(
+                    &source,
+                    0.1,
+                    order,
+                    None,
+                    None,
+                    SourceTimeSide::LeftLimit
+                ),
+                Some(0.0)
+            );
+            for side in [SourceTimeSide::Published, SourceTimeSide::RightLimit] {
+                let actual = VoltageSources::higher_time_derivative_on_side(
+                    &source, 0.1, order, None, None, side,
+                )
+                .unwrap();
+                assert!((actual - expected).abs() <= 1e-14 * expected.abs());
             }
         }
     }

@@ -40,13 +40,26 @@ fn causal_event_orders_affine_source_curvature_does_not_erase_value_or_slope_jum
                 frequency: 1.0,
                 delay: 1.0,
                 damping: 0.0,
-                phase: 0.0,
+                phase: 0.7,
             },
             dialect,
         );
-        for side in [SourceTimeSide::LeftLimit, SourceTimeSide::RightLimit] {
-            assert_eq!(tone.0.time_derivative_at_on_side(0, 1.0, 2, side), None);
-            assert_eq!(tone.1.time_derivative_at_on_side(0, 1.0, 2, side), None);
+        // Regular curvature is finite on both sides even though the first
+        // derivative jumps. Keep that jump visible as a separate event.
+        check_slopes(&tone, 1.0, [0.0, std::f64::consts::TAU * 0.7_f64.cos()]);
+        for (side, expected) in [
+            (SourceTimeSide::LeftLimit, 0.0),
+            (
+                SourceTimeSide::RightLimit,
+                -std::f64::consts::TAU.powi(2) * 0.7_f64.sin(),
+            ),
+        ] {
+            for actual in [
+                tone.0.time_derivative_at_on_side(0, 1.0, 2, side),
+                tone.1.time_derivative_at_on_side(0, 1.0, 2, side),
+            ] {
+                assert!((actual.unwrap() - expected).abs() <= 2e-14 * expected.abs());
+            }
         }
     }
 }
