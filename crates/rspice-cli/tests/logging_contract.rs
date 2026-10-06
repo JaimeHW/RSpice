@@ -129,3 +129,53 @@ fn forced_text_color_does_not_corrupt_json_logs() {
     assert_loading_logged(&records(&output));
     assert!(!output.stderr.contains(&0x1b));
 }
+
+#[test]
+fn veriloga_native_compilation_obeys_quiet_levels_and_json_logging() {
+    let directory = common::test_dir("veriloga_logging");
+    let model = directory.join("model.va");
+    let deck = directory.join("op.cir");
+    let result = directory.join("result.json");
+    std::fs::write(
+        &model,
+        "module resistor(p,n); inout p,n; electrical p,n; analog I(p,n) <+ V(p,n); endmodule\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &deck,
+        "Logging\n.va \"model.va\"\nV1 p 0 1\nX1 p 0 resistor\n.op\n.end\n",
+    )
+    .unwrap();
+    for flags in [
+        &["--quiet"][..],
+        &["--log-level", "off"],
+        &["--log-level", "info"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--error-format", "json"])
+            .args(flags)
+            .arg("run")
+            .arg(&deck)
+            .args(["--format", "json", "--output"])
+            .arg(&result)
+            .env_remove("RUST_LOG")
+            .env_remove("RUST_LOG_STYLE")
+            .output()
+            .unwrap();
+        let logs = records(&output);
+        if flags == ["--log-level", "info"] {
+            assert!(
+                logs.iter().any(|record| record["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Loaded Verilog-A model")),
+                "{logs:?}"
+            );
+        } else {
+            assert!(logs.is_empty(), "{logs:?}");
+        }
+        if flags == ["--quiet"] {
+            assert!(output.stdout.is_empty(), "{output:?}");
+        }
+    }
+}
