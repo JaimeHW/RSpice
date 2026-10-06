@@ -185,3 +185,47 @@ fn interpolation_preserves_finite_values_across_the_binary64_range() {
         assert!(output.status.success(), "{result} => {golden}: {output:?}");
     }
 }
+
+#[test]
+fn interpolation_holds_event_signals_and_preserves_exact_transition_times() {
+    let result = "time,V(x),D(clk),E(sample)\n0,0,0,2\n2,2,1,6\n4,4,0.5,10\n";
+    let held = "time,V(x),D(clk),E(sample)\n0,0,0,2\n1,1,0,2\n2,2,1,6\n3,3,1,6\n4,4,0.5,10\n";
+    let output = compare(
+        result,
+        held,
+        &["--interpolate", "--abstol", "0", "--reltol", "0"],
+    );
+    assert!(output.status.success(), "{output:?}");
+    let ramped =
+        "time,V(x),D(clk),E(sample)\n0,0,0,2\n1,1,0.5,4\n2,2,1,6\n3,3,0.75,8\n4,4,0.5,10\n";
+    failed(compare(result, ramped, &["--interpolate"]));
+}
+
+#[test]
+fn interpolation_holds_explicitly_typed_logic_without_a_name_prefix() {
+    let dir = test_dir("comparison_logic");
+    let result_path = dir.join("result.json");
+    let golden_path = dir.join("golden.json");
+    for (path, times, values) in [
+        (&result_path, vec![0, 2, 4], vec![0, 1, 0]),
+        (&golden_path, vec![0, 1, 2, 3, 4], vec![0, 0, 1, 1, 0]),
+    ] {
+        std::fs::write(
+            path,
+            serde_json::json!({
+                "scale":{"name":"time", "type":"time", "values":times},
+                "signals":[{"name":"clock", "type":"logic", "values":values}]
+            })
+            .to_string(),
+        )
+        .unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "compare"])
+        .arg(result_path)
+        .arg(golden_path)
+        .arg("--interpolate")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+}

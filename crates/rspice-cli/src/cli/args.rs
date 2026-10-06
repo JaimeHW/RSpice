@@ -790,9 +790,9 @@ pub struct CompareArgs {
     #[arg(long, conflicts_with = "section")]
     pub bless: bool,
 
-    /// Linearly resample the result onto the golden file's scale before
-    /// comparing, so runs with different time grids compare point-for-point
-    /// (the result scale must cover the golden range)
+    /// Resample the result onto the golden file's scale before comparing.
+    /// Analog signals interpolate linearly; digital and real event signals
+    /// hold their last value. The result scale must cover the golden range.
     #[arg(long)]
     pub interpolate: bool,
 }

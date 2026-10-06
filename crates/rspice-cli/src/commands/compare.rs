@@ -412,10 +412,12 @@ fn load_comparison_data(
     }))
 }
 
-/// Linearly resample the result's series onto the golden file's scale so
+/// Resample the result's series onto the golden file's scale so
 /// runs with different time grids compare point-for-point. The scale is
 /// each file's first series; the result scale must be strictly increasing
 /// and must cover the golden range — interpolation never extrapolates.
+/// Analog signals are linear; event signals hold their last value until the
+/// next event, including the new value at the exact transition time.
 fn resample_onto_golden(
     result: WaveformData,
     golden: &WaveformData,
@@ -471,7 +473,7 @@ fn resample_onto_golden(
     }
 
     let interp_at =
-        |series: &[f64], x: f64| -> Result<f64, CliError> {
+        |series: &[f64], x: f64, held: bool| -> Result<f64, CliError> {
             // Index of the first scale point >= x (the scale is sorted).
             let upper = result_scale.partition_point(|&s| s < x);
             if upper == 0 {
@@ -489,6 +491,9 @@ fn resample_onto_golden(
             if x == x1 {
                 return Ok(y1);
             }
+            if held {
+                return Ok(y0);
+            }
             // Evaluate (y0 * (x1 - x) + y1 * (x - x0)) / (x1 - x0)
             // with a single rounding. Both differences and intermediate products
             // can overflow, while even a normalized weight can underflow before
@@ -502,16 +507,21 @@ fn resample_onto_golden(
 
     let mut values = Vec::with_capacity(result.values.len());
     values.push(golden_scale.clone());
-    for series in result.values.iter().skip(1) {
+    for (index, series) in result.values.iter().enumerate().skip(1) {
         if series.len() != result_scale.len() {
             return Err(invalid(
                 "result series lengths disagree with its scale; cannot interpolate".to_string(),
             ));
         }
+        // D/E are the event column contract shared by the rawfile, CSV and
+        // VCD projections. Typed logic may also use an arbitrary display name.
+        let held = quantity_type(&result.variable_types[index]).as_deref() == Some("digital")
+            || strip_outer_call(&result.variables[index], "D").is_some()
+            || strip_outer_call(&result.variables[index], "E").is_some();
         values.push(
             golden_scale
                 .iter()
-                .map(|&x| interp_at(series, x))
+                .map(|&x| interp_at(series, x, held))
                 .collect::<Result<Vec<_>, _>>()?,
         );
     }
