@@ -58,7 +58,9 @@ pub fn models(args: ModelsArgs, _verbose: bool, quiet: bool) -> Result<(), CliEr
                 if args.part.is_some() {
                     usize::MAX
                 } else {
-                    BROWSE_LIMIT
+                    // One lookahead row distinguishes a full page from a
+                    // genuinely truncated query without reading all matches.
+                    BROWSE_LIMIT + 1
                 },
                 |entry| {
                     (!args.shippable_only
@@ -154,13 +156,9 @@ fn show_part(
         // Not a warning to be dismissed: the same part number carries different
         // parameter fits in different packs, so the deck must say which it means.
         crate::console::line(format_args!(
-            "'{part}' is defined in {} packs. Reference one explicitly with \
+            "'{part}' has {} matching definitions. Reference the intended source explicitly with \
              .include or .lib; the fits are not interchangeable.\n",
-            matches
-                .iter()
-                .map(|m| m.pack.as_str())
-                .collect::<std::collections::BTreeSet<_>>()
-                .len()
+            matches.len()
         ))?;
     }
 
@@ -188,7 +186,7 @@ fn browse(entries: Vec<CatalogEntry>, quiet: bool) -> Result<(), CliError> {
     if entries.is_empty() {
         return Err(invalid("no definitions matched", None));
     }
-    for entry in &entries {
+    for entry in entries.iter().take(BROWSE_LIMIT) {
         crate::console::line(format_args!(
             "{:<28} {:<8} {:<16} {}{}",
             entry.name,
@@ -202,7 +200,7 @@ fn browse(entries: Vec<CatalogEntry>, quiet: bool) -> Result<(), CliError> {
             }
         ))?;
     }
-    if !quiet && entries.len() >= BROWSE_LIMIT {
+    if !quiet && entries.len() > BROWSE_LIMIT {
         crate::console::line(format_args!(
             "\n(truncated at {BROWSE_LIMIT}; narrow the query)"
         ))?;
