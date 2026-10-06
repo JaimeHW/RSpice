@@ -1359,9 +1359,14 @@ fn a_periodic_map_with_no_dynamic_state_cannot_reach_a_pstb_card() {
             .run_pstb_card_from_pss_with_abort(&stateless, &pstb_card("VIN"), &driven, &NoAbort)
             .is_err()
     );
+    // A driven waveform fails the autonomous-source gate before the dynamic
+    // state contract can be tested. Keep this fixture unforced for that check.
+    let unforced_stateless =
+        Netlist::parse(&NO_REACTIVE_STATE.replace("vin in 0 SIN(0 1 1meg)", "vin in 0 DC 1"))
+            .expect("unforced stateless deck parses");
     let error = engine
         .run_pss_operating_point_with_abort(
-            &stateless,
+            &unforced_stateless,
             PssConfig::autonomous()
                 .with_period_guess(1.0 / PSTB_FUNDAMENTAL)
                 .with_oscillator_node("out")
