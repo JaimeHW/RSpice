@@ -13,6 +13,9 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+mod admission;
+pub use admission::{BoundedFileSystemSourceProvider, SourceResource, SourceResourceLimit};
+
 /// Origin of an exact source document consumed by preprocessing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceDocumentOrigin {
@@ -83,6 +86,11 @@ pub trait SourceProvider {
         include_paths: &[PathBuf],
         requested: &str,
     ) -> Result<Option<SourceDocument>, PreprocessorError>;
+
+    /// Poll before preprocessing a document or logical line.
+    fn checkpoint(&self) -> Result<(), PreprocessorError> {
+        Ok(())
+    }
 
     fn limits(&self) -> SourceProviderLimits {
         SourceProviderLimits::UNBOUNDED
@@ -160,6 +168,10 @@ impl SourceProvider for LimitedSourceProvider<'_> {
     ) -> Result<Option<SourceDocument>, PreprocessorError> {
         self.inner
             .resolve_include(including_file, include_paths, requested)
+    }
+
+    fn checkpoint(&self) -> Result<(), PreprocessorError> {
+        self.inner.checkpoint()
     }
 
     fn limits(&self) -> SourceProviderLimits {
@@ -255,6 +267,9 @@ pub struct PreprocessorError {
     pub message: String,
     pub file: Option<PathBuf>,
     pub line: usize,
+    /// Structured admission failure, independent of human diagnostic text.
+    pub resource_limit: Option<SourceResourceLimit>,
+    pub cancelled: bool,
 }
 
 impl std::fmt::Display for PreprocessorError {
@@ -274,7 +289,32 @@ impl PreprocessorError {
             message: message.into(),
             file,
             line,
+            resource_limit: None,
+            cancelled: false,
         }
+    }
+
+    pub fn resource_limit(
+        resource: SourceResource,
+        requested: usize,
+        limit: usize,
+        file: Option<PathBuf>,
+        line: usize,
+    ) -> Self {
+        let failure = SourceResourceLimit {
+            resource,
+            requested,
+            limit,
+        };
+        let mut error = Self::new(failure.to_string(), file, line);
+        error.resource_limit = Some(failure);
+        error
+    }
+
+    pub fn cancelled() -> Self {
+        let mut error = Self::new("source preprocessing was cancelled", None, 0);
+        error.cancelled = true;
+        error
     }
 }
 
@@ -606,6 +646,7 @@ impl Preprocessor {
         root: &Path,
     ) -> Result<PreprocessedSource, PreprocessorError> {
         self.reset_dependency_capture();
+        provider.checkpoint()?;
         let document = provider.load_root(root)?;
         self.preprocess_document(provider, document, 1)
     }
@@ -654,13 +695,13 @@ impl Preprocessor {
         document: SourceDocument,
         include_depth: usize,
     ) -> Result<PreprocessedSource, PreprocessorError> {
+        provider.checkpoint()?;
         let limits = provider.limits();
         if include_depth > limits.max_include_depth {
-            return Err(PreprocessorError::new(
-                format!(
-                    "Include depth exceeds the provider limit of {}",
-                    limits.max_include_depth
-                ),
+            return Err(PreprocessorError::resource_limit(
+                SourceResource::IncludeDepth,
+                include_depth,
+                limits.max_include_depth,
                 Some(document.logical_path),
                 0,
             ));
@@ -725,11 +766,10 @@ impl Preprocessor {
         let limits = provider.limits();
         let next_count = self.dependency_documents.len().saturating_add(1);
         if next_count > limits.max_dependencies {
-            return Err(PreprocessorError::new(
-                format!(
-                    "Dependency count exceeds the provider limit of {}",
-                    limits.max_dependencies
-                ),
+            return Err(PreprocessorError::resource_limit(
+                SourceResource::Dependencies,
+                next_count,
+                limits.max_dependencies,
                 Some(document.logical_path.clone()),
                 0,
             ));
@@ -745,11 +785,10 @@ impl Preprocessor {
                 )
             })?;
         if next_bytes > limits.max_total_source_bytes {
-            return Err(PreprocessorError::new(
-                format!(
-                    "Dependency source exceeds the provider limit of {} total bytes",
-                    limits.max_total_source_bytes
-                ),
+            return Err(PreprocessorError::resource_limit(
+                SourceResource::TotalSourceBytes,
+                next_bytes,
+                limits.max_total_source_bytes,
                 Some(document.logical_path.clone()),
                 0,
             ));
@@ -808,6 +847,7 @@ impl Preprocessor {
         let mut seen_true: Vec<bool> = Vec::new();
 
         while let Some((line_num, line)) = lines.next() {
+            provider.checkpoint()?;
             let trimmed = line.trim();
 
             // Check if we're in a skipped conditional block
@@ -1112,8 +1152,10 @@ impl Preprocessor {
     ) -> Result<(), PreprocessorError> {
         let limit = provider.limits().max_expanded_bytes;
         if output.len() > limit {
-            return Err(PreprocessorError::new(
-                format!("Expanded source exceeds the provider limit of {limit} bytes"),
+            return Err(PreprocessorError::resource_limit(
+                SourceResource::ExpandedBytes,
+                output.len(),
+                limit,
                 self.current_file.clone(),
                 0,
             ));
@@ -1597,8 +1639,10 @@ impl Preprocessor {
         max_expanded_bytes: usize,
         line_num: usize,
     ) -> PreprocessorError {
-        PreprocessorError::new(
-            format!("Macro expansion exceeds the provider limit of {max_expanded_bytes} bytes"),
+        PreprocessorError::resource_limit(
+            SourceResource::ExpandedBytes,
+            max_expanded_bytes.saturating_add(1),
+            max_expanded_bytes,
             self.current_file.clone(),
             line_num,
         )

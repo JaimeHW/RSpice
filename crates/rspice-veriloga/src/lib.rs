@@ -209,6 +209,15 @@ pub use connection_artifact::ConnectionLibraryArtifact;
 pub use prepared_source::{PreparedRuntimeSource, PreparedSourceDependency};
 pub use prepared_virtual_source::PreparedVirtualSource;
 
+/// Failure at the source-provider or compiler boundary.
+#[derive(Debug, thiserror::Error)]
+pub enum ProviderCompileError {
+    #[error(transparent)]
+    Source(#[from] PreprocessorError),
+    #[error(transparent)]
+    Compile(#[from] CompileError),
+}
+
 /// Result of compiling a Verilog-A source file from disk.
 ///
 /// Includes the compiled model artifact and canonical dependency paths
@@ -1458,6 +1467,41 @@ impl VerilogACompiler {
         // Compile the preprocessed source
         let model =
             self.compile_preprocessed_measured(&preprocessed, module_name, &mut measurements)?;
+        Ok(CompiledFile {
+            model,
+            dependencies,
+            metrics: measurements.finish(),
+        })
+    }
+
+    /// Compile an admitted source closure, retaining typed loader failures.
+    /// The provider owns bounded reads and preprocessing cancellation; `control`
+    /// supplies cancellation checkpoints in the subsequent compiler phases.
+    pub fn compile_provider_module_with_metadata_and_control(
+        &self,
+        provider: &dyn SourceProvider,
+        root: &std::path::Path,
+        module_name: Option<&str>,
+        control: &dyn PipelineControl,
+    ) -> Result<CompiledFile, ProviderCompileError> {
+        let mut measurements = metrics::MetricsRecorder::with_control(
+            0,
+            self.options.performance_budget.clone(),
+            control,
+        );
+        measurements
+            .checkpoint(PipelinePhase::Preprocess)
+            .map_err(CompileError::from)?;
+        let mut pp = self.configured_preprocessor();
+        let started = web_time::Instant::now();
+        let source = pp.preprocess_provider_root(provider, root)?;
+        let dependencies = pp.dependencies();
+        measurements
+            .record(PipelinePhase::Preprocess, started.elapsed())
+            .map_err(CompileError::from)?;
+        measurements.metrics_mut().preprocessed_bytes = metrics::usize_to_u64(source.len());
+        measurements.metrics_mut().dependency_count = metrics::usize_to_u64(dependencies.len());
+        let model = self.compile_preprocessed_measured(&source, module_name, &mut measurements)?;
         Ok(CompiledFile {
             model,
             dependencies,
