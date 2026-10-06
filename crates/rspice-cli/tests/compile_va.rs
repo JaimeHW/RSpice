@@ -466,3 +466,73 @@ fn compiler_diagnostics_identify_original_include_and_macro_locations() {
         }
     }
 }
+
+#[test]
+fn successful_compilation_reports_warnings_and_retains_them_when_quiet() {
+    let dir = common::test_dir("compiler_warnings");
+    let root = dir.join("root.va");
+    let child = dir.join("child.va");
+    let summary = dir.join("interface.json");
+    std::fs::write(&root, "`include \"child.va\"\n").unwrap();
+    std::fs::write(
+        &child,
+        "module chatty(p,n);\ninout p,n; electrical p,n;\nanalog begin\n $display(\"one\");\n $strobe(\"two\");\n I(p,n) <+ V(p,n);\nend\nendmodule\n",
+    )
+    .unwrap();
+    for quiet in [false, true] {
+        for format in ["text", "json"] {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_rspice"));
+            if quiet {
+                command.arg("--quiet");
+            }
+            let output = command
+                .args(["--error-format", format, "compile-va"])
+                .arg(&root)
+                .arg("-o")
+                .arg(&summary)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            let interface = common::read_json(&summary);
+            let warnings = interface["diagnostics"]
+                .as_array()
+                .expect("compiler warnings retained in interface");
+            assert_eq!(warnings.len(), 2, "{interface}");
+            for (warning, line) in warnings.iter().zip([4, 5]) {
+                assert_eq!(warning["severity"], "Warning");
+                assert_eq!(warning["code"], "VA-SEM-NO-EFFECT-SYSTEM-TASK");
+                assert_eq!(warning["line"], line);
+                assert_eq!(warning["column"], 2);
+                assert_eq!(
+                    std::path::Path::new(warning["path"].as_str().unwrap())
+                        .canonicalize()
+                        .unwrap(),
+                    child.canonicalize().unwrap()
+                );
+            }
+            if quiet {
+                assert!(output.stdout.is_empty(), "{output:?}");
+                assert!(output.stderr.is_empty(), "{output:?}");
+            } else if format == "json" {
+                let records: Vec<serde_json::Value> = String::from_utf8(output.stderr)
+                    .unwrap()
+                    .lines()
+                    .map(|line| serde_json::from_str(line).unwrap())
+                    .collect();
+                assert_eq!(records.len(), 2, "{records:?}");
+                for (record, warning) in records.iter().zip(warnings) {
+                    assert_eq!(record["schema"], "rspice.diagnostic");
+                    assert_eq!(&record["diagnostic"], warning);
+                    assert_eq!(record["run_id"], interface["run_id"]);
+                }
+            } else {
+                let text = String::from_utf8(output.stderr).unwrap();
+                assert!(text.contains("Warning: "), "{text}");
+                assert!(text.contains("child.va:4:2:"), "{text}");
+                assert!(text.contains("child.va:5:2:"), "{text}");
+                assert!(text.contains("$display"), "{text}");
+                assert!(text.contains("$strobe"), "{text}");
+            }
+        }
+    }
+}

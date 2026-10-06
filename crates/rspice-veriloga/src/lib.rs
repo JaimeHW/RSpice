@@ -245,6 +245,8 @@ pub struct CompiledFile {
     pub dependencies: Vec<std::path::PathBuf>,
     /// Structured phase timings and work-size counters.
     pub metrics: PipelineMetrics,
+    /// Nonfatal compiler diagnostics resolved against original source documents.
+    pub diagnostics: Vec<SourceCompileDiagnostic>,
 }
 
 /// Result of compiling a Verilog-A source file to canonical IR from disk.
@@ -531,7 +533,7 @@ impl VerilogACompiler {
             .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;
         measurements.record(PipelinePhase::Preprocess, phase_started.elapsed())?;
         measurements.metrics_mut().preprocessed_bytes = metrics::usize_to_u64(preprocessed.len());
-        let output =
+        let (output, _) =
             self.compile_preprocessed_measured(&preprocessed, module_name, &mut measurements)?;
         Ok(Measured {
             output,
@@ -959,7 +961,7 @@ impl VerilogACompiler {
         source: &str,
         module_name: Option<&str>,
         measurements: &mut metrics::MetricsRecorder,
-    ) -> CompileResult<CompiledModel> {
+    ) -> CompileResult<(CompiledModel, Vec<CompileDiagnostic>)> {
         let analyzed = self.analyze_preprocessed("<input>", source, measurements)?;
         let executable = self.select_executable_module(&analyzed, module_name)?;
 
@@ -971,7 +973,10 @@ impl VerilogACompiler {
             .generate_analyzed_module_with_source_digest(&executable, source_digest)?;
         measurements.record(PipelinePhase::BytecodeGeneration, phase_started.elapsed())?;
 
-        Ok(model)
+        Ok((
+            model,
+            runtime_report::semantic_warning_diagnostics(source, &analyzed.warnings),
+        ))
     }
 
     fn analyze_preprocessed(
@@ -1462,17 +1467,18 @@ impl VerilogACompiler {
         measurements.checkpoint(PipelinePhase::Preprocess)?;
         let phase_started = web_time::Instant::now();
         let preprocessed = pp
-            .preprocess_file(path)
+            .preprocess_provider_root_mapped(&preprocessor::FileSystemSourceProvider, path)
             .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;
         let dependencies = pp.take_dependencies();
         measurements.record(PipelinePhase::Preprocess, phase_started.elapsed())?;
-        measurements.metrics_mut().preprocessed_bytes = metrics::usize_to_u64(preprocessed.len());
+        measurements.metrics_mut().preprocessed_bytes =
+            metrics::usize_to_u64(preprocessed.source.len());
         measurements.metrics_mut().dependency_count = metrics::usize_to_u64(dependencies.len());
 
         // DEBUG: Dump preprocessed content to file for debugging
         if std::env::var("RSPICE_DEBUG_PP").is_ok() {
             let debug_path = path.with_extension("pp.va");
-            let _ = std::fs::write(&debug_path, &preprocessed);
+            let _ = std::fs::write(&debug_path, &preprocessed.source);
             eprintln!(
                 "DEBUG: Preprocessed output written to {}",
                 debug_path.display()
@@ -1480,12 +1486,20 @@ impl VerilogACompiler {
         }
 
         // Compile the preprocessed source
-        let model =
-            self.compile_preprocessed_measured(&preprocessed, module_name, &mut measurements)?;
+        let (model, diagnostics) = self.compile_preprocessed_measured(
+            &preprocessed.source,
+            module_name,
+            &mut measurements,
+        )?;
         Ok(CompiledFile {
             model,
             dependencies,
             metrics: measurements.finish(),
+            diagnostics: source_diagnostics::map_diagnostics(
+                diagnostics,
+                &preprocessed,
+                pp.dependency_documents(),
+            ),
         })
     }
 
@@ -1532,7 +1546,7 @@ impl VerilogACompiler {
         measurements.metrics_mut().preprocessed_bytes =
             metrics::usize_to_u64(preprocessed.source.len());
         measurements.metrics_mut().dependency_count = metrics::usize_to_u64(dependencies.len());
-        let model = self
+        let (model, diagnostics) = self
             .compile_preprocessed_measured(&preprocessed.source, module_name, &mut measurements)
             .map_err(|source| ProviderCompileError::Compile {
                 diagnostics: source_diagnostics::provider_diagnostics(
@@ -1546,6 +1560,11 @@ impl VerilogACompiler {
             model,
             dependencies,
             metrics: measurements.finish(),
+            diagnostics: source_diagnostics::map_diagnostics(
+                diagnostics,
+                &preprocessed,
+                pp.dependency_documents(),
+            ),
         })
     }
 

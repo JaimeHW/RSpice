@@ -60,20 +60,7 @@ fn print_cli_error(error: &cli::CliError, format: cli::ErrorFormat) {
                 }
             } else {
                 for diagnostic in &details.diagnostics {
-                    let mut location = diagnostic.path.clone().unwrap_or_default();
-                    if let Some(line) = diagnostic.line {
-                        location.push_str(&format!(":{line}"));
-                        if let Some(column) = diagnostic.column {
-                            location.push_str(&format!(":{column}"));
-                        }
-                    }
-                    if !location.is_empty() {
-                        location.push_str(": ");
-                    }
-                    crate::console::diagnostic_line(format_args!(
-                        "Error: {location}[{}] {}",
-                        diagnostic.code, diagnostic.message
-                    ));
+                    observability::compiler_diagnostic_text(diagnostic);
                 }
             }
             let mut identity = Vec::new();

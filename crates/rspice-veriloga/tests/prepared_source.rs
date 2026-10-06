@@ -28,6 +28,39 @@ impl Drop for Sources {
 }
 
 #[test]
+fn file_and_provider_compilation_retain_warnings_in_original_includes() {
+    use rspice_veriloga::CompileDiagnosticSeverity;
+    use rspice_veriloga::preprocessor::FileSystemSourceProvider;
+
+    let files = Sources::new();
+    let root = files.write("root.va", "`include \"child.va\"\n");
+    let source = "module chatty(p,n);\ninout p,n; electrical p,n;\nanalog begin\n $display(\"hello\");\n I(p,n) <+ V(p,n);\nend\nendmodule\n";
+    let child = files.write("child.va", source);
+    let compiler = VerilogACompiler::default();
+    let from_file = compiler.compile_file_with_metadata(&root).unwrap();
+    let from_provider = compiler
+        .compile_provider_module_with_metadata_and_control(
+            &FileSystemSourceProvider,
+            &root,
+            None,
+            &NoPipelineControl,
+        )
+        .unwrap();
+    assert_eq!(from_file.diagnostics, from_provider.diagnostics);
+    assert_eq!(from_file.diagnostics.len(), 1);
+    let warning = &from_file.diagnostics[0];
+    assert_eq!(warning.severity, CompileDiagnosticSeverity::Warning);
+    assert_eq!(warning.code, "VA-SEM-NO-EFFECT-SYSTEM-TASK");
+    assert_eq!(
+        warning.path.as_deref(),
+        Some(child.canonicalize().unwrap().to_str().unwrap())
+    );
+    assert_eq!(warning.line, Some(4));
+    assert_eq!(warning.column, Some(2));
+    assert!(source[warning.byte_start.unwrap()..warning.byte_end.unwrap()].contains("$display"));
+}
+
+#[test]
 fn filesystem_loader_errors_retain_paths_kinds_and_error_sources() {
     use rspice_veriloga::preprocessor::{
         BoundedFileSystemSourceProvider, FileSystemSourceProvider,

@@ -33,7 +33,19 @@ pub(crate) fn provider_diagnostics(
     preprocessed: &PreprocessedSource,
     dependencies: &[PreprocessedDependency],
 ) -> Vec<SourceCompileDiagnostic> {
-    crate::compile_diagnostics(&preprocessed.source, error)
+    map_diagnostics(
+        crate::compile_diagnostics(&preprocessed.source, error),
+        preprocessed,
+        dependencies,
+    )
+}
+
+pub(crate) fn map_diagnostics(
+    diagnostics: Vec<crate::CompileDiagnostic>,
+    preprocessed: &PreprocessedSource,
+    dependencies: &[PreprocessedDependency],
+) -> Vec<SourceCompileDiagnostic> {
+    diagnostics
         .into_iter()
         .map(|diagnostic| {
             let mapped = diagnostic.span.as_ref().and_then(|span| {

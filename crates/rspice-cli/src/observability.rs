@@ -41,6 +41,43 @@ pub fn diagnostic(code: &str, line: Option<usize>, message: impl std::fmt::Displ
     }
 }
 
+/// Nonfatal compiler diagnostics use the same stderr grammar as other process
+/// diagnostics, retaining their source ranges and severity in JSON records.
+pub fn compiler_diagnostic(diagnostic: &rspice_veriloga::SourceCompileDiagnostic) {
+    if MACHINE_DIAGNOSTICS.get().copied().unwrap_or(false) {
+        crate::console::diagnostic_line(format_args!(
+            "{}",
+            envelope(
+                "rspice.diagnostic",
+                serde_json::json!({"diagnostic": diagnostic})
+            )
+        ));
+    } else {
+        compiler_diagnostic_text(diagnostic);
+    }
+}
+
+pub fn compiler_diagnostic_text(diagnostic: &rspice_veriloga::SourceCompileDiagnostic) {
+    let severity = match diagnostic.severity {
+        rspice_veriloga::CompileDiagnosticSeverity::Error => "Error",
+        rspice_veriloga::CompileDiagnosticSeverity::Warning => "Warning",
+    };
+    let mut location = diagnostic.path.clone().unwrap_or_default();
+    if let Some(line) = diagnostic.line {
+        location.push_str(&format!(":{line}"));
+        if let Some(column) = diagnostic.column {
+            location.push_str(&format!(":{column}"));
+        }
+    }
+    if !location.is_empty() {
+        location.push_str(": ");
+    }
+    crate::console::diagnostic_line(format_args!(
+        "{severity}: {location}[{}] {}",
+        diagnostic.code, diagnostic.message
+    ));
+}
+
 /// Add version and process correlation to a command's existing JSON fields.
 pub fn envelope(schema: &str, mut payload: serde_json::Value) -> serde_json::Value {
     if let Some(object) = payload.as_object_mut() {

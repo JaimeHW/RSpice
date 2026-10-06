@@ -91,6 +91,9 @@ pub fn execute(
 
     // Quiet suppresses all text; an explicitly requested file still publishes.
     if !quiet {
+        for diagnostic in &compiled.diagnostics {
+            crate::observability::compiler_diagnostic(diagnostic);
+        }
         // Display model information
         crate::console::line(format_args!(""))?;
         crate::console::line(format_args!(
@@ -168,6 +171,7 @@ pub fn execute(
                 "model": model.name,
                 "terminals": model.terminal_names,
                 "internal_nodes": model.internal_nodes,
+                "diagnostics": compiled.diagnostics,
                 "parameters": model.parameters.iter().map(|p| {
                     serde_json::json!({
                         "name": p.name,

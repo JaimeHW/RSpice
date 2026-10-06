@@ -655,6 +655,9 @@ Compiler failures identify the original source file, line, and column after
 include and macro expansion. JSON errors retain each compiler diagnostic's code,
 phase, and original UTF-8 byte range in `error.diagnostics`; macro expansions
 select the complete invocation line when an exact token range is unavailable.
+Successful compilations report compiler warnings on stderr using the selected
+`--error-format`. The interface JSON retains these warnings in `diagnostics`,
+including when `--quiet` suppresses their console presentation.
 Use `--module NAME` to select a module in a multi-module source. Root bytes and
 lines, total dependency bytes, include depth, and expanded bytes obey the
 configured resource limits; compilation supports Ctrl-C cancellation.
