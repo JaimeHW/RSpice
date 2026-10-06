@@ -389,6 +389,15 @@ and deferral classification consume no live draws, including when a sampled
 field precedes a missing field. Deferred root-source errors retain their physical
 card location. Grouped runtime-dependent sources retain behavioral evaluation.
 
+Analysis cards stage their result, diagnostics, output requests, Monte Carlo
+source identity and transient-noise selection before changing parser state.
+The whole card and cross-card constraints must validate first, including
+trailing fields after `.AC DATA=...`. Function-bearing cards use the same
+isolated sampling probe as independent sources; failed cards retain no live
+draws, and successful fields evaluate once on the live stream. `.LIN` and `.FFT`
+retain their auxiliary roles and authored output order. This transaction
+boundary does not yet defer unresolved analysis operands.
+
 General dependency planning remains incomplete: eager analysis cards and
 references to an enclosing scope that is still incomplete need further work.
 An early expression invalid at the provisional temperature can also fail before

@@ -12,6 +12,8 @@ use crate::solver::RealSolverBackend;
 
 use super::*;
 
+mod analysis;
+
 pub(super) fn parse_command(
     stream: &mut TokenStream,
     line_num: usize,
@@ -50,165 +52,33 @@ pub(super) fn parse_command(
     } = context;
 
     let cmd = expect_ident(stream, line_num)?;
+    if let Some(card) = analysis::ParsedAnalysisCard::parse(
+        &cmd,
+        stream,
+        analysis::AnalysisCardContext {
+            line_num,
+            logical_line,
+            params,
+            max_analysis_points,
+            origin,
+            lin_exists: lin_analysis.is_some(),
+            current_noise: options.transient_noise,
+        },
+    )? {
+        card.publish(analysis::AnalysisCardSink {
+            analyses,
+            monte_carlo_source_cards,
+            lin_analysis,
+            fft_analyses,
+            output_requests,
+            diagnostics,
+            options,
+        });
+        return Ok(());
+    }
     let mut require_line_consumed = true;
 
     match cmd.as_str() {
-        ".OP" => {
-            analyses.push(AnalysisCommand::Op);
-        }
-        ".DC" => {
-            let (source, spec) = parse_dc_sweep_spec(stream, line_num, params)?;
-
-            push_xyce_inconsistent_dc_sweep_warning(params, diagnostics, origin, &source, &spec);
-
-            // Optional second (outer) source: .DC V1 a b s V2 a2 b2 s2
-            skip_commas(stream);
-            let sweep2 = if matches!(stream.peek().kind, TokenKind::Ident(_)) {
-                let (source2, spec2) = parse_dc_sweep_spec(stream, line_num, params)?;
-                push_xyce_inconsistent_dc_sweep_warning(
-                    params,
-                    diagnostics,
-                    origin,
-                    &source2,
-                    &spec2,
-                );
-                Some(crate::netlist::DcSecondSweep {
-                    source: source2,
-                    start: spec2.start,
-                    stop: spec2.stop,
-                    step: spec2.step,
-                    mode: spec2.mode,
-                })
-            } else {
-                None
-            };
-
-            analyses.push(AnalysisCommand::Dc {
-                source,
-                start: spec.start,
-                stop: spec.stop,
-                step: spec.step,
-                mode: spec.mode,
-                sweep2,
-            });
-        }
-        ".AC" => {
-            let var_str = expect_ident(stream, line_num)?;
-            if var_str.eq_ignore_ascii_case("DATA") {
-                if !stream.consume(&TokenKind::Equals) {
-                    return Err(ParseError::Syntax {
-                        line: line_num,
-                        message: ".AC DATA requires DATA=<table-name>".to_string(),
-                    });
-                }
-                let table_name = expect_ident(stream, line_num)?;
-                analyses.push(AnalysisCommand::AcData { table_name });
-                return Ok(());
-            }
-            let variation = match var_str.as_str() {
-                "LIN" => FreqVariation::Lin,
-                "OCT" => FreqVariation::Oct,
-                "DEC" => FreqVariation::Dec,
-                _ => {
-                    return Err(ParseError::Syntax {
-                        line: line_num,
-                        message: format!("Unknown frequency variation: {}", var_str),
-                    });
-                }
-            };
-            let points = expect_value(stream, line_num, params)? as usize;
-            let start_freq = expect_value(stream, line_num, params)?;
-            let stop_freq = expect_value(stream, line_num, params)?;
-
-            analyses.push(AnalysisCommand::Ac {
-                variation,
-                points,
-                start_freq,
-                stop_freq,
-            });
-        }
-        ".LIN" => {
-            parse_lin_command(stream, line_num, params, lin_analysis)?;
-        }
-        ".QPNOISE" => {
-            analyses.push(qpnoise_card::parse(stream, line_num, params)?);
-        }
-        ".QPXF" => {
-            analyses.push(qpxf_card::parse(stream, line_num, params)?);
-        }
-        ".QPAC" => {
-            analyses.push(qpac_card::parse(stream, line_num, params)?);
-        }
-        ".QPSS" => {
-            analyses.push(qpss_card::parse(stream, line_num, params)?);
-        }
-        ".HB" => {
-            analyses.push(hb_card::parse_hb_command(stream, line_num, params)?);
-        }
-        ".PSS" => {
-            analyses.push(periodic_cards::parse_pss_command(stream, line_num, params)?);
-        }
-        ".PAC" => {
-            analyses.push(periodic_cards::parse_pac_command(stream, line_num, params)?);
-        }
-        ".PXF" => {
-            analyses.push(periodic_cards::parse_pxf_command(stream, line_num, params)?);
-        }
-        ".PNOISE" => {
-            analyses.push(periodic_cards::parse_pnoise_command(
-                stream, line_num, params,
-            )?);
-        }
-        ".PSTB" => {
-            analyses.push(periodic_cards::parse_pstb_command(
-                stream, line_num, params,
-            )?);
-        }
-        ".ENVELOPE" => {
-            analyses.push(periodic_cards::parse_envelope_command(
-                stream, line_num, params,
-            )?);
-        }
-        ".SP" => {
-            let sp = parse_sp_command(stream, line_num, params)?;
-            analyses.push(sp);
-        }
-        ".STB" => {
-            analyses.push(parse_stb_command(stream, line_num, params)?);
-        }
-        ".DISTO" => {
-            let disto = parse_disto_command(stream, line_num, params)?;
-            analyses.push(disto);
-        }
-        ".TRAN" | ".TR" => {
-            let step = expect_value(stream, line_num, params)?;
-            if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-                return Err(ParseError::Syntax {
-                    line: line_num,
-                    message: ".TRAN line has an unexpected number of fields\nUnrecognized dot line will be ignored"
-                        .to_string(),
-                });
-            }
-            let stop = expect_value(stream, line_num, params)?;
-            // A `KEY=VALUE` tail is never a positional field, so the optional
-            // positionals stop at the first keyword pair rather than letting
-            // a keyword whose name also parses as a value be eaten as tstart.
-            let start = try_positional_transient_value(stream, params);
-            let max_step = try_positional_transient_value(stream, params);
-            let mut uic = consume_uic_keyword(stream);
-            if let Some(noise) = parse_transient_noise_keywords(stream, line_num, params, &mut uic)?
-            {
-                bind_transient_noise_options(options, noise, line_num)?;
-            }
-
-            analyses.push(AnalysisCommand::Tran {
-                step,
-                stop,
-                start,
-                max_step,
-                uic,
-            });
-        }
         ".MODEL" => {
             let model = parse_model_definition(
                 stream,
@@ -272,64 +142,6 @@ pub(super) fn parse_command(
                 origin,
                 parameter_overrides,
             )?;
-        }
-        ".STEP" => {
-            let step_cmd = parse_step_command(stream, line_num, params)?;
-            analyses.push(AnalysisCommand::Step(step_cmd));
-        }
-        ".MC" => {
-            let mut report_spans = Vec::new();
-            let mc_cmd = parse_mc_command(
-                stream,
-                line_num,
-                params,
-                max_analysis_points,
-                &mut report_spans,
-            )?;
-            monte_carlo_source_cards.push(monte_carlo_identity::SourceCard::new(
-                origin,
-                logical_line,
-                &report_spans,
-            ));
-            analyses.push(AnalysisCommand::MonteCarlo(mc_cmd));
-        }
-        ".TEMP" => {
-            let temperatures = parse_temp_command(stream, line_num, params)?;
-            analyses.push(AnalysisCommand::Temp { temperatures });
-        }
-        ".FOUR" | ".FOURIER" => {
-            let authored_source = remaining_command_source(stream);
-            let card = parse_four_command(stream, line_num, params)?;
-            output_requests.push(OutputRequest::from_four(
-                card.outputs.as_slice(),
-                origin.clone(),
-                &authored_source,
-            ));
-            analyses.push(AnalysisCommand::Four {
-                fundamental: card.fundamental,
-                outputs: card.outputs,
-                num_harmonics: card.num_harmonics,
-                periods: card.periods,
-                window_from: card.window_from,
-                window_to: card.window_to,
-            });
-        }
-        ".FFT" => {
-            let analysis = parse_fft_command(stream, line_num, params, diagnostics)?;
-            output_requests.push(OutputRequest::from_fft(&analysis, origin.clone()));
-            fft_analyses.push(analysis);
-        }
-        ".NOISE" => {
-            let noise = parse_noise_command(stream, line_num, params)?;
-            analyses.push(noise);
-        }
-        ".SENS" => {
-            let sens = parse_sens_command(stream, line_num, params)?;
-            analyses.push(sens);
-        }
-        ".PZ" => {
-            let pz = parse_pz_command(stream, line_num)?;
-            analyses.push(pz);
         }
         ".IC" => {
             let first_entry = initial_conditions.len();
@@ -424,14 +236,6 @@ pub(super) fn parse_command(
         ".FUNC" => {
             // Parse user-defined function: .FUNC name(arg1, arg2, ...) = expression
             parse_func_statement(stream, line_num, params)?;
-        }
-        ".TF" => {
-            analyses.push(parse_tf_command(stream, line_num)?);
-        }
-        ".DCMATCH" => {
-            analyses.push(dcmatch_card::parse_dcmatch_command(
-                stream, line_num, params,
-            )?);
         }
         ".PREPROCESS" => parse_preprocess_command(stream, line_num, diagnostics)?,
         ".OPTIONS" | ".OPTION" | ".OPT" => {
@@ -763,8 +567,7 @@ fn parse_lin_command(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-    lin_analysis: &mut Option<crate::netlist::LinAnalysis>,
-) -> Result<(), ParseError> {
+) -> Result<crate::netlist::LinAnalysis, ParseError> {
     let mut sparcalc = None;
     let mut saw_assignment = false;
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
@@ -816,16 +619,7 @@ fn parse_lin_command(
                 .to_string(),
         });
     }
-    if lin_analysis
-        .replace(crate::netlist::LinAnalysis::AcOnly)
-        .is_some()
-    {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: ".LIN may appear only once in a netlist".to_string(),
-        });
-    }
-    Ok(())
+    Ok(crate::netlist::LinAnalysis::AcOnly)
 }
 
 fn startup_directive_record<'a>(
@@ -7031,27 +6825,6 @@ fn parse_transient_noise_keywords(
         message,
     })?;
     Ok(Some(config))
-}
-
-/// Store one card's transient-noise selection, refusing a second `.TRAN` card
-/// that asks for a different realization.
-fn bind_transient_noise_options(
-    options: &mut SimulationOptions,
-    config: TransientNoiseConfig,
-    line_num: usize,
-) -> Result<(), ParseError> {
-    match options.transient_noise {
-        Some(existing) if existing != config => Err(ParseError::Syntax {
-            line: line_num,
-            message: "this deck's .TRAN cards request different transient-noise settings; \
-                      one deck plays one noise realization"
-                .to_string(),
-        }),
-        _ => {
-            options.transient_noise = Some(config);
-            Ok(())
-        }
-    }
 }
 
 #[cfg(test)]
