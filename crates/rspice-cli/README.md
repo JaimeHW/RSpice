@@ -60,6 +60,13 @@ defaults are the string `"default"`; infinite waveform limits are `"unbounded"`
 or `"negative_infinity"`. Finite numbers retain their parsed values in core
 units. The inspection does not evaluate a subcircuit for a particular instance.
 
+`--params` lists effective root bindings, including strings, complex values,
+and expressions that depend on the active analysis. Ordinary parameters retain
+precedence over same-name global parameters. JSON `parameter_definitions`
+contains the complete typed list; the compatibility `params` list contains
+real numeric projections only. Inspection does not evaluate retained expressions
+or consume statistical samples to produce these reports.
+
 ## Supported-feature boundaries
 
 The CLI is an adapter over the core engine. An engine entry point does not
