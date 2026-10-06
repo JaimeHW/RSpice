@@ -109,12 +109,12 @@ fn frequency_grid_failure(error: rspice_core::analysis::FrequencyGridError) -> E
 
     match error {
         FrequencyGridError::Aborted => failure_execution(&SimulationError::Aborted),
-        FrequencyGridError::Allocation { .. } | FrequencyGridError::PointCountOverflow => {
-            Execution::failed(
-                "resource.frequency_grid",
-                &format!("The frequency grid exceeds adapter resources: {error}"),
-            )
-        }
+        error @ (FrequencyGridError::Allocation { .. }
+        | FrequencyGridError::LimitExceeded { .. }) => failure_execution(&error.into()),
+        FrequencyGridError::PointCountOverflow => Execution::failed(
+            "resource.frequency_grid",
+            &format!("The frequency grid exceeds adapter resources: {error}"),
+        ),
         _ => Execution::failed(
             "analysis.invalid_frequency_grid",
             &format!("The authored frequency grid is invalid: {error}"),
@@ -361,4 +361,41 @@ pub(super) fn failure_execution(error: &SimulationError) -> Execution {
         stable => format!("engine.{}", stable.as_str()),
     };
     Execution::failed(&code, &error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frequency_grid_allocation_failure_uses_the_core_wire_code() {
+        use rspice_core::analysis::FrequencyGridError;
+        let source = Vec::<f64>::new().try_reserve_exact(usize::MAX).unwrap_err();
+        let execution = frequency_grid_failure(FrequencyGridError::Allocation {
+            requested: usize::MAX,
+            source: source.clone(),
+        });
+        assert!(execution.artifacts.is_empty());
+        let EngineResponse::Failed {
+            failure_code,
+            failure_detail,
+        } = execution.response
+        else {
+            panic!("allocation failure reported success");
+        };
+        assert_eq!(
+            failure_code,
+            format!(
+                "engine.{}",
+                rspice_core::SimulationErrorCode::AllocationFailed.as_str()
+            )
+        );
+        assert!(failure_detail.contains(&source.to_string()));
+        let EngineResponse::Failed { failure_code, .. } =
+            frequency_grid_failure(FrequencyGridError::InvalidStartFrequency).response
+        else {
+            panic!("invalid grid reported success");
+        };
+        assert_eq!(failure_code, "analysis.invalid_frequency_grid");
+    }
 }

@@ -65,8 +65,9 @@ pub fn try_ac_sweep_frequencies_with_abort(
     let mut frequencies = Vec::new();
     frequencies
         .try_reserve_exact(retained_capacity)
-        .map_err(|_| FrequencyGridError::Allocation {
+        .map_err(|source| FrequencyGridError::Allocation {
             requested: retained_capacity,
+            source,
         })?;
     populate_ac_sweep(
         &mut frequencies,
@@ -102,8 +103,9 @@ pub fn try_ac_sweep_frequencies_bounded_with_abort(
     let mut frequencies = Vec::new();
     frequencies
         .try_reserve_exact(retained_count)
-        .map_err(|_| FrequencyGridError::Allocation {
+        .map_err(|source| FrequencyGridError::Allocation {
             requested: retained_count,
+            source,
         })?;
     populate_ac_sweep(
         &mut frequencies,
@@ -490,12 +492,12 @@ mod tests {
 
     #[test]
     fn checked_sweep_reports_allocation_and_cancellation() {
-        assert_eq!(
+        assert!(matches!(
             try_ac_sweep_frequencies(FreqVariation::Lin, usize::MAX / 2, 0.0, 1.0),
             Err(FrequencyGridError::Allocation {
-                requested: usize::MAX / 2
-            })
-        );
+                requested, ..
+            }) if requested == usize::MAX / 2
+        ));
         assert_eq!(
             try_ac_sweep_frequencies_with_abort(
                 FreqVariation::Dec,

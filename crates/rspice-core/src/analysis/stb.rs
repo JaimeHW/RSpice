@@ -230,10 +230,6 @@ impl StbConfig {
         )
         .map_err(|error| match error {
             FrequencyGridError::Aborted => StbAnalysisError::Aborted,
-            FrequencyGridError::Allocation { requested } => StbAnalysisError::Allocation {
-                object: "STB frequency grid",
-                requested,
-            },
             other => StbAnalysisError::FrequencyGrid(other),
         })
     }
@@ -536,7 +532,7 @@ pub struct StbAnalyzer {
 
 /// Failure while projecting an already-computed loop-gain sweep into Bode,
 /// Nyquist, and stability-margin results.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum StbAnalysisError {
     /// The authored sweep or margin configuration is invalid.
@@ -590,7 +586,15 @@ impl std::fmt::Display for StbAnalysisError {
     }
 }
 
-impl std::error::Error for StbAnalysisError {}
+impl std::error::Error for StbAnalysisError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::FrequencyGrid(source) => Some(source),
+            Self::InvalidConfiguration(source) => Some(source),
+            _ => None,
+        }
+    }
+}
 
 impl From<StbConfigError> for StbAnalysisError {
     fn from(error: StbConfigError) -> Self {
@@ -1078,17 +1082,21 @@ mod tests {
 
         assert!(matches!(
             config.try_frequency_points(),
-            Err(StbAnalysisError::Allocation {
-                object: "STB frequency grid",
-                requested: usize::MAX
-            })
+            Err(StbAnalysisError::FrequencyGrid(
+                FrequencyGridError::Allocation {
+                    requested: usize::MAX,
+                    ..
+                }
+            ))
         ));
         assert!(matches!(
             config.frequency_points(),
-            Err(StbAnalysisError::Allocation {
-                object: "STB frequency grid",
-                requested: usize::MAX
-            })
+            Err(StbAnalysisError::FrequencyGrid(
+                FrequencyGridError::Allocation {
+                    requested: usize::MAX,
+                    ..
+                }
+            ))
         ));
     }
 

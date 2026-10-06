@@ -545,8 +545,9 @@ impl AcTransferAnalyzer {
         result
             .points
             .try_reserve_exact(frequencies.len())
-            .map_err(|_| FrequencyGridError::Allocation {
+            .map_err(|source| FrequencyGridError::Allocation {
                 requested: frequencies.len(),
+                source,
             })?;
 
         for (index, freq) in frequencies.into_iter().enumerate() {

@@ -1166,20 +1166,26 @@ pub(crate) fn frequency_grid(
         resource_limits.max_analysis_points,
         abort,
     )
-    .map_err(|error| match error {
+    .map_err(|error| frequency_grid_error(error, variation, points, start, stop))
+}
+
+fn frequency_grid_error(
+    error: FrequencyGridError,
+    variation: FreqVariation,
+    points: usize,
+    start: Value,
+    stop: Value,
+) -> Box<WasmError> {
+    match error {
         FrequencyGridError::Aborted => aborted_error(),
         FrequencyGridError::LimitExceeded { requested, limit } => {
             resource_limit_error(ResourceKind::AnalysisPoints, requested, limit)
         }
-        FrequencyGridError::Allocation { requested } => Box::new(WasmError::new(
-            format!("could not allocate the {requested}-point authored frequency grid"),
-            "result_allocation_failed",
-            "analysis_setup",
-        )),
+        error @ FrequencyGridError::Allocation { .. } => simulation_error(error.into()),
         other => Box::new(WasmError::invalid_argument(format!(
             "invalid authored frequency sweep {variation:?} {points} from {start} to {stop} Hz: {other}"
         ))),
-    })
+    }
 }
 
 pub(crate) fn simulation_error(error: rspice_core::engine::SimulationError) -> Box<WasmError> {
@@ -1253,6 +1259,43 @@ mod tests {
 
     use super::*;
     use crate::handles::WasmResultHandle;
+
+    #[test]
+    fn frequency_grid_allocation_failure_uses_core_error_metadata() {
+        let source = Vec::<f64>::new().try_reserve_exact(usize::MAX).unwrap_err();
+        let error = frequency_grid_error(
+            FrequencyGridError::Allocation {
+                requested: usize::MAX,
+                source: source.clone(),
+            },
+            FreqVariation::Lin,
+            usize::MAX,
+            0.0,
+            1.0,
+        );
+        assert_eq!(
+            error.code,
+            rspice_core::SimulationErrorCode::AllocationFailed.as_str()
+        );
+        assert_eq!(
+            error.category,
+            rspice_core::SimulationErrorCategory::ResourceLimit.as_str()
+        );
+        assert!(error.message.contains(&source.to_string()));
+        assert!(error.resource.is_none());
+        assert!(error.limit.is_none());
+        let invalid = frequency_grid_error(
+            FrequencyGridError::InvalidStartFrequency,
+            FreqVariation::Dec,
+            10,
+            0.0,
+            1.0,
+        );
+        assert_eq!(
+            invalid.code,
+            WasmError::invalid_argument(String::new()).code
+        );
+    }
 
     /// A linear RC driven by one sinusoidal source with an AC excitation.
     const LINEAR: &str = "browser capability deck\n\

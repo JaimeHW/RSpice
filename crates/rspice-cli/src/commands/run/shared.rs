@@ -205,6 +205,10 @@ pub(super) fn generate_frequency_sweep(
     )
     .map_err(|error| match error {
         rspice_core::analysis::FrequencyGridError::Aborted => CliError::Interrupted,
+        error @ (rspice_core::analysis::FrequencyGridError::Allocation { .. }
+            | rspice_core::analysis::FrequencyGridError::LimitExceeded { .. }) => {
+            rspice_core::SimulationError::from(error).into()
+        }
         _ => CliError::InvalidArgument {
             message: format!("invalid frequency sweep: {error}"),
             suggestion: Some(
@@ -414,6 +418,41 @@ pub(super) fn record_continuous_measurements(
 mod tests {
     use super::*;
     use rspice_core::netlist::StepSweep;
+
+    #[test]
+    fn frequency_grid_allocation_failure_uses_core_metadata_and_resource_exit_status() {
+        let error = generate_frequency_sweep(
+            rspice_core::netlist::FreqVariation::Lin,
+            usize::MAX / 2,
+            0.0,
+            1.0,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.exit_code(),
+            crate::cli::error::ExitCode::ResourceLimit
+        );
+        let details = error.details();
+        assert_eq!(
+            details.code,
+            rspice_core::SimulationErrorCode::AllocationFailed.as_str()
+        );
+        assert_eq!(
+            details.category,
+            rspice_core::SimulationErrorCategory::ResourceLimit.as_str()
+        );
+        assert!(matches!(
+            error,
+            CliError::CoreSimulationError {
+                source: rspice_core::SimulationError::Allocation { .. },
+                ..
+            }
+        ));
+        assert!(matches!(
+            generate_frequency_sweep(rspice_core::netlist::FreqVariation::Dec, 10, 0.0, 1.0),
+            Err(CliError::InvalidArgument { .. })
+        ));
+    }
 
     /// The CLI resolves `--node`-style flags through the core resolver, so a
     /// deck's own ground policy and node namespace reach the flag unchanged.

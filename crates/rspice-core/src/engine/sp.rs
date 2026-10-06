@@ -494,9 +494,9 @@ pub(crate) fn card_frequency_grid(
 ) -> Result<Vec<Value>, SimulationError> {
     crate::analysis::ac::try_ac_sweep_frequencies_with_abort(variation, points, start, stop, abort)
         .map_err(|error| match error {
-            crate::analysis::frequency_grid::FrequencyGridError::Aborted => {
-                SimulationError::Aborted
-            }
+            error @ (crate::analysis::FrequencyGridError::Aborted
+            | crate::analysis::FrequencyGridError::Allocation { .. }
+            | crate::analysis::FrequencyGridError::LimitExceeded { .. }) => error.into(),
             other => SimulationError::Netlist(other.to_string()),
         })
 }

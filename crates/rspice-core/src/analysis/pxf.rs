@@ -253,7 +253,14 @@ impl std::fmt::Display for PxfError {
     }
 }
 
-impl std::error::Error for PxfError {}
+impl std::error::Error for PxfError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::FrequencyGrid(source) => Some(source),
+            _ => None,
+        }
+    }
+}
 
 //=============================================================================
 // Transfer Function Point

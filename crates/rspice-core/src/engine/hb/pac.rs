@@ -210,10 +210,7 @@ impl Engine {
         sweep_config.fundamental_freq = config.fundamental_freq;
         let frequencies = sweep_config
             .try_frequency_points_with_abort(abort)
-            .map_err(|error| match error {
-                crate::analysis::FrequencyGridError::Aborted => SimulationError::Aborted,
-                _ => SimulationError::Circuit(format!("Invalid PAC frequency sweep: {error}")),
-            })?;
+            .map_err(|error| error.into_simulation_error("Invalid PAC frequency sweep"))?;
         if frequencies.is_empty() {
             return Err(SimulationError::Circuit(
                 "PAC frequency sweep produced no points".to_string(),

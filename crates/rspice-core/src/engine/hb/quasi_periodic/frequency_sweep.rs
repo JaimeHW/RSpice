@@ -12,10 +12,7 @@ fn error(message: impl Into<String>) -> SimulationError {
     ))
 }
 fn grid_error(e: crate::analysis::FrequencyGridError) -> SimulationError {
-    match e {
-        crate::analysis::FrequencyGridError::Aborted => SimulationError::Aborted,
-        other => error(other.to_string()),
-    }
+    e.into_simulation_error("quasi-periodic frequency sweep")
 }
 fn scale(v: FreqVariation) -> FrequencyGridScale {
     match v {

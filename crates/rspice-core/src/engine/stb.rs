@@ -65,7 +65,7 @@ fn map_stb_analysis_error(error: StbAnalysisError) -> SimulationError {
     match error {
         StbAnalysisError::Aborted => SimulationError::Aborted,
         StbAnalysisError::FrequencyGrid(error) => {
-            SimulationError::Circuit(format!("STB frequency grid: {error}"))
+            error.into_simulation_error("STB frequency grid")
         }
         StbAnalysisError::InvalidConfiguration(error) => {
             SimulationError::Circuit(format!("Invalid STB config: {error}"))
@@ -530,13 +530,18 @@ mod tests {
             )
             .expect_err("unallocatable STB frequency grid must fail");
 
-        assert!(matches!(
-            error,
-            SimulationError::Circuit(message)
-                if message == format!(
-                    "unable to allocate {point_count} elements for STB frequency grid"
-                )
-        ));
+        assert_eq!(
+            error.descriptor().code,
+            crate::SimulationErrorCode::AllocationFailed
+        );
+        let SimulationError::Allocation { object, source } = error else {
+            panic!("frequency-grid allocation failure lost its category");
+        };
+        assert_eq!(object, "frequency grid");
+        let expected = Vec::<Value>::new()
+            .try_reserve_exact(point_count)
+            .unwrap_err();
+        assert_eq!(source, expected);
         assert_eq!(
             abort.count(),
             3,

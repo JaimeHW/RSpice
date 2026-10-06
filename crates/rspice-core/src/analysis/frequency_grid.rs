@@ -15,7 +15,7 @@ pub(crate) enum FrequencyGridScale {
 }
 
 /// Failure while validating or retaining a physical-analysis frequency grid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FrequencyGridError {
     /// The start frequency was not finite or did not satisfy the sweep's sign rule.
@@ -34,6 +34,8 @@ pub enum FrequencyGridError {
     Allocation {
         /// Number of `Value` elements requested.
         requested: usize,
+        /// The original allocator refusal, including capacity overflow.
+        source: std::collections::TryReserveError,
     },
     /// A caller-provided retained-point ceiling was exceeded before allocation.
     LimitExceeded {
@@ -67,9 +69,9 @@ impl std::fmt::Display for FrequencyGridError {
             Self::PointCountOverflow => {
                 formatter.write_str("frequency-grid point count exceeds addressable limits")
             }
-            Self::Allocation { requested } => write!(
+            Self::Allocation { requested, source } => write!(
                 formatter,
-                "unable to allocate {requested} values for the frequency grid"
+                "unable to allocate {requested} values for the frequency grid: {source}"
             ),
             Self::LimitExceeded { requested, limit } => write!(
                 formatter,
@@ -80,7 +82,42 @@ impl std::fmt::Display for FrequencyGridError {
     }
 }
 
-impl std::error::Error for FrequencyGridError {}
+impl std::error::Error for FrequencyGridError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Allocation { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
+
+impl FrequencyGridError {
+    /// Keep failures of allocation, policy and cancellation distinct when a
+    /// physical analysis adds its context to a malformed sweep diagnostic.
+    pub(crate) fn into_simulation_error(self, context: &str) -> crate::SimulationError {
+        use crate::{ResourceKind, ResourceLimitError, SimulationError};
+        match self {
+            Self::Aborted => SimulationError::Aborted,
+            Self::Allocation { source, .. } => SimulationError::Allocation {
+                object: "frequency grid",
+                source,
+            },
+            Self::LimitExceeded { requested, limit } => ResourceLimitError {
+                resource: ResourceKind::AnalysisPoints,
+                requested,
+                limit,
+            }
+            .into(),
+            other => SimulationError::Circuit(format!("{context}: {other}")),
+        }
+    }
+}
+
+impl From<FrequencyGridError> for crate::SimulationError {
+    fn from(error: FrequencyGridError) -> Self {
+        error.into_simulation_error("Invalid frequency grid")
+    }
+}
 
 /// Validate the common endpoints of a generated sweep without allocating it.
 ///
@@ -200,7 +237,10 @@ pub(crate) fn generate_frequency_grid(
     let mut frequencies = Vec::new();
     frequencies
         .try_reserve_exact(count)
-        .map_err(|_| FrequencyGridError::Allocation { requested: count })?;
+        .map_err(|source| FrequencyGridError::Allocation {
+            requested: count,
+            source,
+        })?;
     let low = start.ln();
     let high = stop.ln();
     for index in 0..count {
@@ -425,7 +465,7 @@ mod tests {
 
     #[test]
     fn generated_grid_reports_allocation_failure() {
-        assert_eq!(
+        assert!(matches!(
             generate_frequency_grid(
                 1.0,
                 2.0,
@@ -435,9 +475,10 @@ mod tests {
                 &NoAbort,
             ),
             Err(FrequencyGridError::Allocation {
-                requested: usize::MAX
+                requested: usize::MAX,
+                ..
             })
-        );
+        ));
     }
 
     #[test]

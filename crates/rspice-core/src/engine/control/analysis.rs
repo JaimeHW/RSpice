@@ -66,23 +66,16 @@ impl ControlCircuit {
     }
 }
 
-// Keep cooperative cancellation and configured limits typed during grid construction.
+// Preserve resource failures and cooperative cancellation during grid construction.
 pub(super) fn frequency_error(
     line: usize,
     error: crate::analysis::FrequencyGridError,
 ) -> ControlExecutionError {
     use crate::analysis::FrequencyGridError;
     match error {
-        FrequencyGridError::Aborted => simulation_error(line, SimulationError::Aborted),
-        FrequencyGridError::LimitExceeded { requested, limit } => simulation_error(
-            line,
-            ResourceLimitError {
-                resource: ResourceKind::AnalysisPoints,
-                requested,
-                limit,
-            }
-            .into(),
-        ),
+        error @ (FrequencyGridError::Aborted
+        | FrequencyGridError::LimitExceeded { .. }
+        | FrequencyGridError::Allocation { .. }) => simulation_error(line, error.into()),
         other => command_error(line, other.to_string()).into(),
     }
 }
@@ -159,5 +152,59 @@ pub(super) fn frequency(
             })
             .fold(0usize, usize::saturating_add);
         Ok((ControlAnalysisResult::Ac(result), count))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analysis::FrequencyGridError;
+    use crate::{SimulationErrorCategory, SimulationErrorCode};
+    use std::error::Error;
+
+    #[test]
+    fn frequency_grid_allocation_failure_keeps_control_line_and_allocator_cause() {
+        let source = Vec::<f64>::new().try_reserve_exact(usize::MAX).unwrap_err();
+        let error = frequency_error(
+            17,
+            FrequencyGridError::Allocation {
+                requested: usize::MAX,
+                source: source.clone(),
+            },
+        );
+        let ControlExecutionError::Simulation {
+            line,
+            source: simulation,
+        } = error
+        else {
+            panic!("allocation failure was reported as a command error");
+        };
+        assert_eq!(line, 17);
+        assert_eq!(
+            simulation.descriptor().category,
+            SimulationErrorCategory::ResourceLimit
+        );
+        assert_eq!(
+            simulation.descriptor().code,
+            SimulationErrorCode::AllocationFailed
+        );
+        assert_eq!(
+            simulation
+                .source()
+                .unwrap()
+                .downcast_ref::<std::collections::TryReserveError>(),
+            Some(&source)
+        );
+        assert!(matches!(
+            frequency_error(17, FrequencyGridError::InvalidStartFrequency),
+            ControlExecutionError::Command(_)
+        ));
+        assert!(matches!(
+            frequency_error(17, FrequencyGridError::Aborted),
+            ControlExecutionError::Simulation {
+                line: 17,
+                source: SimulationError::Aborted
+            }
+        ));
     }
 }

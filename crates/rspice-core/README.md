@@ -319,6 +319,19 @@ over a generated built-in with the same name.
 
 Core analyses, driven from `engine/`:
 
+Checked frequency-grid APIs retain the original `TryReserveError` in
+`FrequencyGridError::Allocation { requested, source }`. `Error::source()`
+exposes that cause, including through STB and PXF wrappers. Conversion into
+`SimulationError` preserves the `allocation_failed` resource classification;
+configured point limits and cancellation remain distinct. Malformed sweep
+diagnostics retain their analysis or input context.
+
+SDK migration: `FrequencyGridError` and `StbAnalysisError` implement `Clone`
+and are no longer `Copy`. Borrow or explicitly clone errors when reusing them;
+match allocation variants with `..` when their cause is not needed. These
+checked APIs report allocation refusal, while the legacy infallible
+`ac_sweep_frequencies` wrapper still returns an empty vector on failure.
+
 Parameter sweeps use `Engine::plan_step_commands`, `StepPlan`, and
 `StepPlanLimits`; axis specifications live in `netlist::StepSweep`.
 The unused `analysis::parametric` API has been removed. SDK callers should

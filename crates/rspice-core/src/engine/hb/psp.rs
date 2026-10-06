@@ -203,15 +203,9 @@ impl Engine {
             authored_references.extend(std::iter::repeat_n(port.z0, sidebands));
             ports.push(materialized.port);
         }
-        let frequencies =
-            config
-                .try_frequency_points_with_abort(abort)
-                .map_err(|error| match error {
-                    crate::analysis::FrequencyGridError::Aborted => SimulationError::Aborted,
-                    error => {
-                        SimulationError::Circuit(format!("Invalid PSP frequency sweep: {error}"))
-                    }
-                })?;
+        let frequencies = config
+            .try_frequency_points_with_abort(abort)
+            .map_err(|error| error.into_simulation_error("Invalid PSP frequency sweep"))?;
         let noise_sources = if noise {
             let channels = ports.len().checked_mul(sidebands).ok_or_else(|| {
                 SimulationError::Circuit(
