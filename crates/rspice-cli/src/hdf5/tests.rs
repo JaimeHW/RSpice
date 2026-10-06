@@ -3,6 +3,23 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
+#[test]
+fn legacy_empty_text_is_readable_without_accepting_nonempty_string_arrays() {
+    let mut builder = rustyhdf5::FileBuilder::new();
+    builder.set_attr("title", AttrValue::String(String::new()));
+    builder.set_attr(
+        "array",
+        AttrValue::StringArray(vec!["one".into(), "two".into()]),
+    );
+    let file = Hdf5File::from_bytes(builder.finish().unwrap()).unwrap();
+    let attrs = file.root().attrs().unwrap();
+    assert_eq!(
+        read_string_attr(&attrs, "title").unwrap(),
+        Some(String::new())
+    );
+    assert!(read_string_attr(&attrs, "array").is_err());
+}
+
 struct TestDirectory(std::path::PathBuf);
 
 impl TestDirectory {

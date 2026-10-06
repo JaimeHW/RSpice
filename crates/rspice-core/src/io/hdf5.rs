@@ -471,6 +471,10 @@ pub fn write_hdf5(writer: impl Write, document: &Hdf5Document) -> Result<(), Hdf
 
 fn attribute(value: &Hdf5Attribute) -> AttrValue {
     match value {
+        // The backend encodes String("") as a zero-width datatype, which its
+        // own reader returns as an empty array. A one-byte NUL-padded scalar
+        // is an empty string and is readable by ordinary HDF5 consumers.
+        Hdf5Attribute::Text(value) if value.is_empty() => AttrValue::String("\0".to_owned()),
         Hdf5Attribute::Text(value) => AttrValue::String(value.clone()),
         Hdf5Attribute::Integer(value) => AttrValue::I64(*value),
         Hdf5Attribute::Real(value) => AttrValue::F64(*value),
@@ -638,5 +642,23 @@ mod tests {
         write_hdf5(&mut second, &document).expect("serializes");
         assert_eq!(first, second);
         assert_eq!(&first[..8], b"\x89HDF\r\n\x1a\n", "the HDF5 signature");
+    }
+
+    #[test]
+    fn empty_text_attributes_are_readable_scalar_strings() {
+        let mut document = Hdf5Document::new("");
+        document.add_table(&transient()).unwrap();
+        document.groups[0].set_attr("optional_text", Hdf5Attribute::Text(String::new()));
+        let mut bytes = Vec::new();
+        write_hdf5(&mut bytes, &document).unwrap();
+        let file = rustyhdf5::File::from_bytes(bytes).unwrap();
+        let root = file.root().attrs().unwrap();
+        let group = file.group("transient").unwrap().attrs().unwrap();
+        for (attrs, name) in [(root, "title"), (group, "optional_text")] {
+            assert!(
+                matches!(attrs.get(name), Some(AttrValue::String(value)) if value.is_empty()),
+                "{attrs:?}"
+            );
+        }
     }
 }
