@@ -434,7 +434,7 @@ impl std::fmt::Display for ElaborationErrorKind {
 /// except where it merely repeated the subject.
 ///
 /// `span` is present when the engine genuinely knows where to point, which
-/// today means the Verilog-A source file — a parsed [`crate::netlist::Element`]
+/// includes original Verilog-A compiler locations — a parsed [`crate::netlist::Element`]
 /// carries no line, so an instance-side refusal reports `None` rather than
 /// inventing one. Line `0` in a source span means "this file", the same
 /// convention the output projection already uses.
@@ -452,35 +452,32 @@ pub struct ElaborationError {
     pub span: Option<NetlistSourceLocation>,
     /// The site's own explanation, naming the specifics the kind does not.
     pub detail: String,
+    #[cfg(feature = "veriloga")]
+    compiler_diagnostics: Vec<rspice_veriloga::SourceCompileDiagnostic>,
 }
 
-/// Gated with the `veriloga` feature because the seam that raises one is: a
-/// build without it compiles no `.VERILOGA` route and no mixed circuit, so no
-/// site in it constructs an `ElaborationError` and every builder here would be
-/// a dead-code error under the `-D warnings` check CI runs on default
-/// features. The type, its fields and the [`SimulationError`] variant stay
-/// unconditional, because a frontend reads them from a build it did not
-/// choose the features for.
-#[cfg(feature = "veriloga")]
 impl ElaborationError {
-    pub(crate) fn new(kind: ElaborationErrorKind, detail: impl Into<String>) -> Self {
+    /// Construct a refusal independently of the engine's selected features.
+    pub fn new(kind: ElaborationErrorKind, detail: impl Into<String>) -> Self {
         Self {
             instance: None,
             module: None,
             kind,
             span: None,
             detail: detail.into(),
+            #[cfg(feature = "veriloga")]
+            compiler_diagnostics: Vec::new(),
         }
     }
 
     #[must_use]
-    pub(crate) fn instance(mut self, instance: impl Into<String>) -> Self {
+    pub fn instance(mut self, instance: impl Into<String>) -> Self {
         self.instance = Some(instance.into());
         self
     }
 
     #[must_use]
-    pub(crate) fn module(mut self, module: impl Into<String>) -> Self {
+    pub fn module(mut self, module: impl Into<String>) -> Self {
         self.module = Some(module.into());
         self
     }
@@ -491,17 +488,14 @@ impl ElaborationError {
     /// parsed [`crate::netlist::Element`] carries no source location, so the
     /// engine would have to invent one.
     #[must_use]
-    pub(crate) fn at(mut self, span: NetlistSourceLocation) -> Self {
+    pub fn at(mut self, span: NetlistSourceLocation) -> Self {
         self.span = Some(span);
         self
     }
 
-    /// Point at a whole Verilog-A source file, which is as precise as this
-    /// seam can be: the compiler reports its own offsets inside `detail`, and
-    /// the deck line that authored the `.VERILOGA` card is not retained by the
-    /// parsed netlist.
+    /// Point at a whole Verilog-A source file when no narrower span is known.
     #[must_use]
-    pub(crate) fn in_source(self, path: impl Into<std::path::PathBuf>) -> Self {
+    pub fn in_source(self, path: impl Into<std::path::PathBuf>) -> Self {
         let path = path.into();
         let display = path.display().to_string();
         self.at(NetlistSourceLocation::in_file(path, 0))
@@ -512,6 +506,30 @@ impl ElaborationError {
         if self.module.is_none() {
             self.module = Some(module);
         }
+        self
+    }
+
+    /// Individual compiler findings resolved against original source files.
+    #[cfg(feature = "veriloga")]
+    pub fn compiler_diagnostics(&self) -> &[rspice_veriloga::SourceCompileDiagnostic] {
+        &self.compiler_diagnostics
+    }
+
+    #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+    pub(crate) fn with_compiler_diagnostics(
+        mut self,
+        diagnostics: Vec<rspice_veriloga::SourceCompileDiagnostic>,
+    ) -> Self {
+        if let Some(primary) = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.path.is_some())
+        {
+            self.span = Some(NetlistSourceLocation::in_file(
+                primary.path.as_ref().expect("located diagnostic"),
+                primary.line.unwrap_or(0),
+            ));
+        }
+        self.compiler_diagnostics = diagnostics;
         self
     }
 }
@@ -531,7 +549,12 @@ impl std::fmt::Display for ElaborationError {
             (None, Some(module)) => write!(formatter, "module '{module}': ")?,
             (None, None) => {}
         }
-        write!(formatter, "{}: {}", self.kind.sentence(), self.detail)
+        write!(formatter, "{}: {}", self.kind.sentence(), self.detail)?;
+        #[cfg(feature = "veriloga")]
+        for diagnostic in &self.compiler_diagnostics {
+            write!(formatter, "\n{diagnostic}")?;
+        }
+        Ok(())
     }
 }
 

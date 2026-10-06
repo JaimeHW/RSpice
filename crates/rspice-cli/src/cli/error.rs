@@ -554,6 +554,7 @@ impl CliError {
                     rspice_core::SimulationError::Elaboration(refusal) => {
                         details.instance_name = refusal.instance.clone();
                         details.reason = Some(refusal.kind.as_str());
+                        details.diagnostics = refusal.compiler_diagnostics().to_vec();
                     }
                     _ => {}
                 }
@@ -910,17 +911,16 @@ mod tests {
     #[test]
     fn elaboration_refusals_exit_as_bad_input_and_publish_their_kind() {
         let error = CliError::from(rspice_core::SimulationError::from(
-            rspice_core::ElaborationError {
-                instance: Some("x1".to_string()),
-                module: Some("counter".to_string()),
-                kind: rspice_core::ElaborationErrorKind::PortCount,
-                span: Some(rspice_core::netlist::NetlistSourceLocation::in_file(
-                    "counter.va",
-                    0,
-                )),
-                detail: "the master declares at most 3 terminal(s) and the card connects 4"
-                    .to_string(),
-            },
+            rspice_core::ElaborationError::new(
+                rspice_core::ElaborationErrorKind::PortCount,
+                "the master declares at most 3 terminal(s) and the card connects 4".to_string(),
+            )
+            .instance("x1".to_string())
+            .module("counter".to_string())
+            .at(rspice_core::netlist::NetlistSourceLocation::in_file(
+                "counter.va",
+                0,
+            )),
         ));
 
         assert_eq!(error.exit_code(), ExitCode::InputError);
@@ -938,13 +938,11 @@ mod tests {
     #[test]
     fn an_internal_elaboration_failure_exits_as_a_failed_simulation() {
         let error = CliError::from(rspice_core::SimulationError::from(
-            rspice_core::ElaborationError {
-                instance: Some("x1".to_string()),
-                module: None,
-                kind: rspice_core::ElaborationErrorKind::Internal,
-                span: None,
-                detail: "the plan the boundary was handed contradicts itself".to_string(),
-            },
+            rspice_core::ElaborationError::new(
+                rspice_core::ElaborationErrorKind::Internal,
+                "the plan the boundary was handed contradicts itself".to_string(),
+            )
+            .instance("x1".to_string()),
         ));
         assert_eq!(error.exit_code(), ExitCode::SimulationFailed);
         let details = error.details();

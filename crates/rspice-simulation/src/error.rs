@@ -806,15 +806,16 @@ mod tests {
     fn elaboration_refusals_reach_the_ui_as_their_kind_and_named_objects() {
         use rspice_simulation_contract::worker_error::WorkerSimulationError;
 
-        let core_error = rspice_core::SimulationError::from(rspice_core::ElaborationError {
-            instance: Some("x1".to_owned()),
-            module: Some("clock_divider".to_owned()),
-            kind: rspice_core::ElaborationErrorKind::PortDiscipline,
-            span: None,
-            detail: "connects discrete port 'q' to ground; a boundary net carries a logic value \
+        let core_error = rspice_core::SimulationError::from(
+            rspice_core::ElaborationError::new(
+                rspice_core::ElaborationErrorKind::PortDiscipline,
+                "connects discrete port 'q' to ground; a boundary net carries a logic value \
                      and ground is the voltage reference, not a net"
-                .to_owned(),
-        });
+                    .to_owned(),
+            )
+            .instance("x1".to_owned())
+            .module("clock_divider".to_owned()),
+        );
         let rendered = core_error.to_string();
         let translated = SimulationError::from(core_error);
 
@@ -845,16 +846,15 @@ mod tests {
     #[test]
     fn a_missing_verilog_a_source_is_classified_and_located() {
         let translated = SimulationError::from(rspice_core::SimulationError::from(
-            rspice_core::ElaborationError {
-                instance: None,
-                module: Some("counter.va".to_owned()),
-                kind: rspice_core::ElaborationErrorKind::MissingSource,
-                span: Some(rspice_core::netlist::NetlistSourceLocation::in_file(
-                    "counter.va",
-                    0,
-                )),
-                detail: "this source does not exist or is unreadable".to_owned(),
-            },
+            rspice_core::ElaborationError::new(
+                rspice_core::ElaborationErrorKind::MissingSource,
+                "this source does not exist or is unreadable".to_owned(),
+            )
+            .module("counter.va".to_owned())
+            .at(rspice_core::netlist::NetlistSourceLocation::in_file(
+                "counter.va",
+                0,
+            )),
         ));
         let SimulationError::Elaboration {
             instance,

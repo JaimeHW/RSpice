@@ -438,24 +438,18 @@ fn one_of_every_variant() -> Vec<SimulationError> {
         SimulationError::unsupported_capability("analysis.pz.device", "no PZ stamp"),
         // Both halves of the elaboration classification, so the descriptor
         // table is exercised on a netlist-category kind and a simulation one.
-        SimulationError::from(ElaborationError {
-            instance: Some("X1".to_string()),
-            module: Some("counter".to_string()),
-            kind: ElaborationErrorKind::PortCount,
-            span: None,
-            detail: "the master declares at most 3 terminal(s) and the card connects 4".to_string(),
-        }),
-        SimulationError::from(ElaborationError {
-            instance: None,
-            module: Some("counter.va".to_string()),
-            kind: ElaborationErrorKind::CacheCorrupt,
-            span: Some(NetlistSourceLocation::in_file(
-                "counter.va",
-                0,
-            )),
-            detail: "compiled runtime artifacts failed integrity validation: digest mismatch"
-                .to_string(),
-        }),
+        SimulationError::from(
+            ElaborationError::new(
+                ElaborationErrorKind::PortCount,
+                "the master declares at most 3 terminal(s) and the card connects 4",
+            ).instance("X1").module("counter"),
+        ),
+        SimulationError::from(
+            ElaborationError::new(
+                ElaborationErrorKind::CacheCorrupt,
+                "compiled runtime artifacts failed integrity validation: digest mismatch",
+            ).module("counter.va").at(NetlistSourceLocation::in_file("counter.va", 0)),
+        ),
         SimulationError::from(MaterializationMismatchError::PlanNetlist),
         SimulationError::Solver(SolverError::ConvergenceFailed(9)),
         SimulationError::Netlist("no analyses".to_string()),

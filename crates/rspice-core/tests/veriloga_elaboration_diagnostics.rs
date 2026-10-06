@@ -453,7 +453,9 @@ fn a_source_the_compiler_refuses_is_a_compile_refusal_at_that_file() {
         .span
         .as_ref()
         .expect("the refused source names itself");
-    assert_eq!(span.line, 0);
+    assert_eq!(span.line, 1);
+    assert!(!error.compiler_diagnostics().is_empty());
+    assert!(!error.to_string().contains("at offset"));
     assert_eq!(
         span.path
             .as_deref()
@@ -477,13 +479,14 @@ fn the_two_kinds_no_deck_reaches_are_still_reported_as_engine_failures() {
         ElaborationErrorKind::CacheCorrupt,
         ElaborationErrorKind::Internal,
     ] {
-        let error = SimulationError::from(ElaborationError {
-            instance: Some("x1".to_owned()),
-            module: Some("counter".to_owned()),
-            kind,
-            span: None,
-            detail: "an artifact or a binding step the deck cannot influence".to_owned(),
-        });
+        let error = SimulationError::from(
+            ElaborationError::new(
+                kind,
+                "an artifact or a binding step the deck cannot influence".to_owned(),
+            )
+            .instance("x1".to_owned())
+            .module("counter".to_owned()),
+        );
         let descriptor = error.descriptor();
         assert_eq!(
             descriptor.category.as_str(),
@@ -504,13 +507,7 @@ fn the_two_kinds_no_deck_reaches_are_still_reported_as_engine_failures() {
         ElaborationErrorKind::CompileRefusal,
         ElaborationErrorKind::NameCollision,
     ] {
-        let error = SimulationError::from(ElaborationError {
-            instance: None,
-            module: None,
-            kind,
-            span: None,
-            detail: "authored input".to_owned(),
-        });
+        let error = SimulationError::from(ElaborationError::new(kind, "authored input".to_owned()));
         assert_eq!(
             error.descriptor().category.as_str(),
             "netlist",
@@ -522,16 +519,16 @@ fn the_two_kinds_no_deck_reaches_are_still_reported_as_engine_failures() {
 /// The rendering: one prefix, built once, in front of the site's own sentence.
 #[test]
 fn the_rendering_names_the_span_the_instance_and_the_master_before_the_reason() {
-    let full = ElaborationError {
-        instance: Some("x1".to_owned()),
-        module: Some("counter".to_owned()),
-        kind: ElaborationErrorKind::PortCount,
-        span: Some(rspice_core::netlist::NetlistSourceLocation::in_file(
-            "counter.va",
-            0,
-        )),
-        detail: "the master declares at most 3 terminal(s) and the card connects 4".to_owned(),
-    };
+    let full = ElaborationError::new(
+        ElaborationErrorKind::PortCount,
+        "the master declares at most 3 terminal(s) and the card connects 4".to_owned(),
+    )
+    .instance("x1".to_owned())
+    .module("counter".to_owned())
+    .at(rspice_core::netlist::NetlistSourceLocation::in_file(
+        "counter.va",
+        0,
+    ));
     assert_eq!(
         full.to_string(),
         "Elaboration error at counter.va:0: instance 'x1' (module 'counter'): the instance does \
@@ -540,13 +537,10 @@ fn the_rendering_names_the_span_the_instance_and_the_master_before_the_reason() 
     );
 
     // Each optional part is simply absent rather than rendered empty.
-    let bare = ElaborationError {
-        instance: None,
-        module: None,
-        kind: ElaborationErrorKind::ConnectRule,
-        span: None,
-        detail: "Unknown connectrules 'Low'".to_owned(),
-    };
+    let bare = ElaborationError::new(
+        ElaborationErrorKind::ConnectRule,
+        "Unknown connectrules 'Low'".to_owned(),
+    );
     assert_eq!(
         bare.to_string(),
         "Elaboration error: the connect rules do not settle this boundary: Unknown connectrules \

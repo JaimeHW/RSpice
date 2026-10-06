@@ -388,11 +388,10 @@ pub(super) fn source_admission_error(
             limit: limit.limit,
         });
     }
-    cache_refusal(
-        path,
-        crate::ElaborationErrorKind::CompileRefusal,
-        format!("{context}: {error}"),
-    )
+    crate::ElaborationError::new(crate::ElaborationErrorKind::CompileRefusal, context)
+        .in_source(path)
+        .with_compiler_diagnostics(vec![rspice_veriloga::SourceCompileDiagnostic::from(&error)])
+        .into()
 }
 
 /// On-disk Verilog-A cache statistics.
@@ -2107,15 +2106,24 @@ pub(super) fn prepare_veriloga_source(
                 }
                 source_admission_error(path, "preparation failed", error)
             }
-            error => {
+            rspice_veriloga::ProviderCompileError::Compile {
+                source,
+                diagnostics,
+            } => {
                 VERILOGA_CACHE_TELEMETRY
                     .compilations_failed
                     .fetch_add(1, Relaxed);
-                cache_refusal(
-                    path,
+                crate::ElaborationError::new(
                     crate::ElaborationErrorKind::CompileRefusal,
-                    format!("preparation failed: {error}"),
+                    if diagnostics.is_empty() {
+                        format!("preparation failed: {source}")
+                    } else {
+                        "preparation failed".to_owned()
+                    },
                 )
+                .in_source(path)
+                .with_compiler_diagnostics(diagnostics)
+                .into()
             }
         }
     })

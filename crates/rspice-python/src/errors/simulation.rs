@@ -221,16 +221,16 @@ mod tests {
     #[test]
     fn elaboration_refusals_publish_their_kind_instance_and_source_span() {
         let attributes = simulation_error_attributes(&rspice_core::engine::SimulationError::from(
-            rspice_core::ElaborationError {
-                instance: Some("x1".to_string()),
-                module: Some("counter.va".to_string()),
-                kind: rspice_core::ElaborationErrorKind::MissingSource,
-                span: Some(rspice_core::netlist::NetlistSourceLocation::in_file(
-                    "counter.va",
-                    0,
-                )),
-                detail: "this source does not exist or is unreadable".to_string(),
-            },
+            rspice_core::ElaborationError::new(
+                rspice_core::ElaborationErrorKind::MissingSource,
+                "this source does not exist or is unreadable".to_string(),
+            )
+            .instance("x1".to_string())
+            .module("counter.va".to_string())
+            .at(rspice_core::netlist::NetlistSourceLocation::in_file(
+                "counter.va",
+                0,
+            )),
         ));
         assert_eq!(attributes.kind, "netlist");
         assert_eq!(attributes.category, "netlist");
