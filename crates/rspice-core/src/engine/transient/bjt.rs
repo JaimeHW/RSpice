@@ -68,10 +68,9 @@ impl Engine {
         Ok(())
     }
 
-    /// GP PTF transient operators remain under internal qualification.
-    /// Refuse before startup effects, integration, or checkpoint publication.
-    /// Remove this admission boundary only with delay residuals, accepted
-    /// history, error control, and restoration qualified together.
+    /// Validate causality before startup effects or checkpoint publication.
+    /// Exact transport and the ngspice Weil operator both require a finite,
+    /// nonnegative nominal delay. Zero retains the ordinary GP equations.
     pub(in crate::engine) fn ensure_bjt_transient_phase_support(
         circuit: &crate::circuit::CircuitData,
         abort: &dyn AbortSignal,
@@ -80,15 +79,14 @@ impl Engine {
             if index.is_multiple_of(64) && abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
+            bjt.validate_legacy_excess_phase()
+                .map_err(SimulationError::Circuit)?;
             let delay = bjt.legacy_excess_phase_delay();
-            if delay != 0.0 {
-                return Err(SimulationError::unsupported_capability(
-                    "analysis.tran.bjt_excess_phase",
-                    format!(
-                        "BJT '{}': transient GP PTF excess phase (nominal delay {delay:.17e} s) is not yet supported by the public simulation API; phase history, numerical accuracy, and restart qualification are incomplete",
-                        bjt.name
-                    ),
-                ));
+            if delay < 0.0 {
+                return Err(SimulationError::ParameterDomain(format!(
+                    "BJT '{}': transient GP PTF and nominal TF must define a finite, nonnegative causal delay; found {delay:.17e} s",
+                    bjt.name
+                )));
             }
         }
         Ok(())

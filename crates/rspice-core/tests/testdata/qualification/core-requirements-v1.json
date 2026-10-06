@@ -23,9 +23,9 @@
     },
     {
       "id": "C03",
-      "status": "open",
+      "status": "in_progress",
       "requirement": "GP transient excess phase",
-      "qualification_task": "Qualify both phase models through public transient APIs across dialects, startup modes, polarity, model parameters, retries and restart."
+      "qualification_task": "Public phase execution, independent oracles, dialect/startup/polarity/private-resistance matrices and restart are exercised. Complete the remaining resource/failure and feature-configuration qualification before package closure."
     },
     {
       "id": "C04",
@@ -420,8 +420,8 @@
       "path": "src/engine/transient/bjt.rs",
       "symbol": "ensure_bjt_transient_phase_support",
       "owner": "C03",
-      "status": "open",
-      "qualification_task": "Replace public nonzero-PTF refusals only with qualified public transient execution; preserve invalid-parameter errors."
+      "status": "parameter_validation",
+      "qualification_task": "Public finite nonnegative delay execution replaces the blanket nonzero-PTF refusal; retain tested nonfinite, noncausal and unresolvable-arrival diagnostics."
     }
   ],
   "ignored_tests": [

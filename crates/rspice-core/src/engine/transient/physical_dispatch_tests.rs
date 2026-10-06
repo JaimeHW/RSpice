@@ -1,4 +1,4 @@
-//! Qualification of the real integration body before widening public PTF admission.
+//! Independent physical-event and GP phase qualification through public transient APIs.
 use super::*;
 use crate::SimulationConfig;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -134,46 +134,31 @@ fn run_with_configuration(
             .iter()
             .any(|bjt| bjt.legacy_excess_phase_delay() > 0.0)
     );
-    let continuation = resume.and_then(|checkpoint| {
-        checkpoint
-            .validate_for_with_config(&deck, &engine.config)
-            .unwrap();
-        checkpoint.validate_recorded_integration_max_step().unwrap();
-        checkpoint.validated_integration_continuation().unwrap()
-    });
     let began = std::time::Instant::now();
-    let outcome = engine.run_tran_admitted(
-        &deck,
-        &deck,
-        TransientRunWindow {
-            tstop: stop,
+    let outcome = if let Some(checkpoint) = resume {
+        assert!(
+            scheduled.is_empty(),
+            "public resume does not accept a capture schedule"
+        );
+        engine
+            .run_tran_resume_with_abort(&deck, checkpoint, stop, max_step, abort)
+            .map(|(result, _)| (result, Vec::new()))
+    } else {
+        engine.run_tran_checkpoint_schedule_with_startup_mode_and_abort(
+            &deck,
+            stop,
             max_step,
-            startup_mode: Engine::inferred_transient_startup_mode(&deck).unwrap(),
-            dc_seed: None,
-            integral_trace: None,
-        },
-        abort,
-        TransientResumePlan {
-            resume,
-            resume_validation: ResumeValidation::ExactNetlist,
-            final_checkpoint_retention: FinalCheckpointRetention::Discarded,
-            scheduled_checkpoint_times: scheduled,
-        },
-        PreparedTransientCircuit {
-            circuit,
-            modified_trapezoidal_coefficients: CompanionCoefficients::trapezoidal_with_xmu(0.5)
-                .unwrap(),
-            resume_continuation: continuation,
-        },
-    );
+            Engine::inferred_transient_startup_mode(&deck).unwrap(),
+            scheduled,
+            abort,
+        )
+    };
     eprintln!(
         "physical dispatch: elapsed={:?}, result={:?}",
         began.elapsed(),
-        outcome
-            .as_ref()
-            .map(|(r, _, _)| (r.time.len(), r.time.last()))
+        outcome.as_ref().map(|(r, _)| (r.time.len(), r.time.last()))
     );
-    let (result, _, checkpoints) = outcome.unwrap();
+    let (result, checkpoints) = outcome.unwrap();
     result.validate_current_impulses().unwrap();
     let mut impulses = result
         .current_impulses

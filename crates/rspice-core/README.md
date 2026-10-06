@@ -892,8 +892,10 @@ option is `.options eventfluxtol=1e-24`; ordered `option` commands also accept
 it. Explicit configuration overrides take precedence over authored options.
 This setting controls event conservation independently of charge tolerance
 and ordinary inductor timestep truncation. Existing device admission limits
-still apply. Checkpoint configuration identity version 95 binds this setting,
-the GP transport-event tracking policy and physical-event integration restart;
+still apply. Checkpoint configuration identity version 96 binds this setting,
+the GP transport-event tracking policy, physical-event integration restart,
+exact-history stop-step fitting, and accepted OneStep residual refresh across
+hybrid Gear2 intervals;
 checkpoints with an earlier configuration identity require a fresh run.
 Native GP models in ngspice mode now use ngspice 46's thermal constants
 (`k=1.38064852e-23`, `q=1.6021766208e-19`) for their temperature-scaled
@@ -907,28 +909,38 @@ or `NgspiceWeil` independently of the evaluator dialect. The latter uses
 ngspice's discrete two-sample forward-current filter, with immutable trial
 evaluation and accepted state preserved across charge-integration restarts.
 Checkpoint format 49 stores its accepted input, two outputs, delay and step
-size; changing the selected phase law rejects the old checkpoint. This Rust
-setting does not lift the public nonzero-PTF admission guard below.
+size; changing the selected phase law rejects the old checkpoint. Both phase
+operators are available through the public transient, checkpoint, continuation,
+and compression APIs. The nominal delay `TF*PTF*pi/180` must be finite and
+nonnegative; a negative delay is rejected before startup or checkpoint
+publication. Zero delay retains the ordinary GP equations. A physical arrival
+that cannot be represented within the timestep limits is diagnosed explicitly.
 
-The internal GP transient qualification path tracks all unknown events and
+The GP exact-transport path tracks all unknown events and
 known discontinuities through derivative order two. Solver-certified C2
 inputs retain their delay-history knots and interpolation error control but
 do not force another arrival onto the integration grid. This policy covers
-the currently implemented BE, trapezoidal, Gear2 and hybrid methods. Public
-nonzero transient PTF admission remains guarded pending full qualification.
+the currently implemented BE, trapezoidal, Gear2 and hybrid methods. Before
+solving the last adaptive intervals, exact-history runs fit a rounding-sized
+remainder to the requested horizon while preserving timestep bounds and event
+clocks. This avoids relabeling an already solved state with a different time.
+The hybrid integrator also refreshes retained OneStep static residuals during
+Gear2 intervals, so returning to trapezoidal integration uses the latest
+accepted currents.
 
 Native GP physical events retain outgoing charge/flux rates and delay memory,
 then start a new integration epoch. Gear2 uses one BE interval before returning
 to second order. Capacitor/inductor error control and checkpoint restoration
 share the same accepted interval lengths at that boundary.
 
-Internal transient qualification includes a manufactured nonlinear GP orbit
+Public transient qualification includes a manufactured nonlinear GP orbit
 with finite base/collector impedances, exponential current, Early feedback and
 TF diffusion charge. Independent harmonic current forcing produces prescribed
 base and collector voltages over three periods with a 1 us transport delay.
 Ngspice-mode trapezoidal and Xyce-mode TrapGear meet 2 uV base / 20 uV collector
-bounds on the complete trajectory. This case does not qualify other GP model
-options or broader platform admission.
+bounds on the complete trajectory. Independent public tests also check delayed
+exponential refinement, both polarities, temperature, area and multiplicity,
+private resistances, OP/UIC startup, cancellation, and checkpoint continuation.
 
 The selected Weil path is separately compared with ngspice 46 for a clamped
 NPN at 1 GHz, TF=1 ns and PTF=21/90 degrees. Both complete 20 ns trajectories
@@ -936,8 +948,9 @@ retain all 5,008 recorded ngspice times, including startup. Maximum current
 errors are below 5.5 fA within the unchanged absolute-plus-signal tolerance;
 packed checkpoint resumes reproduce every remaining voltage and branch-current
 sample exactly. The committed decks, raw numeric samples and hash manifest
-are in `tests/testdata/gp_weil_*`. This establishes those legacy cases, not
-general nonlinear/topology or public transient phase admission.
+are in `tests/testdata/gp_weil_*`. Each comparison qualifies its specific model,
+topology and parameters; the remaining core qualification ledger stays explicit
+about broader coverage.
 
 
 ## Monte Carlo checkpoints and pooling

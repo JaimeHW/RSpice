@@ -159,7 +159,8 @@ pub enum SpiceDialect {
 }
 
 /// Transient phase operator for native Gummel–Poon TF/PTF models.
-/// Public nonzero-PTF execution remains guarded pending full qualification.
+/// Public transient APIs accept finite, nonnegative nominal phase delays.
+/// The selection is independent of the evaluator dialect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GpTransientPhaseModel {
     /// Transport the complete nonlinear forward current by TF*PTF*pi/180.

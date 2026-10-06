@@ -120,19 +120,8 @@ fn check_delayed_feedback(dialect: SpiceDialect, method: IntegrationMethod) {
                 .unwrap(),
         )
         .unwrap();
-        let (resumed, _) = run_with_configuration(
-            text,
-            8e-6,
-            max_step,
-            Some(&restored),
-            scheduled
-                .iter()
-                .copied()
-                .filter(|&time| time > checkpoint.time)
-                .collect::<Vec<_>>()
-                .as_slice(),
-            config.clone(),
-        );
+        let (resumed, _) =
+            run_with_configuration(text, 8e-6, max_step, Some(&restored), &[], config.clone());
         let seam = result
             .time
             .iter()
