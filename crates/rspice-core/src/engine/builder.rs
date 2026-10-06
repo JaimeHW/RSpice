@@ -5605,6 +5605,7 @@ impl Engine {
                 let Some(entry) = entry else {
                     continue; // Standalone connection library, already registered.
                 };
+                self.record_compiler_diagnostics(&entry.diagnostics);
                 bind_veriloga_model(
                     &mut veriloga_models,
                     entry.model.name.as_str(),

@@ -326,7 +326,9 @@ use super::*;
 // Version 102 supports higher table input derivatives (Wasm emitter 58).
 // Version 103 retains distinct tiny table intervals (Wasm emitter 59).
 // Version 104 retains table derivative payload actions (Wasm ABI 19).
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 104;
+// Version 105 retains compiler diagnostics. Older records cannot distinguish
+// a warning-free source from one whose warnings were discarded.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 105;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -518,6 +520,7 @@ pub(super) struct VerilogADiskCacheRecord {
     pub(super) dependencies: Vec<VerilogADependencyFingerprint>,
     pub(super) model: rspice_veriloga::CompiledModel,
     pub(super) canonical_ir: Option<rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
+    pub(super) diagnostics: Vec<rspice_veriloga::SourceCompileDiagnostic>,
 }
 
 #[cfg(feature = "veriloga")]
@@ -530,6 +533,7 @@ pub(super) struct CachedVerilogAModel {
     pub(super) model: std::sync::Arc<rspice_veriloga::CompiledModel>,
     pub(super) canonical_ir:
         Option<std::sync::Arc<rspice_veriloga::canonical_ir::CanonicalIrArtifact>>,
+    pub(super) diagnostics: std::sync::Arc<[rspice_veriloga::SourceCompileDiagnostic]>,
 }
 
 #[cfg(feature = "veriloga")]
@@ -623,6 +627,7 @@ struct BorrowedVerilogACacheRecord<'a> {
     dependencies: &'a [VerilogADependencyFingerprint],
     model: &'a rspice_veriloga::CompiledModel,
     canonical_ir: Option<&'a rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
+    diagnostics: &'a [rspice_veriloga::SourceCompileDiagnostic],
 }
 
 #[cfg(feature = "veriloga")]
@@ -635,6 +640,7 @@ impl<'a> BorrowedVerilogACacheRecord<'a> {
             dependencies: &entry.dependencies,
             model: entry.model.as_ref(),
             canonical_ir: entry.canonical_ir.as_deref(),
+            diagnostics: &entry.diagnostics,
         }
     }
 }
@@ -1636,6 +1642,7 @@ fn load_model_from_disk_locked_with_limits(
         dependencies: record.dependencies,
         model: std::sync::Arc::new(record.model),
         canonical_ir: record.canonical_ir.map(std::sync::Arc::new),
+        diagnostics: record.diagnostics.into(),
     }))
 }
 
@@ -2166,6 +2173,7 @@ pub(super) fn compile_and_cache_prepared_veriloga(
         dependencies,
         model: std::sync::Arc::new(compiled.model),
         canonical_ir: Some(std::sync::Arc::new(compiled.canonical_ir)),
+        diagnostics: compiled.diagnostics.into(),
     };
 
     check_build_abort(abort)?;
@@ -2237,6 +2245,7 @@ fn register_precompiled_veriloga_entry_with_dependencies(
         dependencies: dependency_fingerprints,
         model: std::sync::Arc::new(model),
         canonical_ir: canonical_ir.map(std::sync::Arc::new),
+        diagnostics: Vec::new().into(),
     };
 
     retain_veriloga_model(
@@ -2437,6 +2446,7 @@ fn prepare_project_veriloga_registration(
             dependencies: Vec::new(),
             model: std::sync::Arc::new(registration.model),
             canonical_ir: Some(std::sync::Arc::new(registration.canonical_ir)),
+            diagnostics: Vec::new().into(),
         }),
     })
 }
@@ -2753,6 +2763,7 @@ endmodule
             dependencies,
             model: std::sync::Arc::new(runtime.model),
             canonical_ir: Some(std::sync::Arc::new(runtime.canonical_ir)),
+            diagnostics: runtime.diagnostics.into(),
         }
     }
 
@@ -2781,6 +2792,7 @@ endmodule
                 dependencies: fingerprint_paths(&report.dependencies).unwrap(),
                 model: std::sync::Arc::new(report.model),
                 canonical_ir: Some(std::sync::Arc::new(report.canonical_ir)),
+                diagnostics: report.diagnostics.into(),
             };
             persist_model_to_disk_locked_with_limits(key, &entry, &root, ResourceLimits::default())
                 .unwrap();

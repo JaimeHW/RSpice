@@ -43,6 +43,12 @@ use std::collections::{HashMap, HashSet};
 
 /// Main simulation engine
 pub struct Engine {
+    #[cfg(feature = "veriloga")]
+    pub(super) compiler_diagnostics:
+        std::sync::Arc<super::compiler_diagnostics::CompilerDiagnosticState>,
+    #[cfg(feature = "veriloga")]
+    pub(super) compiler_diagnostic_handler:
+        Option<super::compiler_diagnostics::CompilerDiagnosticHandler>,
     pub(crate) config: SimulationConfig,
     config_error: Option<SimulationConfigError>,
     /// True when the configuration already includes the target netlist's
@@ -226,6 +232,10 @@ impl Engine {
             #[cfg(feature = "parallel")]
             classic_mos_parallel_pool: std::sync::OnceLock::new(),
             convergence: std::sync::Arc::new(std::sync::Mutex::new(ConvergenceQuality::new())),
+            #[cfg(feature = "veriloga")]
+            compiler_diagnostics: std::sync::Arc::default(),
+            #[cfg(feature = "veriloga")]
+            compiler_diagnostic_handler: None,
             startup_directives: std::sync::Mutex::new(None),
         }
     }
@@ -247,6 +257,10 @@ impl Engine {
             #[cfg(feature = "parallel")]
             classic_mos_parallel_pool: std::sync::OnceLock::new(),
             convergence: std::sync::Arc::new(std::sync::Mutex::new(ConvergenceQuality::new())),
+            #[cfg(feature = "veriloga")]
+            compiler_diagnostics: std::sync::Arc::default(),
+            #[cfg(feature = "veriloga")]
+            compiler_diagnostic_handler: None,
             startup_directives: std::sync::Mutex::new(None),
         })
     }
@@ -268,6 +282,10 @@ impl Engine {
             #[cfg(feature = "parallel")]
             classic_mos_parallel_pool: std::sync::OnceLock::new(),
             convergence: std::sync::Arc::new(std::sync::Mutex::new(ConvergenceQuality::new())),
+            #[cfg(feature = "veriloga")]
+            compiler_diagnostics: std::sync::Arc::default(),
+            #[cfg(feature = "veriloga")]
+            compiler_diagnostic_handler: None,
             startup_directives: std::sync::Mutex::new(None),
         }
     }
@@ -291,6 +309,10 @@ impl Engine {
             #[cfg(feature = "parallel")]
             classic_mos_parallel_pool: std::sync::OnceLock::new(),
             convergence: std::sync::Arc::new(std::sync::Mutex::new(ConvergenceQuality::new())),
+            #[cfg(feature = "veriloga")]
+            compiler_diagnostics: std::sync::Arc::default(),
+            #[cfg(feature = "veriloga")]
+            compiler_diagnostic_handler: None,
             startup_directives: std::sync::Mutex::new(None),
         })
     }
@@ -532,6 +554,12 @@ impl Engine {
         // would be dropped with the temporary and `convergence_quality` would
         // report a clean run no matter what the solver actually did.
         resolved_engine.convergence = std::sync::Arc::clone(&self.convergence);
+        #[cfg(feature = "veriloga")]
+        {
+            resolved_engine.compiler_diagnostics =
+                std::sync::Arc::clone(&self.compiler_diagnostics);
+            resolved_engine.compiler_diagnostic_handler = self.compiler_diagnostic_handler.clone();
+        }
         resolved_engine
     }
 
@@ -553,6 +581,12 @@ impl Engine {
     ) -> Result<Self, SimulationConfigError> {
         let mut resolved_engine = Self::try_new_with_resolved_config(config)?;
         resolved_engine.convergence = std::sync::Arc::clone(&self.convergence);
+        #[cfg(feature = "veriloga")]
+        {
+            resolved_engine.compiler_diagnostics =
+                std::sync::Arc::clone(&self.compiler_diagnostics);
+            resolved_engine.compiler_diagnostic_handler = self.compiler_diagnostic_handler.clone();
+        }
         Ok(resolved_engine)
     }
 

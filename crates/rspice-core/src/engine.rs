@@ -58,6 +58,8 @@ pub use control::{
     ControlExecutionError, ControlNamedDataset, ControlPlotOptions, ControlPresentation,
     ControlPresentationKind, ControlSettings, ControlTrace, ControlVector, ControlVectorId,
 };
+#[cfg(feature = "veriloga")]
+mod compiler_diagnostics;
 mod convergence;
 mod core;
 mod data;
