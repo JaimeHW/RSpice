@@ -97,3 +97,36 @@ fn interpolation_cannot_extend_a_picosecond_trace_to_half_a_nanosecond() {
     assert_eq!(result.status.code(), Some(3), "{result:?}");
     assert!(String::from_utf8_lossy(&result.stderr).contains("extrapolate"));
 }
+
+#[test]
+fn signal_selection_still_compares_the_independent_coordinate() {
+    let json = failed(compare(
+        "time,V(x)\n0,1\n2,1\n",
+        "time,V(x)\n0,1\n1,1\n",
+        &["--variables", "V(x)", "--abstol", "0", "--reltol", "0"],
+    ));
+    assert_eq!(json["differences"][0]["variable"], "time");
+    assert!(
+        compare(
+            "time,V(x)\n0,1\n2,1\n",
+            "time,V(x)\n0,1\n1,1\n",
+            &["--variables", "V(x)", "--interpolate"],
+        )
+        .status
+        .success()
+    );
+    failed(compare(
+        "time,V(x)\n0,1\n1,1\n",
+        "frequency,V(x)\n0,1\n1,1\n",
+        &["--variables", "V(x)", "--ignore-missing"],
+    ));
+    let interpolated = compare(
+        "time,V(x)\n0,1\n1,1\n",
+        "frequency,V(x)\n0,1\n1,1\n",
+        &["--variables", "V(x)", "--interpolate"],
+    );
+    assert_eq!(interpolated.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&interpolated.stderr).contains("independent coordinates differ")
+    );
+}

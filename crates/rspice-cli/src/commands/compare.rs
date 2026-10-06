@@ -310,6 +310,13 @@ fn resample_onto_golden(
 ) -> Result<WaveformData, CliError> {
     let invalid = |message: String| CliError::VerificationFailed { message };
 
+    if !variable_name_matches(&result.variables[0], &golden.variables[0]) {
+        return Err(invalid(format!(
+            "independent coordinates differ: '{}' versus '{}'",
+            result.variables[0], golden.variables[0]
+        )));
+    }
+
     let result_scale = result
         .values
         .first()
@@ -609,7 +616,7 @@ fn compare_waveforms(
     };
 
     // Find matching variables
-    let pairs: Vec<_> = if let Some(pairs) = explicit_pairs {
+    let mut pairs: Vec<_> = if let Some(pairs) = explicit_pairs {
         pairs
     } else {
         result
@@ -622,6 +629,16 @@ fn compare_waveforms(
             })
             .collect()
     };
+
+    // Signal selection never discards the independent coordinate contract.
+    if !variable_name_matches(&result.variables[0], &golden.variables[0]) {
+        cmp_result.problems.push(format!(
+            "independent coordinates differ: '{}' versus '{}'",
+            result.variables[0], golden.variables[0]
+        ));
+    } else if !pairs.contains(&(0, 0)) {
+        pairs.insert(0, (0, 0));
+    }
 
     for (var_idx, golden_idx) in pairs {
         let var_name = &result.variables[var_idx];
