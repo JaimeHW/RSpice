@@ -153,6 +153,53 @@ fn authored_control_print_propagates_broken_pipe_without_publishing_partial_resu
 }
 
 #[test]
+fn help_and_version_propagate_stdout_failures() {
+    let directory = common::test_dir("help_pipe");
+    for args in [vec!["--help"], vec!["--version"], vec!["run", "--help"]] {
+        assert_io_error(&closed_stdout(&directory, &args));
+    }
+}
+
+#[test]
+fn closed_stderr_preserves_the_primary_exit_status() {
+    let directory = common::test_dir("diagnostic_pipe");
+    std::fs::write(
+        directory.join("warning.cir"),
+        "Warning\n.option foobar=1\nR1 in 0 1k\n.end\n",
+    )
+    .unwrap();
+    for (args, expected) in [
+        (vec!["info", "missing.cir"], 66),
+        (vec!["--error-format", "json", "info", "missing.cir"], 66),
+        (vec!["invalid-command"], 2),
+        (vec!["--error-format", "json", "invalid-command"], 2),
+        (vec!["info", "warning.cir"], 0),
+        (vec!["--error-format", "json", "info", "warning.cir"], 0),
+    ] {
+        let (reader, writer) = std::io::pipe().unwrap();
+        drop(reader);
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(args)
+            .current_dir(&directory)
+            .stderr(writer)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(expected), "{output:?}");
+    }
+
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--error-format", "json", "health", "--json"])
+        .current_dir(&directory)
+        .stdout(writer.try_clone().unwrap())
+        .stderr(writer)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(74), "{output:?}");
+}
+
+#[test]
 fn comparison_conversion_and_compilation_propagate_broken_pipes() {
     let directory = common::test_dir("artifact_pipe");
     std::fs::write(directory.join("result.csv"), "time,V(out)\n0,0\n1,1\n").unwrap();

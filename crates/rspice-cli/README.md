@@ -781,7 +781,7 @@ Every nonzero code is derived from one **failure category**, and for anything th
 | 69 | `capability` | The deck is well formed and this build does not execute it: an unsupported analysis/device combination, model family, or netlist construct |
 | 70 | `internal` | Internal error |
 | 73 | `output_commit` | The run produced correct results and publishing them failed; the previous artifact is intact unless the message says otherwise |
-| 74 | `io` | I/O error outside a publication transaction (failed to read input) |
+| 74 | `io` | I/O error outside a publication transaction (input read or console output failure) |
 | 75 | `resource_limit` | A configured resource budget was exceeded; the same workload succeeds under a larger budget |
 | 76 | `persistence` | A checkpoint or other persisted artifact was written by an incompatible format version |
 | 78 | `configuration` | Configuration error |

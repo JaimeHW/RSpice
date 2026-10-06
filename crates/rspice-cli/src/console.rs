@@ -12,6 +12,13 @@ pub(crate) fn line(arguments: Arguments<'_>) -> Result<(), CliError> {
         .map_err(|error| CliError::output_error(Path::new("stdout"), error))
 }
 
+/// Diagnostics are best effort: a closed stderr must not replace the primary
+/// command failure with a panic, and there is no remaining error channel.
+pub(crate) fn diagnostic_line(arguments: Arguments<'_>) {
+    let mut err = io::stderr().lock();
+    let _ = writeln!(err, "{arguments}").and_then(|()| err.flush());
+}
+
 pub(crate) fn bytes(bytes: &[u8]) -> Result<(), CliError> {
     let mut out = io::stdout().lock();
     out.write_all(bytes)

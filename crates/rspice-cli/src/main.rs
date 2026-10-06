@@ -51,8 +51,10 @@ fn print_cli_error(error: &cli::CliError, format: cli::ErrorFormat) {
     match format {
         cli::ErrorFormat::Text => {
             match source_context(&details) {
-                Some(location) => eprintln!("Error: {location}: {error}"),
-                None => eprintln!("Error: {error}"),
+                Some(location) => {
+                    crate::console::diagnostic_line(format_args!("Error: {location}: {error}"))
+                }
+                None => crate::console::diagnostic_line(format_args!("Error: {error}")),
             }
             let mut identity = Vec::new();
             if let Some(analysis) = &details.analysis_id {
@@ -62,13 +64,15 @@ fn print_cli_error(error: &cli::CliError, format: cli::ErrorFormat) {
                 identity.push(format!("run {coordinate}"));
             }
             if !identity.is_empty() {
-                eprintln!("  in {}", identity.join(", "));
+                crate::console::diagnostic_line(format_args!("  in {}", identity.join(", ")));
             }
             if let Some(capability) = details.capability {
-                eprintln!("  unsupported capability: {capability}");
+                crate::console::diagnostic_line(format_args!(
+                    "  unsupported capability: {capability}"
+                ));
             }
             if let Some(suggestion) = error.suggestion() {
-                eprintln!("Suggestion: {suggestion}");
+                crate::console::diagnostic_line(format_args!("Suggestion: {suggestion}"));
             }
         }
         cli::ErrorFormat::Json => {
@@ -106,12 +110,12 @@ fn print_cli_error(error: &cli::CliError, format: cli::ErrorFormat) {
                 },
             });
             match serde_json::to_string(&payload) {
-                Ok(json) => eprintln!("{json}"),
+                Ok(json) => crate::console::diagnostic_line(format_args!("{json}")),
                 Err(serialization_error) => {
-                    eprintln!("Error: {error}");
-                    eprintln!(
+                    crate::console::diagnostic_line(format_args!("Error: {error}"));
+                    crate::console::diagnostic_line(format_args!(
                         "Error: failed to serialize the machine-readable diagnostic: {serialization_error}"
-                    );
+                    ));
                 }
             }
         }
@@ -146,7 +150,23 @@ fn main() -> ExitCode {
                     clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
                 )
             {
-                error.exit();
+                let use_stderr = error.use_stderr();
+                if let Err(source) = error.print()
+                    && !use_stderr
+                {
+                    let error = cli::CliError::output_error(std::path::Path::new("stdout"), source);
+                    print_cli_error(
+                        &error,
+                        if json {
+                            cli::ErrorFormat::Json
+                        } else {
+                            cli::ErrorFormat::Text
+                        },
+                    );
+                    return error.exit_code().into();
+                }
+                // Failed stderr diagnostics cannot change the usage verdict.
+                return ExitCode::from(error.exit_code() as u8);
             }
             let error = cli::CliError::InvalidArgument {
                 message: error.to_string(),
