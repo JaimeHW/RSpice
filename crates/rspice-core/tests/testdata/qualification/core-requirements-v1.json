@@ -25,7 +25,7 @@
       "id": "C03",
       "status": "in_progress",
       "requirement": "GP transient excess phase",
-      "qualification_task": "Public phase execution, independent oracles, restart, fallible phase storage and fixed BJT/UIC initialization, typed allocation errors, retained result accounting, and aggregate live/copy transport-record budgets are exercised. Complete typed per-site record-ceiling diagnostics, remaining model/configuration/target qualification, and measured cancellation/memory/performance evidence. Other state owners and caches remain C01/C09/C14 work."
+      "qualification_task": "Public phase execution, independent oracles, restart, fallible phase storage and fixed BJT/UIC initialization, typed allocation and per-site record-ceiling diagnostics, retained result accounting, and aggregate live/copy transport-record budgets are exercised. Complete remaining model/configuration/target qualification and measured cancellation/memory/performance evidence. Other state owners, VM transactions and full route coverage remain C01/C09/C12/C14 work."
     },
     {
       "id": "C04",

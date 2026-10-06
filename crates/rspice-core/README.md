@@ -945,6 +945,16 @@ discarded replacement. This allocation contract covers BJT history storage and
 its UIC copies; other model state, caches, and solver workspaces have separate
 allocation paths.
 
+The shared delay buffer also enforces its fixed per-site ceiling of 1,048,576
+accepted records, counting ordinary samples, separate left limits, and known
+derivative-order records after pruning. Native GP propagates this refusal as
+`SimulationError::DeviceResourceLimit`, carrying the elaborated instance and
+`ResourceKind::TransportHistoryRecords` with requested/allowed counts. Its
+descriptor has the nonretryable `resource_limit` code. This record ceiling is
+distinct from the analysis-wide byte quota; malformed or oversized checkpoint
+data remains a state-validation error. Delay-buffer acceptance methods return
+`DelayAcceptanceError` so callers need not classify diagnostic text.
+
 The GP exact-transport path tracks all unknown events and
 known discontinuities through derivative order two. Solver-certified C2
 inputs retain their delay-history knots and interpolation error control but
