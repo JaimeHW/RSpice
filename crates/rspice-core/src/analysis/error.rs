@@ -37,6 +37,8 @@ pub enum SimulationErrorCode {
     InvalidConfiguration,
     /// A configured resource budget was exceeded.
     ResourceLimit,
+    /// The allocator refused storage after resource-policy admission.
+    AllocationFailed,
     /// Circuit construction or device evaluation failed.
     CircuitError,
     /// A finite parameter value violates a declared numerical domain.
@@ -77,6 +79,7 @@ impl SimulationErrorCode {
             Self::ModelFinished => "model_finished",
             Self::InvalidConfiguration => "invalid_configuration",
             Self::ResourceLimit => "resource_limit",
+            Self::AllocationFailed => "allocation_failed",
             Self::CircuitError => "circuit_error",
             Self::ParameterDomain => "parameter_domain",
             Self::BehavioralReferenceError => "behavioral_reference_error",
@@ -119,7 +122,7 @@ pub enum SimulationErrorCategory {
     Capability,
     /// A materialized run does not match the plan that produced it.
     Materialization,
-    /// A configured resource budget was exceeded.
+    /// A configured resource budget was exceeded or memory allocation failed.
     ResourceLimit,
     /// Circuit construction or device evaluation failed.
     Simulation,
@@ -908,6 +911,16 @@ pub enum SimulationError {
     #[error(transparent)]
     ResourceLimit(#[from] crate::resource::ResourceLimitError),
 
+    /// Storage could not be reserved. This is distinct from exceeding a
+    /// configured policy: changing the circuit or convergence tolerances does
+    /// not remedy an allocator refusal. Reporting it requires no allocation.
+    #[error("Unable to allocate {object}: {source}")]
+    Allocation {
+        object: &'static str,
+        #[source]
+        source: std::collections::TryReserveError,
+    },
+
     #[error("Circuit error: {0}")]
     Circuit(String),
 
@@ -1150,6 +1163,11 @@ impl SimulationError {
             Self::Configuration(crate::config::SimulationConfigError::ResourceLimit(_))
             | Self::ResourceLimit(_) => (
                 SimulationErrorCode::ResourceLimit,
+                SimulationErrorCategory::ResourceLimit,
+                false,
+            ),
+            Self::Allocation { .. } => (
+                SimulationErrorCode::AllocationFailed,
                 SimulationErrorCategory::ResourceLimit,
                 false,
             ),

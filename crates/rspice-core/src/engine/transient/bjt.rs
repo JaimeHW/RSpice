@@ -22,10 +22,9 @@ impl Engine {
         model: crate::config::GpTransientPhaseModel,
     ) -> Result<(), SimulationError> {
         let count = circuit.bjts.devices.len();
-        let allocation_error = |error| {
-            SimulationError::Circuit(format!(
-                "BJT phase initialization allocation failed: {error}"
-            ))
+        let allocation_error = |source| SimulationError::Allocation {
+            object: "BJT phase initialization",
+            source,
         };
         let mut phase = Vec::new();
         let mut weil_phase = Vec::new();

@@ -3799,8 +3799,7 @@ impl Engine {
                     bsim4_history,
                     mosfet_history,
                 },
-            )
-            .map_err(SimulationError::Circuit)?;
+            )?;
         let restart_normalized = at_integration_endpoint
             || integration_continuation
                 .is_some_and(|continuation| continuation.xyce_breakpoint_restart_pending);
@@ -5576,8 +5575,7 @@ impl Engine {
         // has no BJT or diode topology.
         let restored_accepted_junction_history = resume
             .map(|checkpoint| checkpoint.restore_accepted_junction_transient_history(&circuit))
-            .transpose()
-            .map_err(SimulationError::Circuit)?;
+            .transpose()?;
         if let Some(restored) = &restored_accepted_junction_history {
             let wrong_phase_model = match self.config.gp_transient_phase_model {
                 crate::config::GpTransientPhaseModel::ExactDelay => {
@@ -11544,8 +11542,7 @@ impl Engine {
                         bsim4_history: &bsim4_history,
                         mosfet_history: &mosfet_history,
                     },
-                )
-                .map_err(SimulationError::Circuit)?;
+                )?;
             let final_accepted_junction_history =
                 if final_accepted_junction_history.resume_blockers.is_empty() {
                     Self::normalize_accepted_junction_transient_history_checkpoint_for_order_one(

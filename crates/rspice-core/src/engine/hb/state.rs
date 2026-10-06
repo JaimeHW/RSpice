@@ -704,8 +704,7 @@ impl Engine {
                         bsim4_history: &bsim4_history,
                         mosfet_history: &mosfet_history,
                     },
-                )
-                .map_err(SimulationError::Circuit)?,
+                )?,
             )
         };
 

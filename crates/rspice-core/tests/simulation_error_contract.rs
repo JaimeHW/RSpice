@@ -328,6 +328,7 @@ fn expected_descriptor(
             (Code::InvalidConfiguration, Category::Configuration, false)
         }
         SimulationError::ResourceLimit(_) => (Code::ResourceLimit, Category::ResourceLimit, false),
+        SimulationError::Allocation { .. } => (Code::AllocationFailed, Category::ResourceLimit, false),
         SimulationError::Circuit(_) | SimulationError::NonFiniteTrial(_) => {
             (Code::CircuitError, Category::Simulation, false)
         }
@@ -398,6 +399,10 @@ fn one_of_every_variant() -> Vec<SimulationError> {
             requested: 2,
             limit: 1,
         }),
+        SimulationError::Allocation {
+            object: "test history",
+            source: Vec::<u8>::new().try_reserve(usize::MAX).unwrap_err(),
+        },
         SimulationError::Circuit("device stamp failed".to_string()),
         SimulationError::NonFiniteTrial(Box::new(rspice_core::device::NonFiniteTrialError {
             instance: "x1".to_string(),
@@ -490,9 +495,9 @@ fn every_variant_round_trips_through_its_descriptor() {
         seen_categories.insert(descriptor.category.as_str());
     }
 
-    // Only the two resource-limit spellings share a code, so the sample set
-    // must have produced one code per variant it contains.
-    assert_eq!(seen_codes.len(), 17, "codes covered: {seen_codes:?}");
+    // Nested and compatibility variants may share codes, but the fixture set
+    // must exercise every distinct published code.
+    assert_eq!(seen_codes.len(), 18, "codes covered: {seen_codes:?}");
 
     for category in SimulationErrorCategory::ALL {
         assert!(

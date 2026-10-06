@@ -6560,7 +6560,8 @@ impl TransientCheckpoint {
                     bsim4_history: &Default::default(),
                     mosfet_history: &Default::default(),
                 },
-            )?
+            )
+            .map_err(|error| error.to_string())?
         } else {
             AcceptedJunctionTransientHistoryCheckpoint::unavailable(
                 "checkpoint capture caller did not provide accepted junction transient histories",
@@ -6917,8 +6918,9 @@ impl TransientCheckpoint {
     pub(super) fn restore_accepted_junction_transient_history(
         &self,
         circuit: &CircuitData,
-    ) -> Result<RestoredJunctionTransientHistories, String> {
-        self.validate_accepted_junction_history_for_circuit(circuit)?;
+    ) -> Result<RestoredJunctionTransientHistories, SimulationError> {
+        self.validate_accepted_junction_history_for_circuit(circuit)
+            .map_err(SimulationError::Circuit)?;
         if !self.accepted_junction_history.available {
             return Ok(RestoredJunctionTransientHistories::default());
         }
@@ -11043,6 +11045,7 @@ mod tests {
             legacy
                 .restore_accepted_junction_transient_history(&circuit)
                 .unwrap_err()
+                .to_string()
                 .contains("BSIM3")
         );
         let mut wrong_name = recaptured.clone();
@@ -11193,6 +11196,7 @@ mod tests {
             assert!(
                 old.restore_accepted_junction_transient_history(&circuit)
                     .unwrap_err()
+                    .to_string()
                     .contains("MOSFET")
             );
             let mut wrong_model = restored.clone();
@@ -11317,6 +11321,7 @@ mod tests {
             legacy
                 .restore_accepted_junction_transient_history(&circuit)
                 .unwrap_err()
+                .to_string()
                 .contains("BSIM4")
         );
         let mut wrong_name = recaptured.clone();
@@ -11418,6 +11423,7 @@ mod tests {
             legacy
                 .restore_accepted_junction_transient_history(&circuit)
                 .unwrap_err()
+                .to_string()
                 .contains("JFET")
         );
         let previous = TransientCheckpoint::from_text(&legacy_text(&original, 38)).unwrap();
@@ -11429,6 +11435,7 @@ mod tests {
             previous
                 .restore_accepted_junction_transient_history(&circuit)
                 .unwrap_err()
+                .to_string()
                 .contains("accepted JFET terminal displacement currents")
         );
         let mut empty = original.clone();
@@ -14030,7 +14037,8 @@ mod tests {
             .expect("v19 junction-history target builds");
         let error = legacy
             .restore_accepted_junction_transient_history(&target)
-            .expect_err("v19 cannot reconstruct accepted BJT/diode histories");
+            .expect_err("v19 cannot reconstruct accepted BJT/diode histories")
+            .to_string();
         assert!(
             error.contains("legacy transient checkpoint")
                 && error.contains("junction transient history"),

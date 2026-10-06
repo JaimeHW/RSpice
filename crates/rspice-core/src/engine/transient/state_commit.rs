@@ -116,7 +116,6 @@ impl PreparedBjtHistory {
     /// is advanced. A failure can change capacity but no physical values.
     fn reserve_phase_storage(
         &self,
-        circuit: &crate::CircuitData,
         history: &mut BjtTransientHistory,
     ) -> Result<(), SimulationError> {
         for (index, value) in self.values.iter().enumerate() {
@@ -125,11 +124,9 @@ impl PreparedBjtHistory {
                     .as_mut()
                     .expect("prepared phase owner")
                     .try_reserve_sample(sample.event.map(|event| event.order))
-                    .map_err(|error| {
-                        SimulationError::Circuit(format!(
-                            "BJT '{}' phase history allocation failed: {error}",
-                            circuit.bjts.devices[index].name
-                        ))
+                    .map_err(|source| SimulationError::Allocation {
+                        object: "BJT phase-history growth",
+                        source,
                     })?;
             }
         }
@@ -389,7 +386,7 @@ impl Engine {
             vbic_snapshots,
             Default::default(),
         )?;
-        prepared.reserve_phase_storage(circuit, history)?;
+        prepared.reserve_phase_storage(history)?;
         Self::commit_bjt_history(history, prepared);
         Ok(())
     }
@@ -409,8 +406,9 @@ impl Engine {
         let mut values = Vec::new();
         values
             .try_reserve_exact(circuit.bjts.devices.len())
-            .map_err(|error| {
-                SimulationError::Circuit(format!("BJT accepted-state allocation failed: {error}"))
+            .map_err(|source| SimulationError::Allocation {
+                object: "BJT accepted-state preparation",
+                source,
             })?;
         for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
             let vc = Self::node_voltage(solution, bjt.node_collector);
@@ -849,7 +847,7 @@ impl Engine {
         // Reserve every growing transport buffer while failure can still
         // reject the complete all-device transaction. The commit below must
         // not allocate after another device has advanced its accepted state.
-        bjt.reserve_phase_storage(circuit, histories.bjt)?;
+        bjt.reserve_phase_storage(histories.bjt)?;
         Ok(PreparedReactiveHistory {
             bjt,
             behavioral,

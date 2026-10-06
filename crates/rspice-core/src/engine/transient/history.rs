@@ -434,7 +434,7 @@ impl Engine {
     pub(in crate::engine) fn capture_accepted_junction_transient_history_checkpoint(
         circuit: &crate::circuit::CircuitData,
         histories: AcceptedJunctionHistories<'_>,
-    ) -> Result<AcceptedJunctionTransientHistoryCheckpoint, String> {
+    ) -> Result<AcceptedJunctionTransientHistoryCheckpoint, SimulationError> {
         let AcceptedJunctionHistories {
             bjt_history,
             diode_history,
@@ -953,14 +953,16 @@ impl Engine {
     pub(super) fn restore_accepted_junction_transient_history_checkpoint(
         circuit: &crate::circuit::CircuitData,
         checkpoint: &AcceptedJunctionTransientHistoryCheckpoint,
-    ) -> Result<RestoredJunctionTransientHistories, String> {
-        Self::validate_accepted_junction_transient_history_checkpoint(circuit, checkpoint)?;
+    ) -> Result<RestoredJunctionTransientHistories, SimulationError> {
+        Self::validate_accepted_junction_transient_history_checkpoint(circuit, checkpoint)
+            .map_err(SimulationError::Circuit)?;
         let mut snapshot_cache = Vec::with_capacity(checkpoint.vbic_snapshot_cache.len());
         for (index, snapshot) in checkpoint.vbic_snapshot_cache.iter().enumerate() {
             snapshot_cache.push(match snapshot {
                 Some(snapshot) => Some(
                     circuit.bjts.devices[index]
-                        .decode_accepted_charge_snapshot_checkpoint(snapshot)?,
+                        .decode_accepted_charge_snapshot_checkpoint(snapshot)
+                        .map_err(SimulationError::Circuit)?,
                 ),
                 None => None,
             });
