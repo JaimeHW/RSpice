@@ -734,7 +734,8 @@ impl Engine {
                 .or_else(|| alias!(&["A", "AREA"], "AREA"))
                 .or_else(|| alias!(&["M", "MULT"], "M"))
                 .or_else(|| alias!(&["NRS", "NRSQ", "NSQ", "SQUARES"], "NRS"))
-                .or_else(|| alias!(&["TC", "TC1"], "TC1")),
+                .or_else(|| alias!(&["TC", "TC1"], "TC1"))
+                .or_else(|| alias!(&["NOISY", "NOISE"], "NOISY")),
             ElementKind::Capacitor { .. } => alias!(&["C", "CAP", "VALUE", "CAPACITANCE"], "C")
                 .or_else(|| alias!(&["L", "LENGTH"], "L"))
                 .or_else(|| alias!(&["W", "WIDTH"], "W"))
@@ -1672,7 +1673,7 @@ impl Engine {
         param_name: Option<&str>,
         value: Value,
     ) -> Result<(), SimulationError> {
-        let param_upper = param_name.map(|p| p.trim().to_ascii_uppercase());
+        let param_upper = param_name.map(|p| Self::canonical_device_parameter(kind, Some(p)));
         let matches_param = |aliases: &[&str]| -> bool {
             match &param_upper {
                 None => true,
@@ -1729,7 +1730,38 @@ impl Engine {
                         }
                     }
                     Some(param_name) => {
-                        set_instance_param(instance_params, deferred_params, param_name, value);
+                        let aliases: &[&str] = match param_name {
+                            "L" => &["L", "LENGTH"],
+                            "W" => &["W", "WIDTH"],
+                            "AREA" => &["A", "AREA"],
+                            "M" => &["M", "MULT"],
+                            "NRS" => &["NRS", "NRSQ", "NSQ", "SQUARES"],
+                            "TC1" => &["TC", "TC1"],
+                            "NOISY" => &["NOISY", "NOISE"],
+                            "AC"
+                            | "SCALE"
+                            | "TEMP"
+                            | "DTEMP"
+                            | "TC2"
+                            | "TCE"
+                            | "RESISTIVITY"
+                            | "HEATCAPACITY"
+                            | "THERMAL_L"
+                            | "THERMAL_A"
+                            | "THERMAL_HEATCAPACITY" => &[param_name],
+                            _ => {
+                                return Err(SimulationError::Circuit(format!(
+                                    "Unsupported resistor step parameter '{param_name}'"
+                                )));
+                            }
+                        };
+                        set_instance_param_alias(
+                            instance_params,
+                            deferred_params,
+                            aliases,
+                            param_name,
+                            value,
+                        );
                     }
                 }
                 Ok(())
