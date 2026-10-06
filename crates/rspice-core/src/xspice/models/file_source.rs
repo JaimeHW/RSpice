@@ -1023,6 +1023,14 @@ fn filesource_params() -> &'static [ParamSpec] {
 }
 
 impl CodeModel for FileSource {
+    fn input_data_file_parameters(&self) -> &[crate::xspice::InputDataFileParameter] {
+        &[crate::xspice::InputDataFileParameter {
+            name: "file",
+            trim: false,
+            empty_uses_default: false,
+        }]
+    }
+
     fn name(&self) -> &str {
         "filesource"
     }
@@ -1085,6 +1093,14 @@ impl CodeModel for FileSource {
 }
 
 impl CodeModel for FileSourceAlias {
+    fn input_data_file_parameters(&self) -> &[crate::xspice::InputDataFileParameter] {
+        &[crate::xspice::InputDataFileParameter {
+            name: "file",
+            trim: false,
+            empty_uses_default: false,
+        }]
+    }
+
     fn name(&self) -> &str {
         "file_source"
     }

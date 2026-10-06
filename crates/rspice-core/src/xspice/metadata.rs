@@ -48,6 +48,10 @@ impl CodeModel for MetadataOverlayModel {
         &self.parameters
     }
 
+    fn input_data_file_parameters(&self) -> &[super::InputDataFileParameter] {
+        self.inner.input_data_file_parameters()
+    }
+
     fn can_skip_unchanged_event_inputs(&self) -> bool {
         self.inner.can_skip_unchanged_event_inputs()
     }

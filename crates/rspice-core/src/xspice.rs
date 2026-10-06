@@ -95,6 +95,7 @@ pub(crate) use context::CmContextCheckpoint;
 pub use context::{
     AnalogTransition, AnalogValue, AnalysisType, CallType, CmContext, EvaluationPhase,
 };
+pub(crate) use data_file::native_input_candidates as data_file_input_candidates;
 pub(crate) use data_file::read_to_string as read_data_file_to_string;
 pub(crate) use data_file::read_to_string_limited as read_data_file_to_string_limited;
 pub use data_file::{
@@ -121,6 +122,6 @@ pub(crate) use resource_transaction::{
     ResourceEntry, ResourceTransaction, ResourceTransactionScope, TransactionalContextResource,
 };
 pub use traits::{
-    CmError, CmResult, CodeModel, ParamSpec, ParamType, PortDirection, PortSpec, PortType,
-    XspiceCheckpointSupport,
+    CmError, CmResult, CodeModel, InputDataFileParameter, ParamSpec, ParamType, PortDirection,
+    PortSpec, PortType, XspiceCheckpointSupport,
 };

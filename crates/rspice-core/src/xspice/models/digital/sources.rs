@@ -698,6 +698,14 @@ fn d_source_breakpoint_times(
 }
 
 impl CodeModel for DigitalSource {
+    fn input_data_file_parameters(&self) -> &[crate::xspice::InputDataFileParameter] {
+        &[crate::xspice::InputDataFileParameter {
+            name: "input_file",
+            trim: false,
+            empty_uses_default: true,
+        }]
+    }
+
     fn name(&self) -> &str {
         "d_source"
     }
@@ -1843,6 +1851,14 @@ fn d_state_set_int_state(ctx: &mut CmContext, index: usize, value: i64) {
 }
 
 impl CodeModel for DigitalStateMachine {
+    fn input_data_file_parameters(&self) -> &[crate::xspice::InputDataFileParameter] {
+        &[crate::xspice::InputDataFileParameter {
+            name: "state_file",
+            trim: false,
+            empty_uses_default: true,
+        }]
+    }
+
     fn name(&self) -> &str {
         "d_state"
     }

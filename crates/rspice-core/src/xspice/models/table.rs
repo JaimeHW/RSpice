@@ -2039,6 +2039,14 @@ fn table_params(kind: TableKind) -> &'static [ParamSpec] {
 }
 
 impl CodeModel for Table2D {
+    fn input_data_file_parameters(&self) -> &[crate::xspice::InputDataFileParameter] {
+        &[crate::xspice::InputDataFileParameter {
+            name: "file",
+            trim: false,
+            empty_uses_default: true,
+        }]
+    }
+
     fn name(&self) -> &str {
         "table2d"
     }
@@ -2095,6 +2103,14 @@ impl CodeModel for Table2D {
 }
 
 impl CodeModel for Table3D {
+    fn input_data_file_parameters(&self) -> &[crate::xspice::InputDataFileParameter] {
+        &[crate::xspice::InputDataFileParameter {
+            name: "file",
+            trim: false,
+            empty_uses_default: true,
+        }]
+    }
+
     fn name(&self) -> &str {
         "table3d"
     }

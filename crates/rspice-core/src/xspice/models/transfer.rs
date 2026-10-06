@@ -1088,6 +1088,14 @@ fn transfer_commits_state(ctx: &CmContext) -> bool {
 pub struct Xfer;
 
 impl CodeModel for Xfer {
+    fn input_data_file_parameters(&self) -> &[crate::xspice::InputDataFileParameter] {
+        &[crate::xspice::InputDataFileParameter {
+            name: "file",
+            trim: true,
+            empty_uses_default: false,
+        }]
+    }
+
     fn name(&self) -> &str {
         "xfer"
     }
