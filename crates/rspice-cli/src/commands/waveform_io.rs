@@ -885,6 +885,15 @@ fn load_json(
     ))
 }
 
+/// Project signed or unsigned 64-bit integers only when binary64 is exact.
+/// A wider round trip avoids saturating i64::MAX/u64::MAX casts, and permits
+/// representable multiples above 2^53 instead of rejecting all large integers.
+fn exact_integer_sample(value: impl Into<i128>) -> Option<f64> {
+    let integer = value.into();
+    let sample = integer as f64;
+    (sample as i128 == integer).then_some(sample)
+}
+
 /// Flatten one typed result document into the shared tabular model.
 ///
 /// A document whose family carries no coordinate axis — the operating point,
@@ -912,7 +921,12 @@ fn result_document_table(
             match axis.values() {
                 AxisValues::Real { values } => values.clone(),
                 AxisValues::Integer { values } => {
-                    values.iter().map(|value| *value as f64).collect()
+                    values.iter().map(|value| {
+                        exact_integer_sample(*value).ok_or_else(|| conversion_error(
+                            path,
+                            format!("axis '{}' coordinate {value} cannot be represented exactly by a numeric flat table", axis.name()),
+                        ))
+                    }).collect::<Result<Vec<_>, _>>()?
                 }
             },
         ),
@@ -1013,12 +1027,16 @@ fn result_document_table(
                 real: vec![value.real; scale.len()],
                 imag: vec![value.imaginary; scale.len()],
             },
-            ScalarValue::Integer { value } if value.unsigned_abs() <= (1u64 << 53) => {
-                ColumnData::Real(vec![*value as f64; scale.len()])
-            }
-            ScalarValue::Count { value } if *value <= (1u64 << 53) => {
-                ColumnData::Real(vec![*value as f64; scale.len()])
-            }
+            ScalarValue::Integer { value } => ColumnData::Real(vec![
+                exact_integer_sample(*value)
+                    .ok_or_else(unsupported)?;
+                scale.len()
+            ]),
+            ScalarValue::Count { value } => ColumnData::Real(vec![
+                exact_integer_sample(*value)
+                    .ok_or_else(unsupported)?;
+                scale.len()
+            ]),
             ScalarValue::Boolean { value } => {
                 ColumnData::Real(vec![u8::from(*value) as f64; scale.len()])
             }
