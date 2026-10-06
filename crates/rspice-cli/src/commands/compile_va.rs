@@ -22,14 +22,6 @@ pub fn execute(
     if let Some(output) = args.output.as_deref() {
         publish::destinations::protect_sources(output, config.source_paths())?;
     }
-    // Validate input file exists
-    if !args.input.exists() {
-        return Err(CliError::InputNotFound {
-            path: args.input.clone(),
-            source: std::io::Error::new(std::io::ErrorKind::NotFound, "File not found"),
-        });
-    }
-
     // Configure compiler options
     let mut options = CompilerOptions {
         strict_mode: args.strict,
@@ -80,7 +72,7 @@ pub fn execute(
             args.module.as_deref(),
             &ProcessControl,
         )
-        .map_err(compile_error)?;
+        .map_err(|error| compile_error(error, &args.input))?;
     if let Some(output) = args.output.as_deref() {
         publish::destinations::protect_sources(
             output,
@@ -248,7 +240,10 @@ impl rspice_veriloga::PipelineControl for ProcessControl {
     }
 }
 
-fn compile_error(error: rspice_veriloga::ProviderCompileError) -> CliError {
+fn compile_error(
+    error: rspice_veriloga::ProviderCompileError,
+    input: &std::path::Path,
+) -> CliError {
     use rspice_veriloga::preprocessor::SourceResource;
     use rspice_veriloga::{CompileError, ProviderCompileError};
     match error {
@@ -271,6 +266,20 @@ fn compile_error(error: rspice_veriloga::ProviderCompileError) -> CliError {
                 limit: limit.limit,
             })
             .into()
+        }
+        ProviderCompileError::Source(rspice_veriloga::PreprocessorError {
+            io_error: Some(source),
+            file,
+            ..
+        }) => {
+            let path = file.unwrap_or_else(|| input.to_path_buf());
+            let source = std::sync::Arc::try_unwrap(source)
+                .unwrap_or_else(|source| std::io::Error::new(source.kind(), source));
+            if source.kind() == std::io::ErrorKind::NotFound {
+                CliError::InputNotFound { path, source }
+            } else {
+                CliError::InputReadError { path, source }
+            }
         }
         error => CliError::VerilogAError {
             message: error.to_string(),

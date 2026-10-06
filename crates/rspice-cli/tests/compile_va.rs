@@ -175,3 +175,91 @@ fn including_source_directory_precedes_cli_and_config_paths() {
     assert!(output.status.success(), "{output:?}");
     assert_eq!(common::read_json(&result)["parameters"][0]["default"], 42.0);
 }
+
+#[test]
+fn source_io_failures_keep_their_exit_category_and_path() {
+    let dir = common::test_dir("source_io");
+    let invalid = dir.join("invalid.va");
+    let directory = dir.join("directory.va");
+    let missing = dir.join("missing.va");
+    let result = dir.join("model.json");
+    std::fs::write(&invalid, [0xff, 0xfe]).unwrap();
+    std::fs::create_dir(&directory).unwrap();
+    std::fs::write(&result, "previous interface").unwrap();
+    for (path, exit, code) in [
+        (&missing, 66, "input_not_found"),
+        (&invalid, 74, "input_read_error"),
+        (&directory, 74, "input_read_error"),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "--error-format", "json", "compile-va"])
+            .arg(path)
+            .arg("-o")
+            .arg(&result)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(exit), "{path:?}: {output:?}");
+        let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["error"]["code"], code, "{error}");
+        assert_eq!(error["error"]["path"], path.to_str().unwrap());
+        assert_eq!(
+            std::fs::read_to_string(&result).unwrap(),
+            "previous interface"
+        );
+    }
+}
+
+#[test]
+fn include_read_failures_identify_the_include_and_preserve_existing_output() {
+    let dir = common::test_dir("include_io");
+    let root = dir.join("model.va");
+    let include = dir.join("value.vams");
+    let result = dir.join("model.json");
+    std::fs::write(&root, format!("`include \"value.vams\"\n{SOURCE}")).unwrap();
+    std::fs::write(&include, [0xff, 0xfe]).unwrap();
+    std::fs::write(&result, "previous interface").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "--error-format", "json", "compile-va"])
+        .arg(root)
+        .arg("-o")
+        .arg(&result)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(74), "{output:?}");
+    let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["error"]["code"], "input_read_error", "{error}");
+    assert_eq!(
+        std::path::Path::new(error["error"]["path"].as_str().unwrap())
+            .canonicalize()
+            .unwrap(),
+        include.canonicalize().unwrap()
+    );
+    assert_eq!(
+        std::fs::read_to_string(result).unwrap(),
+        "previous interface"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn an_exclusively_open_source_is_an_io_failure() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let dir = common::test_dir("source_sharing");
+    let root = dir.join("model.va");
+    std::fs::write(&root, SOURCE).unwrap();
+    let _held = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&root)
+        .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "--error-format", "json", "compile-va"])
+        .arg(&root)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(74), "{output:?}");
+    let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["error"]["code"], "input_read_error", "{error}");
+    assert_eq!(error["error"]["path"], root.to_str().unwrap());
+}

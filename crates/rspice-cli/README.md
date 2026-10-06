@@ -648,6 +648,9 @@ unknown to show, holds its first value backwards.
 **`compile-va`** resolves includes relative to the including source first,
 then searches source directories discovered by preprocessing, `-I` directories,
 and config `paths.veriloga_includes`. Built-in standard headers are the fallback.
+Unreadable entries and broken links stop include resolution instead of selecting
+a different source. File read failures retain their I/O category and source path
+in machine-readable diagnostics.
 Use `--module NAME` to select a module in a multi-module source. Root bytes and
 lines, total dependency bytes, include depth, and expanded bytes obey the
 configured resource limits; compilation supports Ctrl-C cancellation.
