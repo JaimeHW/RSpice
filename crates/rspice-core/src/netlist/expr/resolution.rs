@@ -17,7 +17,24 @@ impl From<ExprError> for ParameterResolutionError {
     }
 }
 
+/// Supplies lexical declaration ownership to the same numeric graph walker used
+/// for a single context. Scope identities are local to one resolver operation.
+pub(crate) trait ParameterEnvironment {
+    fn parameters(&self, scope: usize) -> &ParamContext;
+    fn owner_scope(&self, scope: usize, name: &str, global: bool) -> usize;
+}
+
+impl ParameterEnvironment for ParamContext {
+    fn parameters(&self, _scope: usize) -> &ParamContext {
+        self
+    }
+    fn owner_scope(&self, scope: usize, _name: &str, _global: bool) -> usize {
+        scope
+    }
+}
+
 struct PendingParameter {
+    scope: usize,
     namespace: usize,
     name: String,
     program: PreparedExpression,
@@ -28,7 +45,7 @@ struct PendingParameter {
 /// complex values, numeric provenance and their exact statistical position.
 #[derive(Default)]
 pub(crate) struct ParameterResolver {
-    values: [HashMap<String, ComplexValue>; 2],
+    values: HashMap<usize, [HashMap<String, ComplexValue>; 2]>,
 }
 
 impl ParameterResolver {
@@ -39,7 +56,7 @@ impl ParameterResolver {
         params: &ParamContext,
         abort: &dyn AbortSignal,
     ) -> Result<ComplexValue, ParameterResolutionError> {
-        self.resolve_in_namespace(0, name, expression, params, abort)
+        self.resolve_scoped(0, false, name, expression, params, abort)
     }
 
     pub(crate) fn resolve_global(
@@ -49,11 +66,22 @@ impl ParameterResolver {
         params: &ParamContext,
         abort: &dyn AbortSignal,
     ) -> Result<ComplexValue, ParameterResolutionError> {
-        self.resolve_in_namespace(1, name, expression, params, abort)
+        self.resolve_scoped(0, true, name, expression, params, abort)
     }
 
     pub(crate) fn value(&self, name: &str, params: &ParamContext) -> Option<ComplexValue> {
-        self.values[usize::from(!params.has_parameter_binding(name))]
+        self.scoped_value(0, name, params)
+    }
+
+    pub(crate) fn scoped_value(
+        &self,
+        scope: usize,
+        name: &str,
+        environment: &impl ParameterEnvironment,
+    ) -> Option<ComplexValue> {
+        let global = !environment.parameters(scope).has_parameter_binding(name);
+        let owner = environment.owner_scope(scope, name, global);
+        self.values.get(&owner)?[usize::from(global)]
             .get(name)
             .copied()
     }
@@ -61,12 +89,19 @@ impl ParameterResolver {
     /// Publish successfully resolved bindings once. Global expression bodies
     /// remain authoritative; ordinary static definitions become numeric values.
     pub(crate) fn materialize_into(&self, params: &mut ParamContext) {
-        for (name, value) in &self.values[0] {
+        self.materialize_scope(0, params);
+    }
+
+    pub(crate) fn materialize_scope(&self, scope: usize, params: &mut ParamContext) {
+        let Some(values) = self.values.get(&scope) else {
+            return;
+        };
+        for (name, value) in &values[0] {
             if params.get_parameter_expression(name).is_some() {
                 params.set_complex(name, *value);
             }
         }
-        for (name, value) in &self.values[1] {
+        for (name, value) in &values[1] {
             if let Some(expression) = params.get_global_expression(name).map(str::to_owned) {
                 let origin = params.expression_origin(name, true).cloned();
                 params.define_global_expression(name, expression, Some(*value));
@@ -77,19 +112,26 @@ impl ParameterResolver {
         }
     }
 
-    fn resolve_in_namespace(
+    pub(crate) fn resolve_scoped(
         &mut self,
-        namespace: usize,
+        scope: usize,
+        global: bool,
         name: &str,
         expression: &str,
-        params: &ParamContext,
+        environment: &impl ParameterEnvironment,
         abort: &dyn AbortSignal,
     ) -> Result<ComplexValue, ParameterResolutionError> {
         if abort.is_aborted() {
             return Err(ParameterResolutionError::Aborted);
         }
+        let namespace = usize::from(global);
+        let params = environment.parameters(scope);
         let name = name.to_ascii_uppercase();
-        if let Some(value) = self.values[namespace].get(&name) {
+        if let Some(value) = self
+            .values
+            .get(&scope)
+            .and_then(|values| values[namespace].get(&name))
+        {
             return Ok(*value);
         }
         let captured = if namespace == 1 {
@@ -102,19 +144,25 @@ impl ParameterResolver {
         if let Some(value) = captured
             && super::behavioral::captures_static_statistical_value(expression, params)
         {
-            self.values[namespace].insert(name, value);
+            self.values.entry(scope).or_default()[namespace].insert(name, value);
             return Ok(value);
         }
-        let mut stack = vec![Self::pending(namespace, name.clone(), expression, params)?];
-        let mut active = HashSet::from([(namespace, name.clone())]);
+        let mut stack = vec![Self::pending(
+            scope,
+            namespace,
+            name.clone(),
+            expression,
+            params,
+        )?];
+        let mut active = HashSet::from([(scope, namespace, name.clone())]);
         while let Some(current) = stack.last_mut() {
             if abort.is_aborted() {
                 return Err(ParameterResolutionError::Aborted);
             }
-            match current
-                .program
-                .resume_with(params, &mut |dependency| Ok(self.value(dependency, params)))?
-            {
+            let params = environment.parameters(current.scope);
+            match current.program.resume_with(params, &mut |dependency| {
+                Ok(self.scoped_value(current.scope, dependency, environment))
+            })? {
                 PreparedProgress::Complete(value) => {
                     let value =
                         if params.expression_dialect() == crate::config::ExpressionDialect::Xyce {
@@ -123,12 +171,15 @@ impl ParameterResolver {
                             value
                         };
                     let current = stack.pop().expect("completed stack entry exists");
-                    active.remove(&(current.namespace, current.name.clone()));
-                    self.values[current.namespace].insert(current.name, value);
+                    active.remove(&(current.scope, current.namespace, current.name.clone()));
+                    self.values.entry(current.scope).or_default()[current.namespace]
+                        .insert(current.name, value);
                 }
                 PreparedProgress::MissingParameter(dependency) => {
                     let namespace = usize::from(!params.has_parameter_binding(&dependency));
-                    if active.contains(&(namespace, dependency.clone())) {
+                    let scope = environment.owner_scope(current.scope, &dependency, namespace == 1);
+                    let params = environment.parameters(scope);
+                    if active.contains(&(scope, namespace, dependency.clone())) {
                         let mut names = stack
                             .iter()
                             .map(|entry| entry.name.as_str())
@@ -140,22 +191,38 @@ impl ParameterResolver {
                         ))
                         .into());
                     }
-                    let expression = if params.has_parameter_binding(&dependency) {
+                    let expression = if namespace == 0 {
                         params.get_parameter_expression(&dependency)
                     } else {
                         params.get_global_expression(&dependency)
-                    }
-                    .ok_or_else(|| ExprError::UndefinedParam(dependency.clone()))?;
-                    let pending = Self::pending(namespace, dependency.clone(), expression, params)?;
-                    active.insert((namespace, dependency));
+                    };
+                    // A child can retain an inherited symbolic copy after its
+                    // owner has already materialized the declaration.
+                    let Some(expression) = expression else {
+                        let value = if namespace == 1 {
+                            params.get_global_complex(&dependency)
+                        } else if params.has_parameter_binding(&dependency) {
+                            params.get_complex(&dependency)
+                        } else {
+                            None
+                        };
+                        let value =
+                            value.ok_or_else(|| ExprError::UndefinedParam(dependency.clone()))?;
+                        self.values.entry(scope).or_default()[namespace].insert(dependency, value);
+                        continue;
+                    };
+                    let pending =
+                        Self::pending(scope, namespace, dependency.clone(), expression, params)?;
+                    active.insert((scope, namespace, dependency));
                     stack.push(pending);
                 }
             }
         }
-        Ok(self.values[namespace][&name])
+        Ok(self.values[&scope][namespace][&name])
     }
 
     fn pending(
+        scope: usize,
         namespace: usize,
         name: String,
         expression: &str,
@@ -187,6 +254,7 @@ impl ParameterResolver {
         }
         program.begin_evaluation();
         Ok(PendingParameter {
+            scope,
             namespace,
             name,
             program,
@@ -208,6 +276,51 @@ impl std::fmt::Display for ParameterResolutionError {
 mod tests {
     use super::*;
     use crate::abort_signal::{CountingAbort, NoAbort};
+
+    #[test]
+    fn lexical_dependencies_use_their_owner_and_share_samples_between_children() {
+        struct Scopes([ParamContext; 3]);
+        impl ParameterEnvironment for Scopes {
+            fn parameters(&self, scope: usize) -> &ParamContext {
+                &self.0[scope]
+            }
+            fn owner_scope(&self, scope: usize, name: &str, global: bool) -> usize {
+                if global || matches!(name, "ALIAS" | "BASE") {
+                    0
+                } else {
+                    scope
+                }
+            }
+        }
+        let mut parent = ParamContext::new();
+        parent.set_random_seed(73);
+        parent.define_parameter_expression("alias", "base+aunif(0,1)", None);
+        parent.set("base", 5.0);
+        let mut child = parent.clone();
+        child.set("base", 100.0);
+        child.define_parameter_expression("local", "alias+base", None);
+        let sibling = child.clone();
+        let scopes = Scopes([parent, child, sibling]);
+        let reference = scopes.0[0].isolated_random_clone();
+        let sample = eval_expression("aunif(0,1)", &reference).unwrap();
+        let mut resolver = ParameterResolver::default();
+        for scope in [1, 2] {
+            assert_eq!(
+                resolver
+                    .resolve_scoped(scope, false, "local", "alias+base", &scopes, &NoAbort)
+                    .unwrap(),
+                ComplexValue::from((5.0 + sample) + 100.0)
+            );
+        }
+        assert_eq!(
+            eval_expression("aunif(0,1)", &scopes.0[0]).unwrap(),
+            eval_expression("aunif(0,1)", &reference).unwrap()
+        );
+        let mut materialized = scopes.0[0].clone();
+        resolver.materialize_scope(0, &mut materialized);
+        assert_eq!(materialized.get("alias"), Some(5.0 + sample));
+        assert_eq!(materialized.get("local"), None);
+    }
 
     #[test]
     fn dependency_suspension_keeps_function_frames_complex_values_and_random_order() {
