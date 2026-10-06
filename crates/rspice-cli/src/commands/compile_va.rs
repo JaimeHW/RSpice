@@ -309,12 +309,14 @@ fn compile_error(
             }
         }
         ProviderCompileError::Source(source) => {
+            let diagnostic = rspice_veriloga::SourceCompileDiagnostic::from(&source);
             let error = CliError::VerilogAError {
                 message: source.message,
             };
             let mut details = error.details();
             details.path = source.file.map(|path| path.display().to_string());
             details.line = (source.line > 0).then_some(source.line);
+            details.diagnostics.push(diagnostic);
             CliError::reported(error.to_string(), Some(details))
         }
         ProviderCompileError::Compile {

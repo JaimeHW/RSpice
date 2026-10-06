@@ -314,6 +314,24 @@ fn check_external_model_build(
         Ok(_) => Ok(()),
         Err(rspice_core::SimulationError::Aborted) => Err(CliError::Interrupted),
         Err(error @ rspice_core::SimulationError::ResourceLimit(_)) => Err(error.into()),
+        Err(rspice_core::SimulationError::Elaboration(error))
+            if !error.compiler_diagnostics().is_empty() =>
+        {
+            result.errors.extend(
+                error
+                    .compiler_diagnostics()
+                    .iter()
+                    .cloned()
+                    .map(|diagnostic| ValidationIssue {
+                        message: diagnostic.message.clone(),
+                        element: error.instance.clone(),
+                        line: diagnostic.line,
+                        code: Some(diagnostic.code.clone()),
+                        compiler_diagnostic: Some(diagnostic),
+                    }),
+            );
+            Ok(())
+        }
         Err(error) => {
             let model_kind = if netlist_contains_xspice(netlist) {
                 "XSPICE"
@@ -692,14 +710,15 @@ fn output_json(result: &ValidationResult) -> Result<(), CliError> {
 
 fn output_text(result: &ValidationResult, quiet: bool) -> Result<(), CliError> {
     for error in &result.errors {
-        crate::console::line(format_args!("✗ Error: {}", error.message))?;
+        if let Some(diagnostic) = &error.compiler_diagnostic {
+            crate::console::line(format_args!("{diagnostic}"))?;
+        } else {
+            crate::console::line(format_args!("✗ Error: {}", error.message))?;
+        }
     }
     for warning in &result.warnings {
         if let Some(diagnostic) = &warning.compiler_diagnostic {
-            crate::console::line(format_args!(
-                "{}",
-                crate::observability::format_compiler_diagnostic(diagnostic)
-            ))?;
+            crate::console::line(format_args!("{diagnostic}"))?;
             continue;
         }
         if warning.element.is_none()

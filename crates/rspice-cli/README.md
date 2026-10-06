@@ -564,6 +564,11 @@ does not repeat its findings. `--quiet` suppresses their console presentation.
 Validation applies the current Verilog-A source byte, expansion and include-depth
 limits even when a compiled model is cached. Exceeding a source budget reports
 the resource, requested amount and limit, and exits 75.
+Fatal compiler findings also retain original include paths, lines, columns and
+UTF-8 byte ranges when the compiler knows them. `run` keeps these findings in
+JSON errors and run summaries; `check --json` includes them in each error's
+`diagnostic`. Preprocessing failures retain their file and line without inventing
+unknown columns or byte ranges.
 
 Control scripts are checked without executing them. Every authored host command
 must have a handler, and literal OP/AC/TRAN requests are validated in all branches.

@@ -58,28 +58,7 @@ pub fn compiler_diagnostic(diagnostic: &rspice_veriloga::SourceCompileDiagnostic
 }
 
 pub fn compiler_diagnostic_text(diagnostic: &rspice_veriloga::SourceCompileDiagnostic) {
-    crate::console::diagnostic_line(format_args!("{}", format_compiler_diagnostic(diagnostic)));
-}
-
-pub fn format_compiler_diagnostic(diagnostic: &rspice_veriloga::SourceCompileDiagnostic) -> String {
-    let severity = match diagnostic.severity {
-        rspice_veriloga::CompileDiagnosticSeverity::Error => "Error",
-        rspice_veriloga::CompileDiagnosticSeverity::Warning => "Warning",
-    };
-    let mut location = diagnostic.path.clone().unwrap_or_default();
-    if let Some(line) = diagnostic.line {
-        location.push_str(&format!(":{line}"));
-        if let Some(column) = diagnostic.column {
-            location.push_str(&format!(":{column}"));
-        }
-    }
-    if !location.is_empty() {
-        location.push_str(": ");
-    }
-    format!(
-        "{severity}: {location}[{}] {}",
-        diagnostic.code, diagnostic.message
-    )
+    crate::console::diagnostic_line(format_args!("{diagnostic}"));
 }
 
 /// Add version and process correlation to a command's existing JSON fields.
