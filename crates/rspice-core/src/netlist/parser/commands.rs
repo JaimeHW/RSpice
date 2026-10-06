@@ -2719,11 +2719,21 @@ fn restart_interval_schedule_starts(stream: &TokenStream, params: &ParamContext)
         return false;
     }
 
-    // Digit-leading SPICE values such as `10n` are intentionally lexed as
-    // identifiers because the same spelling is legal as a node or model name.
-    // Probe with the value parser instead of relying on the token variant.
-    let mut probe = stream.clone();
-    try_value(&mut probe, params).is_some()
+    // Classification must neither draw a random value nor erase a failed
+    // authored expression. Numeric validation belongs to the schedule reader.
+    let offset = usize::from(matches!(
+        stream.peek().kind,
+        TokenKind::Plus | TokenKind::Minus
+    ));
+    match &stream.peek_n(offset).kind {
+        TokenKind::Number(_) | TokenKind::Expression(_) => true,
+        TokenKind::Ident(name) => {
+            params.get(name).is_some()
+                || parse_boolean_literal(name).is_some()
+                || parse_spice_value(name).is_ok()
+        }
+        _ => false,
+    }
 }
 
 fn restart_interval_count(options: &super::SimulationOptions) -> usize {
