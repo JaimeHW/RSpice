@@ -1169,8 +1169,10 @@ mod tests {
             ),
             Err(SimulationError::Aborted)
         ));
-        let mut limits = crate::ResourceLimits::default();
-        limits.max_analysis_points = 1;
+        let limits = crate::ResourceLimits {
+            max_analysis_points: 1,
+            ..crate::ResourceLimits::default()
+        };
         assert!(matches!(
             refined.pending_sampled_edges(2.25, 1.0, limits, &NoAbort),
             Err(SimulationError::ResourceLimit(_))
@@ -1196,10 +1198,10 @@ mod tests {
                 [(-1.625_f64).next_down(), -1.625],
             ),
         ] {
-            for index in 0..2 {
+            for (index, expected_clock) in expected.into_iter().enumerate() {
                 assert_eq!(
                     PssIntegrationMesh::shifted_clock(&clocks, index, &offsets),
-                    expected[index]
+                    expected_clock
                 );
             }
         }

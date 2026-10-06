@@ -100,24 +100,24 @@ fn rc_noise_control_matches_direct_and_johnson_nyquist_equations() {
     assert_eq!(traces[0].x.unit, SignalUnit::Hertz);
     assert_eq!(traces[0].y.unit, SignalUnit::Custom("V/sqrt(Hz)".into()));
     assert_eq!(traces[2].y.unit, SignalUnit::Custom("V^2/Hz".into()));
-    for row in 0..expected.len() {
+    for (row, expected_point) in expected.iter().enumerate() {
         relative(
             traces[0].y.samples[row].re.powi(2),
-            expected[row].output_noise_density,
+            expected_point.output_noise_density,
         );
         relative(
             traces[1].y.samples[row].re.powi(2),
-            expected[row].input_referred_density,
+            expected_point.input_referred_density,
         );
         relative(
             traces[5].y.samples[row].re,
-            expected[row].output_noise_density,
+            expected_point.output_noise_density,
         );
         relative(
             traces[6].y.samples[row].re,
-            expected[row].input_referred_density,
+            expected_point.input_referred_density,
         );
-        let omega_rc = std::f64::consts::TAU * expected[row].frequency * 1e-3;
+        let omega_rc = std::f64::consts::TAU * expected_point.frequency * 1e-3;
         relative(traces[7].y.samples[row].re, 2.0 / (1.0 + omega_rc.powi(2)));
         relative(
             traces[7].y.samples[row].im,

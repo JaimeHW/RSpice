@@ -652,8 +652,10 @@ mod tests {
                 .restore_delay_basis(&malformed, Default::default())
                 .is_err()
         );
-        let mut limits = crate::ResourceLimits::default();
-        limits.max_result_values = 100;
+        let limits = crate::ResourceLimits {
+            max_result_values: 100,
+            ..crate::ResourceLimits::default()
+        };
         assert!(worker.restore_delay_basis(&names, limits).is_err());
         assert!(matches!(
             original.refined(
@@ -755,8 +757,10 @@ mod tests {
                 .restore_delay_basis(&malformed, Default::default())
                 .is_err()
         );
-        let mut limits = crate::ResourceLimits::default();
-        limits.max_result_values = 100;
+        let limits = crate::ResourceLimits {
+            max_result_values: 100,
+            ..crate::ResourceLimits::default()
+        };
         assert!(circuit.delay_basis.refined(limits, &NoAbort).is_err());
         assert!(
             circuit

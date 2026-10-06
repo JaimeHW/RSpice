@@ -1,8 +1,8 @@
 use super::*;
 use crate::abort_signal::ImmediateAbort;
 use crate::config::SimulationConfig;
-mod transition;
 mod mission;
+mod transition;
 
 fn config(names: &[&str]) -> SpectralEnvelopeConfig {
     SpectralEnvelopeConfig {
@@ -382,9 +382,14 @@ fn netlist_spectral_envelope_modulation_events_bound_steps_without_enumerating_r
         "selected physical clocks\nVrf rf 0 PULSE(0 1 0 1n 1n 400n 1u)\nRrf rf 0 1k\nVmod out 0 PWL(0 0 {event:.17e} 0 {event:.17e} 1 2m 1)\nRmod out 0 1k\nVnear near 0 PWL(0 0 {adjacent:.17e} 0 {adjacent:.17e} 2 2m 2)\nRnear near 0 1k\nImod load 0 PWL(0 0 {event:.17e} 0 {event:.17e} -1m 2m -1m)\nRload load 0 1k\nVdefault d 0 PULSE(0 1 1.2m)\nRdefault d 0 1k\n.end\n"
     );
     let netlist = Netlist::parse(&deck).unwrap();
-    let mut settings = SimulationConfig::default();
-    settings.spice_dialect = crate::config::SpiceDialect::Ngspice;
-    settings.resource_limits.max_analysis_points = 64;
+    let settings = SimulationConfig {
+        spice_dialect: crate::config::SpiceDialect::Ngspice,
+        resource_limits: crate::ResourceLimits {
+            max_analysis_points: 64,
+            ..crate::ResourceLimits::default()
+        },
+        ..SimulationConfig::default()
+    };
     let mut request = config(&["vmod", "VNEAR", "Imod", "Vdefault"]);
     request.source_time_step = 20e-6;
     let mut prepared = Engine::new(settings)

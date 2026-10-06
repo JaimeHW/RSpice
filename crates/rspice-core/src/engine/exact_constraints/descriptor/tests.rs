@@ -219,8 +219,10 @@ fn descriptor_closure_rejects_invalid_coordinates_and_preserves_typed_failures()
             Err(SimulationError::Circuit(_))
         ));
     }
-    let mut limits = ResourceLimits::default();
-    limits.max_result_values = 1;
+    let limits = ResourceLimits {
+        max_result_values: 1,
+        ..ResourceLimits::default()
+    };
     assert!(matches!(
         run(1, vec![row(&[(1, 1.0)], None)], limits, &NoAbort),
         Err(SimulationError::ResourceLimit(_))

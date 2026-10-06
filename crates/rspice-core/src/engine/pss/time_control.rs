@@ -337,8 +337,10 @@ mod tests {
 
     #[test]
     fn pss_step_ceiling_rejects_unbounded_grid_allocation() {
-        let mut config = crate::SimulationConfig::default();
-        config.transient_timeint_max_timestep = Some(1e-300);
+        let config = crate::SimulationConfig {
+            transient_timeint_max_timestep: Some(1e-300),
+            ..crate::SimulationConfig::default()
+        };
         let engine = Engine::new(config);
         assert!(engine.pss_minimum_grid_steps(1.0).is_err());
     }

@@ -235,6 +235,15 @@ impl AnalysisCardPlan {
     }
 }
 
+fn located_error(error: ParseError, line: usize, origin: &NetlistSourceLocation) -> ParseError {
+    match error {
+        ParseError::InvalidValue(message) => {
+            ParseError::InvalidValue(format!("{origin}: {message}"))
+        }
+        error => source_map_logical_line_error(error, line, origin, true),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -333,14 +342,5 @@ mod tests {
             eval_expression("aunif(0,1)", &state.params).unwrap(),
             eval_expression("aunif(0,1)", &expected).unwrap()
         );
-    }
-}
-
-fn located_error(error: ParseError, line: usize, origin: &NetlistSourceLocation) -> ParseError {
-    match error {
-        ParseError::InvalidValue(message) => {
-            ParseError::InvalidValue(format!("{origin}: {message}"))
-        }
-        error => source_map_logical_line_error(error, line, origin, true),
     }
 }
