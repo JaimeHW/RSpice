@@ -1,0 +1,7 @@
+GP behavioral physical-event coverage gap
+VC c 0 2
+BB b 0 V={.7+1u*sin(2*pi*1e9*time)}
+Q1 c b 0 qm
+.model qm NPN IS=1e-16 BF=100 BR=1 TF=1n PTF=57.29577951308232
+.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10
+.end

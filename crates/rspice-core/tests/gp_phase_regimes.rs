@@ -16,6 +16,12 @@ use rspice_core::{Engine, GpTransientPhaseModel, Netlist, SimulationConfig, Spic
 
 #[path = "gp_phase_regimes/charge.rs"]
 mod charge;
+#[path = "gp_phase_regimes/coverage_gaps.rs"]
+mod coverage_gaps;
+#[path = "gp_phase_regimes/private_nodes.rs"]
+mod private_nodes;
+#[path = "gp_phase_regimes/static_private.rs"]
+mod static_private;
 use charge::ChargeLaw;
 
 const IS: f64 = 1e-16;
