@@ -1,0 +1,194 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C03",
+  "batch": "C03c executed WebAssembly numerical and state contracts",
+  "status": "partial",
+  "source_revision": "b0878b1d0c0ef2682f81b8f11d8c29836d5ac400",
+  "captured_utc": "2026-10-06T05:15:31.228236+00:00",
+  "host": "x86_64-pc-windows-msvc",
+  "wasm_target": "wasm32-unknown-unknown",
+  "toolchain": {
+    "rustc": "1.94.0 (4a4ef493e 2026-03-02)",
+    "cargo": "1.94.0 (85eff7c80 2026-01-15)",
+    "llvm": "21.1.8",
+    "wasm_bindgen_test_runner": "0.2.126",
+    "wasm_bindgen_test": "0.3.76",
+    "node": "24.15.0",
+    "chrome": "154.0.8037.98",
+    "chromedriver": {
+      "version": "154.0.8037.92",
+      "url": "https://storage.googleapis.com/chrome-for-testing-public/154.0.8037.92/win64/chromedriver-win64.zip",
+      "sha256": "3F41A7D5D70CBA88CE66BD39B47174F6F8662CA45530B41054D6E64DA2E11516"
+    },
+    "cargo_lock_sha256": "c342f71fed9c6da2f2bf801804518ed908f0e374adeb921e4786c1e7f084c847",
+    "toolchain_file_sha256": "d6dadd139dac178482d6cca3a8945b8a7e0f7df1f0733872657cbc420b2d82e6"
+  },
+  "implementation_commits": [
+    "12ba3605b",
+    "b0878b1d0"
+  ],
+  "implementation": [
+    "The existing 18 core integration tests register with wasm-bindgen-test on wasm32 and the standard Rust harness on native targets. Oracles, cases and tolerances are shared unchanged.",
+    "WASM-only dev dependencies select the existing workspace test runner and the JavaScript entropy backend for proptest/rand 0.9/getrandom 0.3. The core production dependency still uses getrandom 0.4. No solver or shipping API changed.",
+    "The existing Firefox CI job now executes all four core test targets in an optimized dedicated worker with wasm,veriloga-wasm-jit and no default features, matching the worker core feature selection."
+  ],
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER": "wasm-bindgen-test-runner",
+    "WASM_BINDGEN_TEST_TIMEOUT": "180",
+    "timeout_scope": "Test-runner timeout in seconds, not a measured performance acceptance limit.",
+    "node": "No browser/worker mode override; default runner Node environment.",
+    "chrome_window": {
+      "WASM_BINDGEN_USE_BROWSER": "1"
+    },
+    "chrome_worker": {
+      "WASM_BINDGEN_USE_DEDICATED_WORKER": "1",
+      "WASM_BINDGEN_USE_BROWSER": "unset"
+    },
+    "webdriver": "CHROMEDRIVER selects the downloaded driver; WASM_BINDGEN_TEST_WEBDRIVER_JSON selects the installed Chrome binary. Headless mode retained; driver uses an isolated test profile.",
+    "webdriver_capabilities": {
+      "goog:chromeOptions": {
+        "args": [
+          "--disable-background-networking",
+          "--no-first-run"
+        ],
+        "binary": "C:/Program Files/Google/Chrome/Application/chrome.exe"
+      }
+    }
+  },
+  "setup_references": [
+    "https://wasm-bindgen.github.io/wasm-bindgen/wasm-bindgen-test/browsers.html",
+    "https://developer.chrome.com/docs/chromedriver/downloads/version-selection",
+    "https://googlechromelabs.github.io/chrome-for-testing/latest-patch-versions-per-build-with-downloads.json"
+  ],
+  "coverage": {
+    "bjt_excess_phase_transient": "Both phase laws, three dialects, NPN/PNP, OP/UIC; independent exact-delay refinement and temperature/area/multiplicity oracles; packed/unpacked exact continuation, horizon extension, compression, invalid and unresolvable arrivals, cancellation and reuse.",
+    "gp_phase_regimes": "Independent nonlinear I_BE/Q_B and diffusion-charge derivative under saturation, reverse-active and high injection, both polarities/all dialects; exact-delay refinement, separate Weil recurrence and terminal KCL. Numerical limits remain those in core-gp-regimes-windows-20261005.json.",
+    "gp_history_resources": "32-bit WASM transport-byte budget boundaries, aggregate device/history/checkpoint-copy accounting, typed refusal, successful reuse and unchanged caller checkpoint after failed restoration.",
+    "gp_phase_cancellation": "Cancellation after accepted work, no later accepted sample, bit-identical reuse and unchanged checkpoint/final continuation.",
+    "scope": "Repeated executions exercise the same 18 named tests; do not sum runs as distinct tests. These are native GP device cases even when the Verilog-A feature set is enabled."
+  },
+  "runs": [
+    {
+      "command": "cargo test --offline -p rspice-core --target wasm32-unknown-unknown --no-default-features --features wasm --test bjt_excess_phase_transient --test gp_history_resources --test gp_phase_cancellation --test gp_phase_regimes",
+      "environment": "Node.js",
+      "profile": "test",
+      "features": [
+        "wasm"
+      ],
+      "source_state": "Development before 12ba3605b; first executed WASM build.",
+      "exit_code": 0,
+      "passed": 18,
+      "failed": 0,
+      "ignored": 0,
+      "log": "target/core-qualification/gp-wasm-node-development.log",
+      "log_sha256": "2b81ac6371fb707b5957ae4aaffa993f4ca9d1b0313dc67146321e94676de6ed"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --target wasm32-unknown-unknown --no-default-features --features wasm --test bjt_excess_phase_transient --test gp_history_resources --test gp_phase_cancellation --test gp_phase_regimes",
+      "environment": "Chrome window, headless",
+      "profile": "test",
+      "features": [
+        "wasm"
+      ],
+      "source_state": "Development before 12ba3605b; same binaries and assertions as Node.",
+      "exit_code": 0,
+      "passed": 18,
+      "failed": 0,
+      "ignored": 0,
+      "log": "target/core-qualification/gp-wasm-chrome-development.log",
+      "log_sha256": "39354525ed236a455b2be3d00311d8c2d4a42e5f4c55f6eb088821739e4452fa"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test bjt_excess_phase_transient --test gp_history_resources --test gp_phase_cancellation --test gp_phase_regimes",
+      "environment": "Windows native",
+      "profile": "test",
+      "features": [
+        "default"
+      ],
+      "source_state": "Development before 12ba3605b; verify native discovery and unchanged assertions.",
+      "exit_code": 0,
+      "passed": 18,
+      "failed": 0,
+      "ignored": 0,
+      "log": "target/core-qualification/gp-wasm-native-registration.log",
+      "log_sha256": "dc46c1ad5ab4befc540af1d4a8a8f2442efd48f4b720f98a3bf279c9c142ad2f"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test bjt_excess_phase_transient --test gp_history_resources --test gp_phase_cancellation --test gp_phase_regimes",
+      "environment": "Chrome dedicated worker, headless",
+      "profile": "release",
+      "features": [
+        "wasm",
+        "veriloga-wasm-jit"
+      ],
+      "source_state": "Core sources committed as 12ba3605b; CI workflow awaiting commitment.",
+      "exit_code": 0,
+      "passed": 18,
+      "failed": 0,
+      "ignored": 0,
+      "log": "target/core-qualification/gp-wasm-worker-release-development.log",
+      "log_sha256": "e19a58bd1969f283740132912f4074689a330255f08a156fa8c465afdb459deb"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test bjt_excess_phase_transient --test gp_history_resources --test gp_phase_cancellation --test gp_phase_regimes -- --nocapture",
+      "environment": "Chrome dedicated worker, headless",
+      "profile": "release",
+      "features": [
+        "wasm",
+        "veriloga-wasm-jit"
+      ],
+      "source_state": "b0878b1d0c0ef2682f81b8f11d8c29836d5ac400",
+      "exit_code": 0,
+      "passed": 18,
+      "failed": 0,
+      "ignored": 0,
+      "log": "target/core-qualification/gp-wasm-worker-release-final.log",
+      "log_sha256": "8bee26419e9f90a80a340d09546f650c6f6fcd93926b3863819ee63a6105f395"
+    }
+  ],
+  "checks": [
+    {
+      "command": "cargo clippy --locked -p rspice-core --target wasm32-unknown-unknown --no-default-features --features wasm,veriloga-wasm-jit --test bjt_excess_phase_transient --test gp_history_resources --test gp_phase_cancellation --test gp_phase_regimes -- -D warnings",
+      "exit_code": 0,
+      "log": "target/core-qualification/gp-wasm-clippy.log",
+      "log_sha256": "d7e34083a83a5db92654e1cd8e68ee25ca20e0bf28ee20f060ed779e4e7fbb8c"
+    },
+    {
+      "command": "python tools/ci/test_ci_configuration.py",
+      "exit_code": 0,
+      "log": "target/core-qualification/gp-wasm-ci-configuration.log",
+      "log_sha256": "53469a2a968bd1be887c2f34dde78d85a33b2c1e2f1a347126fb390eeeda612f"
+    },
+    {
+      "command": "actionlint 1.7.12 .github/workflows/ci.yml",
+      "exit_code": 0,
+      "log": "target/core-qualification/gp-wasm-actionlint.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "artifact_sha256": {
+    "target/wasm32-unknown-unknown/debug/deps/bjt_excess_phase_transient-ac09bd1a72641866.wasm": "a5f7f273dfb9dc9dbb0d591604203a333ae5e73f167c5470cc010cd79492e864",
+    "target/wasm32-unknown-unknown/debug/deps/gp_history_resources-3c25d23cc821d051.wasm": "d24c01df14ee9f73516fff339d7ba674ae34f3f94e617018a4c916377c5694f4",
+    "target/wasm32-unknown-unknown/debug/deps/gp_phase_cancellation-69490113154a4f48.wasm": "237b90ac43f955f81c61969bbd96c47691c1ebdbc8ecbd3991b27871fb76276e",
+    "target/wasm32-unknown-unknown/debug/deps/gp_phase_regimes-8f95796197139fee.wasm": "84c2395c84a9fd207ef5826ad8caac45457835ee99e12ebc702cb378481009cc",
+    "target/wasm32-unknown-unknown/release/deps/bjt_excess_phase_transient-b80ba5c9d0d9b715.wasm": "6965dd2ed829933d9310a22a248ff6165077c1b0bd2444ef851ffb5eefc6fc24",
+    "target/wasm32-unknown-unknown/release/deps/gp_history_resources-dd4bc7fcfdd93a35.wasm": "a5f159973dd62d8f6fadcdb1ba11fa96569329abe3a06041eb47b8ff4f723ae4",
+    "target/wasm32-unknown-unknown/release/deps/gp_phase_cancellation-ca0c4be0b8d28a2b.wasm": "8d2abe5009c31b24cb20961c6bd70f0ad6e2c4687c9a5d2a0b3810822827518b",
+    "target/wasm32-unknown-unknown/release/deps/gp_phase_regimes-f241bb5de8d6db51.wasm": "9978ac5a20206017d2ca20287811f729e38610817c7c5d12b18fac0e88ce2e1f"
+  },
+  "remote_ci": {
+    "run": "https://github.com/JaimeHW/RSpice/actions/runs/37417397857",
+    "source_revision": "b0878b1d0c0ef2682f81b8f11d8c29836d5ac400",
+    "observed_status": "pending",
+    "scope": "CI was queued at capture. Local Chrome results do not establish a completed hosted Firefox run."
+  },
+  "remaining": [
+    "Additional feedback/private-node and bias-dependent transit-time/reverse-charge GP cases.",
+    "Whole-run allocation/peak-memory, cancellation inside expensive solver work and broader measured performance limits.",
+    "Remaining C14 browser/runtime, feature and delivered-profile qualification; this record executes the selected minimal test and optimized worker configurations on Node/Chrome only.",
+    "Real external-model/JIT evaluation remains C09 work. Rust callback cancellation here does not qualify asynchronous worker control transport or interruption inside factorization.",
+    "All C00-C14 packages remain open."
+  ]
+}
