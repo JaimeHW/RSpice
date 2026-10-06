@@ -471,6 +471,7 @@ fn ensure_cancellation_report(
         },
     };
     let error_message = error.to_string();
+    let process_details = error.details();
     let run_status_measurement = || MeasurementReport {
         name: "__rspice_run_status__".to_string(),
         value: None,
@@ -487,13 +488,26 @@ fn ensure_cancellation_report(
         target_axis: None,
         aggregate_policy: None,
     };
-    if let Some(report) = reports.iter_mut().find(|report| {
+    let mut recorded = false;
+    for report in reports.iter_mut().filter(|report| {
         report
             .error_details
             .as_ref()
-            .is_some_and(|details| details.category == "cancellation")
+            .is_some_and(|details| matches!(details.category, "cancellation" | "timeout"))
     }) {
+        recorded = true;
         report.passed = false;
+        // Core inner loops may return a reason-free Aborted. Preserve the
+        // analysis/coordinate context while making every stopped run agree
+        // with the process's first recorded reason, including parallel runs.
+        if let Some(details) = report.error_details.as_mut()
+            && details.category != process_details.category
+        {
+            details.code = process_details.code;
+            details.category = process_details.category;
+            details.retryable = process_details.retryable;
+            report.error = Some(error_message.clone());
+        }
         if !report
             .measurements
             .iter()
@@ -501,6 +515,8 @@ fn ensure_cancellation_report(
         {
             report.measurements.push(run_status_measurement());
         }
+    }
+    if recorded {
         return;
     }
 
@@ -1009,6 +1025,48 @@ mod step_cancellation_report_tests {
         assert_eq!(reports[1].measurements.len(), 1);
         assert_eq!(reports[1].measurements[0].name, "__rspice_run_status__");
         assert!(!reports[1].measurements[0].passed);
+    }
+
+    #[test]
+    fn a_deadline_normalizes_all_cancelled_coordinates_without_duplicate_reports() {
+        let mut reports = vec![passing_report()];
+        for (coordinate, error) in [
+            ("run-000002", CliError::Interrupted),
+            ("run-000003", CliError::TimedOut { seconds: 2.5 }),
+        ] {
+            let mut report = passing_report();
+            report.passed = false;
+            report.error = Some(error.to_string());
+            let mut details = error.details();
+            details.analysis_id = Some("tran-001".into());
+            details.coordinate_id = Some(coordinate.into());
+            report.error_details = Some(details);
+            reports.push(report);
+        }
+        for _ in 0..2 {
+            ensure_cancellation_report(
+                &mut reports,
+                std::path::Path::new("deck.cir"),
+                Some(2.5),
+                crate::abort::AbortReason::Timeout,
+            );
+        }
+        assert_eq!(reports.len(), 3);
+        assert!(reports[0].passed);
+        assert!(reports[0].measurements.is_empty());
+        for (report, coordinate) in reports[1..].iter().zip(["run-000002", "run-000003"]) {
+            let details = report.error_details.as_ref().unwrap();
+            assert_eq!((details.code, details.category), ("timed_out", "timeout"));
+            assert_eq!(details.analysis_id.as_deref(), Some("tran-001"));
+            assert_eq!(details.coordinate_id.as_deref(), Some(coordinate));
+            assert_eq!(
+                report.error.as_deref(),
+                Some("Simulation timed out after 2.5s")
+            );
+            assert!(!report.passed);
+            assert_eq!(report.measurements.len(), 1);
+            assert!(!report.measurements[0].passed);
+        }
     }
 
     #[test]

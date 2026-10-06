@@ -1076,6 +1076,7 @@ fn timeout_exits_one_twenty_four() {
     let dir = test_dir("timeout");
     let deck = dir.join("slow.sp");
     let config = dir.join("rspice.toml");
+    let summary = dir.join("summary.json");
     // 100 simulated seconds of a 1kHz sine at 1ns steps: far longer than
     // the 1-second budget on any machine.
     std::fs::write(
@@ -1101,10 +1102,14 @@ fn timeout_exits_one_twenty_four() {
         "--config",
         config.to_str().unwrap(),
         "--quiet",
+        "--error-format",
+        "json",
         "run",
         deck.to_str().unwrap(),
         "--timeout",
         "1",
+        "--summary",
+        summary.to_str().unwrap(),
     ]);
     assert_eq!(
         output.status.code(),
@@ -1116,6 +1121,17 @@ fn timeout_exits_one_twenty_four() {
         start.elapsed() < std::time::Duration::from_secs(30),
         "timeout must stop the run promptly"
     );
+
+    let fatal: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(fatal["error"]["category"], "timeout");
+    let summary = common::read_json(&summary);
+    assert_eq!(summary["status"], "timed_out");
+    let runs = summary["runs"].as_array().unwrap();
+    assert_eq!(runs.len(), 1, "one failed transient: {summary}");
+    assert_eq!(runs[0]["error_details"]["category"], "timeout");
+    assert_eq!(runs[0]["error_details"]["code"], "timed_out");
+    assert_eq!(runs[0]["error_details"]["analysis"], "Transient");
+    assert_eq!(runs[0]["error"], fatal["error"]["message"]);
 
     let _ = std::fs::remove_dir_all(&dir);
 }

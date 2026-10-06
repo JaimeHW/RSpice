@@ -120,6 +120,10 @@ impl AbortSignal for ProgressAbort<'_> {
         matches!(STATE.load(Ordering::Relaxed), INTERRUPT | TIMEOUT)
     }
 
+    fn abort_reason(&self) -> rspice_core::AbortReason {
+        process_abort_reason()
+    }
+
     fn observe_progress(&self, fraction: f64) {
         self.bar
             .set_position((fraction * Self::SCALE as f64) as u64);
