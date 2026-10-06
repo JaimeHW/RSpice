@@ -35,6 +35,7 @@ mod planning;
 mod quasi_periodic;
 mod restart;
 mod shared;
+mod sources;
 
 pub(crate) use crate::commands::export_table as export;
 pub(crate) use document::PublishedResult;
