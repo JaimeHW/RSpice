@@ -367,7 +367,7 @@ fn run_implicit_step_op_table(
                 ),
             });
         }
-        let coordinate_engine = build_engine(args, config, materialized.netlist())?;
+        let coordinate_engine = build_observed_engine(args, config, materialized.netlist(), quiet)?;
         let topology = materialized.topology_fingerprint();
         // The device operating-point report is taken at every coordinate, not
         // only for a scalar deck: it is what carries the complete typed
@@ -942,7 +942,7 @@ pub(super) fn run_deck(
     }
 
     let base_signature = step_analysis_signature(netlist);
-    let engine = build_engine(args, config, netlist)?;
+    let engine = build_observed_engine(args, config, netlist, quiet)?;
     let materializer = engine
         .prepare_deck_plan_materializer_with_abort(
             netlist,

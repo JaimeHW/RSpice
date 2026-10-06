@@ -16,7 +16,7 @@ cargo build --release -p rspice-cli
 | Command | Purpose |
 | :--- | :--- |
 | `run` | Execute the analyses a netlist requests, or one requested from the command line |
-| `check` | Validate netlist and control syntax, analysis requests, output symbols, topology, and XSPICE construction |
+| `check` | Validate netlist and control syntax, analysis requests, output symbols, topology, and XSPICE/Verilog-A construction |
 | `info` | Summarize a netlist without simulating it |
 | `models` | List the shipped SPICE model packs and look up parts in them |
 | `compare` | Compare a result against a golden reference |
@@ -548,7 +548,7 @@ from the netlist reader are reported as warnings; output symbols referenced by
 `.PRINT`/`.PLOT`/`.SAVE`/`.PROBE` must resolve, so an undefined `V(x)` or
 `I(rbogus)` is an error; a loop of ideal voltage sources or inductors is an
 error and a node connected only to current sources warns about its undefined
-voltage; and a deck containing XSPICE devices is built into a circuit with
+voltage; and a deck containing XSPICE devices or Verilog-A declarations is built into a circuit with
 external runtimes stubbed out, so a model that cannot be constructed fails here
 rather than at run time. Construction uses the selected dialect, configured
 simulation settings, and each materialized coordinate's deck options and
@@ -556,6 +556,11 @@ temperature. `--strict` turns a warning-only deck
 into a usage failure, which exits 2. The JSON document reports both verdicts
 separately: `valid` tracks the non-strict exit status, and `strict_valid` stays
 false whenever there are warnings.
+Verilog-A compiler warnings include their original source locations and count
+toward `--strict`; JSON warning records retain this metadata in `diagnostic`.
+The `run` command emits the same compiler findings using `--error-format`,
+including on cache hits. Rebuilding a model for multiple analyses on one engine
+does not repeat its findings. `--quiet` suppresses their console presentation.
 
 Control scripts are checked without executing them. Every authored host command
 must have a handler, and literal OP/AC/TRAN requests are validated in all branches.

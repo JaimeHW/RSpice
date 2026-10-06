@@ -14,6 +14,7 @@ pub struct ValidationResult {
 
 #[derive(Debug)]
 pub struct ValidationIssue {
+    pub compiler_diagnostic: Option<rspice_veriloga::SourceCompileDiagnostic>,
     pub message: String,
     pub element: Option<String>,
     pub line: Option<usize>,
@@ -27,6 +28,7 @@ impl ValidationResult {
 
     pub fn add_element_warning(&mut self, element: impl Into<String>, message: impl Into<String>) {
         self.warnings.push(ValidationIssue {
+            compiler_diagnostic: None,
             message: message.into(),
             element: Some(element.into()),
             line: None,
@@ -186,6 +188,9 @@ fn validate_input(args: &CheckArgs, config: &Config) -> Result<ValidationResult,
         })? {
             for issue in local.errors.iter_mut().chain(&mut local.warnings) {
                 issue.message = format!("[{label}] {}", issue.message);
+                if let Some(diagnostic) = &mut issue.compiler_diagnostic {
+                    diagnostic.message = format!("[{label}] {}", diagnostic.message);
+                }
             }
             result.errors.extend(local.errors);
             result.warnings.extend(local.warnings);
@@ -246,6 +251,7 @@ fn validate_netlist(
             .as_deref()
             .and_then(|script| script.origin(line));
         result.warnings.push(ValidationIssue {
+            compiler_diagnostic: None,
             message: format!("{}control analysis arguments require runtime substitution; numeric validation is deferred",
                 origin.map_or_else(String::new, |origin| format!("{origin}: "))),
             element: None,
@@ -258,7 +264,7 @@ fn validate_netlist(
     // Always-on topology checks: these decks produce singular systems, so
     // catching them statically beats a NaN at runtime.
     check_topology(netlist, &flattened.elements, &mut result);
-    check_xspice_build(netlist, &mut result, &engine)?;
+    check_external_model_build(netlist, &mut result, &engine)?;
 
     if args.connectivity {
         check_connectivity(netlist, &flattened.elements, &mut result);
@@ -271,27 +277,48 @@ fn validate_netlist(
     Ok(result)
 }
 
-/// Elaborate an XSPICE deck to prove it builds.
+/// Elaborate decks with external model declarations to prove they build.
 ///
 /// External runtimes are stubbed out, while device construction uses the
 /// resolved configuration for this coordinate. Cancellation is propagated as
 /// an interrupt rather than reported as a defect in the customer's deck.
-fn check_xspice_build(
+fn check_external_model_build(
     netlist: &Netlist,
     result: &mut ValidationResult,
     engine: &Engine,
 ) -> Result<(), CliError> {
-    if !netlist_contains_xspice(netlist) {
+    if !netlist_contains_xspice(netlist) && netlist.veriloga_includes.is_empty() {
         return Ok(());
     }
     let _external_guard = XspiceCheckExternalRuntimeGuard::install();
-    match engine.build_circuit_with_abort(netlist, &crate::abort::ProcessAbort) {
+    let build = engine.build_circuit_with_abort(netlist, &crate::abort::ProcessAbort);
+    result
+        .warnings
+        .extend(
+            engine
+                .compiler_diagnostics()
+                .into_iter()
+                .map(|diagnostic| ValidationIssue {
+                    message: diagnostic.message.clone(),
+                    element: None,
+                    line: diagnostic.line,
+                    code: Some(diagnostic.code.clone()),
+                    compiler_diagnostic: Some(diagnostic),
+                }),
+        );
+    match build {
         Ok(_) => Ok(()),
         Err(rspice_core::SimulationError::Aborted) => Err(CliError::Interrupted),
         Err(error @ rspice_core::SimulationError::ResourceLimit(_)) => Err(error.into()),
         Err(error) => {
+            let model_kind = if netlist_contains_xspice(netlist) {
+                "XSPICE"
+            } else {
+                "Verilog-A"
+            };
             result.errors.push(ValidationIssue {
-                message: format!("XSPICE build validation failed: {error}"),
+                compiler_diagnostic: None,
+                message: format!("{model_kind} build validation failed: {error}"),
                 element: None,
                 line: None,
                 code: None,
@@ -467,6 +494,7 @@ fn check_topology(
         let b = find(&mut parent, &canonical(&elem.nodes[1]));
         if a == b {
             result.errors.push(ValidationIssue {
+                compiler_diagnostic: None,
                 message: format!(
                     "'{}' closes a loop of voltage sources/inductors — the DC \
                      system is singular",
@@ -505,6 +533,7 @@ fn check_topology(
     current_only_nodes.sort();
     for node in current_only_nodes {
         result.warnings.push(ValidationIssue {
+            compiler_diagnostic: None,
             message: format!(
                 "node '{}' connects only to current sources; its voltage is \
                  undefined without a conductive path",
@@ -522,6 +551,7 @@ fn add_parser_diagnostics(netlist: &Netlist, result: &mut ValidationResult) {
         match diagnostic.severity {
             rspice_core::netlist::DiagnosticSeverity::Warning => {
                 result.warnings.push(ValidationIssue {
+                    compiler_diagnostic: None,
                     message: diagnostic.message.clone(),
                     element: None,
                     line: (diagnostic.line != 0).then_some(diagnostic.line),
@@ -540,6 +570,7 @@ fn check_connectivity(
     if let Ok(diagnostics) = rspice_core::netlist::analyze_xyce_connectivity(elements) {
         for node in diagnostics.one_device_terminal_nodes {
             result.warnings.push(ValidationIssue {
+                compiler_diagnostic: None,
                 message: format!("Voltage Node ({node}) connected to only 1 device Terminal"),
                 element: None,
                 line: None,
@@ -553,6 +584,7 @@ fn check_connectivity(
         if let Ok(dc_paths) = rspice_core::netlist::analyze_dc_ground_paths(elements) {
             for node in dc_paths.no_dc_path_nodes {
                 result.warnings.push(ValidationIssue {
+                    compiler_diagnostic: None,
                     message: format!("Voltage Node ({node}) does not have a DC path to ground"),
                     element: None,
                     line: None,
@@ -598,6 +630,7 @@ fn check_connectivity(
                 // Keep validation total even if a future adjacency producer
                 // changes independently from the connection counter.
                 result.warnings.push(ValidationIssue {
+                    compiler_diagnostic: None,
                     message: format!("Node '{node}' has only one connection"),
                     element: None,
                     line: None,
@@ -620,6 +653,7 @@ fn check_model_references(netlist: &Netlist, result: &mut ValidationResult) {
         }
         Err(error) => {
             result.errors.push(ValidationIssue {
+                compiler_diagnostic: None,
                 message: format!("Model-reference validation failed: {error}"),
                 element: None,
                 line: None,
@@ -638,12 +672,14 @@ fn output_json(result: &ValidationResult) -> Result<(), CliError> {
             "element": &e.element,
             "line": e.line,
             "code": &e.code,
+            "diagnostic": &e.compiler_diagnostic,
         })).collect::<Vec<_>>(),
         "warnings": result.warnings.iter().map(|w| serde_json::json!({
             "message": &w.message,
             "element": &w.element,
             "line": w.line,
             "code": &w.code,
+            "diagnostic": &w.compiler_diagnostic,
         })).collect::<Vec<_>>(),
     });
     let json = crate::observability::envelope("rspice.check", json);
@@ -655,6 +691,13 @@ fn output_text(result: &ValidationResult, quiet: bool) -> Result<(), CliError> {
         crate::console::line(format_args!("✗ Error: {}", error.message))?;
     }
     for warning in &result.warnings {
+        if let Some(diagnostic) = &warning.compiler_diagnostic {
+            crate::console::line(format_args!(
+                "{}",
+                crate::observability::format_compiler_diagnostic(diagnostic)
+            ))?;
+            continue;
+        }
         if warning.element.is_none()
             && let Some(line) = warning.line
         {

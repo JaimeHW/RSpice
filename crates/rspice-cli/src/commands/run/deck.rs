@@ -492,6 +492,21 @@ pub(super) fn build_engine(
     ))?)
 }
 
+pub(super) fn build_observed_engine(
+    args: &RunArgs,
+    config: &Config,
+    netlist: &Netlist,
+    quiet: bool,
+) -> Result<Engine, CliError> {
+    Ok(
+        build_engine(args, config, netlist)?.with_compiler_diagnostic_handler(move |diagnostic| {
+            if !quiet {
+                crate::observability::compiler_diagnostic(diagnostic);
+            }
+        }),
+    )
+}
+
 fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> SimulationConfig {
     let base = config.core_simulation_config();
 

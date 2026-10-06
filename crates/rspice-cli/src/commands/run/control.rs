@@ -34,7 +34,7 @@ pub(super) fn run(
                 error
             }
         })?;
-    let engine = build_engine(args, config, netlist)?;
+    let engine = build_observed_engine(args, config, netlist, quiet)?;
     let mut circuit =
         ControlCircuit::new(netlist.clone()).map_err(|error| map_execution(error, script, args))?;
     let mut session = program.start(netlist.params.clone());
