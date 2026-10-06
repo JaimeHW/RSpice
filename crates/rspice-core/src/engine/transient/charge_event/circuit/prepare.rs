@@ -18,6 +18,7 @@ impl<'a> PreparedEventCircuit<'a> {
                 | Inductor
                 | VoltageSource
                 | CurrentSource
+                | BehavioralSource
                 | Bjt
                 | InductorCoupling
                 | CoupledInductorPair
@@ -39,6 +40,9 @@ impl<'a> PreparedEventCircuit<'a> {
                 line.supports_sided_history_events() && line.ltra_branch_matrix_indices().is_none()
             })
             && circuit.resistors.thermal.iter().all(Option::is_none)
+            && circuit
+                .behavioral_sources
+                .has_smooth_physical_time_equations()
             && circuit
                 .capacitors
                 .value_expressions
@@ -253,6 +257,25 @@ impl<'a> PreparedEventCircuit<'a> {
                 check_abort(abort)?;
             }
             terminals(is.node_pos[index], is.node_neg[index])?;
+        }
+        for source in &circuit.behavioral_sources.voltage_sources {
+            check_abort(abort)?;
+            source
+                .physical_time_program()
+                .ok_or_else(|| behavioral::unsupported(&source.name))?;
+            terminals(source.node_pos, source.node_neg)?;
+            claim(
+                &mut equations,
+                source.branch_ordinal,
+                EventBranchEquation::Algebraic(options.voltage_tolerance),
+            )?;
+        }
+        for source in &circuit.behavioral_sources.current_sources {
+            check_abort(abort)?;
+            source
+                .physical_time_program()
+                .ok_or_else(|| behavioral::unsupported(&source.name))?;
+            terminals(source.node_pos, source.node_neg)?;
         }
         for (magnetic, count) in [(false, rb.len()), (true, l.len())] {
             for index in 0..count {

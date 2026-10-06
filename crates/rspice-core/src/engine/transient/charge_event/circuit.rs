@@ -7,6 +7,7 @@ use crate::device::Bjt;
 use crate::engine::periodic_capability::PeriodicDeviceFamily;
 use rspice_veriloga_runtime::transport_delay::{DelayBuffer, DelayTimeSide};
 
+mod behavioral;
 mod coupling;
 mod prepare;
 mod sample;
@@ -90,6 +91,7 @@ impl PreparedEventCircuit<'_> {
                     self.constant_sources
                         .len()
                         .saturating_add(self.circuit.voltage_sources.len())
+                        .saturating_add(self.circuit.behavioral_sources.voltage_sources.len())
                         .saturating_mul(8),
                 ),
             options.limits.max_result_values,
@@ -117,6 +119,22 @@ impl PreparedEventCircuit<'_> {
                 positive: table.node_pos[index],
                 negative: table.node_neg[index],
                 branch: self.circuit.num_nodes() + table.branch_indices[index] - 1,
+                value,
+                slope,
+            });
+        }
+        for source in &self.circuit.behavioral_sources.voltage_sources {
+            let [value, slope] = self.behavioral_time_values(
+                &source.name,
+                source.physical_time_program(),
+                time,
+                options,
+                abort,
+            )?;
+            sources.push(EventVoltageSource {
+                positive: source.node_pos,
+                negative: source.node_neg,
+                branch: self.circuit.num_nodes() + source.branch_ordinal - 1,
                 value,
                 slope,
             });

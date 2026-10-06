@@ -121,3 +121,27 @@ fn startup_op_contract_retains_time_varying_forcing_provenance() {
         .unwrap();
     assert!(!point.stationary);
 }
+
+#[test]
+fn startup_behavioral_stationarity_requires_constant_forcing_not_a_zero_initial_slope() {
+    for (source, stationary) in [
+        ("B1 n 0 V={1}", true),
+        ("B1 n 0 V={1+time^2}", false),
+        ("B1 0 n I={.001}", true),
+        ("B1 0 n I={.001+time^2}", false),
+    ] {
+        let (engine, circuit, contract, options) = fixture(source);
+        let point = engine
+            .physical_startup_operating_point(&circuit, contract, &options, &NoAbort)
+            .unwrap()
+            .unwrap();
+        assert_eq!(point.stationary, stationary, "{source}");
+    }
+    let (engine, circuit, contract, options) = fixture("B1 n 0 V={if(time>1,2,1)}");
+    assert!(
+        engine
+            .physical_startup_operating_point(&circuit, contract, &options, &NoAbort)
+            .unwrap()
+            .is_none()
+    );
+}

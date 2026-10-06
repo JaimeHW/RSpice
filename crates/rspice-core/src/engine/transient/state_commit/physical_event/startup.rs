@@ -47,6 +47,7 @@ impl Engine {
             // A line owns incoming waves as well as electrical coordinates;
             // an OP certificate alone does not authenticate that history.
             || !circuit.tlines.is_empty()
+            || !circuit.behavioral_sources.has_smooth_physical_time_equations()
             || contract.nodal_gmin != options.nodal_gmin
             || contract.junction_gmin.is_some_and(|gmin| {
                 gmin != self.effective_device_junction_gmin(self.config.convergence_config.gmin_target)
@@ -72,7 +73,16 @@ impl Engine {
                 return Ok(None);
             }
         }
-        let mut stationary = true;
+        let mut stationary = circuit
+            .behavioral_sources
+            .voltage_sources
+            .iter()
+            .all(|source| source.physical_time_is_stationary())
+            && circuit
+                .behavioral_sources
+                .current_sources
+                .iter()
+                .all(|source| source.physical_time_is_stationary());
         for (index, spec) in voltage
             .source_specs
             .iter()

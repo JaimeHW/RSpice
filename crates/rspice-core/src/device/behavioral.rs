@@ -20,6 +20,7 @@ use thiserror::Error;
 
 pub(crate) mod breakpoints;
 mod history;
+mod physical;
 pub(crate) mod integrals;
 pub(crate) use history::BehavioralAcceptedState;
 pub(crate) use integrals::BehavioralFqPoint;

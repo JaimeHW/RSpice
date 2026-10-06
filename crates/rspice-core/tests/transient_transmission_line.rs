@@ -2,6 +2,64 @@ use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect, TransientCheck
 use rspice_core::netlist::Netlist;
 
 #[test]
+fn smooth_behavioral_drive_preserves_matched_line_delay_and_continuation() {
+    let deck = Netlist::parse(
+        "behavioral matched line\nBD drive 0 V={sin(2*pi*1e9*time)}\nRS drive near 50\nT1 near 0 far 0 Z0=50 TD=1n\nRL far 0 50\n.options GMIN=0 RELTOL=1e-7 VNTOL=1e-10 ABSTOL=1e-16\n.save v(far)\n.end\n",
+    ).unwrap();
+    for dialect in [
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+        SpiceDialect::BestAvailable,
+    ] {
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        let result = engine.run_tran(&deck, 2.5e-9, 2e-12).unwrap();
+        let (_, checkpoint) = engine.run_tran_checkpointed(&deck, 1.2e-9, 2e-12).unwrap();
+        let (resumed, _) = engine
+            .run_tran_resume(&deck, &checkpoint, 2.5e-9, 2e-12)
+            .unwrap();
+        for result in [&result, &resumed] {
+            for (&time, &voltage) in result
+                .time
+                .iter()
+                .zip(result.try_voltage_waveform_named("far").unwrap())
+            {
+                let expected = 0.5 * (std::f64::consts::TAU * 1e9 * (time - 1e-9).max(0.0)).sin();
+                // Linear wave-history interpolation at 2 ps contributes at
+                // most 1e-5 V for this tone; include a bounded solve margin.
+                assert!(
+                    (voltage - expected).abs() < 5e-5,
+                    "{dialect:?} at {time:e}: {voltage:e} vs {expected:e}"
+                );
+            }
+            assert_eq!(result.time.last(), Some(&2.5e-9));
+            assert!(
+                result
+                    .current_impulses
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .all(|trace| trace.complete)
+            );
+            if result.time[0] < 1e-9 {
+                assert!(
+                    result
+                        .time
+                        .iter()
+                        .any(|&time| (time - 1e-9).abs() <= 8.0 * f64::EPSILON * 1e-9),
+                    "{dialect:?}: missing first wavefront in {:?}; nearest {:?}",
+                    result.time.first(),
+                    result
+                        .time
+                        .iter()
+                        .min_by(|a, b| (**a - 1e-9).abs().total_cmp(&(**b - 1e-9).abs()))
+                );
+            }
+        }
+        assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+    }
+}
+
+#[test]
 fn loaded_lossless_line_preserves_dc_bias_through_startup_and_resume() {
     for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
         for (near_reference, far_reference, polarity) in

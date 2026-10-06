@@ -201,6 +201,22 @@ impl PreparedEventCircuit<'_> {
                 }
             }
         }
+        for source in &self.circuit.behavioral_sources.current_sources {
+            let [value, slope] = self.behavioral_time_values(
+                &source.name,
+                source.physical_time_program(),
+                time,
+                options,
+                abort,
+            )?;
+            for (row, sign) in [(source.node_pos, 1.0), (source.node_neg, -1.0)] {
+                sample.f.stamp_rhs(row, -sign * value);
+                if row != 0 {
+                    sample.f_time[row - 1] =
+                        sum([(sample.f_time[row - 1], 1.0), (slope, sign)].into_iter())?;
+                }
+            }
+        }
         for (index, (model, history)) in self.models.iter_mut().zip(phase).enumerate() {
             check_abort(abort)?;
             model.stamp_periodic_fq_with_forward_limit(

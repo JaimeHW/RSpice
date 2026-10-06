@@ -18,6 +18,8 @@ use rspice_core::{Engine, GpTransientPhaseModel, Netlist, SimulationConfig, Spic
 mod charge;
 #[path = "gp_phase_regimes/coverage_gaps.rs"]
 mod coverage_gaps;
+#[path = "gp_phase_regimes/behavioral.rs"]
+mod behavioral;
 #[path = "gp_phase_regimes/private_nodes.rs"]
 mod private_nodes;
 #[path = "gp_phase_regimes/static_private.rs"]

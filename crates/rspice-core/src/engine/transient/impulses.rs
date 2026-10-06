@@ -95,7 +95,10 @@ pub(super) fn initialize(
                 }
             }
             DerivedTransientBranchCurrentKind::LinearResistor
-            | DerivedTransientBranchCurrentKind::IndependentCurrentSource => {}
+            | DerivedTransientBranchCurrentKind::IndependentCurrentSource
+            // The admitted prescribed B-current is finite and memoryless;
+            // its impulse is zero even when a voltage-source impulse occurs.
+            | DerivedTransientBranchCurrentKind::BehavioralCurrentSource => {}
             _ => {
                 return Err(failure(
                     "derived current has no qualified physical impulse owner",
