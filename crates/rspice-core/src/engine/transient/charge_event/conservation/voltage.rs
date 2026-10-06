@@ -40,8 +40,10 @@ impl VoltageSeed {
                         .ok_or_else(|| error("invalid voltage seed coefficient"))?,
                 );
             }
+            // ExactRow stores the right-hand side. The query projection
+            // already negates the eliminated residual coefficients.
             row.values
-                .insert(Input::Source(index), integer_coefficient(-1.0).unwrap());
+                .insert(Input::Source(index), integer_coefficient(1.0).unwrap());
             if reducer.admit(row, 1, abort)?.is_some() {
                 return Err(error(
                     "dependent voltage constraints in current-controlled event",
@@ -59,7 +61,7 @@ impl VoltageSeed {
             let mut row = ExactRow::default();
             row.nodes.insert(node, BigInt::from(1));
             row.values
-                .insert(Input::Incoming(node - 1), BigInt::from(-1));
+                .insert(Input::Incoming(node - 1), BigInt::from(1));
             reducer.admit(row, 1, abort)?;
         }
         let mut forms = Vec::with_capacity(constrained.len());

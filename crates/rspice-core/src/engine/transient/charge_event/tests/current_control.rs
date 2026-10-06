@@ -27,6 +27,49 @@ fn controlled(
 }
 
 #[test]
+fn current_controlled_startup_seed_satisfies_authored_voltage_constraints() {
+    let options = options();
+    for value in [-2.0, 2.0] {
+        for gain in [-3.0, 3.0] {
+            let sources = vec![
+                EventVoltageSource {
+                    positive: 1,
+                    negative: 0,
+                    branch: 3,
+                    value,
+                    slope: 0.0,
+                    control: None,
+                },
+                EventVoltageSource {
+                    positive: 2,
+                    negative: 3,
+                    branch: 4,
+                    value: 0.5,
+                    slope: 0.0,
+                    control: Some(EventVoltageControl {
+                        positive: 1,
+                        negative: 0,
+                        gain,
+                    }),
+                },
+            ];
+            let topology = controlled(3, 5, &[(1, 0), (2, 0), (3, 0)], sources, &[], &options);
+            let incoming = [17.0, 0.25, -2.0, 0.0, 0.0];
+            let mut trial = incoming;
+            topology
+                .project_current_controlled_voltage_seed(&incoming, &mut trial, &NoAbort)
+                .unwrap();
+            close(trial[0], value, 1e-14);
+            close(trial[1] - trial[2], 0.5 + gain * trial[0], 1e-14);
+            // The free coordinate is retained; branch slots remain private
+            // impulse unknowns and are not populated with finite currents.
+            assert_eq!(trial[1], incoming[1]);
+            assert_eq!(trial[3..], incoming[3..]);
+        }
+    }
+}
+
+#[test]
 fn controlled_current_transfers_source_charge_and_finite_current_to_another_capacitor() {
     let options = options();
     for gain in [-3.0, 2.0] {
