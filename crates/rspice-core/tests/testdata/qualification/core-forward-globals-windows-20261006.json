@@ -1,0 +1,200 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C04",
+  "related_packages": [
+    "C00",
+    "C01",
+    "C12"
+  ],
+  "batch": "Static global binding for deferred sources and numeric model consumers",
+  "status": "static_global_projections_delivered_general_dependency_planning_remains",
+  "base_revision": "e1121fcaa5f2825bfad7018efc7c3ef79a2c57b2",
+  "source_revision": "138b4f16e930498b093e01e0c87108ff6215f592",
+  "implementation_commits": [
+    "138b4f16e930498b093e01e0c87108ff6215f592"
+  ],
+  "captured_utc": "2026-10-06T19:58:07.018846+00:00",
+  "host": "x86_64-pc-windows-msvc",
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+    "cli_rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "cli_toolchain_reason": "Previously reproduced pinned Rust 1.94/faer compiler crash in CLI runtime builds; repository pin unchanged.",
+    "wasm_target": "wasm32-unknown-unknown",
+    "wasm_profile": "release",
+    "wasm_features": [
+      "wasm",
+      "veriloga-wasm-jit"
+    ],
+    "wasm_runtime": "headless Chrome dedicated worker",
+    "WASM_BINDGEN_TEST_TIMEOUT": "180",
+    "webdriver_config_sha256": "93458ed98943268e089c8c9a793bf2e899872e62941ac54795b0c27b7104785b"
+  },
+  "commands": [
+    {
+      "command": "cargo test --locked -p rspice-core --lib --test forward_globals --test forward_sources --test forward_parameters --test temperature_options --test statistical_params --test frequency_data --test netlist_conditionals --test bsource_temper --test step_temp --test control_noise --test control_dc --test control_execution --test expression_stack_safety --test subckt_instance_params --test measurements_scalar_contract --test measurements_statistics_contract --test measure_bound_reference --test ac_physical_dependents --test transient_passive_currents -- --test-threads=8",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        4950,
+        22,
+        4,
+        6,
+        8,
+        5,
+        5,
+        8,
+        11,
+        11,
+        7,
+        3,
+        11,
+        10,
+        12,
+        31,
+        2,
+        8,
+        21,
+        10
+      ],
+      "log": "target/core-qualification/forward-globals-native-verified.log",
+      "log_sha256": "43865a0e2ffe1260e69aa0ae04ba26866f73bfa367831ed215003115666217f8"
+    },
+    {
+      "command": "cargo +1.95.0 test --locked -p rspice-cli --test temperature_axis --test control_noise --test control_dc --target-dir target/core-cli-195",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1,
+        1,
+        6
+      ],
+      "log": "target/core-qualification/forward-globals-cli-verified.log",
+      "log_sha256": "9d3575996395a4988dcc8f4d0db9553ef73b8bb0d311004cf1174184868432d1"
+    },
+    {
+      "command": "cargo clippy --locked -p rspice-core -p rspice-cli -p rspice-wasm -p rspice-engine-adapter --lib --bins -- -D warnings",
+      "outcome": "passed",
+      "test_target_passed_counts": [],
+      "log": "target/core-qualification/forward-globals-clippy-verified.log",
+      "log_sha256": "91f1b54b36b2cca3c3637bf807b631f1749d1a57bfd6ffae717427147af90b7a"
+    },
+    {
+      "command": "cargo clippy --locked -p rspice-core --test forward_globals -- -D warnings",
+      "outcome": "passed",
+      "test_target_passed_counts": [],
+      "log": "target/core-qualification/forward-globals-test-clippy-verified.log",
+      "log_sha256": "eab54efe6264fb323d4a6a3f8760aee3d0410b08744961cf576a014963e7d53a"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test forward_globals --test forward_sources --test forward_parameters --test temperature_options --test frequency_data -- --nocapture",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        8,
+        10,
+        10,
+        7,
+        19
+      ],
+      "log": "target/core-qualification/forward-globals-wasm-verified.log",
+      "log_sha256": "123cbfc1567d1e43802c92ced0263b7aa15a75e0280c0fdeeed58472fcc9d7f0"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test forward_source_remaining_probe -- --nocapture",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1
+      ],
+      "log": "target/core-qualification/forward-globals-probe-verified.log",
+      "log_sha256": "7d7e98ff2b831583ebff54aea502648869738b21952ff0fc9d9c2a98322cb557"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib engine::requirements",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        3
+      ],
+      "log": "target/core-qualification/forward-globals-ledger.log",
+      "log_sha256": "fd711e08c97cf6bf5b88c39235843bb451bb53895bfd291907ff15ec93cb97cc"
+    }
+  ],
+  "unique_passed_tests": {
+    "native": 5153,
+    "optimized_wasm": 54
+  },
+  "test_accounting": "4950 default core unit tests + 195 selected core integration tests + 8 CLI tests. Discovery and publication reruns are excluded from unique totals.",
+  "ignored_default_core_unit_tests": [
+    "device::mosfet::bsim3v3::tests::live_ngspice_oracle_dc_and_charge",
+    "device::mosfet::bsim4v8::tests::live_ngspice_oracle_dc_and_charge",
+    "engine::transient::residual::tests::diffamp_one_step_map_spectral_radius_probe"
+  ],
+  "source_files_sha256": {
+    "crates/rspice-core/README.md": "a6f7f3ae295f7ef95574728dc1bf422907ade29d933021c5af96a89f3243650b",
+    "crates/rspice-core/src/netlist/expr/behavioral.rs": "fce0fe6e332ac83f53a3bd40833fcde11bd6ac83c658b47ca827eb145813e392",
+    "crates/rspice-core/src/netlist/expr/context.rs": "b43f3f67a086871da9a43eb4264c18b4c02150a3486c331e0f2923d9d0bd00db",
+    "crates/rspice-core/src/netlist/expr/eval.rs": "796d341e381012df44649d093a31bc0ae2570c4bf827f6f2f673bb6e5af8c465",
+    "crates/rspice-core/src/netlist/expr/resolution.rs": "12c503c608f81c802f906b2d034b2ec648f337f5e513e898654708e2e1e014f6",
+    "crates/rspice-core/tests/forward_globals.rs": "5398b7ab94ad13a56f713c4ed42f0211805cd513b0658129fcdb0d0adf0961eb",
+    "Cargo.lock": "ce8dc157a78d2268ff926067f15f08002b90185b9abd7320c4952d3a266fcf8a",
+    "rust-toolchain.toml": "d6dadd139dac178482d6cca3a8945b8a7e0f7df1f0733872657cbc420b2d82e6"
+  },
+  "publication_ledger_sha256": "a11d6d97fe0dc8611956f9694be94c675f2b82ed926d8f0f947001f1ab48b8ee",
+  "implementation": [
+    "Finalize static globals with the same namespace-aware resolver/cache as ordinary definitions, then publish numeric projections while retaining global bodies and origins.",
+    "Read captured global samples from the global namespace, preserving ordinary shadowing; reuse root and dependency samples rather than evaluating them again.",
+    "Inspect compiled function graphs and retained dependencies for statistical calls and runtime identifiers; respect user-function overrides, formal arguments and LIMIT arity.",
+    "Available-parameter materialization resolves original numeric expressions instead of evaluating real-valued behavioral expansion, preserving complex dependencies and shared draws."
+  ],
+  "regression_file": "crates/rspice-core/tests/forward_globals.rs",
+  "independent_oracles": [
+    "Forward voltage/current sources yield 3 V and 2 V across 1 ohm loads; IMG(3+2j) yields a model value of 2.",
+    "Seed-37 reference streams verify shared source/model/ordinary/global values and the untouched next draw for AUNIF, AGAUSS, two-argument LIMIT and user functions, including repeated finalization.",
+    "Forward global temperature, TNOM, source and model bindings share the same sampled ambient value.",
+    "Public DC and AC-magnitude sensitivity of base^2 at base=2 equals 4.",
+    "Runtime global voltage follows 1+t through a complete 10 ms transient in both expression dialects.",
+    "Deterministic global projections follow a redefined dependency, ordinary values shadow globals, lazy branches tolerate unselected missing values and real cycles are rejected.",
+    "Unit checks exercise independent namespace samples, complex shared materialization, two/three-argument LIMIT, function overrides/formals and indirect runtime dependencies."
+  ],
+  "initial_reproduction": {
+    "base_revision": "e1121fcaa5f2825bfad7018efc7c3ef79a2c57b2",
+    "command": "cargo test --locked -p rspice-core --test forward_globals -- --nocapture",
+    "failed_tests": 4,
+    "scope": "Initial four regressions failed before implementation: missing simple/statistical global source values, stale deterministic projections, and extra sampled draws. Four additional integration tests were added after this reproduction.",
+    "log": "target/core-qualification/forward-globals-before.log",
+    "log_sha256": "e38fbecfb04ea0e318e3b8a3aad85a2e3f3c7e8d349d51c694b9400c9b35e05e"
+  },
+  "reference_evidence": {
+    "path": "C:/Users/James/Desktop/Xyce-7.10.0/Xyce-7.10/src/IOInterfacePKG/N_IO_CircuitContext.C",
+    "sha256": "122060fa5fbc7404040e4537015da4447bfcc7e59f7108fb21bfb35c985b1332",
+    "functions": [
+      "CircuitContext::resolveGlobalParameter",
+      "CircuitContext::resolveStrings"
+    ],
+    "use": "Read-only design reference for retained global expressions, parameter/function binding and distinct local random variation; no copied implementation and no claim of identical Xyce sampling policies."
+  },
+  "discovery_probe": {
+    "source_path_for_reproduction": "crates/rspice-core/tests/forward_source_remaining_probe.rs",
+    "source": "use rspice_core::{Netlist, config::ExpressionDialect, netlist::NetlistParseOptions};\n#[test]\nfn remaining_routes() {\n    for (name, source) in [\n        (\"forward_source\", \"Forward source\\n.param value={later}\\nV1 out 0 DC {value}\\nR1 out 0 1k\\n.param later=1\\n.end\\n\"),\n        (\"forward_global_source\", \"Forward global source\\n.global_param value={later}\\nV1 out 0 DC {value}\\nR1 out 0 1k\\n.param later=1\\n.end\\n\"),\n        (\"eager_analysis\", \"Eager analysis\\n.param stop={later}\\n.param later=1\\nV1 out 0 0\\nR1 out 0 1k\\n.dc V1 0 {stop} 0.1\\n.end\\n\"),\n        (\"incomplete_enclosing_scope\", \"Enclosing scope\\n.subckt local p n\\n.options temp={ambient}\\n.ends\\n.param ambient=85\\n.end\\n\"),\n        (\"provisional_domain\", \"Provisional domain\\n.param before={1/(TEMP-27)}\\n.param ambient=85\\n.options temp={ambient}\\n.end\\n\"),\n    ] {\n        for expression_dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {\n            let result = Netlist::parse_with_options(source, NetlistParseOptions { expression_dialect, ..Default::default() });\n            println!(\"{name} {expression_dialect:?}: {:?}\", result.map(|n| (n.options.temp, n.params.get(\"value\"))).map_err(|error| error.to_string()));\n        }\n    }\n}\n",
+    "log": "target/core-qualification/forward-globals-probe-verified.log",
+    "log_sha256": "7d7e98ff2b831583ebff54aea502648869738b21952ff0fc9d9c2a98322cb557",
+    "observations": [
+      "forward_source Ngspice: Ok((None, Some(1.0)))",
+      "forward_source Xyce: Ok((None, Some(1.0)))",
+      "forward_global_source Ngspice: Ok((None, Some(1.0)))",
+      "forward_global_source Xyce: Ok((None, Some(1.0)))",
+      "eager_analysis Ngspice: Err(\"Invalid value: Undefined parameter: STOP\")",
+      "eager_analysis Xyce: Err(\"Invalid value: Undefined parameter: STOP\")",
+      "incomplete_enclosing_scope Ngspice: Err(\"Syntax error at line 3: line 3: TEMP: Undefined parameter: AMBIENT\")",
+      "incomplete_enclosing_scope Xyce: Err(\"Syntax error at line 3: line 3: TEMP: Undefined parameter: AMBIENT\")",
+      "provisional_domain Ngspice: Err(\"Invalid value: line 2: Division by zero\")",
+      "provisional_domain Xyce: Ok((Some(85.0), None))"
+    ],
+    "accounting": "Temporary discovery probe removed after execution and excluded from test totals; restore the embedded source to reproduce its command."
+  },
+  "limitations": [
+    "All 15 plan packages remain unfinished; control dispatch remains 5/29 and table control/document/adapter integration remains open.",
+    "Eager analysis-card binding, incomplete enclosing scopes and ngspice provisional-temperature domain errors remain reproduced.",
+    "This does not qualify all global/statistical/runtime combinations, temperature-dependent sampling, derived-context policies, waveforms, model families or sensitivity routes.",
+    "Compiled sample classification and behavioral validation add work and allocations; whole-run memory budgets, cancellation latency and throughput still require qualification.",
+    "Three existing native unit tests remain ignored. Selected integrations and optimized WASM execution are not full cross-feature qualification."
+  ]
+}

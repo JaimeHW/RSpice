@@ -502,13 +502,15 @@ The parser work supporting C04b has delivered these contracts:
 | `07b4071bf` | Suspended numeric evaluation of retained ordinary/global graphs, complex values and function frames, distinct namespaces, one-time materialization of shared option dependencies | `core-parameter-resolution-windows-20261006.json` |
 | `1a67d5f85` | Ordinary forward declarations in both dialects, bare/signed aliases, duplicate policies, static ngspice/runtime Xyce semantics, failed-probe draw preservation and declaration origins | `core-forward-parameters-windows-20261006.json` |
 | `1e21d0d20` | Ordinary parameters finalized before deferred sources/models, one shared sample, source-grammar probes without live draws, physical root-source errors, public transient and DC/AC sensitivity checks | `core-forward-sources-windows-20261006.json` |
+| `138b4f16e` | Static global projections for deferred sources/models; retained global bodies and distinct namespaces; shared samples including user functions and two-argument LIMIT; indirect runtime-dependency guard; complex numeric materialization | `core-forward-globals-windows-20261006.json` |
 
 Continue shared dependency binding in these concrete cases:
 
-- Bind eager analysis-card values, such as `.DC ... {stop}` with a retained forward `stop`, without losing authored analysis order or source-ordered option effects. Use the same card grammar after resolution and preserve typed result identities.
-- Resolve static global bindings required by deferred sources, such as `.GLOBAL_PARAM value={later}` followed by `V1 out 0 DC {value}`. Preserve independent namespaces, runtime global definitions and sampled projections; general global/statistical consumers still need qualification.
+- Bind eager analysis-card values, such as `.DC ... {stop}` with a retained forward `stop`, without losing authored analysis order or source-ordered option effects. Use the same card grammar after resolution and preserve typed result identities. Stage each parsed card and its effects before publication: DC diagnostics, transient-noise option bindings, Monte Carlo source identities, and Fourier/FFT output requests must retain authored order. Capture lexical scalar/function bindings and preserve the random stream on failed forward probes; replaying all of ParseState or appending deferred analyses at the end would violate these contracts.
 - Resolve parent bindings that are incomplete when a child scope closes, while rejecting sibling leakage and retaining instance scope.
 - Reconcile ngspice expressions that are invalid only at the provisional temperature, such as `1/(TEMP-27)`, before treating them as final domain errors. Preserve bounded replay and cancellation.
+
+General statistical/runtime binding still requires broader qualification, including temperature-dependent sampling, derived-context policies, cancellation inside validation/classification, and allocation/performance bounds. The static global delivery does not close these contracts.
 
 These are reproduced remaining cases, not successful default substitutions. Retain the qualified binding, duplicate-selection, random-draw and diagnostic contracts while implementing them. The local ngspice 46 `src/frontend/inpcom.c` functions `inp_sort_params` and `inp_get_param_level` provide declaration-planning reference evidence; RSpice's explicit definition policies must still be honored.
 
