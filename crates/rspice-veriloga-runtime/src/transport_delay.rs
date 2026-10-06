@@ -14,6 +14,7 @@ mod slope;
 pub use slope::DelayTimeSide;
 mod event;
 pub use event::{DelayEvent, DelayEventArrival, DelayEventOrder};
+mod storage;
 
 /// A clamped delayed time, held exactly as two binary64
 /// words. Rounding the absolute target alone can lose a physical delay or
@@ -958,6 +959,8 @@ impl DelayBuffer {
         max_delay: Option<f64>,
     ) -> Result<(), String> {
         let sample = self.direct_sample(time, value, delay, max_delay)?;
+        self.try_reserve_sample(None)
+            .map_err(|error| format!("delay sample allocation failed: {error}"))?;
         self.candidate = Some(sample);
         self.apply_validated_commit();
         Ok(())
@@ -1012,6 +1015,8 @@ impl DelayBuffer {
         max_delay: Option<f64>,
     ) -> Result<(), String> {
         let sample = self.discontinuity_sample(time, left, right, delay, max_delay)?;
+        self.try_reserve_sample(Some(DelayEventOrder::Unknown))
+            .map_err(|error| format!("delay event allocation failed: {error}"))?;
         self.candidate = Some(sample);
         self.apply_validated_commit();
         Ok(())
@@ -1317,6 +1322,8 @@ impl DelayBuffer {
     /// both accepted history and any current candidate unchanged.
     pub fn restore_checkpoint(&mut self, checkpoint: &DelayCheckpoint) -> Result<(), String> {
         Self::validate_checkpoint(checkpoint)?;
+        self.reserve_restoration(checkpoint)
+            .map_err(|error| format!("delay restoration allocation failed: {error}"))?;
         self.samples.clear();
         self.samples.extend(checkpoint.samples.iter().copied());
         self.left_limits.clear();

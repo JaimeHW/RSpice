@@ -85,6 +85,8 @@ impl DelayBuffer {
         max_delay: Option<f64>,
     ) -> Result<(), String> {
         let sample = self.event_sample(time, event, delay, max_delay)?;
+        self.try_reserve_sample(Some(event.order))
+            .map_err(|error| format!("delay event allocation failed: {error}"))?;
         self.candidate = Some(sample);
         self.apply_validated_commit();
         Ok(())
