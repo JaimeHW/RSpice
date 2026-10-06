@@ -153,6 +153,7 @@ fn check_xspice_build(
     match Engine::new(config).build_circuit_with_abort(netlist, &crate::abort::ProcessAbort) {
         Ok(_) => Ok(()),
         Err(rspice_core::SimulationError::Aborted) => Err(CliError::Interrupted),
+        Err(error @ rspice_core::SimulationError::ResourceLimit(_)) => Err(error.into()),
         Err(error) => {
             result.errors.push(ValidationIssue {
                 message: format!("XSPICE build validation failed: {error}"),

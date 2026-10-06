@@ -132,7 +132,5 @@ fn write_hdf5_output(path: &std::path::Path, table: &ExportTable) -> Result<(), 
         data.transient = Some(section);
     }
 
-    write_hdf5(path, &data).map_err(|err| CliError::ConversionError {
-        message: err.to_string(),
-    })
+    write_hdf5(path, &data).map_err(|error| crate::hdf5::map_output_error(path, error))
 }
