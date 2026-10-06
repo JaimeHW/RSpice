@@ -291,7 +291,11 @@ fn check_external_model_build(
         return Ok(());
     }
     let _external_guard = XspiceCheckExternalRuntimeGuard::install();
-    let build = engine.build_circuit_with_abort(netlist, &crate::abort::ProcessAbort);
+    // A cached runtime still has to satisfy this invocation's source limits.
+    // Use the same bounded discovery as `run` before accepting a cache hit.
+    let build = engine
+        .veriloga_source_dependencies_with_abort(netlist, &crate::abort::ProcessAbort)
+        .and_then(|_| engine.build_circuit_with_abort(netlist, &crate::abort::ProcessAbort));
     result
         .warnings
         .extend(

@@ -158,3 +158,75 @@ fn control_runs_retain_compiler_warnings_and_check_refuses_broken_models() {
         "{result}"
     );
 }
+
+#[test]
+fn check_preserves_source_resource_failures_with_cold_and_warm_caches() {
+    for (setting, resource, limit) in [
+        ("max_include_depth", "include_depth", 1),
+        ("max_expanded_source_bytes", "expanded_source_bytes", 256),
+        (
+            "max_dependency_source_bytes",
+            "dependency_source_bytes",
+            256,
+        ),
+    ] {
+        for warm in [false, true] {
+            let (root, deck) = fixture(&format!("check_{setting}_{warm}"));
+            let child = root.join("child.va");
+            let source = std::fs::read_to_string(&child).unwrap();
+            let parameters = (0..128)
+                .map(|index| format!("parameter real q{index}=1;\n"))
+                .collect::<String>();
+            std::fs::write(
+                &child,
+                source.replace(
+                    "module chatty(p,n);",
+                    &format!("module chatty(p,n);\n{parameters}"),
+                ),
+            )
+            .unwrap();
+            let cache = root.join("cache");
+            if warm {
+                let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+                    .args(["--quiet", "run"])
+                    .arg(&deck)
+                    .env("RSPICE_VERILOGA_CACHE_DIR", &cache)
+                    .output()
+                    .unwrap();
+                assert!(output.status.success(), "{output:?}");
+                assert!(std::fs::read_dir(&cache).unwrap().any(|entry| {
+                    entry
+                        .unwrap()
+                        .path()
+                        .extension()
+                        .is_some_and(|extension| extension == "json")
+                }));
+            }
+            let config = root.join("config.toml");
+            std::fs::write(&config, format!("[resources]\n{setting}={limit}\n")).unwrap();
+            let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+                .args(["--quiet", "--error-format", "json", "--config"])
+                .arg(&config)
+                .args(["check", "--json"])
+                .arg(&deck)
+                .env("RSPICE_VERILOGA_CACHE_DIR", &cache)
+                .output()
+                .unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(75),
+                "{setting}, warm={warm}: {output:?}"
+            );
+            let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+            assert_eq!(error["error"]["resource"], resource, "{error}");
+            assert_eq!(error["error"]["limit"], limit, "{error}");
+            assert!(error["error"]["requested"].as_u64().unwrap() > limit);
+            let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(report["valid"], false, "{report}");
+            assert_eq!(
+                report["errors"][0]["details"]["resource"], resource,
+                "{report}"
+            );
+        }
+    }
+}
