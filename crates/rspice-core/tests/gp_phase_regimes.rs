@@ -14,6 +14,10 @@ use rspice_core::engine::TransientResult;
 use rspice_core::numerics::integration::IntegrationMethod;
 use rspice_core::{Engine, GpTransientPhaseModel, Netlist, SimulationConfig, SpiceDialect};
 
+#[path = "gp_phase_regimes/charge.rs"]
+mod charge;
+use charge::ChargeLaw;
+
 const IS: f64 = 1e-16;
 const BF: f64 = 80.0;
 const BR: f64 = 5.0;
@@ -59,8 +63,14 @@ const REGIMES: [Regime; 3] = [
 ];
 
 struct State {
+    base: f64,
+    collector: f64,
+    base_rate: f64,
+    collector_rate: f64,
     forward: f64,
     reverse: f64,
+    forward_rate: f64,
+    reverse_rate: f64,
     charge_factor: f64,
     forward_transport: f64,
     forward_transport_rate: f64,
@@ -111,18 +121,25 @@ impl Regime {
         let qb = 0.5 * q1 * (1.0 + root);
         let dqb = 0.5 * dq1 * (1.0 + root) + q1 * (df / IKF + dr / IKR) / root;
         State {
+            base,
+            collector,
+            base_rate: db,
+            collector_rate: dc,
             forward,
             reverse,
+            forward_rate: df,
+            reverse_rate: dr,
             charge_factor: qb,
             forward_transport: forward / qb,
             forward_transport_rate: (df * qb - forward * dqb) / (qb * qb),
         }
     }
 
-    fn deck(self, polarity: f64) -> Netlist {
+    fn deck(self, polarity: f64, charge: ChargeLaw) -> Netlist {
         let kind = if polarity > 0.0 { "NPN" } else { "PNP" };
+        let charge_parameters = charge.parameters();
         Netlist::parse(&format!(
-            "Independent GP {}\nVC c 0 DC {} SIN({} {} 700MEG 0 0 90)\nVB b 0 DC {} SIN({} {} 500MEG 0 0 90)\nVE e 0 0\nQ1 c b e qm\n.model qm {kind} IS={IS} BF={BF} BR={BR} IKF={IKF} IKR={IKR} VAF={VAF} VAR={VAR} TF={TF} PTF=57.29577951308232 TNOM=27\n.options TEMP=27 GMIN=0 RELTOL=.01 ABSTOL=1e-15 VNTOL=1e-10 METHOD=TRAP MAXORD=2\n.end\n",
+            "Independent GP {}\nVC c 0 DC {} SIN({} {} 700MEG 0 0 90)\nVB b 0 DC {} SIN({} {} 500MEG 0 0 90)\nVE e 0 0\nQ1 c b e qm\n.model qm {kind} IS={IS} BF={BF} BR={BR} IKF={IKF} IKR={IKR} VAF={VAF} VAR={VAR} TF={TF} PTF=57.29577951308232 TNOM=27 {charge_parameters}\n.options TEMP=27 GMIN=0 RELTOL=.01 ABSTOL=1e-15 VNTOL=1e-10 METHOD=TRAP MAXORD=2\n.end\n",
             self.name,
             polarity * self.collector,
             polarity * (self.collector + self.collector_amplitude),
@@ -140,6 +157,8 @@ struct Error {
     base: f64,
     collector_peak: f64,
     base_peak: f64,
+    kcl: f64,
+    kcl_budget_fraction: f64,
 }
 
 fn compare(
@@ -148,6 +167,7 @@ fn compare(
     polarity: f64,
     dialect: SpiceDialect,
     model: GpTransientPhaseModel,
+    charge: ChargeLaw,
 ) -> Error {
     let collector = result.try_branch_current_waveform_named("vc").unwrap();
     let base = result.try_branch_current_waveform_named("vb").unwrap();
@@ -157,6 +177,8 @@ fn compare(
         base: 0.0,
         collector_peak: 0.0,
         base_peak: 0.0,
+        kcl: 0.0,
+        kcl_budget_fraction: 0.0,
     };
     let mut previous = regime.state(0.0, dialect).forward_transport;
     let mut older = previous;
@@ -188,12 +210,13 @@ fn compare(
             previous_step = step;
             next
         };
-        // There is no collector-connected charge (TR=CJC=CJS=0). All forward
-        // diffusion charge TF*I_BE/Q_B resides between the clamped B and E.
-        let expected_collector =
-            -polarity * (delayed - state.reverse / state.charge_factor - state.reverse / BR);
-        let expected_base = -polarity
-            * (state.forward / BF + state.reverse / BR + TF * state.forward_transport_rate);
+        // Depletion capacitances are zero. Forward diffusion charge resides
+        // between B and E; reverse transit charge resides between B and C.
+        let (forward_rate, reverse_rate) = charge.rates(&state);
+        let expected_collector = -polarity
+            * (delayed - state.reverse / state.charge_factor - state.reverse / BR - reverse_rate);
+        let expected_base =
+            -polarity * (state.forward / BF + state.reverse / BR + forward_rate + reverse_rate);
         error.collector = error
             .collector
             .max((collector[index] - expected_collector).abs());
@@ -201,8 +224,13 @@ fn compare(
         error.collector_peak = error.collector_peak.max(expected_collector.abs());
         error.base_peak = error.base_peak.max(expected_base.abs());
         let scale = collector[index].abs() + base[index].abs() + emitter[index].abs();
+        let roundoff = charge.companion_roundoff(&state, dialect, result.step_sizes[index]);
+        let kcl = (collector[index] + base[index] + emitter[index]).abs();
+        let kcl_budget = 1e-14 + 1e-9 * scale + roundoff;
+        error.kcl = error.kcl.max(kcl);
+        error.kcl_budget_fraction = error.kcl_budget_fraction.max(kcl / kcl_budget);
         assert!(
-            (collector[index] + base[index] + emitter[index]).abs() < 1e-14 + 1e-9 * scale,
+            kcl < kcl_budget,
             "{regime:?}/{dialect:?}/{model:?}/polarity={polarity}/t={time}/dt={}: terminal KCL {}, {}, {}; expected C={expected_collector}, B={expected_base}",
             result.step_sizes[index],
             collector[index],
@@ -220,6 +248,24 @@ fn run(
     model: GpTransientPhaseModel,
     step: f64,
 ) -> Error {
+    run_with_charge(
+        regime,
+        polarity,
+        dialect,
+        model,
+        step,
+        ChargeLaw::UNMODULATED,
+    )
+}
+
+fn run_with_charge(
+    regime: Regime,
+    polarity: f64,
+    dialect: SpiceDialect,
+    model: GpTransientPhaseModel,
+    step: f64,
+    charge: ChargeLaw,
+) -> Error {
     let mut config = SimulationConfig {
         gp_transient_phase_model: model,
         integration_method: IntegrationMethod::Trapezoidal,
@@ -227,9 +273,9 @@ fn run(
     };
     config.convergence_config.gmin_target = 0.0;
     let result = Engine::new(config)
-        .run_tran(&regime.deck(polarity), STOP, step)
+        .run_tran(&regime.deck(polarity, charge), STOP, step)
         .unwrap_or_else(|error| panic!("{regime:?}/{dialect:?}/{model:?}/{polarity}: {error}"));
-    compare(&result, regime, polarity, dialect, model)
+    compare(&result, regime, polarity, dialect, model, charge)
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
