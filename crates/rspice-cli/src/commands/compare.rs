@@ -143,9 +143,9 @@ pub fn execute(
                 config.resources.limits(),
                 args.section.as_deref(),
             )?;
+            let mut comparison = validate_bless_candidate(&data, &args)?;
             bless_golden(&args.result, &args.golden, quiet, "no golden file yet")?;
             if args.format == OutputFormat::Json {
-                let mut comparison = compare_data(&data, &data, &args)?;
                 comparison.passed = false;
                 comparison
                     .problems
@@ -197,6 +197,9 @@ pub fn execute(
     let cmp_result = compare_data(&result_data, &golden_data, &args)?;
 
     let blessed = !cmp_result.passed && args.bless;
+    if blessed {
+        validate_bless_candidate(&result_data, &args)?;
+    }
 
     // Output results. JSON reports the final command outcome, so bless first
     // and only then emit a machine-readable accepted/blessed status.
@@ -299,6 +302,24 @@ fn compare_data(
                 .into(),
         }),
     }
+}
+
+/// A blessed baseline must pass the same selection when compared to itself.
+/// Missing or ambiguous requested probes cannot become an accepted reference.
+fn validate_bless_candidate(
+    candidate: &ComparisonData,
+    args: &CompareArgs,
+) -> Result<CompareResult, CliError> {
+    let comparison = compare_data(candidate, candidate, args)?;
+    if !comparison.passed {
+        return Err(CliError::VerificationFailed {
+            message: format!(
+                "cannot bless a result that does not satisfy the requested comparison: {}",
+                comparison.problems.join("; ")
+            ),
+        });
+    }
+    Ok(comparison)
 }
 
 /// Waveform data structure for comparison
