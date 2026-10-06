@@ -19,7 +19,7 @@
       "id": "C02",
       "status": "in_progress",
       "requirement": "Transient decomposition",
-      "qualification_task": "Preserve exact event clocks, accepted grids, retry/rollback and checkpoint continuation for every extraction."
+      "qualification_task": "Preserve exact event clocks, accepted grids, retry/rollback and checkpoint continuation for every extraction. Checkpoint identity preparation now precedes the integration frame after admission (91bb08b05); core-control-noise-windows-20261006.json records the 1 MiB stack reproducer, preserved identity calculations and checkpoint regressions. Complete the remaining setup/trial/accept/observation/checkpoint boundaries."
     },
     {
       "id": "C03",
@@ -31,7 +31,7 @@
       "id": "C04",
       "status": "in_progress",
       "requirement": "Control execution",
-      "qualification_task": "DC and nested DC now execute through explicit commands and run, with complete axes, per-point reports, physical units, source-ordered options, immutable datasets and cumulative limits. core-control-dc-windows-20261006.json qualifies six public DC cases and core/CLI/WASM integration. The CLI runtime check requires Rust 1.95 after an internal pinned Rust 1.94 compiler crash in faer. Complete the remaining 25 command dispositions, producer dependencies, scalar/complex presentation and bounded orchestration; the full package remains in progress."
+      "qualification_task": "DC/nested DC and ordinary NOISE execute through explicit commands and run, with typed coordinates/spectra, units, source-ordered settings, immutable datasets and cumulative limits. core-control-dc-windows-20261006.json and core-control-noise-windows-20261006.json record public numerical and core/CLI/WASM evidence. Noise referral now distinguishes selected-unit BestAvailable/ngspice transfer from Xyce full AC response. CLI runtime checks require Rust 1.95 after the pinned Rust 1.94/faer compiler crash. Complete the remaining 24 dispositions, especially AC/noise table row identity and aggregate accounting, producer dependencies, scalar/complex presentation and bounded orchestration. Preserve allocator causes across frequency-grid errors; the full package remains in progress."
     },
     {
       "id": "C05",
@@ -476,7 +476,8 @@
     "tests/gp_phase_regimes/private_nodes.rs",
     "tests/fourier_current_impulses.rs",
     "tests/fft_current_derivatives.rs",
-    "tests/measure_current_derivatives.rs"
+    "tests/measure_current_derivatives.rs",
+    "tests/testdata/qualification/core-control-noise-windows-20261006.json"
   ],
   "open_inventory_tasks": [
     "Enumerate every per-instance predicate and pair it with supported/unsupported numerical fixtures; family declarations alone are insufficient.",

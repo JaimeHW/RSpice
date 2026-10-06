@@ -1,0 +1,257 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C04",
+  "related_packages": [
+    "C02",
+    "C13"
+  ],
+  "batch": "C04a/C04b ordinary NOISE control execution and two discovered core repairs",
+  "status": "partial_package_five_control_variants_implemented_twenty_four_remaining",
+  "source_revision": "ad6230cde83d5b1e3f3bfb3618bb53b6c40559fc",
+  "base_revision": "4ee9ca105b78520746b0be25e16494dbdb72a3f3",
+  "implementation_commits": [
+    "fa7fc79c0fb864b0d27a1bfaea35bc0d61c6ac14",
+    "91bb08b05eed49a2a5801114e909d652a244b673",
+    "ad6230cde83d5b1e3f3bfb3618bb53b6c40559fc"
+  ],
+  "captured_utc": "2026-10-06T15:24:23.774333+00:00",
+  "host": "x86_64-pc-windows-msvc",
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "rustc": "1.94.0 (4a4ef493e 2026-03-02)",
+    "cargo": "1.94.0 (85eff7c80 2026-01-15)",
+    "cli_test_rustc": "1.95.0 (59807616e 2026-04-14)",
+    "cli_test_cargo": "1.95.0 (f2d3ce0bd 2026-03-21)",
+    "wasm_profile": "release, Chrome dedicated worker",
+    "wasm_features": "--no-default-features --features wasm,veriloga-wasm-jit",
+    "wasm_bindgen_test_runner": "0.2.126",
+    "chromedriver": "154.0.8037.92",
+    "chrome": "154.0.8037.98",
+    "webdriver_config_sha256": "93458ed98943268e089c8c9a793bf2e899872e62941ac54795b0c27b7104785b"
+  },
+  "source_hash_scope": "Committed Git blob bytes at source_revision for changed Rust files, dependency lock and toolchain pin. Publication ledger bytes recorded separately.",
+  "source_sha256": {
+    "crates/rspice-cli/src/commands/preflight.rs": "67d48af284050fa7eee1909a56712209a0fcb58fbd6b2302520f3041b5f4b38a",
+    "crates/rspice-cli/src/commands/run/control.rs": "5c186dc4c0d6d5e1f28b00858e220a629cd12ec038f564dc9a511226b44f7904",
+    "crates/rspice-cli/src/commands/run/frequency.rs": "d537e6106891b154e1f666811d601170fd8cb9cf30f5517e3b0426131751e750",
+    "crates/rspice-cli/tests/control_noise.rs": "d940cca3fe0c2c6c751586fa3b5897f62405407cb724d1af4a00570267ef26b0",
+    "crates/rspice-core/src/analysis/noise.rs": "f41fc27670de908b0d9e83739b245ae6ef0ed8d1a9f3dec0904cab5bbeb3341d",
+    "crates/rspice-core/src/engine/control.rs": "fc89bff06d82421f494f167a37210fbd31131717a53ca34f79c9956e5971c469",
+    "crates/rspice-core/src/engine/control/analysis.rs": "5f26f531dec3e44c57bff0c96a1a9f0e95ac57299abf9dcec4c7a7eee00b7987",
+    "crates/rspice-core/src/engine/control/presentation.rs": "1c9d99a6f11cd66113991167a4ed8cf015ac28e33a239bf31dbe144b32e36843",
+    "crates/rspice-core/src/engine/control/presentation/noise.rs": "835e74493e50d909e028ab26f85215beae8d95bfeaed5e44bf0bad9d0e62338f",
+    "crates/rspice-core/src/engine/noise.rs": "bc76f8db57e1f6aec56918c92fda425737a14f68b4a766dc7167cd3f8528b4de",
+    "crates/rspice-core/src/engine/noise/input.rs": "91c2c8f864b49a526672d544d5d5e940dae760d4f6ba862fd0cbdd0b967d2f9c",
+    "crates/rspice-core/src/engine/transient.rs": "55a144d018fc2c045214be365d553cdaadb663cc76354011efd58457197a2f5a",
+    "crates/rspice-core/tests/control_noise.rs": "b0a2d80a4923fc34c2d9db428319dcabe6da99f4c7de90e524d0b0bbebf56718",
+    "crates/rspice-core/tests/noise_input_reference.rs": "33ee0ad48fae62b7f64aff4b481bd373236d611b093ac1313e2262d55e989cd2",
+    "crates/rspice-wasm/src/runners/deck/control.rs": "43618eb7803a009d38b964f6f52f97b2266aacb856044af392befda79cbe8007",
+    "Cargo.lock": "32c7249ac4fd36da8e3478cf7ddad6aece428a5f26c4e7621160360f37008a07",
+    "rust-toolchain.toml": "0a73f8e6f0e60b4a2bba97a16fdc0c66517abad4410e72582981b9578bc1aa62"
+  },
+  "publication_ledger_sha256": "fea136d8659fdee1c30136667c6a6179d7f919ea4a8ce9626e3d8955ebbc9861",
+  "implementation": {
+    "noise_referral": "BestAvailable/Ngspice use z^T b_unit from the existing output adjoint. Xyce retains full authored differential AC response. Ordinary AC observations remain unchanged. No additional solve/factorization or unit-source netlist clones.",
+    "control": "Explicit noise and declarative run use the existing named-port engine solver with resolved runtime settings, bounded shared frequency grids, immutable datasets and cumulative retained numeric values.",
+    "presentation": "Amplitude density, power density, squared gain, DNO/DNI device/mechanism probes and complex V/I observations retain quantity units and qualified dataset identities. Invalid contributions fail; cancellation and resource failures cannot publish or consume ordinals.",
+    "adapters": "CLI publication reuses a borrowed noise-result finisher, records A/sqrt(Hz) for current input in flat/HDF5 output and console, and keeps typed JSON PSD units. WASM control reuses the typed noise document builder.",
+    "stack": "Reuse CheckpointIdentity after admission in run_tran_prepared, before run_tran_admitted. Hash functions, order, identity payloads, checkpoint semantics, numerical tolerances and the Windows stack reservation are unchanged."
+  },
+  "independent_oracles": [
+    "RC voltage referral: output PSD = 4*k*T*R/(1+(2*pi*f*R*C)^2); input PSD = 4*k*T*R independent of source AC magnitude/phase and other drives.",
+    "Parallel RC current referral: gain squared = R^2/(1+(2*pi*f*R*C)^2); input PSD = 4*k*T/R.",
+    "Floating current input between two independently loaded nodes: gain squared = (R1+R2)^2, input PSD = 4*k*T/(R1+R2).",
+    "Resistor temperature/alteration response: output PSD scales as T*R."
+  ],
+  "reference_source_inspection": [
+    {
+      "path": "C:/Users/James/Desktop/ngspice-46-release/ngspice-46/src/spicelib/analysis/noisean.c",
+      "lines": "430-445",
+      "sha256": "e7756bca6f00f9e2df510fd6765ed6f8c968ffb7a277fa96afe587cbbda77312",
+      "purpose": "Select MODEACNOISE and the input source for the AC transfer calculation."
+    },
+    {
+      "path": "C:/Users/James/Desktop/ngspice-46-release/ngspice-46/src/spicelib/devices/vsrc/vsrcacld.c",
+      "lines": "159-176",
+      "sha256": "d60aea23f024c4578c4a6dbdfe7f2550887a5be4ac3c5ac1ffb198a177e30cbd",
+      "purpose": "Selected independent voltage source gets real unit AC excitation; other sources get zero."
+    },
+    {
+      "path": "C:/Users/James/Desktop/ngspice-46-release/ngspice-46/src/spicelib/devices/isrc/isrcacld.c",
+      "lines": "28-54",
+      "sha256": "d555f7a3a509061ebf424868d0288555feabf27fd6d6b4f24b1865e2835bdd00",
+      "purpose": "Selected current source gets unit excitation before its instance multiplicity; qualified cases use unity multiplicity."
+    },
+    {
+      "path": "C:/Users/James/Desktop/Xyce-7.10.0/Xyce-7.10/src/AnalysisPKG/N_ANP_Noise.C",
+      "lines": "738-809",
+      "sha256": "4a9a7ed7598388e455efeec703f9f7bdf7508905531a8c60c111a2f4be769485",
+      "purpose": "Retain full ordinary AC solution and refer noise using its differential output norm squared with N_MINGAIN."
+    }
+  ],
+  "stack_regression": {
+    "reproducer": "tests/paranoia/memristor/memristor.sp through the public CLI run command, robust convergence; original permanent CLI regression retained.",
+    "diagnostic_build_command": "cargo +1.95.0 rustc --locked -p rspice-cli --bin rspice --target-dir target/core-cli-195 -- -C link-arg=/MAP:<workspace>/target/core-qualification/control-noise-stack.map",
+    "method": "Windows DEBUG_ONLY_THIS_PROCESS exception capture; PE unwind records plus linker map identify the active call chain. The debugger launches and terminates only its own CLI child.",
+    "stack_reserve_bytes": 1048576,
+    "before_integration_fixed_frame_bytes": 441800,
+    "before_fault_trace_sha256": "76274a505a13dd3d93d06824496516260547ea8ae76b3951628d472de5fe3595",
+    "debugger_script_sha256": "9aa27924cef4cbd588fa2ba2e6f224900b26f5e76515b98ef8c24b4e0aeefd37",
+    "after_log": "target/core-qualification/transient-identity-stack-debug.log",
+    "after_log_sha256": "6b38a9c32e603a38c3ec3f34a6577191529b0c3ecd6ff9e639243f47c21e9c71",
+    "after_outcome": "process exited 0; no stack-overflow exception"
+  },
+  "scope_limits": [
+    "All C00-C14 packages remain unfinished. Ordinary OP/DC/AC/NOISE/TRAN are implemented in the control ledger; 24 variants remain, including AcData and NoiseData.",
+    "Table execution still needs complete row identity, comparison of all row coordinates, cumulative retained-value accounting, resolved row settings, and typed publication through every adapter.",
+    "Pinned Rust 1.94 CLI runtime qualification remains blocked by the previously recorded faer compiler crash; CLI runtime evidence here uses installed Rust 1.95. Pinned three-crate Clippy succeeds. The compiler pin is unchanged.",
+    "Local source inspection plus closed-form tests do not claim an external binary comparison, complete ngspice/Xyce option parity, or independent-source multiplicity qualification.",
+    "Frequency-grid cancellation and point limits are typed; preserving the allocator cause across FrequencyGridError remains an existing C01/C04 error-contract gap.",
+    "The stack repair qualifies the reported call chain. General bounded stack usage, recursive parser frame reduction, allocation, full target/configuration/model coverage and performance remain C13/C14 work.",
+    "The WASM feature set does not establish Verilog-A JIT execution or product-level platform certification. Selected regressions do not establish production readiness."
+  ],
+  "runs": [
+    {
+      "command": "cargo test --locked -p rspice-core --lib engine::noise",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        76
+      ],
+      "source_scope": "Noise numerical fix; the later control and transient preparation changes do not alter these source equations.",
+      "log": "target/core-qualification/noise-reference-unit.log",
+      "log_sha256": "8deff06db89173a85a75644dc4130d75dba87fe84436e2ab53c83108225cbc9b"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test noise_input_reference --test control_noise --test control_dc --test control_execution --test noise_mechanism --test branch_resistor_noise",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        16,
+        6,
+        8,
+        5,
+        5,
+        16
+      ],
+      "source_scope": "After numerical and initial control integration; before the shared frequency helper extraction and transient stack repair.",
+      "log": "target/core-qualification/control-noise-core-verified.log",
+      "log_sha256": "658d175cf67c7771b261207771fbed0fd8a7b683c481557523d85c85049adcee"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test control_noise --test control_dc --test control_execution --test noise_input_reference",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        6,
+        8,
+        5,
+        5
+      ],
+      "source_scope": "Final frequency control implementation; before the independent transient identity preparation repair.",
+      "log": "target/core-qualification/control-noise-core-final.log",
+      "log_sha256": "1e796ea28150be687112ea9fd48139253f0841de84c65eeea082b1dc66ab8c4c"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test transient_checkpoint --test expression_stack_safety --test control_execution",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        8,
+        5,
+        36
+      ],
+      "source_scope": "Final Rust implementation: checkpoint trajectory/identity, bounded expression parsing, and original public control programs.",
+      "log": "target/core-qualification/transient-identity-stack-core.log",
+      "log_sha256": "cdb95f0caf3a301018cf27d0361f5065313842fce2d2f2377fb600a4109eeb8b"
+    },
+    {
+      "command": "cargo +1.95.0 test --locked -p rspice-cli --test control_noise --test output_formats --test meas_output --test step_cartesian noise --target-dir target/core-cli-195",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "source_scope": "Final noise export code; before shared grid extraction and the transient stack repair. Noise measurements, all export formats and authored stepped noise remain exercised.",
+      "log": "target/core-qualification/control-noise-cli-final.log",
+      "log_sha256": "7518eeb84affbaac2eec2d8c3e2b425052f1ac39b7eaa1954c3480c67c3d6830"
+    },
+    {
+      "command": "cargo +1.95.0 test --locked -p rspice-cli --test control_scripts --test request_preflight --test control_noise --target-dir target/core-cli-195",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1,
+        5,
+        3
+      ],
+      "source_scope": "Final Rust implementation, including the stack repair. JSON route equality, RAW current type, HDF5 amplitude-density units, original scripts and preflight.",
+      "log": "target/core-qualification/control-noise-cli-final-dispatch.log",
+      "log_sha256": "d724c6936db0e11ec8e6d3f0e55fb1515067f0df8916507c1ea3d565571a328b"
+    },
+    {
+      "command": "cargo test --locked -p rspice-wasm --lib control_noise_document",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1
+      ],
+      "source_scope": "Final Rust implementation; native execution of the WASM deck adapter.",
+      "log": "target/core-qualification/control-noise-adapter-final.log",
+      "log_sha256": "e83b517e4a0fc7eee64ae773791f68fb98113f5034ba58df10fd9e0e302ae50c"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test control_noise --test noise_input_reference -- --nocapture",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        5,
+        5
+      ],
+      "source_scope": "Committed implementation, executed as optimized WASM in a headless Chrome dedicated worker.",
+      "log": "target/core-qualification/control-noise-wasm.log",
+      "log_sha256": "99de8bafda5a35de4fd272b210aef94763980719938d2c51da1a4b51d5b31db5"
+    },
+    {
+      "command": "cargo clippy --locked -p rspice-core -p rspice-cli -p rspice-wasm --lib --bins -- -D warnings",
+      "outcome": "passed",
+      "test_target_passed_counts": [],
+      "source_scope": "Final Rust implementation; pinned Rust 1.94.",
+      "log": "target/core-qualification/control-noise-clippy-final.log",
+      "log_sha256": "92b4febbc7bbb1d31911ea6b91c411572c3adc9d55efde1f370addf5e9e8b2e5"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib engine::requirements",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        3
+      ],
+      "source_scope": "Final publication ledger and all three implementation commits.",
+      "log": "target/core-qualification/control-noise-requirements-final.log",
+      "log_sha256": "f4be73218af678d208b9b7f9385710ee1078dd2edff818f8c6bd78534dbbb9d3"
+    }
+  ],
+  "development_attempts": [
+    {
+      "log": "target/core-qualification/control-noise-native-verified.log",
+      "log_sha256": "5f5785f241a00882a78a85201aafb7894df294e9acd2367f85c6130bb312c854",
+      "finding_and_resolution": "Independent RC and current-source equations exposed amplitude-dependent input referral. Fixed the dialect input contract without relaxing numerical tolerances."
+    },
+    {
+      "log": "target/core-qualification/control-noise-cli-verified.log",
+      "log_sha256": "b9d5f70042601deb0a81741ce7ce1a8ac336a6f803f431e901d9df9672dc9c3a",
+      "finding_and_resolution": "New HDF5 regression initially looked up family name noise instead of the existing instance group noise-001. Corrected the test to check the established group identity."
+    },
+    {
+      "log": "target/core-qualification/control-noise-cli-preflight.log",
+      "log_sha256": "8c5e5b2e5225969d5f308e0426215435f35ac83966a3213f695b54bb2c068d27",
+      "finding_and_resolution": "Original memristor control script overflowed the 1 MiB Windows main stack after control dispatcher growth."
+    },
+    {
+      "log": "target/core-qualification/control-noise-cli-dispatch.log",
+      "log_sha256": "b81df6b840defbca07990258160177b5f319211ccb0c1084938b7d28d0f2c8a2",
+      "finding_and_resolution": "A shared frequency helper reduced the dispatch frame and made the ordinary CLI tests pass, but this alone was insufficient: the diagnostic map build still overflowed."
+    },
+    {
+      "log": "target/core-qualification/control-noise-stack-debug.log",
+      "log_sha256": "c630333ad40cae06f41ce75a4b6883c8668233c5a41538a793a9ebbac49f1ff0",
+      "finding_and_resolution": "Captured Windows exception unwind identifies behavioral-expression reparsing under restart_checkpoint_identity inside the 441800-byte integration frame. Identity construction moved before entry into that frame."
+    }
+  ]
+}
