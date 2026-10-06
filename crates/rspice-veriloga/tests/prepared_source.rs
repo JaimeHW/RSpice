@@ -28,6 +28,124 @@ impl Drop for Sources {
 }
 
 #[test]
+fn runtime_preparation_retains_source_limits_and_original_compiler_locations() {
+    use rspice_veriloga::ProviderCompileError;
+    use rspice_veriloga::preprocessor::SourceResource;
+
+    let files = Sources::new();
+    let root = files.write("root.va", "`include \"child.va\"\n");
+    let child = files.write(
+        "child.va",
+        &format!("// header\nmodule broken({};\n", "port".repeat(1024)),
+    );
+    let compiler = VerilogACompiler::default();
+    for (limits, resource, limit) in [
+        (
+            SourceProviderLimits {
+                max_include_depth: 1,
+                ..SourceProviderLimits::UNBOUNDED
+            },
+            SourceResource::IncludeDepth,
+            1,
+        ),
+        (
+            SourceProviderLimits {
+                max_total_source_bytes: 256,
+                ..SourceProviderLimits::UNBOUNDED
+            },
+            SourceResource::TotalSourceBytes,
+            256,
+        ),
+        (
+            SourceProviderLimits {
+                max_expanded_bytes: 256,
+                ..SourceProviderLimits::UNBOUNDED
+            },
+            SourceResource::ExpandedBytes,
+            256,
+        ),
+    ] {
+        let error = compiler
+            .prepare_file_runtime_source_with_diagnostics(&root, limits, &NoPipelineControl)
+            .unwrap_err();
+        let ProviderCompileError::Source(error) = error else {
+            panic!("{error:?}")
+        };
+        let failure = error.resource_limit.unwrap();
+        assert_eq!(failure.resource, resource);
+        assert_eq!(failure.limit, limit);
+        assert!(failure.requested > limit);
+    }
+    let error = compiler
+        .prepare_file_runtime_source_with_diagnostics(
+            &root,
+            SourceProviderLimits::UNBOUNDED,
+            &NoPipelineControl,
+        )
+        .unwrap_err();
+    let ProviderCompileError::Compile { diagnostics, .. } = error else {
+        panic!("{error:?}")
+    };
+    assert!(!diagnostics.is_empty());
+    assert_eq!(diagnostics[0].line, Some(2));
+    assert_eq!(
+        PathBuf::from(diagnostics[0].path.as_ref().unwrap()),
+        child.canonicalize().unwrap()
+    );
+
+    let missing = files.0.join("missing.va");
+    let error = compiler
+        .prepare_file_runtime_source_with_diagnostics(
+            &missing,
+            SourceProviderLimits::UNBOUNDED,
+            &NoPipelineControl,
+        )
+        .unwrap_err();
+    let ProviderCompileError::Source(error) = error else {
+        panic!("{error:?}")
+    };
+    assert_eq!(error.io_error.unwrap().kind(), std::io::ErrorKind::NotFound);
+    assert_eq!(error.file, Some(missing));
+}
+
+#[test]
+fn runtime_preparation_cancels_during_source_reads_in_both_apis() {
+    struct CancelDuringRead(std::sync::atomic::AtomicUsize);
+    impl rspice_veriloga::PipelineControl for CancelDuringRead {
+        fn is_cancelled(&self) -> bool {
+            self.0.fetch_add(1, Ordering::SeqCst) >= 4
+        }
+    }
+    let files = Sources::new();
+    let root = files.write(
+        "large.va",
+        &format!("// {}\nmodule m; endmodule\n", "x".repeat(65536)),
+    );
+    let compiler = VerilogACompiler::default();
+    let error = compiler
+        .prepare_file_runtime_source_with_diagnostics(
+            &root,
+            SourceProviderLimits::UNBOUNDED,
+            &CancelDuringRead(std::sync::atomic::AtomicUsize::new(0)),
+        )
+        .unwrap_err();
+    assert!(
+        matches!(error, rspice_veriloga::ProviderCompileError::Source(error) if error.cancelled)
+    );
+    let error = compiler
+        .prepare_file_runtime_source_with_limits_and_control(
+            &root,
+            SourceProviderLimits::UNBOUNDED,
+            &CancelDuringRead(std::sync::atomic::AtomicUsize::new(0)),
+        )
+        .unwrap_err();
+    assert!(
+        matches!(error, rspice_veriloga::CompileError::Cancelled(cancelled)
+        if cancelled.phase == rspice_veriloga::PipelinePhase::Preprocess)
+    );
+}
+
+#[test]
 fn file_and_provider_compilation_retain_warnings_in_original_includes() {
     use rspice_veriloga::CompileDiagnosticSeverity;
     use rspice_veriloga::preprocessor::FileSystemSourceProvider;

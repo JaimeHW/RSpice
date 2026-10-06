@@ -1712,6 +1712,29 @@ impl VerilogACompiler {
         limits: preprocessor::SourceProviderLimits,
         control: &dyn PipelineControl,
     ) -> CompileResult<PreparedRuntimeSource> {
+        self.prepare_file_runtime_source_with_diagnostics(path, limits, control)
+            .map_err(|error| match error {
+                ProviderCompileError::Compile { source, .. } => source,
+                ProviderCompileError::Source(error) if error.cancelled => {
+                    CompileError::Cancelled(metrics::PipelineCancelled {
+                        phase: PipelinePhase::Preprocess,
+                    })
+                }
+                ProviderCompileError::Source(error) => {
+                    CompileError::io_error(format!("Preprocessor error: {error}"))
+                }
+            })
+    }
+
+    /// Prepare a filesystem source closure with bounded, cancellable reads.
+    /// Unlike the compatibility preparation API, this retains typed source
+    /// admission failures and compiler findings in the original documents.
+    pub fn prepare_file_runtime_source_with_diagnostics(
+        &self,
+        path: &std::path::Path,
+        limits: preprocessor::SourceProviderLimits,
+        control: &dyn PipelineControl,
+    ) -> Result<PreparedRuntimeSource, ProviderCompileError> {
         let input_bytes = std::fs::metadata(path)
             .ok()
             .and_then(|metadata| usize::try_from(metadata.len()).ok())
@@ -1723,11 +1746,17 @@ impl VerilogACompiler {
         );
         let mut pp = self.configured_preprocessor();
 
-        measurements.checkpoint(PipelinePhase::Preprocess)?;
+        measurements
+            .checkpoint(PipelinePhase::Preprocess)
+            .map_err(CompileError::from)?;
         let phase_started = web_time::Instant::now();
-        let preprocessed = pp
-            .preprocess_file_with_limits_mapped(path, limits)
-            .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;
+        let provider = preprocessor::BoundedFileSystemSourceProvider::new(
+            limits,
+            limits.max_total_source_bytes,
+            usize::MAX,
+            control,
+        );
+        let preprocessed = pp.preprocess_provider_root_mapped(&provider, path)?;
         let dependencies: Vec<_> = pp
             .dependency_documents()
             .iter()
@@ -1738,7 +1767,9 @@ impl VerilogACompiler {
                 content_identity: *blake3::hash(document.source.as_bytes()).as_bytes(),
             })
             .collect();
-        measurements.record(PipelinePhase::Preprocess, phase_started.elapsed())?;
+        measurements
+            .record(PipelinePhase::Preprocess, phase_started.elapsed())
+            .map_err(CompileError::from)?;
         measurements.metrics_mut().preprocessed_bytes =
             metrics::usize_to_u64(preprocessed.source.len());
         measurements.metrics_mut().dependency_count = metrics::usize_to_u64(dependencies.len());
@@ -1755,8 +1786,16 @@ impl VerilogACompiler {
 
         let diagnostic_source = source_package_path.display().to_string();
         let source_package = self.logical_file_source_package(&source_package_path);
-        let analyzed =
-            self.analyze_preprocessed(&diagnostic_source, &preprocessed.source, &mut measurements)?;
+        let analyzed = self
+            .analyze_preprocessed(&diagnostic_source, &preprocessed.source, &mut measurements)
+            .map_err(|source| ProviderCompileError::Compile {
+                diagnostics: source_diagnostics::provider_diagnostics(
+                    &source,
+                    &preprocessed,
+                    pp.dependency_documents(),
+                ),
+                source,
+            })?;
         let diagnostics = source_diagnostics::map_diagnostics(
             runtime_report::semantic_warning_diagnostics(&preprocessed.source, &analyzed.warnings),
             &preprocessed,
