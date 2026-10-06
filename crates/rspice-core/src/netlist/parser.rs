@@ -180,7 +180,10 @@ use line::*;
 use pspice_stim::*;
 use scoping::*;
 pub use source_specs::{independent_source_file_dependency, parse_source_spec_text};
-pub(super) use source_specs::{map_source_spec_values, parse_source_spec_text_with_direction};
+pub(super) use source_specs::{
+    map_source_spec_values, normalize_deferred_source_file_path,
+    parse_source_spec_text_with_direction,
+};
 use state::*;
 use tlines::*;
 use values::*;

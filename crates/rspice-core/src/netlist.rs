@@ -2831,14 +2831,31 @@ impl Netlist {
             return Ok(());
         };
 
-        for (index, element) in self.elements.iter_mut().enumerate() {
-            poll_parse_abort(abort, index)?;
-            match &mut element.kind {
-                ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
-                    normalize_source_spec_file_paths(spec, base_dir);
+        fn normalize_elements(
+            elements: &mut [Element],
+            base_dir: &Path,
+            abort: &dyn AbortSignal,
+        ) -> Result<(), ParseWithAbortError> {
+            for (index, element) in elements.iter_mut().enumerate() {
+                poll_parse_abort(abort, index)?;
+                match &mut element.kind {
+                    ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+                        normalize_source_spec_file_paths(spec, base_dir);
+                    }
+                    ElementKind::VoltageSourceDeferred(raw)
+                    | ElementKind::CurrentSourceDeferred(raw) => {
+                        parser::normalize_deferred_source_file_path(raw, base_dir)?;
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
+            ensure_parse_not_aborted(abort)
+        }
+        normalize_elements(&mut self.elements, base_dir, abort)?;
+        let mut definitions: Vec<_> = self.subcircuits.iter_mut().collect();
+        while let Some(definition) = definitions.pop() {
+            normalize_elements(&mut definition.elements, base_dir, abort)?;
+            definitions.extend(&mut definition.nested_subcircuits);
         }
         ensure_parse_not_aborted(abort)
     }
@@ -2952,7 +2969,7 @@ fn is_registered_virtual_source_key(spelling: &str) -> bool {
 
 fn normalize_source_spec_file_paths(spec: &mut SourceSpec, source_base_dir: &Path) {
     match spec {
-        SourceSpec::RfPort { inner, .. } => {
+        SourceSpec::RfPort { inner, .. } | SourceSpec::Distortion { inner, .. } => {
             normalize_source_spec_file_paths(inner, source_base_dir);
         }
         SourceSpec::PwlFile { path, .. } => {
