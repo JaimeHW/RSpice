@@ -38,18 +38,6 @@ pub(super) fn add_to_bins(
         analysis.points - 1
     } as Value;
     let last_sample = sample_time(analysis, transient_stop, analysis.points - 1);
-    if analysis.window != FftWindow::Rectangular
-        && terms.iter().any(|term| {
-            term.trace
-                .derivatives
-                .iter()
-                .any(|point| point.time > start && point.time <= stop)
-        })
-    {
-        return Err(invalid(
-            "current impulse derivatives require analytic taper derivatives; this FFT window is not yet implemented for them",
-        ));
-    }
     for (bin, coefficient) in bins.iter_mut().enumerate() {
         if abort.is_aborted() {
             return Err(CurrentObservationError::Aborted);
@@ -114,7 +102,10 @@ pub(super) fn add_to_bins(
                 if index.is_multiple_of(64) && abort.is_aborted() {
                     return Err(CurrentObservationError::Aborted);
                 }
-                if point.time <= start || point.time > stop {
+                if analysis.window != FftWindow::Rectangular
+                    || point.time <= start
+                    || point.time > stop
+                {
                     continue;
                 }
                 let rate = point

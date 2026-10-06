@@ -14,6 +14,8 @@ use std::f64::consts::PI;
 #[cfg(test)]
 mod current_impulse_tests;
 mod current_impulses;
+mod window;
+mod window_derivatives;
 
 pub(super) const FFT_RETAINED_VALUES_PER_BIN: usize = 5;
 pub(super) const FFT_RETAINED_VALUES_PER_HARMONIC: usize = 4;
@@ -120,10 +122,35 @@ pub(super) fn evaluate(
             Some((netlist, result)),
             transient_stop,
             &mut planner,
+            engine.config.resource_limits.max_result_values,
             abort,
         )?);
     }
     Ok(spectra)
+}
+
+impl Engine {
+    /// Evaluate authored `.FFT` requests against a retained transient result.
+    /// Uses the same checked window, physical-current, normalization and
+    /// resource contracts as FFT post-processing during a transient run.
+    pub fn evaluate_transient_fft_results(
+        &self,
+        netlist: &Netlist,
+        result: &TransientResult,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<TransientFftResult>, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        if netlist.fft_analyses.is_empty() {
+            return Ok(Vec::new());
+        }
+        let stop = result.time.last().copied().ok_or_else(|| {
+            SimulationError::Circuit(".FFT requires a nonempty transient history".into())
+        })?;
+        preflight(self, netlist, stop, abort)?;
+        evaluate(self, netlist, result, stop, abort)
+    }
 }
 
 fn validate_request(
@@ -215,6 +242,7 @@ fn evaluate_one(
     current_record: Option<(&Netlist, &TransientResult)>,
     transient_stop: Value,
     planner: &mut FftPlanner<Value>,
+    max_values: usize,
     abort: &dyn AbortSignal,
 ) -> Result<TransientFftResult, SimulationError> {
     validate_request(index, analysis, transient_stop)?;
@@ -366,6 +394,16 @@ fn evaluate_one(
             abort,
         )
         .map_err(|error| current_observation_error(index, error))?;
+        window_derivatives::add_to_bins(
+            &mut input,
+            &impulses,
+            analysis,
+            mode,
+            transient_stop,
+            coherent_gain,
+            max_values,
+            abort,
+        )?;
         if format == FftFormat::Normalized {
             let largest = input
                 .iter()
@@ -692,43 +730,7 @@ fn window_coefficient_at_position_with_alpha(
     if window == FftWindow::Rectangular {
         return 1.0;
     }
-    let x = index / denominator;
-    let cosine = |multiple: Value| (multiple * 2.0 * PI * x).cos();
-    match window {
-        FftWindow::Rectangular => 1.0,
-        FftWindow::Bartlett => {
-            if index < 0.5 * denominator {
-                2.0 * x
-            } else {
-                2.0 - 2.0 * x
-            }
-        }
-        FftWindow::BartlettHann => {
-            0.62 - 0.48 * (x - 0.5).abs() + 0.38 * (2.0 * PI * (x - 0.5)).cos()
-        }
-        FftWindow::Hamming => 0.54 - 0.46 * cosine(1.0),
-        FftWindow::Hann | FftWindow::Cosine2 => 0.5 - 0.5 * cosine(1.0),
-        FftWindow::Blackman67Db => 0.42323 - 0.49755 * cosine(1.0) + 0.07922 * cosine(2.0),
-        FftWindow::Blackman => 0.42 - 0.5 * cosine(1.0) + 0.08 * cosine(2.0),
-        FftWindow::BlackmanHarris => {
-            0.35875 - 0.48829 * cosine(1.0) + 0.14128 * cosine(2.0) - 0.01168 * cosine(3.0)
-        }
-        FftWindow::Nuttall => {
-            0.3635819 - 0.4891775 * cosine(1.0) + 0.1365995 * cosine(2.0) - 0.0106411 * cosine(3.0)
-        }
-        FftWindow::HalfCycleSine => (PI * x).sin(),
-        FftWindow::HalfCycleSine3 => (PI * x).sin().powi(3),
-        FftWindow::HalfCycleSine6 => (PI * x).sin().powi(6),
-        FftWindow::Cosine4 => 0.375 - 0.5 * cosine(1.0) + 0.125 * cosine(2.0),
-        // The Xyce/HSPICE ALFA convention is the inverse normalized
-        // standard deviation: alpha=3 gives exp(-4.5) at each endpoint.
-        FftWindow::Gaussian => (-0.5 * (alpha * (2.0 * x - 1.0)).powi(2)).exp(),
-        // Kaiser-Bessel window, with ALFA as its beta parameter.
-        FftWindow::Kaiser => {
-            let radial = (1.0 - (2.0 * x - 1.0).powi(2)).max(0.0).sqrt();
-            modified_bessel_i0(alpha * radial) / modified_bessel_i0(alpha)
-        }
-    }
+    window::coefficient(window, index / denominator, alpha)
 }
 
 /// Modified Bessel function I0 evaluated with its rapidly convergent power
@@ -1013,6 +1015,7 @@ mod tests {
             None,
             1.0,
             &mut planner,
+            crate::ResourceLimits::default().max_result_values,
             &NoAbort,
         )
         .expect("exact Nyquist record transforms");

@@ -67,7 +67,7 @@ fn current_fft_uses_exact_charge_time_without_snapping_to_the_sample_grid() {
 }
 
 #[test]
-fn current_fft_derivatives_have_analytic_phase_and_no_fabricated_taper_result() {
+fn current_fft_rectangular_derivatives_have_analytic_phase() {
     for order in 1..=4 {
         let mut result = fixture();
         let trace = &mut result.current_impulses.as_mut().unwrap()[0];
@@ -89,8 +89,6 @@ fn current_fft_derivatives_have_analytic_phase_and_no_fabricated_taper_result() 
             let actual = Complex::new(bin.real, bin.imaginary);
             assert!((actual - expected).norm() < 2e-13 * expected.norm());
         }
-        let error = spectrum(&result, ".fft I(V1) np=8 format=unorm window=hann").unwrap_err();
-        assert!(error.to_string().contains("analytic taper derivatives"));
     }
 }
 
