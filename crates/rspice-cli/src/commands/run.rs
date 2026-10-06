@@ -152,6 +152,28 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
         };
         crate::commands::vcd_io::expand_buses_needs_vcd("--expand-buses", format)?;
     }
+    let resolved_output = resolve_output_path(args.output.clone(), config)?;
+    let declared: Vec<_> = [
+        ("result", resolved_output.as_deref()),
+        ("checkpoint", args.checkpoint.as_deref()),
+    ]
+    .into_iter()
+    .filter_map(|(role, path)| path.map(|path| (role, path)))
+    .collect();
+    let report_paths: Vec<_> = [
+        ("CI report", args.report_file.as_deref()),
+        ("measurement report", args.meas_file.as_deref()),
+        (
+            "summary",
+            args.summary
+                .as_deref()
+                .filter(|path| path.as_os_str() != "-"),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(role, path)| path.map(|path| (role, path)))
+    .collect();
+    let (destinations, destination_scope) = publish::destinations::begin(&declared, &report_paths)?;
     // Held for the whole cancellable region. Dropping it on any exit path
     // closes the completion latch, so a deadline that expires after the run
     // is already over cannot announce a cancellation that never happened.
@@ -252,6 +274,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
             plan.par_iter()
                 .zip(&prepared)
                 .map(|(deck, prepared)| {
+                    let _destination_scope = publish::destinations::enter(destinations.clone());
                     // The outer pool owns the process worker budget.
                     let mut child_args = args.clone();
                     child_args.jobs = 1;
@@ -308,6 +331,10 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     if let Some(reason) = abort_reason {
         ensure_cancellation_report(&mut reports, &args.input, args.timeout, reason);
     }
+    // A result that collided with a reserved report must never be overwritten
+    // by that report while unwinding the failed invocation.
+    destinations.finish()?;
+    drop(destination_scope);
     write_report_files(&reports, &args, verbose)?;
 
     let failed_measurements: Vec<&str> = reports

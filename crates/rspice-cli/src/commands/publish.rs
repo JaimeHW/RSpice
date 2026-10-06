@@ -33,6 +33,8 @@ use rspice_output::{
 
 use crate::cli::CliError;
 
+pub(crate) mod destinations;
+
 thread_local! {
     static ACTIVE: RefCell<Option<Arc<RunTransactionState>>> = const { RefCell::new(None) };
 }
@@ -171,6 +173,7 @@ where
     E: std::error::Error + 'static,
     F: FnOnce(&mut dyn Write) -> Result<(), E>,
 {
+    destinations::claim(path).map_err(joining_error)?;
     match current() {
         None => write_atomic(path, write),
         Some(state) => {
@@ -189,6 +192,7 @@ where
     E: std::error::Error + 'static,
     F: FnOnce(&mut dyn Write) -> Result<(), E>,
 {
+    destinations::claim(path).map_err(joining_error)?;
     match current() {
         None => write_atomic(path, write),
         Some(state) => {
@@ -216,6 +220,8 @@ where
     F: FnOnce(&mut dyn Write) -> Result<(), E>,
     G: FnOnce(&mut dyn Write) -> Result<(), E>,
 {
+    destinations::claim(first).map_err(joining_error)?;
+    destinations::claim(second).map_err(joining_error)?;
     let staged_first = StagedArtifact::stage(first, write_first).map_err(set_stage_error)?;
     let staged_second = StagedArtifact::stage(second, write_second).map_err(set_stage_error)?;
 

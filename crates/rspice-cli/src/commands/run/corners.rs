@@ -126,10 +126,12 @@ pub(super) fn run(
         }
     }
     let transaction = publish::current();
+    let destinations = publish::destinations::current();
     let job = |prepared: &PreparedCorner| {
         let corner = &prepared.name;
         let started = Instant::now();
         let _joined = transaction.clone().map(publish::enter);
+        let _destinations = destinations.clone().map(publish::destinations::enter);
         let execute = || -> Result<DeckOutcome, CliError> {
             if crate::abort::reason().is_some() {
                 return Err(cancellation_cli_error(args.timeout));
