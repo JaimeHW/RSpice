@@ -267,14 +267,14 @@ pub const fn exit_code_for(category: FailureCategory) -> ExitCode {
 /// CLI-specific errors with context and suggestions
 #[derive(Debug, Error)]
 pub enum CliError {
-    #[error("Input file not found: {path}")]
+    #[error("Input file not found: {path}: {source}")]
     InputNotFound {
         path: PathBuf,
         #[source]
         source: std::io::Error,
     },
 
-    #[error("Failed to read input file: {path}")]
+    #[error("Failed to read input file: {path}: {source}")]
     InputReadError {
         path: PathBuf,
         #[source]

@@ -202,6 +202,27 @@ fn source_io_failures_keep_their_exit_category_and_path() {
         let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
         assert_eq!(error["error"]["code"], code, "{error}");
         assert_eq!(error["error"]["path"], path.to_str().unwrap());
+        if path == &invalid {
+            let cause = String::from_utf8(std::fs::read(path).unwrap()).unwrap_err();
+            assert!(
+                error["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains(&cause.to_string()),
+                "{error}"
+            );
+            let text = Command::new(env!("CARGO_BIN_EXE_rspice"))
+                .args(["--quiet", "compile-va"])
+                .arg(path)
+                .output()
+                .unwrap();
+            assert_eq!(text.status.code(), Some(74));
+            assert!(
+                String::from_utf8(text.stderr)
+                    .unwrap()
+                    .contains(&cause.to_string())
+            );
+        }
         assert_eq!(
             std::fs::read_to_string(&result).unwrap(),
             "previous interface"
@@ -262,6 +283,13 @@ fn an_exclusively_open_source_is_an_io_failure() {
     let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
     assert_eq!(error["error"]["code"], "input_read_error", "{error}");
     assert_eq!(error["error"]["path"], root.to_str().unwrap());
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains(&std::io::Error::from_raw_os_error(32).to_string()),
+        "the sharing violation must remain visible: {error}"
+    );
 }
 
 #[test]
