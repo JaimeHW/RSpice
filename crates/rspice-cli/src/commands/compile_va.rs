@@ -278,12 +278,14 @@ fn compile_error(
                 SourceResource::IncludeDepth => rspice_core::ResourceKind::IncludeDepth,
                 SourceResource::ExpandedBytes => rspice_core::ResourceKind::ExpandedSourceBytes,
             };
-            rspice_core::SimulationError::ResourceLimit(rspice_core::ResourceLimitError {
-                resource,
-                requested: limit.requested,
-                limit: limit.limit,
-            })
-            .into()
+            CliError::ResourceLimit {
+                path: error.file.unwrap_or_else(|| input.to_path_buf()),
+                source: rspice_core::ResourceLimitError {
+                    resource,
+                    requested: limit.requested,
+                    limit: limit.limit,
+                },
+            }
         }
         ProviderCompileError::Source(rspice_veriloga::PreprocessorError {
             io_error: Some(source),
@@ -298,6 +300,15 @@ fn compile_error(
             } else {
                 CliError::InputReadError { path, source }
             }
+        }
+        ProviderCompileError::Source(source) => {
+            let error = CliError::VerilogAError {
+                message: source.message,
+            };
+            let mut details = error.details();
+            details.path = source.file.map(|path| path.display().to_string());
+            details.line = (source.line > 0).then_some(source.line);
+            CliError::reported(error.to_string(), Some(details))
         }
         error => CliError::VerilogAError {
             message: error.to_string(),

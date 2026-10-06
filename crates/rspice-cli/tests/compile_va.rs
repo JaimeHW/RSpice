@@ -85,6 +85,7 @@ fn source_admission_preserves_typed_resource_failures() {
         let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
         assert_eq!(error["error"]["resource"], resource, "{error}");
         assert_eq!(error["error"]["limit"], 1);
+        assert!(error["error"]["path"].is_string(), "{error}");
         assert!(!result.exists());
     }
 }
@@ -359,4 +360,28 @@ fn usage_examples_run_with_nested_paths_and_explicit_module_selection() {
         let expected = if selected.is_some() { 1.0 / 3.0 } else { 0.5 };
         assert!((voltage - expected).abs() < 1e-8, "{document}");
     }
+}
+
+#[test]
+fn preprocessing_diagnostics_name_the_authored_include_and_line() {
+    let dir = common::test_dir("preprocessor_location");
+    let root = dir.join("model.va");
+    let header = dir.join("bad.vams");
+    std::fs::write(&root, format!("`include \"bad.vams\"\n{SOURCE}")).unwrap();
+    std::fs::write(&header, "// invalid conditional\n`else\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "--error-format", "json", "compile-va"])
+        .arg(&root)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["error"]["code"], "veriloga_error");
+    assert_eq!(error["error"]["line"], 2, "{error}");
+    assert_eq!(
+        std::path::Path::new(error["error"]["path"].as_str().unwrap())
+            .canonicalize()
+            .unwrap(),
+        header.canonicalize().unwrap()
+    );
 }
