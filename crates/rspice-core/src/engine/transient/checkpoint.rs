@@ -9675,6 +9675,19 @@ impl TransientCheckpoint {
         }
     }
 
+    /// Encode a resumable checkpoint for a caller-owned artifact transaction.
+    /// This has the same persistence admission as `save_with_encoding_and_abort`;
+    /// numerical serialization alone does not prove that a checkpoint can resume.
+    pub fn to_persistable_bytes_with_abort(
+        &self,
+        encoding: TransientCheckpointEncoding,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<u8>, SimulationError> {
+        check_checkpoint_abort(abort)?;
+        checkpoint_operation_result(self.validate_persistence_preflight(), abort)?;
+        self.to_bytes_with_abort(encoding, abort)
+    }
+
     /// Parse an unpacked or packed checkpoint, selected by its authenticated header.
     ///
     /// The default limit matches the production resource-policy default. Use
@@ -9788,9 +9801,7 @@ impl TransientCheckpoint {
         encoding: TransientCheckpointEncoding,
         abort: &dyn AbortSignal,
     ) -> Result<(), SimulationError> {
-        check_checkpoint_abort(abort)?;
-        checkpoint_operation_result(self.validate_persistence_preflight(), abort)?;
-        let bytes = self.to_bytes_with_abort(encoding, abort)?;
+        let bytes = self.to_persistable_bytes_with_abort(encoding, abort)?;
         atomic_write_checkpoint_with_abort(path, &bytes, abort)
     }
 
@@ -14491,6 +14502,12 @@ mod tests {
             TransientCheckpointEncoding::Unpacked,
             TransientCheckpointEncoding::Packed,
         ] {
+            assert!(
+                checkpoint
+                    .to_persistable_bytes_with_abort(encoding, &NoAbort)
+                    .is_err(),
+                "transactional persistence must enforce the same resumability preflight"
+            );
             let path = directory.join(format!("state-{encoding:?}.chk"));
             std::fs::write(&path, original).expect("seed last known good checkpoint");
             let error = checkpoint
