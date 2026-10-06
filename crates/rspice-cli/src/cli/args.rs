@@ -467,7 +467,7 @@ pub struct RunArgs {
     pub mc_params: Vec<String>,
 
     /// CI/CD report format (junit, tap)
-    #[arg(long, value_name = "FORMAT")]
+    #[arg(long, value_name = "FORMAT", requires = "report_file")]
     pub report_format: Option<ReportFormat>,
 
     /// CI/CD report output file
@@ -475,7 +475,7 @@ pub struct RunArgs {
     pub report_file: Option<PathBuf>,
 
     /// Machine-readable .MEAS output format (json, csv)
-    #[arg(long, value_name = "FORMAT")]
+    #[arg(long, value_name = "FORMAT", requires = "meas_file")]
     pub meas_format: Option<MeasFormat>,
 
     /// .MEAS output file (defaults to JSON format if --meas-format not specified)
