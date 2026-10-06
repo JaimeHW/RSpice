@@ -588,6 +588,8 @@ struct LiveMeasureProgram<'a> {
     store_trace: bool,
     requires_live_evaluation: bool,
     observation: Option<current_measure::Integral<'a>>,
+    singular: Option<current_measure::Boundary>,
+    primitive_sources: Vec<usize>,
     strict_failures: bool,
     failure: Option<String>,
 }
@@ -603,6 +605,10 @@ struct LiveMeasureReadContext<'program, 'netlist> {
     program_indices: &'program HashMap<String, usize>,
     row: usize,
     axis: &'program [Value],
+    query_axis: Option<Value>,
+    primitive_window: Option<(Value, Value)>,
+    boundary: Option<current_measure::Boundary>,
+    abort: &'program dyn AbortSignal,
 }
 
 /// One row of the series a live measurement is being advanced over.
@@ -635,6 +641,32 @@ struct LiveSelectionRow {
 
 impl LiveMeasureReadContext<'_, '_> {
     fn read_measure(&mut self, canonical_name: &str) -> Result<Option<Value>, String> {
+        if let Some(&index) = self.program_indices.get(canonical_name) {
+            let sources = &self.programs.get(index)
+                .ok_or("invalid current primitive consumer index")?.primitive_sources;
+            for &source in sources {
+                let Some(observation) = &self.programs.get(source)
+                    .ok_or("invalid current primitive source index")?.observation else {
+                    continue;
+                };
+                let boundary = if let Some(time) = self.query_axis {
+                    observation.boundary_at(time, self.abort)
+                } else if let Some((lower, upper)) = self.primitive_window {
+                    observation.first_boundary_in_window(lower, upper, self.abort)
+                } else {
+                    continue;
+                }
+                .map_err(|error| error.to_string())?;
+                if let Some(boundary) = boundary {
+                    self.boundary = Some(boundary);
+                    return Err(if self.primitive_window.is_some() {
+                        format!("measurement '{canonical_name}' contains current impulse primitives inside the requested interval; generalized interval-operator composition is not yet implemented ({boundary})")
+                    } else {
+                        format!("measurement '{canonical_name}' is unavailable: {boundary}")
+                    });
+                }
+            }
+        }
         if let Some(&program_index) = self.program_indices.get(canonical_name)
             && let Some(program) = self.programs.get_mut(program_index)
         {
@@ -643,6 +675,25 @@ impl LiveMeasureReadContext<'_, '_> {
             {
                 return Err(format!(
                     "measurement '{}' is unavailable: {error}",
+                    program.statement.name
+                ));
+            }
+            let boundary = if let (Some(time), Some(observation)) =
+                (self.query_axis, program.observation.as_ref())
+            {
+                // FIND/DERIV at a regular point use the primitive's regular
+                // part for interpolation. Test the actual requested point,
+                // including an event between accepted rows.
+                observation
+                    .boundary_at(time, self.abort)
+                    .map_err(|error| error.to_string())?
+            } else {
+                program.singular
+            };
+            if let Some(boundary) = boundary {
+                self.boundary = Some(boundary);
+                return Err(format!(
+                    "measurement '{}' is unavailable: {boundary}",
                     program.statement.name
                 ));
             }
@@ -2408,6 +2459,10 @@ pub(crate) fn evaluate_output_operand(
                     program_indices: &program_indices,
                     row,
                     axis,
+                    query_axis: None,
+                    primitive_window: None,
+                    boundary: None,
+                    abort,
                 };
                 let value = prepared
                     .value(row, signal_index, &mut reads, params)
@@ -2906,6 +2961,8 @@ fn evaluate_equation_measurements_with_observations(
             store_trace: false,
             requires_live_evaluation: observation.is_some(),
             observation,
+            singular: None,
+            primitive_sources: Vec::new(),
             strict_failures: current_result.is_some(),
             failure,
         });
@@ -2953,6 +3010,15 @@ fn evaluate_equation_measurements_with_observations(
         .iter()
         .map(|program| matches!(program.state, Some(LiveMeasureState::FileError { .. })))
         .collect::<Vec<_>>();
+    if current_result.is_some() {
+        current_measure::bind_consumers(
+            &mut programs,
+            &all_dependencies,
+            &program_indices,
+            &netlist.params,
+            abort,
+        )?;
+    }
     for (index, (program, dependencies)) in programs.iter_mut().zip(&all_dependencies).enumerate() {
         if index.is_multiple_of(64) && abort.is_aborted() {
             return Err(EquationMeasurementEvaluationError::Aborted);
@@ -3001,6 +3067,11 @@ fn evaluate_equation_measurements_with_observations(
                 }
                 _ => None,
             };
+            let query_axis = match &state {
+                LiveMeasureState::Point { at, .. } => *at,
+                _ => None,
+            };
+            let mut boundary_read = None;
             let update = if has_failed {
                 Ok(None)
             } else {
@@ -3010,8 +3081,12 @@ fn evaluate_equation_measurements_with_observations(
                     program_indices: &program_indices,
                     row,
                     axis,
+                    query_axis,
+                    primitive_window: current_measure::scalar_window(&state, axis),
+                    boundary: None,
+                    abort,
                 };
-                state.update(
+                let update = state.update(
                     row,
                     axis_value,
                     axis,
@@ -3020,8 +3095,13 @@ fn evaluate_equation_measurements_with_observations(
                     &mut reads,
                     &netlist.params,
                     dc_sweep_ascending,
-                )
+                );
+                boundary_read = reads.boundary;
+                update
             };
+            if abort.is_aborted() {
+                return Err(EquationMeasurementEvaluationError::Aborted);
+            }
             let update = match (&mut observation, update) {
                 (Some(observation), Ok(value)) => {
                     match observation.advance(&state, previous_axis, axis_value, value, abort) {
@@ -3038,13 +3118,33 @@ fn evaluate_equation_measurements_with_observations(
                 break;
             };
             program.observation = observation;
+            let observation_boundary = program
+                .observation
+                .as_ref()
+                .and_then(|value| value.boundary);
+            let recoverable_boundary = matches!(
+                state,
+                LiveMeasureState::Equation { .. } | LiveMeasureState::Param { .. }
+            ) || query_axis.is_some_and(|at| axis_value < at);
+            if boundary_read.is_some()
+                && let LiveMeasureState::Point { previous_signal, .. } = &mut state
+            {
+                // Do not interpolate a later request across a sample whose
+                // scalar value was unavailable through a derived expression.
+                *previous_signal = None;
+            }
             program.state = Some(state);
             match update {
                 Ok(Some(value)) => {
                     program.current = value;
                     program.initialized = true;
+                    program.singular = observation_boundary;
                 }
                 Ok(None) => {}
+                Err(_) if recoverable_boundary && boundary_read.is_some() => {
+                    program.singular = boundary_read;
+                    program.initialized = true;
+                }
                 Err(error) if is_equation && !program.strict_failures => {
                     return Err(EquationMeasurementEvaluationError::Detail(format!(
                         "continuous measure '{}' evaluation failed at row {row}: {error}",
@@ -3057,9 +3157,14 @@ fn evaluate_equation_measurements_with_observations(
                 *slot = program.current;
             }
             if program.store_trace {
-                program.values.push(program.current);
+                program.values.push(if program.singular.is_some() {
+                    Value::NAN
+                } else {
+                    program.current
+                });
                 program.valid.push(
                     !program.current.is_nan()
+                        && program.singular.is_none()
                         && (!program.strict_failures || program.failure.is_none()),
                 );
             }
@@ -3076,6 +3181,29 @@ fn evaluate_equation_measurements_with_observations(
                 evaluation.overrides.insert(
                     program.canonical_name,
                     MeasureResult::failed_for_statement(program.statement, error),
+                );
+            } else if let Some(boundary) = program.singular {
+                evaluation.overrides.insert(
+                    program.canonical_name,
+                    MeasureResult::failed_for_statement(program.statement, &boundary.to_string()),
+                );
+            } else if program.initialized
+                && program.requires_live_evaluation
+                && let Some(LiveMeasureState::Point {
+                    at: Some(at),
+                    complete: true,
+                    ..
+                }) = &program.state
+            {
+                // The offline scalar trace deliberately contains NaN at a
+                // singular primitive. The live point query has separately
+                // checked its requested time and interpolated the regular
+                // part, so retain that result and its authored axis metadata.
+                let mut result = MeasureResult::success(&program.statement.name, program.current);
+                result.event_axis = Some(*at);
+                evaluation.overrides.insert(
+                    program.canonical_name,
+                    result.check_contract(program.statement),
                 );
             } else if program.initialized
                 && (program.observation.is_some()
@@ -8779,6 +8907,10 @@ mod tests {
                 program_indices: &program_indices,
                 row,
                 axis: &axis,
+                query_axis: None,
+                primitive_window: None,
+                boundary: None,
+                abort: &NoAbort,
             };
             if let Some(event) = selector
                 .update(
@@ -9375,6 +9507,10 @@ mod tests {
                 program_indices: &program_indices,
                 row,
                 axis: &axis,
+                query_axis: None,
+                primitive_window: None,
+                boundary: None,
+                abort: &NoAbort,
             };
             if let Some(value) = find_state
                 .update(
@@ -9397,6 +9533,10 @@ mod tests {
                 program_indices: &program_indices,
                 row,
                 axis: &axis,
+                query_axis: None,
+                primitive_window: None,
+                boundary: None,
+                abort: &NoAbort,
             };
             if let Some(value) = derivative_state
                 .update(

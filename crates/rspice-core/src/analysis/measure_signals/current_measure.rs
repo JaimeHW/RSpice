@@ -3,6 +3,11 @@
 use super::*;
 use current_observation::{CurrentImpulseContribution, CurrentObservationError};
 
+mod boundary;
+mod consumers;
+pub(super) use boundary::Boundary;
+pub(super) use consumers::bind as bind_consumers;
+
 fn invalid(detail: impl Into<String>) -> CurrentObservationError {
     CurrentObservationError::Invalid {
         detail: detail.into(),
@@ -18,9 +23,56 @@ pub(super) struct Integral<'a> {
     cursors: Vec<Cursor<'a>>,
     charge: Value,
     correction: Value,
+    pub(super) boundary: Option<Boundary>,
+    window: (Value, Value),
 }
 
 impl Integral<'_> {
+    pub(super) fn first_boundary_in_window(
+        &self,
+        lower: Value,
+        upper: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Boundary>, CurrentObservationError> {
+        let mut previous = lower.max(self.window.0);
+        let stop = upper.min(self.window.1);
+        loop {
+            if abort.is_aborted() {
+                return Err(CurrentObservationError::Aborted);
+            }
+            let mut next = None;
+            for cursor in &self.cursors {
+                if abort.is_aborted() {
+                    return Err(CurrentObservationError::Aborted);
+                }
+                let points = &cursor.term.trace.derivatives;
+                let index = points.partition_point(|point| point.time <= previous);
+                if let Some(point) = points.get(index).filter(|point| point.time <= stop) {
+                    next = Some(next.map_or(point.time, |old: Value| old.min(point.time)));
+                }
+            }
+            let Some(time) = next else { return Ok(None) };
+            if let Some(boundary) = self.boundary_at(time, abort)? {
+                return Ok(Some(boundary));
+            }
+            previous = time;
+        }
+    }
+
+    pub(super) fn boundary_at(
+        &self,
+        time: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Boundary>, CurrentObservationError> {
+        if time <= self.window.0 {
+            return Ok(None);
+        }
+        if time > self.window.1 {
+            return Ok(self.boundary);
+        }
+        boundary::at(self.cursors.iter().map(|cursor| cursor.term), time, abort)
+    }
+
     pub(super) fn advance(
         &mut self,
         state: &LiveMeasureState,
@@ -44,6 +96,13 @@ impl Integral<'_> {
         if finite_result.is_none() || previous.is_none() {
             return Ok(finite_result);
         }
+        self.boundary = if *width > 0.0 {
+            self.boundary_at(axis, abort)?
+        } else {
+            // An empty integral is the zero operator, even if its coincident
+            // endpoints lie on singular support. AVG still needs positive width.
+            None
+        };
         if let Some(start) = previous_axis {
             for cursor in &mut self.cursors {
                 if abort.is_aborted() {
@@ -109,6 +168,27 @@ fn inclusive_window(axis: &[Value], lower: Value, upper: Value) -> Option<(Value
         .filter(|value| live_axis_in_window(*value, lower, upper, 1e-12));
     let first = selected.next()?;
     Some((first.next_down(), selected.next_back().unwrap_or(first)))
+}
+
+/// Operators over an interval require the entire source distribution. Looking
+/// only for singularities at accepted rows would lose off-grid primitives.
+pub(super) fn scalar_window(state: &LiveMeasureState, axis: &[Value]) -> Option<(Value, Value)> {
+    match state {
+        LiveMeasureState::Equation { .. }
+        | LiveMeasureState::Param { .. }
+        | LiveMeasureState::Point { at: Some(_), .. } => None,
+        LiveMeasureState::IntegralStatistic { lower, upper, .. }
+        | LiveMeasureState::Extremum { lower, upper, .. }
+        | LiveMeasureState::PeakToPeak { lower, upper, .. }
+        | LiveMeasureState::Point { lower, upper, .. }
+        | LiveMeasureState::ErrorFunction { lower, upper, .. } => {
+            inclusive_window(axis, *lower, *upper)
+        }
+        _ => axis
+            .first()
+            .zip(axis.last())
+            .map(|(first, last)| (first.next_down(), *last)),
+    }
 }
 
 pub(super) fn compile<'a>(
@@ -184,21 +264,19 @@ pub(super) fn compile<'a>(
                 Some(netlist),
                 result,
                 &signal.authored,
-                (start, stop),
+                (start_below, stop),
                 abort,
             )?;
             if terms.is_empty() {
                 return Ok(None);
             }
-            if terms.iter().any(|term| {
-                term.trace
-                    .derivatives
-                    .iter()
-                    .any(|point| point.time > start && point.time <= stop)
-            }) {
-                return Err(invalid(
-                    "INTEG/AVG of current impulse derivatives needs distributional boundary state, which is not yet implemented",
-                ));
+            // A fixed singular lower endpoint cannot be subtracted from the
+            // primitive. Interior singularities have zero regular contribution
+            // and only make the running result non-scalar at their exact time.
+            if start < stop
+                && let Some(boundary) = boundary::at(terms.iter().copied(), start, abort)?
+            {
+                return Err(invalid(format!("singular lower {boundary}")));
             }
             let mut cursors = Vec::new();
             cursors
@@ -209,6 +287,8 @@ pub(super) fn compile<'a>(
                 cursors,
                 charge: 0.0,
                 correction: 0.0,
+                boundary: None,
+                window: (start, stop),
             }));
         }
         LiveMeasureState::IntegralStatistic {
@@ -419,7 +499,7 @@ mod tests {
             ".meas tran charge INTEG I(V1)\n.meas tran mean AVG I(V1)\n.meas tran peak MAX I(V1)\n.meas tran at_event FIND I(V1) AT=.5\n.meas tran away FIND I(V1) AT=.625\n.meas tran before INTEG I(V1) FROM=0 TO=.25",
         );
         let measured = evaluate_tran_measurements(&netlist, &result);
-        for name in ["charge", "mean", "peak", "at_event"] {
+        for name in ["peak", "at_event"] {
             let failed = measured
                 .iter()
                 .find(|m| m.name.eq_ignore_ascii_case(name))
@@ -433,6 +513,8 @@ mod tests {
                     .contains("impulse derivatives")
             );
         }
+        value(&measured, "charge", 1.0);
+        value(&measured, "mean", 1.0);
         value(&measured, "away", 1.0);
         value(&measured, "before", 0.25);
     }
