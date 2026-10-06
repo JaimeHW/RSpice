@@ -8,11 +8,14 @@ use rspice_core::abort_signal::AbortSignal;
 use rspice_results::convergence_attribution::ConvergenceAttribution;
 use rspice_results::monte_carlo_checkpoint::CheckpointError;
 use rspice_results::validation::ResultSchemaMismatch;
+use rspice_simulation_contract::resource_failure::ResourceFailure;
 use rspice_simulation_contract::worker_error::WorkerSimulationError;
 
 /// Errors that can occur during simulation
 #[derive(Debug, Clone, PartialEq)]
 pub enum SimulationError {
+    /// A device policy or allocator refusal, preserving the core classification.
+    ResourceFailure(ResourceFailure),
     /// Netlist parsing error
     ParseError(String),
 
@@ -114,6 +117,7 @@ pub enum SimulationError {
 impl std::fmt::Display for SimulationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::ResourceFailure(error) => std::fmt::Display::fmt(error, f),
             SimulationError::ParseError(msg) => write!(f, "Parse error: {}", msg),
             SimulationError::BehavioralReference {
                 canonical_owner_name,
@@ -231,6 +235,10 @@ impl std::error::Error for SimulationError {}
 impl From<rspice_core::SimulationError> for SimulationError {
     fn from(err: rspice_core::SimulationError) -> Self {
         match err {
+            error @ (rspice_core::SimulationError::DeviceResourceLimit { .. }
+            | rspice_core::SimulationError::Allocation { .. }) => {
+                ServiceRunError::from(error).into()
+            }
             // Result-only entry points cannot represent completion before a
             // numerical result exists. Keep the model diagnostic and identify
             // the runner limitation rather than blaming the circuit or solver.
@@ -369,6 +377,7 @@ impl From<CheckpointError> for SimulationError {
 impl From<SimulationError> for WorkerSimulationError {
     fn from(value: SimulationError) -> Self {
         match value {
+            SimulationError::ResourceFailure(error) => Self::ResourceFailure(error),
             SimulationError::ParseError(message) => Self::ParseError(message),
             SimulationError::BehavioralReference {
                 owner_name,
@@ -443,6 +452,7 @@ impl From<SimulationError> for WorkerSimulationError {
 impl From<WorkerSimulationError> for SimulationError {
     fn from(value: WorkerSimulationError) -> Self {
         match value {
+            WorkerSimulationError::ResourceFailure(error) => Self::ResourceFailure(error),
             WorkerSimulationError::ParseError(message) => Self::ParseError(message),
             WorkerSimulationError::BehavioralReference {
                 owner_name,
@@ -523,6 +533,8 @@ impl From<WorkerSimulationError> for SimulationError {
 /// exhaustion can never be mistaken for configuration or solver failures.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ServiceRunError {
+    #[error(transparent)]
+    ResourceFailure(#[from] ResourceFailure),
     /// Cooperative cancellation was requested.
     #[error("Simulation aborted")]
     Aborted,
@@ -538,17 +550,10 @@ pub enum ServiceRunError {
 pub type ServiceRunResult<T> = Result<T, ServiceRunError>;
 
 impl ServiceRunError {
-    /// Preserve typed cancellation while adding analysis-specific context to
-    /// all other core errors.
+    /// Preserve typed cancellation and resource failures while adding
+    /// analysis-specific context to ordinary core errors.
     pub fn from_core(context: &str, error: rspice_core::SimulationError) -> Self {
-        match error {
-            rspice_core::SimulationError::Aborted => Self::Aborted,
-            rspice_core::SimulationError::Configuration(
-                rspice_core::SimulationConfigError::ResourceLimit(error),
-            )
-            | rspice_core::SimulationError::ResourceLimit(error) => Self::ResourceLimit(error),
-            other => Self::Failure(format!("{context}: {other}")),
-        }
+        Self::from(error).with_context(context)
     }
 
     /// Create a typed resource-limit error without relying on display-string
@@ -567,8 +572,7 @@ impl ServiceRunError {
 
     /// Add context to ordinary failures while preserving cancellation and
     /// structured resource-limit errors.
-    #[cfg(test)]
-    pub fn with_context(self, context: &str) -> Self {
+    fn with_context(self, context: &str) -> Self {
         match self {
             Self::Failure(message) => Self::Failure(format!("{context}: {message}")),
             other => other,
@@ -584,6 +588,20 @@ impl ServiceRunError {
 impl From<rspice_core::SimulationError> for ServiceRunError {
     fn from(error: rspice_core::SimulationError) -> Self {
         match error {
+            rspice_core::SimulationError::DeviceResourceLimit { instance, source } => {
+                Self::ResourceFailure(ResourceFailure::DeviceLimit {
+                    instance,
+                    resource: source.resource.as_str().into(),
+                    requested: source.requested,
+                    limit: source.limit,
+                })
+            }
+            rspice_core::SimulationError::Allocation { object, source } => {
+                Self::ResourceFailure(ResourceFailure::Allocation {
+                    object: object.into(),
+                    detail: source.to_string(),
+                })
+            }
             rspice_core::SimulationError::Aborted => Self::Aborted,
             rspice_core::SimulationError::Configuration(
                 rspice_core::SimulationConfigError::ResourceLimit(error),
@@ -630,6 +648,7 @@ where
 impl From<ServiceRunError> for SimulationError {
     fn from(error: ServiceRunError) -> Self {
         match error {
+            ServiceRunError::ResourceFailure(error) => Self::ResourceFailure(error),
             ServiceRunError::Aborted => SimulationError::Aborted,
             ServiceRunError::ResourceLimit(error) => SimulationError::ResourceLimit {
                 resource: error.resource.as_str().to_string(),
@@ -658,6 +677,56 @@ pub fn poll_periodically(abort: &dyn AbortSignal, index: usize) -> ServiceRunRes
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn contextual_resource_failures_survive_service_and_worker_round_trips() {
+        for route in 0..3 {
+            for error in [
+                rspice_core::SimulationError::DeviceResourceLimit {
+                    instance: "X1:Q2".into(),
+                    source: rspice_core::ResourceLimitError {
+                        resource: rspice_core::ResourceKind::TransportHistoryRecords,
+                        requested: 11,
+                        limit: 10,
+                    },
+                },
+                rspice_core::SimulationError::Allocation {
+                    object: "BJT phase-history growth",
+                    source: Vec::<u8>::new().try_reserve(usize::MAX).unwrap_err(),
+                },
+            ] {
+                let message = error.to_string();
+                let descriptor = error.descriptor();
+                let converted = match route {
+                    0 => SimulationError::from(error),
+                    1 => SimulationError::from(ServiceRunError::from(error)),
+                    _ => {
+                        SimulationError::from(ServiceRunError::from_core("Transient error", error))
+                    }
+                };
+                let SimulationError::ResourceFailure(ref failure) = converted else {
+                    panic!("resource classification lost");
+                };
+                assert_eq!(failure.code(), descriptor.code.as_str());
+                assert_eq!(converted.to_string(), message);
+                if let ResourceFailure::DeviceLimit {
+                    instance,
+                    resource,
+                    requested,
+                    limit,
+                } = failure
+                {
+                    assert_eq!(instance, "X1:Q2");
+                    assert_eq!(resource, "transport_history_records");
+                    assert_eq!((*requested, *limit), (11, 10));
+                }
+                let wire = WorkerSimulationError::from(converted.clone());
+                let json = serde_json::to_string(&wire).unwrap();
+                let restored: WorkerSimulationError = serde_json::from_str(&json).unwrap();
+                assert_eq!(SimulationError::from(restored), converted);
+            }
+        }
+    }
 
     #[test]
     fn core_abort_remains_typed() {

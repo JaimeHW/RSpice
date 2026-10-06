@@ -102,6 +102,7 @@ pub struct DistoData {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DistoRunError {
+    ResourceFailure(rspice_simulation_contract::resource_failure::ResourceFailure),
     Aborted,
     ResourceLimit(rspice_core::ResourceLimitError),
     Validation(String),
@@ -113,6 +114,7 @@ enum DistoRunError {
 impl fmt::Display for DistoRunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ResourceFailure(error) => fmt::Display::fmt(error, f),
             Self::Aborted => f.write_str("Simulation aborted"),
             Self::ResourceLimit(error) => fmt::Display::fmt(error, f),
             Self::Validation(message)
@@ -128,6 +130,7 @@ impl std::error::Error for DistoRunError {}
 impl DistoRunError {
     fn from_service(error: ServiceRunError, classify: fn(String) -> Self) -> Self {
         match error {
+            ServiceRunError::ResourceFailure(error) => Self::ResourceFailure(error),
             ServiceRunError::Aborted => Self::Aborted,
             ServiceRunError::ResourceLimit(error) => Self::ResourceLimit(error),
             ServiceRunError::Failure(message) => classify(message),
@@ -136,6 +139,7 @@ impl DistoRunError {
 
     fn from_core(context: &str, error: rspice_core::SimulationError) -> Self {
         match ServiceRunError::from_core(context, error) {
+            ServiceRunError::ResourceFailure(error) => Self::ResourceFailure(error),
             ServiceRunError::Aborted => Self::Aborted,
             ServiceRunError::ResourceLimit(error) => Self::ResourceLimit(error),
             ServiceRunError::Failure(message) => Self::Execution(message),
@@ -144,6 +148,7 @@ impl DistoRunError {
 
     fn into_service(self) -> ServiceRunError {
         match self {
+            Self::ResourceFailure(error) => ServiceRunError::ResourceFailure(error),
             Self::Aborted => ServiceRunError::Aborted,
             Self::ResourceLimit(error) => ServiceRunError::ResourceLimit(error),
             other => ServiceRunError::Failure(other.to_string()),

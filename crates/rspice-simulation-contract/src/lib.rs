@@ -56,6 +56,7 @@ pub mod pz_draft;
 pub mod quasi_periodic_controls;
 pub mod quasi_periodic_draft;
 pub mod regression_policy;
+pub mod resource_failure;
 pub mod run_set;
 pub mod saved_output;
 pub mod sens_draft;

@@ -53,4 +53,5 @@ pub enum WorkerSimulationError {
         requested: usize,
         limit: usize,
     },
+    ResourceFailure(crate::resource_failure::ResourceFailure),
 }

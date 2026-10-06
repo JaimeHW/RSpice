@@ -439,7 +439,9 @@ where
                 abort_seen.set(true);
                 Value::INFINITY.into()
             }
-            Err(error @ ServiceRunError::ResourceLimit(_)) => {
+            Err(
+                error @ (ServiceRunError::ResourceLimit(_) | ServiceRunError::ResourceFailure(_)),
+            ) => {
                 fatal_error_seen.set(true);
                 *eval_error.borrow_mut() = Some(error);
                 Value::INFINITY.into()
@@ -707,6 +709,37 @@ mod tests {
 mod configured_search_limits {
     use super::*;
     use rspice_core::abort_signal::NoAbort;
+
+    #[test]
+    fn contextual_resource_failures_stop_optimization_without_another_candidate() {
+        use rspice_simulation_contract::resource_failure::ResourceFailure;
+        for failure in [
+            ResourceFailure::DeviceLimit {
+                instance: "X1:Q2".into(),
+                resource: "transport_history_records".into(),
+                requested: 11,
+                limit: 10,
+            },
+            ResourceFailure::Allocation {
+                object: "BJT phase-history growth".into(),
+                detail: "allocator refused storage".into(),
+            },
+        ] {
+            let calls = Cell::new(0);
+            let error = run_optimization_with_evaluator(
+                &OptimizationRunConfig::default(),
+                rspice_core::ResourceLimits::default(),
+                &NoAbort,
+                |_| {
+                    calls.set(calls.get() + 1);
+                    Err(ServiceRunError::ResourceFailure(failure.clone()))
+                },
+            )
+            .unwrap_err();
+            assert_eq!(error, ServiceRunError::ResourceFailure(failure));
+            assert_eq!(calls.get(), 1);
+        }
+    }
 
     #[test]
     fn configured_optimization_bounds_history_and_candidate_evaluations() {
