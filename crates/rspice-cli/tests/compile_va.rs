@@ -4,6 +4,34 @@ use std::process::Command;
 const SOURCE: &str = "`include \"disciplines.vams\"\nmodule resistor(p,n);\ninout p,n; electrical p,n;\nparameter real R=1000;\nanalog I(p,n) <+ V(p,n)/R;\nendmodule\n";
 
 #[test]
+fn root_line_admission_precedes_decoding_and_does_not_publish() {
+    let dir = common::test_dir("line_admission_before_decoding");
+    let config = dir.join("config.toml");
+    let input = dir.join("model.va");
+    let result = dir.join("model.json");
+    std::fs::write(&config, "[resources]\nmax_netlist_lines=1\n").unwrap();
+    let mut bytes = b"// first\n// second\n".to_vec();
+    bytes.extend(vec![b'x'; 65536]);
+    bytes.push(0xff);
+    std::fs::write(&input, bytes).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "--error-format", "json", "--config"])
+        .arg(&config)
+        .arg("compile-va")
+        .arg(&input)
+        .arg("-o")
+        .arg(&result)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(75), "{output:?}");
+    let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["error"]["resource"], "netlist_lines", "{error}");
+    assert_eq!(error["error"]["limit"], 1);
+    assert!(error["error"]["requested"].as_u64().unwrap() > 1);
+    assert!(!result.exists());
+}
+
+#[test]
 fn interface_output_cannot_replace_the_source_or_its_includes() {
     let dir = common::test_dir("source_collision");
     let input = dir.join("model.va");

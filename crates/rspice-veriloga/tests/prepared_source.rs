@@ -28,6 +28,130 @@ impl Drop for Sources {
 }
 
 #[test]
+fn limited_filesystem_preprocessing_admits_sources_before_reading_or_decoding() {
+    use rspice_veriloga::Preprocessor;
+    use rspice_veriloga::preprocessor::SourceResource;
+
+    let files = Sources::new();
+    let root = files.write("root.va", "`include \"child.va\"\n");
+    let child = files.0.join("child.va");
+    std::fs::write(&child, vec![0xff; 1024]).unwrap();
+    for (input, limits, expected) in [
+        (
+            &child,
+            SourceProviderLimits {
+                max_total_source_bytes: 128,
+                ..SourceProviderLimits::UNBOUNDED
+            },
+            SourceResource::TotalSourceBytes,
+        ),
+        (
+            &root,
+            SourceProviderLimits {
+                max_total_source_bytes: 128,
+                ..SourceProviderLimits::UNBOUNDED
+            },
+            SourceResource::TotalSourceBytes,
+        ),
+        (
+            &root,
+            SourceProviderLimits {
+                max_dependencies: 1,
+                ..SourceProviderLimits::UNBOUNDED
+            },
+            SourceResource::Dependencies,
+        ),
+    ] {
+        let error = Preprocessor::new()
+            .preprocess_file_with_limits(input, limits)
+            .unwrap_err();
+        assert_eq!(
+            error.file.as_ref().unwrap().canonicalize().unwrap(),
+            child.canonicalize().unwrap()
+        );
+        assert!(
+            error.io_error.is_none(),
+            "source was decoded before admission: {error:?}"
+        );
+        assert_eq!(
+            error
+                .resource_limit
+                .expect("typed source budget refusal")
+                .resource,
+            expected
+        );
+    }
+}
+
+#[test]
+fn root_line_limits_stop_loading_before_later_invalid_utf8() {
+    use rspice_veriloga::SourceProvider;
+    use rspice_veriloga::preprocessor::{BoundedFileSystemSourceProvider, SourceResource};
+
+    let files = Sources::new();
+    let root = files.0.join("root.va");
+    let mut source = b"// first\n// second\n".to_vec();
+    source.extend(vec![b'x'; 65536]);
+    source.push(0xff);
+    std::fs::write(&root, source).unwrap();
+    let provider = BoundedFileSystemSourceProvider::new(
+        SourceProviderLimits::UNBOUNDED,
+        usize::MAX,
+        1,
+        &NoPipelineControl,
+    );
+    let error = provider.load_root(&root).unwrap_err();
+    assert!(error.io_error.is_none(), "{error:?}");
+    let limit = error.resource_limit.expect("line limit precedes decoding");
+    assert_eq!(limit.resource, SourceResource::RootLines);
+    assert_eq!(limit.limit, 1);
+    assert!(limit.requested > 1);
+}
+
+#[test]
+fn streaming_line_admission_matches_text_lines_at_chunk_boundaries() {
+    use rspice_veriloga::SourceProvider;
+    use rspice_veriloga::preprocessor::{BoundedFileSystemSourceProvider, SourceResource};
+
+    let files = Sources::new();
+    for source in [
+        String::new(),
+        "\n".into(),
+        "\r\n".into(),
+        "a\rb".into(),
+        "a\n\nb".into(),
+        "a\r\n\r\nb\r\n".into(),
+        format!("{}\r\nlast", "x".repeat(16383)),
+        format!("{}\u{3bb}\nlast\n", "x".repeat(16383)),
+    ] {
+        let root = files.write("lines.va", &source);
+        let count = source.lines().count();
+        let provider = BoundedFileSystemSourceProvider::new(
+            SourceProviderLimits::UNBOUNDED,
+            usize::MAX,
+            count,
+            &NoPipelineControl,
+        );
+        assert_eq!(provider.load_root(&root).unwrap().source, source);
+        if count > 0 {
+            let provider = BoundedFileSystemSourceProvider::new(
+                SourceProviderLimits::UNBOUNDED,
+                usize::MAX,
+                count - 1,
+                &NoPipelineControl,
+            );
+            let failure = provider
+                .load_root(&root)
+                .unwrap_err()
+                .resource_limit
+                .unwrap();
+            assert_eq!(failure.resource, SourceResource::RootLines);
+            assert_eq!(failure.requested, count);
+        }
+    }
+}
+
+#[test]
 fn post_preparation_errors_keep_frozen_include_locations() {
     use rspice_veriloga::{CompileDiagnosticPhase, VirtualCompileLimits, VirtualSourceBundle};
 

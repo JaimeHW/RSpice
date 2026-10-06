@@ -150,35 +150,6 @@ fn include_candidate_exists(path: &Path) -> Result<bool, PreprocessorError> {
     }
 }
 
-struct LimitedSourceProvider<'a> {
-    inner: &'a dyn SourceProvider,
-    limits: SourceProviderLimits,
-}
-
-impl SourceProvider for LimitedSourceProvider<'_> {
-    fn load_root(&self, requested: &Path) -> Result<SourceDocument, PreprocessorError> {
-        self.inner.load_root(requested)
-    }
-
-    fn resolve_include(
-        &self,
-        including_file: Option<&Path>,
-        include_paths: &[PathBuf],
-        requested: &str,
-    ) -> Result<Option<SourceDocument>, PreprocessorError> {
-        self.inner
-            .resolve_include(including_file, include_paths, requested)
-    }
-
-    fn checkpoint(&self) -> Result<(), PreprocessorError> {
-        self.inner.checkpoint()
-    }
-
-    fn limits(&self) -> SourceProviderLimits {
-        self.limits
-    }
-}
-
 /// Exact dependency record captured during provider-backed preprocessing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreprocessedDependency {
@@ -633,6 +604,7 @@ impl Preprocessor {
     /// limits. This is used when importing third-party model trees: ordinary
     /// compiler entry points remain unbounded unless their own contract says
     /// otherwise, while acquisition cannot traverse an arbitrary host tree.
+    /// Byte and dependency limits apply before loading documents into memory.
     pub fn preprocess_file_with_limits(
         &mut self,
         path: &Path,
@@ -647,10 +619,12 @@ impl Preprocessor {
         path: &Path,
         limits: SourceProviderLimits,
     ) -> Result<PreprocessedSource, PreprocessorError> {
-        let provider = LimitedSourceProvider {
-            inner: &FileSystemSourceProvider,
+        let provider = BoundedFileSystemSourceProvider::new(
             limits,
-        };
+            usize::MAX,
+            usize::MAX,
+            &crate::NoPipelineControl,
+        );
         self.preprocess_provider_root_mapped(&provider, path)
     }
 

@@ -113,6 +113,7 @@ impl<'a> BoundedFileSystemSourceProvider<'a> {
         ensure_bytes(usize::try_from(metadata.len()).unwrap_or(usize::MAX))?;
         let mut bytes = Vec::new();
         let mut chunk = [0u8; 16 * 1024];
+        let mut newlines = 0usize;
         loop {
             self.checkpoint()?;
             let count = file.read(&mut chunk).map_err(io_error)?;
@@ -120,6 +121,15 @@ impl<'a> BoundedFileSystemSourceProvider<'a> {
                 break;
             }
             ensure_bytes(bytes.len().saturating_add(count))?;
+            if root && self.root_lines != usize::MAX {
+                newlines = newlines
+                    .saturating_add(chunk[..count].iter().filter(|&&byte| byte == b'\n').count());
+                // Match str::lines: LF terminates a line (including CRLF),
+                // and a nonempty unterminated tail is one more line. Count
+                // bytes before decoding so an over-budget source stops here.
+                let lines = newlines.saturating_add(usize::from(chunk[count - 1] != b'\n'));
+                ensure(SourceResource::RootLines, lines, self.root_lines)?;
+            }
             bytes
                 .try_reserve(count)
                 .map_err(|error| io_error(std::io::Error::other(error)))?;
@@ -128,13 +138,6 @@ impl<'a> BoundedFileSystemSourceProvider<'a> {
         let source = String::from_utf8(bytes).map_err(|error| {
             io_error(std::io::Error::new(std::io::ErrorKind::InvalidData, error))
         })?;
-        if root {
-            ensure(
-                SourceResource::RootLines,
-                source.lines().count(),
-                self.root_lines,
-            )?;
-        }
         self.admitted
             .borrow_mut()
             .insert(path.clone(), source.len());
