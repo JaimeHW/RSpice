@@ -893,6 +893,10 @@ fn parse_ascii_data(
     };
     ensure_waveform_dimensions(header, point_count, resource_limits)?;
     let mut data = data_columns(num_vars, point_count)?;
+    let mut imaginary = header
+        .is_complex
+        .then(|| data_columns(num_vars, point_count))
+        .transpose()?;
 
     if row_oriented {
         for (point_idx, line) in lines.iter().enumerate().take(point_count) {
@@ -918,8 +922,11 @@ fn parse_ascii_data(
 
             for var_idx in 0..num_vars {
                 let value_str = parts[var_idx + 1];
-                let value = parse_ascii_raw_value(value_str)?;
-                data[var_idx].push(value);
+                let (real, imag) = parse_ascii_components(value_str, header.is_complex)?;
+                data[var_idx].push(real);
+                if let Some(columns) = &mut imaginary {
+                    columns[var_idx].push(imag);
+                }
             }
         }
     } else {
@@ -974,8 +981,11 @@ fn parse_ascii_data(
                     }
                 };
 
-                let value = parse_ascii_raw_value(value_str)?;
-                column.push(value);
+                let (real, imag) = parse_ascii_components(value_str, header.is_complex)?;
+                column.push(real);
+                if let Some(columns) = &mut imaginary {
+                    columns[var_idx].push(imag);
+                }
             }
         }
     }
@@ -995,7 +1005,7 @@ fn parse_ascii_data(
         }
     }
     Ok((
-        build_waveforms(data, None, variables)?,
+        build_waveforms(data, imaginary, variables)?,
         actual_points,
         consumed,
     ))
@@ -1009,6 +1019,23 @@ fn ensure_finite_binary_value(value: f64) -> Result<(), RawParseError> {
             "Non-finite binary raw value: {value}"
         )))
     }
+}
+
+fn parse_ascii_components(value: &str, complex: bool) -> Result<(f64, f64), RawParseError> {
+    if !complex {
+        return Ok((parse_ascii_raw_value(value)?, 0.0));
+    }
+    let value = value
+        .strip_prefix('(')
+        .and_then(|v| v.strip_suffix(')'))
+        .unwrap_or(value);
+    let (real, imaginary) = value
+        .split_once(',')
+        .ok_or_else(|| RawParseError::DataError(format!("Invalid complex value: {value}")))?;
+    Ok((
+        parse_ascii_raw_value(real)?,
+        parse_ascii_raw_value(imaginary)?,
+    ))
 }
 
 fn parse_ascii_raw_value(value_str: &str) -> Result<f64, RawParseError> {

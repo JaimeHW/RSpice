@@ -108,6 +108,12 @@ pub fn execute(
         output_text(&result, quiet);
     }
 
+    if !result.is_ok() {
+        return Err(CliError::parse_error(format!(
+            "{} error(s)",
+            result.errors.len()
+        )));
+    }
     if args.strict && !result.warnings.is_empty() {
         return Err(CliError::InvalidArgument {
             message: format!("{} warning(s) in strict mode", result.warnings.len()),
@@ -115,14 +121,7 @@ pub fn execute(
         });
     }
 
-    if result.is_ok() {
-        Ok(())
-    } else {
-        Err(CliError::parse_error(format!(
-            "{} error(s)",
-            result.errors.len()
-        )))
-    }
+    Ok(())
 }
 
 /// Elaborate an XSPICE deck to prove it builds.
@@ -153,6 +152,7 @@ fn check_xspice_build(
     match Engine::new(config).build_circuit_with_abort(netlist, &crate::abort::ProcessAbort) {
         Ok(_) => Ok(()),
         Err(rspice_core::SimulationError::Aborted) => Err(CliError::Interrupted),
+        Err(error @ rspice_core::SimulationError::ResourceLimit(_)) => Err(error.into()),
         Err(error) => {
             result.errors.push(ValidationIssue {
                 message: format!("XSPICE build validation failed: {error}"),

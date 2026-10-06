@@ -366,12 +366,13 @@ fn run_implicit_step_op_table(
                     || canonical_coordinate_description(canonical_coordinate),
                     |value| format!("{target} = {value}"),
                 );
-                return Err(CliError::simulation_error_in(
+                return Err(map_step_core_error(
+                    error,
+                    args.timeout,
                     format!(
-                        ".STEP {} ({coordinate_context}): {error}",
+                        ".STEP {} ({coordinate_context})",
                         canonical_coordinate.stable_tag()
                     ),
-                    "Step",
                 ));
             }
         };

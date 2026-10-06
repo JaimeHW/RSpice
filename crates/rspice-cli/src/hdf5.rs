@@ -34,14 +34,10 @@ pub enum Hdf5Error {
     Backend(#[from] rustyhdf5::Error),
     #[error("invalid HDF5 schema: {0}")]
     InvalidSchema(String),
-    #[error("failed to prepare staged HDF5 artifact: {0}")]
-    ArtifactPreparation(#[source] std::io::Error),
     #[error("failed while writing staged HDF5 artifact: {0}")]
     ArtifactWrite(#[source] std::io::Error),
-    #[error("failed to flush staged HDF5 artifact: {0}")]
-    ArtifactFlush(#[source] std::io::Error),
-    #[error("failed to atomically commit staged HDF5 artifact: {0}")]
-    ArtifactCommit(#[source] std::io::Error),
+    #[error(transparent)]
+    Publication(#[from] rspice_core::OutputCommitError),
 }
 
 #[derive(Debug, Error)]
@@ -1134,12 +1130,10 @@ fn write_hdf5_staged(
     write: impl FnOnce(&mut dyn std::io::Write) -> std::result::Result<(), Hdf5StagingError>,
 ) -> Result<()> {
     publish::artifact(path, write).map_err(|error| match error {
-        AtomicArtifactError::Prepare(error) => Hdf5Error::ArtifactPreparation(error),
         AtomicArtifactError::Write(Hdf5StagingError::Backend(error)) => Hdf5Error::Backend(error),
         AtomicArtifactError::Write(Hdf5StagingError::Core(error)) => Hdf5Error::from(error),
         AtomicArtifactError::Write(Hdf5StagingError::Io(error)) => Hdf5Error::ArtifactWrite(error),
-        AtomicArtifactError::Flush { source, .. } => Hdf5Error::ArtifactFlush(source),
-        AtomicArtifactError::Commit { source, .. } => Hdf5Error::ArtifactCommit(source),
+        error => Hdf5Error::Publication(rspice_core::OutputCommitError::from_atomic(path, &error)),
     })
 }
 
@@ -2582,5 +2576,17 @@ mod tests {
             let fft_error = read_hdf5(&fft_path).expect_err("reject unsupported FFT schema");
             assert!(matches!(fft_error, Hdf5Error::InvalidSchema(_)));
         }
+    }
+}
+
+/// Preserve resource admission and publication failures across every HDF5 producer.
+pub(crate) fn map_output_error(path: &Path, error: Hdf5Error) -> crate::cli::CliError {
+    match error {
+        Hdf5Error::ResourceLimit(source) => crate::cli::CliError::ResourceLimit {
+            path: path.to_path_buf(),
+            source,
+        },
+        Hdf5Error::Publication(error) => rspice_core::SimulationError::from(error).into(),
+        error => crate::cli::CliError::output_error(path, std::io::Error::other(error)),
     }
 }

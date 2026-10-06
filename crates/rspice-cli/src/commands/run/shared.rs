@@ -216,10 +216,7 @@ pub(super) fn generate_frequency_sweep(
 }
 
 pub(super) fn map_hdf5_output_error(path: &Path, err: crate::hdf5::Hdf5Error) -> CliError {
-    CliError::OutputError {
-        path: path.to_path_buf(),
-        source: std::io::Error::other(err.to_string()),
-    }
+    crate::hdf5::map_output_error(path, err)
 }
 
 /// Reject results containing NaN/Inf: the solver produced a non-physical
