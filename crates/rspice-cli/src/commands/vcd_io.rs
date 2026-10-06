@@ -36,7 +36,7 @@ use rspice_core::io::{
 };
 use rspice_core::xspice::{DigitalState, DigitalStrength, DigitalValue};
 
-use crate::cli::{CliError, OutputFormat};
+use crate::cli::{CliError, InputFormat, OutputFormat};
 use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
 use crate::commands::publish;
 use crate::commands::waveform_io::{conversion_error, enforce_resource_limit, load_table};
@@ -176,11 +176,11 @@ fn parse_vcd(path: &Path, resource_limits: ResourceLimits) -> Result<VcdDocument
 /// [`EVENT_SCOPE`] whether they are expanded or not.
 pub(crate) fn load_vcd_document(
     path: &Path,
-    format: OutputFormat,
+    format: InputFormat,
     resource_limits: ResourceLimits,
     expand_buses: bool,
 ) -> Result<VcdDocument, CliError> {
-    if format == OutputFormat::Vcd {
+    if format == InputFormat::Vcd {
         // Reading and rewriting normalises the file: canonical identifier
         // codes, one declaration order, the writer's layout.
         let mut document = parse_vcd(path, resource_limits)?;
@@ -374,22 +374,26 @@ fn variable_reference(signal: &VcdSignal) -> String {
 /// to read: the caller then falls back to the grid columns.
 fn event_traces_of(
     path: &Path,
-    format: OutputFormat,
+    format: InputFormat,
     resource_limits: ResourceLimits,
     expand_buses: bool,
 ) -> Result<Option<VcdDocument>, CliError> {
     let traces = match format {
-        OutputFormat::Raw | OutputFormat::RawAscii => {
+        InputFormat::Raw | InputFormat::RawAscii => {
             let file = rspice_core::io::parse_raw_plots_file_with_limits(path, resource_limits)
                 .map_err(|error| conversion_error(path, error))?;
             rspice_core::execution::decode_event_plots(&file)
                 .map_err(|error| conversion_error(path, error))?
         }
-        OutputFormat::Json => match typed_transient_traces(path, resource_limits)? {
+        InputFormat::Json => match typed_transient_traces(path, resource_limits)? {
             Some(traces) => traces,
             None => return Ok(None),
         },
-        OutputFormat::Csv | OutputFormat::Tsv | OutputFormat::Hdf5 | OutputFormat::Vcd => {
+        InputFormat::Touchstone
+        | InputFormat::Csv
+        | InputFormat::Tsv
+        | InputFormat::Hdf5
+        | InputFormat::Vcd => {
             return Ok(None);
         }
     };

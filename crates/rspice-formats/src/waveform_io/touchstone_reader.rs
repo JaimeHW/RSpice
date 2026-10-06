@@ -39,6 +39,28 @@ pub fn read_touchstone_bytes(
     source_name: &str,
     bytes: &[u8],
 ) -> Result<WaveformDataset, TouchstoneError> {
+    read_touchstone_bytes_with_limit(source_name, bytes, usize::MAX)
+}
+
+/// Decode a Touchstone document while bounding numeric input and expanded
+/// matrix storage before allocation. The limit includes independently sampled
+/// noise traces, including their retained coordinate copies.
+pub fn read_touchstone_bytes_with_limit(
+    source_name: &str,
+    bytes: &[u8],
+    max_values: usize,
+) -> Result<WaveformDataset, TouchstoneError> {
+    let admit = |requested: usize| {
+        if requested > max_values {
+            Err(TouchstoneError::ValueLimit {
+                requested,
+                limit: max_values,
+            })
+        } else {
+            Ok(())
+        }
+    };
+    let mut input_values = 0usize;
     let text = std::str::from_utf8(bytes).map_err(TouchstoneError::Encoding)?;
     let mut options = Options {
         // Touchstone v1 defaults.
@@ -271,6 +293,13 @@ pub fn read_touchstone_bytes(
             )
             .into());
         }
+        input_values = input_values.saturating_add(
+            trimmed
+                .split_whitespace()
+                .filter(|token| *token != "+")
+                .count(),
+        );
+        admit(input_values)?;
         let values = trimmed
             .split_whitespace()
             .filter(|token| *token != "+")
@@ -376,6 +405,13 @@ pub fn read_touchstone_bytes(
         reference_values.as_deref(),
     )?;
 
+    let expanded_values = num_ports
+        .saturating_mul(num_ports)
+        .saturating_mul(2)
+        .saturating_add(1)
+        .saturating_mul(frequency_count)
+        .saturating_add(noise_records.len().saturating_mul(8));
+    admit(expanded_values)?;
     let mut frequencies = Vec::with_capacity(frequency_count);
     let mut matrix_real = vec![vec![vec![0.0; frequency_count]; num_ports]; num_ports];
     let mut matrix_imag = vec![vec![vec![0.0; frequency_count]; num_ports]; num_ports];
@@ -739,6 +775,26 @@ fn pair_to_complex(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn numeric_admission_precedes_token_and_expanded_matrix_allocation() {
+        for (source, limit, requested) in [
+            ("# Hz S RI R 50\n1 0 0 1 0 1 0 0 0\n", 8, 9),
+            (
+                "[Version] 2.0\n# Hz S RI R 50\n[Number of Ports] 3\n[Number of Frequencies] 1\n[Matrix Format] Lower\n[Network Data]\n1 0 0 1 0 0 0 1 0 1 0 0 0\n[End]\n",
+                15,
+                19,
+            ),
+        ] {
+            let error =
+                super::read_touchstone_bytes_with_limit("fixture.ts", source.as_bytes(), limit)
+                    .unwrap_err();
+            assert!(
+                matches!(error, super::TouchstoneError::ValueLimit { requested: actual, limit: actual_limit } if actual == requested && actual_limit == limit),
+                "{error}"
+            );
+        }
+    }
+
     use super::*;
 
     /// One matrix entry, as the reader materialized it.

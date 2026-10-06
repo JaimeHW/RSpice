@@ -38,4 +38,5 @@ pub mod zip;
 pub use waveform_io::{
     SignalType, TouchstoneError, UnsupportedWaveformDomain, WaveformDataset, WaveformDomain,
     WaveformFormat, WaveformSignal, WaveformWriteError, WaveformWriter, read_touchstone_bytes,
+    read_touchstone_bytes_with_limit,
 };

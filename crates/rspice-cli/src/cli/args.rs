@@ -694,7 +694,7 @@ pub struct CheckArgs {
 /// Arguments for the `convert` subcommand
 #[derive(Args, Debug)]
 pub struct ConvertArgs {
-    /// RAW plot or HDF5 group (exact name or one-based index); required for multiple results
+    /// RAW/HDF5/Touchstone section (exact name or one-based index); required for multiple results
     #[arg(long, value_name = "NAME_OR_INDEX")]
     pub section: Option<String>,
 
@@ -708,7 +708,7 @@ pub struct ConvertArgs {
 
     /// Input format (auto-detected if not specified)
     #[arg(long, value_name = "FORMAT")]
-    pub from: Option<OutputFormat>,
+    pub from: Option<InputFormat>,
 
     /// Output format (required)
     #[arg(long, value_name = "FORMAT")]
@@ -739,7 +739,7 @@ pub struct ConvertArgs {
 /// Arguments for the `compare` subcommand
 #[derive(Args, Debug)]
 pub struct CompareArgs {
-    /// RAW plot or HDF5 group (exact name or one-based index); required for multiple results
+    /// RAW/HDF5/Touchstone section (exact name or one-based index); required for multiple results
     #[arg(long, value_name = "NAME_OR_INDEX")]
     pub section: Option<String>,
 
@@ -809,6 +809,34 @@ pub enum MeasFormat {
     Json,
     /// CSV format
     Csv,
+}
+
+/// Result input formats, including read-only interchange carriers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum InputFormat {
+    Raw,
+    #[value(name = "ascii")]
+    RawAscii,
+    Csv,
+    Json,
+    Tsv,
+    Hdf5,
+    Vcd,
+    Touchstone,
+}
+
+impl From<OutputFormat> for InputFormat {
+    fn from(format: OutputFormat) -> Self {
+        match format {
+            OutputFormat::Raw => Self::Raw,
+            OutputFormat::RawAscii => Self::RawAscii,
+            OutputFormat::Csv => Self::Csv,
+            OutputFormat::Json => Self::Json,
+            OutputFormat::Tsv => Self::Tsv,
+            OutputFormat::Hdf5 => Self::Hdf5,
+            OutputFormat::Vcd => Self::Vcd,
+        }
+    }
 }
 
 /// Supported output formats
