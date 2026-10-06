@@ -183,7 +183,7 @@ pub fn parse_raw_reader_with_limits<R: Read>(
 ///
 /// Each plot is bounded by its own declared `No. Points`, so a file whose
 /// analysis plot is followed by further plots yields all of them. Limits are
-/// enforced per plot, before that plot's storage is allocated.
+/// enforced across the complete file, before each plot's storage is allocated.
 pub fn parse_raw_plots_file_with_limits(
     path: &Path,
     resource_limits: ResourceLimits,
@@ -234,13 +234,50 @@ fn parse_raw_plot_bytes(
 ) -> Result<RawFile, RawParseError> {
     let mut plots = Vec::new();
     let mut offset = 0usize;
+    let mut external_values = 0usize;
+    let mut result_values = 0usize;
     loop {
         let plot_number = plots.len().saturating_add(1);
         let remaining = bytes.get(offset..).ok_or_else(|| {
             RawParseError::DataError("raw plot offset exceeds the input length".to_string())
         })?;
-        let (plot, consumed) =
-            parse_plot(remaining, resource_limits).map_err(|error| in_plot(plot_number, error))?;
+        let mut remaining_limits = resource_limits;
+        remaining_limits.max_external_data_values = resource_limits
+            .max_external_data_values
+            .saturating_sub(external_values);
+        remaining_limits.max_result_values = resource_limits
+            .max_result_values
+            .saturating_sub(result_values);
+        let (plot, consumed) = parse_plot(remaining, remaining_limits).map_err(|error| {
+            let error = match error {
+                RawParseError::ResourceLimit(mut error) => {
+                    match error.resource {
+                        ResourceKind::ExternalDataValues => {
+                            error.requested = error.requested.saturating_add(external_values);
+                            error.limit = resource_limits.max_external_data_values;
+                        }
+                        ResourceKind::ResultValues => {
+                            error.requested = error.requested.saturating_add(result_values);
+                            error.limit = resource_limits.max_result_values;
+                        }
+                        _ => {}
+                    }
+                    RawParseError::ResourceLimit(error)
+                }
+                error => error,
+            };
+            in_plot(plot_number, error)
+        })?;
+        external_values = external_values.saturating_add(checked_product(&[
+            plot.header.no_variables,
+            plot.header.no_points,
+            if plot.header.is_complex { 2 } else { 1 },
+        ]));
+        result_values = result_values.saturating_add(checked_product(&[
+            plot.header.no_variables,
+            plot.header.no_points,
+            if plot.header.is_complex { 3 } else { 2 },
+        ]));
         plots.try_reserve(1).map_err(|error| {
             RawParseError::DataError(format!("unable to retain raw plot {plot_number}: {error}"))
         })?;

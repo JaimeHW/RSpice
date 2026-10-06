@@ -694,6 +694,10 @@ pub struct CheckArgs {
 /// Arguments for the `convert` subcommand
 #[derive(Args, Debug)]
 pub struct ConvertArgs {
+    /// RAW plot or HDF5 group (exact name or one-based index); required for multiple results
+    #[arg(long, value_name = "NAME_OR_INDEX")]
+    pub section: Option<String>,
+
     /// Input file
     #[arg(value_name = "INPUT")]
     pub input: PathBuf,
@@ -735,6 +739,10 @@ pub struct ConvertArgs {
 /// Arguments for the `compare` subcommand
 #[derive(Args, Debug)]
 pub struct CompareArgs {
+    /// RAW plot or HDF5 group (exact name or one-based index); required for multiple results
+    #[arg(long, value_name = "NAME_OR_INDEX")]
+    pub section: Option<String>,
+
     /// Result file to compare
     #[arg(value_name = "RESULT")]
     pub result: PathBuf,
@@ -775,7 +783,7 @@ pub struct CompareArgs {
 
     /// Accept the result as the new reference: copy it over the golden
     /// file when they differ (or when the golden file does not exist yet)
-    #[arg(long)]
+    #[arg(long, conflicts_with = "section")]
     pub bless: bool,
 
     /// Linearly resample the result onto the golden file's scale before

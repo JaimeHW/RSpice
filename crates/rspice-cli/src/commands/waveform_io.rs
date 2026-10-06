@@ -8,7 +8,7 @@
 
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
-use crate::hdf5::read_hdf5_with_limits;
+use crate::hdf5::read_hdf5_sections_with_limits;
 use std::io::Read;
 use std::path::Path;
 
@@ -35,12 +35,22 @@ pub(crate) fn load_table(
     format: OutputFormat,
     resource_limits: rspice_core::ResourceLimits,
 ) -> Result<ExportTable, CliError> {
+    load_table_selected(path, format, resource_limits, None)
+}
+
+/// Select one fully validated container section by exact name or one-based index.
+pub(crate) fn load_table_selected(
+    path: &Path,
+    format: OutputFormat,
+    resource_limits: rspice_core::ResourceLimits,
+    section: Option<&str>,
+) -> Result<ExportTable, CliError> {
     let table = match format {
-        OutputFormat::Raw | OutputFormat::RawAscii => load_rawfile(path, resource_limits),
+        OutputFormat::Raw | OutputFormat::RawAscii => load_rawfile(path, resource_limits, section),
         OutputFormat::Csv => load_delimited(path, ',', resource_limits),
         OutputFormat::Tsv => load_delimited(path, '\t', resource_limits),
         OutputFormat::Json => load_json(path, resource_limits),
-        OutputFormat::Hdf5 => load_hdf5(path, resource_limits),
+        OutputFormat::Hdf5 => load_hdf5(path, resource_limits, section),
         OutputFormat::Vcd => crate::commands::vcd_io::load_vcd_table(path, resource_limits),
     }?;
     validate_table_shape(path, table, resource_limits)
@@ -230,12 +240,74 @@ fn validate_values(path: &Path, signal: &str, part: &str, values: &[f64]) -> Res
     Ok(())
 }
 
+/// The default is safe only when the container carries one result. Names are
+/// exact; a one-based index can disambiguate repeated names in a RAW file.
+fn select_section(path: &Path, names: &[&str], selector: Option<&str>) -> Result<usize, CliError> {
+    if selector.is_none() && names.len() == 1 {
+        return Ok(0);
+    }
+    if let Some(selector) = selector {
+        if let Ok(index) = selector.parse::<usize>() {
+            if index > 0 && index <= names.len() {
+                return Ok(index - 1);
+            }
+        } else {
+            let mut matches = names
+                .iter()
+                .enumerate()
+                .filter(|(_, name)| **name == selector);
+            if let Some((index, _)) = matches.next() {
+                if matches.next().is_none() {
+                    return Ok(index);
+                }
+            }
+        }
+    }
+    let available = names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| format!("{}: {name}", index + 1))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(conversion_error(
+        path,
+        format!(
+            "{}; use --section with an exact name or one-based index. Available sections: [{available}]",
+            selector.map_or_else(
+                || format!("file contains {} result sections", names.len()),
+                |value| format!("section '{value}' is missing or ambiguous")
+            )
+        ),
+    ))
+}
+
 fn load_rawfile(
     path: &Path,
     resource_limits: rspice_core::ResourceLimits,
+    section: Option<&str>,
 ) -> Result<ExportTable, CliError> {
-    let data = rspice_core::io::parse_raw_file_with_limits(path, resource_limits)
-        .map_err(|e| conversion_error(path, e))?;
+    let file = rspice_core::io::parse_raw_plots_file_with_limits(path, resource_limits).map_err(
+        |error| match error {
+            rspice_core::io::RawParseError::ResourceLimit(source) => CliError::ResourceLimit {
+                path: path.to_path_buf(),
+                source,
+            },
+            error => conversion_error(path, error),
+        },
+    )?;
+    rspice_core::execution::decode_event_plots(&file)
+        .map_err(|error| conversion_error(path, error))?;
+    let names: Vec<_> = file
+        .plots
+        .iter()
+        .map(|plot| plot.header.plotname.as_str())
+        .collect();
+    let index = select_section(path, &names, section)?;
+    let data = file
+        .plots
+        .into_iter()
+        .nth(index)
+        .expect("selected existing plot");
     if data.header.plotname == "Transient FFT" {
         crate::commands::run::read_fft_raw_artifact(path).map_err(|error| {
             conversion_error(path, format!("invalid typed FFT RAW artifact: {error}"))
@@ -860,6 +932,7 @@ fn result_document_table(
 fn load_hdf5(
     path: &Path,
     resource_limits: rspice_core::ResourceLimits,
+    section: Option<&str>,
 ) -> Result<ExportTable, CliError> {
     let metadata_bytes = usize::try_from(
         std::fs::metadata(path)
@@ -876,14 +949,27 @@ fn load_hdf5(
         metadata_bytes,
         resource_limits.max_external_data_bytes,
     )?;
-    let data = read_hdf5_with_limits(path, resource_limits).map_err(|error| match error {
-        crate::hdf5::Hdf5Error::ResourceLimit(source) => CliError::ResourceLimit {
-            path: path.to_path_buf(),
-            source,
-        },
-        error => conversion_error(path, error),
-    })?;
+    let crate::hdf5::Hdf5Readback { metadata, sections } =
+        read_hdf5_sections_with_limits(path, resource_limits).map_err(|error| match error {
+            crate::hdf5::Hdf5Error::ResourceLimit(source) => CliError::ResourceLimit {
+                path: path.to_path_buf(),
+                source,
+            },
+            error => conversion_error(path, error),
+        })?;
 
+    let names: Vec<_> = sections.iter().map(|(name, _)| name.as_str()).collect();
+    let index = select_section(path, &names, section)?;
+    let (_, mut data) = sections
+        .into_iter()
+        .nth(index)
+        .expect("selected existing section");
+    data.title = metadata.title;
+    data.identity = metadata.identity;
+    hdf5_table(path, data)
+}
+
+fn hdf5_table(path: &Path, data: crate::hdf5::Hdf5SimulationData) -> Result<ExportTable, CliError> {
     let from_section = |section: crate::hdf5::Hdf5WaveformSection, analysis: &str| ExportTable {
         analysis: analysis.to_string(),
         plot_name: if data.title.is_empty() {
@@ -1240,12 +1326,12 @@ mod tests {
         });
         crate::hdf5::write_hdf5(&input.0, &data).expect("write combined HDF5 fixture");
 
-        let error = match load_hdf5(&input.0, rspice_core::ResourceLimits::default()) {
+        let error = match load_hdf5(&input.0, rspice_core::ResourceLimits::default(), None) {
             Err(error) => error,
             Ok(_) => panic!("combined typed FFT data must not be flattened"),
         };
         assert!(
-            error.to_string().contains("typed transient FFT HDF5"),
+            error.to_string().contains("2 result sections"),
             "unexpected conversion error: {error}"
         );
     }

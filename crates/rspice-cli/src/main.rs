@@ -221,6 +221,7 @@ fn main() -> ExitCode {
         }
         Commands::Compare(args) => {
             let compare_args = commands::compare::CompareArgs {
+                section: args.section,
                 result: args.result,
                 golden: args.golden,
                 abstol: args.abstol,

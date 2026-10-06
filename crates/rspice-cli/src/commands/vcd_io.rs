@@ -195,7 +195,11 @@ pub(crate) fn load_vcd_document(
     }
 
     let table = load_table(path, format, resource_limits)?;
-    let traces = grid_event_traces(path, &table)?;
+    table_document(path, &table)
+}
+
+pub(crate) fn table_document(path: &Path, table: &ExportTable) -> Result<VcdDocument, CliError> {
+    let traces = grid_event_traces(path, table)?;
     event_document(
         path,
         &traces.digital_traces,

@@ -475,6 +475,20 @@ fail, point-count mismatches fail (a result truncated by a crashed run cannot
 pass on the overlap it wrote), and NaN never matches anything. `--bless`
 accepts the result as the new reference.
 
+RAW and HDF5 inputs are validated in full before any section is selected.
+When they contain multiple results, `compare` and tabular `convert` require
+`--section NAME_OR_INDEX`: an exact RAW plot name or HDF5 group name, or a
+one-based index from the available-section list in the diagnostic. This
+selector applies to container inputs; a CSV or other single-table reference
+still supplies its sole result. Repeated RAW plot names require an index.
+Comparison JSON identifies the selected section. Section selection cannot
+be combined with `--bless`, which replaces an entire reference file.
+
+For example, `convert mixed.raw grid.csv --to csv --section "Transient Analysis"`
+selects the sampled grid of a mixed-signal result. `convert mixed.raw events.vcd
+--to vcd` preserves its complete event timelines. RAW numeric admission limits
+cover all plots together, including plots outside the selection.
+
 **`convert`** preserves complex AC data across every round trip
 (`Re(..)`/`Im(..)` column pairs in CSV and TSV, `Flags: complex` in rawfiles,
 real/imag arrays in JSON and HDF5). One sample is a result: an operating point

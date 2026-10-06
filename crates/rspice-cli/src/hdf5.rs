@@ -1142,10 +1142,49 @@ pub(crate) fn read_hdf5(path: &Path) -> Result<Hdf5SimulationData> {
     read_hdf5_with_limits(path, rspice_core::ResourceLimits::default())
 }
 
+/// Read the legacy family view, rejecting repeated families instead of replacing them.
+#[cfg(test)]
 pub fn read_hdf5_with_limits(
     path: &Path,
     limits: rspice_core::ResourceLimits,
 ) -> Result<Hdf5SimulationData> {
+    let Hdf5Readback {
+        metadata: mut data,
+        sections,
+    } = read_hdf5_sections_with_limits(path, limits)?;
+    for (name, section) in sections {
+        macro_rules! merge {
+            ($field:ident) => {
+                if let Some(value) = section.$field {
+                    if data.$field.replace(value).is_some() {
+                        return Err(Hdf5Error::InvalidSchema(format!(
+                            "repeated {} section '{name}'; select an explicit result section",
+                            stringify!($field)
+                        )));
+                    }
+                }
+            };
+        }
+        merge!(operating_point);
+        merge!(transient);
+        merge!(dc_sweep);
+        merge!(noise);
+        merge!(ac);
+        merge!(distortion);
+        merge!(fft);
+    }
+    Ok(data)
+}
+
+pub struct Hdf5Readback {
+    pub metadata: Hdf5SimulationData,
+    pub sections: Vec<(String, Hdf5SimulationData)>,
+}
+
+pub fn read_hdf5_sections_with_limits(
+    path: &Path,
+    limits: rspice_core::ResourceLimits,
+) -> Result<Hdf5Readback> {
     let bytes = std::fs::metadata(path).map_err(rustyhdf5::Error::Io)?.len();
     admission::admit(
         rspice_core::ResourceKind::ExternalDataBytes,
@@ -1184,6 +1223,7 @@ pub fn read_hdf5_with_limits(
         identity,
         ..Hdf5SimulationData::default()
     };
+    let mut sections = Vec::new();
     for group_name in &root_groups {
         if group_name == "measurements" {
             data.measurements = read_measurements(&file)?;
@@ -1195,25 +1235,30 @@ pub fn read_hdf5_with_limits(
                 "group '{group_name}' declares no section_type, so its result family is unknown"
             ))
         })?;
+        let mut section = Hdf5SimulationData::default();
         match family.as_str() {
             "operating_point" => {
-                data.operating_point = Some(read_waveform_section(&file, group_name)?);
+                section.operating_point = Some(read_waveform_section(&file, group_name)?);
             }
-            "transient" => data.transient = Some(read_waveform_section(&file, group_name)?),
-            "dc_sweep" => data.dc_sweep = Some(read_waveform_section(&file, group_name)?),
-            "noise" => data.noise = Some(read_waveform_section(&file, group_name)?),
-            "ac" => data.ac = Some(read_ac_section(&file, group_name)?),
-            "distortion" => data.distortion = Some(read_distortion_section(&file, group_name)?),
-            "fft" => data.fft = Some(read_fft_section(&file, group_name)?),
+            "transient" => section.transient = Some(read_waveform_section(&file, group_name)?),
+            "dc_sweep" => section.dc_sweep = Some(read_waveform_section(&file, group_name)?),
+            "noise" => section.noise = Some(read_waveform_section(&file, group_name)?),
+            "ac" => section.ac = Some(read_ac_section(&file, group_name)?),
+            "distortion" => section.distortion = Some(read_distortion_section(&file, group_name)?),
+            "fft" => section.fft = Some(read_fft_section(&file, group_name)?),
             other => {
                 return Err(Hdf5Error::InvalidSchema(format!(
                     "group '{group_name}' declares unknown section_type '{other}'"
                 )));
             }
         }
+        sections.push((group_name.clone(), section));
     }
 
-    Ok(data)
+    Ok(Hdf5Readback {
+        metadata: data,
+        sections,
+    })
 }
 
 fn add_waveform_section(

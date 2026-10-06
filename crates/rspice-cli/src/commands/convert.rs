@@ -14,7 +14,7 @@
 use crate::cli::{CliError, Config, ConvertArgs, OutputFormat};
 use crate::commands::export_table::{ColumnData, ExportTable};
 use crate::commands::vcd_io;
-use crate::commands::waveform_io::{detect_format, load_table};
+use crate::commands::waveform_io::{detect_format, load_table_selected};
 use crate::hdf5::{Hdf5AcSection, Hdf5SimulationData, Hdf5WaveformSection, write_hdf5};
 
 /// Execute the convert command
@@ -46,7 +46,7 @@ pub fn execute(
         vcd_io::expand_buses_needs_vcd("--expand-buses", args.to)?;
     }
 
-    if args.to == OutputFormat::Vcd {
+    if args.to == OutputFormat::Vcd && args.section.is_none() {
         let mut document = vcd_io::load_vcd_document(
             &args.input,
             from_format,
@@ -67,7 +67,12 @@ pub fn execute(
         return Ok(());
     }
 
-    let mut table = load_table(&args.input, from_format, config.resources.limits())?;
+    let mut table = load_table_selected(
+        &args.input,
+        from_format,
+        config.resources.limits(),
+        args.section.as_deref(),
+    )?;
 
     table.select_variables(&args.variables)?;
     table.clip_scale_range(args.start, args.stop);
@@ -80,6 +85,10 @@ pub fn execute(
     }
 
     match args.to {
+        OutputFormat::Vcd => {
+            let document = vcd_io::table_document(&args.input, &table)?;
+            vcd_io::write_vcd_artifact(&args.output, &document)?;
+        }
         OutputFormat::Hdf5 => write_hdf5_output(&args.output, &table)?,
         format => table.write(&args.output, format)?,
     }

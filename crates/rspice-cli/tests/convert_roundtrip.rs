@@ -470,7 +470,8 @@ fn a_bus_reaches_a_table_as_one_column_per_bit_from_either_artifact() {
     let raw = simulate(&dir, &deck, "raw", "run.raw");
 
     let grid = dir.join("grid.csv");
-    convert(&raw, &grid, "csv", &[]);
+    // Choose the sampled analysis grid explicitly; the other plots carry exact events.
+    convert(&raw, &grid, "csv", &["--section", "Transient Analysis"]);
     let (header, _) = read_csv(&grid);
     for member in ["D(COUNT#1)", "D(COUNT#0)"] {
         assert!(
