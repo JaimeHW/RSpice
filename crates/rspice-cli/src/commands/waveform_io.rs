@@ -499,8 +499,8 @@ fn load_delimited(
         });
         if let Some((inner, imag)) = complex_pair {
             columns.push(ExportColumn {
+                var_type: signal_var_type(&inner),
                 name: inner,
-                var_type: "voltage".to_string(),
                 data: ColumnData::Complex { real: values, imag },
             });
             continue;
@@ -894,15 +894,7 @@ fn load_hdf5(
         scale_type: scale_var_type(&section.independent_name),
         scale_name: section.independent_name,
         scale: section.independent_values,
-        columns: section
-            .signals
-            .into_iter()
-            .map(|signal| ExportColumn {
-                var_type: hdf5_signal_var_type(&signal),
-                name: signal.name,
-                data: ColumnData::Real(signal.values),
-            })
-            .collect(),
+        columns: decode_hdf5_columns(section.signals),
     };
 
     if data.fft.is_some() {
@@ -1012,6 +1004,39 @@ fn load_hdf5(
         path,
         "HDF5 file did not contain a supported waveform section",
     ))
+}
+
+/// A general-coordinate complex conversion stores marked real/imaginary
+/// columns in the ordinary waveform schema, without pretending time is hertz.
+fn decode_hdf5_columns(signals: Vec<crate::hdf5::Hdf5Signal>) -> Vec<ExportColumn> {
+    let mut columns = Vec::new();
+    let mut signals = signals.into_iter().peekable();
+    while let Some(signal) = signals.next() {
+        if let Some(var_type) = signal.var_type.strip_prefix("complex_real:")
+            && let Some(name) = complex_part_name(&signal.name, "Re(")
+            && signals.peek().is_some_and(|imag| {
+                imag.var_type == format!("complex_imag:{var_type}")
+                    && complex_part_name(&imag.name, "Im(").as_deref() == Some(&name)
+            })
+        {
+            let imag = signals.next().expect("matching imaginary column");
+            columns.push(ExportColumn {
+                name,
+                var_type: var_type.to_string(),
+                data: ColumnData::Complex {
+                    real: signal.values,
+                    imag: imag.values,
+                },
+            });
+        } else {
+            columns.push(ExportColumn {
+                var_type: hdf5_signal_var_type(&signal),
+                name: signal.name,
+                data: ColumnData::Real(signal.values),
+            });
+        }
+    }
+    columns
 }
 
 /// `Re(x)` / `Im(x)` helper: returns the inner name when `name` starts with

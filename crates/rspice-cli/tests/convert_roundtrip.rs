@@ -1212,3 +1212,28 @@ fn complex_ascii_raw_roundtrips_both_layouts_at_full_precision() {
         assert_eq!(read_csv(&csv).1, original);
     }
 }
+
+#[test]
+fn complex_conversion_preserves_current_quantity_and_time_coordinate() {
+    let dir = test_dir("complex_coordinate_quantity");
+    let csv = dir.join("source.csv");
+    let hdf5 = dir.join("result.h5");
+    let raw = dir.join("result.raw");
+    let restored = dir.join("restored.csv");
+    std::fs::write(
+        &csv,
+        "time,Re(I(v1)),Im(I(v1))\n0,0.001,0.002\n1,0.003,0.004\n",
+    )
+    .unwrap();
+    convert(&csv, &hdf5, "hdf5", &[]);
+    convert(&hdf5, &raw, "ascii", &[]);
+    let text = std::fs::read_to_string(&raw).unwrap();
+    assert!(text.contains("time\ttime"), "{text}");
+    assert!(
+        text.to_ascii_lowercase().contains("i(v1)\tcurrent"),
+        "{text}"
+    );
+    assert!(text.contains("Flags: complex"), "{text}");
+    convert(&raw, &restored, "csv", &[]);
+    assert_eq!(read_csv(&csv), read_csv(&restored));
+}
