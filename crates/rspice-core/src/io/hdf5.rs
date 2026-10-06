@@ -40,6 +40,15 @@
 //!   `signal_{i:04}_unit`;
 //! - datasets `independent`, then `signal_{i:04}`, all `f64`.
 //!
+//! A general **table** section uses that real-section layout and adds group
+//! attributes `analysis` and `coordinate_type`. The latter preserves arbitrary
+//! coordinates such as a report's `index`, instead of inferring time from a
+//! column name. A complex column occupies two adjacent real columns named
+//! `Re(name)` and `Im(name)`, with types `complex_real:<quantity>` and
+//! `complex_imag:<quantity>`. Both halves must agree on name and quantity.
+//! Waveform readers may admit only the coordinate domains they can represent;
+//! the CLI also reads report/index tables.
+//!
 //! A **spectral** section (`ac`) carries:
 //!
 //! - attributes `section_type`, `signal_count`, then, for each column,

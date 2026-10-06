@@ -43,7 +43,6 @@ These combinations remain explicitly unsupported:
 | :--- | :--- |
 | QPSS, QPAC, QPXF, QPNOISE | No shared result-document projection; rejected before solving with a typed capability diagnostic |
 | Control scripts with checkpoint/resume, segmented restart, compression, declarative FFT/Fourier or STEP/TEMP axes | Rejected during frontend preflight |
-| TF, PZ, sensitivity or DCMATCH exported as HDF5 | Rejected before solving; use JSON, CSV, TSV or RAW |
 | Generic conversion of typed FFT artifacts | Rejected where conversion would discard FFT metadata |
 
 These are feature gaps, not a claim of parity with other commercial simulators.
@@ -358,8 +357,13 @@ shapes:
 | `.SP` | `S_i_j` complex columns for the deck's N ports (Touchstone instead when `-o` ends in a matching `.sNp`) |
 | `--sparam` | `S11`/`S21`/`S12`/`S22` complex columns over frequency (Touchstone instead when `-o` ends in `.s2p`) |
 
-TF, pole-zero, sensitivity, and DCMATCH tables have no HDF5 section and reject
-`-f hdf5` with a clear error; use `csv`, `json`, or `raw`.
+TF, pole-zero, sensitivity, DCMATCH and periodic stability support HDF5
+through a general `table` section. The group retains its analysis identity,
+coordinate name and type, and each column's quantity type. Complex columns
+carry paired `complex_real:<type>` / `complex_imag:<type>` markers. Conversion
+uses the same section for arbitrary coordinates, preserving an index as an
+index and a time coordinate as time. JSON tables likewise retain these types;
+readers continue to accept older JSON tables that did not declare them.
 
 ### `vcd`
 

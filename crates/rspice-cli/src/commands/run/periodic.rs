@@ -593,10 +593,7 @@ fn export_pxf(
 /// shape. The complete spectrum is published; the card's `NMULTS` is a display
 /// limit and lives in the typed document's payload.
 ///
-/// HDF5 is refused by name, as `.PZ` and `.SENS` refuse it: the file's section
-/// vocabulary is time, frequency and DC sweeps, and a mode index is none of
-/// those. The RAW renderings keep it as an `index` scale, which is the same
-/// spelling `.PZ` and `.SENS` already publish.
+/// RAW and HDF5 keep the independent coordinate as a mode index.
 fn export_pstb(
     ctx: &RunContext<'_>,
     artifact: &PeriodicArtifact,
@@ -605,7 +602,6 @@ fn export_pstb(
     card: &PstbCard,
     stability: &rspice_core::engine::PeriodicStabilityResult,
 ) -> Result<(), CliError> {
-    super::frequency::reject_hdf5(ctx.format, "periodic stability")?;
     let analysis_id = artifact.analysis;
     let modes = &stability.result.multipliers;
     let column = |name: &str, values: Vec<f64>| ExportColumn {

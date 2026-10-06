@@ -256,10 +256,10 @@ fn select_section(path: &Path, names: &[&str], selector: Option<&str>) -> Result
                 .iter()
                 .enumerate()
                 .filter(|(_, name)| **name == selector);
-            if let Some((index, _)) = matches.next() {
-                if matches.next().is_none() {
-                    return Ok(index);
-                }
+            if let Some((index, _)) = matches.next()
+                && matches.next().is_none()
+            {
+                return Ok(index);
             }
         }
     }
@@ -720,7 +720,11 @@ fn load_json(
                 }
             };
             columns.push(ExportColumn {
-                var_type: signal_var_type(&name),
+                var_type: signal
+                    .get("type")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| signal_var_type(&name)),
                 name,
                 data,
             });
@@ -732,8 +736,16 @@ fn load_json(
                 .and_then(|v| v.as_str())
                 .unwrap_or("converted")
                 .to_string(),
-            plot_name: "Converted Data".to_string(),
-            scale_type: scale_var_type(&scale_name),
+            plot_name: value
+                .get("plot_name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("Converted Data")
+                .to_owned(),
+            scale_type: scale_obj
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .unwrap_or_else(|| scale_var_type(&scale_name)),
             scale_name,
             scale,
             columns,
@@ -983,6 +995,16 @@ fn hdf5_table(path: &Path, data: crate::hdf5::Hdf5SimulationData) -> Result<Expo
         columns: decode_hdf5_columns(section.signals),
     };
 
+    if let Some(table) = data.table {
+        return Ok(ExportTable {
+            analysis: table.analysis,
+            plot_name: data.title,
+            scale_name: table.waveform.independent_name,
+            scale_type: table.coordinate_type,
+            scale: table.waveform.independent_values,
+            columns: decode_hdf5_columns(table.waveform.signals),
+        });
+    }
     if data.fft.is_some() {
         return Err(conversion_error(
             path,

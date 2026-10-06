@@ -136,6 +136,16 @@ fn repeated_hdf5_families_are_selected_by_group_and_all_sections_are_validated()
             .status
             .success()
         );
+        hdf5(&right, family, &[f64::NAN, f64::NAN]);
+        let result = cli(&[
+            "compare",
+            left.to_str().unwrap(),
+            right.to_str().unwrap(),
+            "--section",
+            "first",
+        ]);
+        assert!(!result.status.success(), "{result:?}");
+        assert!(String::from_utf8_lossy(&result.stderr).contains("non-finite"));
     }
 }
 

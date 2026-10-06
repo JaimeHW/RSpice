@@ -1266,7 +1266,6 @@ fn export_dc_match(
     let Some(resolved) = ctx.resolve_output("dcmatch") else {
         return Ok(());
     };
-    super::frequency::reject_hdf5(ctx.format, "DC mismatch")?;
     let analysis_id = resolved.analysis("dcmatch")?;
     use super::export::{ColumnData, ExportColumn, ExportTable};
 
