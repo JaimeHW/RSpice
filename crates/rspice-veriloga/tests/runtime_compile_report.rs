@@ -27,6 +27,34 @@ fn compiler() -> VerilogACompiler {
 }
 
 #[test]
+fn expression_lowering_errors_retain_the_innermost_authored_span() {
+    for (expression, offending) in [
+        ("V(p,n) + missing", "missing"),
+        ("V(p,n) + $vt(1,2)", "$vt(1,2)"),
+    ] {
+        let source = format!(
+            "module bad(p,n);\ninout p,n; electrical p,n;\nanalog I(p,n) <+ {expression};\nendmodule\n"
+        );
+        for runtime in [false, true] {
+            let error = if runtime {
+                compiler().compile_runtime(&source, None).unwrap_err()
+            } else {
+                compiler().compile(&source).unwrap_err()
+            };
+            let diagnostics = compile_diagnostics(&source, &error);
+            assert_eq!(diagnostics.len(), 1, "{error}");
+            let diagnostic = &diagnostics[0];
+            assert_eq!(diagnostic.phase, CompileDiagnosticPhase::CodeGeneration);
+            let span = diagnostic.span.as_ref().expect("authored expression span");
+            assert_eq!(
+                &source[span.byte_start as usize..span.byte_end as usize],
+                offending
+            );
+        }
+    }
+}
+
+#[test]
 fn runtime_noise_count_tracks_processes_and_checks_both_artifacts() {
     for (body, expected) in [
         (

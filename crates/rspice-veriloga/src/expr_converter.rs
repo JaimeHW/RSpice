@@ -633,6 +633,20 @@ impl<'a> ExprConverter<'a> {
 
     /// Convert an AST expression to an IR expression
     pub fn convert(&self, arena: &mut ExprArena, expr: &Expression) -> CompileResult<NodeId> {
+        self.convert_inner(arena, expr).map_err(|mut error| {
+            // The deepest failing expression owns the location. Helpers that
+            // already identify a narrower operand retain their exact span.
+            if let crate::CompileError::CodeGen(error) = &mut error {
+                let span = expr.span();
+                if !span.is_empty() {
+                    error.span.get_or_insert(span);
+                }
+            }
+            error
+        })
+    }
+
+    fn convert_inner(&self, arena: &mut ExprArena, expr: &Expression) -> CompileResult<NodeId> {
         match expr {
             Expression::Number(num) => self.convert_number(arena, num),
             Expression::StringLit(_) => Err(CodeGenError::new(
