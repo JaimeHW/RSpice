@@ -25,7 +25,7 @@ fn explicit_temperature_wins_in_scalar_control_corner_and_parameter_sweep_runs()
         let mut checked = 0;
         for entry in std::fs::read_dir(&dir).unwrap() {
             let path = entry.unwrap().path();
-            if !path.extension().is_some_and(|ext| ext == "csv") {
+            if path.extension().is_none_or(|ext| ext != "csv") {
                 continue;
             }
             let text = std::fs::read_to_string(path).unwrap();

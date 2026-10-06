@@ -562,4 +562,3 @@ impl Hdf5FftMetrics {
         Ok(())
     }
 }
-

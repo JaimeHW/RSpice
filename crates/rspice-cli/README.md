@@ -16,7 +16,7 @@ cargo build --release -p rspice-cli
 | Command | Purpose |
 | :--- | :--- |
 | `run` | Execute the analyses a netlist requests, or one requested from the command line |
-| `check` | Validate netlist syntax, output symbols, topology, and XSPICE construction |
+| `check` | Validate netlist and control syntax, analysis requests, output symbols, topology, and XSPICE construction |
 | `info` | Summarize a netlist without simulating it |
 | `models` | List the shipped SPICE model packs and look up parts in them |
 | `compare` | Compare a result against a golden reference |
@@ -41,6 +41,7 @@ These combinations remain explicitly unsupported:
 
 | Feature | CLI boundary |
 | :--- | :--- |
+| Strict Verilog-A LRM checking | `compile-va --strict` returns an unsupported-capability error until strict checking is implemented |
 | Partial-spectrum conversion | `convert --variables`/`--start`/`--stop` cannot represent a complete typed transform and are rejected |
 
 These are feature gaps, not a claim of parity with other commercial simulators.
@@ -358,7 +359,16 @@ identity, sampling and window settings, complex bins, ranked harmonics,
 metrics, and incomplete-history evidence. It validates the whole input before
 publishing the destination. Gaussian and Kaiser windows retain their `ALFA`
 parameters. FFT bundles require whole-transform conversion; waveform clipping,
-variable selection, VCD output, and generic waveform comparison are refused.
+variable selection and VCD output are refused.
+
+FFT comparison accepts all six FFT encodings and compares each request by its
+canonical identity. It checks sampling, normalization, window, physical quantity,
+coordinate, and source contracts before comparing bins and metrics using the
+requested tolerances. `--variables` selects signal names or canonical FFT request
+IDs. Incomplete spectra cannot pass a numerical comparison, even against another
+incomplete spectrum. Discrete FFT grids cannot use waveform interpolation.
+Cartesian coefficients carry phase comparison; derived phase angles do not
+create false differences at wrap boundaries or at effectively zero amplitude.
 
 ### `csv`, `tsv`, `raw`, `ascii`: the flat authored projection
 
@@ -768,10 +778,3 @@ unsupported projections fail instead of comparing an empty coordinate.
 `models --shippable-only` applies to pack listings and to part, device and
 search queries. The filter excludes restricted definitions and packs whose
 metadata does not mark them redistributable before limiting displayed results.
-
-FFT comparison accepts all six FFT encodings and compares each request by its
-canonical identity. It checks sampling, normalization, window, physical quantity,
-coordinate, and source contracts before comparing bins and metrics using the
-requested tolerances. `--variables` selects signal names or canonical FFT request
-IDs. Incomplete spectra cannot pass a numerical comparison, even against another
-incomplete spectrum. Discrete FFT grids cannot use waveform interpolation.

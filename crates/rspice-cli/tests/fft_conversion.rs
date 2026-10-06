@@ -279,3 +279,43 @@ fn typed_fft_comparison_retains_transform_contracts_across_formats() {
         "unavailable spectra must not pass: {compared:?}"
     );
 }
+
+#[test]
+fn fft_comparison_applies_numeric_tolerances_to_spectral_values() {
+    let directory = test_dir("numeric_comparison");
+    let deck = directory.join("deck.cir");
+    let mut spectra = Vec::new();
+    for (name, amplitude) in [("golden", 1.0), ("result", 1.01)] {
+        let out = directory.join(format!("{name}.json"));
+        std::fs::write(&deck, format!("numeric FFT comparison\nV1 out 0 SIN(0 {amplitude} 1k)\nR1 out 0 1k\n.tran 1u 1m\n.fft v(out) np=8 format=unorm window=rect\n.end\n")).unwrap();
+        let run = cli(&[
+            "run",
+            deck.to_str().unwrap(),
+            "-o",
+            out.to_str().unwrap(),
+            "-f",
+            "json",
+        ]);
+        assert!(run.status.success(), "{run:?}");
+        spectra.push(directory.join(format!("{name}.fft.json")));
+    }
+    let compare = |extra: &[&str]| {
+        let mut args = vec![
+            "compare",
+            spectra[1].to_str().unwrap(),
+            spectra[0].to_str().unwrap(),
+            "--json",
+        ];
+        args.extend_from_slice(extra);
+        cli(&args)
+    };
+    let failed = compare(&[]);
+    assert!(!failed.status.success(), "{failed:?}");
+    let report: serde_json::Value = serde_json::from_slice(&failed.stdout).unwrap();
+    assert!(report["num_differences"].as_u64().unwrap() > 0);
+    let passed = compare(&["--abstol", "1"]);
+    assert!(passed.status.success(), "{passed:?}");
+    let fast = compare(&["--fail-fast"]);
+    let report: serde_json::Value = serde_json::from_slice(&fast.stdout).unwrap();
+    assert_eq!(report["num_differences"], 1);
+}

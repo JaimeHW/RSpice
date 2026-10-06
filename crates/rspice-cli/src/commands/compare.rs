@@ -265,7 +265,7 @@ fn bless_golden(
 
 enum ComparisonData {
     Waveform(WaveformData),
-    Fft(serde_json::Value),
+    Fft(Box<crate::commands::run::FftBundle>),
 }
 
 fn compare_data(
@@ -367,7 +367,7 @@ fn load_comparison_data(
 ) -> Result<ComparisonData, CliError> {
     let table = match load_result_selected(path, detect_format(path), resource_limits, section)? {
         ImportedResult::Table(table) => table,
-        ImportedResult::Fft(fft) => return fft.comparison_document().map(ComparisonData::Fft),
+        ImportedResult::Fft(fft) => return Ok(ComparisonData::Fft(Box::new(fft))),
     };
     let mut variables = vec![table.scale_name];
     let mut variable_types = vec![table.scale_type];
