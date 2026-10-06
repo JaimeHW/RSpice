@@ -702,6 +702,8 @@ one exact part name; `--device` lists every definition of a canonical device
 class; `--search` matches on substring; `--shippable-only` restricts the
 listing to packs whose metadata says redistributable. Browse queries are capped
 so a bare `--device diode` does not spool tens of thousands of lines.
+Malformed pack statistics, inconsistent top-level counts, and overflowing
+totals are rejected with the index filename and line number.
 
 ## Observability
 

@@ -2,6 +2,54 @@ mod common;
 use std::process::Command;
 
 #[test]
+fn invalid_pack_statistics_fail_before_printing_a_successful_inventory() {
+    let dir = common::test_dir("invalid_pack_statistics");
+    let row = |id: &str, models: &str, bytes: &str| {
+        format!(
+            "{id}\tbasic\t{id}\tpermissive\tMIT\t1\t\t{models}\t0\t0\t0\t1\t{bytes}\tdiode\tPack\n"
+        )
+    };
+    let cases = [
+        row("bad", "not-a-number", "100"),
+        row("bad", "-1", "100"),
+        format!(
+            "{}{}",
+            row("first", &usize::MAX.to_string(), "100"),
+            row("second", "1", "100")
+        ),
+        format!(
+            "{}{}",
+            row("first", "1", &u64::MAX.to_string()),
+            row("second", "1", "100")
+        ),
+        "incomplete\trow\n".into(),
+    ];
+    for content in cases {
+        std::fs::write(dir.join("PACKS.tsv"), content).unwrap();
+        for quiet in [false, true] {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_rspice"));
+            command.args(["--error-format", "json"]);
+            if quiet {
+                command.arg("--quiet");
+            }
+            let output = command
+                .args(["models", "--models-dir"])
+                .arg(dir.path())
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(2), "{output:?}");
+            assert!(output.stdout.is_empty(), "{output:?}");
+            let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+            let message = error["error"]["message"].as_str().unwrap();
+            assert!(
+                message.contains("PACKS.tsv") && message.contains("line"),
+                "{error}"
+            );
+        }
+    }
+}
+
+#[test]
 fn browse_reports_truncation_only_when_rows_are_omitted() {
     for count in [199, 200, 201] {
         let dir = common::test_dir("browse_limit");

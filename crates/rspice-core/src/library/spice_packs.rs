@@ -313,7 +313,10 @@ impl SpiceLibraryIndex {
         packs_index: &'static str,
         catalog_index: &'static str,
     ) -> io::Result<Self> {
-        let packs = parse_packs(&fs::read_to_string(root.join(packs_index))?);
+        let path = root.join(packs_index);
+        let packs = parse_packs(&fs::read_to_string(&path)?).map_err(|error| {
+            io::Error::new(error.kind(), format!("{}: {error}", path.display()))
+        })?;
         Ok(Self {
             root,
             packs,
@@ -814,7 +817,9 @@ impl SpiceLibraryIndex {
     }
 
     fn build_addressable_catalog(&self) -> io::Result<AddressableCatalog> {
-        let mut entries = Vec::with_capacity(self.part_count());
+        // Manifest statistics describe the corpus; they are not allocation
+        // instructions. Grow only for rows actually present in the catalog.
+        let mut entries = Vec::new();
         let mut device_counts = BTreeMap::new();
         self.for_each_catalog_entry(|entry| {
             if !entry.scope.is_addressable() {
@@ -926,16 +931,58 @@ fn parse_catalog_row(line: &str) -> Option<CatalogEntry> {
     })
 }
 
-fn parse_packs(text: &str) -> Vec<SpicePack> {
+fn parse_packs(text: &str) -> io::Result<Vec<SpicePack>> {
     let mut packs = Vec::new();
-    for line in text.lines() {
-        if line.starts_with('#') || line.is_empty() {
+    let mut total_definitions = 0usize;
+    let mut total_files = 0usize;
+    let mut total_bytes = 0u64;
+    for (index, line) in text.lines().enumerate() {
+        if line.starts_with('#') || line.trim().is_empty() {
             continue;
         }
+        let invalid = |message: String| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("model pack index line {}: {message}", index + 1),
+            )
+        };
         let fields: Vec<&str> = line.split('\t').collect();
         if fields.len() < 15 {
-            continue;
+            return Err(invalid(format!(
+                "expected at least 15 tab-separated fields, found {}",
+                fields.len()
+            )));
         }
+        let count = |column: usize, name: &str| {
+            fields[column]
+                .parse::<usize>()
+                .map_err(|_| invalid(format!("invalid {name} count '{}'", fields[column])))
+        };
+        let models = count(7, "models")?;
+        let subcircuits = count(8, "subcircuits")?;
+        let models_top = count(9, "models_top")?;
+        let subcircuits_top = count(10, "subcircuits_top")?;
+        let files = count(11, "files")?;
+        let bytes = fields[12]
+            .parse::<u64>()
+            .map_err(|_| invalid(format!("invalid bytes count '{}'", fields[12])))?;
+        if models_top > models || subcircuits_top > subcircuits {
+            return Err(invalid(
+                "top-level definition counts exceed their total counts".into(),
+            ));
+        }
+        // These bounds also make every per-kind and redistributable-subset
+        // sum safe for consumers of the immutable index.
+        total_definitions = total_definitions
+            .checked_add(models)
+            .and_then(|total| total.checked_add(subcircuits))
+            .ok_or_else(|| invalid("total definition count overflows usize".into()))?;
+        total_files = total_files
+            .checked_add(files)
+            .ok_or_else(|| invalid("total file count overflows usize".into()))?;
+        total_bytes = total_bytes
+            .checked_add(bytes)
+            .ok_or_else(|| invalid("total byte count overflows u64".into()))?;
         let entry = fields[6].trim();
         packs.push(SpicePack {
             id: fields[0].to_string(),
@@ -945,12 +992,12 @@ fn parse_packs(text: &str) -> Vec<SpicePack> {
             spdx: fields[4].to_string(),
             redistributable: fields[5] == "1",
             entry: (!entry.is_empty()).then(|| index_path(entry)),
-            models: fields[7].parse().unwrap_or(0),
-            subcircuits: fields[8].parse().unwrap_or(0),
-            models_top: fields[9].parse().unwrap_or(0),
-            subcircuits_top: fields[10].parse().unwrap_or(0),
-            files: fields[11].parse().unwrap_or(0),
-            bytes: fields[12].parse().unwrap_or(0),
+            models,
+            subcircuits,
+            models_top,
+            subcircuits_top,
+            files,
+            bytes,
             devices: fields[13]
                 .split(',')
                 .filter(|d| !d.is_empty())
@@ -959,7 +1006,7 @@ fn parse_packs(text: &str) -> Vec<SpicePack> {
             name: fields[14].to_string(),
         });
     }
-    packs
+    Ok(packs)
 }
 
 #[cfg(test)]
@@ -1276,6 +1323,67 @@ mod tests {
         fs::write(root.join(PACKS_INDEX), packs_index).expect("write fixture pack index");
         fs::write(root.join(CATALOG_INDEX), catalog_index).expect("write fixture catalog");
         FixtureCorpus { root }
+    }
+
+    #[test]
+    fn pack_index_rejects_malformed_and_overflowing_statistics() {
+        const ROW: &str = "ok\tbasic\tok\tpermissive\tMIT\t1\t\t1\t0\t1\t0\t1\t100\tdiode\tOK";
+        let with_field = |column: usize, value: &str| {
+            let mut fields: Vec<_> = ROW.split('\t').collect();
+            fields[column] = value;
+            fields.join("\t")
+        };
+        for column in 7..=12 {
+            for value in ["", "-1", "bad", "18446744073709551616"] {
+                let error = parse_packs(&with_field(column, value)).unwrap_err();
+                assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                assert!(error.to_string().contains("line 1"), "{error}");
+                assert!(error.to_string().contains("invalid"), "{error}");
+            }
+        }
+        for column in [9, 10] {
+            let error = parse_packs(&with_field(column, "2")).unwrap_err();
+            assert!(error.to_string().contains("top-level"), "{error}");
+        }
+        assert!(parse_packs("incomplete\trow").is_err());
+
+        for column in [7, 8, 11, 12] {
+            let maximum = if column == 12 {
+                u64::MAX.to_string()
+            } else {
+                usize::MAX.to_string()
+            };
+            let first = with_field(column, &maximum);
+            let second = with_field(column, "1").replacen("ok", "second", 1);
+            let error = parse_packs(&format!("# header\n{first}\n{second}\n")).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert!(error.to_string().contains("overflows"), "{error}");
+        }
+        // Top-level rows are a subset of all definitions, so validating the
+        // combined total also protects part_count() and model_count().
+        let row = with_field(7, &usize::MAX.to_string());
+        assert_eq!(parse_packs(&row).unwrap()[0].models, usize::MAX);
+    }
+
+    #[test]
+    fn catalog_allocation_follows_rows_instead_of_manifest_statistics() {
+        let corpus = fixture_corpus("untrusted-counts");
+        let maximum = usize::MAX;
+        fs::write(corpus.root.join(PACKS_INDEX), format!(
+            "large\tbasic\tlarge\tpermissive\tMIT\t1\t\t{maximum}\t0\t{maximum}\t0\t1\t100\tdiode\tLarge\n"
+        )).unwrap();
+        fs::write(
+            corpus.root.join(CATALOG_INDEX),
+            "ACTUAL\tmodel\tdiode\tlarge\tmodel.lib\t1\t0\ttop\n",
+        )
+        .unwrap();
+        let index = corpus.index();
+        assert_eq!(index.part_count(), maximum);
+        assert_eq!(index.definition_count(), maximum);
+        let entries = index.find_part("ACTUAL").unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "ACTUAL");
+        corpus.discard();
     }
 
     #[test]
