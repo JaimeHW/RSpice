@@ -815,6 +815,8 @@ pub(crate) struct NetlistAstOverlay {
     /// Options evaluated at the most recent control command, retained across
     /// later parameter/source replay just like resolved device alterations.
     pub(crate) control_options: Option<SimulationOptions>,
+    /// Frontend probe selection, retained when a study reparses the source.
+    pub(crate) output_selection: Option<(SaveSet, Vec<OutputRequest>)>,
     /// Ideal current meters inserted at flattened authored device terminals.
     pub(crate) terminal_current_probes: Vec<TerminalCurrentProbe>,
 }
@@ -1123,6 +1125,25 @@ pub struct Netlist {
 }
 
 impl Netlist {
+    /// Replace authored SAVE/PROBE/PRINT/PLOT selection for this run and any
+    /// parameter replay it performs. Measurement and post-processing requests
+    /// retain their own contracts. Callers validate symbols after applying it.
+    pub fn override_output_selection(&mut self, mut saves: SaveSet, requests: Vec<OutputRequest>) {
+        saves.apply_ground_policy(self.ground_policy());
+        self.saves = saves.clone();
+        self.output_requests.retain(|request| {
+            !matches!(
+                request.directive,
+                OutputDirectiveKind::Save
+                    | OutputDirectiveKind::Probe
+                    | OutputDirectiveKind::Print
+                    | OutputDirectiveKind::Plot
+            )
+        });
+        self.output_requests.extend(requests.iter().cloned());
+        self.ast_overlay.output_selection = Some((saves, requests));
+    }
+
     /// Register a terminal current meter without rewriting authored hierarchy.
     ///
     /// The request survives parameter replay and contributes to checkpoint

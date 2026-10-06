@@ -429,18 +429,7 @@ pub(super) fn load_netlist_from_source(
                 spec,
             ));
         }
-        saves.apply_ground_policy(netlist.ground_policy());
-        netlist.saves = saves;
-        netlist.output_requests.retain(|request| {
-            !matches!(
-                request.directive,
-                rspice_core::netlist::OutputDirectiveKind::Save
-                    | rspice_core::netlist::OutputDirectiveKind::Probe
-                    | rspice_core::netlist::OutputDirectiveKind::Print
-                    | rspice_core::netlist::OutputDirectiveKind::Plot
-            )
-        });
-        netlist.output_requests.extend(override_requests);
+        netlist.override_output_selection(saves, override_requests);
     }
 
     rspice_core::netlist::validate_output_symbols_with_abort(&netlist, &crate::abort::ProcessAbort)

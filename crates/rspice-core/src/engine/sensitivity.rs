@@ -662,6 +662,9 @@ impl Engine {
         if let Some(options) = &overlay.control_options {
             netlist.options = options.clone();
         }
+        if let Some((saves, requests)) = &overlay.output_selection {
+            netlist.override_output_selection(saves.clone(), requests.clone());
+        }
         for (index, ((device_name, parameter_name), value)) in
             overlay.device_parameters.iter().enumerate()
         {
