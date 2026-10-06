@@ -65,13 +65,7 @@ impl<'a> BoundedFileSystemSourceProvider<'a> {
         self.checkpoint()?;
         let io_error = |error| PreprocessorError::from_io(error, path);
         let path = path.canonicalize().map_err(io_error)?;
-        let mut file = std::fs::File::open(&path).map_err(io_error)?;
-        let metadata = file.metadata().map_err(io_error)?;
-        if !metadata.is_file() {
-            return Err(io_error(std::io::Error::other(
-                "source must be a regular file",
-            )));
-        }
+        let (mut file, metadata) = open_regular_source(&path).map_err(io_error)?;
         let admitted = self.admitted.borrow();
         let previous = admitted.get(&path).copied().unwrap_or(0);
         let used = admitted
@@ -116,7 +110,13 @@ impl<'a> BoundedFileSystemSourceProvider<'a> {
         let mut newlines = 0usize;
         loop {
             self.checkpoint()?;
-            let count = file.read(&mut chunk).map_err(io_error)?;
+            let count = match file.read(&mut chunk) {
+                Ok(count) => count,
+                // A signal may interrupt a read without making the source
+                // invalid. Retry through the cancellation checkpoint.
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(io_error(error)),
+            };
             if count == 0 {
                 break;
             }

@@ -152,6 +152,125 @@ fn streaming_line_admission_matches_text_lines_at_chunk_boundaries() {
 }
 
 #[test]
+fn filesystem_sources_reject_directories_without_changing_include_precedence() {
+    use rspice_veriloga::preprocessor::{
+        BoundedFileSystemSourceProvider, FileSystemSourceProvider,
+    };
+    use rspice_veriloga::{Preprocessor, SourceProvider};
+
+    let files = Sources::new();
+    let blocked = files.0.join("blocked.va");
+    std::fs::create_dir(&blocked).unwrap();
+    let fallback = files.0.join("fallback");
+    std::fs::create_dir(&fallback).unwrap();
+    std::fs::write(fallback.join("blocked.va"), "module other; endmodule\n").unwrap();
+    let root = files.write("root.va", "`include \"blocked.va\"\n");
+    let bounded = BoundedFileSystemSourceProvider::new(
+        SourceProviderLimits::UNBOUNDED,
+        usize::MAX,
+        usize::MAX,
+        &NoPipelineControl,
+    );
+    for provider in [&FileSystemSourceProvider as &dyn SourceProvider, &bounded] {
+        for included in [false, true] {
+            let mut pp = Preprocessor::new();
+            pp.add_include_path(fallback.clone());
+            let error = pp
+                .preprocess_provider_root(provider, if included { &root } else { &blocked })
+                .unwrap_err();
+            assert_eq!(
+                error.file.as_ref().unwrap().canonicalize().unwrap(),
+                blocked.canonicalize().unwrap()
+            );
+            assert_eq!(
+                error.io_error.as_ref().unwrap().kind(),
+                std::io::ErrorKind::Other
+            );
+            assert!(error.message.contains("regular file"), "{error}");
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn filesystem_sources_reject_fifos_without_waiting_for_a_writer() {
+    use rspice_veriloga::preprocessor::{
+        BoundedFileSystemSourceProvider, FileSystemSourceProvider,
+    };
+    use rspice_veriloga::{Preprocessor, SourceProvider};
+
+    let files = Sources::new();
+    let fifo = files.0.join("pipe.va");
+    assert!(
+        std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let root = files.write("root.va", "`include \"pipe.va\"\n");
+    for bounded in [false, true] {
+        for included in [false, true] {
+            let requested = if included { root.clone() } else { fifo.clone() };
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                let bounded_provider = BoundedFileSystemSourceProvider::new(
+                    SourceProviderLimits::UNBOUNDED,
+                    usize::MAX,
+                    usize::MAX,
+                    &NoPipelineControl,
+                );
+                let provider: &dyn SourceProvider = if bounded {
+                    &bounded_provider
+                } else {
+                    &FileSystemSourceProvider
+                };
+                let result = Preprocessor::new().preprocess_provider_root(provider, &requested);
+                let _ = sender.send(result);
+            });
+            // Do not join a blocked reader if this regresses: the assertion
+            // must fail promptly rather than hang the whole test process.
+            let error = receiver
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("filesystem source admission waited for a FIFO writer")
+                .unwrap_err();
+            worker.join().unwrap();
+            assert!(error.message.contains("regular file"), "{error}");
+            assert_eq!(
+                error.file.as_ref().unwrap().canonicalize().unwrap(),
+                fifo.canonicalize().unwrap()
+            );
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn filesystem_sources_still_follow_symlinks_to_regular_files() {
+    use rspice_veriloga::SourceProvider;
+    use rspice_veriloga::preprocessor::{
+        BoundedFileSystemSourceProvider, FileSystemSourceProvider,
+    };
+
+    let files = Sources::new();
+    let source = "module linked; endmodule\n";
+    let target = files.write("target.va", source);
+    let alias = files.0.join("alias.va");
+    std::os::unix::fs::symlink(&target, &alias).unwrap();
+    let bounded = BoundedFileSystemSourceProvider::new(
+        SourceProviderLimits::UNBOUNDED,
+        usize::MAX,
+        usize::MAX,
+        &NoPipelineControl,
+    );
+    for provider in [&FileSystemSourceProvider as &dyn SourceProvider, &bounded] {
+        let document = provider.load_root(&alias).unwrap();
+        assert_eq!(document.logical_path, target.canonicalize().unwrap());
+        assert_eq!(document.source, source);
+    }
+}
+
+#[test]
 fn post_preparation_errors_keep_frozen_include_locations() {
     use rspice_veriloga::{CompileDiagnosticPhase, VirtualCompileLimits, VirtualSourceBundle};
 

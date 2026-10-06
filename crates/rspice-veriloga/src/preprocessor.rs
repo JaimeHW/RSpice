@@ -97,17 +97,51 @@ pub trait SourceProvider {
     }
 }
 
-/// Source provider preserving the pre-existing file-system include behavior.
+/// Source provider preserving filesystem include resolution for regular files.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FileSystemSourceProvider;
 
 impl FileSystemSourceProvider {
     fn load_path(path: &Path) -> Result<SourceDocument, PreprocessorError> {
+        use std::io::Read as _;
+
         let io_error = |error| PreprocessorError::from_io(error, path);
         let canonical = path.canonicalize().map_err(io_error)?;
-        let source = std::fs::read_to_string(&canonical).map_err(io_error)?;
+        let (mut file, metadata) = open_regular_source(&canonical).map_err(io_error)?;
+        let mut source = String::new();
+        let capacity = usize::try_from(metadata.len())
+            .map_err(|error| io_error(std::io::Error::other(error)))?;
+        source
+            .try_reserve(capacity)
+            .map_err(|error| io_error(std::io::Error::other(error)))?;
+        file.read_to_string(&mut source).map_err(io_error)?;
         Ok(SourceDocument::provided(canonical, source))
     }
+}
+
+/// Open a filesystem source without waiting for a FIFO writer. Check the
+/// opened descriptor as well as the path so replacement during open cannot
+/// bypass the regular-file requirement. Symlinks to regular files still work.
+fn open_regular_source(path: &Path) -> std::io::Result<(std::fs::File, std::fs::Metadata)> {
+    fn ensure_regular(metadata: &std::fs::Metadata) -> std::io::Result<()> {
+        if metadata.is_file() {
+            Ok(())
+        } else {
+            Err(std::io::Error::other("source must be a regular file"))
+        }
+    }
+    ensure_regular(&std::fs::metadata(path)?)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY);
+    }
+    let file = options.open(path)?;
+    let metadata = file.metadata()?;
+    ensure_regular(&metadata)?;
+    Ok((file, metadata))
 }
 
 impl SourceProvider for FileSystemSourceProvider {

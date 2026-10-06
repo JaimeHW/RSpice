@@ -677,6 +677,9 @@ including when `--quiet` suppresses their console presentation.
 Use `--module NAME` to select a module in a multi-module source. Root bytes and
 lines, total dependency bytes, include depth, and expanded bytes obey the
 configured resource limits; compilation supports Ctrl-C cancellation.
+Filesystem sources must be regular files (symlinks to regular files are
+supported). Byte and dependency budgets are checked before allocation; root
+line limits are checked during reading, before UTF-8 decoding.
 The interface table prints unless `--quiet` is set. Quiet also suppresses
 `--detailed` and `--show-usage` text, while `-o FILE` still writes a versioned
 JSON interface summary. Usage examples include the absolute source path and
