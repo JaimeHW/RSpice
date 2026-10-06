@@ -125,12 +125,20 @@ fn virtual_inputs_have_no_native_candidates() {
     ));
     let spelling = path.to_string_lossy().replace('\\', "/");
     rspice_core::xspice::register_data_file(&spelling, "0 1\n").unwrap();
+    let uri = "virtual://dependency-test/wave";
+    rspice_core::xspice::register_data_file(uri, "0 1\n").unwrap();
     let netlist = Netlist::parse(&format!(
         "virtual\nA1 out filesource file=\"{spelling}\"\nA2 out filesource file=\"virtual://dependency-test/wave\"\n.end\n"
     )).unwrap();
     let result = candidates(&netlist);
     rspice_core::xspice::unregister_data_file(&spelling).unwrap();
+    rspice_core::xspice::unregister_data_file(uri).unwrap();
     assert!(result.is_empty(), "{result:?}");
+    // The loader falls back to native I/O for every unregistered spelling,
+    // including URI-like names that can be real relative paths on Unix.
+    let native = candidates(&netlist);
+    assert!(native.contains(&PathBuf::from(uri)), "{native:?}");
+    assert!(native.contains(&path), "{native:?}");
 }
 
 #[test]

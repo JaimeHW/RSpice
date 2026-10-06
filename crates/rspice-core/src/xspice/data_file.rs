@@ -255,7 +255,7 @@ fn ngspice_input_dir_path(path: &Path) -> Option<PathBuf> {
 /// a previously absent preferred file must not shadow the input used by a run.
 /// This query performs no native I/O and never reads a registered virtual file.
 pub(crate) fn native_input_candidates(path: &str) -> Vec<PathBuf> {
-    if path.is_empty() || path.contains("://") || lock_virtual_files().files.contains_key(path) {
+    if path.is_empty() || lock_virtual_files().files.contains_key(path) {
         return Vec::new();
     }
     let path = Path::new(path);
