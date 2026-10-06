@@ -915,7 +915,7 @@ fn logical_parent(path: &str) -> Option<&str> {
     path.rsplit_once('/').map(|(parent, _)| parent)
 }
 
-fn path_to_logical(path: &Path) -> String {
+pub(crate) fn path_to_logical(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 

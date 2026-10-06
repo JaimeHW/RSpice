@@ -106,6 +106,7 @@ pub mod lexer;
 pub mod metrics;
 mod numeric_literal;
 pub mod parser;
+mod prepared_diagnostics;
 mod prepared_source;
 mod prepared_virtual_source;
 pub mod preprocessor;
@@ -1802,6 +1803,12 @@ impl VerilogACompiler {
             pp.dependency_documents(),
         );
         Ok(PreparedRuntimeSource {
+            source_map: prepared_diagnostics::PreparedSourceMap::new(&preprocessed, |path| {
+                pp.dependency_documents()
+                    .iter()
+                    .find(|document| document.logical_path == path)
+                    .map(|document| document.source.as_str())
+            }),
             diagnostics,
             source_package,
             source: preprocessed.source,

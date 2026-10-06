@@ -214,6 +214,49 @@ mod tests {
     use crate::{Preprocessor, VirtualCompileLimits, VirtualSourceBundle};
 
     #[test]
+    fn prepared_mapping_matches_live_mapping_for_all_offsets() {
+        let bundle = VirtualSourceBundle::from_sources(
+            "root.va",
+            [
+                ("root.va", "`include \"first.va\"\n`include \"second.va\"\n"),
+                ("first.va", "// header\r\n\u{3b1} @\r\nlast line\r\n"),
+                ("second.va", "`define BAD missing\n\t`BAD\n\u{3b2}"),
+            ],
+        )
+        .unwrap();
+        let provider = VirtualBundleProvider::new(&bundle, VirtualCompileLimits::default());
+        let mut pp = Preprocessor::new();
+        let preprocessed = pp
+            .preprocess_provider_root_mapped(&provider, Path::new("root.va"))
+            .unwrap();
+        let prepared = crate::prepared_diagnostics::PreparedSourceMap::new(&preprocessed, |path| {
+            pp.dependency_documents()
+                .iter()
+                .find(|document| document.logical_path == path)
+                .map(|document| document.source.as_str())
+        });
+        // Include non-boundaries, cross-line spans and EOF, as well as normal
+        // token ranges. Neither adapter may split an original UTF-8 scalar.
+        for start in 0..=preprocessed.source.len() {
+            for end in [
+                start,
+                (start + 1).min(preprocessed.source.len()),
+                preprocessed.source.len(),
+            ] {
+                let error = CompileError::Parser(ParseError::new(
+                    ParseErrorKind::InvalidExpression,
+                    Span::new(SourceId::new(0), start as u32, end as u32),
+                ));
+                assert_eq!(
+                    prepared.diagnostics(&preprocessed.source, &error),
+                    provider_diagnostics(&error, &preprocessed, pp.dependency_documents()),
+                    "span {start}..{end}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn collected_diagnostics_keep_each_original_document_and_unicode_position() {
         let first = "// header\r\n\u{3b1} @\r\n";
         let second = "`define BAD #\n`BAD\n";

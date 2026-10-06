@@ -28,6 +28,82 @@ impl Drop for Sources {
 }
 
 #[test]
+fn post_preparation_errors_keep_frozen_include_locations() {
+    use rspice_veriloga::{CompileDiagnosticPhase, VirtualCompileLimits, VirtualSourceBundle};
+
+    for (body, line, token) in [
+        ("analog I(p,n) <+ V(p,n) + missing;", 4, "missing"),
+        ("`define BAD missing\r\nanalog I(p,n) <+ `BAD;", 5, "`BAD"),
+    ] {
+        let files = Sources::new();
+        let root = files.write("root.va", "`include \"child.va\"\n");
+        let source = format!(
+            "// original \u{3b1}\r\nmodule bad(p,n);\r\ninout p,n; electrical p,n;\r\n{body}\r\nendmodule\r\n"
+        );
+        let child = files.write("child.va", &source).canonicalize().unwrap();
+        let compiler = VerilogACompiler::default();
+        let prepared = compiler.prepare_file_runtime_source(&root).unwrap();
+        // A later edit must not redefine the bytes the compiler consumed.
+        files.write("child.va", "this is a different document\n");
+        let error = prepared.compile_runtime(None).unwrap_err();
+        let diagnostics = prepared.diagnostics_for_error(&error);
+        assert_eq!(diagnostics.len(), 1);
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.phase, CompileDiagnosticPhase::CodeGeneration);
+        assert_eq!(diagnostic.code, "VA-CODEGEN-INVALID-EXPRESSION");
+        assert_eq!(diagnostic.path.as_deref(), child.to_str());
+        assert_eq!(diagnostic.line, Some(line));
+        assert!(
+            source[diagnostic.byte_start.unwrap()..diagnostic.byte_end.unwrap()].contains(token)
+        );
+
+        let bundle = VirtualSourceBundle::from_sources(
+            "root.va",
+            [
+                ("root.va", "`include \"child.va\"\n"),
+                ("child.va", &source),
+            ],
+        )
+        .unwrap();
+        let virtual_prepared = compiler
+            .prepare_virtual_runtime_source(&bundle, VirtualCompileLimits::default())
+            .unwrap();
+        let failure = virtual_prepared.compile_runtime("bad").unwrap_err();
+        assert_eq!(failure.diagnostics.len(), 1);
+        let virtual_diagnostic = &failure.diagnostics[0];
+        assert_eq!(virtual_diagnostic.logical_path.as_deref(), Some("child.va"));
+        assert_eq!(virtual_diagnostic.source.as_deref(), Some(source.as_str()));
+        assert_eq!(virtual_diagnostic.code, diagnostic.code);
+        assert_eq!(virtual_diagnostic.line, diagnostic.line);
+        assert_eq!(virtual_diagnostic.column, diagnostic.column);
+        assert_eq!(virtual_diagnostic.byte_start, diagnostic.byte_start);
+        assert_eq!(virtual_diagnostic.byte_end, diagnostic.byte_end);
+    }
+}
+
+#[test]
+fn post_preparation_errors_without_spans_do_not_invent_locations() {
+    let files = Sources::new();
+    let root = files.write(
+        "root.va",
+        "module first; endmodule\nmodule second; endmodule\n",
+    );
+    let prepared = VerilogACompiler::default()
+        .prepare_file_runtime_source(&root)
+        .unwrap();
+    let error = prepared.compile_runtime(None).unwrap_err();
+    let diagnostics = prepared.diagnostics_for_error(&error);
+    assert_eq!(diagnostics.len(), 1);
+    let diagnostic = &diagnostics[0];
+    assert_eq!(diagnostic.code, "VA-MODULE-SELECTION");
+    assert!(diagnostic.path.is_none());
+    assert!(diagnostic.line.is_none());
+    assert!(diagnostic.column.is_none());
+    assert!(diagnostic.byte_start.is_none());
+    assert!(diagnostic.byte_end.is_none());
+}
+
+#[test]
 fn runtime_preparation_retains_source_limits_and_original_compiler_locations() {
     use rspice_veriloga::ProviderCompileError;
     use rspice_veriloga::preprocessor::SourceResource;

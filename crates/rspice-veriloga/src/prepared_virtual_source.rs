@@ -1,6 +1,5 @@
 //! A sealed source closure shared by virtual modules and connection libraries.
 
-use crate::preprocessor::{PreprocessedSource, PreprocessedSourceSegment};
 use crate::virtual_source;
 use crate::{
     CompileError, ConnectSpecification, NoPipelineControl, PipelineControl, PipelineMetrics,
@@ -19,7 +18,6 @@ use crate::{
 #[derive(Debug)]
 pub struct PreparedVirtualSource {
     prepared: PreparedRuntimeSource,
-    segments: Vec<PreprocessedSourceSegment>,
     source_bundle: VirtualSourceBundle,
     dependency_closure: Vec<VirtualSourceDependency>,
     include_graph: Vec<VirtualSourceInclude>,
@@ -63,16 +61,34 @@ impl PreparedVirtualSource {
     }
 
     pub(crate) fn diagnose(&self, error: CompileError) -> VirtualRuntimeCompileFailure {
-        // Retain one expanded string during successful preparation/emission;
-        // the mapped diagnostic adapter only needs a copy on an error path.
-        VirtualRuntimeCompileFailure::from_compiler(
-            error,
-            &PreprocessedSource {
-                source: self.prepared.source.clone(),
-                segments: self.segments.clone(),
-            },
-            &self.dependency_closure,
-        )
+        let diagnostics = self
+            .prepared
+            .diagnostics_for_error(&error)
+            .into_iter()
+            .map(|diagnostic| {
+                let logical_path = diagnostic
+                    .path
+                    .map(|path| virtual_source::path_to_logical(std::path::Path::new(&path)));
+                let source = logical_path.as_deref().and_then(|path| {
+                    self.dependency_closure
+                        .iter()
+                        .find(|document| document.logical_path == path)
+                        .map(|document| document.source.clone())
+                });
+                crate::VirtualSourceDiagnostic {
+                    phase: diagnostic.phase,
+                    code: diagnostic.code,
+                    message: diagnostic.message,
+                    logical_path,
+                    source,
+                    byte_start: diagnostic.byte_start,
+                    byte_end: diagnostic.byte_end,
+                    line: diagnostic.line,
+                    column: diagnostic.column,
+                }
+            })
+            .collect();
+        VirtualRuntimeCompileFailure { error, diagnostics }
     }
 
     pub fn compile_runtime(
@@ -232,6 +248,16 @@ impl VerilogACompiler {
         );
         Ok(PreparedVirtualSource {
             prepared: PreparedRuntimeSource {
+                source_map: crate::prepared_diagnostics::PreparedSourceMap::new(
+                    &preprocessed,
+                    |path| {
+                        let logical_path = virtual_source::path_to_logical(path);
+                        dependency_closure
+                            .iter()
+                            .find(|document| document.logical_path == logical_path)
+                            .map(|document| document.source.as_str())
+                    },
+                ),
                 diagnostics,
                 source_package: bundle.root_path().to_owned(),
                 source: preprocessed.source,
@@ -240,7 +266,6 @@ impl VerilogACompiler {
                 compiler_options: self.options.clone(),
                 metrics: measurements.finish(),
             },
-            segments: preprocessed.segments,
             source_bundle: bundle.clone(),
             source_bundle_identity: virtual_source::source_bundle_identity(bundle),
             dependency_closure_identity: virtual_source::dependency_closure_identity(

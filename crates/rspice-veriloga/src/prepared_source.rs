@@ -31,6 +31,7 @@ pub struct PreparedRuntimeSource {
     pub(crate) compiler_options: CompilerOptions,
     pub(crate) metrics: PipelineMetrics,
     pub(crate) diagnostics: Vec<crate::SourceCompileDiagnostic>,
+    pub(crate) source_map: crate::prepared_diagnostics::PreparedSourceMap,
 }
 
 impl PreparedRuntimeSource {
@@ -88,6 +89,17 @@ impl PreparedRuntimeSource {
 
     pub fn compile_runtime(&self, module: Option<&str>) -> CompileResult<CompiledRuntimeFile> {
         self.compile_runtime_with_control(module, &NoPipelineControl)
+    }
+
+    /// Resolve an error returned by this preparation's compilation methods
+    /// against its original source documents. Do not pass an error from a
+    /// different source snapshot. Mapping never rereads the filesystem and
+    /// leaves locations absent when the compiler did not supply a span.
+    pub fn diagnostics_for_error(
+        &self,
+        error: &crate::CompileError,
+    ) -> Vec<crate::SourceCompileDiagnostic> {
+        self.source_map.diagnostics(&self.source, error)
     }
 
     /// Compile one selected module with the options frozen at preparation.
