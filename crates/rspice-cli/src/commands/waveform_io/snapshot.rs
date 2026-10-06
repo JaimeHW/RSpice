@@ -94,7 +94,7 @@ impl ResultSnapshot {
                 InputFormat::Json => parse_json(path, text()?, limits)?,
                 InputFormat::Vcd => {
                     let document = rspice_core::io::vcd::parse_vcd_bytes_with_limits(bytes, limits)
-                        .map_err(|error| conversion_error(path, error))?;
+                        .map_err(|error| crate::commands::vcd_io::read_error(path, error))?;
                     crate::commands::vcd_io::vcd_table(path, document, limits)?.into()
                 }
                 InputFormat::Touchstone => touchstone::parse(path, bytes, limits, section)?.into(),

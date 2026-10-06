@@ -154,7 +154,21 @@ pub(crate) fn write_vcd_artifact(path: &Path, document: &VcdDocument) -> Result<
 /// Parse a dump, naming the file in any failure.
 fn parse_vcd(path: &Path, resource_limits: ResourceLimits) -> Result<VcdDocument, CliError> {
     rspice_core::io::parse_vcd_file_with_limits(path, resource_limits)
-        .map_err(|error| conversion_error(path, error))
+        .map_err(|error| read_error(path, error))
+}
+
+pub(crate) fn read_error(path: &Path, error: rspice_core::io::VcdError) -> CliError {
+    match error {
+        rspice_core::io::VcdError::ResourceLimit(source) => CliError::ResourceLimit {
+            path: path.to_owned(),
+            source,
+        },
+        rspice_core::io::VcdError::Io(source) => CliError::InputReadError {
+            path: path.to_owned(),
+            source,
+        },
+        error => conversion_error(path, error),
+    }
 }
 
 // -------------------------------------------------------------------------
