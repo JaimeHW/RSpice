@@ -171,9 +171,24 @@ pub(super) fn fit_model_interval(
             return Ok(minimum);
         }
     }
-    let requested = proposed.clamp(minimum, candidate_maximum).min(gap);
+    let mut requested = proposed.clamp(minimum, candidate_maximum).min(gap);
     if time + requested <= time {
         return Err(refuse());
+    }
+    // A regular grid can fall a few ulps short of an event. Reserving just
+    // `minimum` for that remainder can amplify charge-subtraction roundoff
+    // into a large current and seed trapezoidal ringing. Partition the gap
+    // into two supported intervals before the floor reservation below. The
+    // event retains its original clock and neither ceiling is widened.
+    let tail = target - (time + requested);
+    let half_gap = gap * 0.5;
+    if tail > 0.0
+        && tail <= roundoff
+        && requested > roundoff
+        && half_gap >= minimum
+        && half_gap <= requested
+    {
+        requested = half_gap;
     }
     let mut min_count = (gap / persistent_maximum).ceil().max(1.0);
     // Division can round down to an integer although that many maximum steps
@@ -1571,6 +1586,54 @@ mod source_side_tests;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn roundoff_event_remainders_use_two_supported_intervals() {
+        for (time, target, maximum) in [
+            (2.959999999999997e-9, 3.0000000000000004e-9, 4e-11),
+            (1.995999999999997e-9, 2e-9, 4e-12),
+        ] {
+            let minimum = maximum * 1e-11;
+            for is_stop_time in [false, true] {
+                let dt = fit_model_interval(
+                    time,
+                    target,
+                    maximum,
+                    minimum,
+                    maximum,
+                    maximum,
+                    is_stop_time,
+                )
+                .unwrap();
+                assert_eq!(dt, (target - time) * 0.5);
+                assert!(dt >= minimum && dt <= maximum);
+                let next = time + dt;
+                let last = fit_model_interval(
+                    next,
+                    target,
+                    maximum,
+                    minimum,
+                    maximum,
+                    maximum,
+                    is_stop_time,
+                )
+                .unwrap();
+                assert_eq!(last, target - next);
+                assert!(last >= minimum && last <= maximum);
+                assert_eq!(next + last, target);
+            }
+        }
+        // An ordinary short final interval is not roundoff. Nor should a
+        // tighter adaptive/model proposal be enlarged to reach the event.
+        assert_eq!(
+            fit_model_interval(0.0, 1.01, 1.0, 1e-8, 2.0, 1.0, false).unwrap(),
+            1.0,
+        );
+        assert_eq!(
+            fit_model_interval(0.0, 1.01, 0.1, 1e-8, 2.0, 0.2, false).unwrap(),
+            0.1,
+        );
+    }
+
     #[test]
     fn model_interval_preserves_both_bounds_and_a_representable_event_gap() {
         // The quotient rounds to 249 although 249 maximum steps fall short.

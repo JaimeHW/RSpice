@@ -1283,7 +1283,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v95 binds the selected GP transient phase law and legacy filter memory.
     // v96 fits rounding-sized stop remainders before exact-history solves
     // and retains current OneStep static residuals across hybrid Gear2 steps.
-    hasher.update(b"rspice-transient-resolved-config-v96\0");
+    // v97 balances rounding-sized event remainders before model floor fitting.
+    hasher.update(b"rspice-transient-resolved-config-v97\0");
     hash_field(
         &mut hasher,
         "gp_transient_phase_model",
