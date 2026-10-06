@@ -101,8 +101,10 @@ fn shooting_delay_preserves_ideal_repeating_pwl_steps() {
         ),
     ] {
         let deck = Netlist::parse(&format!("Ideal PWL delay\n{source}\nRS in near 50\nT1 near 0 far 0 Z0=50 TD={delay}\nRL far 0 50\n.save all\n.end\n")).unwrap();
-        let mut simulation = SimulationConfig::default();
-        simulation.spice_dialect = dialect;
+        let mut simulation = SimulationConfig {
+            spice_dialect: dialect,
+            ..SimulationConfig::default()
+        };
         simulation.resource_limits.max_result_values = 2_000_000;
         let engine = Engine::new(simulation);
         let (pss, state) = engine
@@ -278,8 +280,10 @@ fn shooting_delay_preserves_pulse_edges_across_the_period_boundary() {
         let deck = Netlist::parse(&format!(
             "Pulsed delay\nVIN in 0 PULSE(0 1 710n 50n 50n 70n 1u)\nRS in near 50\nT1 near 0 far 0 Z0=50 TD={delay:e}\nRL far 0 50\n.save all\n.end\n"
         )).unwrap();
-        let mut simulation = SimulationConfig::default();
-        simulation.spice_dialect = dialect;
+        let mut simulation = SimulationConfig {
+            spice_dialect: dialect,
+            ..SimulationConfig::default()
+        };
         simulation.resource_limits.max_result_values = 2_000_000;
         let engine = Engine::new(simulation);
         let (pss, state) = engine

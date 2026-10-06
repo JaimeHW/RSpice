@@ -115,7 +115,7 @@ M1 {terminals} mm L=1u W=10u AD=4p AS=5p PD=20u PS=22u M=2 OFF
         for (name, wave) in result.node_names.iter().zip(&result.waveforms) {
             let reference_wave = reference.try_voltage_waveform_named(name).unwrap();
             for (&time, &actual) in result.time.iter().zip(&wave.values) {
-                let expected = interpolate(&reference.time, &reference_wave, 190e-9 + time);
+                let expected = interpolate(&reference.time, reference_wave, 190e-9 + time);
                 assert!(
                     (actual - expected).abs() < 4e-4,
                     "{label} {name} at {time}: {actual} vs {expected}"
@@ -129,7 +129,7 @@ M1 {terminals} mm L=1u W=10u AD=4p AS=5p PD=20u PS=22u M=2 OFF
             let actual = continued.try_voltage_waveform_named(name).unwrap();
             let reference_wave = reference.try_voltage_waveform_named(name).unwrap();
             for (&time, &value) in continued.time.iter().zip(actual) {
-                let expected = interpolate(&reference.time, &reference_wave, 190e-9 + time);
+                let expected = interpolate(&reference.time, reference_wave, 190e-9 + time);
                 assert!(
                     (value - expected).abs() < 4e-4,
                     "{label} handoff {name} at {time}: {value} vs {expected}"

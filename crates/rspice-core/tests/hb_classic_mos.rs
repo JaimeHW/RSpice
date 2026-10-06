@@ -14,7 +14,7 @@ fn engine(dialect: SpiceDialect) -> Engine {
 }
 
 fn amplifier(level: usize, amplitude: f64, noise: bool) -> Netlist {
-    let p = if level % 2 == 0 { -1.0 } else { 1.0 };
+    let p = if level.is_multiple_of(2) { -1.0 } else { 1.0 };
     let kind = if p < 0.0 { "PMOS" } else { "NMOS" };
     let model = if matches!(level, 4 | 5) {
         "VFB=-0.8 PHI=0.7 K1=0.5 TOX=0.02".to_string()
@@ -119,7 +119,7 @@ fn classic_mos_hb_native_storage_matches_settled_transient_and_lead_kcl() {
                     .enumerate()
                     .map(|(k, c)| (c * Complex64::from_polar(1.0, TAU * 1e8 * k as f64 * time)).re)
                     .sum();
-                let expected = interpolate(&tran.time, &reference, 190e-9 + time);
+                let expected = interpolate(&tran.time, reference, 190e-9 + time);
                 assert!(
                     (actual - expected).abs() < 2e-4,
                     "level {level} {dialect:?} {name} t={time}: {actual} vs {expected}"

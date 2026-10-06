@@ -406,7 +406,7 @@ fn bsim4_noise_stationary_cases(cases: &[(i32, i32, &str, bool)], offsets: &[f64
                 "out",
                 None,
                 "vin",
-                &offsets,
+                offsets,
                 348.15,
                 &rspice_core::NoAbort,
             )
@@ -420,7 +420,7 @@ fn bsim4_noise_stationary_cases(cases: &[(i32, i32, &str, bool)], offsets: &[f64
         let periodic = engine
             .run_pnoise_from_hb_with_abort(
                 &netlist,
-                &offsets,
+                offsets,
                 "out",
                 None,
                 Some("vin"),
