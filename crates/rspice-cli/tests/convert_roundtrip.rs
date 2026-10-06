@@ -1183,3 +1183,32 @@ fn ascii_raw_preserves_adjacent_f64_values() {
         }
     }
 }
+
+#[test]
+fn complex_ascii_raw_roundtrips_both_layouts_at_full_precision() {
+    let dir = test_dir("complex_ascii_raw");
+    for (layout, values) in [
+        (
+            "row",
+            "0\t1.0000000000000002,0\t1.0000000000000004,-1.0000000000000002\n1\t2,0\t2.2250738585072014e-308,5e-324\n",
+        ),
+        (
+            "column",
+            "0\t1.0000000000000002,0\n\t1.0000000000000004,-1.0000000000000002\n1\t2,0\n\t2.2250738585072014e-308,5e-324\n",
+        ),
+    ] {
+        let raw = dir.join(format!("{layout}.raw"));
+        let csv = dir.join(format!("{layout}.csv"));
+        std::fs::write(&raw, format!("Title: AC\nPlotname: AC Analysis\nFlags: complex\nNo. Variables: 2\nNo. Points: 2\nVariables:\n0 frequency frequency\n1 I(v1) current\nValues:\n{values}")).unwrap();
+        convert(&raw, &csv, "csv", &[]);
+        let original = read_csv(&csv).1;
+        assert_eq!(
+            original[0],
+            vec![1.0000000000000002, 1.0000000000000004, -1.0000000000000002]
+        );
+        assert_eq!(original[1], vec![2.0, 2.2250738585072014e-308, 5e-324]);
+        convert(&csv, &raw, "ascii", &[]);
+        convert(&raw, &csv, "csv", &[]);
+        assert_eq!(read_csv(&csv).1, original);
+    }
+}
