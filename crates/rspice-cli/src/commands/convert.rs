@@ -13,7 +13,7 @@
 
 use crate::cli::{CliError, Config, ConvertArgs, OutputFormat};
 use crate::commands::vcd_io;
-use crate::commands::waveform_io::{detect_format, load_table_selected};
+use crate::commands::waveform_io::{ImportedResult, detect_format, load_result_selected};
 
 /// Execute the convert command
 pub fn execute(
@@ -65,12 +65,26 @@ pub fn execute(
         return Ok(());
     }
 
-    let mut table = load_table_selected(
+    let imported = load_result_selected(
         &args.input,
         from_format,
         config.resources.limits(),
         args.section.as_deref(),
     )?;
+
+    let mut table = match imported {
+        ImportedResult::Table(table) => table,
+        ImportedResult::Fft(fft) => {
+            if !args.variables.is_empty() || args.start.is_some() || args.stop.is_some() {
+                return Err(CliError::ConversionError { message: "FFT conversion preserves the complete transform; --variables, --start, and --stop apply only to waveform tables".into() });
+            }
+            fft.write(&args.output, args.to)?;
+            if !quiet {
+                println!("✓ Conversion complete: {}", args.output.display());
+            }
+            return Ok(());
+        }
+    };
 
     table.select_variables(&args.variables)?;
     table.clip_scale_range(args.start, args.stop);

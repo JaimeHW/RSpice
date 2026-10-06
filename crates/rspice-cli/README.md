@@ -43,7 +43,7 @@ These combinations remain explicitly unsupported:
 | :--- | :--- |
 | QPSS, QPAC, QPXF, QPNOISE | No shared result-document projection; rejected before solving with a typed capability diagnostic |
 | Control scripts with checkpoint/resume, segmented restart, compression, declarative FFT/Fourier or STEP/TEMP axes | Rejected during frontend preflight |
-| Generic conversion of typed FFT artifacts | Rejected where conversion would discard FFT metadata |
+| FFT comparison and partial-spectrum conversion | Waveform comparison and `--variables`/`--start`/`--stop` selection cannot represent a complete typed transform and are rejected |
 
 These are feature gaps, not a claim of parity with other commercial simulators.
 Passing crate tests does not qualify every device model or platform. Desktop,
@@ -328,6 +328,14 @@ spectrum. The requested FFT window is preserved, including an implicit stop.
 CSV/TSV retain incomplete requests as `unavailable` records. RAW metadata and
 the HDF5 FFT section use the same version 3 status contract and permit zero
 spectral rows when all requests lack history.
+
+`convert` reads and writes these typed FFT bundles in JSON, CSV, TSV, binary
+RAW, ASCII RAW, and HDF5. Conversion retains every request, its source and run
+identity, sampling and window settings, complex bins, ranked harmonics,
+metrics, and incomplete-history evidence. It validates the whole input before
+publishing the destination. Gaussian and Kaiser windows retain their `ALFA`
+parameters. FFT bundles require whole-transform conversion; waveform clipping,
+variable selection, VCD output, and generic waveform comparison are refused.
 
 ### `csv`, `tsv`, `raw`, `ascii`: the flat authored projection
 

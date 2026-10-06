@@ -38,7 +38,7 @@ mod shared;
 
 pub(crate) use crate::commands::export_table as export;
 pub(crate) use document::PublishedResult;
-pub(crate) use fft_document::read_fft_raw_artifact;
+pub(crate) use fft_document::{FftBundle, decode_fft_raw_plot};
 pub(crate) use naming::canonical_analysis_identities;
 
 use axis::{

@@ -28,6 +28,9 @@ use std::path::Path;
 
 use super::basic::TransientOutputDocument;
 
+mod conversion;
+pub(crate) use conversion::FftBundle;
+
 #[allow(clippy::too_many_arguments)]
 // One atomic pair takes both destinations, the format, the identities both
 // members carry, and the results and requests the FFT member is checked
@@ -1528,6 +1531,8 @@ fn validate_fft_raw_metadata(metadata: &FftRawMetadata) -> Result<(), String> {
                     | "half_cycle_sine_6"
                     | "cosine_2"
                     | "cosine_4"
+                    | "gaussian"
+                    | "kaiser"
             )
             || result.transform.window_name.is_empty()
         {
@@ -1743,7 +1748,15 @@ pub(crate) struct DecodedFftRawArtifact {
 /// reader intentionally remains generic; this decoder joins its numeric
 /// columns with the typed JSON provenance carried by the standard `Command:`
 /// header and rejects any inconsistent identity or bin layout.
+#[cfg(test)]
 pub(crate) fn read_fft_raw_artifact(path: &Path) -> Result<DecodedFftRawArtifact, String> {
+    let raw = rspice_core::io::parse_raw_file(path).map_err(|error| error.to_string())?;
+    decode_fft_raw_plot(&raw)
+}
+
+pub(crate) fn decode_fft_raw_plot(
+    raw: &rspice_core::io::RawWaveformData,
+) -> Result<DecodedFftRawArtifact, String> {
     const EXPECTED_VARIABLES: [&str; 7] = [
         "frequency",
         "fft_real",
@@ -1762,7 +1775,6 @@ pub(crate) fn read_fft_raw_artifact(path: &Path) -> Result<DecodedFftRawArtifact
         "index",
         "index",
     ];
-    let raw = rspice_core::io::parse_raw_file(path).map_err(|error| error.to_string())?;
     if raw.header.plotname != "Transient FFT"
         || raw.variables.len() != EXPECTED_VARIABLES.len()
         || raw

@@ -16,6 +16,17 @@ use std::path::Path;
 
 mod touchstone;
 
+pub(crate) enum ImportedResult {
+    Table(ExportTable),
+    Fft(crate::commands::run::FftBundle),
+}
+
+impl From<ExportTable> for ImportedResult {
+    fn from(table: ExportTable) -> Self {
+        Self::Table(table)
+    }
+}
+
 /// Guess a format from the file extension; rawfile when unknown.
 pub(crate) fn detect_format(path: &Path) -> InputFormat {
     match path
@@ -60,16 +71,38 @@ pub(crate) fn load_table_selected(
     resource_limits: rspice_core::ResourceLimits,
     section: Option<&str>,
 ) -> Result<ExportTable, CliError> {
-    let table = match format.into() {
+    match load_result_selected(path, format, resource_limits, section)? {
+        ImportedResult::Table(table) => Ok(table),
+        ImportedResult::Fft(_) => Err(conversion_error(
+            path,
+            "typed transient FFT artifacts cannot be flattened for waveform comparison; use convert to retain the complete FFT document",
+        )),
+    }
+}
+
+pub(crate) fn load_result_selected(
+    path: &Path,
+    format: impl Into<InputFormat>,
+    resource_limits: rspice_core::ResourceLimits,
+    section: Option<&str>,
+) -> Result<ImportedResult, CliError> {
+    let result = match format.into() {
         InputFormat::Raw | InputFormat::RawAscii => load_rawfile(path, resource_limits, section),
         InputFormat::Csv => load_delimited(path, ',', resource_limits),
         InputFormat::Tsv => load_delimited(path, '\t', resource_limits),
         InputFormat::Json => load_json(path, resource_limits),
         InputFormat::Hdf5 => load_hdf5(path, resource_limits, section),
-        InputFormat::Vcd => crate::commands::vcd_io::load_vcd_table(path, resource_limits),
-        InputFormat::Touchstone => touchstone::load(path, resource_limits, section),
+        InputFormat::Vcd => {
+            crate::commands::vcd_io::load_vcd_table(path, resource_limits).map(Into::into)
+        }
+        InputFormat::Touchstone => touchstone::load(path, resource_limits, section).map(Into::into),
     }?;
-    validate_table_shape(path, table, resource_limits)
+    match result {
+        ImportedResult::Table(table) => {
+            validate_table_shape(path, table, resource_limits).map(Into::into)
+        }
+        fft => Ok(fft),
+    }
 }
 
 pub(crate) fn conversion_error(path: &Path, message: impl std::fmt::Display) -> CliError {
@@ -305,7 +338,7 @@ fn load_rawfile(
     path: &Path,
     resource_limits: rspice_core::ResourceLimits,
     section: Option<&str>,
-) -> Result<ExportTable, CliError> {
+) -> Result<ImportedResult, CliError> {
     let file = rspice_core::io::parse_raw_plots_file_with_limits(path, resource_limits).map_err(
         |error| match error {
             rspice_core::io::RawParseError::ResourceLimit(source) => CliError::ResourceLimit {
@@ -317,6 +350,16 @@ fn load_rawfile(
     )?;
     rspice_core::execution::decode_event_plots(&file)
         .map_err(|error| conversion_error(path, error))?;
+    // Validate every typed plot before choosing one, including unselected FFTs.
+    let mut fft_plots = std::collections::BTreeMap::new();
+    for (index, plot) in file.plots.iter().enumerate() {
+        if plot.header.plotname == "Transient FFT" {
+            let decoded = crate::commands::run::decode_fft_raw_plot(plot)
+                .and_then(crate::commands::run::FftBundle::from_raw)
+                .map_err(|error| conversion_error(path, error))?;
+            fft_plots.insert(index, decoded);
+        }
+    }
     let names: Vec<_> = file
         .plots
         .iter()
@@ -328,14 +371,8 @@ fn load_rawfile(
         .into_iter()
         .nth(index)
         .expect("selected existing plot");
-    if data.header.plotname == "Transient FFT" {
-        crate::commands::run::read_fft_raw_artifact(path).map_err(|error| {
-            conversion_error(path, format!("invalid typed FFT RAW artifact: {error}"))
-        })?;
-        return Err(conversion_error(
-            path,
-            "typed transient FFT RAW artifacts cannot be flattened by generic waveform conversion without losing analysis identity, transform metadata, and FFTOUT metrics",
-        ));
+    if let Some(fft) = fft_plots.remove(&index) {
+        return Ok(ImportedResult::Fft(fft));
     }
 
     let operating_point = matches!(
@@ -390,7 +427,8 @@ fn load_rawfile(
         scale_type,
         scale,
         columns,
-    })
+    }
+    .into())
 }
 
 /// The transposed table an operating point publishes, read back as a table.
@@ -496,7 +534,7 @@ fn load_delimited(
     path: &Path,
     separator: char,
     resource_limits: rspice_core::ResourceLimits,
-) -> Result<ExportTable, CliError> {
+) -> Result<ImportedResult, CliError> {
     let content = read_utf8_input_limited(path, resource_limits.max_external_data_bytes)?;
 
     let mut lines = content.lines().filter(|line| !line.trim().is_empty());
@@ -510,6 +548,15 @@ fn load_delimited(
     if header.is_empty() {
         return Err(conversion_error(path, "missing header row"));
     }
+    if crate::commands::run::FftBundle::is_delimited(&header) {
+        return crate::commands::run::FftBundle::from_delimited(
+            path,
+            &content,
+            separator,
+            resource_limits,
+        )
+        .map(ImportedResult::Fft);
+    }
     enforce_resource_limit(
         path,
         rspice_core::ResourceKind::ExternalDataValues,
@@ -518,7 +565,7 @@ fn load_delimited(
     )?;
 
     if let Some(table) = load_operating_point_report(path, &content, separator, &header)? {
-        return Ok(table);
+        return Ok(table.into());
     }
 
     let mut scale = Vec::new();
@@ -612,10 +659,11 @@ fn load_delimited(
         scale_name,
         scale,
         columns,
-    })
+    }
+    .into())
 }
 
-fn parse_delimited_record(line: &str, separator: char) -> Result<Vec<String>, String> {
+pub(crate) fn parse_delimited_record(line: &str, separator: char) -> Result<Vec<String>, String> {
     let mut fields = Vec::new();
     let mut field = String::new();
     let mut chars = line.chars().peekable();
@@ -668,10 +716,14 @@ fn finish_delimited_field(field: &str, quoted: bool) -> String {
 fn load_json(
     path: &Path,
     resource_limits: rspice_core::ResourceLimits,
-) -> Result<ExportTable, CliError> {
+) -> Result<ImportedResult, CliError> {
     let content = read_utf8_input_limited(path, resource_limits.max_external_data_bytes)?;
     let value: serde_json::Value =
         serde_json::from_str(&content).map_err(|e| conversion_error(path, e))?;
+    if value.get("analysis").and_then(serde_json::Value::as_str) == Some("fft") {
+        return crate::commands::run::FftBundle::from_json(path, value, resource_limits)
+            .map(ImportedResult::Fft);
+    }
 
     let parsed_values = std::cell::Cell::new(0_usize);
     let to_f64_vec = |value: &serde_json::Value, what: &str| -> Result<Vec<f64>, CliError> {
@@ -769,7 +821,8 @@ fn load_json(
             scale_name,
             scale,
             columns,
-        });
+        }
+        .into());
     }
 
     // A `run` artifact is a shared typed result document. Flatten its axis and
@@ -781,7 +834,7 @@ fn load_json(
     {
         let document = rspice_core::execution::AnalysisResultDocument::from_json(&content)
             .map_err(|error| conversion_error(path, error))?;
-        return result_document_table(path, &document, resource_limits);
+        return result_document_table(path, &document, resource_limits).map(Into::into);
     }
 
     Err(conversion_error(
@@ -965,7 +1018,7 @@ fn load_hdf5(
     path: &Path,
     resource_limits: rspice_core::ResourceLimits,
     section: Option<&str>,
-) -> Result<ExportTable, CliError> {
+) -> Result<ImportedResult, CliError> {
     let metadata_bytes = usize::try_from(
         std::fs::metadata(path)
             .map_err(|source| CliError::InputReadError {
@@ -998,7 +1051,12 @@ fn load_hdf5(
         .expect("selected existing section");
     data.title = metadata.title;
     data.identity = metadata.identity;
-    hdf5_table(path, data)
+    if let Some(fft) = data.fft.take() {
+        return crate::commands::run::FftBundle::from_section(fft)
+            .map(ImportedResult::Fft)
+            .map_err(|error| conversion_error(path, error));
+    }
+    hdf5_table(path, data).map(Into::into)
 }
 
 fn hdf5_table(path: &Path, data: crate::hdf5::Hdf5SimulationData) -> Result<ExportTable, CliError> {

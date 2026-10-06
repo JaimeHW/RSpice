@@ -525,7 +525,7 @@ pub(crate) fn fft_metric_expectations(
 }
 
 impl Hdf5FftSection {
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         if self.parent_analysis_id.is_empty() {
             return Err(Hdf5Error::InvalidSchema(
                 "FFT parent_analysis_id must not be empty".to_string(),
@@ -635,6 +635,8 @@ impl Hdf5FftResult {
                     | "half_cycle_sine_6"
                     | "cosine_2"
                     | "cosine_4"
+                    | "gaussian"
+                    | "kaiser"
             )
         {
             return Err(Hdf5Error::InvalidSchema(format!(
