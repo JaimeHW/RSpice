@@ -897,9 +897,6 @@ pub(super) fn run_deck(
             suggestion: None,
         });
     }
-    if args.corners.is_some() {
-        return corners::run(netlist, args, config, quiet, run_label);
-    }
     if canonical_plan.axes().is_empty() {
         // An axis-free deck still takes its artifact namespaces from the
         // canonical plan. Reading the authored identities straight off the

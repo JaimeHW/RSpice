@@ -836,6 +836,7 @@ pub(super) fn run_transient(
                     }
                 };
                 if let Some(ref checkpoint_path) = checkpoint_path {
+                    publish::destinations::claim(checkpoint_path)?;
                     checkpoint
                         .save_with_abort(checkpoint_path, &progress_abort)
                         .map_err(|source| CliError::CoreSimulationError {

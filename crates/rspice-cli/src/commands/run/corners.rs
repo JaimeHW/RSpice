@@ -44,19 +44,19 @@ pub(super) fn names(
     Ok(names)
 }
 
-pub(super) fn run(
-    netlist: &Netlist,
+pub(super) struct PreparedCorner {
+    pub name: String,
+    pub netlist: Netlist,
+    pub args: RunArgs,
+}
+
+/// Inject the selected library before parsing any expressions or output requests.
+pub(super) fn prepare(
+    source: &str,
     args: &RunArgs,
     config: &Config,
-    quiet: bool,
-    run_label: Option<&str>,
-) -> Result<DeckOutcome, CliError> {
+) -> Result<Vec<PreparedCorner>, CliError> {
     let names = names(args, config.resources.limits())?;
-    let jobs = effective_jobs(
-        args.jobs,
-        names.len(),
-        config.resources.max_parallel_workers,
-    )?;
     let library = args
         .corner_lib
         .as_ref()
@@ -75,44 +75,81 @@ pub(super) fn run(
             source: std::io::Error::new(std::io::ErrorKind::NotFound, "corner library not found"),
         });
     }
-    let source = netlist
-        .source_text
-        .as_deref()
-        .ok_or_else(|| CliError::InternalError {
-            message: "netlist source unavailable for corner re-elaboration".into(),
-        })?;
-    if !quiet {
-        println!(
-            "Running process corner sweep: {} corners on {jobs} workers",
-            names.len()
-        );
-        if library.is_none() {
-            println!("  No --corner-lib supplied; each corner uses the nominal models.");
-        }
-    }
-    let transaction = publish::current();
-    let job = |corner: &String| {
-        let started = Instant::now();
-        let _joined = transaction.clone().map(publish::enter);
-        let execute = || -> Result<DeckOutcome, CliError> {
-            if crate::abort::reason().is_some() {
-                return Err(cancellation_cli_error(args.timeout));
-            }
+    names
+        .into_iter()
+        .map(|name| {
             let mut child = args.clone();
             child.corners = None;
             child.corner_lib = None;
             child.jobs = 1;
-            child.output = corner_output_path(args.output.as_deref(), corner);
-            child.checkpoint = corner_output_path(args.checkpoint.as_deref(), corner);
-            child.resume = corner_output_path(args.resume.as_deref(), corner);
+            child.output = corner_output_path(
+                resolve_output_path(args.output.clone(), config)?.as_deref(),
+                &name,
+            );
+            child.checkpoint = corner_output_path(args.checkpoint.as_deref(), &name);
+            child.resume = corner_output_path(args.resume.as_deref(), &name);
             let source = if let Some(library) = &library {
                 let (title, body) = source.split_once('\n').unwrap_or((source, ""));
-                format!("{title}\n.lib \"{}\" {corner}\n{body}", library.display())
+                format!("{title}\n.lib \"{}\" {name}\n{body}", library.display())
             } else {
                 source.to_string()
             };
-            let child_netlist = load_netlist_from_source(&source, &child, config, false)?;
-            run_deck(&child_netlist, &child, config, false, true, run_label)
+            let netlist = load_netlist_from_source(&source, &child, config, false)?;
+            Ok(PreparedCorner {
+                name,
+                netlist,
+                args: child,
+            })
+        })
+        .collect()
+}
+
+pub(super) fn run(
+    prepared: &[PreparedCorner],
+    args: &RunArgs,
+    config: &Config,
+    quiet: bool,
+    run_label: Option<&str>,
+) -> Result<DeckOutcome, CliError> {
+    let jobs = effective_jobs(
+        args.jobs,
+        prepared.len(),
+        config.resources.max_parallel_workers,
+    )?;
+    if !quiet {
+        println!(
+            "Running process corner sweep: {} corners on {jobs} workers",
+            prepared.len()
+        );
+        if args.corner_lib.is_none() {
+            println!("  No --corner-lib supplied; each corner uses the nominal models.");
+        }
+    }
+    let transaction = publish::current();
+    let destinations = publish::destinations::current();
+    let job = |prepared: &PreparedCorner| {
+        let corner = &prepared.name;
+        let started = Instant::now();
+        let _joined = transaction.clone().map(publish::enter);
+        let _destinations = destinations.clone().map(publish::destinations::enter);
+        let execute = || -> Result<DeckOutcome, CliError> {
+            if crate::abort::reason().is_some() {
+                return Err(cancellation_cli_error(args.timeout));
+            }
+            let default_label = prepared
+                .args
+                .output
+                .is_none()
+                .then(|| compose_run_label(run_label, Some(corner)))
+                .flatten();
+            run_deck(
+                &prepared.netlist,
+                &prepared.args,
+                config,
+                false,
+                true,
+                default_label.as_deref().or(run_label),
+            )
         };
         let mut outcome = match execute() {
             Ok(outcome) => outcome,
@@ -145,16 +182,16 @@ pub(super) fn run(
             .map_err(|error| CliError::InternalError {
                 message: format!("failed to create corner workers: {error}"),
             })?
-            .install(|| names.par_iter().map(job).collect())
+            .install(|| prepared.par_iter().map(job).collect())
     } else {
-        names.iter().map(job).collect()
+        prepared.iter().map(job).collect()
     };
-    let results: Vec<_> = names
+    let results: Vec<_> = prepared
         .iter()
         .zip(&outcomes)
         .map(|(name, outcome)| {
             (
-                name.clone(),
+                name.name.clone(),
                 outcome.reports.iter().all(|report| report.error.is_none()),
                 outcome.reports.iter().all(|report| {
                     report

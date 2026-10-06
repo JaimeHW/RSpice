@@ -95,6 +95,7 @@ pub(super) fn run_authored_restart(
                     }
                 })?;
                 let path = safe_restart_write_path(&parent, &name)?;
+                crate::commands::publish::destinations::claim(&path)?;
                 scheduled
                     .checkpoint
                     .save_with_encoding_and_abort(&path, plan.encoding(), &abort)

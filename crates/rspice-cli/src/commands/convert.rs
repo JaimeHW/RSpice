@@ -99,7 +99,7 @@ fn write_hdf5_output(path: &std::path::Path, table: &ExportTable) -> Result<(), 
     // and the tabular model every carrier reads back into keeps the rawfile
     // variable type and nothing else. Only a run knows a column's quantity,
     // and only its own writers publish one.
-    if table.is_complex() {
+    if table.is_complex() && table.scale_name == "frequency" && table.scale_type == "frequency" {
         let mut section = Hdf5AcSection::new(table.scale.clone());
         for column in &table.columns {
             match &column.data {
@@ -120,13 +120,27 @@ fn write_hdf5_output(path: &std::path::Path, table: &ExportTable) -> Result<(), 
     } else {
         let mut section = Hdf5WaveformSection::new(table.scale_name.clone(), table.scale.clone());
         for column in &table.columns {
-            if let ColumnData::Real(values) = &column.data {
-                section.add_typed_signal(
+            match &column.data {
+                ColumnData::Real(values) => section.add_typed_signal(
                     column.name.clone(),
                     column.var_type.clone(),
                     None,
                     values.clone(),
-                );
+                ),
+                ColumnData::Complex { real, imag } => {
+                    section.add_typed_signal(
+                        format!("Re({})", column.name),
+                        format!("complex_real:{}", column.var_type),
+                        None,
+                        real.clone(),
+                    );
+                    section.add_typed_signal(
+                        format!("Im({})", column.name),
+                        format!("complex_imag:{}", column.var_type),
+                        None,
+                        imag.clone(),
+                    );
+                }
             }
         }
         data.transient = Some(section);

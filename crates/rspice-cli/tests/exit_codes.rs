@@ -1563,6 +1563,7 @@ fn a_resolved_node_flag_keeps_the_engine_category_of_what_refused_it() {
         &dir,
         "ltra_sens.sp",
         "* RLGC LTRA with shunt conductance, behind a node-resolving flag\n\
+         .param R1=1\n\
          V1 in 0 1\n\
          O1 in 0 out 0 rgline\n\
          .model rgline LTRA R=1 G=1e-3 L=1n C=1p LEN=1\n\

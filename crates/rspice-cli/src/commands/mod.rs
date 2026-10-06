@@ -132,10 +132,21 @@ pub(crate) fn parse_netlist_input(
     args: &crate::cli::NetlistOptions,
     config: &crate::cli::Config,
 ) -> Result<rspice_core::Netlist, crate::cli::CliError> {
+    let options = input::parse_options(args, config.resources.limits(), true);
+    let source = read_netlist_input(path, args, config)?;
+    input::parse_source(&source, path, args, config, options, None)
+}
+
+/// Read once before textual expansion, with the same path and resource rules.
+pub(crate) fn read_netlist_input(
+    path: &std::path::Path,
+    args: &crate::cli::NetlistOptions,
+    config: &crate::cli::Config,
+) -> Result<String, crate::cli::CliError> {
     crate::abort::install_interrupt_handler();
     let limits = config.resources.limits();
     let options = input::parse_options(args, limits, true);
-    let source = if is_stdin(path) {
+    if is_stdin(path) {
         read_stdin_source_with_limits_and_abort(limits, &crate::abort::ProcessAbort)
     } else {
         rspice_core::Netlist::read_source_with_options_and_abort(
@@ -144,8 +155,7 @@ pub(crate) fn parse_netlist_input(
             &crate::abort::ProcessAbort,
         )
     }
-    .map_err(|error| input::map_error(error, path, None))?;
-    input::parse_source(&source, path, args, config, options, None)
+    .map_err(|error| input::map_error(error, path, None))
 }
 
 /// Preserve typed semantic context when crossing the core/CLI boundary.
