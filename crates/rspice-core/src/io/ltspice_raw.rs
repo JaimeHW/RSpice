@@ -1444,7 +1444,7 @@ mod tests {
     }
 
     #[test]
-    fn resource_limits_are_enforced_per_plot() {
+    fn resource_limits_cover_all_retained_plots() {
         let mut bytes = concat!(
             "Plotname: Transient Analysis\n",
             "Flags: real\n",
@@ -1460,21 +1460,21 @@ mod tests {
         .to_vec();
         bytes.extend_from_slice(DIGITAL_EVENT_PLOT_ASCII.as_bytes());
         let limits = ResourceLimits {
-            max_result_values: 8,
+            max_result_values: 15,
             ..Default::default()
         };
 
-        // The first plot retains four values and is admitted; the second
-        // declares six points' worth and is refused before it is allocated.
+        // Each plot fits on its own (four and twelve values); retaining both
+        // exceeds the aggregate budget before the second allocation.
         let error = parse_raw_plots_reader_with_limits(&mut Cursor::new(bytes.clone()), limits)
-            .expect_err("the second plot must be measured against the limit on its own");
+            .expect_err("the second plot must include values already retained");
         assert!(
             matches!(
                 error,
                 RawParseError::ResourceLimit(ResourceLimitError {
                     resource: ResourceKind::ResultValues,
-                    requested: 12,
-                    limit: 8,
+                    requested: 16,
+                    limit: 15,
                 })
             ),
             "unexpected error: {error}"
