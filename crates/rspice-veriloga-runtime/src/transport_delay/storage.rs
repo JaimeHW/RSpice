@@ -3,12 +3,25 @@
 use super::*;
 use std::collections::TryReserveError;
 
+fn capacity_after_reservation<T>(values: &VecDeque<T>, additional: usize) -> usize {
+    let required = values.len().saturating_add(additional);
+    if required <= values.capacity() {
+        values.capacity()
+    } else {
+        required.max(values.capacity().saturating_mul(2)).max(4)
+    }
+}
+
 fn reserve<T>(values: &mut VecDeque<T>, additional: usize) -> Result<(), TryReserveError> {
+    let capacity = capacity_after_reservation(values, additional);
     #[cfg(test)]
     if values.capacity().saturating_sub(values.len()) < additional {
         reservation_attempt()?;
     }
-    values.try_reserve(additional)
+    // Select the geometric growth policy here so an owning solver can check
+    // its aggregate storage request before any buffer is grown. Asking the
+    // collection for unspecified spare capacity makes that preflight opaque.
+    values.try_reserve_exact(capacity.saturating_sub(values.len()))
 }
 
 fn copy_records<T: Copy>(source: &VecDeque<T>) -> Result<Vec<T>, TryReserveError> {
@@ -64,6 +77,44 @@ impl DelayBuffer {
             .saturating_add(
                 self.event_orders
                     .capacity()
+                    .saturating_mul(std::mem::size_of::<(f64, u32)>()),
+            )
+    }
+
+    /// Requested backing bytes after reserving one native accepted sample.
+    /// Includes spare capacity and all event-side/order lanes. Saturates on
+    /// arithmetic overflow; a subsequent impossible reservation still returns
+    /// an allocator error. No state or capacity is changed by this query.
+    pub fn allocation_after_sample(&self, event: Option<DelayEventOrder>) -> usize {
+        capacity_after_reservation(&self.samples, 1)
+            .saturating_mul(std::mem::size_of::<(f64, f64)>())
+            .saturating_add(
+                capacity_after_reservation(&self.left_limits, usize::from(event.is_some()))
+                    .saturating_mul(std::mem::size_of::<(f64, f64)>()),
+            )
+            .saturating_add(
+                capacity_after_reservation(
+                    &self.event_orders,
+                    usize::from(matches!(event, Some(DelayEventOrder::AtLeast(_)))),
+                )
+                .saturating_mul(std::mem::size_of::<(f64, u32)>()),
+            )
+    }
+
+    /// Backing bytes requested by [`Self::try_clone`] or
+    /// [`Self::try_checkpoint`]. Copies retain records without spare capacity.
+    pub fn copy_allocation_bytes(&self) -> usize {
+        self.samples
+            .len()
+            .saturating_mul(std::mem::size_of::<(f64, f64)>())
+            .saturating_add(
+                self.left_limits
+                    .len()
+                    .saturating_mul(std::mem::size_of::<(f64, f64)>()),
+            )
+            .saturating_add(
+                self.event_orders
+                    .len()
                     .saturating_mul(std::mem::size_of::<(f64, u32)>()),
             )
     }
@@ -134,6 +185,49 @@ fn reservation_attempt() -> Result<(), TryReserveError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn growth_preflight_includes_capacity_event_sides_and_orders() {
+        let mut buffer = DelayBuffer::new(0);
+        for index in 0..100 {
+            let event = match index % 3 {
+                0 => None,
+                1 => Some(DelayEventOrder::Unknown),
+                _ => Some(DelayEventOrder::AtLeast(2)),
+            };
+            let old_capacity = buffer.allocated_bytes();
+            let requested = buffer.allocation_after_sample(event);
+            assert_eq!(buffer.allocated_bytes(), old_capacity);
+            buffer.try_reserve_sample(event).unwrap();
+            assert_eq!(buffer.allocated_bytes(), requested);
+            let time = f64::from(index);
+            if let Some(order) = event {
+                buffer
+                    .accept_event(
+                        time,
+                        DelayEvent {
+                            left: time,
+                            right: if matches!(order, DelayEventOrder::Unknown) {
+                                time + 1.0
+                            } else {
+                                time
+                            },
+                            order,
+                        },
+                        3.0,
+                        None,
+                    )
+                    .unwrap();
+            } else {
+                buffer.accept_sample(time, time, 3.0, None).unwrap();
+            }
+            assert_eq!(buffer.allocated_bytes(), requested);
+            let copy_bytes = buffer.copy_allocation_bytes();
+            let copied = buffer.try_clone().unwrap();
+            assert_eq!(copied.allocated_bytes(), copy_bytes);
+            assert_eq!(copied, buffer);
+        }
+    }
 
     #[test]
     fn construction_and_copy_failures_are_values_and_preserve_the_source() {
