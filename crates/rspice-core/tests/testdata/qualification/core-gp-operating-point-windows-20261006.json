@@ -1,0 +1,202 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C03",
+  "batch": "C03c.2 authenticated operating-point rate initialization and stationary transport provenance",
+  "status": "partial_with_required_failure",
+  "source_revision": "92cd7cf668027dd53fe68fd09c9824e8b0c0c74b",
+  "captured_utc": "2026-10-06T07:11:38.571294+00:00",
+  "implementation_commits": [
+    "4ec035c19"
+  ],
+  "host": "x86_64-pc-windows-msvc",
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "rustc": "1.94.0 (4a4ef493e 2026-03-02)",
+    "cargo": "1.94.0 (85eff7c80 2026-01-15)",
+    "llvm": "21.1.8",
+    "wasm_target": "wasm32-unknown-unknown",
+    "wasm_bindgen_test_runner": "0.2.126",
+    "wasm_bindgen_test": "0.3.76",
+    "chrome": "154.0.8037.98",
+    "chromedriver": "154.0.8037.92",
+    "WASM_BINDGEN_USE_DEDICATED_WORKER": "1",
+    "WASM_BINDGEN_TEST_TIMEOUT": "180",
+    "webdriver_configuration": "target/core-qualification/gp-webdriver.json",
+    "webdriver_configuration_sha256": "93458ed98943268e089c8c9a793bf2e899872e62941ac54795b0c27b7104785b",
+    "timeout_scope": "Harness timeout, not a measured performance acceptance bound."
+  },
+  "source_hash_scope": "Hashes identify the committed compiled source_revision. Native development runs retain their separate source states. Qualification/plan documentation is uncommitted while this record is captured.",
+  "source_sha256": {
+    "Cargo.lock": "ea7ed4e97284b27608b8ea02399cf875e017e93b291f165794d467ae3384bde7",
+    "rust-toolchain.toml": "d6dadd139dac178482d6cca3a8945b8a7e0f7df1f0733872657cbc420b2d82e6",
+    "crates/rspice-core/src/engine/transient.rs": "1d56eb282dbb776f024d69ca2c698882059e48dcff7b13356c9f7a32e9a2d705",
+    "crates/rspice-core/src/engine/transient/charge_event/solve.rs": "ee8278956d5329e62b0a358bae3d078bf2f72e417d29e4b1790b22d1728f903e",
+    "crates/rspice-core/src/engine/transient/charge_event/tests.rs": "60f9aab5ca4dc49bc82c57ff8aa7db9c8347a3843d491f62684144094e5bf119",
+    "crates/rspice-core/src/engine/transient/charge_event/tests/operating_point.rs": "7333ab86a452ee46c286ca1b0257a9cb37853f5ebe8be27f77f197da1fc9fdb3",
+    "crates/rspice-core/src/engine/transient/checkpoint.rs": "f57902cb93fadcd8036c4bc729cb4e8928085d34c5f1dcbe8a014922710e420e",
+    "crates/rspice-core/src/engine/transient/state_commit/physical_event.rs": "adf6a98a8f6f71d3dfbb81fc775e529fa824b7db07b5103f4e67187daeef6f76",
+    "crates/rspice-core/src/engine/transient/state_commit/physical_event/lines.rs": "65f80c7fbb32bf348f99e424c9d2eeb19b8810040042639210831e74c6aea178",
+    "crates/rspice-core/src/engine/transient/state_commit/physical_event/orders.rs": "a1ce3f06b92156151c6793a75598d16abcdfeddd1b0a9706910b562f22a18e8e",
+    "crates/rspice-core/src/engine/transient/state_commit/physical_event/startup.rs": "4fbcac0a70eb10b8c4dc4cb572c153b04f62df6f21b6e666e7fc8bc47e9403ac",
+    "crates/rspice-core/src/engine/transient/state_commit/physical_event/startup_contract_tests.rs": "7f7cea0ba074996244bd4646d4ff99073c9fa1c65d537a55e1ff8ab5500820e6",
+    "crates/rspice-core/src/engine/transient/state_commit/physical_event/tests/startup.rs": "e9749ca68bd9b5635cbd6d4e3b9bab820f72199458234462fd32e6e8adacc77e",
+    "crates/rspice-core/tests/gp_history_resources.rs": "26dec78bc2cd50a81a59623785a46fb077106d41f6402089810cd17b3cfbb470",
+    "crates/rspice-core/tests/gp_phase_regimes/static_private.rs": "0324860f21efc76f7a231fc22e2609d7911ba2a6d6f1b9deb8288ab667def4f4",
+    "crates/rspice-core/tests/testdata/qualification/core-requirements-v1.json": "fe93669647e46c542efd2e6918ac7d4d76cd0655434d29da847ba15294b24504"
+  },
+  "wasm_artifact_sha256": {
+    "target/wasm32-unknown-unknown/release/deps/bjt_excess_phase_transient-b80ba5c9d0d9b715.wasm": "32b48cea9cd00cf97cf16b0fe0b7a76727a117af17f80ce2db7cc6c9b158fa4f",
+    "target/wasm32-unknown-unknown/release/deps/gp_history_resources-dd4bc7fcfdd93a35.wasm": "76b2cb68816470907d45a31703ed2d5506c9c3b4caff22802d796900a9110ac8",
+    "target/wasm32-unknown-unknown/release/deps/gp_phase_cancellation-ca0c4be0b8d28a2b.wasm": "864a99df0f14a8e4ad79e29321552108d43f9869829a190a9116707d5e088e6f",
+    "target/wasm32-unknown-unknown/release/deps/gp_phase_regimes-f241bb5de8d6db51.wasm": "706efebd23e1c72ac03f9c69801b882570df3afefebb1da22bca85d3c03e8f38"
+  },
+  "root_cause": {
+    "static_rate": "The constant-bias OP has approximately 2e-17 A of floating-point KCL remainder. Dividing this by the tiny reverse-charge derivative created coordinate rates of order 1e13 V/s.",
+    "false_arrival": "An unconditional time-zero transport event subsequently reprojected the constant equilibrium at one delay, reproducing the same problem even after the initial rate correction.",
+    "diagnostic_scope": "Development traces identified the cause; quoted magnitudes are diagnostic observations, not independent simulator comparisons."
+  },
+  "implementation": {
+    "rate_contract": "Only an accepted unconstrained OP with unchanged source-side values and matching nodal/junction conditioning may supply static balance to the storage-row rate RHS. Prescribed source slopes and explicit time derivatives remain in the rate equations.",
+    "excluded_paths": "UIC or missing certificate, released ICs, changed conditioning, real authored source jumps, and transmission-line history without a separate OP/history certificate.",
+    "event_contract": "Only structurally constant deterministic independent forcing establishes stationary prehistory and omits the synthetic time-zero GP event. Sampled/nonconstant/RF/noise forcing retains conservative provenance.",
+    "numerical_invariants": "No capacitance cutoff, blanket small-residual suppression, widened current/voltage/charge tolerance, or changed device law. Original charge, rank, differentiated rate, finite KCL and flux audits remain.",
+    "checkpoint_identity": "v99"
+  },
+  "coverage": {
+    "new_unit_cases": 6,
+    "unit_scope": "Broad transient run had 565 passes, one new fixture failure and one existing diagnostic ignore. All three corrected contract tests then passed; two overlap previous passes. Thus 566 distinct selected cases have successful outcomes, not 568, and no single full final-tree library run is claimed.",
+    "native_integration_scope": "74 distinct selected integration tests passed across the completed BJT target (10), corrected resource target (4), and final five-target run (60). One required driven regression remains ignored in normal runs and fails explicitly.",
+    "static_positive_gate": "All three dialects and both polarities preserve private high-injection constant bias through 2.5 ns with actual RB/RC/RE, RELTOL=1e-7, and original lead-current tolerance 1e-12 A + 1e-5 * abs(reference).",
+    "guard_cases": "Roundoff versus real tiny excitation, retained voltage-source slope and capacitor current, original inductor-voltage audit, missing/changed OP contracts and released ICs, sub-tolerance authored source jump, nonstationary source provenance.",
+    "resource_gate": "Both constant-history and retained-startup-event fixtures succeed at the calculated exact live/copy budget and refuse a one-byte-insufficient budget; aggregate, compression, checkpoint schedule, restore and engine reuse checks remain.",
+    "wasm_scope": "21 tests passed in an optimized headless Chrome dedicated worker on the committed source; one required regression ignored. Enabling veriloga-wasm-jit does not qualify external model/JIT evaluation."
+  },
+  "runs": [
+    {
+      "reproduction_command": "cargo test --locked -p rspice-core --lib engine::transient -- --nocapture",
+      "source_state": "Development numerical source of 4ec035c19 before the concurrent control-parser merge. Startup source-jump fixture still used PULSE with dialect-defaulted zero edge times; corrected to explicit duplicate-time PWL before final focused rerun.",
+      "outcome": "one_new_fixture_failure_corrected_in_followup",
+      "observed_test_totals": {
+        "passed": 565,
+        "failed": 1,
+        "ignored": 1
+      },
+      "log": "target/core-qualification/gp-op-rates-transient-unit.log",
+      "log_sha256": "ca7b9209c035c26da5cca5b9a3a2df1fc2d64abfb027a840fc2dc0b27aab72e1",
+      "command_provenance": "Reproduction invocation for this scope; the log preserves outcomes rather than the full shell invocation."
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib startup::contract_tests -- --nocapture",
+      "source_state": "Development source subsequently committed as 4ec035c19 on 9da4b2ab2; production numerical code and the relevant final tests match that commit. Concurrent include-source metadata changes were not yet merged.",
+      "outcome": "passed",
+      "observed_test_totals": {
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0
+      },
+      "log": "target/core-qualification/gp-op-startup-contracts-final.log",
+      "log_sha256": "7919f8ea43f1927fc2afbea1dd183133643e68baedaa3f6c0efe4b717d3d9f92"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib engine::requirements -- --nocapture",
+      "source_state": "Development source subsequently committed as 4ec035c19 on 9da4b2ab2; production numerical code and the relevant final tests match that commit. Concurrent include-source metadata changes were not yet merged. Subsequent wording clarification in the C03 ledger changes no inventory row.",
+      "outcome": "passed",
+      "observed_test_totals": {
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0
+      },
+      "log": "target/core-qualification/gp-op-rates-ledger.log",
+      "log_sha256": "e50645bbbe10d05671788427d299e3a2f7945b297fd2740b8036fab27192f62b"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test gp_phase_regimes --test bjt_excess_phase_transient --test gp_history_resources --test gp_phase_cancellation --test transient_checkpoint --test transient_source_events --test resource_and_commit_faults -- --nocapture",
+      "source_state": "Development source subsequently committed as 4ec035c19 on 9da4b2ab2; production numerical code and the relevant final tests match that commit. Concurrent include-source metadata changes were not yet merged. Resource fixtures still assumed that every startup allocated an event record.",
+      "outcome": "bjt_target_passed_then_two_obsolete_resource_expectations_failed",
+      "observed_test_totals": {
+        "passed": 12,
+        "failed": 2,
+        "ignored": 0
+      },
+      "log": "target/core-qualification/gp-op-rates-integrations.log",
+      "log_sha256": "37a28ae29cb747fceef53cead9d1d62f9e983717fae9b513b47591e316a7f1e8"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test gp_history_resources -- --nocapture",
+      "source_state": "Development source subsequently committed as 4ec035c19 on 9da4b2ab2; production numerical code and the relevant final tests match that commit. Concurrent include-source metadata changes were not yet merged.",
+      "outcome": "passed",
+      "observed_test_totals": {
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0
+      },
+      "log": "target/core-qualification/gp-op-rates-resources-final.log",
+      "log_sha256": "b3bdf078d20ac73d7a9fc8878446da01d76922e4141d5dae680876503f6fd915"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test gp_phase_regimes --test gp_phase_cancellation --test transient_checkpoint --test transient_source_events --test resource_and_commit_faults -- --nocapture",
+      "source_state": "Development source subsequently committed as 4ec035c19 on 9da4b2ab2; production numerical code and the relevant final tests match that commit. Concurrent include-source metadata changes were not yet merged.",
+      "outcome": "passed_with_one_required_ignored_regression",
+      "observed_test_totals": {
+        "passed": 60,
+        "failed": 0,
+        "ignored": 1
+      },
+      "log": "target/core-qualification/gp-op-rates-integrations-final.log",
+      "log_sha256": "eff29654a30551df83c2c17078b61b9862152c230662ecdfc90a5daac3003eb6"
+    },
+    {
+      "command": "cargo clippy --locked -p rspice-core --lib --test gp_phase_regimes --test gp_history_resources -- -D warnings",
+      "source_state": "Development source subsequently committed as 4ec035c19 on 9da4b2ab2; production numerical code and the relevant final tests match that commit. Concurrent include-source metadata changes were not yet merged.",
+      "outcome": "passed",
+      "observed_test_totals": null,
+      "log": "target/core-qualification/gp-op-rates-clippy.log",
+      "log_sha256": "c336dff3a8eb78bdd96d7d6688b36a792decef56f1a089c4dd923f359a02700d"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test gp_phase_regimes private_nodes -- --ignored --nocapture",
+      "source_state": "Development source subsequently committed as 4ec035c19 on 9da4b2ab2; production numerical code and the relevant final tests match that commit. Concurrent include-source metadata changes were not yet merged. Test executable was built before the subsequent merge to 92cd7cf66.",
+      "outcome": "required_regression_still_fails",
+      "observed_test_totals": {
+        "passed": 0,
+        "failed": 1,
+        "ignored": 0
+      },
+      "log": "target/core-qualification/gp-op-rates-private-remaining.log",
+      "log_sha256": "2a10e3ff4bb42661cbab85141a1a6396c13d23297e8a85a4477d29289beec9ed"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test bjt_excess_phase_transient --test gp_history_resources --test gp_phase_cancellation --test gp_phase_regimes -- --nocapture",
+      "source_state": "Committed compiled source 92cd7cf668027dd53fe68fd09c9824e8b0c0c74b; only the plan documentation was modified while the tests ran.",
+      "outcome": "passed_with_one_required_ignored_regression",
+      "observed_test_totals": {
+        "passed": 21,
+        "failed": 0,
+        "ignored": 1
+      },
+      "log": "target/core-qualification/gp-op-rates-worker-committed.log",
+      "log_sha256": "a8196fa4fd6ce1f4c4619acd8f2dcd0d8fe1d05e11840e03e161df3a87743e73"
+    }
+  ],
+  "required_failures": [
+    {
+      "owner": "C03c.2",
+      "test": "private_nodes::gp_exact_delay_solves_biased_charge_through_private_terminal_resistances",
+      "outcome": "Ngspice NPN high-injection still fails convergence after 284 iterations after preceding saturation and reverse-active comparisons pass. The new failure time is not recorded; the prior 374-iteration failure near 2 ns is historical evidence.",
+      "acceptance": "Preserve independent native-source forcing, 2% peak-current, 2e-4 V intrinsic-voltage and 0.7 refinement limits. Complete the matrix and remove ignore."
+    },
+    {
+      "owner": "C03d",
+      "test": "coverage_gaps::gp_behavioral_physical_event_gap_is_explicit",
+      "outcome": "Passing disposition test still records refusal of exact-delay GP with a behavioral source; equations remain unimplemented.",
+      "acceptance": "Supply actual physical-event equations and replace the refusal disposition with independent event/continuation qualification."
+    }
+  ],
+  "limitations": [
+    "All C00-C14 packages remain open.",
+    "This batch does not complete the parameter/topology corpus, line-history startup certificate, generic physical-event providers, whole-run allocation and performance gates, inner-solve cancellation, or all configuration coverage.",
+    "No new live ngspice or Xyce executable comparison was performed. Local source references remain available for the next numerical work.",
+    "Native tests and committed WASM tests have explicitly different source scopes; counts are not a full core-suite certificate."
+  ]
+}
