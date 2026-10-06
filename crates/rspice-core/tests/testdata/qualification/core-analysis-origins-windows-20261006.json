@@ -1,0 +1,151 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C04",
+  "related_packages": [
+    "C00",
+    "C12"
+  ],
+  "batch": "Physical origins for typed analysis-card errors",
+  "status": "typed_analysis_origins_delivered_other_dependency_planning_remains",
+  "base_revision": "be541088cf76a10c59c22c9c54b414980bc3fd64",
+  "source_revision": "520527555117f0ba36fb874460bdcab86806c5ad",
+  "implementation_commits": [
+    "d63caea8a91fb79865e44accf0119cbbfc3e76c0",
+    "520527555117f0ba36fb874460bdcab86806c5ad"
+  ],
+  "captured_utc": "2026-10-06T21:57:20.129027+00:00",
+  "host": "x86_64-pc-windows-msvc",
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+    "cli_rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "cli_toolchain_reason": "Previously reproduced pinned Rust 1.94/faer compiler crash in CLI runtime builds; repository pin unchanged.",
+    "wasm_target": "wasm32-unknown-unknown",
+    "wasm_profile": "release",
+    "wasm_features": [
+      "wasm",
+      "veriloga-wasm-jit"
+    ],
+    "wasm_runtime": "headless Chrome dedicated worker",
+    "WASM_BINDGEN_TEST_TIMEOUT": "180",
+    "webdriver_config_sha256": "93458ed98943268e089c8c9a793bf2e899872e62941ac54795b0c27b7104785b",
+    "PYO3_PYTHON": "C:/Users/James/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe"
+  },
+  "commands": [
+    {
+      "command": "cargo test --locked -p rspice-core --lib netlist:: -- --test-threads=8",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1096
+      ],
+      "log": "target/core-qualification/analysis-origin-netlist-verified.log",
+      "log_sha256": "00d2b8d7514e93a3f193e20a85c2f4627cffc97075708503283bd20a777cca9e"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test analysis_error_origins --test forward_analyses -- --test-threads=8",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        4,
+        17
+      ],
+      "log": "target/core-qualification/analysis-origin-core-verified.log",
+      "log_sha256": "21e7420cd3b2d1dc82f1c385cff84a036ec42919409c030aff8e23d1bc317e5d"
+    },
+    {
+      "command": "cargo test --locked -p rspice-python --lib errors::parse::directives::tests -- --test-threads=4",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        4
+      ],
+      "log": "target/core-qualification/analysis-origin-python-verified.log",
+      "log_sha256": "6cc99b95b1174dda1d8e43233a4a14000e9e7560b33b1e14ea551cb44ac74389"
+    },
+    {
+      "command": "cargo +1.95.0 test --locked -p rspice-cli --test analysis_error_origins --target-dir target/core-cli-195",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1
+      ],
+      "log": "target/core-qualification/analysis-origin-cli-verified.log",
+      "log_sha256": "58e097515c5ea04d188eae35776716ead5ca8ea544b4d6dc4ed67f5e2a07116b"
+    },
+    {
+      "command": "cargo clippy --locked -p rspice-core -p rspice-cli -p rspice-wasm -p rspice-engine-adapter -p rspice-python --lib --bins --test analysis_error_origins -- -D warnings",
+      "outcome": "passed",
+      "test_target_passed_counts": [],
+      "log": "target/core-qualification/analysis-origin-clippy-verified.log",
+      "log_sha256": "025949aa483be66961fcea5431caa2a97019a17e19a07a501bb13c90366f7e73"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test analysis_error_origins --test forward_analyses -- --nocapture",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        4,
+        16
+      ],
+      "log": "target/core-qualification/analysis-origin-wasm.log",
+      "log_sha256": "88f7ad42a932add5bb93c0ab0ab4caa73a9baacb1e3c63e5b4ea4d651e047970"
+    }
+  ],
+  "unique_passed_tests": {
+    "native": 1122,
+    "optimized_wasm": 20
+  },
+  "test_accounting": "1096 netlist unit tests, 21 public core integration tests, four Python attribute-projection unit tests and one CLI integration test. Earlier development runs and publication-ledger checks are excluded.",
+  "source_hash_format": "SHA-256 of committed Git blob bytes",
+  "source_files_sha256": {
+    "crates/rspice-cli/tests/analysis_error_origins.rs": "113b72d0f1bc04f3c580bed47b3d131e2a09476100d778dfa6d80d5d301c217e",
+    "crates/rspice-core/README.md": "81493d38ec51ed45664d1b41c9c2bef3e2606c229e027f1060ec79368025356e",
+    "crates/rspice-core/src/netlist.rs": "a08100a81b6194c9817fb3bb05e8d07cd717e79ba5f254321c67396080193d61",
+    "crates/rspice-core/src/netlist/ast.rs": "8a44d692a9d2f15fc6c4e7584059b21a83ecbc3e59e24bfb7453f47afd9e772d",
+    "crates/rspice-core/src/netlist/parser.rs": "748c58279e6adf725973857dae5b01ac9ed9c8223f8c3418637d85c4fcb274ba",
+    "crates/rspice-core/tests/analysis_error_origins.rs": "4d671d81453462ea66f74dfeaa93a357d41ee97b85e9e0e3e145b2bb149cc309",
+    "crates/rspice-python/src/errors/parse/directives.rs": "5b066cec7ceb6a703858624a2dcb749a66162c2013afc14c2e458ac8d7077ae0",
+    "Cargo.lock": "32c7249ac4fd36da8e3478cf7ddad6aece428a5f26c4e7621160360f37008a07",
+    "rust-toolchain.toml": "0a73f8e6f0e60b4a2bba97a16fdc0c66517abad4410e72582981b9578bc1aa62"
+  },
+  "publication_ledger_sha256": "ae710da136cd6396b42b4de0c15120148b954f7bded3d3b280e305108e6aeeea",
+  "implementation": [
+    "AnalysisCardError retains an optional physical NetlistSourceLocation while keeping the public card, line and issue. Its constructor preserves the existing unattributed line-only behavior; source_location supplies the physical owner when available.",
+    "Parser source attribution attaches a physical origin once and keeps the error typed. Repeated source-map passes do not remap an included error onto its caller. Deferred root and scoped cards use the same attribution boundary.",
+    "ParseError::source_location and Display expose the physical card location. Python SDK attribute projection preserves the source and primary_source fields. CLI check retains the corrected physical line and message path.",
+    "Core README documents the added field for SDK struct-literal callers and recommends the compatible constructor."
+  ],
+  "acceptance_evidence": [
+    "Root and subcircuit failures after forward binding preserve AnalysisCard::Pss and the InvalidNumber issue for HARMS.",
+    "Authenticated sealed source bundles exercise two include levels and continuation lines without filesystem fallback on native and optimized WASM builds.",
+    "Missing-field, unknown-keyword, duplicate-keyword and invalid-number failures retain source-local card lines and included paths, including scoped pending cards.",
+    "In-memory errors and direct constructors retain line-only locations and existing display wording. An idempotence unit test preserves an already attributed included error.",
+    "CLI check JSON reports the physical card line and includes the physical path in its message. Python projections expose the same origin in existing source attributes."
+  ],
+  "limits": [
+    "This batch covers typed analysis-card diagnostic ownership; it does not redesign generic syntax/value-error metadata or all frontend error envelopes.",
+    "TEMP/TNOM options that close before later parent declarations, and provisional ngspice temperature-domain errors, remain open.",
+    "These focused parsing and propagation checks do not replace full numerical/model/control/performance qualification. No C00-C14 package is closed.",
+    "No selected tests are ignored. The full-suite ignored-test inventory remains unchanged from prior evidence.",
+    "One CLI rebuild failed in the compiler before tests ran. A passing retry does not prove compiler-build reproducibility; the earlier Rust 1.94/faer incident and this Rust 1.95 assembler diagnostic remain C14 toolchain qualification work."
+  ],
+  "development_notes": "The first compile exposed a missing AST import and a thiserror formatting expression, both corrected before validation. The first public source-path assertion compared Windows slash spellings rather than path identity; corrected the message assertion while keeping the exact structured path check. Final selected checks use the committed implementation; the WASM build started from the same unchanged implementation files immediately before commit.",
+  "compiler_incidents": [
+    {
+      "command": "cargo +1.95.0 test --locked -p rspice-cli --test analysis_error_origins --target-dir target/core-cli-195",
+      "toolchain": "Rust 1.95.0 on x86_64-pc-windows-msvc",
+      "outcome": "compiler_failure_before_test_execution",
+      "diagnostic": "expected relocatable expression while compiling rspice-core",
+      "log": "target/core-qualification/analysis-origin-cli-compiler-failure.log",
+      "log_sha256": "268581711f3d1ccd47f3823867f5d4cdbb52bfcf74edc5c4f1e35e84da8afe71",
+      "follow_up": "The same command passed after the other local qualification chain completed. No source, toolchain or compiler-setting workaround was applied. The successful retry is recorded separately above; build reproducibility remains unqualified."
+    }
+  ],
+  "publication_validation": {
+    "command": "cargo test --locked -p rspice-core --lib engine::requirements",
+    "outcome": "passed",
+    "test_target_passed_counts": [
+      3
+    ],
+    "log": "target/core-qualification/analysis-origin-ledger.log",
+    "log_sha256": "95a7737f74ff15cf497365e71172ba2be90ad83b5edd80f4fa4f2d40f10ed0e5",
+    "scope": "Ledger and evidence-path validation after the documentation edits; excluded from unique implementation test counts."
+  }
+}

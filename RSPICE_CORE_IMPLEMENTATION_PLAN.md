@@ -507,10 +507,10 @@ The parser work supporting C04b has delivered these contracts:
 | `42ed06c67`, `d9af822b8` | Failed optional operands remain visible to validation; root analysis forward bindings preserve captured values/functions, ordered effects, statistical phases and MC spans; public DC/AC/transient and 26 numeric-family grammar checks | `core-forward-analyses-windows-20261006.json` |
 | `022237471` | Physical source locations attached to staged diagnostics before delayed publication; included ready/pending FFT warning regression | `core-forward-analyses-windows-20261006.json` |
 | `0bb6ee975`, `5550bb89a` | Demand-driven analysis operands in lexical scopes; parent/default completion, shared samples, inherited snapshots, suspended lazy operands and per-instance body preservation | `core-scoped-analyses-windows-20261006.json` |
+| `d63caea8a`, `520527555` | Physical source ownership on typed analysis-card errors through root/scoped deferred binding, nested includes and continuations; preserved typed issues and SDK diagnostics | `core-analysis-origins-windows-20261006.json` |
 
 Continue shared dependency binding in these concrete cases:
 
-- Extend typed analysis-card errors with physical source identity. `AnalysisCardError` currently carries a line but no include path; preserve its typed issue while adding included-source ownership and regression coverage. The delivered source-location checks cover ordinary DC binding failures and staged warnings.
 - Extend forward TEMP/TNOM option binding to parents that are incomplete when the child closes. Analysis cards now support this case; temperature options still resolve at `.ENDS` and can fail before a later parent declaration. Preserve option assignment order, scoped samples and bounded replay while extending the shared planning machinery.
 - Reconcile ngspice expressions that are invalid only at the provisional temperature, such as `1/(TEMP-27)`, before treating them as final domain errors. Preserve bounded replay and cancellation.
 
