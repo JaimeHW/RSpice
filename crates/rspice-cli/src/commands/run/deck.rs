@@ -309,7 +309,10 @@ pub(super) fn validate_step_frontend_compatibility(
         shared::validate_step_sweep(&step.sweep)?;
     }
     let signature = step_analysis_signature(netlist);
-    if (args.checkpoint.is_some() || args.resume.is_some()) && !signature.contains(&"tran") {
+    if (args.checkpoint.is_some() || args.resume.is_some())
+        && !signature.contains(&"tran")
+        && netlist.control_script.is_none()
+    {
         return Err(CliError::InvalidArgument {
             message: ".STEP --checkpoint/--resume requires an authored .TRAN child analysis"
                 .to_string(),
@@ -348,8 +351,7 @@ pub(super) fn preflight_deck_run_count(
             &crate::abort::ProcessAbort,
         )
         .map_err(|error| map_materialized_run_error(error, args, "Step planning preflight"))?;
-    let aggregate_report_values = base_signature
-        .is_empty()
+    let aggregate_report_values = (base_signature.is_empty() && netlist.control_script.is_none())
         .then(|| 1usize.saturating_add(netlist.measurements.len().saturating_mul(3)));
     preflight_step_coordinates(
         &engine,
@@ -435,7 +437,6 @@ pub(super) fn load_netlist_from_source(
     rspice_core::netlist::validate_output_symbols_with_abort(&netlist, &crate::abort::ProcessAbort)
         .map_err(|error| map_cancellable_parse_error(error, args.timeout))?;
 
-    compatibility::validate(&netlist, args, config)?;
     if emit_diagnostics {
         crate::commands::emit_netlist_diagnostics(&netlist, false);
     }

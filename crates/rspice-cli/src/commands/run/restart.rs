@@ -94,18 +94,9 @@ pub(super) fn run_authored_restart(
                         ),
                     }
                 })?;
+                let name = ctx.restart_logical_name(&name)?;
                 let path = safe_restart_write_path(&parent, &name)?;
-                crate::commands::publish::destinations::claim(&path)?;
-                scheduled
-                    .checkpoint
-                    .save_with_encoding_and_abort(&path, plan.encoding(), &abort)
-                    .map_err(|source| CliError::CoreSimulationError {
-                        source,
-                        analysis: Some(format!(
-                            ".OPTIONS RESTART checkpoint save ({})",
-                            path.display()
-                        )),
-                    })?;
+                publish_checkpoint(ctx, &scheduled.checkpoint, &path, plan.encoding(), &abort)?;
                 if !ctx.quiet {
                     println!(
                         "  Restart checkpoint saved (nominal t={nominal_time:.6e}s, accepted t={:.6e}s): {}",
@@ -123,7 +114,8 @@ pub(super) fn run_authored_restart(
                 ));
             }
             let parent = restart_namespace_parent(&ctx.args.input)?;
-            let path = safe_restart_read_path(&parent, file)?;
+            let file = ctx.restart_logical_name(file)?;
+            let path = safe_restart_read_path(&parent, &file)?;
             let checkpoint_limit = ctx.engine.config().resource_limits.max_external_data_bytes;
             let checkpoint = rspice_core::engine::TransientCheckpoint::load_with_limit_and_abort(
                 &path,
@@ -299,6 +291,29 @@ pub(super) fn map_restart_simulation_error(
             analysis: Some("Transient restart".to_string()),
         }
     }
+}
+
+/// Checkpoints participate in the same artifact transaction as their results.
+/// Encoding retains the core's resumability and cancellation admission.
+pub(super) fn publish_checkpoint(
+    ctx: &RunContext<'_>,
+    checkpoint: &rspice_core::engine::TransientCheckpoint,
+    path: &Path,
+    encoding: rspice_core::engine::TransientCheckpointEncoding,
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<(), CliError> {
+    let bytes = checkpoint
+        .to_persistable_bytes_with_abort(encoding, abort)
+        .map_err(|error| map_restart_simulation_error(ctx, error))?;
+    crate::commands::publish::artifact(path, |writer| {
+        if abort.is_aborted() {
+            return Err(super::cancellation_cli_error(ctx.args.timeout));
+        }
+        writer
+            .write_all(&bytes)
+            .map_err(|error| CliError::output_error(path, error))
+    })
+    .map_err(|error| crate::cli::map_atomic_output_error(path, error))
 }
 
 #[cfg(test)]

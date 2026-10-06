@@ -39,6 +39,8 @@ pub(super) struct RunContext<'a> {
     pub(super) compress_tol: f64,
     /// More than one analysis card runs; output files get per-analysis tags.
     multi_analysis: bool,
+    control_outputs: bool,
+    run_label: Option<String>,
     /// Canonical identity of the concrete STEP/TEMP coordinate, when this is
     /// an axis-expanded run. Scalar runs deliberately retain `None`.
     pub(super) coordinate: Option<ArtifactCoordinate>,
@@ -208,9 +210,59 @@ impl<'a> RunContext<'a> {
         // The next command may launch another analysis; every script result
         // therefore receives its stable identity even before that is known.
         self.multi_analysis = true;
+        self.control_outputs = true;
         if !self.planned_transient_ids.is_empty() {
             self.next_transient_ordinal.set(1);
         }
+    }
+
+    /// Evaluate Fourier cards against the exact accepted post-products before
+    /// handing the same trajectory back to the script's dataset store.
+    pub(super) fn finish_control_transient(
+        &self,
+        outcome: basic::TransientOutcome,
+    ) -> Result<rspice_core::engine::TransientResult, CliError> {
+        let analysis = self.current_transient_instance()?;
+        if !self.plans_fourier_for(analysis) {
+            return Ok(outcome.result);
+        }
+        self.retained_transients
+            .borrow_mut()
+            .push(RetainedTransient {
+                analysis,
+                analysis_id: analysis.tag(),
+                result: outcome.result,
+                post_results: outcome.post_results,
+            });
+        for (index, card) in self
+            .netlist
+            .analyses
+            .iter()
+            .filter(|card| matches!(card, AnalysisCommand::Four { .. }))
+            .enumerate()
+        {
+            fourier_document::run_fourier(self, index, card)?;
+        }
+        self.retained_transients
+            .borrow_mut()
+            .pop()
+            .map(|retained| retained.result)
+            .ok_or_else(|| CliError::InternalError {
+                message: "control transient lost its retained trajectory".into(),
+            })
+    }
+
+    pub(super) fn restart_logical_name(&self, name: &str) -> Result<String, CliError> {
+        let mut name = name.to_owned();
+        if let Some(label) = &self.run_label {
+            name.push('.');
+            name.push_str(&sanitize_run_tag(label));
+        }
+        if self.control_outputs || self.planned_transient_ids.len() > 1 {
+            name.push('.');
+            name.push_str(&self.current_transient_analysis_id()?);
+        }
+        Ok(name)
     }
 
     pub(super) fn new(
@@ -269,6 +321,8 @@ impl<'a> RunContext<'a> {
             multi_analysis: coordinate.is_some()
                 || netlist.analyses.len() > 1
                 || !netlist.fft_analyses.is_empty(),
+            control_outputs: false,
+            run_label: run_label.map(str::to_owned),
             coordinate: coordinate.map(ArtifactCoordinate::from_run_coordinate),
             output_tag_multiplicities: analysis_output_tag_multiplicities(netlist),
             planned_output_ids: std::cell::RefCell::new(planned.output_ids),
@@ -658,6 +712,7 @@ impl<'a> RunContext<'a> {
             .get("tran")
             .is_none_or(|count| *count <= 1)
             && self.coordinate.is_none()
+            && !self.control_outputs
         {
             return Some(path);
         }
@@ -696,10 +751,11 @@ impl<'a> RunContext<'a> {
         &self,
         parent_analysis_id: &str,
     ) -> Option<std::path::PathBuf> {
-        let tag = if self
-            .output_tag_multiplicities
-            .get("tran")
-            .is_some_and(|count| *count > 1)
+        let tag = if self.control_outputs
+            || self
+                .output_tag_multiplicities
+                .get("tran")
+                .is_some_and(|count| *count > 1)
         {
             format!("{parent_analysis_id}.fft")
         } else {

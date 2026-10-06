@@ -836,16 +836,13 @@ pub(super) fn run_transient(
                     }
                 };
                 if let Some(ref checkpoint_path) = checkpoint_path {
-                    publish::destinations::claim(checkpoint_path)?;
-                    checkpoint
-                        .save_with_abort(checkpoint_path, &progress_abort)
-                        .map_err(|source| CliError::CoreSimulationError {
-                            source,
-                            analysis: Some(format!(
-                                "Transient checkpoint save ({})",
-                                checkpoint_path.display()
-                            )),
-                        })?;
+                    super::restart::publish_checkpoint(
+                        ctx,
+                        &checkpoint,
+                        checkpoint_path,
+                        rspice_core::engine::TransientCheckpointEncoding::Unpacked,
+                        &progress_abort,
+                    )?;
                     if !ctx.quiet {
                         println!(
                             "  Checkpoint saved (t={:.6e}s): {}",
