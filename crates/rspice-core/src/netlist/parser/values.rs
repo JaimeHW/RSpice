@@ -2142,9 +2142,12 @@ fn try_value_unsigned(stream: &mut TokenStream, params: &ParamContext) -> Option
             Some(v)
         }
         TokenKind::Expression(expr) => {
-            let expr = expr.clone();
+            // A failed optional value is still an authored operand. Leave it
+            // for the caller's error/forward-binding path instead of silently
+            // treating it as an omitted field.
+            let value = eval_expression(expr, params).ok()?;
             stream.advance();
-            eval_expression(&expr, params).ok()
+            Some(value)
         }
         TokenKind::Ident(s) => {
             if let Some(v) = params.get(s) {

@@ -5,6 +5,26 @@ use rspice_core::netlist::{AnalysisCommand, FftWindow, OutputDirectiveKind};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn invalid_optional_values_are_not_silently_omitted() {
+    for card in [
+        ".TRAN 1n 1u {missing}",
+        ".TRAN 1n 1u 0 {missing}",
+        ".TEMP 25 {missing}",
+        ".STEP PARAM gain LIST 1 {missing}",
+        ".NOISE V(out) V1 LIN 2 1 10 {missing}",
+        ".MC 2 uniform {missing}",
+    ] {
+        let error = Netlist::parse(&format!("Invalid optional operand\n{card}\n.end\n"))
+            .expect_err(card);
+        assert!(
+            error.to_string().to_ascii_uppercase().contains("MISSING"),
+            "{card}: {error}"
+        );
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn ac_data_rejects_unconsumed_fields() {
     for tail in ["unexpected", "1", "{missing}", "DATA=other"] {
         let error = Netlist::parse(&format!(
