@@ -245,7 +245,7 @@
         "path": "src/engine/noise.rs",
         "symbol": "run_noise_named_with_input_source_and_abort"
       },
-      "control_host": "missing",
+      "control_host": "implemented",
       "owner": "C04",
       "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
     },

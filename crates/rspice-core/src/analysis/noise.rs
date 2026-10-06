@@ -1072,6 +1072,14 @@ pub enum NoiseInputQuantity {
 }
 
 impl NoiseInputQuantity {
+    /// Unit of an amplitude spectral density (the square root of power density).
+    pub const fn amplitude_density_unit(self) -> &'static str {
+        match self {
+            Self::Voltage => "V/sqrt(Hz)",
+            Self::Current => "A/sqrt(Hz)",
+        }
+    }
+
     /// SI unit of the integrated input-referred RMS noise.
     pub const fn rms_unit(self) -> &'static str {
         match self {
@@ -1109,6 +1117,8 @@ pub struct NoiseResult {
     /// Input-referred noise spectral density (V²/Hz or A²/Hz, per `input_quantity`).
     pub input_referred_density: Value,
     /// Squared small-signal gain used to refer output noise to the input.
+    /// BestAvailable and Ngspice use the selected source's unit transfer;
+    /// Xyce uses the differential output from the full authored AC excitation.
     /// The ngspice and Xyce compatibility dialects retain their shared
     /// `N_MINGAIN=1e-20` floor. The native best-available dialect reports the
     /// physical gain and rejects positive output noise at an exact transfer
@@ -1295,6 +1305,17 @@ pub struct IntegratedContribution {
 }
 
 impl NoiseResult {
+    /// Number of retained numeric values, including complex AC samples and
+    /// the three scalars per noise contribution. Identity strings are not values.
+    pub fn retained_value_count(&self) -> usize {
+        self.voltages
+            .len()
+            .saturating_add(self.currents.len())
+            .saturating_mul(2)
+            .saturating_add(4)
+            .saturating_add(self.contributions.len().saturating_mul(3))
+    }
+
     /// Resolve a device contribution with Xyce-compatible case-insensitive
     /// matching and duplicate-mechanism summation.
     pub fn contribution(

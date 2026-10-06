@@ -287,6 +287,7 @@ pub(crate) fn check_requests(
                     analysis,
                     AnalysisCommand::Op
                         | AnalysisCommand::Dc { .. }
+                        | AnalysisCommand::Noise { .. }
                         | AnalysisCommand::Ac { .. }
                         | AnalysisCommand::Tran { .. }
                 ) {
@@ -302,7 +303,7 @@ pub(crate) fn check_requests(
                     "run has no declarative analysis to execute",
                 )));
             }
-        } else if matches!(command.name.as_str(), "op" | "dc" | "ac" | "tran") {
+        } else if matches!(command.name.as_str(), "op" | "dc" | "ac" | "noise" | "tran") {
             if command.arguments.contains('$') {
                 deferred.push(command.line);
                 continue;

@@ -1,6 +1,7 @@
 //! Resolve control output against immutable, named analysis datasets.
 
 use super::*;
+mod noise;
 use crate::ComplexValue;
 use crate::netlist::expr::{
     BinOpKind, Expr, ParseExpressionWithAbortError, UnaryOpKind, evaluate_complex,
@@ -80,6 +81,8 @@ enum Column {
     Branch(usize),
     Scale,
     DcAxis(usize),
+    Noise(noise::NoiseColumn),
+    NoiseContribution,
 }
 
 struct Selected<'a> {
@@ -87,6 +90,7 @@ struct Selected<'a> {
     id: ControlVectorId,
     column: Column,
     unit: SignalUnit,
+    noise_probe: Option<crate::analysis::noise::NoiseContributionProbe>,
 }
 
 impl ControlNamedDataset {
@@ -94,6 +98,7 @@ impl ControlNamedDataset {
         match &self.result {
             ControlAnalysisResult::OperatingPoint(_) => 1,
             ControlAnalysisResult::Ac(points) => points.len(),
+            ControlAnalysisResult::Noise(points) => points.len(),
             ControlAnalysisResult::DcSweep(result) => result.points.len(),
             ControlAnalysisResult::Transient(result) => result.time.len(),
         }
@@ -102,7 +107,7 @@ impl ControlNamedDataset {
     fn scale_unit(&self) -> SignalUnit {
         match &self.result {
             ControlAnalysisResult::OperatingPoint(_) => SignalUnit::Dimensionless,
-            ControlAnalysisResult::Ac(_) => SignalUnit::Hertz,
+            ControlAnalysisResult::Ac(_) | ControlAnalysisResult::Noise(_) => SignalUnit::Hertz,
             ControlAnalysisResult::DcSweep(result) => result
                 .axes
                 .last()
@@ -114,7 +119,7 @@ impl ControlNamedDataset {
     fn scale_name(&self) -> &str {
         match &self.result {
             ControlAnalysisResult::OperatingPoint(_) => "index",
-            ControlAnalysisResult::Ac(_) => "frequency",
+            ControlAnalysisResult::Ac(_) | ControlAnalysisResult::Noise(_) => "frequency",
             ControlAnalysisResult::DcSweep(result) => {
                 result.axes.last().map_or("sweep", |a| a.name.as_str())
             }
@@ -126,6 +131,7 @@ impl ControlNamedDataset {
         match &self.result {
             ControlAnalysisResult::OperatingPoint(_) => (row == 0).then_some(0.0),
             ControlAnalysisResult::Ac(points) => points.get(row).map(|point| point.frequency),
+            ControlAnalysisResult::Noise(points) => points.get(row).map(|point| point.frequency),
             ControlAnalysisResult::DcSweep(result) => result.points.get(row).map(|p| p.sweep_value),
             ControlAnalysisResult::Transient(result) => result.time.get(row).copied(),
         }
@@ -135,6 +141,7 @@ impl ControlNamedDataset {
         match &self.result {
             ControlAnalysisResult::OperatingPoint(result) => &result.branch_names,
             ControlAnalysisResult::Ac(points) => points.first().map_or(&[], |p| &p.branch_names),
+            ControlAnalysisResult::Noise(points) => points.first().map_or(&[], |p| &p.branch_names),
             ControlAnalysisResult::DcSweep(result) => result
                 .points
                 .first()
@@ -150,6 +157,29 @@ impl Selected<'_> {
             return None;
         }
         match (self.column, &self.dataset.result) {
+            (Column::Noise(column), ControlAnalysisResult::Noise(points)) => {
+                let point = points.get(row)?;
+                (point.input_quantity == points.first()?.input_quantity)
+                    .then(|| column.sample(point).into())
+            }
+            (Column::NoiseContribution, ControlAnalysisResult::Noise(points)) => points
+                .get(row)?
+                .contribution(self.noise_probe.as_ref()?)
+                .ok()
+                .map(Into::into),
+            (Column::Noise(_) | Column::NoiseContribution, _) => None,
+            (Column::Node(index), ControlAnalysisResult::Noise(points)) => {
+                let point = points.get(row)?;
+                (point.node_names == points.first()?.node_names)
+                    .then(|| point.voltages.get(index).copied())
+                    .flatten()
+            }
+            (Column::Branch(index), ControlAnalysisResult::Noise(points)) => {
+                let point = points.get(row)?;
+                (point.branch_names == points.first()?.branch_names)
+                    .then(|| point.currents.get(index).copied())
+                    .flatten()
+            }
             (Column::Ground, _) => Some(0.0.into()),
             (Column::Scale, _) => self.dataset.scale_value(row).map(Into::into),
             (Column::DcAxis(axis), ControlAnalysisResult::DcSweep(result)) => {
@@ -232,6 +262,14 @@ impl ControlCircuit {
         probe: Option<&str>,
         line: usize,
     ) -> Result<Selected<'a>, ControlError> {
+        if probe.is_none()
+            && let Some(mut selected) = noise::select(dataset, name, line)?
+        {
+            if let Some(unit) = self.vector_units.get(&selected.id) {
+                selected.unit = unit.clone();
+            }
+            return Ok(selected);
+        }
         let lower = name.to_ascii_lowercase();
         let branch = probe == Some("I") || (probe.is_none() && lower.ends_with("#branch"));
         let (column, signal, unit) = if branch {
@@ -273,6 +311,12 @@ impl ControlCircuit {
                         .result
                         .node_names
                 }
+                ControlAnalysisResult::Noise(points) => {
+                    &points
+                        .first()
+                        .ok_or_else(|| unavailable(line, dataset, name))?
+                        .node_names
+                }
                 ControlAnalysisResult::OperatingPoint(result) => &result.node_names,
                 ControlAnalysisResult::Ac(points) => {
                     &points
@@ -298,6 +342,7 @@ impl ControlCircuit {
             id,
             column,
             unit,
+            noise_probe: None,
         })
     }
 
@@ -309,6 +354,13 @@ impl ControlCircuit {
             }
             Expr::FnCall { name, args } => {
                 let (dataset, probe) = self.qualified(name, line)?;
+                if matches!(probe, "DNO" | "DNI") {
+                    let mut selected = noise::contribution(dataset, probe, args, line)?;
+                    if let Some(unit) = self.vector_units.get(&selected.id) {
+                        selected.unit = unit.clone();
+                    }
+                    return Ok(selected);
+                }
                 if !matches!(probe, "V" | "N" | "I") {
                     return Err(command_error(
                         line,
@@ -594,7 +646,7 @@ impl<'a> Resolver<'a> {
             }
             Expr::FnCall { name, args } => {
                 let probe = name.rsplit('.').next().unwrap_or(name);
-                if matches!(probe, "V" | "N" | "I") {
+                if matches!(probe, "V" | "N" | "I" | "DNO" | "DNI") {
                     if matches!(probe, "V" | "N") && args.len() == 2 {
                         let mut first = Expr::FnCall {
                             name: name.clone(),

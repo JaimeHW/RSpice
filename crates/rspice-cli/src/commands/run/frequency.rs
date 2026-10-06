@@ -1083,165 +1083,200 @@ fn finish_noise(
     execution: Result<Vec<rspice_core::analysis::NoiseResult>, rspice_core::SimulationError>,
     integrate: bool,
 ) -> Result<(), CliError> {
-    match execution {
-        Ok(results) => {
-            if !ctx.args.allow_nonfinite {
-                for result in &results {
-                    if !result.output_noise_rms().is_finite()
-                        || !result.input_referred_rms().is_finite()
-                    {
-                        return Err(CliError::SimulationError {
-                            message: format!(
-                                "noise spectrum is non-finite at {:e} Hz; the solution \
-                                 is not physical. Use --allow-nonfinite to export anyway.",
-                                result.frequency
-                            ),
-                            analysis: Some("Noise".to_string()),
-                        });
-                    }
-                }
+    let results = execution.map_err(|source| map_frequency_error(ctx, "Noise", source))?;
+    finish_noise_results(
+        ctx,
+        output_node,
+        reference_node,
+        input_source,
+        &results,
+        integrate,
+    )
+}
+
+pub(super) fn finish_noise_results(
+    ctx: &RunContext<'_>,
+    output_node: &str,
+    reference_node: Option<&str>,
+    input_source: &str,
+    results: &[rspice_core::analysis::NoiseResult],
+    integrate: bool,
+) -> Result<(), CliError> {
+    use rspice_core::analysis::noise::NoiseInputQuantity;
+    if !ctx.args.allow_nonfinite {
+        for result in results {
+            if !result.output_noise_rms().is_finite() || !result.input_referred_rms().is_finite() {
+                return Err(CliError::SimulationError {
+                    message: format!(
+                        "noise spectrum is non-finite at {:e} Hz; the solution \
+                         is not physical. Use --allow-nonfinite to export anyway.",
+                        result.frequency
+                    ),
+                    analysis: Some("Noise".to_string()),
+                });
             }
-
-            let measurements = rspice_core::analysis::evaluate_noise_measurements_with_abort(
-                ctx.netlist,
-                &results,
-                &crate::abort::ProcessAbort,
-            )
-            .map_err(|source| CliError::CoreSimulationError {
-                source,
-                analysis: Some("Noise measurement projection".to_string()),
-            })?;
-            ctx.record_measurements("NOISE", measurements)?;
-
-            if !ctx.quiet {
-                crate::console::line(format_args!(
-                    "Noise Analysis: {} frequency points",
-                    results.len()
-                ))?;
-                if let Some(reference) = reference_node {
-                    crate::console::line(format_args!(
-                        "  Output node: V({},{})",
-                        output_node, reference
-                    ))?;
-                } else {
-                    crate::console::line(format_args!("  Output node: V({})", output_node))?;
-                }
-                crate::console::line(format_args!("  Input source: {}", input_source))?;
-                if let (Some(first), Some(last)) = (results.first(), results.last()) {
-                    crate::console::line(format_args!(
-                        "  @ {:e} Hz: output_noise={:.6e} V/sqrt(Hz)",
-                        first.frequency,
-                        first.output_noise_rms()
-                    ))?;
-                    crate::console::line(format_args!(
-                        "  @ {:e} Hz: input_referred={:.6e} /sqrt(Hz)",
-                        first.frequency,
-                        first.input_referred_rms()
-                    ))?;
-                    crate::console::line(format_args!(
-                        "  @ {:e} Hz: output_noise={:.6e} V/sqrt(Hz)",
-                        last.frequency,
-                        last.output_noise_rms()
-                    ))?;
-                    crate::console::line(format_args!(
-                        "  @ {:e} Hz: input_referred={:.6e} /sqrt(Hz)",
-                        last.frequency,
-                        last.input_referred_rms()
-                    ))?;
-                }
-
-                if integrate {
-                    print_noise_contribution_summary(&results, ctx.verbose)?;
-                } else {
-                    crate::console::line(format_args!(
-                        "  Total-noise integration disabled: DATA frequencies are not strictly increasing"
-                    ))?;
-                }
-            }
-
-            if let Some(output) = ctx.resolve_output("noise") {
-                let analysis_id = output.analysis("noise")?;
-                let noise_frequencies: Vec<f64> =
-                    results.iter().map(|result| result.frequency).collect();
-                // ngspice-46 emits the onoise/inoise vectors in
-                // root-spectral-density units (V/sqrt(Hz)) unless the legacy
-                // `sqrnoise` control variable is set; exported tables carry
-                // the modern convention so they diff cleanly against it.
-                let onoise: Vec<f64> = results
-                    .iter()
-                    .map(|result| result.output_noise_rms())
-                    .collect();
-                let inoise: Vec<f64> = results
-                    .iter()
-                    .map(|result| result.input_referred_rms())
-                    .collect();
-
-                use super::export::{ColumnData, ExportColumn, ExportTable};
-
-                let table = ExportTable {
-                    scale_unit: None,
-                    analysis: "noise".to_string(),
-                    plot_name: "Noise Spectral Density Curves".to_string(),
-                    scale_name: "frequency".to_string(),
-                    scale_type: "frequency".to_string(),
-                    scale: noise_frequencies.clone(),
-                    columns: vec![
-                        ExportColumn {
-                            unit: None,
-                            name: "onoise_spectrum".to_string(),
-                            var_type: "voltage".to_string(),
-                            data: ColumnData::Real(onoise.clone()),
-                        },
-                        ExportColumn {
-                            unit: None,
-                            name: "inoise_spectrum".to_string(),
-                            var_type: "voltage".to_string(),
-                            data: ColumnData::Real(inoise.clone()),
-                        },
-                    ],
-                };
-                let schema = table_schema(&table)?;
-                super::document::publish_analysis_result(
-                    ctx,
-                    &output.path,
-                    analysis_id,
-                    schema,
-                    || {
-                        rspice_core::execution::AnalysisResultDocument::from_noise(
-                            analysis_id,
-                            &results,
-                        )
-                    },
-                    |path, format| {
-                        if matches!(format, OutputFormat::Hdf5) {
-                            let mut data = Hdf5SimulationData::new();
-                            data.title = "Noise Analysis".to_string();
-                            data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
-
-                            let mut noise =
-                                Hdf5WaveformSection::new("frequency", noise_frequencies.clone());
-                            noise.add_signal("onoise_spectrum", onoise.clone());
-                            noise.add_signal("inoise_spectrum", inoise.clone());
-                            data.noise = Some(noise);
-
-                            write_hdf5(path, &data).map_err(|err| map_hdf5_output_error(path, err))
-                        } else {
-                            table.write(path, format)
-                        }
-                    },
-                )?;
-
-                if !ctx.quiet {
-                    crate::console::line(format_args!(
-                        "  Noise spectra exported to: {}",
-                        output.path.display()
-                    ))?;
-                }
-            }
-            Ok(())
         }
-        Err(source) => Err(map_frequency_error(ctx, "Noise", source)),
     }
+
+    let measurements = rspice_core::analysis::evaluate_noise_measurements_with_abort(
+        ctx.netlist,
+        results,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|source| CliError::CoreSimulationError {
+        source,
+        analysis: Some("Noise measurement projection".to_string()),
+    })?;
+    ctx.record_measurements("NOISE", measurements)?;
+
+    if !ctx.quiet {
+        crate::console::line(format_args!(
+            "Noise Analysis: {} frequency points",
+            results.len()
+        ))?;
+        if let Some(reference) = reference_node {
+            crate::console::line(format_args!(
+                "  Output node: V({},{})",
+                output_node, reference
+            ))?;
+        } else {
+            crate::console::line(format_args!("  Output node: V({})", output_node))?;
+        }
+        crate::console::line(format_args!("  Input source: {}", input_source))?;
+        if let (Some(first), Some(last)) = (results.first(), results.last()) {
+            crate::console::line(format_args!(
+                "  @ {:e} Hz: output_noise={:.6e} V/sqrt(Hz)",
+                first.frequency,
+                first.output_noise_rms()
+            ))?;
+            crate::console::line(format_args!(
+                "  @ {:e} Hz: input_referred={:.6e} {}",
+                first.frequency,
+                first.input_referred_rms(),
+                first
+                    .input_quantity
+                    .unwrap_or(NoiseInputQuantity::Voltage)
+                    .amplitude_density_unit()
+            ))?;
+            crate::console::line(format_args!(
+                "  @ {:e} Hz: output_noise={:.6e} V/sqrt(Hz)",
+                last.frequency,
+                last.output_noise_rms()
+            ))?;
+            crate::console::line(format_args!(
+                "  @ {:e} Hz: input_referred={:.6e} {}",
+                last.frequency,
+                last.input_referred_rms(),
+                last.input_quantity
+                    .unwrap_or(NoiseInputQuantity::Voltage)
+                    .amplitude_density_unit()
+            ))?;
+        }
+
+        if integrate {
+            print_noise_contribution_summary(results, ctx.verbose)?;
+        } else {
+            crate::console::line(format_args!(
+                "  Total-noise integration disabled: DATA frequencies are not strictly increasing"
+            ))?;
+        }
+    }
+
+    if let Some(output) = ctx.resolve_output("noise") {
+        let analysis_id = output.analysis("noise")?;
+        let noise_frequencies: Vec<f64> = results.iter().map(|result| result.frequency).collect();
+        // ngspice-46 emits the onoise/inoise vectors in
+        // root-spectral-density units (V/sqrt(Hz)) unless the legacy
+        // `sqrnoise` control variable is set; exported tables carry
+        // the modern convention so they diff cleanly against it.
+        let onoise: Vec<f64> = results
+            .iter()
+            .map(|result| result.output_noise_rms())
+            .collect();
+        let inoise: Vec<f64> = results
+            .iter()
+            .map(|result| result.input_referred_rms())
+            .collect();
+
+        use super::export::{ColumnData, ExportColumn, ExportTable};
+        let input_quantity = results
+            .first()
+            .and_then(|p| p.input_quantity)
+            .unwrap_or(NoiseInputQuantity::Voltage);
+        let input_type = if input_quantity == NoiseInputQuantity::Current {
+            "current"
+        } else {
+            "voltage"
+        };
+        let output_unit = NoiseInputQuantity::Voltage.amplitude_density_unit();
+        let input_unit = input_quantity.amplitude_density_unit();
+
+        let table = ExportTable {
+            scale_unit: None,
+            analysis: "noise".to_string(),
+            plot_name: "Noise Spectral Density Curves".to_string(),
+            scale_name: "frequency".to_string(),
+            scale_type: "frequency".to_string(),
+            scale: noise_frequencies.clone(),
+            columns: vec![
+                ExportColumn {
+                    unit: Some(output_unit.into()),
+                    name: "onoise_spectrum".to_string(),
+                    var_type: "voltage".to_string(),
+                    data: ColumnData::Real(onoise.clone()),
+                },
+                ExportColumn {
+                    unit: Some(input_unit.into()),
+                    name: "inoise_spectrum".to_string(),
+                    var_type: input_type.into(),
+                    data: ColumnData::Real(inoise.clone()),
+                },
+            ],
+        };
+        let schema = table_schema(&table)?;
+        super::document::publish_analysis_result(
+            ctx,
+            &output.path,
+            analysis_id,
+            schema,
+            || rspice_core::execution::AnalysisResultDocument::from_noise(analysis_id, results),
+            |path, format| {
+                if matches!(format, OutputFormat::Hdf5) {
+                    let mut data = Hdf5SimulationData::new();
+                    data.title = "Noise Analysis".to_string();
+                    data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
+
+                    let mut noise =
+                        Hdf5WaveformSection::new("frequency", noise_frequencies.clone());
+                    noise.add_typed_signal(
+                        "onoise_spectrum",
+                        "voltage",
+                        Some(output_unit.into()),
+                        onoise.clone(),
+                    );
+                    noise.add_typed_signal(
+                        "inoise_spectrum",
+                        input_type,
+                        Some(input_unit.into()),
+                        inoise.clone(),
+                    );
+                    data.noise = Some(noise);
+
+                    write_hdf5(path, &data).map_err(|err| map_hdf5_output_error(path, err))
+                } else {
+                    table.write(path, format)
+                }
+            },
+        )?;
+
+        if !ctx.quiet {
+            crate::console::line(format_args!(
+                "  Noise spectra exported to: {}",
+                output.path.display()
+            ))?;
+        }
+    }
+    Ok(())
 }
 
 /// Print the ranked, band-integrated noise-contributor table.

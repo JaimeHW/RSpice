@@ -138,10 +138,33 @@ pub(super) fn run(
                             ControlAnalysisResult::DcSweep(result) => {
                                 let AnalysisCommand::Dc { source, .. } = &dataset.command else {
                                     return Err(CliError::InternalError {
-                                        message: "control DC dataset lost its authored command".into(),
+                                        message: "control DC dataset lost its authored command"
+                                            .into(),
                                     });
                                 };
                                 basic::finish_dc_sweep_result(&ctx, source, result)?;
+                            }
+                            ControlAnalysisResult::Noise(result) => {
+                                let AnalysisCommand::Noise {
+                                    output_node,
+                                    reference_node,
+                                    input_source,
+                                    ..
+                                } = &dataset.command
+                                else {
+                                    return Err(CliError::InternalError {
+                                        message: "control noise dataset lost its authored command"
+                                            .into(),
+                                    });
+                                };
+                                frequency::finish_noise_results(
+                                    &ctx,
+                                    output_node,
+                                    reference_node.as_deref(),
+                                    input_source,
+                                    result,
+                                    true,
+                                )?;
                             }
                             ControlAnalysisResult::Ac(result) => {
                                 frequency::finish_ac_results(&ctx, result)?

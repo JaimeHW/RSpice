@@ -5,6 +5,22 @@ mod tests {
     use super::super::*;
 
     #[test]
+    fn control_noise_document_matches_direct_current_referred_noise() {
+        let source = "Noise\nI1 0 out DC 0 AC 1\nR1 out 0 1k\n";
+        let direct = run_authored_deck_document_detailed(&format!(
+            "{source}.noise V(out) I1 lin 3 10 100\n.end\n"
+        ))
+        .unwrap();
+        let control = run_authored_deck_document_detailed(&format!(
+            "{source}.control\nnoise V(out) I1 lin 3 10 100\nprint inoise_spectrum dni(R1)\n.endc\n.end\n"
+        )).unwrap();
+        assert_eq!(control.control_datasets, ["noise1"]);
+        assert_eq!(control.results[0].signals(), direct.results[0].signals());
+        assert_eq!(control.results[0].payload(), direct.results[0].payload());
+        assert_eq!(control.control_presentations.len(), 1);
+    }
+
+    #[test]
     fn control_dc_document_matches_direct_nested_sweep() {
         let source = "DC\nI1 0 out 0\nR1 out bias 1k\nV2 bias 0 0\n";
         let direct = run_authored_deck_document_detailed(&format!(
@@ -187,6 +203,9 @@ pub(super) fn run(
             }
             ControlAnalysisResult::DcSweep(result) => {
                 AnalysisResultDocument::from_dc_analysis(dataset.analysis_id, result)
+            }
+            ControlAnalysisResult::Noise(points) => {
+                AnalysisResultDocument::from_noise(dataset.analysis_id, points)
             }
             ControlAnalysisResult::Ac(points) => {
                 AnalysisResultDocument::from_ac(dataset.analysis_id, points)

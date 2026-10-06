@@ -44,6 +44,7 @@ pub enum ControlExecutionError {
 pub enum ControlAnalysisResult {
     OperatingPoint(Box<crate::solver::SimulationResult>),
     Ac(Vec<AcResult>),
+    Noise(Vec<crate::analysis::NoiseResult>),
     DcSweep(Box<super::DcSweepResult>),
     Transient(Box<TransientResult>),
 }
@@ -87,7 +88,7 @@ impl CommandKind {
             "option" | "options" => Self::Options,
             "set" => Self::Set,
             "alter" => Self::Alter,
-            "op" | "dc" | "ac" | "tran" => Self::Analysis,
+            "op" | "dc" | "ac" | "noise" | "tran" => Self::Analysis,
             "run" => Self::Run,
             "plot" | "print" | "settype" => Self::Presentation,
             _ => {
@@ -280,6 +281,7 @@ impl ControlCircuit {
             AnalysisCommand::Op => ("op", crate::identity::AnalysisKind::Op),
             AnalysisCommand::Dc { .. } => ("dc", crate::identity::AnalysisKind::Dc),
             AnalysisCommand::Ac { .. } => ("ac", crate::identity::AnalysisKind::Ac),
+            AnalysisCommand::Noise { .. } => ("noise", crate::identity::AnalysisKind::Noise),
             AnalysisCommand::Tran { .. } => ("tran", crate::identity::AnalysisKind::Tran),
             _ => {
                 return Err(command_error(
@@ -349,36 +351,10 @@ impl ControlCircuit {
                     count,
                 )
             }
-            AnalysisCommand::Ac {
-                variation,
-                points,
-                start_freq,
-                stop_freq,
-            } => {
-                let frequencies = crate::analysis::ac::try_ac_sweep_frequencies_bounded_with_abort(
-                    *variation,
-                    *points,
-                    *start_freq,
-                    *stop_freq,
-                    bounded.config().resource_limits.max_analysis_points,
-                    abort,
-                )
-                .map_err(|error| command_error(line, error.to_string()))?;
-                let result = bounded
-                    .run_ac_with_abort(&netlist, &frequencies, abort)
-                    .map_err(|error| simulation_error(line, error))?;
-                let count = result
-                    .iter()
-                    .map(|point| {
-                        point
-                            .voltages
-                            .len()
-                            .saturating_add(point.currents.len())
-                            .saturating_mul(2)
-                            .saturating_add(1)
-                    })
-                    .fold(0usize, usize::saturating_add);
-                ("ac", ControlAnalysisResult::Ac(result), count)
+            AnalysisCommand::Ac { .. } | AnalysisCommand::Noise { .. } => {
+                let (result, count) =
+                    analysis::frequency(&bounded, &netlist, &analysis, line, abort)?;
+                (kind, result, count)
             }
             AnalysisCommand::Tran { .. } => {
                 let result = runner(&bounded, &netlist, &analysis, analysis_id, abort)?;
