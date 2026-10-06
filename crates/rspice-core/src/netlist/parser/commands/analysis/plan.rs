@@ -142,21 +142,35 @@ impl AnalysisCardPlan {
         &mut self,
         scopes: &mut LexicalScopes,
         params: &ParamContext,
+        previous_error: Option<ParseWithAbortError>,
         last_temperature_directive: &mut Option<TemperatureDirective>,
         sink: AnalysisCardSink<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<(), ParseWithAbortError> {
-        if self.entries.is_empty() {
-            return Ok(());
+        if matches!(
+            previous_error,
+            Some(
+                ParseWithAbortError::Aborted
+                    | ParseWithAbortError::Parse(ParseError::ResourceLimit(_))
+            )
+        ) {
+            return Err(previous_error.expect("terminal error"));
         }
+        ensure_parse_not_aborted(abort)?;
+        let incomplete_parameters = previous_error.is_some();
         let mut lin_exists = sink.lin_analysis.is_some();
         let mut current_noise = sink.options.transient_noise;
         let mut ready = Vec::new();
-        let mut first_error = None;
+        let mut first_error = previous_error;
         let last_temperature_position = self.entries.iter().rposition(|entry| match &entry.card {
             Card::Ready(card) => matches!(card.analysis, Some(AnalysisCommand::Temp { .. })),
             Card::Pending(card) => card.command.eq_ignore_ascii_case(".TEMP"),
         });
+        if last_temperature_position.is_none()
+            && let Some(error) = first_error.take()
+        {
+            return Err(error);
+        }
         for (position, entry) in std::mem::take(&mut self.entries).into_iter().enumerate() {
             ensure_parse_not_aborted(abort)?;
             let bound = (|| -> Result<ParsedAnalysisCard, ParseWithAbortError> {
@@ -166,20 +180,22 @@ impl AnalysisCardPlan {
                             .map_err(|error| located_error(error, entry.line, &entry.origin))?;
                         *card
                     }
-                    Card::Pending(pending) if pending.scope != 0 => scoped::bind(
-                        scopes,
-                        &pending,
-                        AnalysisCardContext {
-                            line_num: entry.line,
-                            logical_line: &pending.logical_line,
-                            params,
-                            max_analysis_points: pending.max_analysis_points,
-                            origin: &entry.origin,
-                            lin_exists,
-                            current_noise,
-                        },
-                        abort,
-                    )?,
+                    Card::Pending(pending) if pending.scope != 0 || incomplete_parameters => {
+                        scoped::bind(
+                            scopes,
+                            &pending,
+                            AnalysisCardContext {
+                                line_num: entry.line,
+                                logical_line: &pending.logical_line,
+                                params,
+                                max_analysis_points: pending.max_analysis_points,
+                                origin: &entry.origin,
+                                lin_exists,
+                                current_noise,
+                            },
+                            abort,
+                        )?
+                    }
                     Card::Pending(pending) => {
                         let bound = pending.context(params);
                         ParsedAnalysisCard::parse(
@@ -308,6 +324,7 @@ mod tests {
             let result = state.analysis_cards.complete(
                 &mut state.scopes,
                 &state.params,
+                None,
                 &mut None,
                 AnalysisCardSink {
                     analyses: &mut state.analyses,
@@ -356,6 +373,7 @@ mod tests {
         let result = state.analysis_cards.complete(
             &mut state.scopes,
             &state.params,
+            None,
             &mut None,
             AnalysisCardSink {
                 analyses: &mut state.analyses,

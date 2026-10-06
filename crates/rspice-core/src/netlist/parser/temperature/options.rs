@@ -58,6 +58,10 @@ pub(in super::super) struct TemperatureOptionPlan {
     last: [usize; 2],
     scopes: Vec<Vec<PendingTemperatureOption>>,
     delayed: Vec<PendingScope>,
+    // An eager declaration can fail before a later card selects temperature.
+    // Keep its first error independently of subsequent redefinitions. A pass
+    // containing one of these errors must never publish a netlist.
+    parameter_error: Option<ParseError>,
 }
 
 pub(in super::super) struct TemperatureOptionSink<'a> {
@@ -149,6 +153,33 @@ impl TemperatureOptionSink<'_> {
 }
 
 impl TemperatureOptionPlan {
+    pub(in super::super) fn retain_parameter_error(
+        &mut self,
+        error: crate::netlist::expr::ExprError,
+        origin: &NetlistSourceLocation,
+    ) {
+        self.parameter_error
+            .get_or_insert_with(|| ParseError::InvalidValue(format!("{origin}: {error}")));
+    }
+
+    pub(in super::super) fn take_parameter_error(&mut self) -> Option<ParseError> {
+        self.parameter_error.take()
+    }
+
+    pub(in super::super) fn prefer_parameter_error(
+        &mut self,
+        error: ParseWithAbortError,
+    ) -> ParseWithAbortError {
+        match error {
+            error @ (ParseWithAbortError::Aborted
+            | ParseWithAbortError::Parse(ParseError::ResourceLimit(_))) => error,
+            error => self
+                .take_parameter_error()
+                .map(ParseWithAbortError::from)
+                .unwrap_or(error),
+        }
+    }
+
     pub(in super::super) fn resolve_scope(
         &mut self,
         scopes: &mut LexicalScopes,

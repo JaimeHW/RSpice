@@ -55,7 +55,7 @@ impl From<ParseError> for TemperaturePassError {
 }
 
 impl TemperaturePassError {
-    pub(super) fn after_analysis_completion(
+    pub(super) fn after_completion(
         error: ParseWithAbortError,
         used: ParserTemperatures,
         options: &SimulationOptions,
@@ -256,6 +256,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn eager_parameter_recovery_stops_at_every_cancellation_boundary() {
+        let source = "Cancellation during discovery\n.param scale={1/(TEMP-27)}\n.temp {ambient}\n.param ambient=85\n.end\n";
+        for limit in 0..512 {
+            let abort = crate::abort_signal::CountingAbort::new(limit);
+            let result = super::super::parse_netlist_with_options_and_abort(
+                source,
+                NetlistParseOptions::default(),
+                &abort,
+            );
+            assert_eq!(abort.polls_after_abort(), 0, "poll limit {limit}");
+            match result {
+                Err(ParseWithAbortError::Aborted) => {}
+                Ok(netlist) => {
+                    assert!(limit > 20, "both discovery and replay must be exercised");
+                    assert_eq!(netlist.params.get("scale"), Some(1.0 / 58.0));
+                    return;
+                }
+                error => panic!("unexpected result at poll limit {limit}: {error:?}"),
+            }
+        }
+        panic!("cancellation coverage never reached successful completion");
+    }
+
+    #[test]
     fn physical_temperature_override_survives_failed_analysis_completion() {
         let source = "Physical replay\n.ac lin 1 {1/(TNOM-27)} 100\n.temp 27\n.param nominal=55\n.options tnom={nominal}\n.end\n";
         let netlist = parse_netlist_with_parameter_overrides_and_abort(
@@ -292,7 +316,7 @@ mod tests {
             let mut calls = 0;
             let result = parse_with_consistent_temperatures(|_| {
                 calls += 1;
-                Err(TemperaturePassError::after_analysis_completion(
+                Err(TemperaturePassError::after_completion(
                     failure.take().expect("terminal errors must not replay"),
                     ParserTemperatures::default(),
                     &SimulationOptions {

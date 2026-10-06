@@ -132,6 +132,7 @@ pub(super) fn parse_command(
                 diagnostics,
                 origin,
                 parameter_overrides,
+                temperature_options.plan,
             )?;
         }
         ".GLOBAL_PARAM" => {
@@ -144,6 +145,7 @@ pub(super) fn parse_command(
                 diagnostics,
                 origin,
                 parameter_overrides,
+                temperature_options.plan,
             )?;
         }
         ".IC" => {
@@ -5692,6 +5694,7 @@ pub(super) fn parse_param_statement(
     diagnostics: &mut Vec<ParseDiagnostic>,
     origin: &NetlistSourceLocation,
     overrides: &[ParameterOverride],
+    temperature_options: &mut temperature::TemperatureOptionPlan,
 ) -> Result<(), ParseError> {
     if retain_global_expression && deferred_params.is_some() {
         return Err(ParseError::Syntax {
@@ -5759,7 +5762,7 @@ pub(super) fn parse_param_statement(
                 parameter.global == retain_global_expression
                     && parameter.name.eq_ignore_ascii_case(&name)
             });
-            parse_param_assignment_value(
+            if let Some(error) = parse_param_assignment_value(
                 stream,
                 line_num,
                 params,
@@ -5767,7 +5770,9 @@ pub(super) fn parse_param_statement(
                 retain_global_expression,
                 name.clone(),
                 parameter_override.map(|parameter| parameter.value),
-            )?;
+            )? {
+                temperature_options.retain_parameter_error(error, origin);
+            }
             params.retain_expression_origin(&name, retain_global_expression, origin);
             if parameter_override.is_some_and(|parameter| parameter.direction) {
                 params.seed_parameter_direction(&name, retain_global_expression);
@@ -5781,7 +5786,7 @@ pub(super) fn parse_param_statement(
             let mut ignored_params = params.isolated_random_clone();
             let mut ignored_deferred = Vec::new();
             let ignored_deferred = (!retain_global_expression).then_some(&mut ignored_deferred);
-            parse_param_assignment_value(
+            if let Some(error) = parse_param_assignment_value(
                 stream,
                 line_num,
                 &mut ignored_params,
@@ -5789,7 +5794,9 @@ pub(super) fn parse_param_statement(
                 retain_global_expression,
                 name.clone(),
                 None,
-            )?;
+            )? {
+                temperature_options.retain_parameter_error(error, origin);
+            }
         }
         handle_parameter_redefinition(
             params,
@@ -5854,7 +5861,8 @@ fn parse_param_assignment_value(
     retain_global_expression: bool,
     name: String,
     override_value: Option<Value>,
-) -> Result<(), ParseError> {
+) -> Result<Option<crate::netlist::expr::ExprError>, ParseError> {
+    let mut provisional_error = None;
     let override_binding = override_value.map(|value| (name.clone(), value));
     // Get the value (could be number, expression, or string-valued vector).
     match &stream.peek().kind {
@@ -5908,15 +5916,17 @@ fn parse_param_assignment_value(
                         );
                     }
                     Err(err) => {
-                        let err = ParseError::InvalidValue(format!("line {}: {}", line_num, err));
-                        defer_param_expression_or_error(
+                        provisional_error = defer_param_expression_or_error(
                             deferred_params.as_deref_mut(),
                             params,
                             retain_global_expression,
                             name,
                             expr,
                             err,
-                        )?;
+                        )
+                        .map_err(|error| {
+                            ParseError::InvalidValue(format!("line {line_num}: {error}"))
+                        })?;
                     }
                 }
             }
@@ -5960,15 +5970,17 @@ fn parse_param_assignment_value(
                         );
                     }
                     Err(err) => {
-                        let err = ParseError::InvalidValue(format!("line {}: {}", line_num, err));
-                        defer_param_expression_or_error(
+                        provisional_error = defer_param_expression_or_error(
                             deferred_params.as_deref_mut(),
                             params,
                             retain_global_expression,
                             name,
                             expr,
                             err,
-                        )?;
+                        )
+                        .map_err(|error| {
+                            ParseError::InvalidValue(format!("line {line_num}: {error}"))
+                        })?;
                     }
                 }
             }
@@ -6044,23 +6056,21 @@ fn parse_param_assignment_value(
                 Err(err) => {
                     let expr = collect_param_rhs_expression(stream, line_num, &name)?;
                     reject_parameter_expression_circuit_probe(&name, &expr, line_num, params)?;
-                    let err = match crate::netlist::expr::eval_expression_complex(
+                    let Err(error) = crate::netlist::expr::eval_expression_complex(
                         &expr,
                         &params.isolated_random_clone(),
-                    ) {
-                        Err(error @ crate::netlist::expr::ExprError::UndefinedParam(_)) => {
-                            ParseError::InvalidValue(format!("line {line_num}: {error}"))
-                        }
-                        _ => err,
+                    ) else {
+                        return Err(err);
                     };
-                    defer_param_expression_or_error(
+                    provisional_error = defer_param_expression_or_error(
                         deferred_params,
                         params,
                         retain_global_expression,
                         name,
                         expr,
-                        err,
-                    )?;
+                        error,
+                    )
+                    .map_err(|_| err)?;
                 }
             }
         }
@@ -6074,7 +6084,7 @@ fn parse_param_assignment_value(
             params.set(&name, value);
         }
     }
-    Ok(())
+    Ok(provisional_error)
 }
 
 fn eval_and_bind_param_expression(
@@ -6154,21 +6164,24 @@ fn defer_param_expression_or_error(
     retain_global_expression: bool,
     name: String,
     expr: String,
-    err: ParseError,
-) -> Result<(), ParseError> {
-    if parameter_error_can_defer(&err) {
-        if retain_global_expression {
-            params.define_global_expression(&name, &expr, None);
-        } else {
-            params.define_parameter_expression(&name, &expr, None);
-        }
-        if let Some(deferred_params) = deferred_params {
-            upsert_param_expression(deferred_params, name, expr);
-            return Ok(());
-        }
-        return Ok(());
+    err: crate::netlist::expr::ExprError,
+) -> Result<Option<crate::netlist::expr::ExprError>, crate::netlist::expr::ExprError> {
+    use crate::netlist::expr::ExprError;
+    let provisional_error = match err {
+        ExprError::UndefinedParam(_) => None,
+        // These evaluations can be invalid only at the provisional TEMP/TNOM.
+        // Retain the expression without a numeric placeholder, and retain the
+        // failure even if a later assignment replaces the expression.
+        ExprError::DivisionByZero | ExprError::InvalidArgument(_) => Some(err),
+        error => return Err(error),
+    };
+    if retain_global_expression {
+        params.define_global_expression(&name, &expr, None);
+    } else {
+        params.define_parameter_expression(&name, &expr, None);
     }
-    Err(err)
+    upsert_deferred_param_expression(deferred_params, &name, &expr);
+    Ok(provisional_error)
 }
 
 fn retain_runtime_param_expression(
