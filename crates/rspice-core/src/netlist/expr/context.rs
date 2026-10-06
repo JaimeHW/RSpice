@@ -1268,6 +1268,7 @@ impl ParamContext {
 fn builtin_numeric_param(name: &str, temp_c: Value) -> Option<Value> {
     match name {
         "TEMP" | "TEMPER" => Some(temp_c),
+        "TNOM" => Some(DEFAULT_TEMPERATURE_C),
         "VT" => Some(crate::constants::thermal_voltage(
             crate::constants::celsius_to_kelvin(temp_c),
         )),

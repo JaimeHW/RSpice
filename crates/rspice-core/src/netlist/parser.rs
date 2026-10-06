@@ -55,6 +55,12 @@ mod analysis_card_scan;
 mod chebyshev_synthesis;
 mod command_parsers;
 mod commands;
+mod temperature;
+
+use temperature::{
+    ParserTemperatures, apply_replayed_temperature, parse_with_consistent_temperatures,
+    prescan_temperature_options_with_abort, replayed_temperature,
+};
 
 pub use commands::{option_package_key_is_known, parse_save_probe};
 
@@ -568,7 +574,17 @@ pub(crate) fn parse_netlist_with_parameter_overrides_and_abort(
     abort: &dyn AbortSignal,
 ) -> Result<Netlist, ParseWithAbortError> {
     parse_with_consistent_random_seed(|seed| {
-        parse_netlist_impl(input, options, None, None, seed, overrides, abort)
+        parse_with_consistent_temperatures(|temperatures| {
+            parse_netlist_impl(
+                input,
+                options,
+                None,
+                None,
+                ParserReplay { seed, temperatures },
+                overrides,
+                abort,
+            )
+        })
     })
 }
 
@@ -580,15 +596,17 @@ pub(crate) fn parse_expanded_netlist_with_parameter_overrides_and_abort(
 ) -> Result<Netlist, ParseWithAbortError> {
     let rendered = expanded.render();
     parse_with_consistent_random_seed(|seed| {
-        parse_netlist_impl(
-            &rendered,
-            options,
-            Some(SourceEventSchedule::from_expanded(expanded)),
-            expanded.implicit_title(),
-            seed,
-            overrides,
-            abort,
-        )
+        parse_with_consistent_temperatures(|temperatures| {
+            parse_netlist_impl(
+                &rendered,
+                options,
+                Some(SourceEventSchedule::from_expanded(expanded)),
+                expanded.implicit_title(),
+                ParserReplay { seed, temperatures },
+                overrides,
+                abort,
+            )
+        })
     })
 }
 
@@ -646,15 +664,21 @@ pub(crate) fn strip_device_initial_condition_record_comment(
     )
 }
 
+#[derive(Default)]
+struct ParserReplay {
+    seed: Option<u64>,
+    temperatures: Option<ParserTemperatures>,
+}
+
 fn parse_netlist_impl(
     input: &str,
     options: NetlistParseOptions,
     mut source_schedule: Option<SourceEventSchedule>,
     implicit_title: Option<&str>,
-    seed_override: Option<u64>,
+    replay: ParserReplay,
     overrides: &[ParameterOverride],
     abort: &dyn AbortSignal,
-) -> Result<Netlist, ParseWithAbortError> {
+) -> Result<(Netlist, ParserTemperatures), ParseWithAbortError> {
     ensure_parse_not_aborted(abort)?;
     crate::resource::ResourceLimitError::ensure(
         crate::resource::ResourceKind::NetlistBytes,
@@ -683,7 +707,7 @@ fn parse_netlist_impl(
         if let Some(title) = implicit_title {
             netlist.title = title.to_owned();
         }
-        return Ok(netlist);
+        return Ok((netlist, ParserTemperatures::default()));
     }
     let body_start = usize::from(implicit_title.is_none());
     let xyce_syntax = options.expression_dialect == ExpressionDialect::Xyce;
@@ -794,7 +818,7 @@ fn parse_netlist_impl(
     // Seed the statistical expression functions before any parameter
     // evaluation so the deck behaves identically regardless of where the
     // `.options seed=` line appears.
-    let seed = match options.statistical_seed.or(seed_override) {
+    let seed = match options.statistical_seed.or(replay.seed) {
         Some(seed) => Some(seed),
         None => prescan_random_seed_with_abort(
             &lines,
@@ -808,14 +832,18 @@ fn parse_netlist_impl(
         state.params.set_random_seed(seed);
         log::info!("statistical expression functions seeded with {seed} (.options seed)");
     }
-    prescan_temperature_options_with_abort(
-        &lines,
-        body_start,
-        &mut state,
-        allow_non_semicolon_comments,
-        xyce_syntax,
-        abort,
-    )?;
+    let mut temperatures = match replay.temperatures {
+        Some(temperatures) => temperatures,
+        None => prescan_temperature_options_with_abort(
+            &lines,
+            body_start,
+            allow_non_semicolon_comments,
+            xyce_syntax,
+            abort,
+        )?,
+    };
+    temperatures.apply_override(overrides)?;
+    temperatures.install(&mut state.params);
     apply_replayed_temperature(&mut state)?;
 
     let mut line_num = body_start;
@@ -1137,6 +1165,9 @@ fn parse_netlist_impl(
         root_eof.unwrap_or_else(|| NetlistSourceLocation::in_memory(lines.len() + 1)),
         abort,
     )?;
+    if let Some(temperature) = replayed_temperature(overrides)? {
+        netlist.options.temp = Some(temperature);
+    }
     emit_pending_xyce_diode_model_parameter_warnings_with_abort(
         &mut netlist,
         pending_xyce_diode_model_warnings,
@@ -1149,7 +1180,7 @@ fn parse_netlist_impl(
     // reported once against the source that defined it.
     let shadowed = shadowed_instance_master_diagnostics(&netlist, input);
     netlist.diagnostics.extend(shadowed);
-    Ok(netlist)
+    Ok((netlist, temperatures))
 }
 
 fn prescan_spectre_statistics_with_abort(
@@ -4375,47 +4406,6 @@ fn is_dot_command_head(head: &str) -> bool {
         .is_some_and(|ch| ch.is_ascii_alphabetic())
 }
 
-/// A stepped/study temperature takes precedence over authored option cards
-/// before expressions are evaluated, and remains the solver's temperature.
-fn apply_replayed_temperature(state: &mut ParseState) -> Result<(), ParseError> {
-    let Some(temperature) = state
-        .parameter_overrides
-        .iter()
-        .rev()
-        .find(|parameter| !parameter.global && parameter.name.eq_ignore_ascii_case("TEMP"))
-        .map(|parameter| parameter.value)
-    else {
-        return Ok(());
-    };
-    let temperature = parse_celsius_option("TEMP", temperature, 0)?;
-    state.options.temp = Some(temperature);
-    state.params.set("TEMP", temperature);
-    state.params.set("TEMPER", temperature);
-    state.params.set(
-        "VT",
-        crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(temperature)),
-    );
-    Ok(())
-}
-
-fn prescan_temperature_options_with_abort(
-    lines: &[&str],
-    body_start: usize,
-    state: &mut ParseState,
-    allow_non_semicolon_comments: bool,
-    xyce_syntax: bool,
-    abort: &dyn AbortSignal,
-) -> Result<(), ParseWithAbortError> {
-    for_each_options_line_with_abort(
-        lines,
-        body_start,
-        allow_non_semicolon_comments,
-        xyce_syntax,
-        abort,
-        |line, line_num| scan_temperature_option_line(line, line_num, state),
-    )
-}
-
 /// Seed and temperature discovery consume the same complete logical cards as
 /// each other, including values split over continuation lines.
 fn for_each_options_line_with_abort(
@@ -4482,87 +4472,6 @@ fn for_each_options_line_with_abort(
     }
 
     ensure_parse_not_aborted(abort)
-}
-
-fn scan_temperature_option_line(
-    line: &str,
-    line_num: usize,
-    state: &mut ParseState,
-) -> Result<(), ParseError> {
-    let tokens = tokenize(line).map_err(|err| lex_to_parse_error(err, line_num))?;
-    let mut stream = TokenStream::new(tokens);
-    stream.advance();
-    let mut option_package: Option<String> = None;
-
-    while !stream.is_eof() {
-        skip_commas(&mut stream);
-        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-            break;
-        }
-
-        let TokenKind::Ident(key) = &stream.peek().kind else {
-            stream.advance();
-            continue;
-        };
-        let key_upper = key.to_ascii_uppercase();
-        stream.advance();
-
-        let has_equals = stream.consume(&TokenKind::Equals);
-        if !has_equals && option_package_key_is_known(&key_upper) {
-            option_package = Some(key_upper);
-            continue;
-        }
-        if option_package.as_deref() == Some("RESTART") {
-            if has_equals && matches!(key_upper.as_str(), "FILE" | "JOB") {
-                let _ = parse_restart_string_option(
-                    &mut stream,
-                    line_num,
-                    &format!("RESTART.{key_upper}"),
-                )?;
-            } else if has_equals
-                && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
-            {
-                stream.advance();
-            }
-            continue;
-        }
-        if !matches!(key_upper.as_str(), "TEMP" | "TNOM") {
-            if has_equals && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-                stream.advance();
-            }
-            continue;
-        }
-        if !matches!(option_package.as_deref(), None | Some("DEVICE")) {
-            if has_equals
-                && try_value(&mut stream, &state.params).is_none()
-                && matches!(stream.peek().kind, TokenKind::Ident(_))
-            {
-                stream.advance();
-            }
-            continue;
-        }
-
-        let value = expect_value(&mut stream, line_num, &state.params)?;
-        let parsed = parse_celsius_option(&key_upper, value, line_num)?;
-        match key_upper.as_str() {
-            "TEMP" => {
-                state.options.temp = Some(parsed);
-                state.params.set("TEMP", parsed);
-                state.params.set("TEMPER", parsed);
-                state.params.set(
-                    "VT",
-                    crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(parsed)),
-                );
-            }
-            "TNOM" => {
-                state.options.tnom = Some(parsed);
-                state.params.set("TNOM", parsed);
-            }
-            _ => {}
-        }
-    }
-
-    Ok(())
 }
 
 /// Dispatch one logical line through the conditional gate: conditional
@@ -4914,16 +4823,16 @@ mod cancellation_tests {
             NetlistParseOptions::default(),
             None,
             None,
-            None,
+            ParserReplay::default(),
             &[],
             &counter,
         )
         .unwrap();
         assert_ne!(
-            speculative.params.random().seed(),
+            speculative.0.params.random().seed(),
             super::super::expr::DEFAULT_RANDOM_SEED
         );
-        assert_eq!(speculative.options.seed, None);
+        assert_eq!(speculative.0.options.seed, None);
         // Let the full initial pass finish, then abort as replay starts.
         let abort = crate::abort_signal::CountingAbort::new(counter.count());
         let result =
@@ -5070,10 +4979,10 @@ mod logical_line_origin_tests {
     }
 
     #[test]
-    fn temperature_prescan_error_reports_options_base_line() {
+    fn temperature_option_error_reports_options_base_line() {
         let source =
             "temperature origin\n.options noop=1\n+ temp=-274\n\n* intervening comment\n.end\n";
-        let error = parse_netlist(source).expect_err("invalid TEMP must be rejected by prescan");
+        let error = parse_netlist(source).expect_err("invalid active TEMP must be rejected");
         match error {
             ParseError::Syntax { line, message } => {
                 assert_eq!(line, 2);

@@ -343,6 +343,21 @@ The unused `analysis::parametric` API has been removed. SDK callers should
 migrate to the engine planner, which validates dimensions and total run counts
 before executing the same sweep path used by the frontends.
 
+Temperature options accept expressions using parameters available at the option
+card, for example `.param ambient=85` followed by `.options temp={ambient}`.
+The parser reconciles the selected temperature with earlier eager expressions
+through bounded replay of the same immutable source and statistical seed.
+Inactive branches and text after `.END` cannot author temperature options.
+`TEMP`, `TEMPER`, and `VT` agree with the selected physical temperature;
+`TNOM` defaults to 27 C without adding a stored parameter binding. A physical
+table/study `TEMP` coordinate takes precedence over options and a single `.TEMP`
+directive. Temperature selections that keep changing on replay are rejected.
+
+Two parser limits remain: option expressions cannot yet reference parameters
+declared later, and an early expression that is invalid at the provisional
+temperature can fail before replay. The implementation plan tracks both;
+these cases are not covered by the temperature-option support above.
+
 The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and
 the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.
 Semiconductor temperature behavior belongs to each device model;

@@ -1,0 +1,247 @@
+//! Reconcile lexical temperature hints with the ordinary scoped parser.
+//!
+//! Hints avoid replay for ordinary literal options. Only the full parser can
+//! decide which source/conditional cards apply and evaluate parameter values.
+//! A replay starts from immutable input and a fresh statistical stream; it
+//! never evaluates declarations on a cloned, shared random counter.
+
+use super::*;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) struct ParserTemperatures {
+    temp: Option<Value>,
+    tnom: Option<Value>,
+}
+
+impl ParserTemperatures {
+    pub(super) fn apply_override(
+        &mut self,
+        overrides: &[ParameterOverride],
+    ) -> Result<(), ParseError> {
+        if let Some(temp) = replayed_temperature(overrides)? {
+            self.temp = Some(temp);
+        }
+        Ok(())
+    }
+
+    fn resolved(netlist: &Netlist) -> Self {
+        Self {
+            temp: netlist.options.temp,
+            tnom: netlist.options.tnom,
+        }
+    }
+
+    pub(super) fn install(self, params: &mut ParamContext) {
+        if let Some(temp) = self.temp {
+            install_temperature(params, temp);
+        }
+        if let Some(tnom) = self.tnom {
+            params.set("TNOM", tnom);
+        }
+    }
+}
+
+/// Resolve both global temperatures before publishing any eagerly parsed
+/// values. An acyclic dependence between TEMP and TNOM needs at most three
+/// passes (discovery, dependency propagation, confirmation). A changing or
+/// cyclic selection is an error, never a silently accepted provisional deck.
+pub(super) fn parse_with_consistent_temperatures(
+    mut parse: impl FnMut(
+        Option<ParserTemperatures>,
+    ) -> Result<(Netlist, ParserTemperatures), ParseWithAbortError>,
+) -> Result<Netlist, ParseWithAbortError> {
+    let mut selected = None;
+    for _ in 0..3 {
+        let (netlist, used) = parse(selected)?;
+        let resolved = ParserTemperatures::resolved(&netlist);
+        if used == resolved {
+            return Ok(netlist);
+        }
+        selected = Some(resolved);
+    }
+    Err(ParseError::InvalidValue(
+        "TEMP/TNOM selection changes when temperature-dependent expressions are reevaluated; remove circular temperature options or temperature-dependent option selection".into(),
+    ).into())
+}
+
+pub(super) fn replayed_temperature(
+    overrides: &[ParameterOverride],
+) -> Result<Option<Value>, ParseError> {
+    overrides
+        .iter()
+        .rev()
+        .find(|parameter| !parameter.global && parameter.name.eq_ignore_ascii_case("TEMP"))
+        .map(|parameter| parse_celsius_option("TEMP", parameter.value, 0))
+        .transpose()
+}
+
+/// Physical study coordinates take precedence over authored options and .TEMP.
+pub(super) fn apply_replayed_temperature(state: &mut ParseState) -> Result<(), ParseError> {
+    if let Some(temperature) = replayed_temperature(&state.parameter_overrides)? {
+        state.options.temp = Some(temperature);
+        install_temperature(&mut state.params, temperature);
+    }
+    Ok(())
+}
+
+fn install_temperature(params: &mut ParamContext, temperature: Value) {
+    params.set("TEMP", temperature);
+    params.set("TEMPER", temperature);
+    params.set(
+        "VT",
+        crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(temperature)),
+    );
+}
+
+/// A lexical scan supplies hints only. It must not evaluate an expression,
+/// consume a random draw, report a suppressed card's error, or author options.
+pub(super) fn prescan_temperature_options_with_abort(
+    lines: &[&str],
+    body_start: usize,
+    allow_non_semicolon_comments: bool,
+    xyce_syntax: bool,
+    abort: &dyn AbortSignal,
+) -> Result<ParserTemperatures, ParseWithAbortError> {
+    let mut hints = ParserTemperatures::default();
+    for_each_options_line_with_abort(
+        lines,
+        body_start,
+        allow_non_semicolon_comments,
+        xyce_syntax,
+        abort,
+        |line, line_num| {
+            scan_temperature_option_line(line, line_num, &mut hints);
+            Ok(())
+        },
+    )?;
+    Ok(hints)
+}
+
+fn scan_temperature_option_line(line: &str, line_num: usize, hints: &mut ParserTemperatures) {
+    let Ok(tokens) = tokenize(line) else {
+        return;
+    };
+    let mut stream = TokenStream::new(tokens);
+    stream.advance();
+    let mut option_package: Option<String> = None;
+    while !stream.is_eof() {
+        skip_commas(&mut stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+        let TokenKind::Ident(key) = &stream.peek().kind else {
+            stream.advance();
+            continue;
+        };
+        let key = key.to_ascii_uppercase();
+        stream.advance();
+        let has_equals = stream.consume(&TokenKind::Equals);
+        if !has_equals && option_package_key_is_known(&key) {
+            option_package = Some(key);
+            continue;
+        }
+        let literal = match (&stream.peek().kind, &stream.peek_n(1).kind) {
+            (TokenKind::Number(value), _) => Some((*value, 1)),
+            (TokenKind::Plus, TokenKind::Number(value)) => Some((*value, 2)),
+            (TokenKind::Minus, TokenKind::Number(value)) => Some((-value, 2)),
+            _ => None,
+        };
+        if matches!(key.as_str(), "TEMP" | "TNOM")
+            && matches!(option_package.as_deref(), None | Some("DEVICE"))
+            && let Some((value, width)) = literal
+            && let Ok(value) = parse_celsius_option(&key, value, line_num)
+        {
+            if key == "TEMP" {
+                hints.temp = Some(value);
+            } else {
+                hints.tnom = Some(value);
+            }
+            for _ in 0..width {
+                stream.advance();
+            }
+            continue;
+        }
+        if has_equals && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            stream.advance();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn literal_fast_path_and_parameter_dependency_pass_counts_are_bounded() {
+        for (body, expected) in [
+            (".options temp=85 tnom=35\n", 1),
+            (".param ambient=85\n.options temp={ambient}\n", 2),
+            (
+                ".param nominal=55\n.options temp={TNOM+10} tnom={nominal}\n",
+                3,
+            ),
+        ] {
+            let source = format!("Temperature pass count\n{body}.end\n");
+            let mut passes = 0;
+            parse_with_consistent_temperatures(|temperatures| {
+                passes += 1;
+                parse_netlist_impl(
+                    &source,
+                    NetlistParseOptions::default(),
+                    None,
+                    None,
+                    ParserReplay {
+                        seed: None,
+                        temperatures,
+                    },
+                    &[],
+                    &NoAbort,
+                )
+            })
+            .unwrap();
+            assert_eq!(passes, expected, "{body}");
+        }
+    }
+
+    #[test]
+    fn temperature_reconciliation_replay_remains_cancellable() {
+        let source = "Temperature replay\n.param ambient=85\n.options temp={ambient}\n.end\n";
+        let counter = crate::abort_signal::CountingAbort::new(usize::MAX);
+        let (candidate, used) = parse_netlist_impl(
+            source,
+            NetlistParseOptions::default(),
+            None,
+            None,
+            ParserReplay::default(),
+            &[],
+            &counter,
+        )
+        .unwrap();
+        assert_ne!(used, ParserTemperatures::resolved(&candidate));
+        let abort = crate::abort_signal::CountingAbort::new(counter.count());
+        assert!(matches!(
+            parse_netlist_with_options_and_abort(source, NetlistParseOptions::default(), &abort),
+            Err(ParseWithAbortError::Aborted)
+        ));
+        assert_eq!(abort.polls_after_abort(), 0);
+    }
+
+    #[test]
+    fn absent_nominal_option_preserves_a_root_parameter_override() {
+        let source = "Nominal parameter override\n.param nominal_read={TNOM}\n.end\n";
+        let netlist = parse_netlist_with_parameter_overrides_and_abort(
+            source,
+            NetlistParseOptions::default(),
+            &[ParameterOverride {
+                name: "TNOM".into(),
+                value: 55.0,
+                global: false,
+                direction: false,
+            }],
+            &NoAbort,
+        )
+        .unwrap();
+        assert_eq!(netlist.params.get("nominal_read"), Some(55.0));
+        assert_eq!(netlist.options.tnom, None);
+    }
+}
