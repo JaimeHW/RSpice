@@ -2189,11 +2189,19 @@ pub(super) fn compile_and_cache_prepared_veriloga(
             VERILOGA_CACHE_TELEMETRY
                 .compilations_failed
                 .fetch_add(1, Relaxed);
-            return Err(cache_refusal(
-                path,
+            let diagnostics = prepared.diagnostics_for_error(&error);
+            let detail = if diagnostics.is_empty() {
+                format!("compilation failed: {error}")
+            } else {
+                "compilation failed".into()
+            };
+            return Err(crate::ElaborationError::new(
                 crate::ElaborationErrorKind::CompileRefusal,
-                format!("compilation failed: {error}"),
-            ));
+                detail,
+            )
+            .in_source(path)
+            .with_compiler_diagnostics(diagnostics)
+            .into());
         }
     };
 

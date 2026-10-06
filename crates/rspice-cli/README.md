@@ -569,6 +569,9 @@ UTF-8 byte ranges when the compiler knows them. `run` keeps these findings in
 JSON errors and run summaries; `check --json` includes them in each error's
 `diagnostic`. Preprocessing failures retain their file and line without inventing
 unknown columns or byte ranges.
+These locations also survive runtime code generation; expression-lowering
+failures identify the innermost offending expression in the prepared source
+snapshot, including when it came from an included file or macro invocation.
 
 Control scripts are checked without executing them. Every authored host command
 must have a handler, and literal OP/AC/TRAN requests are validated in all branches.

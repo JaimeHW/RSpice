@@ -515,7 +515,7 @@ impl ElaborationError {
         &self.compiler_diagnostics
     }
 
-    #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+    #[cfg(feature = "veriloga")]
     pub(crate) fn with_compiler_diagnostics(
         mut self,
         diagnostics: Vec<rspice_veriloga::SourceCompileDiagnostic>,

@@ -241,6 +241,18 @@ fn fatal_compiler_findings_keep_original_include_locations_in_run_and_check() {
             "R",
         ),
         ("`define BAD @\nanalog I(p,n) <+ `BAD;", "Parser", 5, "`BAD"),
+        (
+            "analog I(p,n) <+ V(p,n) + missing;",
+            "CodeGeneration",
+            4,
+            "missing",
+        ),
+        (
+            "`define BAD missing\nanalog I(p,n) <+ `BAD;",
+            "CodeGeneration",
+            5,
+            "`BAD",
+        ),
     ] {
         let (root, deck) = fixture("fatal_compiler_locations");
         let child = root.join("child.va");
@@ -248,7 +260,7 @@ fn fatal_compiler_findings_keep_original_include_locations_in_run_and_check() {
             "// original child\nmodule chatty(p,n);\ninout p,n; electrical p,n;\n{body}\nendmodule\n"
         );
         std::fs::write(&child, &source).unwrap();
-        for command in ["run", "check"] {
+        for command in ["run", "check", "compile-va"] {
             for format in ["text", "json"] {
                 let mut process = Command::new(env!("CARGO_BIN_EXE_rspice"));
                 process.args([
@@ -267,11 +279,19 @@ fn fatal_compiler_findings_keep_original_include_locations_in_run_and_check() {
                     process.arg("--summary").arg(&summary);
                 }
                 let output = process
-                    .arg(&deck)
+                    .arg(if command == "compile-va" {
+                        root.join("model.va")
+                    } else {
+                        deck.clone()
+                    })
                     .env("RSPICE_VERILOGA_CACHE_DIR", root.join("cache"))
                     .output()
                     .unwrap();
-                assert_eq!(output.status.code(), Some(65), "{output:?}");
+                assert_eq!(
+                    output.status.code(),
+                    Some(if command == "compile-va" { 1 } else { 65 }),
+                    "{output:?}"
+                );
                 let stderr = String::from_utf8(output.stderr).unwrap();
                 let stdout = String::from_utf8(output.stdout).unwrap();
                 assert!(!stderr.contains("at offset"), "{stderr}");
@@ -286,8 +306,10 @@ fn fatal_compiler_findings_keep_original_include_locations_in_run_and_check() {
                 let fatal: serde_json::Value = serde_json::from_str(&stderr).unwrap();
                 let report: serde_json::Value = if command == "check" {
                     serde_json::from_str(&stdout).unwrap()
-                } else {
+                } else if command == "run" {
                     common::read_json(&summary)
+                } else {
+                    serde_json::Value::Null
                 };
                 let diagnostic = if command == "check" {
                     assert_eq!(report["valid"], false);
@@ -296,10 +318,12 @@ fn fatal_compiler_findings_keep_original_include_locations_in_run_and_check() {
                 } else {
                     let diagnostics = fatal["error"]["diagnostics"].as_array().unwrap();
                     assert_eq!(diagnostics.len(), 1, "{fatal}");
-                    assert_eq!(
-                        report["runs"][0]["error_details"]["diagnostics"],
-                        fatal["error"]["diagnostics"]
-                    );
+                    if command == "run" {
+                        assert_eq!(
+                            report["runs"][0]["error_details"]["diagnostics"],
+                            fatal["error"]["diagnostics"]
+                        );
+                    }
                     &diagnostics[0]
                 };
                 assert_eq!(diagnostic["phase"], phase);
