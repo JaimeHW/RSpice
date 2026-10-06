@@ -9,7 +9,7 @@ use crate::cli::{CliError, Config, OutputFormat, map_atomic_output_error};
 use crate::commands::export_table::ColumnData;
 use crate::commands::publish;
 use crate::commands::waveform_io::{
-    ImportedResult, detect_format, load_result_selected, supports_sections,
+    ImportedResult, ResultSnapshot, detect_format, load_result_selected, supports_sections,
 };
 
 mod fft;
@@ -183,18 +183,21 @@ pub fn execute(
             source: std::io::Error::new(std::io::ErrorKind::NotFound, "Result file not found"),
         });
     }
+    // Promotion and validation must use the same bytes even if a simulator
+    // replaces or edits the result while comparison is running.
+    let snapshot = args
+        .bless
+        .then(|| ResultSnapshot::read(&args.result, config.resources.limits()))
+        .transpose()?;
     if !args.golden.exists() {
         if args.bless {
             // Missing-golden bootstrap is still a promotion of a result
             // artifact. Validate the result before copying so malformed CSV,
             // JSON, RAW, etc. cannot become the accepted baseline.
-            let data = load_comparison_data(
-                &args.result,
-                config.resources.limits(),
-                args.section.as_deref(),
-            )?;
+            let snapshot = snapshot.as_ref().expect("bless captured a snapshot");
+            let data = comparison_data(&args.result, snapshot.load(args.section.as_deref())?)?;
             let mut comparison = validate_bless_candidate(&data, &args)?;
-            bless_golden(&args.result, &args.golden, quiet, "no golden file yet")?;
+            bless_golden(snapshot, &args.golden, quiet, "no golden file yet")?;
             if args.format == OutputFormat::Json {
                 comparison.passed = false;
                 comparison
@@ -223,11 +226,15 @@ pub fn execute(
     }
 
     // Load and parse files
-    let result_data = load_comparison_data(
-        &args.result,
-        config.resources.limits(),
-        args.section.as_deref(),
-    )?;
+    let result_data = if let Some(snapshot) = &snapshot {
+        comparison_data(&args.result, snapshot.load(args.section.as_deref())?)?
+    } else {
+        load_comparison_data(
+            &args.result,
+            config.resources.limits(),
+            args.section.as_deref(),
+        )?
+    };
     let golden_data = load_comparison_data(
         &args.golden,
         config.resources.limits(),
@@ -246,13 +253,23 @@ pub fn execute(
     // and only then emit a machine-readable accepted/blessed status.
     if args.format == OutputFormat::Json {
         if blessed {
-            bless_golden(&args.result, &args.golden, quiet, "differences accepted")?;
+            bless_golden(
+                snapshot.as_ref().expect("bless captured a snapshot"),
+                &args.golden,
+                quiet,
+                "differences accepted",
+            )?;
         }
         output_json(&cmp_result, blessed, args.section.as_deref())?;
     } else {
         output_text(&cmp_result, quiet)?;
         if blessed {
-            bless_golden(&args.result, &args.golden, quiet, "differences accepted")?;
+            bless_golden(
+                snapshot.as_ref().expect("bless captured a snapshot"),
+                &args.golden,
+                quiet,
+                "differences accepted",
+            )?;
         }
     }
 
@@ -289,12 +306,12 @@ fn validate_compare_tolerance(name: &str, value: f64) -> Result<(), CliError> {
 
 /// Promote the result file to the new golden reference.
 fn bless_golden(
-    result: &std::path::Path,
+    result: &ResultSnapshot,
     golden: &std::path::Path,
     quiet: bool,
     why: &str,
 ) -> Result<(), CliError> {
-    if detect_format(result) != detect_format(golden) {
+    if detect_format(result.path()) != detect_format(golden) {
         return Err(CliError::InvalidArgument {
             message: "--bless requires the result and golden to use the same file format"
                 .to_string(),
@@ -303,13 +320,9 @@ fn bless_golden(
             ),
         });
     }
-    let mut source = std::fs::File::open(result).map_err(|source| CliError::InputReadError {
-        path: result.to_path_buf(),
-        source,
-    })?;
     publish::artifact(golden, |writer| {
-        std::io::copy(&mut source, writer)
-            .map(|_| ())
+        writer
+            .write_all(result.bytes())
             .map_err(|source| CliError::output_error(golden, source))
     })
     .map_err(|error| map_atomic_output_error(golden, error))?;
@@ -474,7 +487,17 @@ fn load_comparison_data(
     let format = detect_format(path);
     // A selected container may be compared against an already extracted table.
     let section = section.filter(|_| supports_sections(format));
-    let table = match load_result_selected(path, format, resource_limits, section)? {
+    comparison_data(
+        path,
+        load_result_selected(path, format, resource_limits, section)?,
+    )
+}
+
+fn comparison_data(
+    path: &std::path::Path,
+    result: ImportedResult,
+) -> Result<ComparisonData, CliError> {
+    let table = match result {
         ImportedResult::Table(table) => table,
         ImportedResult::Fft(fft) => return Ok(ComparisonData::Fft(Box::new(fft))),
     };
@@ -929,6 +952,34 @@ fn output_text(result: &CompareResult, quiet: bool) -> Result<(), CliError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blessing_publishes_validated_bytes_after_the_source_changes_or_disappears() {
+        struct TestDirectory(PathBuf);
+        impl Drop for TestDirectory {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let dir = TestDirectory(
+            std::env::temp_dir().join(format!("rspice_bless_snapshot_{}", std::process::id())),
+        );
+        std::fs::create_dir(&dir.0).unwrap();
+        let source = dir.0.join("result.csv");
+        let golden = dir.0.join("golden.csv");
+        let original = b"time,V(out)\r\n0,1.000\r\n1,2.000\r\n";
+        std::fs::write(&source, original).unwrap();
+        let snapshot = ResultSnapshot::read(&source, Default::default()).unwrap();
+        let data = comparison_data(&source, snapshot.load(None).unwrap()).unwrap();
+        validate_bless_candidate(&data, &CompareArgs::default()).unwrap();
+
+        std::fs::write(&source, b"invalid replacement").unwrap();
+        bless_golden(&snapshot, &golden, true, "source changed").unwrap();
+        assert_eq!(std::fs::read(&golden).unwrap(), original);
+        std::fs::remove_file(&source).unwrap();
+        bless_golden(&snapshot, &golden, true, "source removed").unwrap();
+        assert_eq!(std::fs::read(&golden).unwrap(), original);
+    }
 
     #[test]
     fn comparison_retains_only_the_report_preview_for_large_failures() {

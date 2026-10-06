@@ -593,7 +593,14 @@ pub(crate) fn load_vcd_table(
     path: &Path,
     resource_limits: ResourceLimits,
 ) -> Result<ExportTable, CliError> {
-    let mut document = parse_vcd(path, resource_limits)?;
+    vcd_table(path, parse_vcd(path, resource_limits)?, resource_limits)
+}
+
+pub(crate) fn vcd_table(
+    path: &Path,
+    mut document: VcdDocument,
+    resource_limits: ResourceLimits,
+) -> Result<ExportTable, CliError> {
     expand_vector_variables(path, &mut document)?;
     let names = column_names(&document);
 

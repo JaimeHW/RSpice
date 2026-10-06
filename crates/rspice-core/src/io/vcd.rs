@@ -454,7 +454,7 @@ pub fn parse_vcd_file_with_limits(
         ResourceKind::ExternalDataBytes,
         resource_limits.max_external_data_bytes,
     )?;
-    parse_vcd_bytes(&bytes, resource_limits)
+    parse_vcd_bytes_with_limits(&bytes, resource_limits)
 }
 
 /// Parse VCD data from a reader.
@@ -476,10 +476,19 @@ pub fn parse_vcd_reader_with_limits<R: Read>(
         ResourceKind::ExternalDataBytes,
         resource_limits.max_external_data_bytes,
     )?;
-    parse_vcd_bytes(&bytes, resource_limits)
+    parse_vcd_bytes_with_limits(&bytes, resource_limits)
 }
 
-fn parse_vcd_bytes(bytes: &[u8], resource_limits: ResourceLimits) -> Result<VcdDocument, VcdError> {
+/// Parse a borrowed VCD byte snapshot with explicit resource limits.
+pub fn parse_vcd_bytes_with_limits(
+    bytes: &[u8],
+    resource_limits: ResourceLimits,
+) -> Result<VcdDocument, VcdError> {
+    ResourceLimitError::ensure(
+        ResourceKind::ExternalDataBytes,
+        bytes.len(),
+        resource_limits.max_external_data_bytes,
+    )?;
     parse_vcd_text(std::str::from_utf8(bytes)?, resource_limits)
 }
 
@@ -1706,6 +1715,30 @@ mod tests {
             matches!(error, VcdError::ResourceLimit(limit) if limit.requested == 4096),
             "{error:?}"
         );
+    }
+
+    #[test]
+    fn borrowed_vcd_snapshot_enforces_byte_limit_before_decoding() {
+        let bytes = UI_FIXTURE.as_bytes();
+        let mut limits = ResourceLimits {
+            max_external_data_bytes: bytes.len(),
+            ..Default::default()
+        };
+        assert_eq!(
+            parse_vcd_bytes_with_limits(bytes, limits).unwrap(),
+            parse(UI_FIXTURE).unwrap()
+        );
+        limits.max_external_data_bytes -= 1;
+        assert!(matches!(
+            parse_vcd_bytes_with_limits(bytes, limits),
+            Err(VcdError::ResourceLimit(error))
+                if error.resource == ResourceKind::ExternalDataBytes && error.requested == bytes.len()
+        ));
+        limits.max_external_data_bytes = 0;
+        assert!(matches!(
+            parse_vcd_bytes_with_limits(&[0xff], limits),
+            Err(VcdError::ResourceLimit(_))
+        ));
     }
 
     #[test]

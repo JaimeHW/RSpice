@@ -198,7 +198,7 @@ pub fn parse_raw_plots_file_with_limits(
         ResourceKind::ExternalDataBytes,
         resource_limits.max_external_data_bytes,
     )?;
-    parse_raw_plot_bytes(&bytes, resource_limits)
+    parse_raw_plots_bytes_with_limits(&bytes, resource_limits)
 }
 
 /// Parse every plot in `.raw` data from a reader with explicit resource limits.
@@ -213,7 +213,7 @@ pub fn parse_raw_plots_reader_with_limits<R: Read>(
         ResourceKind::ExternalDataBytes,
         resource_limits.max_external_data_bytes,
     )?;
-    parse_raw_plot_bytes(&bytes, resource_limits)
+    parse_raw_plots_bytes_with_limits(&bytes, resource_limits)
 }
 
 fn parse_raw_bytes(
@@ -233,10 +233,16 @@ fn parse_raw_bytes(
     Ok(plot)
 }
 
-fn parse_raw_plot_bytes(
+/// Parse every plot from a borrowed byte snapshot with explicit resource limits.
+pub fn parse_raw_plots_bytes_with_limits(
     bytes: &[u8],
     resource_limits: ResourceLimits,
 ) -> Result<RawFile, RawParseError> {
+    ResourceLimitError::ensure(
+        ResourceKind::ExternalDataBytes,
+        bytes.len(),
+        resource_limits.max_external_data_bytes,
+    )?;
     let mut plots = Vec::new();
     let mut offset = 0usize;
     let mut external_values = 0usize;
@@ -1222,6 +1228,28 @@ mod tests {
                 requested,
                 limit,
             }) if requested == source.len() && limit == source.len() - 1
+        ));
+    }
+
+    #[test]
+    fn borrowed_raw_snapshot_enforces_byte_limit_before_decoding() {
+        let bytes = LEGACY_SINGLE_PLOT_ASCII.as_bytes();
+        let mut limits = ResourceLimits {
+            max_external_data_bytes: bytes.len(),
+            ..Default::default()
+        };
+        let parsed = parse_raw_plots_bytes_with_limits(bytes, limits).unwrap();
+        assert_eq!(parsed.plots.len(), 1);
+        limits.max_external_data_bytes -= 1;
+        assert!(matches!(
+            parse_raw_plots_bytes_with_limits(bytes, limits),
+            Err(RawParseError::ResourceLimit(error))
+                if error.resource == ResourceKind::ExternalDataBytes && error.requested == bytes.len()
+        ));
+        limits.max_external_data_bytes = 0;
+        assert!(matches!(
+            parse_raw_plots_bytes_with_limits(&[0xff], limits),
+            Err(RawParseError::ResourceLimit(_))
         ));
     }
 

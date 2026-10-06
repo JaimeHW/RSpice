@@ -776,6 +776,19 @@ pub fn read_hdf5_sections_with_limits(
         limits.max_external_data_bytes,
     )?;
     let file = Hdf5File::open(path)?;
+    read_hdf5_sections_from_file_with_limits(&file, limits)
+}
+
+/// Decode an opened or owned-byte HDF5 file without copying its backing data.
+pub(crate) fn read_hdf5_sections_from_file_with_limits(
+    file: &Hdf5File,
+    limits: rspice_core::ResourceLimits,
+) -> Result<Hdf5Readback> {
+    admission::admit(
+        rspice_core::ResourceKind::ExternalDataBytes,
+        file.as_bytes().len(),
+        limits.max_external_data_bytes,
+    )?;
     let root = file.root();
     let root_attrs = root.attrs()?;
     let schema_version = read_required_string_attr(&root_attrs, "schema_version")?;
@@ -784,7 +797,7 @@ pub fn read_hdf5_sections_with_limits(
             "unsupported HDF5 schema version '{schema_version}', expected '{SCHEMA_VERSION}'"
         )));
     }
-    admission::validate(&file, limits)?;
+    admission::validate(file, limits)?;
 
     let title = read_string_attr(&root_attrs, "title")?.unwrap_or_default();
     let identity = read_string_attr(&root_attrs, "analysis_id")?.map(|analysis_id| {
@@ -810,7 +823,7 @@ pub fn read_hdf5_sections_with_limits(
     let mut sections = Vec::new();
     for group_name in &root_groups {
         if group_name == "measurements" {
-            data.measurements = read_measurements(&file)?;
+            data.measurements = read_measurements(file)?;
             continue;
         }
         let family = read_required_string_attr(&file.group(group_name)?.attrs()?, "section_type")
@@ -822,14 +835,14 @@ pub fn read_hdf5_sections_with_limits(
         let mut section = Hdf5SimulationData::default();
         match family.as_str() {
             "operating_point" => {
-                section.operating_point = Some(read_waveform_section(&file, group_name)?);
+                section.operating_point = Some(read_waveform_section(file, group_name)?);
             }
-            "transient" => section.transient = Some(read_waveform_section(&file, group_name)?),
-            "dc_sweep" => section.dc_sweep = Some(read_waveform_section(&file, group_name)?),
-            "noise" => section.noise = Some(read_waveform_section(&file, group_name)?),
-            "ac" => section.ac = Some(read_ac_section(&file, group_name)?),
-            "distortion" => section.distortion = Some(read_distortion_section(&file, group_name)?),
-            "fft" => section.fft = Some(read_fft_section(&file, group_name)?),
+            "transient" => section.transient = Some(read_waveform_section(file, group_name)?),
+            "dc_sweep" => section.dc_sweep = Some(read_waveform_section(file, group_name)?),
+            "noise" => section.noise = Some(read_waveform_section(file, group_name)?),
+            "ac" => section.ac = Some(read_ac_section(file, group_name)?),
+            "distortion" => section.distortion = Some(read_distortion_section(file, group_name)?),
+            "fft" => section.fft = Some(read_fft_section(file, group_name)?),
             "table" => {
                 section.table = Some(Hdf5TableSection {
                     coordinate_unit: read_string_attr(
@@ -844,7 +857,7 @@ pub fn read_hdf5_sections_with_limits(
                         &file.group(group_name)?.attrs()?,
                         "coordinate_type",
                     )?,
-                    waveform: read_waveform_section(&file, group_name)?,
+                    waveform: read_waveform_section(file, group_name)?,
                 })
             }
             other => {

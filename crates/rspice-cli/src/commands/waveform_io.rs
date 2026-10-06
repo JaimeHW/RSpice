@@ -14,7 +14,9 @@ use crate::hdf5::read_hdf5_sections_with_limits;
 use std::io::Read;
 use std::path::Path;
 
+mod snapshot;
 mod touchstone;
+pub(crate) use snapshot::ResultSnapshot;
 
 pub(crate) enum ImportedResult {
     Table(ExportTable),
@@ -117,6 +119,14 @@ pub(crate) fn load_result_selected(
         }
         InputFormat::Touchstone => touchstone::load(path, resource_limits, section).map(Into::into),
     }?;
+    validate_result(path, result, resource_limits)
+}
+
+fn validate_result(
+    path: &Path,
+    result: ImportedResult,
+    resource_limits: rspice_core::ResourceLimits,
+) -> Result<ImportedResult, CliError> {
     match result {
         ImportedResult::Table(table) => {
             validate_table_shape(path, table, resource_limits).map(Into::into)
@@ -161,6 +171,15 @@ pub(crate) fn enforce_resource_limit(
 }
 
 pub(crate) fn read_utf8_input_limited(path: &Path, limit: usize) -> Result<String, CliError> {
+    String::from_utf8(read_input_bytes_limited(path, limit)?).map_err(|error| {
+        CliError::InputReadError {
+            path: path.to_path_buf(),
+            source: std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()),
+        }
+    })
+}
+
+fn read_input_bytes_limited(path: &Path, limit: usize) -> Result<Vec<u8>, CliError> {
     let file = std::fs::File::open(path).map_err(|source| CliError::InputReadError {
         path: path.to_path_buf(),
         source,
@@ -203,10 +222,7 @@ pub(crate) fn read_utf8_input_limited(path: &Path, limit: usize) -> Result<Strin
         bytes.len(),
         limit,
     )?;
-    String::from_utf8(bytes).map_err(|error| CliError::InputReadError {
-        path: path.to_path_buf(),
-        source: std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()),
-    })
+    Ok(bytes)
 }
 
 /// The fewest coordinate samples a result may have and still be a result.
@@ -368,6 +384,14 @@ fn load_rawfile(
             error => conversion_error(path, error),
         },
     )?;
+    raw_result(path, file, section)
+}
+
+fn raw_result(
+    path: &Path,
+    file: rspice_core::io::ltspice_raw::RawFile,
+    section: Option<&str>,
+) -> Result<ImportedResult, CliError> {
     rspice_core::execution::decode_event_plots(&file)
         .map_err(|error| conversion_error(path, error))?;
     // Validate every typed plot before choosing one, including unselected FFTs.
@@ -567,7 +591,15 @@ fn load_delimited(
     resource_limits: rspice_core::ResourceLimits,
 ) -> Result<ImportedResult, CliError> {
     let content = read_utf8_input_limited(path, resource_limits.max_external_data_bytes)?;
+    parse_delimited(path, &content, separator, resource_limits)
+}
 
+fn parse_delimited(
+    path: &Path,
+    content: &str,
+    separator: char,
+    resource_limits: rspice_core::ResourceLimits,
+) -> Result<ImportedResult, CliError> {
     let mut lines = content.lines().filter(|line| !line.trim().is_empty());
     let header = parse_delimited_record(
         lines
@@ -582,7 +614,7 @@ fn load_delimited(
     if crate::commands::run::FftBundle::is_delimited(&header) {
         return crate::commands::run::FftBundle::from_delimited(
             path,
-            &content,
+            content,
             separator,
             resource_limits,
         )
@@ -595,7 +627,7 @@ fn load_delimited(
         resource_limits.max_external_data_values,
     )?;
 
-    if let Some(table) = load_operating_point_report(path, &content, separator, &header)? {
+    if let Some(table) = load_operating_point_report(path, content, separator, &header)? {
         return Ok(table.into());
     }
 
@@ -752,8 +784,16 @@ fn load_json(
     resource_limits: rspice_core::ResourceLimits,
 ) -> Result<ImportedResult, CliError> {
     let content = read_utf8_input_limited(path, resource_limits.max_external_data_bytes)?;
+    parse_json(path, &content, resource_limits)
+}
+
+fn parse_json(
+    path: &Path,
+    content: &str,
+    resource_limits: rspice_core::ResourceLimits,
+) -> Result<ImportedResult, CliError> {
     let value: serde_json::Value =
-        serde_json::from_str(&content).map_err(|e| conversion_error(path, e))?;
+        serde_json::from_str(content).map_err(|e| conversion_error(path, e))?;
     let read_unit = |object: &serde_json::Value| -> Result<Option<String>, CliError> {
         match object.get("unit") {
             None | Some(serde_json::Value::Null) => Ok(None),
@@ -882,7 +922,7 @@ fn load_json(
     {
         let document =
             rspice_core::execution::AnalysisResultDocument::from_json_with_limits_and_abort(
-                &content,
+                content,
                 &resource_limits,
                 &crate::abort::ProcessAbort,
                 resource_limits.max_external_data_bytes as u64,
@@ -1136,7 +1176,7 @@ fn load_hdf5(
         metadata_bytes,
         resource_limits.max_external_data_bytes,
     )?;
-    let crate::hdf5::Hdf5Readback { metadata, sections } =
+    let readback =
         read_hdf5_sections_with_limits(path, resource_limits).map_err(|error| match error {
             crate::hdf5::Hdf5Error::ResourceLimit(source) => CliError::ResourceLimit {
                 path: path.to_path_buf(),
@@ -1145,6 +1185,15 @@ fn load_hdf5(
             error => conversion_error(path, error),
         })?;
 
+    hdf5_result(path, readback, section)
+}
+
+fn hdf5_result(
+    path: &Path,
+    readback: crate::hdf5::Hdf5Readback,
+    section: Option<&str>,
+) -> Result<ImportedResult, CliError> {
+    let crate::hdf5::Hdf5Readback { metadata, sections } = readback;
     let names: Vec<_> = sections.iter().map(|(name, _)| name.as_str()).collect();
     let index = select_section(path, &names, section)?;
     let (_, mut data) = sections

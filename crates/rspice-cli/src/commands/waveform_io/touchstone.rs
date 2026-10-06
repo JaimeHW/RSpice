@@ -7,9 +7,18 @@ pub(super) fn load(
     section: Option<&str>,
 ) -> Result<ExportTable, CliError> {
     let text = read_utf8_input_limited(path, limits.max_external_data_bytes)?;
+    parse(path, text.as_bytes(), limits, section)
+}
+
+pub(super) fn parse(
+    path: &Path,
+    bytes: &[u8],
+    limits: rspice_core::ResourceLimits,
+    section: Option<&str>,
+) -> Result<ExportTable, CliError> {
     let dataset = rspice_formats::read_touchstone_bytes_with_limit(
         &path.to_string_lossy(),
-        text.as_bytes(),
+        bytes,
         limits.max_external_data_values,
     )
     .map_err(|error| match error {

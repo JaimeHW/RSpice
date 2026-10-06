@@ -36,8 +36,9 @@ pub use hdf5::{
 };
 pub use ltspice_raw::{
     RawFile, RawFileHeader, RawParseError, RawWaveform, RawWaveformData, parse_raw_file,
-    parse_raw_file_with_limits, parse_raw_plots_file_with_limits,
-    parse_raw_plots_reader_with_limits, parse_raw_reader, parse_raw_reader_with_limits,
+    parse_raw_file_with_limits, parse_raw_plots_bytes_with_limits,
+    parse_raw_plots_file_with_limits, parse_raw_plots_reader_with_limits, parse_raw_reader,
+    parse_raw_reader_with_limits,
 };
 pub use raw_export::{
     RawBusTimeline, RawEventKind, RawEventTimeline, RawExporter, RawFormat, RawVariable,
@@ -45,8 +46,9 @@ pub use raw_export::{
 };
 pub use vcd::{
     VCD_WRITER_VERSION, VcdBit, VcdChange, VcdDocument, VcdError, VcdMagnitude, VcdSignal,
-    VcdSignalKind, VcdTimeUnit, VcdTimescale, VcdValue, VcdVariable, parse_vcd_file,
-    parse_vcd_file_with_limits, parse_vcd_reader, parse_vcd_reader_with_limits, write_vcd,
+    VcdSignalKind, VcdTimeUnit, VcdTimescale, VcdValue, VcdVariable, parse_vcd_bytes_with_limits,
+    parse_vcd_file, parse_vcd_file_with_limits, parse_vcd_reader, parse_vcd_reader_with_limits,
+    write_vcd,
 };
 pub use waveform_stream::{StreamingWaveformWriter, WaveformStreamError};
 pub use xyce_prn::{
