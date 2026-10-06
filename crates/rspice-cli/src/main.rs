@@ -27,6 +27,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 mod abort;
 mod cli;
 mod commands;
+mod console;
 mod hdf5;
 mod observability;
 mod report;
@@ -211,13 +212,12 @@ fn main() -> ExitCode {
         Commands::Convert(args) => commands::convert(args, &config, cli.verbose, cli.quiet),
         Commands::Completions(args) => {
             use clap::CommandFactory;
-            clap_complete::generate(
-                args.shell,
-                &mut Cli::command(),
-                "rspice",
-                &mut std::io::stdout(),
-            );
-            Ok(())
+            // clap_complete treats writer failures as internal panics. Its
+            // output is bounded by our fixed command tree, so generate it in
+            // memory and publish through the same fallible path as reports.
+            let mut script = Vec::new();
+            clap_complete::generate(args.shell, &mut Cli::command(), "rspice", &mut script);
+            console::bytes(&script)
         }
         Commands::Compare(args) => {
             let compare_args = commands::compare::CompareArgs {

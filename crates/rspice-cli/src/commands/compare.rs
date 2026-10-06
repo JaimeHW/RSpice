@@ -200,7 +200,7 @@ pub fn execute(
                 comparison
                     .problems
                     .push("golden file did not exist".to_string());
-                output_json(&comparison, true, args.section.as_deref());
+                output_json(&comparison, true, args.section.as_deref())?;
             }
             return Ok(());
         }
@@ -211,15 +211,15 @@ pub fn execute(
     }
 
     if !quiet {
-        println!(
+        crate::console::line(format_args!(
             "Comparing: {} vs {}",
             args.result.display(),
             args.golden.display()
-        );
-        println!(
+        ))?;
+        crate::console::line(format_args!(
             "  Tolerances: abstol={:.2e}, reltol={:.2e}",
             args.abstol, args.reltol
-        );
+        ))?;
     }
 
     // Load and parse files
@@ -248,9 +248,9 @@ pub fn execute(
         if blessed {
             bless_golden(&args.result, &args.golden, quiet, "differences accepted")?;
         }
-        output_json(&cmp_result, blessed, args.section.as_deref());
+        output_json(&cmp_result, blessed, args.section.as_deref())?;
     } else {
-        output_text(&cmp_result, quiet);
+        output_text(&cmp_result, quiet)?;
         if blessed {
             bless_golden(&args.result, &args.golden, quiet, "differences accepted")?;
         }
@@ -314,7 +314,11 @@ fn bless_golden(
     })
     .map_err(|error| map_atomic_output_error(golden, error))?;
     if !quiet {
-        println!("✓ Golden updated ({}): {}", why, golden.display());
+        crate::console::line(format_args!(
+            "✓ Golden updated ({}): {}",
+            why,
+            golden.display()
+        ))?;
     }
     Ok(())
 }
@@ -842,7 +846,11 @@ fn compare_waveforms(
 }
 
 /// Output comparison result as JSON
-fn output_json(result: &CompareResult, blessed: bool, section: Option<&str>) {
+fn output_json(
+    result: &CompareResult,
+    blessed: bool,
+    section: Option<&str>,
+) -> Result<(), CliError> {
     let accepted = result.passed || blessed;
     let json = serde_json::json!({
         "passed": accepted,
@@ -869,36 +877,36 @@ fn output_json(result: &CompareResult, blessed: bool, section: Option<&str>) {
         }).collect::<Vec<_>>(),
     });
     let json = crate::observability::envelope("rspice.comparison", json);
-    match serde_json::to_string_pretty(&json) {
-        Ok(text) => println!("{text}"),
-        Err(e) => eprintln!("Error: failed to serialize comparison report: {e}"),
-    }
+    crate::console::json(&json, true)
 }
 
 /// Output comparison result as text
-fn output_text(result: &CompareResult, quiet: bool) {
+fn output_text(result: &CompareResult, quiet: bool) -> Result<(), CliError> {
     if result.passed {
         if !quiet {
-            println!("✓ Comparison PASSED");
-            println!(
+            crate::console::line(format_args!("✓ Comparison PASSED"))?;
+            crate::console::line(format_args!(
                 "  Compared {} variables, {} points",
                 result.num_variables, result.num_points
-            );
-            println!(
+            ))?;
+            crate::console::line(format_args!(
                 "  Max difference: {:.2e} ({})",
                 result.max_abs_diff, result.max_diff_variable
-            );
+            ))?;
         }
     } else {
-        println!("✗ Comparison FAILED");
+        crate::console::line(format_args!("✗ Comparison FAILED"))?;
         for problem in &result.problems {
-            println!("  {}", problem);
+            crate::console::line(format_args!("  {}", problem))?;
         }
-        println!("  {} differences found", result.num_differences);
+        crate::console::line(format_args!(
+            "  {} differences found",
+            result.num_differences
+        ))?;
 
         // Show first few differences
         for (i, d) in result.differences.iter().take(5).enumerate() {
-            println!(
+            crate::console::line(format_args!(
                 "  [{}] {} @ {}: result={:.6e}, golden={:.6e}, diff={:.2e}",
                 i + 1,
                 d.variable,
@@ -906,12 +914,16 @@ fn output_text(result: &CompareResult, quiet: bool) {
                 d.result_value,
                 d.golden_value,
                 d.abs_diff
-            );
+            ))?;
         }
         if result.num_differences > 5 {
-            println!("  ... and {} more", result.num_differences - 5);
+            crate::console::line(format_args!(
+                "  ... and {} more",
+                result.num_differences - 5
+            ))?;
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]

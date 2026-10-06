@@ -50,15 +50,15 @@ pub fn execute(
     }
 
     if verbose && !quiet {
-        println!("Verilog-A Compiler Options:");
-        println!("  Strict mode: {}", options.strict_mode);
-        println!("  Include paths: {:?}", options.include_paths);
-        println!();
+        crate::console::line(format_args!("Verilog-A Compiler Options:"))?;
+        crate::console::line(format_args!("  Strict mode: {}", options.strict_mode))?;
+        crate::console::line(format_args!("  Include paths: {:?}", options.include_paths))?;
+        crate::console::line(format_args!(""))?;
     }
 
     // Compile the model
     if !quiet {
-        println!("Compiling: {}", args.input.display());
+        crate::console::line(format_args!("Compiling: {}", args.input.display()))?;
     }
     let compiler = VerilogACompiler::new(options);
     let limits = config.resources.limits();
@@ -97,61 +97,71 @@ pub fn execute(
     // Quiet suppresses all text; an explicitly requested file still publishes.
     if !quiet {
         // Display model information
-        println!();
-        println!("====================================================================");
-        println!("Verilog-A Model: {}", model.name);
-        println!("====================================================================");
-        println!();
+        crate::console::line(format_args!(""))?;
+        crate::console::line(format_args!(
+            "===================================================================="
+        ))?;
+        crate::console::line(format_args!("Verilog-A Model: {}", model.name))?;
+        crate::console::line(format_args!(
+            "===================================================================="
+        ))?;
+        crate::console::line(format_args!(""))?;
 
         // Terminals
-        println!("Terminals ({}):", model.num_terminals);
+        crate::console::line(format_args!("Terminals ({}):", model.num_terminals))?;
         for (i, name) in model.terminal_names.iter().enumerate() {
-            println!("  [{:2}] {}", i, name);
+            crate::console::line(format_args!("  [{:2}] {}", i, name))?;
         }
-        println!();
+        crate::console::line(format_args!(""))?;
 
         // Internal nodes
         if model.internal_nodes > 0 {
-            println!("Internal Nodes: {}", model.internal_nodes);
-            println!();
+            crate::console::line(format_args!("Internal Nodes: {}", model.internal_nodes))?;
+            crate::console::line(format_args!(""))?;
         }
 
         // Parameters
         if !model.parameters.is_empty() {
-            println!("Parameters ({}):", model.parameters.len());
-            println!(
+            crate::console::line(format_args!("Parameters ({}):", model.parameters.len()))?;
+            crate::console::line(format_args!(
                 "  {:<20} {:>15} {:>12} {:>12}",
                 "Name", "Default", "Min", "Max"
-            );
-            println!("  {:-<20} {:-^15} {:-^12} {:-^12}", "", "", "", "");
+            ))?;
+            crate::console::line(format_args!(
+                "  {:-<20} {:-^15} {:-^12} {:-^12}",
+                "", "", "", ""
+            ))?;
 
             for param in &model.parameters {
                 let min_str = param.min.map_or("-".to_string(), |v| format!("{:.4e}", v));
                 let max_str = param.max.map_or("-".to_string(), |v| format!("{:.4e}", v));
-                println!(
+                crate::console::line(format_args!(
                     "  {:<20} {:>15.6e} {:>12} {:>12}",
                     param.name, param.default, min_str, max_str
-                );
+                ))?;
             }
-            println!();
+            crate::console::line(format_args!(""))?;
         }
 
         // Branch equations (stamp programs)
         if args.detailed {
-            println!("Branch Equations: {}", model.stamp_programs.len());
+            crate::console::line(format_args!(
+                "Branch Equations: {}",
+                model.stamp_programs.len()
+            ))?;
             for (i, program) in model.stamp_programs.iter().enumerate() {
-                println!(
+                crate::console::line(format_args!(
                     "  [{}] {} stamp locations, {} jacobian entries",
                     i,
                     program.stamp_locations.len(),
                     program.jacobian_programs.len()
-                );
+                ))?;
             }
-            println!();
+            crate::console::line(format_args!(""))?;
         }
 
         // Summary
-        println!("Compilation successful");
+        crate::console::line(format_args!("Compilation successful"))?;
     }
 
     // Machine-readable interface summary
@@ -183,7 +193,10 @@ pub fn execute(
         })
         .map_err(|error| map_atomic_output_error(output_path, error))?;
         if !quiet {
-            println!("Interface summary written to: {}", output_path.display());
+            crate::console::line(format_args!(
+                "Interface summary written to: {}",
+                output_path.display()
+            ))?;
         }
     }
 
@@ -211,18 +224,18 @@ pub fn execute(
             .map(|parameter| format!(" {}={}", parameter.name, parameter.default))
             .unwrap_or_default();
 
-        println!();
-        println!("Usage in SPICE netlist:");
-        println!("  .va \"{}\"", source);
-        println!(
+        crate::console::line(format_args!(""))?;
+        crate::console::line(format_args!("Usage in SPICE netlist:"))?;
+        crate::console::line(format_args!("  .va \"{}\"", source))?;
+        crate::console::line(format_args!(
             "  X1 {} {}{}",
             terminal_list, model.name, instance_parameters
-        );
-        println!();
-        println!(
+        ))?;
+        crate::console::line(format_args!(""))?;
+        crate::console::line(format_args!(
             "The .va card compiles the source and the X card instantiates the module by name, \
              carrying any instance parameters."
-        );
+        ))?;
     }
 
     Ok(())

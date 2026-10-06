@@ -192,9 +192,7 @@ fn print_json(out: &mut impl Write, netlist: &Netlist, args: &InfoArgs) -> Resul
     });
     let json = crate::observability::envelope("rspice.info", json);
 
-    serde_json::to_writer_pretty(&mut *out, &json)
-        .map_err(|error| CliError::output_json_error(Path::new("stdout"), error))?;
-    writeln!(out).map_err(|error| CliError::output_error(Path::new("stdout"), error))
+    crate::console::write_json(out, &json, true)
 }
 
 struct ElementCounts {

@@ -93,7 +93,7 @@ fn list_packs(
     quiet: bool,
 ) -> Result<(), CliError> {
     if !quiet {
-        println!("Model tree: {}", index.root().display());
+        crate::console::line(format_args!("Model tree: {}", index.root().display()))?;
     }
 
     let packs: Vec<_> = if shippable_only {
@@ -102,36 +102,36 @@ fn list_packs(
         index.packs().iter().collect()
     };
 
-    println!(
+    crate::console::line(format_args!(
         "{:<22} {:<10} {:<14} {:>9} {:>9}  NAME",
         "PACK", "CATEGORY", "LICENCE", "MODELS", "SUBCKTS"
-    );
+    ))?;
     for pack in &packs {
         let licence = if pack.redistributable {
             pack.tier.display_name().to_string()
         } else {
             format!("{}*", pack.tier.display_name())
         };
-        println!(
+        crate::console::line(format_args!(
             "{:<22} {:<10} {:<14} {:>9} {:>9}  {}",
             pack.id, pack.category, licence, pack.models, pack.subcircuits, pack.name
-        );
+        ))?;
     }
 
     if !quiet {
         let models: usize = packs.iter().map(|p| p.models).sum();
         let subckts: usize = packs.iter().map(|p| p.subcircuits).sum();
         let bytes: u64 = packs.iter().map(|p| p.bytes).sum();
-        println!(
+        crate::console::line(format_args!(
             "\n{} packs, {models} models, {subckts} subcircuits, {:.1} MB",
             packs.len(),
             bytes as f64 / 1_048_576.0
-        );
+        ))?;
         if !shippable_only && packs.iter().any(|pack| !pack.redistributable) {
-            println!(
+            crate::console::line(format_args!(
                 "* redistribution not established; excluded by --shippable-only. \
                  See models/spice/LICENSE-AUDIT.tsv."
-            );
+            ))?;
         }
     }
     Ok(())
@@ -153,7 +153,7 @@ fn show_part(
     if !quiet && matches.len() > 1 {
         // Not a warning to be dismissed: the same part number carries different
         // parameter fits in different packs, so the deck must say which it means.
-        println!(
+        crate::console::line(format_args!(
             "'{part}' is defined in {} packs. Reference one explicitly with \
              .include or .lib; the fits are not interchangeable.\n",
             matches
@@ -161,11 +161,11 @@ fn show_part(
                 .map(|m| m.pack.as_str())
                 .collect::<std::collections::BTreeSet<_>>()
                 .len()
-        );
+        ))?;
     }
 
     for entry in &matches {
-        println!(
+        crate::console::line(format_args!(
             "{:<24} {:<8} {:<16} {}{}",
             entry.name,
             entry.kind,
@@ -176,9 +176,9 @@ fn show_part(
             } else {
                 ""
             }
-        );
+        ))?;
         if let Some(path) = entry.source_path(index) {
-            println!("    {}:{}", path.display(), entry.line);
+            crate::console::line(format_args!("    {}:{}", path.display(), entry.line))?;
         }
     }
     Ok(())
@@ -189,7 +189,7 @@ fn browse(entries: Vec<CatalogEntry>, quiet: bool) -> Result<(), CliError> {
         return Err(invalid("no definitions matched", None));
     }
     for entry in &entries {
-        println!(
+        crate::console::line(format_args!(
             "{:<28} {:<8} {:<16} {}{}",
             entry.name,
             entry.kind,
@@ -200,10 +200,12 @@ fn browse(entries: Vec<CatalogEntry>, quiet: bool) -> Result<(), CliError> {
             } else {
                 ""
             }
-        );
+        ))?;
     }
     if !quiet && entries.len() >= BROWSE_LIMIT {
-        println!("\n(truncated at {BROWSE_LIMIT}; narrow the query)");
+        crate::console::line(format_args!(
+            "\n(truncated at {BROWSE_LIMIT}; narrow the query)"
+        ))?;
     }
     Ok(())
 }
