@@ -31,7 +31,7 @@
       "id": "C04",
       "status": "in_progress",
       "requirement": "Control execution",
-      "qualification_task": "Compare every command with direct execution; verify producer dependencies, alteration, nested sweeps, limits and cancellation."
+      "qualification_task": "DC and nested DC now execute through explicit commands and run, with complete axes, per-point reports, physical units, source-ordered options, immutable datasets and cumulative limits. core-control-dc-windows-20261006.json qualifies six public DC cases and core/CLI/WASM integration. The CLI runtime check requires Rust 1.95 after an internal pinned Rust 1.94 compiler crash in faer. Complete the remaining 25 command dispositions, producer dependencies, scalar/complex presentation and bounded orchestration; the full package remains in progress."
     },
     {
       "id": "C05",
@@ -460,6 +460,7 @@
   "existing_evidence": [
     "tests/qualification_baseline.rs",
     "tests/control_execution.rs",
+    "tests/control_dc.rs",
     "tests/authored_card_runners.rs",
     "tests/capability_refusals.rs",
     "tests/bjt_excess_phase_transient.rs",

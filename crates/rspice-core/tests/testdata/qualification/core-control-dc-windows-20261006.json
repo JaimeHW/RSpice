@@ -1,0 +1,180 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C04",
+  "batch": "C04a/C04b DC and nested DC control execution",
+  "status": "partial_package_four_control_variants_implemented_twenty_five_remaining",
+  "source_revision": "17ea0ca58a2a70c6052a6e76315111fd210c42ec",
+  "base_revision": "6e82bcc324692e145ffcd1a244d0a6941461f73f",
+  "implementation_commits": [
+    "1dd0e114622408862ec16287060d40ab522d0401",
+    "17ea0ca58a2a70c6052a6e76315111fd210c42ec"
+  ],
+  "captured_utc": "2026-10-06T14:26:09.419242+00:00",
+  "host": "x86_64-pc-windows-msvc",
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "rustc": "1.94.0 (4a4ef493e 2026-03-02)",
+    "cargo": "1.94.0 (85eff7c80 2026-01-15)",
+    "cli_test_rustc": "1.95.0 (59807616e 2026-04-14)",
+    "cli_test_cargo": "1.95.0 (f2d3ce0bd 2026-03-21)",
+    "wasm_profile": "release, Chrome dedicated worker",
+    "wasm_features": "--no-default-features --features wasm,veriloga-wasm-jit",
+    "wasm_bindgen_test_runner": "0.2.126",
+    "chromedriver": "154.0.8037.92",
+    "chrome": "154.0.8037.98",
+    "webdriver_config_sha256": "93458ed98943268e089c8c9a793bf2e899872e62941ac54795b0c27b7104785b"
+  },
+  "source_hash_scope": "Committed Git blob bytes at source_revision for changed Rust files, dependency lock and toolchain pin. Publication-ledger bytes are recorded separately.",
+  "source_sha256": {
+    "crates/rspice-cli/src/commands/preflight.rs": "a2eea63c2a99a0064592d5a6d97ed1b25fa11c6ace24699b24d91a59c9fe6ceb",
+    "crates/rspice-cli/src/commands/run/basic.rs": "ac25ae1f366bd1db57291d4872b5b41582817b5781d6d84cb36cb640862e1fd8",
+    "crates/rspice-cli/src/commands/run/context.rs": "1bb62be01686a55e44144935702d4dae0ee65e31d281fc96cc5a206dec3a0ac0",
+    "crates/rspice-cli/src/commands/run/control.rs": "20cbdd032129e13fb5a9fffb2ce982591e48502a2bf16add177b563b72b99332",
+    "crates/rspice-cli/tests/control_dc.rs": "c248bcce9b3768b63d2ae62f39b289f7515555f34177f9833d9e847495b2898e",
+    "crates/rspice-cli/tests/request_preflight.rs": "006cff1d65a24a34ca66f6f500982b4528fde41abbdcedb4632295e3b46176da",
+    "crates/rspice-core/src/engine.rs": "19a289146477562385106021dd9e599da3afe51df55e5b771fadab2f6436b93e",
+    "crates/rspice-core/src/engine/control.rs": "89940085ec49226a81395382ad0783b82e1abf2fd94c757ac781ceb10c533c67",
+    "crates/rspice-core/src/engine/control/analysis.rs": "79ddba22c1ada378153a485fef0ae011c249bed06918083b0be60664deb58a46",
+    "crates/rspice-core/src/engine/control/presentation.rs": "b77497ebda4fd5f0d07d1b5c306c92bbb0ec6331657993824fc46d4ec5de5988",
+    "crates/rspice-core/src/engine/dc.rs": "fccd3276f155e6f1117c77afdbc01f82d17cff8dbe8ae1a2e8ae27e41ed0ac04",
+    "crates/rspice-core/src/engine/dc/result.rs": "c6ca9504db247b6cf83002f4f3588201137bae88a0fbdf0348ac46f7428b4d02",
+    "crates/rspice-core/src/execution/result_document/builders.rs": "29403cd9009b7bfa278524a7f1eb77a9c1ad4e6059ab37ae53375e04a16eac1d",
+    "crates/rspice-core/src/execution/result_document/builders/dc.rs": "1af3e6a3fe5788000412d95d4b1f3b90a78523741b7001fcce9e22fcdeed99ba",
+    "crates/rspice-core/tests/control_dc.rs": "2c723554f25e8df1c5afdd9c1ca20ec7084ff586f18650cac290edadfd4d12e6",
+    "crates/rspice-wasm/src/runners/deck.rs": "9004566e29e22952613e8227f32b6342211db59d9a4dd66c76b7a0c941aa4a05",
+    "crates/rspice-wasm/src/runners/deck/control.rs": "c620149cb15e9b6d266761f9118b8973fb103627219355f7e07a3d9ed1855452",
+    "Cargo.lock": "32c7249ac4fd36da8e3478cf7ddad6aece428a5f26c4e7621160360f37008a07",
+    "rust-toolchain.toml": "0a73f8e6f0e60b4a2bba97a16fdc0c66517abad4410e72582981b9578bc1aa62"
+  },
+  "publication_ledger_sha256": "298c630eeca518201f036636cca8123e2b526040c55dd1e438572c92f5f322aa",
+  "implementation": {
+    "execution": "Explicit dc and declarative run reuse the public full-specification DC solver. DcSweepResult owns compact outer/inner axes and original accepted DcSweepPointResult objects with device reports. No new device equations or alternate DC solver were introduced.",
+    "presentation": "Node/branch vectors, both physical coordinates, correct shared units, stable dataset identities and source-order alteration/options. Cross-dataset expressions compare all nested coordinates rather than only the repeated inner scale.",
+    "resources": "Retained numeric counts include compact axes, solver results, observables and per-point reports. The remaining cumulative control budget bounds each solve. Failure/cancellation cannot publish a partial dataset or consume an ordinal.",
+    "integration": "CLI and WASM deck/control adapters share the typed DC execution and document constructor. CLI keeps LIST/DEC/OCT specifications and physical units; typed documents include the outer axis. Flat CLI headers preserve authored source spelling after the follow-up repair."
+  },
+  "independent_oracles": [
+    "Equal-resistor divider: V(out)=(V1+V2)/2 and I(V1)=(V2-V1)/2000, across both nested dimensions and negative/nonmonotonic input values.",
+    "Current-source/resistor network: V(out)=1000*I1 across linear, list, decade and octave specifications.",
+    "Temperature-adjusted resistor: TC1=0.01, TNOM=27, TEMP=127 gives R=2 kOhm and source current -0.5 mA at 1 V."
+  ],
+  "scope_limits": [
+    "C04 remains in progress: OP/DC/AC/TRAN implemented; 25 command variants still require execution, producer or orchestration semantics. No other package is closed.",
+    "CLI runtime qualification under pinned Rust 1.94 is not established because of the dependency compiler crash. Installed Rust 1.95 supplies the recorded CLI runtime evidence.",
+    "Selected tests do not establish whole-core/device accuracy, all configurations, allocation or performance limits, or production readiness. No external reference simulator was needed for these closed-form resistor oracles.",
+    "WASM feature selection does not prove Verilog-A JIT/model execution. Flat output formats retain their existing projection contract; complete nested coordinate metadata is carried by the core typed result and typed documents."
+  ],
+  "runs": [
+    {
+      "command": "cargo test --locked -p rspice-core --test control_dc --test control_execution --test dc_two_source",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        6,
+        8,
+        6
+      ],
+      "source_scope": "Final core implementation, before implementation commit; identical core code at source_revision.",
+      "log": "target/core-qualification/control-dc-native-final.log",
+      "log_sha256": "0852f587104ba90e7249e81b31ba6f385725b79817babb6e717a0e3a3da3096c"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib engine::requirements",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        3
+      ],
+      "source_scope": "Core implementation plus publication-ledger prose and existing-evidence list; same ledger bytes as this evidence.",
+      "log": "target/core-qualification/control-dc-requirements-final.log",
+      "log_sha256": "c946bbd0dcab51411c8c7174da25822e8d79538f13dd6af63cce5e088c627fb6"
+    },
+    {
+      "command": "cargo +1.95.0 test --locked -p rspice-cli --test control_dc --test control_scripts --test request_preflight --target-dir target/core-cli-195",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1,
+        5,
+        3
+      ],
+      "source_scope": "At the DC implementation commit, before the separate flat-header spelling repair.",
+      "log": "target/core-qualification/control-dc-cli-verified.log",
+      "log_sha256": "fa2ae05b48c7c4c704c57cc2ee9fd3b9fb6884d6b1290a2bea38c9eabfc7372a"
+    },
+    {
+      "command": "cargo +1.95.0 test --locked -p rspice-cli --test output_formats --test step_cartesian --target-dir target/core-cli-195 dc_",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        3,
+        1
+      ],
+      "source_scope": "Final CLI implementation including authored header spelling repair, before its commit.",
+      "log": "target/core-qualification/control-dc-cli-exports-final.log",
+      "log_sha256": "63818d6eb1c09c246b3651072fa6f56eadae415efcab05533eb639b7d8b76c9f"
+    },
+    {
+      "command": "cargo +1.95.0 test --locked -p rspice-cli --test control_dc --target-dir target/core-cli-195",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1
+      ],
+      "source_scope": "Final CLI implementation including authored header spelling repair, before its commit.",
+      "log": "target/core-qualification/control-dc-cli-spelling.log",
+      "log_sha256": "f32bdf71503ca4e6316eef7f9355db3c55dfe0b04226d17d9573b48e2ead076d"
+    },
+    {
+      "command": "cargo test --locked -p rspice-wasm --lib control_dc_document",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1
+      ],
+      "source_scope": "Final WASM-adapter source, unchanged by the later CLI-only repair.",
+      "log": "target/core-qualification/control-dc-adapter.log",
+      "log_sha256": "94c3ae9c67aebfb97d15f458f2bde861ed0132725155c897fc2605ad8d5d6221"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test control_dc -- --nocapture",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        6
+      ],
+      "source_scope": "Committed DC core implementation, unchanged by the later CLI-only repair. Executed in a headless Chrome dedicated worker.",
+      "log": "target/core-qualification/control-dc-wasm.log",
+      "log_sha256": "67b569946c09bfe5aa6320b53aef4f571a063b3c8ac38caf832feef553323857"
+    },
+    {
+      "command": "cargo clippy --locked -p rspice-core -p rspice-cli -p rspice-wasm --lib --bins -- -D warnings",
+      "outcome": "passed",
+      "test_target_passed_counts": [],
+      "source_scope": "After both implementation commits, with publication-ledger prose updates.",
+      "log": "target/core-qualification/control-dc-clippy-committed.log",
+      "log_sha256": "6ed100c8d18c7a816b6f82624eb3dd21bbc2aa8264333b07c3f566b6e586e0cc"
+    }
+  ],
+  "development_attempts": [
+    {
+      "log": "target/core-qualification/control-dc-cli.log",
+      "log_sha256": "0364e716f2f3ce235e7a0d44cb78542dbf587b87066c735a0b6df1f8b62505b8",
+      "finding_and_resolution": "Pinned Rust 1.94 crashes inside rustc region inference while compiling faer 0.24.4. CARGO_INCREMENTAL=0 was already set. Pinned three-crate check and Clippy pass, but CLI execution here requires installed Rust 1.95. The pin was not changed."
+    },
+    {
+      "log": "target/core-qualification/control-dc-native.log",
+      "log_sha256": "796b00b9372b844cce3e08a2f4d119192489c0778f5bedea5a140ac72b28c65b",
+      "finding_and_resolution": "Initial new numerical checks used a case-sensitive node-name lookup. Tests were corrected to respect case-insensitive circuit names; all six final public tests pass."
+    },
+    {
+      "log": "target/core-qualification/control-dc-clippy.log",
+      "log_sha256": "688d09d44ac1d398bef1840d1b15053713c36c5e9d32cc8cb7918fec9743d40a",
+      "finding_and_resolution": "A removed adapter unit helper left an unattached doc comment; removed before the implementation commit."
+    },
+    {
+      "log": "target/core-qualification/control-dc-cli-final.log",
+      "log_sha256": "83a40486eef5594c0ac8a2666d52c4a4887edd94e8df35b25f08198d5cf7095c",
+      "finding_and_resolution": "The old preflight test expected DC to be unsupported. Its unsupported cases now exercise still-missing TF; invalid explicit/declarative DC cases remain covered."
+    },
+    {
+      "log": "target/core-qualification/control-dc-cli-exports.log",
+      "log_sha256": "0d0ae5edd9c64154a2804b1d8ac5e8487a8128f4211faca39a3900fac7450ae2",
+      "finding_and_resolution": "Existing flat-output regression caught canonical v1 replacing authored V1. Follow-up 17ea0ca58 preserves the authored command name in shared CLI publication; all selected DC export checks then pass."
+    }
+  ]
+}
