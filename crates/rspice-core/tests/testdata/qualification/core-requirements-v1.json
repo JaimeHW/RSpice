@@ -1,0 +1,469 @@
+{
+  "schema": "rspice-core-requirements",
+  "version": 1,
+  "scope": "Core implementation requirements. Declarations and route inventory are not numerical qualification.",
+  "packages": [
+    {
+      "id": "C00",
+      "status": "in_progress",
+      "requirement": "Executable scope and baseline",
+      "qualification_task": "Inventory remaining admission predicates and public entry points; measure accuracy, conservation, timing, allocation, memory and cancellation on committed builds."
+    },
+    {
+      "id": "C01",
+      "status": "open",
+      "requirement": "Shared numerical and state contracts",
+      "qualification_task": "Conformance tests for residual, charge, derivative, noise, trial/accepted ownership and atomic restore; measure adapter overhead."
+    },
+    {
+      "id": "C02",
+      "status": "open",
+      "requirement": "Transient decomposition",
+      "qualification_task": "Preserve exact event clocks, accepted grids, retry/rollback and checkpoint continuation for every extraction."
+    },
+    {
+      "id": "C03",
+      "status": "open",
+      "requirement": "GP transient excess phase",
+      "qualification_task": "Qualify both phase models through public transient APIs across dialects, startup modes, polarity, model parameters, retries and restart."
+    },
+    {
+      "id": "C04",
+      "status": "open",
+      "requirement": "Control execution",
+      "qualification_task": "Compare every command with direct execution; verify producer dependencies, alteration, nested sweeps, limits and cancellation."
+    },
+    {
+      "id": "C05",
+      "status": "open",
+      "requirement": "IMD measurements",
+      "qualification_task": "Polynomial two-tone products and intercepts; unequal tones, coincidence, windows, dynamic range, noise and compression."
+    },
+    {
+      "id": "C06",
+      "status": "open",
+      "requirement": "Native semiconductor periodic support",
+      "qualification_task": "Public periodic residual, small-signal, shooting and envelope evidence per model/instance restriction, including conservation and independent references."
+    },
+    {
+      "id": "C07",
+      "status": "open",
+      "requirement": "Dynamic, hysteretic and distributed elements",
+      "qualification_task": "Public memory, switch, line and magnetic cases with event refinement, causal histories, conservation and continuation."
+    },
+    {
+      "id": "C08",
+      "status": "open",
+      "requirement": "Periodic noise",
+      "qualification_task": "DC reduction, modulated and correlated independent oracles, sideband convergence and integrated power."
+    },
+    {
+      "id": "C09",
+      "status": "open",
+      "requirement": "External models",
+      "qualification_task": "Real runtime/generated/XSPICE models through core evaluators, complete state, operator-aware admission and rollback."
+    },
+    {
+      "id": "C10",
+      "status": "open",
+      "requirement": "Mixed accepted state and equilibrium",
+      "qualification_task": "Coupled equilibrium, event ordering, rejected side effects and persisted deterministic continuation."
+    },
+    {
+      "id": "C11",
+      "status": "open",
+      "requirement": "Mixed periodic and RF",
+      "qualification_task": "Analog/discrete period closure, moving-event derivatives, conversion, sampled noise and envelope evidence."
+    },
+    {
+      "id": "C12",
+      "status": "open",
+      "requirement": "Execution and result integration",
+      "qualification_task": "Every public route retains options, identity, units, errors, limits and producer state; compare transient observation routes."
+    },
+    {
+      "id": "C13",
+      "status": "open",
+      "requirement": "Organization and performance",
+      "qualification_task": "Review responsibility boundaries and duplicate numerical contracts; measure memory, sparse scaling and hot-path changes."
+    },
+    {
+      "id": "C14",
+      "status": "open",
+      "requirement": "Final qualification",
+      "qualification_task": "Requirement-by-requirement committed-build audit across profiles/features; independent corpora, boundary fuzzing and failure atomicity."
+    }
+  ],
+  "analyses": [
+    {
+      "variant": "Op",
+      "card": ".op",
+      "route": {
+        "path": "src/engine/dc.rs",
+        "symbol": "run_dc_op_with_report_and_abort"
+      },
+      "control_host": "implemented",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Dc",
+      "card": ".dc V1 0 1 .5",
+      "route": {
+        "path": "src/engine/dc.rs",
+        "symbol": "run_dc_sweep2_spec_with_report_and_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Ac",
+      "card": ".ac lin 2 1 10",
+      "route": {
+        "path": "src/engine/ac.rs",
+        "symbol": "run_ac_with_abort"
+      },
+      "control_host": "implemented",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "AcData",
+      "card": ".ac data=grid",
+      "route": {
+        "path": "src/engine/ac.rs",
+        "symbol": "run_ac_data_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Hb",
+      "card": ".hb 1k",
+      "route": {
+        "path": "src/engine/hb.rs",
+        "symbol": "run_hb_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Qpss",
+      "card": ".qpss 1k 1.4142135623730951k",
+      "route": {
+        "path": "src/engine/hb/quasi_periodic.rs",
+        "symbol": "run_qpss_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Qpac",
+      "card": ".qpac lin 2 1 10 source=V1 out=V(out) inlattice=(0,0) outlattice=(0,0)",
+      "route": {
+        "path": "src/engine/hb/quasi_periodic/qpac.rs",
+        "symbol": "run_qpac_from_qpss_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Qpxf",
+      "card": ".qpxf list=(1) out=V(out) outlattice=(0,0)",
+      "route": {
+        "path": "src/engine/hb/quasi_periodic/qpxf.rs",
+        "symbol": "run_qpxf_from_qpss_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Qpnoise",
+      "card": ".qpnoise list=(1) out=V(out) outlattice=(0,0) minlattice=(0,0) maxlattice=(0,0)",
+      "route": {
+        "path": "src/engine/hb/quasi_periodic/qpnoise.rs",
+        "symbol": "run_qpnoise_from_qpss_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Sp",
+      "card": ".sp lin 2 1 10",
+      "route": {
+        "path": "src/engine/sp.rs",
+        "symbol": "run_sp_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Stb",
+      "card": ".stb lin 2 1 10 probe=V1",
+      "route": {
+        "path": "src/engine/stb.rs",
+        "symbol": "run_stb_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Disto",
+      "card": ".disto lin 2 1 10 .9",
+      "route": {
+        "path": "src/engine/distortion.rs",
+        "symbol": "run_distortion_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Tran",
+      "card": ".tran 1u 1m",
+      "route": {
+        "path": "src/engine/transient.rs",
+        "symbol": "run_tran_with_startup_mode_and_abort"
+      },
+      "control_host": "implemented",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Noise",
+      "card": ".noise V(out) V1 lin 2 1 10",
+      "route": {
+        "path": "src/engine/noise.rs",
+        "symbol": "run_noise_named_with_input_source_and_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "NoiseData",
+      "card": ".noise V(out) V1 data=grid",
+      "route": {
+        "path": "src/engine/noise.rs",
+        "symbol": "run_noise_data_named_with_input_source_and_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "PoleZero",
+      "card": ".pz in 0 out 0 vol pz",
+      "route": {
+        "path": "src/engine/pole_zero.rs",
+        "symbol": "run_pz_from_card_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Sensitivity",
+      "card": ".sens V(out)",
+      "route": {
+        "path": "src/engine/sensitivity.rs",
+        "symbol": "run_sensitivity_from_card_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Tf",
+      "card": ".tf V(out) V1",
+      "route": {
+        "path": "src/engine/transfer.rs",
+        "symbol": "run_transfer_function_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Four",
+      "card": ".four 1k V(out)",
+      "route": {
+        "path": "src/execution/post_process.rs",
+        "symbol": "evaluate_planned_fourier_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "MonteCarlo",
+      "card": ".mc 2 uniform .1 seed 37",
+      "route": {
+        "path": "src/engine/monte_carlo.rs",
+        "symbol": "run_monte_carlo_deck_statistics_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Step",
+      "card": ".step param r list 1k 2k",
+      "route": {
+        "path": "src/engine/step.rs",
+        "symbol": "run_step_command_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Temp",
+      "card": ".temp 0 27 100",
+      "route": {
+        "path": "src/execution/materialized.rs",
+        "symbol": "materialize_run_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Pss",
+      "card": ".pss fund=1k",
+      "route": {
+        "path": "src/engine/pss.rs",
+        "symbol": "run_pss_with_continuation_state_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Pac",
+      "card": ".pac lin 2 1 10 input=V1 out=V(out)",
+      "route": {
+        "path": "src/engine/hb/pac.rs",
+        "symbol": "run_pac_from_pss_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Pxf",
+      "card": ".pxf lin 2 1 10 input=V1 out=V(out)",
+      "route": {
+        "path": "src/engine/hb/pac.rs",
+        "symbol": "run_pxf_card_from_pss_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Pnoise",
+      "card": ".pnoise lin 2 1 10 out=V(out)",
+      "route": {
+        "path": "src/engine/pss_noise.rs",
+        "symbol": "run_pnoise_card_from_pss_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Pstb",
+      "card": ".pstb probe=V1 maxharm=3",
+      "route": {
+        "path": "src/engine/pstb.rs",
+        "symbol": "run_pstb_card_from_pss_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "Envelope",
+      "card": ".envelope tstop=1m maxstep=1u",
+      "route": {
+        "path": "src/engine/hb/state.rs",
+        "symbol": "run_envelope_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    },
+    {
+      "variant": "DcMatch",
+      "card": ".dcmatch out=V(out)",
+      "route": {
+        "path": "src/engine/dcmatch.rs",
+        "symbol": "run_dc_match_with_abort"
+      },
+      "control_host": "missing",
+      "owner": "C04",
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+    }
+  ],
+  "guards": [
+    {
+      "path": "src/engine/transient/bjt.rs",
+      "symbol": "ensure_bjt_transient_phase_support",
+      "owner": "C03",
+      "status": "open",
+      "qualification_task": "Replace public nonzero-PTF refusals only with qualified public transient execution; preserve invalid-parameter errors."
+    }
+  ],
+  "ignored_tests": [
+    {
+      "path": "src/device/mosfet/bsim3v3/tests.rs",
+      "symbol": "live_ngspice_oracle_dc_and_charge",
+      "owner": "C14",
+      "disposition": "Run explicitly with an identified ngspice-46 binary; independent DC and charge oracle."
+    },
+    {
+      "path": "src/device/mosfet/bsim4v8/tests.rs",
+      "symbol": "live_ngspice_oracle_dc_and_charge",
+      "owner": "C14",
+      "disposition": "Run explicitly with an identified ngspice-46 binary; independent DC and charge oracle."
+    },
+    {
+      "path": "src/engine/transient/residual.rs",
+      "symbol": "diagnostic probe over the diffamp regression deck",
+      "owner": "C14",
+      "disposition": "Diagnostic probe; inspect and replace with bounded assertions before treating as a correctness gate."
+    },
+    {
+      "path": "src/device/mosfet/bsim4v8/tests.rs",
+      "symbol": "requires an externally supplied models/veriloga/bsim4.va",
+      "owner": "C09",
+      "disposition": "Feature-gated external-model comparison; requires actual model source and runtime. Open until supplied and executed."
+    }
+  ],
+  "existing_evidence": [
+    "tests/qualification_baseline.rs",
+    "tests/control_execution.rs",
+    "tests/authored_card_runners.rs",
+    "tests/capability_refusals.rs",
+    "tests/bjt_excess_phase_transient.rs",
+    "tests/transient_checkpoint.rs",
+    "tests/transient_source_events.rs",
+    "tests/resource_and_commit_faults.rs"
+  ],
+  "open_inventory_tasks": [
+    "Enumerate every per-instance predicate and pair it with supported/unsupported numerical fixtures; family declarations alone are insufficient.",
+    "Index auxiliary public engine entry points and checkpoint/continuation routes beyond the representative analysis routes.",
+    "Add permanent requirement-specific regressions as packages implement missing behavior.",
+    "Record reproducible allocation, peak-memory and performance measurements; numerical and build baselines alone do not establish these."
+  ]
+}

@@ -84,6 +84,8 @@ mod pole_zero;
 mod pss;
 mod pss_noise;
 mod pstb;
+#[cfg(test)]
+mod requirements;
 use crate::analysis::transient as result;
 pub use pstb::PeriodicStabilityResult;
 mod sensitivity;

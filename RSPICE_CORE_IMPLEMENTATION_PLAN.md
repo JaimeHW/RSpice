@@ -1,6 +1,6 @@
 # RSpice core remaining implementation plan
 
-Status: planned; implementation packages below remain open. Prepared October 5, 2026 against revision `20fd0d6350596c0cfc814ee729f4e2286dd30d2b`; reconciled with remote `main` through `abdc1f12e` before publication.
+Status: implementation in progress; no package is closed yet. Prepared October 5, 2026 against revision `20fd0d6350596c0cfc814ee729f4e2286dd30d2b`; initial execution baseline is `f24e2ea28f2322e78086c14837ea53bc2d4c18c3`.
 
 Complete the unfinished work identified by the core audit: missing analysis and model support, incomplete control execution, IMD measurements, architecture and duplication problems, and core qualification. This plan covers `rspice-core`, its public Rust interfaces, and the dependency contracts needed by its solvers. Application UI, packaging, deployment, and product-level platform certification are outside this plan.
 
@@ -281,4 +281,10 @@ Within each model family, deliver residual and derivative tests, transient/state
 
 Start with C00 and the smallest C01/C02 state-boundary extraction: create the requirements ledger, capture a clean baseline, document accepted versus trial ownership, and extract physical-event step fitting with its existing regressions. Establish state invariants before opening GP PTF admission. Prepare the C04 result/dispatch design and C05 measurement contract alongside that work; neither requires rewriting the remaining device families first.
 
-Update this plan after each delivered package with implementation commits, permanent tests, evidence, and unresolved rows. All packages are currently open; this planning commit implements no additional solver capability.
+Update this plan after each delivered package with implementation commits, permanent tests, evidence, and unresolved rows. All packages remain open.
+
+## Execution record
+
+- C00 has an executable requirements ledger under `crates/rspice-core/tests/testdata/qualification/`: all 29 analysis command variants, representative public routes, control-host disposition, all 38 families across six periodic contracts, the full declared restrictions, package ownership, and remaining qualification tasks. Tests check the parsed command inventory, actual control-host outcomes, and declaration changes. These checks do not certify missing numerical implementations.
+- The clean committed baseline at `f24e2ea28` passed 4,843 unit tests. The two live ngspice-46 BSIM oracle tests also passed all 22,586 comparisons. Toolchain, reference-binary identity, commands, observed errors, and unresolved evidence are recorded in `core-baseline-windows-20261005.json`.
+- C00 remains open for complete per-instance predicate fixtures, auxiliary public-route inventory, broader configurations, and reproducible numerical/performance/resource measurements.
