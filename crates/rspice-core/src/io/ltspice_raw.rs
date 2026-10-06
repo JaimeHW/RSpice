@@ -17,7 +17,9 @@ use std::path::Path;
 use thiserror::Error;
 
 mod table_metadata;
-pub use table_metadata::write_raw_table_metadata;
+pub use table_metadata::{
+    raw_table_units, write_raw_table_metadata, write_raw_table_metadata_with_units,
+};
 
 use crate::resource::{
     ResourceKind, ResourceLimitError, ResourceLimits, ResourceReadError, read_bytes_limited,
