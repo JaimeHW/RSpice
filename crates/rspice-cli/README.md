@@ -25,10 +25,31 @@ cargo build --release -p rspice-cli
 | `health` | Probe backend liveness or numerical readiness |
 | `completions` | Emit a shell completion script for bash, zsh, fish, powershell, or elvish |
 
-`run`, `check`, and `info` accept `-` to read the netlist from stdin, where
+`run`, `check`, and `info` share `-I`, `-D`, dialect, parameter-redefinition,
+and configured include/library search options. Root `-D` values are applied
+before conditional parsing and expression evaluation; local subcircuit
+parameters retain their own scope. All three commands accept `-` to read the netlist from stdin, where
 includes resolve against the working directory. Every flag is in
 `rspice <command> --help`; what follows is the behaviour a flag list does not
 show.
+
+## Supported-feature boundaries
+
+The CLI is an adapter over the core engine. An engine entry point does not
+imply that the CLI has a complete export or orchestration adapter for it.
+These combinations remain explicitly unsupported:
+
+| Feature | CLI boundary |
+| :--- | :--- |
+| QPSS, QPAC, QPXF, QPNOISE | No shared result-document projection; rejected before solving with a typed capability diagnostic |
+| Control scripts with checkpoint/resume, segmented restart, compression, declarative FFT/Fourier or STEP/TEMP axes | Rejected during frontend preflight |
+| TF, PZ, sensitivity or DCMATCH exported as HDF5 | Rejected before solving; use JSON, CSV, TSV or RAW |
+| Generic conversion of typed FFT artifacts | Rejected where conversion would discard FFT metadata |
+
+These are feature gaps, not a claim of parity with other commercial simulators.
+Passing crate tests does not qualify every device model or platform. Desktop,
+browser and tablet release qualification must include numerical reference
+comparisons, performance and memory budgets, packaging, and application tests.
 
 ## How analyses are selected
 
@@ -72,7 +93,9 @@ Each completed script dataset gets its own output identity, for example
 `abs(ac1.v(out))` select the named run. Separate plot traces keep their own
 time/frequency grids; arithmetic or `vs` pairing across different grids is
 rejected. `print` writes full complex sample pairs to stdout, including under
-`--quiet`. `plot` writes an SVG and a companion `*.control-NNN.json` file
+`--quiet`. With `--summary -`, stdout is reserved for the summary: print data
+is preserved in a companion `*.control-NNN.json` artifact listed in its
+`outputs` manifest. `plot` writes an SVG and a companion `*.control-NNN.json` file
 containing exact complex samples, units, axes, and current impulse observations
 and coverage. The JSON is written beside `-o`, or beside the input deck when
 no output path was selected. SVG plots require real expressions; use `real`
@@ -154,7 +177,11 @@ lands in the reports and the process exit status reflects the whole plan.
 `resources.max_batch_runs` bounds how large a plan may get.
 
 Corner runs write per-corner tagged outputs (`res.csv` becomes `res.tt.csv`,
-`res.ss.csv`) and exit nonzero if any corner fails. Without `--corner-lib`,
+`res.ss.csv`) and exit nonzero if any corner fails. Each corner has its own
+summary/CI report with the original failure category and measurements.
+Corner names are unique without regard to case and contain letters, digits,
+underscores or hyphens. The batch budget includes every corner of every ALTER
+variant; nested scheduling shares the configured worker ceiling. Without `--corner-lib`,
 every corner runs nominal models and the sweep only checks convergence.
 
 `--monte-carlo` runs solve in parallel across cores automatically, bounded by
@@ -331,7 +358,7 @@ shapes:
 | `.SP` | `S_i_j` complex columns for the deck's N ports (Touchstone instead when `-o` ends in a matching `.sNp`) |
 | `--sparam` | `S11`/`S21`/`S12`/`S22` complex columns over frequency (Touchstone instead when `-o` ends in `.s2p`) |
 
-TF, pole-zero, and sensitivity tables have no natural HDF5 section and reject
+TF, pole-zero, sensitivity, and DCMATCH tables have no HDF5 section and reject
 `-f hdf5` with a clear error; use `csv`, `json`, or `raw`.
 
 ### `vcd`
@@ -545,8 +572,8 @@ show_progress = false            # default for --progress
 # output_directory = "results"   # relative -o paths land here (created on demand)
 
 [paths]
-include_paths = ["./models", "./lib"]   # extra .include/.lib search dirs for run
-library_paths = []                      # extra .include/.lib search dirs for run
+include_paths = ["./models", "./lib"]   # extra .include/.lib search dirs for run/check/info
+library_paths = []                      # extra .include/.lib search dirs for run/check/info
 veriloga_includes = []                  # extra include dirs for compile-va
 
 [resources]
@@ -650,3 +677,29 @@ Because every failure category maps to a documented nonzero exit code,
 archiving.
 
 Licensed under the [RSpice Personal Use License](../../LICENSE).
+
+### Automation and input contracts
+
+`check --json`, `compare --json`, and `run --summary -` reserve stdout for one
+JSON document without requiring `--quiet`. `--error-format json` also covers
+argument parsing and timeout failures. A timeout interrupts an idle stdin pipe;
+unrepresentable durations are usage errors. Signed temperatures accept the
+usual separated spelling, such as `--temp -40`.
+
+Alternative command-line analysis modes are mutually exclusive. Checkpoint,
+resume and transient-stop options require an analysis that actually executes a
+transient. Numeric node strings always mean authored node names, not internal
+solver indices.
+
+Comparison keeps voltage, current and real/imaginary components distinct.
+For finite values, a sample passes when its absolute error is no greater than
+`abstol` or its error relative to the golden value is no greater than `reltol`.
+Against zero, only the absolute threshold can admit a nonzero value.
+Interpolation refuses uncovered golden samples except for endpoint rounding
+within four ULPs. Blessing requires matching file formats, including bootstrap
+creation. Result readers preserve typed scalar quantities and every OP signal;
+unsupported projections fail instead of comparing an empty coordinate.
+
+`models --shippable-only` applies to pack listings and to part, device and
+search queries. The filter excludes restricted definitions and packs whose
+metadata does not mark them redistributable before limiting displayed results.
