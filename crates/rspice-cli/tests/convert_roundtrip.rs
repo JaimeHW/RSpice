@@ -1162,3 +1162,24 @@ fn one_sample_survives_every_table_format_and_none_is_refused_by_name() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn ascii_raw_preserves_adjacent_f64_values() {
+    let dir = test_dir("ascii_raw_precision");
+    for (name, contents) in [(
+        "real",
+        "time,V(x)\n1.0000000000000002,1.0000000000000004\n2,2.2250738585072014e-308\n",
+    )] {
+        let source = dir.join(format!("{name}.csv"));
+        let raw = dir.join(format!("{name}.raw"));
+        let restored = dir.join(format!("{name}-restored.csv"));
+        std::fs::write(&source, contents).unwrap();
+        convert(&source, &raw, "ascii", &[]);
+        convert(&raw, &restored, "csv", &[]);
+        let expected = read_csv(&source).1;
+        let actual = read_csv(&restored).1;
+        for (expected, actual) in expected.iter().flatten().zip(actual.iter().flatten()) {
+            assert_eq!(actual.to_bits(), expected.to_bits());
+        }
+    }
+}

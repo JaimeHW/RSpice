@@ -303,9 +303,9 @@ impl ExportTable {
                 write!(writer, "{}", row).map_err(io_err)?;
                 let emit = |writer: &mut W, re: f64, im: f64| -> Result<(), CliError> {
                     if complex {
-                        write!(writer, "\t{:.15e},{:.15e}", re, im).map_err(io_err)
+                        write!(writer, "\t{:.17e},{:.17e}", re, im).map_err(io_err)
                     } else {
-                        write!(writer, "\t{:.15e}", re).map_err(io_err)
+                        write!(writer, "\t{:.17e}", re).map_err(io_err)
                     }
                 };
                 emit(writer, self.scale[row], 0.0)?;
