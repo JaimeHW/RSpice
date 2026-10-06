@@ -4,6 +4,60 @@ use std::process::Command;
 const SOURCE: &str = "`include \"disciplines.vams\"\nmodule resistor(p,n);\ninout p,n; electrical p,n;\nparameter real R=1000;\nanalog I(p,n) <+ V(p,n)/R;\nendmodule\n";
 
 #[test]
+fn interface_output_cannot_replace_the_source_or_its_includes() {
+    let dir = common::test_dir("source_collision");
+    let input = dir.join("model.va");
+    let include = dir.join("value.vams");
+    let source = format!(
+        "`include \"value.vams\"\n{}",
+        SOURCE.replace("R=1000", "R=`VALUE")
+    );
+    let included = "`define VALUE 42\n";
+    std::fs::write(&input, &source).unwrap();
+    std::fs::write(&include, included).unwrap();
+    std::fs::create_dir(dir.join("child")).unwrap();
+    let destinations = [
+        input.clone(),
+        include.clone(),
+        dir.join("child/../model.va"),
+        #[cfg(windows)]
+        dir.join("MODEL.VA"),
+    ];
+    for destination in destinations {
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "--error-format", "json", "compile-va"])
+            .arg(&input)
+            .arg("-o")
+            .arg(&destination)
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{destination:?}: {output:?}");
+        let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert!(
+            error["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("source"),
+            "{error}"
+        );
+        assert_eq!(std::fs::read_to_string(&input).unwrap(), source);
+        assert_eq!(std::fs::read_to_string(&include).unwrap(), included);
+    }
+    // An ordinary existing summary remains replaceable.
+    let summary = dir.join("model.json");
+    std::fs::write(&summary, "old summary").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "compile-va"])
+        .arg(&input)
+        .arg("-o")
+        .arg(&summary)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(common::read_json(&summary)["model"], "resistor");
+}
+
+#[test]
 fn source_admission_preserves_typed_resource_failures() {
     for (setting, resource) in [
         ("max_netlist_bytes", "netlist_bytes"),

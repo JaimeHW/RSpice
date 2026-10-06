@@ -70,15 +70,26 @@ pub fn execute(
         limits.max_netlist_lines,
         &ProcessControl,
     );
-    let model = compiler
+    let compiled = compiler
         .compile_provider_module_with_metadata_and_control(
             &provider,
             &args.input,
             args.module.as_deref(),
             &ProcessControl,
         )
-        .map_err(compile_error)?
-        .model;
+        .map_err(compile_error)?;
+    if let Some(output) = args.output.as_deref() {
+        publish::destinations::protect_sources(
+            output,
+            std::iter::once(args.input.as_path()).chain(
+                compiled
+                    .dependencies
+                    .iter()
+                    .map(std::path::PathBuf::as_path),
+            ),
+        )?;
+    }
+    let model = compiled.model;
 
     // Quiet suppresses all text; an explicitly requested file still publishes.
     if !quiet {

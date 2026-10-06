@@ -70,6 +70,32 @@ fn conflict(message: String) -> CliError {
     }
 }
 
+/// Refuse to replace any source directory entry with a generated artifact.
+/// Directory aliases and Windows case folding use the same rules as outputs.
+pub(crate) fn protect_sources<'a>(
+    output: &Path,
+    sources: impl IntoIterator<Item = &'a Path>,
+) -> Result<(), CliError> {
+    let output_key = key(output).map_err(|error| CliError::output_error(output, error))?;
+    for source in sources {
+        let source_key = key(source).map_err(|error| CliError::InputReadError {
+            path: source.to_path_buf(),
+            source: error,
+        })?;
+        if output_key == source_key {
+            return Err(CliError::InvalidArgument {
+                message: format!(
+                    "output '{}' would overwrite source '{}'",
+                    output.display(),
+                    source.display()
+                ),
+                suggestion: Some("choose an output path distinct from every source file".into()),
+            });
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn begin(
     declared: &[(&str, &Path)],
     reports: &[(&str, &Path)],
