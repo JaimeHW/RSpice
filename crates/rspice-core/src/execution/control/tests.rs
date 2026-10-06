@@ -1,6 +1,29 @@
 use super::*;
 use crate::{Netlist, NoAbort};
 
+#[test]
+fn authored_commands_preserve_branches_and_substitutions_without_execution() {
+    let program = ControlProgram::parse_deck_with_abort(
+        "static\n.control\nrepeat 1000000000\nif 0\nac dec 10 1 $upper\nelse\ntran 1u $stop\nend\nend\n.endc\n.end\n",
+        ControlLimits {
+            max_steps: 0,
+            ..ControlLimits::default()
+        },
+        &NoAbort,
+    )
+    .unwrap();
+    let commands: Vec<_> = program.authored_commands().collect();
+    assert_eq!(commands.len(), 2);
+    assert_eq!(
+        (commands[0].line, commands[0].arguments.as_str()),
+        (5, "dec 10 1 $upper")
+    );
+    assert_eq!(
+        (commands[1].line, commands[1].arguments.as_str()),
+        (7, "1u $stop")
+    );
+}
+
 fn collect(source: &str) -> Vec<ControlCommand> {
     let program =
         ControlProgram::parse_deck_with_abort(source, ControlLimits::default(), &NoAbort).unwrap();

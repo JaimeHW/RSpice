@@ -12,6 +12,7 @@ use crate::resource::{ResourceKind, ResourceLimitError};
 use crate::{AbortSignal, Value};
 use std::collections::BTreeMap;
 
+mod analysis;
 mod options;
 mod presentation;
 mod transient;
@@ -68,6 +69,37 @@ pub enum ControlCommandEffect {
 enum PreparedCommand {
     Complete(ControlCommandEffect),
     Analyses(Vec<(AnalysisCommand, Option<usize>)>),
+}
+
+enum CommandKind {
+    Options,
+    Set,
+    Alter,
+    Analysis,
+    Run,
+    Presentation,
+}
+
+impl CommandKind {
+    fn parse(command: &ControlCommand) -> Result<Self, ControlError> {
+        Ok(match command.name.as_str() {
+            "option" | "options" => Self::Options,
+            "set" => Self::Set,
+            "alter" => Self::Alter,
+            "op" | "ac" | "tran" => Self::Analysis,
+            "run" => Self::Run,
+            "plot" | "print" | "settype" => Self::Presentation,
+            _ => {
+                return Err(command_error(
+                    command.line,
+                    format!(
+                        "control command '{}' has no electrical or presentation handler",
+                        command.name
+                    ),
+                ));
+            }
+        })
+    }
 }
 
 /// Mutable circuit state and immutable completed datasets for one script.
@@ -142,51 +174,31 @@ impl ControlCircuit {
             )
             .into());
         }
-        match command.name.as_str() {
-            "option" | "options" => {
+        match CommandKind::parse(command)? {
+            CommandKind::Options => {
                 self.apply_options(engine, command, variables, abort)?;
                 Ok(PreparedCommand::Complete(
                     ControlCommandEffect::CircuitChanged,
                 ))
             }
-            "set" => {
+            CommandKind::Set => {
                 self.apply_set(command, variables)?;
                 Ok(PreparedCommand::Complete(
                     ControlCommandEffect::CircuitChanged,
                 ))
             }
-            "alter" => {
+            CommandKind::Alter => {
                 self.alter(engine, command, variables)?;
                 Ok(PreparedCommand::Complete(
                     ControlCommandEffect::CircuitChanged,
                 ))
             }
-            "op" | "ac" | "tran" => {
-                let source = format!(
-                    "control analysis\n.{} {}\n.end\n",
-                    command.name, command.arguments
-                );
-                let parsed = Netlist::parse_with_abort(&source, abort).map_err(|error| {
-                    ControlError::new(
-                        line,
-                        if abort.is_aborted() {
-                            ControlErrorKind::Aborted
-                        } else {
-                            ControlErrorKind::Syntax
-                        },
-                        error.to_string(),
-                    )
-                })?;
-                let [analysis] = parsed.analyses.as_slice() else {
-                    return Err(command_error(
-                        line,
-                        "analysis command did not produce exactly one analysis",
-                    )
-                    .into());
-                };
-                Ok(PreparedCommand::Analyses(vec![(analysis.clone(), None)]))
+            CommandKind::Analysis => {
+                let analysis =
+                    Self::parse_analysis_command(command, engine.config().resource_limits, abort)?;
+                Ok(PreparedCommand::Analyses(vec![(analysis, None)]))
             }
-            "run" => {
+            CommandKind::Run => {
                 if !command.arguments.is_empty() {
                     return Err(command_error(line, "run does not accept arguments").into());
                 }
@@ -212,20 +224,12 @@ impl ControlCircuit {
                 }
                 Ok(PreparedCommand::Analyses(analyses))
             }
-            "plot" | "print" | "settype" => {
+            CommandKind::Presentation => {
                 self.present(engine, command, variables, abort)
                     .map(|request| {
                         PreparedCommand::Complete(ControlCommandEffect::Presentation(request))
                     })
             }
-            _ => Err(command_error(
-                line,
-                format!(
-                    "control command '{}' has no electrical or presentation handler",
-                    command.name
-                ),
-            )
-            .into()),
         }
     }
 

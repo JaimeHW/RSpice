@@ -307,6 +307,23 @@ impl ControlProgram {
         &self.declarative_source
     }
 
+    /// Visit authored host commands in source order without evaluating control
+    /// flow or substituting variables. Includes commands inside every branch;
+    /// intended for static validation, never as an execution sequence.
+    pub fn authored_commands(&self) -> impl Iterator<Item = ControlCommand> + '_ {
+        self.instructions.iter().filter_map(|instruction| {
+            if let Op::Command { name, arguments } = &instruction.op {
+                Some(ControlCommand {
+                    line: instruction.line,
+                    name: name.clone(),
+                    arguments: arguments.clone(),
+                })
+            } else {
+                None
+            }
+        })
+    }
+
     pub fn start(&self, variables: ParamContext) -> ControlSession<'_> {
         ControlSession {
             program: self,
