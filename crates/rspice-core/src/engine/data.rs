@@ -1,81 +1,107 @@
-//! Typed `.DATA` column resolution shared by table-driven analyses.
+//! Shared validation, coordinate retention and execution for frequency tables.
 //!
-//! Xyce resolves a column as an artificial analysis quantity, then as a
-//! declared scalar parameter, and finally as a device parameter. Resolving
-//! this once per table prevents AC, noise, CLI, and conformance frontends from
-//! assigning different meanings to the same authored row.
-
+//! Resolve columns once using the Xyce analysis/parameter/device precedence.
+//! Both compact results and the compatibility APIs execute the same row loop.
 use std::collections::BTreeSet;
 
 use super::{Engine, SimulationError};
 use crate::abort_signal::AbortSignal;
-use crate::netlist::FrequencyDataPoint;
+use crate::resource::{ResourceKind, ResourceLimitError};
 use crate::{Netlist, Value};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum FrequencyDataTarget {
-    Frequency(String),
-    Parameter(String),
-    DeviceParameter {
-        device_name: String,
-        parameter_name: String,
-    },
+mod result;
+pub use result::{FrequencyDataColumn, FrequencyDataResult, FrequencyDataTarget};
+
+#[cfg(test)]
+mod tests;
+
+pub(super) struct FrequencyDataOptions {
+    pub analysis: &'static str,
+    pub positive_frequency: bool,
+    pub retain_netlists: bool,
 }
 
-#[derive(Debug, Clone)]
-pub(in crate::engine) struct FrequencyDataOverridePlan {
-    authored_columns: Vec<String>,
-    targets: Vec<FrequencyDataTarget>,
+struct FrequencyDataOverridePlan {
+    columns: Vec<FrequencyDataColumn>,
+    override_names: Vec<String>,
+}
+
+fn reserve<T>(
+    values: &mut Vec<T>,
+    count: usize,
+    object: &'static str,
+) -> Result<(), SimulationError> {
+    values
+        .try_reserve_exact(count)
+        .map_err(|source| SimulationError::Allocation { object, source })
+}
+
+// Row solvers see the remaining allowance. Report failures against the full
+// caller budget, including values retained from earlier rows.
+fn cumulative_limit(
+    error: SimulationError,
+    resource: ResourceKind,
+    retained: usize,
+    limit: usize,
+) -> SimulationError {
+    match error {
+        SimulationError::ResourceLimit(error) if error.resource == resource => ResourceLimitError {
+            resource,
+            requested: error.requested.saturating_add(retained),
+            limit,
+        }
+        .into(),
+        other => other,
+    }
 }
 
 impl FrequencyDataOverridePlan {
-    pub(in crate::engine) fn resolve(
+    fn resolve(
         netlist: &Netlist,
-        points: &[FrequencyDataPoint],
+        names: &[String],
+        rows: usize,
+        abort: &dyn AbortSignal,
     ) -> Result<Self, SimulationError> {
-        let first = points.first().ok_or_else(|| {
-            SimulationError::Circuit("frequency .DATA table has no rows".to_owned())
-        })?;
-        let authored_columns = first
-            .overrides
-            .iter()
-            .map(|(name, _)| name.clone())
-            .collect::<Vec<_>>();
-        if points.iter().any(|point| {
-            point.overrides.len() != authored_columns.len()
-                || point
-                    .overrides
-                    .iter()
-                    .zip(&authored_columns)
-                    .any(|((actual, _), expected)| !actual.eq_ignore_ascii_case(expected))
-        }) {
-            return Err(SimulationError::Circuit(
-                "frequency .DATA rows do not share one stable column schema".to_owned(),
-            ));
-        }
-
-        let mut targets = Vec::with_capacity(authored_columns.len());
+        let mut columns = Vec::new();
+        let mut override_names = Vec::new();
+        reserve(&mut columns, names.len(), "frequency table columns")?;
+        reserve(&mut override_names, names.len(), "frequency table targets")?;
         let mut canonical_targets = BTreeSet::new();
-        for column in &authored_columns {
-            let target = Self::resolve_column(netlist, column)?;
-            let canonical = match &target {
-                FrequencyDataTarget::Frequency(_) => "ARTIFICIAL:FREQUENCY".to_owned(),
-                FrequencyDataTarget::Parameter(name) => format!("PARAM:{name}"),
+        for name in names {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let target = Self::resolve_column(netlist, name)?;
+            let (canonical, override_name) = match &target {
+                FrequencyDataTarget::Frequency => {
+                    ("ARTIFICIAL:FREQUENCY".to_owned(), name.to_ascii_uppercase())
+                }
+                FrequencyDataTarget::Parameter(name) => (format!("PARAM:{name}"), name.clone()),
                 FrequencyDataTarget::DeviceParameter {
                     device_name,
                     parameter_name,
-                } => format!("DEVICE:{device_name}:{parameter_name}"),
+                } => (
+                    format!("DEVICE:{device_name}:{parameter_name}"),
+                    format!("{device_name}:{parameter_name}"),
+                ),
             };
             if !canonical_targets.insert(canonical.clone()) {
                 return Err(SimulationError::Circuit(format!(
-                    "frequency .DATA column '{column}' duplicates canonical target '{canonical}'"
+                    "frequency .DATA column '{name}' duplicates canonical target '{canonical}'"
                 )));
             }
-            targets.push(target);
+            let mut values = Vec::new();
+            reserve(&mut values, rows, "frequency table coordinates")?;
+            columns.push(FrequencyDataColumn {
+                name: name.clone(),
+                target,
+                values,
+            });
+            override_names.push(override_name);
         }
         Ok(Self {
-            authored_columns,
-            targets,
+            columns,
+            override_names,
         })
     }
 
@@ -85,7 +111,7 @@ impl FrequencyDataOverridePlan {
     ) -> Result<FrequencyDataTarget, SimulationError> {
         let column = authored_column.trim();
         if column.eq_ignore_ascii_case("FREQ") || column.eq_ignore_ascii_case("HERTZ") {
-            return Ok(FrequencyDataTarget::Frequency(column.to_ascii_uppercase()));
+            return Ok(FrequencyDataTarget::Frequency);
         }
         if netlist.params.has_any_parameter_binding(column) {
             return Ok(FrequencyDataTarget::Parameter(column.to_ascii_uppercase()));
@@ -122,45 +148,174 @@ impl FrequencyDataOverridePlan {
             parameter_name,
         })
     }
-
-    pub(in crate::engine) fn canonical_overrides(
-        &self,
-        point: &FrequencyDataPoint,
-    ) -> Result<Vec<(String, Value)>, SimulationError> {
-        if point.overrides.len() != self.targets.len()
-            || point
-                .overrides
-                .iter()
-                .zip(&self.authored_columns)
-                .any(|((actual, _), expected)| !actual.eq_ignore_ascii_case(expected))
-        {
-            return Err(SimulationError::Circuit(
-                "frequency .DATA row changed after its target plan was resolved".to_owned(),
-            ));
-        }
-        Ok(point
-            .overrides
-            .iter()
-            .zip(&self.targets)
-            .map(|((_, value), target)| match target {
-                FrequencyDataTarget::Frequency(name) => (name.clone(), *value),
-                FrequencyDataTarget::Parameter(name) => (name.clone(), *value),
-                FrequencyDataTarget::DeviceParameter {
-                    device_name,
-                    parameter_name,
-                } => (format!("{device_name}:{parameter_name}"), *value),
-            })
-            .collect())
-    }
 }
 
-pub(in crate::engine) fn materialize_frequency_data_row_with_abort(
-    netlist: &Netlist,
-    plan: &FrequencyDataOverridePlan,
-    point: &FrequencyDataPoint,
-    abort: &dyn AbortSignal,
-) -> Result<Netlist, SimulationError> {
-    let overrides = plan.canonical_overrides(point)?;
-    let (row, _) = Engine::create_perturbed_netlist_multi_with_abort(netlist, &overrides, abort)?;
-    Ok(row)
+impl Engine {
+    /// Validate all input rows before solving, then charge retained coordinates
+    /// and earlier results against every subsequent row's solver budget.
+    pub(super) fn run_frequency_data<T>(
+        &self,
+        netlist: &Netlist,
+        table_name: &str,
+        options: FrequencyDataOptions,
+        abort: &dyn AbortSignal,
+        solve_row: impl Fn(
+            &Engine,
+            &Netlist,
+            Value,
+            &dyn AbortSignal,
+        ) -> Result<Vec<T>, SimulationError>,
+        value_count: fn(&T) -> usize,
+    ) -> Result<(Vec<Netlist>, FrequencyDataResult<T>), SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        self.ensure_valid_configuration()?;
+        let table = netlist
+            .data_tables
+            .iter()
+            .find(|table| table.name.eq_ignore_ascii_case(table_name))
+            .ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "{} DATA references unknown .DATA table '{table_name}'",
+                    options.analysis
+                ))
+            })?;
+        self.ensure_analysis_points(table.rows.len())?;
+        self.ensure_batch_runs(table.rows.len())?;
+        // Bound metadata before cloning any rows, column names or result storage.
+        let coordinate_values = table.rows.len().saturating_mul(table.params.len());
+        self.ensure_result_values(coordinate_values)?;
+        let table_error =
+            |error| SimulationError::Circuit(format!("{} DATA {error}", options.analysis));
+        let frequency_column = table.frequency_column().map_err(table_error)?;
+        for (index, row) in table.rows.iter().enumerate() {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let frequency = table
+                .validate_frequency_row(index, row, frequency_column)
+                .map_err(table_error)?;
+            if options.positive_frequency && frequency <= 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "{} DATA frequencies must be strictly positive, got {frequency}",
+                    options.analysis
+                )));
+            }
+        }
+        let plan =
+            FrequencyDataOverridePlan::resolve(netlist, &table.params, table.rows.len(), abort)?;
+        let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
+        let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
+        Self::ensure_model_run_active(abort)?;
+        let mut result = FrequencyDataResult {
+            table_name: table.name.clone(),
+            columns: plan.columns,
+            points: Vec::new(),
+            requested_rows: table.rows.len(),
+            finish: None,
+        };
+        let mut row_netlists = Vec::new();
+        reserve(
+            &mut result.points,
+            table.rows.len(),
+            "frequency table results",
+        )?;
+        if options.retain_netlists {
+            reserve(
+                &mut row_netlists,
+                table.rows.len(),
+                "frequency table row netlists",
+            )?;
+        }
+        let mut retained_values = coordinate_values;
+        let mut retained_source_bytes = 0usize;
+        for (row_index, values) in table.rows.iter().enumerate() {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let mut overrides = Vec::new();
+            reserve(
+                &mut overrides,
+                values.len(),
+                "frequency table row overrides",
+            )?;
+            overrides.extend(
+                plan.override_names
+                    .iter()
+                    .cloned()
+                    .zip(values.iter().copied()),
+            );
+            let mut limits = self.config().resource_limits;
+            limits.max_expanded_source_bytes = limits
+                .max_expanded_source_bytes
+                .saturating_sub(retained_source_bytes);
+            let (row, _) = Self::create_perturbed_netlist_multi_with_limits_and_abort(
+                netlist, &overrides, limits, abort,
+            )
+            .map_err(|error| {
+                cumulative_limit(
+                    error,
+                    ResourceKind::ExpandedSourceBytes,
+                    retained_source_bytes,
+                    self.config().resource_limits.max_expanded_source_bytes,
+                )
+            })?;
+            if options.retain_netlists {
+                retained_source_bytes =
+                    retained_source_bytes.saturating_add(row.retained_source_bytes());
+                ResourceLimitError::ensure(
+                    ResourceKind::ExpandedSourceBytes,
+                    retained_source_bytes,
+                    self.config().resource_limits.max_expanded_source_bytes,
+                )?;
+            }
+            // Resolve row options before constructing a bounded resolved engine.
+            let row_engine = self.resolved_for_netlist(&row);
+            let mut config = row_engine.config().clone();
+            config.resource_limits.max_result_values -= retained_values;
+            let bounded = row_engine.try_resolved_with_config(config)?;
+            let mut points = match solve_row(&bounded, &row, values[frequency_column], abort) {
+                Err(SimulationError::ModelFinished(finish)) if !result.points.is_empty() => {
+                    result.finish = Some(*finish);
+                    break;
+                }
+                outcome => outcome.map_err(|error| {
+                    cumulative_limit(
+                        error,
+                        ResourceKind::ResultValues,
+                        retained_values,
+                        self.config().resource_limits.max_result_values,
+                    )
+                })?,
+            };
+            if points.len() != 1 {
+                return Err(SimulationError::Circuit(format!(
+                    "{} DATA table '{}' row {} produced {} results, expected one",
+                    options.analysis,
+                    table.name,
+                    row_index + 1,
+                    points.len()
+                )));
+            }
+            let point = points.remove(0);
+            retained_values = retained_values.saturating_add(value_count(&point));
+            self.ensure_result_values(retained_values)?;
+            for (column, &value) in result.columns.iter_mut().zip(values) {
+                column.values.push(value);
+            }
+            result.points.push(point);
+            if options.retain_netlists {
+                row_netlists.push(row);
+            }
+            if let Some(finish) = abort.model_control().and_then(|control| control.finish()) {
+                result.finish = Some(finish);
+                break;
+            }
+        }
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        Ok((row_netlists, result))
+    }
 }

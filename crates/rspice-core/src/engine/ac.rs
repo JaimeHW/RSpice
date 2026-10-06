@@ -4,7 +4,7 @@
 //! frequency-domain analysis at each specified frequency. Supports
 //! parallel frequency sweeps when the `parallel` feature is enabled.
 
-use super::data::{FrequencyDataOverridePlan, materialize_frequency_data_row_with_abort};
+use super::data::{FrequencyDataOptions, FrequencyDataResult};
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::ac::AcResult;
@@ -3115,50 +3115,52 @@ impl Engine {
         table_name: &str,
         abort: &dyn AbortSignal,
     ) -> Result<(Vec<Netlist>, Vec<AcResult>), SimulationError> {
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
-        let points = netlist
-            .frequency_data_table_points(table_name)
-            .map_err(|error| SimulationError::Circuit(format!(".AC DATA {error}")))?;
-        self.ensure_analysis_points(points.len())?;
-        self.ensure_batch_runs(points.len())?;
-        let override_plan = FrequencyDataOverridePlan::resolve(netlist, &points)?;
-        let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
-        let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
-        Self::ensure_model_run_active(abort)?;
-        let mut row_netlists = Vec::with_capacity(points.len());
-        let mut results = Vec::with_capacity(points.len());
-        for (row_index, point) in points.iter().enumerate() {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            let row_netlist =
-                materialize_frequency_data_row_with_abort(netlist, &override_plan, point, abort)?;
-            let mut row_results =
-                match self.run_ac_with_abort(&row_netlist, &[point.frequency], abort) {
-                    Err(SimulationError::ModelFinished(_)) if !results.is_empty() => break,
-                    result => result?,
-                };
-            if row_results.len() != 1 {
-                return Err(SimulationError::Circuit(format!(
-                    ".AC DATA table '{}' row {} produced {} results, expected one",
-                    table_name,
-                    row_index + 1,
-                    row_results.len()
-                )));
-            }
-            row_netlists.push(row_netlist);
-            results.push(row_results.remove(0));
-            if abort
-                .model_control()
-                .is_some_and(|control| control.is_finished())
-            {
-                break;
-            }
-        }
-        Ok((row_netlists, results))
+        let (rows, result) = self.run_ac_data_impl(netlist, table_name, true, abort)?;
+        Ok((rows, result.points))
     }
+
+    /// Execute table-driven AC while retaining compact, typed row coordinates.
+    /// Repeated and decreasing frequencies retain their original row identity.
+    pub fn run_ac_table(
+        &self,
+        netlist: &Netlist,
+        table_name: &str,
+    ) -> Result<FrequencyDataResult<AcResult>, SimulationError> {
+        self.run_ac_table_with_abort(netlist, table_name, &NoAbort)
+    }
+
+    /// Cancellable variant of [`Self::run_ac_table`].
+    pub fn run_ac_table_with_abort(
+        &self,
+        netlist: &Netlist,
+        table_name: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<FrequencyDataResult<AcResult>, SimulationError> {
+        self.run_ac_data_impl(netlist, table_name, false, abort)
+            .map(|(_, result)| result)
+    }
+
+    fn run_ac_data_impl(
+        &self,
+        netlist: &Netlist,
+        table_name: &str,
+        retain_netlists: bool,
+        abort: &dyn AbortSignal,
+    ) -> Result<(Vec<Netlist>, FrequencyDataResult<AcResult>), SimulationError> {
+        self.run_frequency_data(
+            netlist,
+            table_name,
+            FrequencyDataOptions {
+                analysis: ".AC",
+                positive_frequency: false,
+                retain_netlists,
+            },
+            abort,
+            |engine, row, frequency, abort| engine.run_ac_with_abort(row, &[frequency], abort),
+            AcResult::retained_value_count,
+        )
+    }
+
 }
 
 pub(super) fn validate_ac_frequencies(frequencies: &[Value]) -> Result<(), SimulationError> {

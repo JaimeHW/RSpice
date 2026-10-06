@@ -1,7 +1,7 @@
 //! Shared validation for frequency-axis `.DATA` tables.
 //!
 //! Table-driven AC and noise analyses use the same Xyce contract: one named
-//! table supplies a finite, positive `FREQ`/`HERTZ` axis and one value for
+//! table supplies a finite, nonnegative `FREQ`/`HERTZ` axis and one value for
 //! every declared parameter column on every row.  Keeping this validation in
 //! the netlist layer prevents individual analysis frontends from drifting in
 //! their handling of malformed tables.
@@ -29,7 +29,7 @@ pub fn data_table_parameter_name_is_valid(name: &str) -> bool {
 /// One validated row from a frequency-axis `.DATA` table.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrequencyDataPoint {
-    /// The positive frequency from the table's sole `FREQ`/`HERTZ` column.
+    /// The nonnegative frequency from the table's sole `FREQ`/`HERTZ` column.
     pub frequency: Value,
     /// Authored column names paired with this row's values, in source order.
     pub overrides: Vec<(String, Value)>,
@@ -138,6 +138,28 @@ impl DataTable {
     /// Validate and materialize every row using the table's nonnegative frequency axis.
     /// Consumers such as noise analysis additionally require strictly positive values.
     pub fn frequency_points(&self) -> Result<Vec<FrequencyDataPoint>, FrequencyDataTableError> {
+        let frequency_column = self.frequency_column()?;
+        self.rows
+            .iter()
+            .enumerate()
+            .map(|(row_index, row)| {
+                let frequency = self.validate_frequency_row(row_index, row, frequency_column)?;
+                Ok(FrequencyDataPoint {
+                    frequency,
+                    overrides: self
+                        .params
+                        .iter()
+                        .cloned()
+                        .zip(row.iter().copied())
+                        .collect(),
+                })
+            })
+            .collect()
+    }
+
+    // The engine validates borrowed rows before it allocates result storage.
+    // Keep the same schema and value rules as the public materializing API.
+    pub(crate) fn frequency_column(&self) -> Result<usize, FrequencyDataTableError> {
         if self.params.is_empty() {
             return Err(FrequencyDataTableError::EmptyColumns {
                 table_name: self.name.clone(),
@@ -159,19 +181,18 @@ impl DataTable {
             }
         }
 
-        let frequency_columns = self
-            .params
-            .iter()
-            .enumerate()
-            .filter_map(|(index, column_name)| {
-                (column_name.eq_ignore_ascii_case("FREQ")
-                    || column_name.eq_ignore_ascii_case("HERTZ"))
-                .then_some(index)
-            })
-            .collect::<Vec<_>>();
-        let frequency_column = match frequency_columns.as_slice() {
-            [index] => *index,
-            [] => {
+        let mut frequency_columns =
+            self.params
+                .iter()
+                .enumerate()
+                .filter_map(|(index, column_name)| {
+                    (column_name.eq_ignore_ascii_case("FREQ")
+                        || column_name.eq_ignore_ascii_case("HERTZ"))
+                    .then_some(index)
+                });
+        let frequency_column = match (frequency_columns.next(), frequency_columns.next()) {
+            (Some(index), None) => index,
+            (None, _) => {
                 return Err(FrequencyDataTableError::MissingFrequencyColumn {
                     table_name: self.name.clone(),
                 });
@@ -183,48 +204,43 @@ impl DataTable {
             }
         };
 
-        self.rows
-            .iter()
-            .enumerate()
-            .map(|(row_index, row)| {
-                let row_number = row_index + 1;
-                if row.len() != self.params.len() {
-                    return Err(FrequencyDataTableError::RowWidth {
-                        table_name: self.name.clone(),
-                        row: row_number,
-                        actual: row.len(),
-                        expected: self.params.len(),
-                    });
-                }
-                if let Some((column_index, value)) =
-                    row.iter().enumerate().find(|(_, value)| !value.is_finite())
-                {
-                    return Err(FrequencyDataTableError::NonFiniteValue {
-                        table_name: self.name.clone(),
-                        row: row_number,
-                        column_name: self.params[column_index].clone(),
-                        value: *value,
-                    });
-                }
-                let frequency = row[frequency_column];
-                if !frequency.is_finite() || frequency < 0.0 {
-                    return Err(FrequencyDataTableError::InvalidFrequency {
-                        table_name: self.name.clone(),
-                        row: row_number,
-                        frequency,
-                    });
-                }
-                Ok(FrequencyDataPoint {
-                    frequency,
-                    overrides: self
-                        .params
-                        .iter()
-                        .cloned()
-                        .zip(row.iter().copied())
-                        .collect(),
-                })
-            })
-            .collect()
+        Ok(frequency_column)
+    }
+
+    pub(crate) fn validate_frequency_row(
+        &self,
+        row_index: usize,
+        row: &[Value],
+        frequency_column: usize,
+    ) -> Result<Value, FrequencyDataTableError> {
+        let row_number = row_index + 1;
+        if row.len() != self.params.len() {
+            return Err(FrequencyDataTableError::RowWidth {
+                table_name: self.name.clone(),
+                row: row_number,
+                actual: row.len(),
+                expected: self.params.len(),
+            });
+        }
+        if let Some((column_index, value)) =
+            row.iter().enumerate().find(|(_, value)| !value.is_finite())
+        {
+            return Err(FrequencyDataTableError::NonFiniteValue {
+                table_name: self.name.clone(),
+                row: row_number,
+                column_name: self.params[column_index].clone(),
+                value: *value,
+            });
+        }
+        let frequency = row[frequency_column];
+        if !frequency.is_finite() || frequency < 0.0 {
+            return Err(FrequencyDataTableError::InvalidFrequency {
+                table_name: self.name.clone(),
+                row: row_number,
+                frequency,
+            });
+        }
+        Ok(frequency)
     }
 }
 

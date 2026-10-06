@@ -5,7 +5,7 @@ use input::NoiseInputReference;
 mod port;
 pub(super) use port::{PortNoiseWorkspace, PreparedPortNoise, validate_port_noise_frequencies};
 
-use super::data::{FrequencyDataOverridePlan, materialize_frequency_data_row_with_abort};
+use super::data::{FrequencyDataOptions, FrequencyDataResult};
 use super::{Engine, SimulationError};
 
 /// A probed noise-source set: one source per contribution, and the absolute
@@ -3164,69 +3164,107 @@ impl Engine {
         default_temperature: Value,
         abort: &dyn AbortSignal,
     ) -> Result<(Vec<Netlist>, Vec<NoiseResult>), SimulationError> {
-        let points = netlist
-            .frequency_data_table_points(table_name)
-            .map_err(|error| SimulationError::Circuit(format!(".NOISE DATA {error}")))?;
-        // Reject the whole table before running any row: unlike AC, a noise
-        // density (in particular 1/f noise) has no zero-frequency sample.
-        if let Some(point) = points.iter().find(|point| point.frequency <= 0.0) {
-            return Err(SimulationError::Circuit(format!(
-                ".NOISE DATA frequencies must be strictly positive, got {}",
-                point.frequency
-            )));
-        }
-        self.ensure_analysis_points(points.len())?;
-        self.ensure_batch_runs(points.len())?;
-        let override_plan = FrequencyDataOverridePlan::resolve(netlist, &points)?;
-        let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
-        let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
-        Self::ensure_model_run_active(abort)?;
-
-        let mut row_netlists = Vec::with_capacity(points.len());
-        let mut results = Vec::with_capacity(points.len());
-        for (row_index, point) in points.iter().enumerate() {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            let row_netlist =
-                materialize_frequency_data_row_with_abort(netlist, &override_plan, point, abort)?;
-            let temperature = row_netlist
-                .options
-                .temp
-                .map(|celsius| celsius + 273.15)
-                .unwrap_or(default_temperature);
-            let mut row_result = match self.run_noise_named_with_input_source_and_abort(
-                &row_netlist,
-                output_pos,
-                output_neg,
-                input_source,
-                &[point.frequency],
-                temperature,
-                abort,
-            ) {
-                Err(SimulationError::ModelFinished(_)) if !results.is_empty() => break,
-                result => result?,
-            };
-            if row_result.len() != 1 {
-                return Err(SimulationError::Circuit(format!(
-                    ".NOISE DATA table '{}' row {} produced {} results, expected one",
-                    table_name,
-                    row_index + 1,
-                    row_result.len()
-                )));
-            }
-            row_netlists.push(row_netlist);
-            results.push(row_result.remove(0));
-            if abort
-                .model_control()
-                .is_some_and(|control| control.is_finished())
-            {
-                break;
-            }
-        }
-        Ok((row_netlists, results))
+        let (rows, result) = self.run_noise_data_impl(
+            netlist,
+            output_pos,
+            output_neg,
+            input_source,
+            table_name,
+            default_temperature,
+            true,
+            abort,
+        )?;
+        Ok((rows, result.points))
     }
 
+    /// Execute table-driven noise with compact, typed coordinates for each row.
+    /// Row options supply the noise temperature, falling back to the argument.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_noise_table_named_with_input_source_and_abort(
+        &self,
+        netlist: &Netlist,
+        output_pos: &str,
+        output_neg: Option<&str>,
+        input_source: &str,
+        table_name: &str,
+        default_temperature: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<FrequencyDataResult<NoiseResult>, SimulationError> {
+        self.run_noise_data_impl(
+            netlist,
+            output_pos,
+            output_neg,
+            input_source,
+            table_name,
+            default_temperature,
+            false,
+            abort,
+        )
+        .map(|(_, result)| result)
+    }
+
+    /// Non-cancellable variant of [`Self::run_noise_table_named_with_input_source_and_abort`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_noise_table_named_with_input_source(
+        &self,
+        netlist: &Netlist,
+        output_pos: &str,
+        output_neg: Option<&str>,
+        input_source: &str,
+        table_name: &str,
+        default_temperature: Value,
+    ) -> Result<FrequencyDataResult<NoiseResult>, SimulationError> {
+        self.run_noise_table_named_with_input_source_and_abort(
+            netlist,
+            output_pos,
+            output_neg,
+            input_source,
+            table_name,
+            default_temperature,
+            &NoAbort,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_noise_data_impl(
+        &self,
+        netlist: &Netlist,
+        output_pos: &str,
+        output_neg: Option<&str>,
+        input_source: &str,
+        table_name: &str,
+        default_temperature: Value,
+        retain_netlists: bool,
+        abort: &dyn AbortSignal,
+    ) -> Result<(Vec<Netlist>, FrequencyDataResult<NoiseResult>), SimulationError> {
+        self.run_frequency_data(
+            netlist,
+            table_name,
+            FrequencyDataOptions {
+                analysis: ".NOISE",
+                positive_frequency: true,
+                retain_netlists,
+            },
+            abort,
+            |engine, row, frequency, abort| {
+                let temperature = row
+                    .options
+                    .temp
+                    .map(|celsius| celsius + 273.15)
+                    .unwrap_or(default_temperature);
+                engine.run_noise_named_with_input_source_and_abort(
+                    row,
+                    output_pos,
+                    output_neg,
+                    input_source,
+                    &[frequency],
+                    temperature,
+                    abort,
+                )
+            },
+            NoiseResult::retained_value_count,
+        )
+    }
     /// Non-cancellable convenience wrapper for table-driven named-node noise.
     #[allow(clippy::too_many_arguments)]
     pub fn run_noise_data_named_with_input_source(

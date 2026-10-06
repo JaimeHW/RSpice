@@ -61,6 +61,7 @@ pub use control::{
 mod convergence;
 mod core;
 mod data;
+pub use data::{FrequencyDataColumn, FrequencyDataResult, FrequencyDataTarget};
 mod dc;
 mod dcmatch;
 mod distortion;

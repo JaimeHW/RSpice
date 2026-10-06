@@ -359,6 +359,15 @@ pub struct AcResult {
 }
 
 impl AcResult {
+    /// Scalar storage for this point, including both complex components and frequency.
+    pub fn retained_value_count(&self) -> usize {
+        self.voltages
+            .len()
+            .saturating_add(self.currents.len())
+            .saturating_mul(2)
+            .saturating_add(1)
+    }
+
     /// Get voltage magnitude at a node (1-indexed, consistent with SPICE)
     pub fn voltage_magnitude(&self, node: usize) -> Value {
         if node == 0 {
