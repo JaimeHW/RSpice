@@ -229,3 +229,66 @@ fn interpolation_holds_explicitly_typed_logic_without_a_name_prefix() {
         .unwrap();
     assert!(output.status.success(), "{output:?}");
 }
+
+#[test]
+fn a_wide_result_can_compare_on_a_dense_golden_grid_within_the_input_budget() {
+    let dir = test_dir("comparison_streaming");
+    let result = dir.join("wide.csv");
+    let golden = dir.join("dense.csv");
+    let config = dir.join("limit.toml");
+    // Both inputs fit in 5,000 values; materializing every result column on
+    // the golden grid would unnecessarily allocate over a million values.
+    std::fs::write(&config, "[resources]\nmax_external_data_values=5000\n").unwrap();
+    let mut table = String::from("time");
+    for i in 0..512 {
+        table.push_str(&format!(",V(n{i})"));
+    }
+    for point in [0, 2047] {
+        table.push_str(&format!("\n{point}"));
+        for _ in 0..512 {
+            table.push_str(&format!(",{point}"));
+        }
+    }
+    table.push('\n');
+    std::fs::write(&result, table).unwrap();
+    let mut table = String::from("time,V(n0)\n");
+    for i in 0..2048 {
+        table.push_str(&format!("{i},{i}\n"));
+    }
+    std::fs::write(&golden, table).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "--config"])
+        .arg(&config)
+        .arg("compare")
+        .arg(&result)
+        .arg(&golden)
+        .args(["--interpolate", "--json", "--abstol", "0", "--reltol", "0"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["num_variables"], 2);
+    assert_eq!(report["num_points"], 2048);
+    assert_eq!(report["num_differences"], 0);
+}
+
+#[test]
+fn mismatch_previews_keep_full_counts_and_late_extrema() {
+    let mut result = String::from("time,V(x)\n");
+    let mut golden = String::from("time,V(x)\n");
+    for i in 0..1000 {
+        result.push_str(&format!("{i},{}\n", i + 2));
+        golden.push_str(&format!("{i},1\n"));
+    }
+    let report = failed(compare(&result, &golden, &[]));
+    assert_eq!(report["num_differences"], 1000);
+    let differences = report["differences"].as_array().unwrap();
+    assert_eq!(differences.len(), 10);
+    assert_eq!(differences[0]["index"], 0);
+    assert_eq!(differences[9]["index"], 9);
+    assert_eq!(report["max_abs_diff"], 1000.0);
+    assert_eq!(report["max_rel_diff"], 1000.0);
+    let fast = failed(compare(&result, &golden, &["--fail-fast"]));
+    assert_eq!(fast["num_differences"], 1);
+    assert_eq!(fast["max_abs_diff"], 1.0);
+}

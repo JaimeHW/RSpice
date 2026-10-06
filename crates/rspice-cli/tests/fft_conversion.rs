@@ -319,3 +319,26 @@ fn fft_comparison_applies_numeric_tolerances_to_spectral_values() {
     let report: serde_json::Value = serde_json::from_slice(&fast.stdout).unwrap();
     assert_eq!(report["num_differences"], 1);
 }
+
+#[test]
+fn bootstrap_bless_refuses_fft_interpolation_without_creating_a_golden() {
+    let directory = test_dir("fft_bless_interpolation");
+    let source = source(&directory);
+    for json in [false, true] {
+        let golden = directory.join(format!("golden-{json}.json"));
+        let mut args = vec![
+            "compare",
+            source.to_str().unwrap(),
+            golden.to_str().unwrap(),
+            "--bless",
+            "--interpolate",
+        ];
+        if json {
+            args.push("--json");
+        }
+        let output = cli(&args);
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("discrete transform grids"));
+        assert!(!golden.exists());
+    }
+}

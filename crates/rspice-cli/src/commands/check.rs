@@ -145,12 +145,7 @@ fn validate_input(args: &CheckArgs, config: &Config) -> Result<ValidationResult,
             let plan =
                 DeckPlan::from_netlist_with_abort(&netlist, &limits, &crate::abort::ProcessAbort)
                     .map_err(plan_error)?;
-            let simulation_config = rspice_core::resolve_simulation_config(
-                &config.core_simulation_config(),
-                Some(&netlist.options),
-                &Default::default(),
-            );
-            let engine = Engine::try_new_with_resolved_config(simulation_config)?;
+            let engine = validation_engine(&netlist, args, config)?;
             let materializer = engine
                 .prepare_deck_plan_materializer_with_abort(
                     &netlist,
@@ -182,7 +177,7 @@ fn validate_input(args: &CheckArgs, config: &Config) -> Result<ValidationResult,
                         materializer.coordinates()[index].stable_tag()
                     )
                 };
-                results.push((name, validate_netlist(&coordinate, args, limits)?));
+                results.push((name, validate_netlist(&coordinate, args, config)?));
             }
             Ok(results)
         };
@@ -199,11 +194,38 @@ fn validate_input(args: &CheckArgs, config: &Config) -> Result<ValidationResult,
     Ok(result)
 }
 
+/// Resolve the same shared configuration policy as `run`, including CLI
+/// dialect selection and options rematerialized for this concrete coordinate.
+fn validation_engine(
+    netlist: &Netlist,
+    args: &CheckArgs,
+    config: &Config,
+) -> Result<Engine, CliError> {
+    let overrides = rspice_core::SimulationConfigOverrides {
+        spice_dialect: args
+            .netlist_options
+            .spice_dialect
+            .map(crate::cli::SpiceDialectArg::simulation_dialect),
+        convergence_preset: rspice_core::ConvergencePreset::from_mode_name(
+            &config.simulation.convergence_mode,
+        ),
+        ..Default::default()
+    };
+    let simulation_config = rspice_core::resolve_simulation_config(
+        &config.core_simulation_config(),
+        Some(&netlist.options),
+        &overrides,
+    );
+    Ok(Engine::try_new_with_resolved_config(simulation_config)?)
+}
+
 fn validate_netlist(
     netlist: &Netlist,
     args: &CheckArgs,
-    resource_limits: rspice_core::ResourceLimits,
+    config: &Config,
 ) -> Result<ValidationResult, CliError> {
+    let engine = validation_engine(netlist, args, config)?;
+    let resource_limits = engine.config().resource_limits;
     let deferred = super::preflight::check_requests(netlist, &args.input, resource_limits)?;
     rspice_core::netlist::validate_output_symbols_with_abort(netlist, &crate::abort::ProcessAbort)
         .map_err(|error| crate::commands::input::map_error(error, &args.input, None))?;
@@ -236,7 +258,7 @@ fn validate_netlist(
     // Always-on topology checks: these decks produce singular systems, so
     // catching them statically beats a NaN at runtime.
     check_topology(netlist, &flattened.elements, &mut result);
-    check_xspice_build(netlist, &mut result, resource_limits)?;
+    check_xspice_build(netlist, &mut result, &engine)?;
 
     if args.connectivity {
         check_connectivity(netlist, &flattened.elements, &mut result);
@@ -251,30 +273,19 @@ fn validate_netlist(
 
 /// Elaborate an XSPICE deck to prove it builds.
 ///
-/// This is the one part of `check` that runs the engine's circuit builder and
-/// so the one part whose duration the deck controls, which is why the
-/// interrupt handler is installed here rather than for the whole command:
-/// everything else finishes promptly and keeps the default disposition, while
-/// a Ctrl-C during a large hierarchical build stops it at the next poll. A
-/// cancelled build is returned as an interrupt, never recorded as a validation
-/// error — reporting a cancelled run as a defect in the customer's deck would
-/// be a false negative.
+/// External runtimes are stubbed out, while device construction uses the
+/// resolved configuration for this coordinate. Cancellation is propagated as
+/// an interrupt rather than reported as a defect in the customer's deck.
 fn check_xspice_build(
     netlist: &Netlist,
     result: &mut ValidationResult,
-    resource_limits: rspice_core::ResourceLimits,
+    engine: &Engine,
 ) -> Result<(), CliError> {
     if !netlist_contains_xspice(netlist) {
         return Ok(());
     }
-    crate::abort::install_interrupt_handler();
-
     let _external_guard = XspiceCheckExternalRuntimeGuard::install();
-    let config = rspice_core::SimulationConfig {
-        resource_limits,
-        ..rspice_core::SimulationConfig::default()
-    };
-    match Engine::new(config).build_circuit_with_abort(netlist, &crate::abort::ProcessAbort) {
+    match engine.build_circuit_with_abort(netlist, &crate::abort::ProcessAbort) {
         Ok(_) => Ok(()),
         Err(rspice_core::SimulationError::Aborted) => Err(CliError::Interrupted),
         Err(error @ rspice_core::SimulationError::ResourceLimit(_)) => Err(error.into()),

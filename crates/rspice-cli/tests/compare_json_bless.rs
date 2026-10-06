@@ -130,3 +130,68 @@ fn cross_format_bless_never_replaces_or_creates_a_mislabelled_golden() {
         }
     }
 }
+
+#[test]
+fn bless_requires_the_candidate_to_satisfy_its_own_variable_selection() {
+    for existing in [false, true] {
+        for json in [false, true] {
+            for selector in ["missing", "x"] {
+                let dir = test_dir("invalid_bless_selection");
+                let result = dir.join("result.csv");
+                let golden = dir.join("golden.csv");
+                std::fs::write(&result, "time,V(x),I(x)\n0,1,2\n1,3,4\n").unwrap();
+                let original = "time,V(x)\n0,9\n1,9\n";
+                if existing {
+                    std::fs::write(&golden, original).unwrap();
+                }
+                let mut command = Command::new(env!("CARGO_BIN_EXE_rspice"));
+                command
+                    .args(["--quiet", "compare"])
+                    .arg(&result)
+                    .arg(&golden)
+                    .args(["--bless", "--variables", selector]);
+                if json {
+                    command.arg("--json");
+                }
+                let output = command.output().unwrap();
+                assert_eq!(
+                    output.status.code(),
+                    Some(3),
+                    "existing={existing}, json={json}, selector={selector}: {output:?}"
+                );
+                assert!(
+                    String::from_utf8_lossy(&output.stderr).contains("cannot bless"),
+                    "{output:?}"
+                );
+                if existing {
+                    assert_eq!(std::fs::read_to_string(&golden).unwrap(), original);
+                } else {
+                    assert!(!golden.exists());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn bootstrap_bless_validates_interpolation_before_creating_a_golden() {
+    for json in [false, true] {
+        let dir = test_dir("invalid_bless_interpolation");
+        let result = dir.join("result.csv");
+        let golden = dir.join("golden.csv");
+        std::fs::write(&result, "time,V(x)\n1,1\n0,0\n").unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_rspice"));
+        command
+            .args(["--quiet", "compare"])
+            .arg(&result)
+            .arg(&golden)
+            .args(["--bless", "--interpolate"]);
+        if json {
+            command.arg("--json");
+        }
+        let output = command.output().unwrap();
+        assert_eq!(output.status.code(), Some(3), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("strictly increasing"));
+        assert!(!golden.exists());
+    }
+}
