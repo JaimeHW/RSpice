@@ -924,6 +924,8 @@ pub struct CompileDiagnostic {
 /// values are populated only when those offsets are valid UTF-8 boundaries in
 /// `source`; this prevents a preprocessor-expanded span from being presented as
 /// a false original-source location.
+/// Messages omit offsets so callers can attach remapped source locations
+/// without also displaying a contradictory expanded-input offset.
 pub fn compile_diagnostics(source: &str, error: &CompileError) -> Vec<CompileDiagnostic> {
     let mut diagnostics = Vec::new();
     collect_compile_diagnostics(source, error, &mut diagnostics);
@@ -947,7 +949,7 @@ fn collect_compile_diagnostics(
             CompileDiagnosticSeverity::Error,
             CompileDiagnosticPhase::Lexer,
             code,
-            error.to_string(),
+            format!("Lexer error: {}", inner.kind),
             Some(inner.span),
         )),
         CompileError::Parser(inner) => diagnostics.push(diagnostic(
@@ -955,7 +957,7 @@ fn collect_compile_diagnostics(
             CompileDiagnosticSeverity::Error,
             CompileDiagnosticPhase::Parser,
             code,
-            error.to_string(),
+            format!("Parse error: {}", inner.kind),
             Some(inner.span),
         )),
         CompileError::Semantic(inner) => diagnostics.push(diagnostic(
@@ -963,7 +965,7 @@ fn collect_compile_diagnostics(
             CompileDiagnosticSeverity::Error,
             CompileDiagnosticPhase::Semantic,
             code,
-            error.to_string(),
+            format!("Semantic error: {}", inner.kind),
             Some(inner.span),
         )),
         CompileError::CodeGen(inner) => diagnostics.push(diagnostic(

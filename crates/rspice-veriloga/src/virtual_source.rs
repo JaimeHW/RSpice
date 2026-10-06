@@ -16,6 +16,7 @@ use crate::preprocessor::{
     PreprocessedDependency, PreprocessedInclude, SourceDocument, SourceDocumentOrigin,
     SourceProvider, SourceProviderLimits,
 };
+use crate::source_diagnostics::source_line_range;
 use crate::{CompileDiagnosticPhase, PreprocessorError};
 use crate::{CompileError, CompileResult, CompilerOptions, IntegrationOrder, RuntimeCompileReport};
 
@@ -315,90 +316,29 @@ impl VirtualRuntimeCompileFailure {
             .into_iter()
             .map(|diagnostic| {
                 let mapped = diagnostic.span.as_ref().and_then(|span| {
-                    let offset = usize::try_from(span.byte_start).ok()?;
-                    let segment = preprocessed.segment_at(offset)?;
-                    let logical_path = path_to_logical(&segment.logical_path);
-                    let dependency = dependencies
-                        .iter()
-                        .find(|dependency| dependency.logical_path == logical_path)?;
-                    let line_range = source_line_range(&dependency.source, segment.source_line)?;
-                    let expanded_line =
-                        &preprocessed.source[segment.expanded_start..segment.expanded_end];
-                    let original_line = &dependency.source[line_range.clone()];
-                    let exact_line = expanded_line.trim_end_matches(['\r', '\n'])
-                        == original_line.trim_end_matches(['\r', '\n']);
-                    let local_start = offset.saturating_sub(segment.expanded_start);
-                    let requested_end = usize::try_from(span.byte_end).ok()?;
-                    let local_end = requested_end.saturating_sub(segment.expanded_start);
-                    let (byte_start, byte_end, column) = if exact_line {
-                        let start = line_range
-                            .start
-                            .saturating_add(local_start)
-                            .min(line_range.end);
-                        let end = line_range
-                            .start
-                            .saturating_add(local_end)
-                            .min(line_range.end);
-                        (
-                            start,
-                            end.max(start),
-                            dependency.source[line_range.start..start].chars().count() + 1,
-                        )
-                    } else {
-                        (line_range.start, line_range.end, 1)
-                    };
-                    Some((
-                        logical_path,
-                        dependency.source.clone(),
-                        byte_start,
-                        byte_end,
-                        segment.source_line,
-                        column,
-                    ))
+                    preprocessed.map_span(span, |path| {
+                        let logical_path = path_to_logical(path);
+                        dependencies
+                            .iter()
+                            .find(|dependency| dependency.logical_path == logical_path)
+                            .map(|dependency| dependency.source.as_str())
+                    })
                 });
-                let (logical_path, source, byte_start, byte_end, line, column) = mapped.map_or(
-                    (None, None, None, None, None, None),
-                    |(path, source, start, end, line, column)| {
-                        (
-                            Some(path),
-                            Some(source),
-                            Some(start),
-                            Some(end),
-                            Some(line),
-                            Some(column),
-                        )
-                    },
-                );
                 VirtualSourceDiagnostic {
                     phase: diagnostic.phase,
                     code: diagnostic.code,
                     message: diagnostic.message,
-                    logical_path,
-                    source,
-                    byte_start,
-                    byte_end,
-                    line,
-                    column,
+                    logical_path: mapped.as_ref().map(|span| path_to_logical(span.path)),
+                    source: mapped.as_ref().map(|span| span.source.to_owned()),
+                    byte_start: mapped.as_ref().map(|span| span.byte_start),
+                    byte_end: mapped.as_ref().map(|span| span.byte_end),
+                    line: mapped.as_ref().map(|span| span.line),
+                    column: mapped.as_ref().map(|span| span.column),
                 }
             })
             .collect();
         Self { error, diagnostics }
     }
-}
-
-fn source_line_range(source: &str, one_based_line: usize) -> Option<std::ops::Range<usize>> {
-    if one_based_line == 0 {
-        return None;
-    }
-    let mut start = 0usize;
-    for (index, line) in source.split_inclusive('\n').enumerate() {
-        let end = start.saturating_add(line.len());
-        if index + 1 == one_based_line {
-            return Some(start..end);
-        }
-        start = end;
-    }
-    None
 }
 
 /// Complete output of a sealed virtual runtime compilation.

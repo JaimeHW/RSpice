@@ -115,6 +115,7 @@ pub mod runtime_report;
 pub mod rust_backend;
 pub mod semantic;
 pub mod source;
+mod source_diagnostics;
 pub mod specialist;
 pub mod stdlib;
 pub mod time_scale;
@@ -208,14 +209,28 @@ pub struct ConnectSpecification {
 pub use connection_artifact::ConnectionLibraryArtifact;
 pub use prepared_source::{PreparedRuntimeSource, PreparedSourceDependency};
 pub use prepared_virtual_source::PreparedVirtualSource;
+pub use source_diagnostics::SourceCompileDiagnostic;
 
 /// Failure at the source-provider or compiler boundary.
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderCompileError {
     #[error(transparent)]
     Source(#[from] PreprocessorError),
-    #[error(transparent)]
-    Compile(#[from] CompileError),
+    #[error("{source}")]
+    Compile {
+        #[source]
+        source: CompileError,
+        diagnostics: Vec<SourceCompileDiagnostic>,
+    },
+}
+
+impl From<CompileError> for ProviderCompileError {
+    fn from(source: CompileError) -> Self {
+        Self::Compile {
+            source,
+            diagnostics: Vec::new(),
+        }
+    }
 }
 
 /// Result of compiling a Verilog-A source file from disk.
@@ -1488,7 +1503,8 @@ impl VerilogACompiler {
         Ok(pp.take_dependencies())
     }
 
-    /// Compile an admitted source closure, retaining typed loader failures.
+    /// Compile an admitted source closure, retaining typed loader failures and
+    /// compiler diagnostics mapped to the original source documents.
     /// The provider owns bounded reads and preprocessing cancellation; `control`
     /// supplies cancellation checkpoints in the subsequent compiler phases.
     pub fn compile_provider_module_with_metadata_and_control(
@@ -1508,14 +1524,24 @@ impl VerilogACompiler {
             .map_err(CompileError::from)?;
         let mut pp = self.configured_preprocessor();
         let started = web_time::Instant::now();
-        let source = pp.preprocess_provider_root(provider, root)?;
+        let preprocessed = pp.preprocess_provider_root_mapped(provider, root)?;
         let dependencies = pp.dependencies();
         measurements
             .record(PipelinePhase::Preprocess, started.elapsed())
             .map_err(CompileError::from)?;
-        measurements.metrics_mut().preprocessed_bytes = metrics::usize_to_u64(source.len());
+        measurements.metrics_mut().preprocessed_bytes =
+            metrics::usize_to_u64(preprocessed.source.len());
         measurements.metrics_mut().dependency_count = metrics::usize_to_u64(dependencies.len());
-        let model = self.compile_preprocessed_measured(&source, module_name, &mut measurements)?;
+        let model = self
+            .compile_preprocessed_measured(&preprocessed.source, module_name, &mut measurements)
+            .map_err(|source| ProviderCompileError::Compile {
+                diagnostics: source_diagnostics::provider_diagnostics(
+                    &source,
+                    &preprocessed,
+                    pp.dependency_documents(),
+                ),
+                source,
+            })?;
         Ok(CompiledFile {
             model,
             dependencies,

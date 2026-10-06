@@ -51,11 +51,30 @@ fn print_cli_error(error: &cli::CliError, format: cli::ErrorFormat) {
     let details = error.details();
     match format {
         cli::ErrorFormat::Text => {
-            match source_context(&details) {
-                Some(location) => {
-                    crate::console::diagnostic_line(format_args!("Error: {location}: {error}"))
+            if details.diagnostics.is_empty() {
+                match source_context(&details) {
+                    Some(location) => {
+                        crate::console::diagnostic_line(format_args!("Error: {location}: {error}"))
+                    }
+                    None => crate::console::diagnostic_line(format_args!("Error: {error}")),
                 }
-                None => crate::console::diagnostic_line(format_args!("Error: {error}")),
+            } else {
+                for diagnostic in &details.diagnostics {
+                    let mut location = diagnostic.path.clone().unwrap_or_default();
+                    if let Some(line) = diagnostic.line {
+                        location.push_str(&format!(":{line}"));
+                        if let Some(column) = diagnostic.column {
+                            location.push_str(&format!(":{column}"));
+                        }
+                    }
+                    if !location.is_empty() {
+                        location.push_str(": ");
+                    }
+                    crate::console::diagnostic_line(format_args!(
+                        "Error: {location}[{}] {}",
+                        diagnostic.code, diagnostic.message
+                    ));
+                }
             }
             let mut identity = Vec::new();
             if let Some(analysis) = &details.analysis_id {
@@ -112,6 +131,7 @@ fn print_cli_error(error: &cli::CliError, format: cli::ErrorFormat) {
                     "canonical_instance_name": details.canonical_instance_name,
                     "missing_dependency": details.missing_dependency,
                     "reason": details.reason,
+                    "diagnostics": details.diagnostics,
                 },
             });
             match serde_json::to_string(&payload) {

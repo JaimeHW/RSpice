@@ -59,6 +59,9 @@ pub struct ErrorDetails {
     pub missing_dependency: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<&'static str>,
+    /// Individual compiler errors resolved against original source documents.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<rspice_veriloga::SourceCompileDiagnostic>,
 }
 
 impl ErrorDetails {
@@ -81,6 +84,7 @@ impl ErrorDetails {
             canonical_instance_name: None,
             missing_dependency: None,
             reason: None,
+            diagnostics: Vec::new(),
         }
     }
 }

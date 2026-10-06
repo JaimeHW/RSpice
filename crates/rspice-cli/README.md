@@ -651,6 +651,10 @@ and config `paths.veriloga_includes`. Built-in standard headers are the fallback
 Unreadable entries and broken links stop include resolution instead of selecting
 a different source. File read failures retain their I/O category and source path
 in machine-readable diagnostics.
+Compiler failures identify the original source file, line, and column after
+include and macro expansion. JSON errors retain each compiler diagnostic's code,
+phase, and original UTF-8 byte range in `error.diagnostics`; macro expansions
+select the complete invocation line when an exact token range is unavailable.
 Use `--module NAME` to select a module in a multi-module source. Root bytes and
 lines, total dependency bytes, include depth, and expanded bytes obey the
 configured resource limits; compilation supports Ctrl-C cancellation.

@@ -385,3 +385,84 @@ fn preprocessing_diagnostics_name_the_authored_include_and_line() {
         header.canonicalize().unwrap()
     );
 }
+
+#[test]
+fn compiler_diagnostics_identify_original_include_and_macro_locations() {
+    let dir = common::test_dir("compiler_locations");
+    let root = dir.join("root.va");
+    let child = dir.join("child.va");
+    let output_path = dir.join("interface.json");
+    std::fs::write(
+        &root,
+        "`include \"disciplines.vams\"\n`include \"child.va\"\n",
+    )
+    .unwrap();
+    for (body, phase, expected_line, token) in [
+        ("analog I(p,n) <+ @;", "Parser", 4, "@"),
+        ("analog I(p,n) <+ \u{a3};", "Lexer", 4, "\u{a3}"),
+        (
+            "parameter real R=1;\nparameter real R=2;",
+            "Semantic",
+            5,
+            "R",
+        ),
+        ("`define BAD @\nanalog I(p,n) <+ `BAD;", "Parser", 5, "`BAD"),
+    ] {
+        let source = format!(
+            "// original child\nmodule selected(p,n);\ninout p,n; electrical p,n;\n{body}\nendmodule\n"
+        );
+        std::fs::write(&child, &source).unwrap();
+        std::fs::write(&output_path, "previous interface").unwrap();
+        for format in ["text", "json"] {
+            let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+                .args(["--quiet", "--error-format", format, "compile-va"])
+                .arg(&root)
+                .arg("-o")
+                .arg(&output_path)
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(1), "{output:?}");
+            let stderr = String::from_utf8(output.stderr).unwrap();
+            if format == "text" {
+                assert!(!stderr.contains("at offset"), "{stderr}");
+                assert!(
+                    stderr.contains(&format!("child.va:{expected_line}:")),
+                    "{stderr}"
+                );
+            } else {
+                let error: serde_json::Value = serde_json::from_str(&stderr).unwrap();
+                assert_eq!(error["error"]["line"], expected_line, "{error}");
+                assert!(
+                    !error["error"]["message"]
+                        .as_str()
+                        .unwrap()
+                        .contains("at offset"),
+                    "{error}"
+                );
+                let diagnostics = error["error"]["diagnostics"].as_array().unwrap();
+                assert_eq!(diagnostics.len(), 1, "{error}");
+                let diagnostic = &diagnostics[0];
+                assert_eq!(diagnostic["phase"], phase, "{error}");
+                assert_eq!(diagnostic["line"], expected_line, "{error}");
+                assert_eq!(
+                    std::path::Path::new(diagnostic["path"].as_str().unwrap())
+                        .canonicalize()
+                        .unwrap(),
+                    child.canonicalize().unwrap()
+                );
+                let start = diagnostic["byte_start"].as_u64().unwrap() as usize;
+                let end = diagnostic["byte_end"].as_u64().unwrap() as usize;
+                assert!(source[start..end].contains(token), "{error}");
+                if token == "`BAD" {
+                    assert_eq!(diagnostic["column"], 1, "{error}");
+                }
+                assert!(diagnostic["code"].as_str().unwrap().starts_with("VA-"));
+                assert!(diagnostic.get("source").is_none(), "{error}");
+            }
+            assert_eq!(
+                std::fs::read_to_string(&output_path).unwrap(),
+                "previous interface"
+            );
+        }
+    }
+}

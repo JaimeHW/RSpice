@@ -265,7 +265,10 @@ fn compile_error(
     use rspice_veriloga::preprocessor::SourceResource;
     use rspice_veriloga::{CompileError, ProviderCompileError};
     match error {
-        ProviderCompileError::Compile(CompileError::Cancelled(_)) => CliError::Interrupted,
+        ProviderCompileError::Compile {
+            source: CompileError::Cancelled(_),
+            ..
+        } => CliError::Interrupted,
         ProviderCompileError::Source(error) if error.cancelled => CliError::Interrupted,
         ProviderCompileError::Source(error) if error.resource_limit.is_some() => {
             let limit = error.resource_limit.expect("matched resource failure");
@@ -310,8 +313,28 @@ fn compile_error(
             details.line = (source.line > 0).then_some(source.line);
             CliError::reported(error.to_string(), Some(details))
         }
-        error => CliError::VerilogAError {
-            message: error.to_string(),
-        },
+        ProviderCompileError::Compile {
+            source,
+            diagnostics,
+        } => {
+            let error = CliError::VerilogAError {
+                message: if diagnostics.is_empty() {
+                    source.to_string()
+                } else {
+                    diagnostics
+                        .iter()
+                        .map(|diagnostic| diagnostic.message.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                },
+            };
+            let mut details = error.details();
+            if let Some(primary) = diagnostics.first() {
+                details.path = primary.path.clone();
+                details.line = primary.line;
+            }
+            details.diagnostics = diagnostics;
+            CliError::reported(error.to_string(), Some(details))
+        }
     }
 }
