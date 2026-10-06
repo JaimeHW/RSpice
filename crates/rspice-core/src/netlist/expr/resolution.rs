@@ -7,6 +7,7 @@ use std::collections::HashSet;
 #[derive(Debug)]
 pub(crate) enum ParameterResolutionError {
     Aborted,
+    IncompleteScope(usize),
     Definition(String),
     Expression(ExprError),
 }
@@ -22,6 +23,9 @@ impl From<ExprError> for ParameterResolutionError {
 pub(crate) trait ParameterEnvironment {
     fn parameters(&self, scope: usize) -> &ParamContext;
     fn owner_scope(&self, scope: usize, name: &str, global: bool) -> usize;
+    fn ensure_ready(&self, _scope: usize) -> Result<(), ParameterResolutionError> {
+        Ok(())
+    }
 }
 
 impl ParameterEnvironment for ParamContext {
@@ -67,10 +71,6 @@ impl ParameterResolver {
         abort: &dyn AbortSignal,
     ) -> Result<ComplexValue, ParameterResolutionError> {
         self.resolve_scoped(0, true, name, expression, params, abort)
-    }
-
-    pub(crate) fn value(&self, name: &str, params: &ParamContext) -> Option<ComplexValue> {
-        self.scoped_value(0, name, params)
     }
 
     pub(crate) fn scoped_value(
@@ -124,6 +124,7 @@ impl ParameterResolver {
         if abort.is_aborted() {
             return Err(ParameterResolutionError::Aborted);
         }
+        environment.ensure_ready(scope)?;
         let namespace = usize::from(global);
         let params = environment.parameters(scope);
         let name = name.to_ascii_uppercase();
@@ -178,6 +179,7 @@ impl ParameterResolver {
                 PreparedProgress::MissingParameter(dependency) => {
                     let namespace = usize::from(!params.has_parameter_binding(&dependency));
                     let scope = environment.owner_scope(current.scope, &dependency, namespace == 1);
+                    environment.ensure_ready(scope)?;
                     let params = environment.parameters(scope);
                     if active.contains(&(scope, namespace, dependency.clone())) {
                         let mut names = stack
@@ -219,6 +221,42 @@ impl ParameterResolver {
             }
         }
         Ok(self.values[&scope][namespace][&name])
+    }
+
+    /// Resolve a demanded lexical binding after its declaration scope closes.
+    /// Captured numeric values are supplied by the consumer before this path.
+    pub(crate) fn resolve_binding(
+        &mut self,
+        scope: usize,
+        name: &str,
+        environment: &impl ParameterEnvironment,
+        abort: &dyn AbortSignal,
+    ) -> Result<ComplexValue, ParameterResolutionError> {
+        if abort.is_aborted() {
+            return Err(ParameterResolutionError::Aborted);
+        }
+        let global = !environment.parameters(scope).has_parameter_binding(name);
+        let owner = environment.owner_scope(scope, name, global);
+        environment.ensure_ready(owner)?;
+        let params = environment.parameters(owner);
+        let expression = if global {
+            params.get_global_expression(name)
+        } else {
+            params.get_parameter_expression(name)
+        };
+        if let Some(expression) = expression {
+            return self.resolve_scoped(owner, global, name, expression, environment, abort);
+        }
+        let value = if global {
+            params.get_global_complex(name)
+        } else if params.has_parameter_binding(name) {
+            params.get_complex(name)
+        } else {
+            None
+        }
+        .ok_or_else(|| ExprError::UndefinedParam(name.to_owned()))?;
+        self.values.entry(owner).or_default()[usize::from(global)].insert(name.to_owned(), value);
+        Ok(value)
     }
 
     fn pending(
@@ -266,6 +304,9 @@ impl std::fmt::Display for ParameterResolutionError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Aborted => formatter.write_str("parameter resolution was cancelled"),
+            Self::IncompleteScope(scope) => {
+                write!(formatter, "parameter scope {scope} is still open")
+            }
             Self::Definition(message) => formatter.write_str(message),
             Self::Expression(error) => error.fmt(formatter),
         }

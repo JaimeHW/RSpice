@@ -1137,9 +1137,13 @@ fn parse_netlist_impl(
     if let Some(seed) = options.statistical_seed {
         state.options.seed = Some(seed);
     }
-    state
-        .temperature_options
-        .resolve_scope(0, &mut state.params, &mut state.options, abort)?;
+    state.temperature_options.resolve_scope(
+        &mut state.scopes,
+        &mut state.params,
+        &mut state.subckt_stack,
+        &mut state.options,
+        abort,
+    )?;
     // Authored option cards must not undo a physical replay coordinate.
     apply_replayed_temperature(&mut state)?;
     if let Some(policy) = state.options.remove_unused.clone() {
@@ -4591,16 +4595,16 @@ fn process_line_gated(
     if state.conditionals_suppress() {
         return Ok(());
     }
-    let temperature_depth = state.subckt_stack.len();
     if line
         .split_whitespace()
         .next()
         .is_some_and(|head| head.eq_ignore_ascii_case(".ends"))
-        && let Some(frame) = state.subckt_stack.last_mut()
+        && !state.subckt_stack.is_empty()
     {
         state.temperature_options.resolve_scope(
-            temperature_depth,
-            &mut frame.local_params,
+            &mut state.scopes,
+            &mut state.params,
+            &mut state.subckt_stack,
             &mut state.options,
             abort,
         )?;

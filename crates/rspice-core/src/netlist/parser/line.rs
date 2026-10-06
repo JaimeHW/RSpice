@@ -482,7 +482,7 @@ pub(super) fn process_line(
         &mut state.measurements,
         ParseLineContext {
             analysis_cards: &mut state.analysis_cards,
-                    scopes: &mut state.scopes,
+            scopes: &mut state.scopes,
             parameter_direction: state.parameter_direction.as_deref_mut(),
             parameter_overrides: &state.parameter_overrides,
             analyses: &mut state.analyses,

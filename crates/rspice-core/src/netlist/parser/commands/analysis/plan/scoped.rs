@@ -9,7 +9,7 @@ pub(super) fn bind(
     context: AnalysisCardContext<'_>,
     abort: &dyn AbortSignal,
 ) -> Result<ParsedAnalysisCard, ParseWithAbortError> {
-    let environment = scopes.environment(pending.scope, context.params, abort)?;
+    let environment = scopes.environment(pending.scope, context.params, &[], abort)?;
     stage(pending, context, &environment.isolated(), abort)?;
     let (card, resolver) = stage(pending, context, &environment, abort)?;
     scopes.materialize_closed(&resolver, &environment, abort)?;
