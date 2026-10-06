@@ -1,5 +1,7 @@
 mod bjt;
+mod input;
 pub(in crate::engine) use bjt::BjtNoiseProjection;
+use input::NoiseInputReference;
 mod port;
 pub(super) use port::{PortNoiseWorkspace, PreparedPortNoise, validate_port_noise_frequencies};
 
@@ -3097,6 +3099,10 @@ impl Engine {
     /// Run input-referred noise analysis using case-insensitive SPICE node
     /// names. Ground aliases resolve to node zero. The circuit is built only
     /// once; name resolution and analysis use the same canonical topology.
+    /// BestAvailable and Ngspice refer noise to a unit excitation at the
+    /// selected independent source, with other AC drives suppressed. Xyce
+    /// uses the full authored AC output phasor. Every dialect retains the
+    /// ordinary AC node voltages and branch currents in the result.
     #[allow(clippy::too_many_arguments)]
     pub fn run_noise_named_with_input_source_and_abort(
         &self,
@@ -3631,37 +3637,15 @@ impl Engine {
             temperature,
         )?;
 
-        let input_quantity = match input_source {
-            None => None,
-            Some(source_name) => {
-                use crate::analysis::noise::NoiseInputQuantity;
-                if circuit
-                    .voltage_sources
-                    .names
-                    .iter()
-                    .any(|name| name.eq_ignore_ascii_case(source_name))
-                {
-                    Some(NoiseInputQuantity::Voltage)
-                } else if circuit
-                    .current_sources
-                    .names
-                    .iter()
-                    .any(|name| name.eq_ignore_ascii_case(source_name))
-                {
-                    Some(NoiseInputQuantity::Current)
-                } else {
-                    return Err(SimulationError::Circuit(format!(
-                        "Noise input source '{}' not found (expected independent V/I source)",
-                        source_name
-                    )));
-                }
-            }
-        };
-        let has_input_source = input_quantity.is_some();
+        let input_reference = input_source
+            .map(|name| NoiseInputReference::resolve(&circuit, name))
+            .transpose()?;
+        let input_quantity = input_reference.as_ref().map(|input| input.quantity);
+        let has_input_source = input_reference.is_some();
 
-        // Xyce NOISE retains the ordinary AC solution and uses its selected
-        // output phasor for input-referred gain. This is the full deck AC
-        // excitation: all independent sources, magnitudes, and phases.
+        // Retain the ordinary AC phasors for observations in every dialect.
+        // Input referral is a separate contract: Xyce 7.10 uses this full AC
+        // output; ngspice 46 and BestAvailable use the selected unit source.
         let ac_excitation_rhs = Self::build_ac_excitation_rhs(&circuit);
         let noise_dialect = engine.config.spice_dialect;
         let runtime_veriloga_device_names = Self::runtime_veriloga_device_names(&circuit);
@@ -3748,22 +3732,6 @@ impl Engine {
                 }
                 Err(error) => return Err(SimulationError::Solver(error)),
             }
-            let input_gain_sq = if has_input_source {
-                let gain = Self::differential_noise_output_complex(
-                    ac_solution,
-                    output_pos,
-                    output_neg,
-                    num_nodes,
-                );
-                Self::effective_noise_gain_squared(
-                    noise_dialect,
-                    gain,
-                    input_source.unwrap_or("<unknown>"),
-                    freq,
-                )?
-            } else {
-                1.0
-            };
 
             let mut total_noise_v2_hz = 0.0;
             let mut total_noise_compensation = 0.0;
@@ -3794,6 +3762,21 @@ impl Engine {
                 }
                 Err(error) => return Err(SimulationError::Solver(error)),
             }
+
+            let input_gain_sq = if let Some(input) = &input_reference {
+                let gain = if noise_dialect == crate::engine::SpiceDialect::Xyce {
+                    Self::differential_noise_output_complex(
+                        ac_solution, output_pos, output_neg, num_nodes,
+                    )
+                } else {
+                    input.gain(transfer_solution)?
+                };
+                Self::effective_noise_gain_squared(
+                    noise_dialect, gain, input_source.unwrap_or("<unknown>"), freq,
+                )?
+            } else {
+                1.0
+            };
 
             for &index in &private_bjts {
                 let recovered = Self::bjt_noise_adjoint(
@@ -5354,7 +5337,7 @@ r1 a 0 rmod
     }
 
     #[test]
-    fn noise_retains_the_canonical_multi_source_ac_solution() {
+    fn xyce_noise_retains_the_canonical_multi_source_ac_solution() {
         let netlist = Netlist::parse(
             "Noise AC-observable parity\n\
              VIN in 0 0 AC 2 30\n\
@@ -5365,7 +5348,10 @@ r1 a 0 rmod
         )
         .expect("deck parses");
         let frequencies = [17.0, 2.5e6];
-        let engine = Engine::default();
+        let engine = Engine::new(crate::SimulationConfig {
+            spice_dialect: crate::SpiceDialect::Xyce,
+            ..crate::SimulationConfig::default()
+        });
         let ac = engine
             .run_ac(&netlist, &frequencies)
             .expect("AC analysis runs");
