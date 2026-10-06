@@ -47,7 +47,8 @@ fn assert_limit(error: SimulationError, limit: usize) -> usize {
     error.requested
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn live_transport_storage_is_bounded_independently_of_waveform_retention() {
     let netlist = deck(1, 90.0);
     let baseline = Engine::new(config(usize::MAX))
@@ -80,7 +81,8 @@ fn live_transport_storage_is_bounded_independently_of_waveform_retention() {
     assert_eq!(rerun.branch_currents, baseline.branch_currents);
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn the_history_budget_is_aggregate_across_devices_and_startup_modes() {
     let baseline = Engine::new(config(usize::MAX))
         .run_tran(&deck(1, 90.0), 1e-9, 1e-12)
@@ -117,7 +119,8 @@ fn the_history_budget_is_aggregate_across_devices_and_startup_modes() {
         .unwrap();
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn checkpoint_capture_accounts_for_the_live_history_and_all_retained_copies() {
     let netlist = deck(1, 90.0);
     let baseline = Engine::new(config(usize::MAX))
@@ -164,7 +167,8 @@ fn checkpoint_capture_accounts_for_the_live_history_and_all_retained_copies() {
     assert!(waveform.time.len() >= 1001);
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn restoration_obeys_the_new_budget_without_mutating_the_input_checkpoint() {
     let netlist = deck(1, 90.0);
     let config = SimulationConfig::default();

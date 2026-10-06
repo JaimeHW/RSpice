@@ -27,7 +27,8 @@ fn assert_noncausal(error: SimulationError, instance: &str) {
     );
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn gp_phase_runs_both_polarities_models_dialects_and_startup_modes() {
     for dialect in [
         SpiceDialect::Ngspice,
@@ -72,7 +73,8 @@ fn gp_phase_runs_both_polarities_models_dialects_and_startup_modes() {
     }
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn gp_phase_support_covers_preflight_checkpoint_compression_and_continuation() {
     use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
     let source = deck("TF=1n PTF=21 RB=100 RBM=20 IRB=1e-5");
@@ -140,7 +142,8 @@ fn gp_phase_support_covers_preflight_checkpoint_compression_and_continuation() {
     }
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn gp_noncausal_phase_refuses_before_startup_and_checkpoint_publication() {
     let source = deck("TF=1n PTF=-21");
     for model in [
@@ -175,7 +178,8 @@ fn gp_noncausal_phase_refuses_before_startup_and_checkpoint_publication() {
     }
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn gp_zero_phase_preserves_transient_and_checkpoint_behavior() {
     let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice));
     for private in ["", "RB=100 RBM=20 IRB=1e-5 RE=1 RC=2"] {
@@ -198,7 +202,8 @@ fn gp_zero_phase_preserves_transient_and_checkpoint_behavior() {
     }
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn gp_unused_phase_model_does_not_block_an_unaffected_circuit() {
     let source = Netlist::parse(
         "unused phase model\nV1 in 0 1\nR1 in 0 1k\n.model unused NPN TF=1n PTF=90\n.end\n",
@@ -214,7 +219,8 @@ fn gp_unused_phase_model_does_not_block_an_unaffected_circuit() {
     engine.run_tran(&source, 1e-9, 1e-10).unwrap();
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn gp_hierarchical_noncausal_phase_names_the_elaborated_instance() {
     let source = Netlist::parse(
         "hierarchical phase\nVC c 0 2\nVB b 0 .7\nXstage c b stage\n.subckt stage c b\nQphase c b 0 local\n.model local NPN TF=1n PTF=-21\n.ends\n.end\n",
@@ -230,7 +236,8 @@ fn gp_hierarchical_noncausal_phase_names_the_elaborated_instance() {
     assert_noncausal(error, "PTF");
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn gp_exact_transport_refines_toward_the_independent_delayed_exponential() {
     for dialect in [
         SpiceDialect::Ngspice,
@@ -277,7 +284,8 @@ fn gp_exact_transport_refines_toward_the_independent_delayed_exponential() {
     }
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn gp_phase_preserves_nominal_delay_at_temperature_with_area_and_multiplicity() {
     use rspice_core::GpTransientPhaseModel::{ExactDelay, NgspiceWeil};
     for dialect in [
@@ -438,7 +446,8 @@ fn gp_phase_preserves_nominal_delay_at_temperature_with_area_and_multiplicity() 
     }
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn gp_phase_cancellation_does_not_contaminate_a_later_run() {
     use rspice_core::abort_signal::CountingAbort;
     let source = deck("TF=1n PTF=21 RB=100 RBM=20 IRB=1e-5");
@@ -465,7 +474,8 @@ fn gp_phase_cancellation_does_not_contaminate_a_later_run() {
     }
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn gp_unresolvable_transport_arrival_is_not_coalesced_or_silently_removed() {
     let source = deck("TF=1n PTF=1e-200");
     let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice));

@@ -2411,9 +2411,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi 5.3.0",
  "wasip2",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -5489,6 +5491,7 @@ dependencies = [
  "dirs",
  "faer",
  "flate2",
+ "getrandom 0.3.4",
  "getrandom 0.4.3",
  "libm",
  "log",
@@ -5512,6 +5515,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "wasm-bindgen",
+ "wasm-bindgen-test",
  "wide",
  "windows-sys 0.61.2",
 ]

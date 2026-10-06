@@ -232,7 +232,8 @@ fn run(
     compare(&result, regime, polarity, dialect, model)
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn gp_exact_phase_tracks_nonlinear_transport_and_instantaneous_reverse_current() {
     for dialect in [
         SpiceDialect::Ngspice,
@@ -282,7 +283,8 @@ fn gp_exact_phase_tracks_nonlinear_transport_and_instantaneous_reverse_current()
     }
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn gp_weil_phase_tracks_the_nonlinear_recurrence_across_operating_regimes() {
     for dialect in [
         SpiceDialect::Ngspice,

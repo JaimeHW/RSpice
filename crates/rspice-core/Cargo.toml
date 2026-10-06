@@ -322,6 +322,13 @@ proptest.workspace = true
 # iteration bound is an exact number rather than a function of core count.
 rayon.workspace = true
 
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+# Register the same public-core regressions with the workspace's WASM runner.
+wasm-bindgen-test.workspace = true
+# Proptest's rand 0.9 uses getrandom 0.3, separately from the core's 0.4.
+# Its entropy backend must also be enabled when compiling WASM test binaries.
+getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+
 [build-dependencies]
 blake3 = { version = "1.5", features = ["pure"] }
 serde = { workspace = true, features = ["derive"] }
