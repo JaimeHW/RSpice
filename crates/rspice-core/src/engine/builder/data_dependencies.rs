@@ -3,7 +3,7 @@ use super::*;
 use std::path::PathBuf;
 
 impl Engine {
-    /// Discover native input candidates for XSPICE data-file models and
+    /// Discover native input candidates for XSPICE and PEM data-file models and
     /// behavioral lookup tables in sources, resistors, and capacitors.
     /// Uses the circuit builder's hierarchy and model/instance parameter
     /// resolution, including model defaults. Registered virtual inputs are
@@ -31,8 +31,10 @@ impl Engine {
             let mut found = false;
             for element in elements {
                 check_build_abort(abort)?;
-                if matches!(element.kind, ElementKind::Xspice { .. })
-                    || behavioral_data_expression(&element.kind).is_some()
+                if matches!(
+                    element.kind,
+                    ElementKind::Xspice { .. } | ElementKind::XyceMemristor { .. }
+                ) || behavioral_data_expression(&element.kind).is_some()
                 {
                     found = true;
                     break;
@@ -65,6 +67,15 @@ impl Engine {
         let mut paths = BTreeSet::new();
         for element in flattened.elements {
             check_build_abort(abort)?;
+            if let ElementKind::XyceMemristor { model, .. } = &element.kind {
+                collect_pem_data_inputs(
+                    &isolated,
+                    &element.name,
+                    model,
+                    engine.config.temperature,
+                    &mut paths,
+                )?;
+            }
             if let Some(expression) = behavioral_data_expression(&element.kind) {
                 collect_behavioral_data_inputs(&isolated, &element, expression, abort, &mut paths)?;
             }
@@ -131,6 +142,40 @@ impl Engine {
         check_build_abort(abort)?;
         Ok(paths.into_iter().collect())
     }
+}
+
+fn collect_pem_data_inputs(
+    netlist: &Netlist,
+    element_name: &str,
+    model_name: &str,
+    temperature: Value,
+    paths: &mut BTreeSet<PathBuf>,
+) -> Result<(), SimulationError> {
+    let model = find_model_def(netlist, model_name).ok_or_else(|| {
+        SimulationError::Circuit(format!(
+            "Xyce memristor '{element_name}' references unknown model '{model_name}'"
+        ))
+    })?;
+    if resolve_native_xyce_memristor_family(netlist, model, element_name, model_name, temperature)?
+        != NativeXyceMemristorFamily::Pem
+    {
+        return Ok(());
+    }
+    for (parameter, default) in [
+        (
+            "FXPDATA",
+            crate::device::XYCE_PEM_DEFAULT_POSITIVE_TABLE_FILE,
+        ),
+        (
+            "FXMDATA",
+            crate::device::XYCE_PEM_DEFAULT_NEGATIVE_TABLE_FILE,
+        ),
+    ] {
+        let path =
+            xyce_pem_table_path(netlist, model, element_name, model_name, parameter, default)?;
+        paths.extend(crate::xspice::data_file_input_candidates(&path));
+    }
+    Ok(())
 }
 
 fn behavioral_data_expression(kind: &ElementKind) -> Option<&str> {

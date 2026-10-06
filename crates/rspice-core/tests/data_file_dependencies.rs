@@ -32,6 +32,25 @@ fn behavioral_dependencies_expand_functions_and_use_the_readers_path_rules() {
 }
 
 #[test]
+fn pem_inputs_include_deck_relative_defaults_and_only_the_active_family() {
+    let root = std::env::temp_dir().join("rspice-pem-dependency-paths");
+    let netlist = Netlist::parse_with_path(
+        "PEM inputs\n\
+         .model unused memristor level=4 fxpdata=\"unused.csv\"\n\
+         .model pem memristor level=4 fxpdata=\"positive.csv\"\n\
+         .model team memristor level=2\n\
+         YMEMRISTOR mr1 in 0 pem\n\
+         YMEMRISTOR mr2 in 0 team\n.end\n",
+        &root.join("deck.cir"),
+    )
+    .unwrap();
+    assert_eq!(
+        candidates(&netlist),
+        vec![root.join("filem.dat"), root.join("positive.csv")]
+    );
+}
+
+#[test]
 fn active_model_and_instance_paths_use_builder_precedence_without_reading_files() {
     let root = std::env::temp_dir().join("rspice-xspice-dependency-paths");
     let netlist = Netlist::parse_with_path(
