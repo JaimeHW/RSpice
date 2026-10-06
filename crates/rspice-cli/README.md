@@ -33,6 +33,33 @@ includes resolve against the working directory. Every flag is in
 `rspice <command> --help`; what follows is the behaviour a flag list does not
 show.
 
+## Inspecting a netlist
+
+`info --models` includes each model's type and parameters, preserving numeric,
+expression, string, and vector values. `info --hierarchy` shows root instances,
+their connections and parameter overrides, and subcircuit definitions with
+their ports, defaults, local parameters, and instance references. Nested
+definitions retain the parser's qualified names and appear under their owning
+scope. References are not recursively expanded, so repeated or recursive
+instances remain finite to inspect. This is a view of the parsed deck; use
+`check` to validate it and `run` to elaborate and simulate it.
+
+The version-1 `rspice.info` JSON envelope retains its summary fields, including
+the `models` and `subcircuits` name lists. `--models --json` adds
+`model_definitions`; `--hierarchy --json` adds `hierarchy`, whose `instances` and
+`definitions` describe each scope. Each parameter entry carries `name`, `kind`,
+and `value`. Optional reports are `null` when their flags are absent. Text and
+JSON output report write failures through the normal CLI I/O diagnostics.
+
+`--detailed` adds element names, node connections, and typed device/source
+specifications in either format. JSON exposes these as `element_details`;
+combine it with `--hierarchy` to include each definition's elements. Device
+values that require expression or model evaluation are `null`, accompanied by
+their expression or model reference. Waveform arguments that depend on analysis
+defaults are the string `"default"`; infinite waveform limits are `"unbounded"`
+or `"negative_infinity"`. Finite numbers retain their parsed values in core
+units. The inspection does not evaluate a subcircuit for a particular instance.
+
 ## Supported-feature boundaries
 
 The CLI is an adapter over the core engine. An engine entry point does not

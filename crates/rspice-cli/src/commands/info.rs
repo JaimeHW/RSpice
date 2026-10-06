@@ -3,6 +3,12 @@
 use crate::cli::{CliError, Config, InfoArgs};
 use crate::commands::truncate;
 use rspice_core::Netlist;
+use std::io::Write;
+use std::path::Path;
+
+mod elements;
+mod hierarchy;
+mod parameters;
 
 /// Execute the info command
 pub fn execute(
@@ -13,124 +19,130 @@ pub fn execute(
 ) -> Result<(), CliError> {
     let netlist = crate::commands::parse_netlist_input(&args.input, &args.netlist_options, config)?;
 
+    let mut out = std::io::stdout().lock();
     if args.json {
-        print_json(&netlist, &args)?;
+        print_json(&mut out, &netlist, &args)?;
     } else {
         crate::commands::emit_netlist_diagnostics(&netlist, quiet);
-        print_summary(&netlist, &args, quiet)?;
+        print_summary(&mut out, &netlist, &args)
+            .map_err(|error| CliError::output_error(Path::new("stdout"), error))?;
     }
 
-    Ok(())
+    out.flush()
+        .map_err(|error| CliError::output_error(Path::new("stdout"), error))
 }
 
-fn print_summary(netlist: &Netlist, args: &InfoArgs, _quiet: bool) -> Result<(), CliError> {
-    println!("╔══════════════════════════════════════════════════════════════════╗");
-    println!("║  Netlist: {:<56} ║", truncate(&netlist.title, 56));
-    println!("╚══════════════════════════════════════════════════════════════════╝");
-    println!();
+fn print_summary(out: &mut impl Write, netlist: &Netlist, args: &InfoArgs) -> std::io::Result<()> {
+    writeln!(
+        out,
+        "╔══════════════════════════════════════════════════════════════════╗"
+    )?;
+    writeln!(out, "║  Netlist: {:<56} ║", truncate(&netlist.title, 56))?;
+    writeln!(
+        out,
+        "╚══════════════════════════════════════════════════════════════════╝"
+    )?;
+    writeln!(out)?;
 
     let counts = count_elements(netlist);
-    println!("Elements ({} total):", counts.total);
+    writeln!(out, "Elements ({} total):", counts.total)?;
     if counts.resistors > 0 {
-        println!("  Resistors:      {:>6}", counts.resistors);
+        writeln!(out, "  Resistors:      {:>6}", counts.resistors)?;
     }
     if counts.capacitors > 0 {
-        println!("  Capacitors:     {:>6}", counts.capacitors);
+        writeln!(out, "  Capacitors:     {:>6}", counts.capacitors)?;
     }
     if counts.inductors > 0 {
-        println!("  Inductors:      {:>6}", counts.inductors);
+        writeln!(out, "  Inductors:      {:>6}", counts.inductors)?;
     }
     if counts.diodes > 0 {
-        println!("  Diodes:         {:>6}", counts.diodes);
+        writeln!(out, "  Diodes:         {:>6}", counts.diodes)?;
     }
     if counts.bjts > 0 {
-        println!("  BJTs:           {:>6}", counts.bjts);
+        writeln!(out, "  BJTs:           {:>6}", counts.bjts)?;
     }
     if counts.mosfets > 0 {
-        println!("  MOSFETs:        {:>6}", counts.mosfets);
+        writeln!(out, "  MOSFETs:        {:>6}", counts.mosfets)?;
     }
     if counts.voltage_sources > 0 {
-        println!("  Voltage Sources:{:>6}", counts.voltage_sources);
+        writeln!(out, "  Voltage Sources:{:>6}", counts.voltage_sources)?;
     }
     if counts.current_sources > 0 {
-        println!("  Current Sources:{:>6}", counts.current_sources);
+        writeln!(out, "  Current Sources:{:>6}", counts.current_sources)?;
     }
     if counts.subcircuits > 0 {
-        println!("  Subcircuits:    {:>6}", counts.subcircuits);
+        writeln!(out, "  Subcircuits:    {:>6}", counts.subcircuits)?;
     }
     if counts.other > 0 {
-        println!("  Other:          {:>6}", counts.other);
+        writeln!(out, "  Other:          {:>6}", counts.other)?;
     }
-    println!();
+    writeln!(out)?;
 
     if !netlist.analyses.is_empty() {
-        println!("Analyses ({}):", netlist.analyses.len());
+        writeln!(out, "Analyses ({}):", netlist.analyses.len())?;
         for analysis in &netlist.analyses {
-            println!("  • {:?}", analysis);
+            writeln!(out, "  • {:?}", analysis)?;
         }
-        println!();
+        writeln!(out)?;
     }
 
     if args.detailed {
-        print_detailed_elements(netlist);
+        print_detailed_elements(out, netlist)?;
     }
 
-    if args.models && !netlist.models.is_empty() {
-        println!("Models ({}):", netlist.models.len());
+    if args.models {
+        writeln!(out, "Models ({}):", netlist.models.len())?;
         for model in &netlist.models {
-            println!("  {} ({})", model.name, model.model_type);
+            writeln!(out, "  {} ({})", model.name, model.model_type)?;
+            for parameter in parameters::model_parameters(model) {
+                writeln!(out, "    {parameter}")?;
+            }
         }
-        println!();
+        writeln!(out)?;
     }
 
     if args.params {
         let mut params = netlist.params.all_params();
         params.sort_by(|a, b| a.0.cmp(&b.0));
         if params.is_empty() {
-            println!("Parameters: none");
-            println!();
+            writeln!(out, "Parameters: none")?;
+            writeln!(out)?;
         } else {
-            println!("Parameters ({}):", params.len());
+            writeln!(out, "Parameters ({}):", params.len())?;
             for (name, value) in &params {
-                println!("  {} = {}", name, value);
+                writeln!(out, "  {} = {}", name, value)?;
             }
-            println!();
+            writeln!(out)?;
         }
     }
 
-    if args.hierarchy && !netlist.subcircuits.is_empty() {
-        println!("Subcircuits ({}):", netlist.subcircuits.len());
-        for subckt in &netlist.subcircuits {
-            println!(
-                "  {} ({} ports, {} elements)",
-                subckt.name,
-                subckt.ports.len(),
-                subckt.elements.len()
-            );
-        }
-        println!();
+    if args.hierarchy {
+        writeln!(out, "Subcircuit definitions and instance references:")?;
+        hierarchy::Hierarchy::new(&netlist.elements, &netlist.subcircuits, args.detailed)
+            .write(out, 2)?;
+        writeln!(out)?;
     }
 
     if !netlist.measurements.is_empty() {
-        println!("Measurements ({}):", netlist.measurements.len());
+        writeln!(out, "Measurements ({}):", netlist.measurements.len())?;
         for meas in &netlist.measurements {
-            println!("  {}", meas.name);
+            writeln!(out, "  {}", meas.name)?;
         }
-        println!();
+        writeln!(out)?;
     }
 
     Ok(())
 }
 
-fn print_detailed_elements(netlist: &Netlist) {
-    println!("Elements:");
+fn print_detailed_elements(out: &mut impl Write, netlist: &Netlist) -> std::io::Result<()> {
+    writeln!(out, "Elements:")?;
     for elem in &netlist.elements {
-        println!("  {}: {:?}", elem.name, elem.kind);
+        elements::ElementDetails::new(elem).write(out, 2)?;
     }
-    println!();
+    writeln!(out)
 }
 
-fn print_json(netlist: &Netlist, args: &InfoArgs) -> Result<(), CliError> {
+fn print_json(out: &mut impl Write, netlist: &Netlist, args: &InfoArgs) -> Result<(), CliError> {
     let counts = count_elements(netlist);
 
     let json = serde_json::json!({
@@ -149,7 +161,13 @@ fn print_json(netlist: &Netlist, args: &InfoArgs) -> Result<(), CliError> {
             "other": counts.other,
         },
         "analyses": netlist.analyses.len(),
+        "element_details": args.detailed.then(|| netlist.elements.iter().map(elements::ElementDetails::new).collect::<Vec<_>>()),
         "models": if args.models { Some(netlist.models.iter().map(|m| &m.name).collect::<Vec<_>>()) } else { None },
+        "model_definitions": args.models.then(|| netlist.models.iter().map(|model| serde_json::json!({
+            "name": model.name,
+            "model_type": model.model_type,
+            "parameters": parameters::model_parameters(model),
+        })).collect::<Vec<_>>()),
         "params": if args.params {
             let mut params = netlist.params.all_params();
             params.sort_by(|a, b| a.0.cmp(&b.0));
@@ -158,6 +176,7 @@ fn print_json(netlist: &Netlist, args: &InfoArgs) -> Result<(), CliError> {
             }).collect::<Vec<_>>())
         } else { None },
         "subcircuits": if args.hierarchy { Some(netlist.subcircuits.iter().map(|s| &s.name).collect::<Vec<_>>()) } else { None },
+        "hierarchy": args.hierarchy.then(|| hierarchy::Hierarchy::new(&netlist.elements, &netlist.subcircuits, args.detailed)),
         "measurements": netlist.measurements.len(),
         "diagnostics": netlist.diagnostics.iter().map(|diagnostic| serde_json::json!({
             "severity": match diagnostic.severity {
@@ -170,11 +189,9 @@ fn print_json(netlist: &Netlist, args: &InfoArgs) -> Result<(), CliError> {
     });
     let json = crate::observability::envelope("rspice.info", json);
 
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&json).unwrap_or_default()
-    );
-    Ok(())
+    serde_json::to_writer_pretty(&mut *out, &json)
+        .map_err(|error| CliError::output_json_error(Path::new("stdout"), error))?;
+    writeln!(out).map_err(|error| CliError::output_error(Path::new("stdout"), error))
 }
 
 struct ElementCounts {
@@ -210,12 +227,21 @@ fn count_elements(netlist: &Netlist) -> ElementCounts {
         match &elem.kind {
             rspice_core::netlist::ElementKind::Resistor { .. } => counts.resistors += 1,
             rspice_core::netlist::ElementKind::Capacitor { .. } => counts.capacitors += 1,
-            rspice_core::netlist::ElementKind::Inductor { .. } => counts.inductors += 1,
+            rspice_core::netlist::ElementKind::Inductor { .. }
+            | rspice_core::netlist::ElementKind::JilesAthertonInductor { .. } => {
+                counts.inductors += 1
+            }
             rspice_core::netlist::ElementKind::Diode { .. } => counts.diodes += 1,
             rspice_core::netlist::ElementKind::Bjt { .. } => counts.bjts += 1,
             rspice_core::netlist::ElementKind::Mosfet { .. } => counts.mosfets += 1,
-            rspice_core::netlist::ElementKind::VoltageSource(_) => counts.voltage_sources += 1,
-            rspice_core::netlist::ElementKind::CurrentSource(_) => counts.current_sources += 1,
+            rspice_core::netlist::ElementKind::VoltageSource(_)
+            | rspice_core::netlist::ElementKind::VoltageSourceDeferred(_) => {
+                counts.voltage_sources += 1
+            }
+            rspice_core::netlist::ElementKind::CurrentSource(_)
+            | rspice_core::netlist::ElementKind::CurrentSourceDeferred(_) => {
+                counts.current_sources += 1
+            }
             rspice_core::netlist::ElementKind::Subcircuit { .. } => counts.subcircuits += 1,
             _ => counts.other += 1,
         }
