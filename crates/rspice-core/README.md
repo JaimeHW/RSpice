@@ -344,11 +344,15 @@ migrate to the engine planner, which validates dimensions and total run counts
 before executing the same sweep path used by the frontends.
 
 Temperature options accept expressions using parameters available at the option
-card, or scalar parameters declared later in the same lexical scope. For
-example, `.options temp={ambient}` can precede `.param ambient=85`.
+card, or scalar parameters declared later in the same or an enclosing lexical
+scope. For example, `.options temp={ambient}` can precede `.param ambient=85`,
+including when a child option closes before that parent declaration.
 Already-bound values and functions keep their option-card meaning. Forward
-expressions resolve when their root or subcircuit scope closes, in authored
-order within that scope; any random draws occur then, after its declarations.
+expressions resolve after their own scope and the required declaration owners
+close, in authored order within each scope. Local-only options keep their scope
+closure sampling phase; delayed child groups retry in scope-close order when
+an ancestor closes. An unresolved parent graph uses that parent's completed
+definitions, independently of child overrides.
 An unsuccessful forward-reference probe consumes no retained random draws.
 Later option assignments still win, and superseded assignments are validated.
 The parser reconciles the selected temperature with earlier eager expressions
@@ -363,6 +367,8 @@ Retained ordinary/global parameter chains resolve on demand for temperature
 options, including subcircuit scopes. Numeric evaluation preserves complex
 values, function-argument shadowing and lazy branches. Shared dependencies
 materialize once, so repeated references do not resample statistical parameters.
+Deferred child options, parent options and later analysis cards share those
+owner samples. A failed or cancelled scope probe publishes no options or cache.
 Static parameter validation uses the numeric expression language, including
 complex functions such as `IMG`.
 
@@ -429,11 +435,10 @@ sample once in their owner. Original subcircuit bodies remain available for
 per-instance overrides and evaluation. Only scopes needed by pending cards are
 retained beyond `.ENDS`.
 
-General dependency planning remains incomplete: temperature options that read
-an enclosing scope still incomplete at `.ENDS` need further work.
-An early expression invalid at the provisional temperature can also fail before
-replay in the ngspice dialect.
-These cases remain in the implementation plan.
+General dependency planning remains incomplete: an early expression invalid
+at the provisional temperature can still fail before replay in the ngspice
+dialect. This case and broader statistical/runtime binding qualification remain
+in the implementation plan.
 
 The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and
 the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.
