@@ -41,7 +41,7 @@ These combinations remain explicitly unsupported:
 
 | Feature | CLI boundary |
 | :--- | :--- |
-| FFT comparison and partial-spectrum conversion | Waveform comparison and `--variables`/`--start`/`--stop` selection cannot represent a complete typed transform and are rejected |
+| Partial-spectrum conversion | `convert --variables`/`--start`/`--stop` cannot represent a complete typed transform and are rejected |
 
 These are feature gaps, not a claim of parity with other commercial simulators.
 Passing crate tests does not qualify every device model or platform. Desktop,
@@ -768,3 +768,10 @@ unsupported projections fail instead of comparing an empty coordinate.
 `models --shippable-only` applies to pack listings and to part, device and
 search queries. The filter excludes restricted definitions and packs whose
 metadata does not mark them redistributable before limiting displayed results.
+
+FFT comparison accepts all six FFT encodings and compares each request by its
+canonical identity. It checks sampling, normalization, window, physical quantity,
+coordinate, and source contracts before comparing bins and metrics using the
+requested tolerances. `--variables` selects signal names or canonical FFT request
+IDs. Incomplete spectra cannot pass a numerical comparison, even against another
+incomplete spectrum. Discrete FFT grids cannot use waveform interpolation.

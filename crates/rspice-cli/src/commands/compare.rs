@@ -8,7 +8,9 @@
 use crate::cli::{CliError, Config, OutputFormat, map_atomic_output_error};
 use crate::commands::export_table::ColumnData;
 use crate::commands::publish;
-use crate::commands::waveform_io::{detect_format, load_table_selected};
+use crate::commands::waveform_io::{ImportedResult, detect_format, load_result_selected};
+
+mod fft;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -122,14 +124,14 @@ pub fn execute(
             // Missing-golden bootstrap is still a promotion of a result
             // artifact. Validate the result before copying so malformed CSV,
             // JSON, RAW, etc. cannot become the accepted baseline.
-            let data = load_waveform_data(
+            let data = load_comparison_data(
                 &args.result,
                 config.resources.limits(),
                 args.section.as_deref(),
             )?;
             bless_golden(&args.result, &args.golden, quiet, "no golden file yet")?;
             if args.format == OutputFormat::Json {
-                let mut comparison = compare_waveforms(&data, &data, &args)?;
+                let mut comparison = compare_data(&data, &data, &args)?;
                 comparison.passed = false;
                 comparison
                     .problems
@@ -157,25 +159,28 @@ pub fn execute(
     }
 
     // Load and parse files
-    let result_data = load_waveform_data(
+    let result_data = load_comparison_data(
         &args.result,
         config.resources.limits(),
         args.section.as_deref(),
     )?;
-    let golden_data = load_waveform_data(
+    let golden_data = load_comparison_data(
         &args.golden,
         config.resources.limits(),
         args.section.as_deref(),
     )?;
 
     let result_data = if args.interpolate {
-        resample_onto_golden(result_data, &golden_data)?
+        match (result_data, &golden_data) {
+            (ComparisonData::Waveform(result), ComparisonData::Waveform(golden)) => ComparisonData::Waveform(resample_onto_golden(result, golden)?),
+            _ => return Err(CliError::InvalidArgument { message: "FFT comparison requires matching discrete transform grids; --interpolate is only available for waveforms".into(), suggestion: None }),
+        }
     } else {
         result_data
     };
 
     // Perform comparison
-    let cmp_result = compare_waveforms(&result_data, &golden_data, &args)?;
+    let cmp_result = compare_data(&result_data, &golden_data, &args)?;
 
     let blessed = !cmp_result.passed && args.bless;
 
@@ -258,6 +263,30 @@ fn bless_golden(
     Ok(())
 }
 
+enum ComparisonData {
+    Waveform(WaveformData),
+    Fft(serde_json::Value),
+}
+
+fn compare_data(
+    result: &ComparisonData,
+    golden: &ComparisonData,
+    args: &CompareArgs,
+) -> Result<CompareResult, CliError> {
+    match (result, golden) {
+        (ComparisonData::Waveform(result), ComparisonData::Waveform(golden)) => {
+            compare_waveforms(result, golden, args)
+        }
+        (ComparisonData::Fft(result), ComparisonData::Fft(golden)) => {
+            fft::compare(result, golden, args)
+        }
+        _ => Err(CliError::VerificationFailed {
+            message: "result kinds differ: a typed FFT cannot be compared to a waveform table"
+                .into(),
+        }),
+    }
+}
+
 /// Waveform data structure for comparison
 struct WaveformData {
     variables: Vec<String>,
@@ -331,12 +360,15 @@ fn find_variable_index(variables: &[String], requested: &str) -> Option<usize> {
 ///
 /// The scale becomes the first compared series; complex signals expand to
 /// `Re(name)` / `Im(name)` so AC results compare value-for-value.
-fn load_waveform_data(
+fn load_comparison_data(
     path: &std::path::Path,
     resource_limits: rspice_core::ResourceLimits,
     section: Option<&str>,
-) -> Result<WaveformData, CliError> {
-    let table = load_table_selected(path, detect_format(path), resource_limits, section)?;
+) -> Result<ComparisonData, CliError> {
+    let table = match load_result_selected(path, detect_format(path), resource_limits, section)? {
+        ImportedResult::Table(table) => table,
+        ImportedResult::Fft(fft) => return fft.comparison_document().map(ComparisonData::Fft),
+    };
     let mut variables = vec![table.scale_name];
     let mut variable_types = vec![table.scale_type];
     let mut values = vec![table.scale];
@@ -368,11 +400,11 @@ fn load_waveform_data(
             });
         }
     }
-    Ok(WaveformData {
+    Ok(ComparisonData::Waveform(WaveformData {
         variables,
         variable_types,
         values,
-    })
+    }))
 }
 
 /// Linearly resample the result's series onto the golden file's scale so

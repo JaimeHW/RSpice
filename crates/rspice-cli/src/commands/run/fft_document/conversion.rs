@@ -271,6 +271,19 @@ impl FftBundle {
         })
     }
 
+    pub(crate) fn comparison_document(&self) -> Result<serde_json::Value, CliError> {
+        serde_json::to_value(fft_json_document(
+            &self.parent,
+            &self.ids,
+            self.coordinate.as_ref(),
+            &self.results,
+            &self.requests,
+        ))
+        .map_err(|error| CliError::ConversionError {
+            message: error.to_string(),
+        })
+    }
+
     pub(crate) fn write(&self, path: &Path, format: OutputFormat) -> Result<(), CliError> {
         publish::artifact(path, |writer| {
             write_fft_to_writer(

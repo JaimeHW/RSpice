@@ -209,3 +209,73 @@ fn selecting_a_raw_plot_still_validates_other_fft_plot_metadata() {
         "{output:?}"
     );
 }
+
+#[test]
+fn typed_fft_comparison_retains_transform_contracts_across_formats() {
+    let directory = test_dir("comparison");
+    let source = source(&directory);
+    for (format, extension) in [
+        ("json", "json"),
+        ("csv", "csv"),
+        ("tsv", "tsv"),
+        ("raw", "raw"),
+        ("ascii", "raw"),
+        ("hdf5", "h5"),
+    ] {
+        let destination = directory.join(format!("compare-{format}.{extension}"));
+        assert!(
+            convert(&source, &destination, "json", format, &[])
+                .status
+                .success()
+        );
+        let compared = cli(&[
+            "compare",
+            destination.to_str().unwrap(),
+            source.to_str().unwrap(),
+            "--json",
+        ]);
+        assert!(compared.status.success(), "{format}: {compared:?}");
+        let report: serde_json::Value = serde_json::from_slice(&compared.stdout).unwrap();
+        assert_eq!(report["comparison_passed"], true);
+        assert_eq!(report["num_variables"], 4);
+    }
+    let mut altered = read_json(&source);
+    altered["results"][0]["sampling"]["accurate_sampling"] = serde_json::json!(false);
+    let changed = directory.join("different-policy.json");
+    std::fs::write(&changed, serde_json::to_vec(&altered).unwrap()).unwrap();
+    let compared = cli(&[
+        "compare",
+        changed.to_str().unwrap(),
+        source.to_str().unwrap(),
+        "--json",
+    ]);
+    assert!(!compared.status.success(), "{compared:?}");
+    assert!(String::from_utf8_lossy(&compared.stdout).contains("sampling contract differs"));
+    let selected = cli(&[
+        "compare",
+        changed.to_str().unwrap(),
+        source.to_str().unwrap(),
+        "--variables",
+        "I(V1)",
+        "--json",
+    ]);
+    assert!(selected.status.success(), "{selected:?}");
+    let report: serde_json::Value = serde_json::from_slice(&selected.stdout).unwrap();
+    assert_eq!(report["num_variables"], 1);
+    for result in altered["results"].as_array_mut().unwrap() {
+        result["status"] = serde_json::json!({"kind":"incomplete-history","availableStart":0.0,"availableStop":0.0002});
+        result["metrics"] = serde_json::Value::Null;
+        result["spectrum"]["bins"] = serde_json::json!([]);
+    }
+    std::fs::write(&changed, serde_json::to_vec(&altered).unwrap()).unwrap();
+    let compared = cli(&[
+        "compare",
+        changed.to_str().unwrap(),
+        changed.to_str().unwrap(),
+        "--json",
+    ]);
+    assert!(
+        !compared.status.success(),
+        "unavailable spectra must not pass: {compared:?}"
+    );
+}
