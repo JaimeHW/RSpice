@@ -11,13 +11,13 @@
     },
     {
       "id": "C01",
-      "status": "open",
+      "status": "in_progress",
       "requirement": "Shared numerical and state contracts",
       "qualification_task": "Conformance tests for residual, charge, derivative, noise, trial/accepted ownership and atomic restore; measure adapter overhead."
     },
     {
       "id": "C02",
-      "status": "open",
+      "status": "in_progress",
       "requirement": "Transient decomposition",
       "qualification_task": "Preserve exact event clocks, accepted grids, retry/rollback and checkpoint continuation for every extraction."
     },

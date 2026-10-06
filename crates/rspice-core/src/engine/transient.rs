@@ -180,35 +180,6 @@ fn xyce_iteration_retry_timestep(rejected_dt: Value, hard_min_dt: Value, max_dt:
     (rejected_dt * 0.125).clamp(hard_min_dt, max_dt)
 }
 
-/// Return the exact requested horizon when a step consumes the remaining
-/// transient interval. Floating-point subtraction followed by addition is not
-/// an identity for every pair of finite values, so endpoint-sensitive sources,
-/// device loads, checkpoints, and recorded samples must share this canonical
-/// time instead of independently recomputing `current_time + dt`.
-#[inline]
-fn canonical_transient_step_time(current_time: Value, dt: Value, stop_time: Value) -> Value {
-    if dt >= stop_time - current_time {
-        stop_time
-    } else {
-        current_time + dt
-    }
-}
-
-/// Preserve the exact absolute time requested by an accepted Verilog-A event.
-/// Floating-point subtraction followed by addition is not an identity for
-/// every pair, so the event target must remain authoritative while `dt`
-/// separately supplies integration coefficients.
-#[inline]
-fn canonical_transient_step_time_with_device_event(
-    current_time: Value,
-    dt: Value,
-    stop_time: Value,
-    exact_device_event_time: Option<Value>,
-) -> Value {
-    exact_device_event_time
-        .unwrap_or_else(|| canonical_transient_step_time(current_time, dt, stop_time))
-}
-
 fn accepted_veriloga_event_time(
     circuit: &crate::circuit::CircuitData,
     floor_grid: &mut FloorLandingGrid,
@@ -776,6 +747,11 @@ mod state_commit;
 mod state_recovery;
 mod state_transmission_lines;
 mod step_control;
+mod step_proposal;
+use step_proposal::{
+    PhysicalStepWindow, StepProposal, canonical_transient_step_time,
+    canonical_transient_step_time_with_device_event, fit_physical_event_approach,
+};
 mod truncation;
 use truncation::{
     NgspiceChargeTruncationContext, NgspiceTruncationTolerances, TruncationStep, VoltageLteConfig,
@@ -7098,50 +7074,28 @@ impl Engine {
                         Self::max_expected_source_delta(&circuit, t, candidate_step_time);
                 }
             }
-            // Approximate source/line breakpoints can fall a few ulps before
-            // an owned arrival. Fit the still-unaccepted interval so its next
-            // gap is representable and respects the minimum; never consume
-            // the arrival early or manufacture a subminimum follow-up step.
-            // Xyce's floor grows with accepted time. Reserve the floor at the
-            // deadline, which bounds every intervening point's floor, rather
-            // than leaving a gap that only satisfies the current clock.
-            let physical_event_min_dt =
-                physical_event_time.map_or(timestep.hard_min_dt(), |time| {
-                    if self.config.spice_dialect == SpiceDialect::Xyce {
-                        timestep.hard_min_dt().max(xyce_hard_min_timestep(time))
-                    } else {
-                        timestep.hard_min_dt()
-                    }
-                });
             if locked_grid.is_none()
                 && pending_exact_event_time == physical_event_time
-                && let Some(deadline) = physical_event_time.filter(|deadline| {
-                    *deadline > candidate_step_time
-                        && *deadline - candidate_step_time < physical_event_min_dt
-                })
+                && let Some(fitted) = fit_physical_event_approach(
+                    PhysicalStepWindow {
+                        accepted_time: t,
+                        stop_time: tstop,
+                        hard_min_dt: timestep.hard_min_dt(),
+                        persistent_maximum: max_step,
+                        controller_maximum: timestep.max_dt(),
+                    },
+                    StepProposal {
+                        dt,
+                        time: candidate_step_time,
+                        exact_event_time: exact_device_event_time,
+                    },
+                    physical_event_time,
+                    self.config.spice_dialect,
+                )?
             {
-                let bound = timestep.max_dt().min(max_step);
-                dt = breakpoints::fit_model_interval(
-                    t,
-                    deadline,
-                    dt,
-                    physical_event_min_dt,
-                    max_step,
-                    bound,
-                    false,
-                )?;
-                if dt > bound {
-                    return Err(SimulationError::Circuit(
-                        "physical event fitting exceeds the step bound".into(),
-                    ));
-                }
-                exact_device_event_time = (t + dt >= deadline).then_some(deadline);
-                candidate_step_time = canonical_transient_step_time_with_device_event(
-                    t,
-                    dt,
-                    tstop,
-                    exact_device_event_time,
-                );
+                dt = fitted.dt;
+                exact_device_event_time = fitted.exact_event_time;
+                candidate_step_time = fitted.time;
                 at_breakpoint = exact_device_event_time.is_some()
                     || breakpoints.at_breakpoint(candidate_step_time);
                 expected_source_delta =
