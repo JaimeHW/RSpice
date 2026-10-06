@@ -1,0 +1,249 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C04",
+  "related_packages": [
+    "C00",
+    "C14"
+  ],
+  "batch": "Provisional-temperature recovery for eager parameters and root completion",
+  "status": "parameter_and_root_completion_recovery_delivered_general_discovery_remains",
+  "base_revision": "aae9ac91a1e5c12b4068c95d12c1a343a0c6a599",
+  "source_revision": "26b5788044f2aeb7bea7b53e936b1068cede6640",
+  "implementation_commits": [
+    "26b5788044f2aeb7bea7b53e936b1068cede6640"
+  ],
+  "captured_utc": "2026-10-06T23:24:40.577279+00:00",
+  "host": "x86_64-pc-windows-msvc",
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+    "cli_rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "cli_toolchain_reason": "Previously reproduced pinned Rust 1.94/faer compiler crash in CLI runtime builds; repository pin unchanged.",
+    "wasm_target": "wasm32-unknown-unknown",
+    "wasm_profile": "release",
+    "wasm_features": [
+      "wasm",
+      "veriloga-wasm-jit"
+    ],
+    "wasm_runtime": "headless Chrome dedicated worker",
+    "WASM_BINDGEN_TEST_TIMEOUT": "180",
+    "webdriver_config_sha256": "93458ed98943268e089c8c9a793bf2e899872e62941ac54795b0c27b7104785b",
+    "wasm_runner_version": "wasm-bindgen-test-runner 0.2.126",
+    "wasm_runner_executable_sha256": "e451b278c106269fa9a2731a4f8e77f888ccd2694b2b3a1760319198f6c2a68e"
+  },
+  "commands": [
+    {
+      "command": "cargo test --locked -p rspice-core --lib netlist:: -- --test-threads=8",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1101
+      ],
+      "log": "target/core-qualification/provisional-parameter-netlist-final.log",
+      "log_sha256": "dbb154343e8989129253974d61d053943267d6cb2c44d954d8ca5d4dde3ec6d1"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test provisional_parameter_temperature --test provisional_temperature --test parent_temperature_options --test temperature_options --test forward_analyses --test analysis_error_origins --test analysis_card_transactions --test control_noise --test control_dc --test control_execution --test frequency_data --test step_temp --test forward_globals --test forward_parameters --test forward_sources -- --test-threads=8",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        4,
+        4,
+        6,
+        8,
+        5,
+        17,
+        8,
+        11,
+        11,
+        7,
+        9,
+        13,
+        9,
+        2,
+        21
+      ],
+      "log": "target/core-qualification/provisional-parameter-core-final.log",
+      "log_sha256": "b7c52336db0f15e86326d99052aa4a1c396dd694fae7361eb84ba29e6df9049d"
+    },
+    {
+      "command": "cargo +1.95.0 test --locked -p rspice-cli --test temperature_axis --test control_noise --test control_dc --test analysis_error_origins --target-dir target/core-cli-195",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1,
+        1,
+        1,
+        6
+      ],
+      "log": "target/core-qualification/provisional-parameter-cli.log",
+      "log_sha256": "9138af55a2698bb3f3203d9d040d85d538d6a188945f195cea6711e2d3ebc1f8"
+    },
+    {
+      "command": "cargo clippy --locked -p rspice-core -p rspice-cli -p rspice-wasm -p rspice-engine-adapter --lib --bins --test provisional_parameter_temperature -- -D warnings",
+      "outcome": "passed",
+      "test_target_passed_counts": [],
+      "log": "target/core-qualification/provisional-parameter-clippy-final.log",
+      "log_sha256": "2d2fa353f7c1fbc3c948a00841fff42d2ee8b4421e5dc619251806eeefdefe9e"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test provisional_parameter_temperature --test provisional_temperature --test parent_temperature_options --test temperature_options --test forward_analyses --test forward_parameters --test forward_globals --test forward_sources --test analysis_error_origins --test analysis_card_transactions -- --nocapture",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        4,
+        4,
+        16,
+        8,
+        10,
+        10,
+        9,
+        13,
+        9,
+        19
+      ],
+      "log": "target/core-qualification/provisional-parameter-wasm.log",
+      "log_sha256": "272579bbc750e555e49482043e23a830ced417de182073d8933c87f9734f7a00"
+    }
+  ],
+  "formatting": {
+    "command": "python target/core-qualification/check-workspace-format.py",
+    "outcome": "passed",
+    "targets": 574,
+    "batches": 11,
+    "failed_batches": 0,
+    "log": "target/core-qualification/provisional-parameter-workspace-format.log",
+    "log_sha256": "466303740157772e9a30b9c3b26e3e38ea9eee533fd24949fc336c9d1e3620c8",
+    "script_sha256": "655a9f32a65d5e7c24fe3d8af6fd4bee3f12b2aaccfe905fdba198196839c2d8",
+    "method": "Read locked cargo metadata, select every workspace member target, deduplicate target source paths by edition, and invoke rustfmt --check --edition in argument batches below the Windows command-line limit. Module traversal uses the default rustfmt behavior."
+  },
+  "unique_passed_tests": {
+    "native": 1245,
+    "optimized_wasm": 102,
+    "additional_native_catalog_integration": 29
+  },
+  "test_accounting": "Final committed-source parser/expression unit tests, 15 public core integration targets and four CLI targets. All ten selected optimized WASM targets must pass in one invocation for this record. Earlier development checks and the separate documentation-ledger validation are excluded. No selected tests are ignored.",
+  "source_hash_format": "SHA-256 of committed Git blob bytes",
+  "source_files_sha256": {
+    "crates/rspice-core/src/netlist/parser.rs": "00babcfe12daeb2d47a4bd19f8ad8e9c033bbb27d2333461aeeccde9d7f8d7e1",
+    "crates/rspice-core/src/netlist/parser/body.rs": "501ae63c3a94d553ac49e4fec2bdf9ffd8e57349d18d365af6752e2ab7b704e4",
+    "crates/rspice-core/src/netlist/parser/commands.rs": "f07f8faa68e74fca5484152ff6dc2c0dd56de2e0d4d55e9cce479176d0ef2ebc",
+    "crates/rspice-core/src/netlist/parser/commands/analysis/plan.rs": "d555acb38465a1acfb13991e4527b99b88ebc51a598f3a34258dc318803bc1fb",
+    "crates/rspice-core/src/netlist/parser/temperature.rs": "35a6d57222b2bd8a3a4f4c5dad3eceee0824a354eceadac7f2a228549bc82197",
+    "crates/rspice-core/src/netlist/parser/temperature/options.rs": "55acda60d533b17d77c9bcf43f83d846b6d892626a40869d5daea0ba16bcda61",
+    "crates/rspice-core/tests/provisional_parameter_temperature.rs": "44d623f792e0ba2c6280aaf9b46aa210af0277bc43808d5ea11f119cc620d01f",
+    "Cargo.lock": "b8e4cc402c12137eee5b660d8c95d208b5ae45e5251b096c76e2f8c2117cb34b",
+    "rust-toolchain.toml": "0a73f8e6f0e60b4a2bba97a16fdc0c66517abad4410e72582981b9578bc1aa62"
+  },
+  "publication_ledger_sha256": "fddcbc42dd7a34de98529e33ca91b50b098b73a530c1e9d8b71266e7eb95b8b2",
+  "implementation": [
+    "Typed DivisionByZero/InvalidArgument expression failures retain symbolic definitions and a separate first physical parameter error. Undefined forward names keep their existing deferred behavior; grammar errors remain errors. Every assignment on a PARAM card is consumed, including bare aliases and ignored duplicate definitions.",
+    "Source-card reading is extracted unchanged into parser/body.rs. Its failure boundary preserves an earlier parameter error while allowing cancellation and resource errors to remain terminal.",
+    "Root options, declarations, sources and models complete in their existing order on successful passes. A failed completion flows through the existing ordered analysis discovery path. Root pending analysis dependencies use the shared lexical resolver when ordinary parameter materialization is incomplete.",
+    "A failed pass returns no netlist or staged analysis effects. Temperature selection still uses options, last scalar-versus-sweep TEMP precedence and physical overrides; fresh-source replay must confirm the selected values within three passes."
+  ],
+  "acceptance_evidence": [
+    "The baseline failed both public eager declaration/device and TEMP precedence cases with division by zero; an invalid-declaration preservation control already passed.",
+    "Thirteen public regressions exercise braced/unbraced expressions, a same-card bare alias and later ambient assignment, scalar/sweep precedence, a demanded forward temperature graph, TNOM propagation, inactive hints, captured functions and evaluated domain errors.",
+    "Closed-form DC checks produce 1 V after direct eager parameter and deferred source recovery. A deferred static model expression using a captured temperature alias resolves to resistance 1.0. Forward root declaration finalization recovers its expected numeric value.",
+    "An independently seeded expression context checks exact eager sample order and the next unconsumed sample. Stable and newly invalid final expressions survive redefinitions. Included continued declarations retain parameters.inc:2.",
+    "A public DATA row-ceiling regression retains typed ResourceLimit after an eager parameter failure. A private test cancels at every poll position across failed discovery and successful replay, asserting no subsequent abort polls and eventual correct completion."
+  ],
+  "limits": [
+    "Other eager evaluation errors, option fields and earlier conditional/subcircuit-header/other card failures can still prevent complete temperature discovery. No unresolved branch is guessed and no bad card is skipped. General dependency planning remains open.",
+    "The broader statistical/runtime, allocation/performance and production qualification contracts remain open; this batch closes no C00-C14 package.",
+    "CLI runtime checks still use Rust 1.95 because earlier pinned Rust 1.94/faer compiler incidents are unresolved. Historical WASM runner access violations remain open; this run alone cannot establish general harness reproducibility."
+  ],
+  "baseline_reproduction": {
+    "core_revision": "91d3b897aa3a94989a6ccae08140b2e1266492e2",
+    "outcome": "two_expected_regression_failures_and_one_existing_pass",
+    "log": "target/core-qualification/provisional-parameter-before.log",
+    "log_sha256": "f90328585a7b6573a35e9ece44aeb2c3d5abb6993bab081856cc099ee32a64b3"
+  },
+  "development_notes": "Corrected two development test assumptions: AC numeric point-count cards do not allocate a grid during parsing, so the resource test now uses the parser DATA row ceiling; direct TEMP model expressions remain dynamic, so static model completion uses an eager captured temperature alias. The token sequence of the extracted source-card reader was compared with its original after reference adjustment. Integrated three remote-main commits (Verilog-A source budgets/regular-file checks and model manifest statistics) before final qualification. Existing tests were not weakened or ignored.",
+  "post_qualification_integration": {
+    "revision": "f8d45a153878156b8a05755ea8d70708e48e9194",
+    "merged_commits": [
+      "7b5ffa4a6",
+      "2fd3b03a0"
+    ],
+    "reason": "Remote main advanced during the push. A merge preserves the qualified implementation revision and integrates independent model-catalog validation without rewriting it.",
+    "scope": "Only library/spice_packs.rs, a CLI catalog test and the CLI README changed. Every implementation/test blob listed above and Cargo.lock/rust-toolchain.toml is byte-identical to the qualified source revision.",
+    "commands": [
+      {
+        "command": "cargo test --locked -p rspice-core --lib library::spice_packs::tests -- --test-threads=8",
+        "outcome": "passed",
+        "test_target_passed_counts": [
+          24
+        ],
+        "log": "target/core-qualification/provisional-parameter-integration-catalog.log",
+        "log_sha256": "8e4244aabd243df0c847fc21f490288dfec14dfd3c3a854dbfb909645dadcba6"
+      },
+      {
+        "command": "cargo test --locked -p rspice-core --test provisional_parameter_temperature",
+        "outcome": "passed",
+        "test_target_passed_counts": [
+          13
+        ],
+        "log": "target/core-qualification/provisional-parameter-integration-parameters-retry.log",
+        "log_sha256": "1890bacc8357c8e21e3cf5363d797013bbce9050c90f7f58785ec51950930c56"
+      },
+      {
+        "command": "cargo +1.95.0 test --locked -p rspice-cli --test models_catalog_validation --target-dir target/core-cli-195",
+        "outcome": "passed",
+        "test_target_passed_counts": [
+          5
+        ],
+        "log": "target/core-qualification/provisional-parameter-integration-cli.log",
+        "log_sha256": "542a6d5a6bd595b7666404144b8a93fe68e80b69100ddfdac8f350e89226d50d"
+      },
+      {
+        "command": "cargo check --locked -p rspice-core --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit",
+        "outcome": "passed",
+        "test_target_passed_counts": [],
+        "log": "target/core-qualification/provisional-parameter-integration-wasm-check.log",
+        "log_sha256": "1274e0fee571d280d2dab2fd4be4cccd3d4306723b7f32e6da3e4f6ecb002747"
+      },
+      {
+        "command": "cargo clippy --locked -p rspice-core -p rspice-cli -p rspice-wasm -p rspice-engine-adapter --lib --bins --test provisional_parameter_temperature -- -D warnings",
+        "outcome": "passed",
+        "test_target_passed_counts": [],
+        "log": "target/core-qualification/provisional-parameter-integration-clippy.log",
+        "log_sha256": "8185230ed16814689dfdf9427861ab5b955024a890d0946e56d7ffec91ae56f5"
+      }
+    ],
+    "formatting": {
+      "targets": 575,
+      "batches": 11,
+      "failed_batches": 0,
+      "command": "python target/core-qualification/check-workspace-format.py",
+      "outcome": "passed",
+      "log": "target/core-qualification/provisional-parameter-integration-format.log",
+      "log_sha256": "0029a1557051b3aaa4e8f9a6fadcfd222769b8f33531518db8a2d4dd475b5d62"
+    },
+    "test_accounting": "Catalog unit and CLI catalog cases are additional integration checks. The 13 parameter regressions repeat qualified coverage and are not counted twice. Optimized WASM execution belongs to source_revision; the integrated library additionally passes its same-feature WASM build check.",
+    "compiler_incident": {
+      "command": "cargo test --locked -p rspice-core --test provisional_parameter_temperature",
+      "outcome": "rustc_process_access_violation_before_tests",
+      "exit_code": "0xc0000005",
+      "compiler": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+      "source_revision": "f8d45a153878156b8a05755ea8d70708e48e9194",
+      "log": "target/core-qualification/provisional-parameter-integration-parameters.log",
+      "log_sha256": "7f83d2d90a0b4af1ead4e381016ae31cb4f566330f3bec2708ef7847e9acd03f",
+      "retry": "The unchanged command passed after the other builds finished; see integration commands. No source or toolchain change was made.",
+      "disposition": "C14 remains open. Root cause is not established; a passing retry does not close the compiler reproducibility requirement."
+    },
+    "source_files_sha256": {
+      "crates/rspice-cli/README.md": "8378d824c336097a1e687db02c674943580114c26c96ef5335e6cbd7c35b3228",
+      "crates/rspice-cli/tests/models_catalog_validation.rs": "79445687c260426a5716bb0b9bbc6875dd0613d570279194dafcc11fa7336380",
+      "crates/rspice-core/src/library/spice_packs.rs": "364aa6bd36f70caa97003f413c8900401393cdc3884bba565520d8be59f5d914"
+    }
+  },
+  "publication_validation": {
+    "command": "cargo test --locked -p rspice-core --lib engine::requirements",
+    "outcome": "passed",
+    "test_target_passed_counts": [
+      3
+    ],
+    "log": "target/core-qualification/provisional-parameter-ledger.log",
+    "log_sha256": "6f531dea63402e579503de9e13124ed22127f712c9029113c17d74091ba2bc25",
+    "scope": "Requirements/evidence-path validation after documentation updates; excluded from implementation and integration test totals."
+  }
+}
