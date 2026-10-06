@@ -58,7 +58,7 @@ pub fn execute(
         // for, and silently writing more than a caller requested is the thing
         // the note exists to prevent.
         for note in &notes {
-            eprintln!("Note: {note}");
+            crate::observability::diagnostic("conversion_note", None, format_args!("Note: {note}"));
         }
         vcd_io::write_vcd_artifact(&args.output, &document)?;
         if !quiet {

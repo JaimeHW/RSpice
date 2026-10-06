@@ -5,6 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::cli::LogFormat;
 
+static MACHINE_DIAGNOSTICS: OnceLock<bool> = OnceLock::new();
+
 static RUN_ID: OnceLock<String> = OnceLock::new();
 
 /// Correlation identifier shared by logs, fatal diagnostics, and run summaries.
@@ -16,6 +18,45 @@ pub fn run_id() -> &'static str {
             .as_nanos();
         format!("{:x}-{epoch_nanos:x}", std::process::id())
     })
+}
+
+/// Select one stderr grammar for nonfatal and fatal process diagnostics.
+pub fn set_machine_diagnostics(enabled: bool) {
+    let _ = MACHINE_DIAGNOSTICS.set(enabled);
+}
+
+pub fn diagnostic(code: &str, line: Option<usize>, message: impl std::fmt::Display) {
+    if MACHINE_DIAGNOSTICS.get().copied().unwrap_or(false) {
+        eprintln!(
+            "{}",
+            envelope(
+                "rspice.diagnostic",
+                serde_json::json!({
+                    "diagnostic": { "code": code, "line": line, "message": message.to_string() },
+                })
+            )
+        );
+    } else {
+        eprintln!("{message}");
+    }
+}
+
+/// Add version and process correlation to a command's existing JSON fields.
+pub fn envelope(schema: &str, mut payload: serde_json::Value) -> serde_json::Value {
+    if let Some(object) = payload.as_object_mut() {
+        object.insert("schema".into(), schema.into());
+        object.insert("schema_version".into(), 1.into());
+        object.insert("run_id".into(), run_id().into());
+        object.insert(
+            "tool".into(),
+            serde_json::json!({
+                "name": "rspice", "version": env!("CARGO_PKG_VERSION"),
+                "target": env!("RSPICE_BUILD_TARGET"), "profile": env!("RSPICE_BUILD_PROFILE"),
+                "commit": env!("RSPICE_BUILD_COMMIT"),
+            }),
+        );
+    }
+    payload
 }
 
 /// Initialize the process logger once using the requested production format.

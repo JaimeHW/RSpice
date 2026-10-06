@@ -210,10 +210,14 @@ pub(super) fn run_monte_carlo(
                 ));
             }
             if result.num_failures > 0 {
-                eprintln!(
-                    "Warning: {}/{} Monte Carlo runs failed to converge; statistics \
+                crate::observability::diagnostic(
+                    "monte_carlo_partial",
+                    None,
+                    format_args!(
+                        "Warning: {}/{} Monte Carlo runs failed to converge; statistics \
                      cover the surviving runs only",
-                    result.num_failures, num_runs
+                        result.num_failures, num_runs
+                    ),
                 );
             }
 

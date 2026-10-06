@@ -156,6 +156,7 @@ fn main() -> ExitCode {
         }
     };
     let error_format = cli.error_format;
+    observability::set_machine_diagnostics(error_format == cli::ErrorFormat::Json);
 
     // Quiet execution has no observable log records, so avoid constructing
     // env_logger's filters and formatter on the latency-sensitive batch path.
@@ -166,7 +167,12 @@ fn main() -> ExitCode {
         } else {
             cli.log_level.as_deref().unwrap_or("warn")
         };
-        observability::init(log_level, cli.log_format);
+        let log_format = if error_format == cli::ErrorFormat::Json {
+            cli::LogFormat::Json
+        } else {
+            cli.log_format
+        };
+        observability::init(log_level, log_format);
     }
 
     // Load configuration

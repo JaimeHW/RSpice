@@ -752,6 +752,7 @@ fn output_json(result: &CompareResult, blessed: bool) {
             })
         }).collect::<Vec<_>>(),
     });
+    let json = crate::observability::envelope("rspice.comparison", json);
     match serde_json::to_string_pretty(&json) {
         Ok(text) => println!("{text}"),
         Err(e) => eprintln!("Error: failed to serialize comparison report: {e}"),

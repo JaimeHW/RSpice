@@ -267,9 +267,13 @@ pub fn recover_stale_artifacts(directory: &Path, quiet: bool) {
             );
             if !quiet {
                 for removed in &report.removed {
-                    eprintln!(
-                        "Removed a staging file left by an interrupted run: {}",
-                        removed.display()
+                    crate::observability::diagnostic(
+                        "artifact_recovery",
+                        None,
+                        format_args!(
+                            "Removed a staging file left by an interrupted run: {}",
+                            removed.display()
+                        ),
                     );
                 }
             }

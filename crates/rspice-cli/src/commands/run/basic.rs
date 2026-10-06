@@ -1072,10 +1072,14 @@ pub(super) fn finish_transient_result(
             }
             OutputFormat::Vcd => {
                 if result.digital_traces.is_empty() && result.real_traces.is_empty() {
-                    eprintln!(
-                        "Warning: this transient captured no digital or real event node; \
+                    crate::observability::diagnostic(
+                        "empty_event_capture",
+                        None,
+                        format_args!(
+                            "Warning: this transient captured no digital or real event node; \
                          {} declares no signal and records no change",
-                        output_path.display()
+                            output_path.display()
+                        ),
                     );
                 }
                 TransientOutputDocument::Vcd(Box::new(crate::commands::vcd_io::event_document(

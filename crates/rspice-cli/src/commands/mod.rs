@@ -249,7 +249,11 @@ pub(crate) fn emit_netlist_diagnostics(netlist: &rspice_core::Netlist, quiet: bo
         match diagnostic.severity {
             rspice_core::netlist::DiagnosticSeverity::Warning => {
                 for line in format_netlist_warning_lines(diagnostic) {
-                    eprintln!("{line}");
+                    crate::observability::diagnostic(
+                        &diagnostic.code,
+                        Some(diagnostic.line),
+                        &line,
+                    );
                 }
             }
         }

@@ -168,6 +168,7 @@ fn print_json(netlist: &Netlist, args: &InfoArgs) -> Result<(), CliError> {
             "message": &diagnostic.message,
         })).collect::<Vec<_>>(),
     });
+    let json = crate::observability::envelope("rspice.info", json);
 
     println!(
         "{}",

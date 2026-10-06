@@ -182,7 +182,7 @@ pub struct Cli {
     #[arg(long, global = true, value_enum, default_value_t = LogFormat::Text)]
     pub log_format: LogFormat,
 
-    /// Format fatal diagnostics on stderr for automation
+    /// Format stderr diagnostics for automation (json also selects JSON logs)
     #[arg(long, global = true, value_enum, default_value_t = ErrorFormat::Text)]
     pub error_format: ErrorFormat,
 }

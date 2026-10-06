@@ -445,6 +445,7 @@ fn write_measurement_json<W: Write + ?Sized>(
         "passed": results.iter().filter(|r| r["passed"] == true).count(),
         "failed": results.iter().filter(|r| r["passed"] == false).count(),
     });
+    let json = crate::observability::envelope("rspice.measurements", json);
 
     serde_json::to_writer_pretty(&mut *writer, &json)
         .map_err(|e| CliError::output_json_error(path, e))?;
