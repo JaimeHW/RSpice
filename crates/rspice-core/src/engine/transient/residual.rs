@@ -1700,7 +1700,8 @@ impl Engine {
                 dt,
             },
             ctx.bsim3_history,
-            evaluation_mode == crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+            evaluation_mode
+                == crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
         );
         Self::stamp_bsim4_transient_companions(
             circuit,

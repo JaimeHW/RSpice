@@ -303,7 +303,9 @@ pub(crate) fn clip_transient_to_start(
         for trace in traces.iter_mut() {
             // Impulses are newly accepted actions, never held state at TSTART.
             trace.points.retain(|point| point.time >= retained_start);
-            trace.derivatives.retain(|point| point.time >= retained_start);
+            trace
+                .derivatives
+                .retain(|point| point.time >= retained_start);
         }
         traces.retain(|trace| {
             trace.complete || !trace.points.is_empty() || !trace.derivatives.is_empty()
@@ -423,9 +425,13 @@ mod structural_tests {
         }]);
         let mut past_only = result.clone();
         past_only.current_impulses.as_mut().unwrap()[0].points.pop();
-        past_only.current_impulses.as_mut().unwrap()[0].derivatives.pop();
+        past_only.current_impulses.as_mut().unwrap()[0]
+            .derivatives
+            .pop();
         let mut derivative_only = result.clone();
-        derivative_only.current_impulses.as_mut().unwrap()[0].points.clear();
+        derivative_only.current_impulses.as_mut().unwrap()[0]
+            .points
+            .clear();
         clip_transient_to_start(&mut result, 1e-9).unwrap();
         assert_eq!(
             result.current_impulses.as_ref().unwrap()[0].points,

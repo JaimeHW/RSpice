@@ -7,8 +7,7 @@
 use super::{
     BinOpKind, Expr as NetExpr, ParamContext, ParameterResolutionError, ParameterResolver,
     ParseExpressionWithAbortError as NetExpressionParseWithAbortError, UnaryOpKind,
-    parse_expression as parse_net_expr,
-    parse_expression_with_abort as parse_net_expr_with_abort,
+    parse_expression as parse_net_expr, parse_expression_with_abort as parse_net_expr_with_abort,
 };
 use crate::{
     Value,
@@ -838,13 +837,12 @@ fn validate_parameter_expression_definitions(
             // Expand the definition body itself. Looking up the root by name
             // would select a same-name ordinary binding while validating the
             // independent global namespace.
-            let root = if kind == ParameterExpressionKind::Global
-                && params.has_parameter_binding(name)
-            {
-                expression.as_str()
-            } else {
-                name.as_str()
-            };
+            let root =
+                if kind == ParameterExpressionKind::Global && params.has_parameter_binding(name) {
+                    expression.as_str()
+                } else {
+                    name.as_str()
+                };
             let prepared = prepare_behavioral_expression(root, params)
                 .map_err(|error| format!("Unable to resolve {description} {name}: {error}"))?;
             let parsed = parse_net_expr(&prepared)
@@ -888,12 +886,18 @@ fn validate_parameter_expression_definitions(
                         static_resolver.resolve_global(name, expression, isolated, &NoAbort)
                     }
                 };
-                result.map_err(|error| format!("Unable to resolve {description} {name}: {error}"))?;
+                result
+                    .map_err(|error| format!("Unable to resolve {description} {name}: {error}"))?;
             }
             Ok(())
         })();
         result.map_err(|error| {
-            parameter_error_with_origin(params, name, kind == ParameterExpressionKind::Global, error)
+            parameter_error_with_origin(
+                params,
+                name,
+                kind == ParameterExpressionKind::Global,
+                error,
+            )
         })?;
     }
     Ok(())

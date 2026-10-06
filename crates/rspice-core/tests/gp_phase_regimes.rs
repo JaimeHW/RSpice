@@ -14,14 +14,14 @@ use rspice_core::engine::TransientResult;
 use rspice_core::numerics::integration::IntegrationMethod;
 use rspice_core::{Engine, GpTransientPhaseModel, Netlist, SimulationConfig, SpiceDialect};
 
-#[path = "gp_phase_regimes/charge.rs"]
-mod charge;
-#[path = "gp_phase_regimes/coverage_gaps.rs"]
-mod coverage_gaps;
 #[path = "gp_phase_regimes/behavioral.rs"]
 mod behavioral;
+#[path = "gp_phase_regimes/charge.rs"]
+mod charge;
 #[path = "gp_phase_regimes/controlled.rs"]
 mod controlled;
+#[path = "gp_phase_regimes/coverage_gaps.rs"]
+mod coverage_gaps;
 #[path = "gp_phase_regimes/current_controlled.rs"]
 mod current_controlled;
 #[path = "gp_phase_regimes/private_nodes.rs"]

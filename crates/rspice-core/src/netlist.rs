@@ -54,19 +54,20 @@ mod xspice_parser;
 
 pub use add_resistors::*;
 pub use ast::*;
-pub use data_table::{FrequencyDataPoint, FrequencyDataTableError, data_table_parameter_name_is_valid};
+pub use data_table::{
+    FrequencyDataPoint, FrequencyDataTableError, data_table_parameter_name_is_valid,
+};
 pub use expr::{
     ParamContext, ParameterRedefinitionDiagnosticPolicy, ParameterRedefinitionPolicy, RandomState,
     StatisticalParamMode,
 };
 pub use flattener::{
     FlattenedNetlist, Flattener, FlattenerConfig, InstanceMetadata, XspiceAutoBridgeNodeHint,
-    flatten_netlist, flatten_netlist_with_models, flatten_netlist_with_models_with_abort,
-    flatten_netlist_with_models_config_with_abort,
+    flatten_netlist, flatten_netlist_with_models, flatten_netlist_with_models_config_with_abort,
+    flatten_netlist_with_models_with_abort,
 };
 pub(crate) use flattener::{
-    flatten_netlist_with_parameter_direction,
-    materialize_passive_initial_condition,
+    flatten_netlist_with_parameter_direction, materialize_passive_initial_condition,
 };
 pub use hierarchy_path::{HierarchyPath, HierarchyPathConfig};
 pub use include::source_path_literal_to_host_path;

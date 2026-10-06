@@ -55,9 +55,9 @@ mod analysis_card_scan;
 mod chebyshev_synthesis;
 mod command_parsers;
 mod commands;
-mod temperature;
 mod scopes;
 mod stream;
+mod temperature;
 use stream::TokenStream;
 
 use temperature::{

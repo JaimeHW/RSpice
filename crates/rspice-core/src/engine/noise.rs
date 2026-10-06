@@ -3804,13 +3804,19 @@ impl Engine {
             let input_gain_sq = if let Some(input) = &input_reference {
                 let gain = if noise_dialect == crate::engine::SpiceDialect::Xyce {
                     Self::differential_noise_output_complex(
-                        ac_solution, output_pos, output_neg, num_nodes,
+                        ac_solution,
+                        output_pos,
+                        output_neg,
+                        num_nodes,
                     )
                 } else {
                     input.gain(transfer_solution)?
                 };
                 Self::effective_noise_gain_squared(
-                    noise_dialect, gain, input_source.unwrap_or("<unknown>"), freq,
+                    noise_dialect,
+                    gain,
+                    input_source.unwrap_or("<unknown>"),
+                    freq,
                 )?
             } else {
                 1.0

@@ -2,13 +2,13 @@
 mod autonomous;
 mod bindings;
 mod envelope;
-pub use envelope::{
-    EnvelopeEventTolerances, EnvelopeCarrierBasis, EnvelopeSourceEvent, EnvelopeSourceSide,
-    NetlistEnvelopeAdvance, NetlistEnvelopeEvent, NetlistEnvelopeState, PreparedSpectralEnvelope,
-    SpectralEnvelopeConfig, NetlistEnvelopeMission, NetlistEnvelopeSample,
-    NetlistEnvelopeTransition, SpectralEnvelopeMissionConfig, SpectralEnvelopeStepping,
-};
 pub use autonomous::{QpssOscillator, QpssOscillatorSeed};
+pub use envelope::{
+    EnvelopeCarrierBasis, EnvelopeEventTolerances, EnvelopeSourceEvent, EnvelopeSourceSide,
+    NetlistEnvelopeAdvance, NetlistEnvelopeEvent, NetlistEnvelopeMission, NetlistEnvelopeSample,
+    NetlistEnvelopeState, NetlistEnvelopeTransition, PreparedSpectralEnvelope,
+    SpectralEnvelopeConfig, SpectralEnvelopeMissionConfig, SpectralEnvelopeStepping,
+};
 mod card;
 mod frequency_sweep;
 #[cfg(test)]

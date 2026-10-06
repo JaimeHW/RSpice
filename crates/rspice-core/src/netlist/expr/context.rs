@@ -485,7 +485,8 @@ impl ParamContext {
 
     fn forget_expression_origin(&mut self, key: &str, global: bool) {
         if !self.retained_expression_origins.is_empty() {
-            self.retained_expression_origins.remove(&(global, key.to_owned()));
+            self.retained_expression_origins
+                .remove(&(global, key.to_owned()));
         }
     }
 
@@ -586,10 +587,12 @@ impl ParamContext {
     /// Read a global projection without selecting a same-name ordinary binding.
     pub(crate) fn get_global_complex(&self, name: &str) -> Option<ComplexValue> {
         let key = name.to_uppercase();
-        self.global_complex_params
-            .get(&key)
-            .copied()
-            .or_else(|| self.global_params.get(&key).copied().map(ComplexValue::from))
+        self.global_complex_params.get(&key).copied().or_else(|| {
+            self.global_params
+                .get(&key)
+                .copied()
+                .map(ComplexValue::from)
+        })
     }
 
     /// Return all retained global expressions for deterministic inspection

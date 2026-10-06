@@ -14,8 +14,8 @@ fn invalid_optional_values_are_not_silently_omitted() {
         ".NOISE V(out) V1 LIN 2 1 10 {missing}",
         ".MC 2 uniform {missing}",
     ] {
-        let error = Netlist::parse(&format!("Invalid optional operand\n{card}\n.end\n"))
-            .expect_err(card);
+        let error =
+            Netlist::parse(&format!("Invalid optional operand\n{card}\n.end\n")).expect_err(card);
         assert!(
             error.to_string().to_ascii_uppercase().contains("MISSING"),
             "{card}: {error}"

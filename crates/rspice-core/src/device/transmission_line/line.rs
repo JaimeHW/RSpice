@@ -662,7 +662,8 @@ impl TransmissionLine {
                         0.0
                     };
                     let mut inward_slope = endpoint_direction * quadratic.1;
-                    if endpoint_direction != 0.0 && inward_slope == 0.0
+                    if endpoint_direction != 0.0
+                        && inward_slope == 0.0
                         && let Some(previous) = prev2
                     {
                         inward_slope = (next_value - prev_value) / (next.time - prev.time)

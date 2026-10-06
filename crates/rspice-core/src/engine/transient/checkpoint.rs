@@ -46,9 +46,9 @@ mod bsim3;
 mod bsim4;
 mod capacitor_sdt;
 mod mosfet;
-mod solver_state;
 #[cfg(test)]
 mod record_limit_tests;
+mod solver_state;
 use crate::device::behavioral::BehavioralAcceptedState;
 
 use crate::Value;
@@ -3533,7 +3533,10 @@ fn accepted_junction_history_payload_is_empty(
             .all(|(_, values)| values.is_empty())
         && checkpoint.mosfet_history.accepted_dt_prev.to_bits() == 0
         && checkpoint.mosfet_history.accepted_dt_prev_prev.to_bits() == 0
-        && checkpoint.mosfet_history.accepted_displacement_currents.is_empty()
+        && checkpoint
+            .mosfet_history
+            .accepted_displacement_currents
+            .is_empty()
         && checkpoint.jfet_names.is_empty()
         && checkpoint.jfet_runtime_tags.is_empty()
         && checkpoint
@@ -11137,7 +11140,8 @@ mod tests {
             let mut original = sample();
             let history = &mut original.accepted_junction_history;
             history.mosfet_states.push(state);
-            for (i, (name, values)) in history.mosfet_history.columns_mut().into_iter().enumerate() {
+            for (i, (name, values)) in history.mosfet_history.columns_mut().into_iter().enumerate()
+            {
                 if level == 4 || !MosfetTransientHistory::is_extended_column(name) {
                     values.push(if i == 0 { -0.0 } else { 0.125 * i as Value });
                 }

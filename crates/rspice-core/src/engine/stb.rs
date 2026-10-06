@@ -370,7 +370,8 @@ mod tests {
     #[test]
     fn stb_workspace_reservation_failure_preserves_existing_values_and_reuse() {
         let mut values = vec![Complex64::new(2.0, 3.0)];
-        let error = try_reserve_stb_values(&mut values, usize::MAX, "STB test workspace").unwrap_err();
+        let error =
+            try_reserve_stb_values(&mut values, usize::MAX, "STB test workspace").unwrap_err();
         assert_eq!(
             error.descriptor().code,
             crate::SimulationErrorCode::AllocationFailed

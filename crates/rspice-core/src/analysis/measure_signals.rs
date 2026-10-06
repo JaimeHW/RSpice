@@ -642,11 +642,18 @@ struct LiveSelectionRow {
 impl LiveMeasureReadContext<'_, '_> {
     fn read_measure(&mut self, canonical_name: &str) -> Result<Option<Value>, String> {
         if let Some(&index) = self.program_indices.get(canonical_name) {
-            let sources = &self.programs.get(index)
-                .ok_or("invalid current primitive consumer index")?.primitive_sources;
+            let sources = &self
+                .programs
+                .get(index)
+                .ok_or("invalid current primitive consumer index")?
+                .primitive_sources;
             for &source in sources {
-                let Some(observation) = &self.programs.get(source)
-                    .ok_or("invalid current primitive source index")?.observation else {
+                let Some(observation) = &self
+                    .programs
+                    .get(source)
+                    .ok_or("invalid current primitive source index")?
+                    .observation
+                else {
                     continue;
                 };
                 let boundary = if let Some(time) = self.query_axis {
@@ -660,7 +667,9 @@ impl LiveMeasureReadContext<'_, '_> {
                 if let Some(boundary) = boundary {
                     self.boundary = Some(boundary);
                     return Err(if self.primitive_window.is_some() {
-                        format!("measurement '{canonical_name}' contains current impulse primitives inside the requested interval; generalized interval-operator composition is not yet implemented ({boundary})")
+                        format!(
+                            "measurement '{canonical_name}' contains current impulse primitives inside the requested interval; generalized interval-operator composition is not yet implemented ({boundary})"
+                        )
                     } else {
                         format!("measurement '{canonical_name}' is unavailable: {boundary}")
                     });
@@ -3127,7 +3136,9 @@ fn evaluate_equation_measurements_with_observations(
                 LiveMeasureState::Equation { .. } | LiveMeasureState::Param { .. }
             ) || query_axis.is_some_and(|at| axis_value < at);
             if boundary_read.is_some()
-                && let LiveMeasureState::Point { previous_signal, .. } = &mut state
+                && let LiveMeasureState::Point {
+                    previous_signal, ..
+                } = &mut state
             {
                 // Do not interpolate a later request across a sample whose
                 // scalar value was unavailable through a derived expression.

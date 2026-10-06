@@ -3160,7 +3160,6 @@ impl Engine {
             AcResult::retained_value_count,
         )
     }
-
 }
 
 pub(super) fn validate_ac_frequencies(frequencies: &[Value]) -> Result<(), SimulationError> {

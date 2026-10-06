@@ -3,8 +3,8 @@ use super::*;
 use crate::ResourceLimits;
 use crate::analysis::quasi_periodic::{
     QuasiPeriodicError as Error, QuasiPeriodicSolution, QuasiPeriodicSolveConfig,
-    SpectralEnvelopeMethod, SpectralEnvelopeState, SpectralEnvelopeEvent,
-    SpectralEnvelopeEventConfig, SpectralEnvelopeEventEquation,
+    SpectralEnvelopeEvent, SpectralEnvelopeEventConfig, SpectralEnvelopeEventEquation,
+    SpectralEnvelopeMethod, SpectralEnvelopeState,
     solve::{JacobianEntry, envelope},
 };
 
@@ -125,6 +125,6 @@ impl HbSolver {
 }
 
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
 mod event_tests;
+#[cfg(test)]
+mod tests;

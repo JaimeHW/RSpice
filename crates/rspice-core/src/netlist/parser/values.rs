@@ -23,7 +23,9 @@ pub(super) fn card_values_may_sample(stream: &TokenStream) -> bool {
                             pending.push(left);
                             pending.push(right);
                         }
-                        crate::netlist::expr::Expr::UnaryOp { operand, .. } => pending.push(operand),
+                        crate::netlist::expr::Expr::UnaryOp { operand, .. } => {
+                            pending.push(operand)
+                        }
                         _ => {}
                     }
                 }
@@ -1998,7 +2000,8 @@ pub(super) fn expect_value_capturing_direction(
                 Ok(v * sign)
             } else if stream.binding_numeric_values() {
                 let name = s.clone();
-                let value = stream.numeric_expression(&name, params)
+                let value = stream
+                    .numeric_expression(&name, params)
                     .map_err(|error| ParseError::InvalidValue(error.to_string()))?;
                 stream.advance();
                 Ok(value * sign)

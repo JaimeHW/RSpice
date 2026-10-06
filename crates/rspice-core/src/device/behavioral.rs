@@ -20,8 +20,8 @@ use thiserror::Error;
 
 pub(crate) mod breakpoints;
 mod history;
-mod physical;
 pub(crate) mod integrals;
+mod physical;
 pub(crate) use history::BehavioralAcceptedState;
 pub(crate) use integrals::BehavioralFqPoint;
 pub(crate) mod periodicity;

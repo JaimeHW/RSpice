@@ -4153,17 +4153,19 @@ impl Engine {
         SimulationError,
     > {
         let AdmittedTransientCircuit {
-            prepared: PreparedTransientCircuit {
-                mut circuit,
-                modified_trapezoidal_coefficients,
-                resume_continuation,
-            },
-            identity: CheckpointIdentity {
-                fingerprint,
-                netlist_identity,
-                restart_identity,
-                simulation_identity,
-            },
+            prepared:
+                PreparedTransientCircuit {
+                    mut circuit,
+                    modified_trapezoidal_coefficients,
+                    resume_continuation,
+                },
+            identity:
+                CheckpointIdentity {
+                    fingerprint,
+                    netlist_identity,
+                    restart_identity,
+                    simulation_identity,
+                },
         } = admitted;
         let TransientRunWindow {
             tstop,

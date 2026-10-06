@@ -10,11 +10,11 @@ mod coordinates;
 pub use autonomous::QuasiPeriodicAutonomousConfig;
 pub(crate) use autonomous::solve_autonomous_with_abort;
 pub(crate) use coordinates::validate as validate_spectra;
-mod evaluation;
 pub(crate) mod envelope;
+mod evaluation;
 pub use envelope::{
-    SpectralEnvelopeEvent, SpectralEnvelopeEventConfig, SpectralEnvelopeEventEquation,
-    SpectralEnvelopeAdvance, SpectralEnvelopeControl, SpectralEnvelopeMethod,
+    SpectralEnvelopeAdvance, SpectralEnvelopeControl, SpectralEnvelopeEvent,
+    SpectralEnvelopeEventConfig, SpectralEnvelopeEventEquation, SpectralEnvelopeMethod,
     SpectralEnvelopeState, advance_spectral_envelope_with_abort,
 };
 mod iterative;

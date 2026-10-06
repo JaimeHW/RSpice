@@ -2,9 +2,9 @@ use super::*;
 use crate::abort_signal::NoAbort;
 use rspice_veriloga_runtime::transport_delay::{DelayCheckpoint, DelayConfiguration};
 
-mod native;
 mod behavioral;
 mod controlled;
+mod native;
 mod transmission_line;
 
 fn options() -> EventOptions {

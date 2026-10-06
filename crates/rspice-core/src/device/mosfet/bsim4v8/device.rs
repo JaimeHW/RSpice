@@ -37,11 +37,11 @@ use crate::{Complex64, NodeId, Value};
 const TRNQS_SCALING: Value = 1.0e-9;
 
 mod ac_response;
+#[cfg(test)]
+mod charge_tests;
 pub(crate) mod checkpoint;
 mod continuation;
 mod periodic;
-#[cfg(test)]
-mod charge_tests;
 
 /// Mode-assembled charge-companion conductance matrix: the `gc**` of
 /// b4ld.c:4216-4260 (mode > 0) / 4408-4456 (mode < 0) *before* the `ag0`

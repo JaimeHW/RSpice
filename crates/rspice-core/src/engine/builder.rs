@@ -80,9 +80,9 @@ pub use veriloga_cache::{
     veriloga_cache_stats, veriloga_cache_telemetry,
 };
 #[cfg(feature = "veriloga")]
-mod veriloga_sources;
-#[cfg(feature = "veriloga")]
 mod source_dependencies;
+#[cfg(feature = "veriloga")]
+mod veriloga_sources;
 
 #[cfg(feature = "veriloga")]
 mod connect_modules;

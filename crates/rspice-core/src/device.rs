@@ -83,7 +83,9 @@ pub(crate) use transmission_line::{
     DistributedRlgc, LtraRgTwoPort, TransmissionLineCheckpoint,
 };
 pub(crate) use transmission_line::{TlineTransientResponse, TxlTransientStamp};
-pub use transmission_line::{TransmissionLine, TransmissionLineHistoryEvent, TransmissionLineTimeSide};
+pub use transmission_line::{
+    TransmissionLine, TransmissionLineHistoryEvent, TransmissionLineTimeSide,
+};
 
 use crate::Value;
 

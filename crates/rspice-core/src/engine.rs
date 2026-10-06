@@ -142,16 +142,15 @@ pub use error::{
     SimulationErrorDescriptor, UnsupportedCapabilityError,
 };
 pub use hb::{
-    EnvelopeEventTolerances, EnvelopeCarrierBasis, EnvelopeSourceEvent, EnvelopeSourceSide,
-    NetlistEnvelopeAdvance, NetlistEnvelopeEvent, NetlistEnvelopeState, PreparedSpectralEnvelope,
-    SpectralEnvelopeConfig, NetlistEnvelopeMission, NetlistEnvelopeSample,
-    NetlistEnvelopeTransition, SpectralEnvelopeMissionConfig, SpectralEnvelopeStepping,
-    EnvelopeResult, HbAnalysisResult, HbCurrentSpectrum, HbEnvelopeContinuationState,
+    EnvelopeCarrierBasis, EnvelopeEventTolerances, EnvelopeResult, EnvelopeSourceEvent,
+    EnvelopeSourceSide, HbAnalysisResult, HbCurrentSpectrum, HbEnvelopeContinuationState,
     HbEnvelopeStateGuarantee, HbIntegralSpectrum, HbNoiseFigureRequest, HbOperatingPoint,
-    HbOperatingPointIdentity, PacAnalysisResult, PeriodicNoiseEdge, PeriodicNoiseEdgeDirection,
-    PeriodicNoiseFigureResult, PeriodicNoiseFigureSpectrum, PeriodicNoiseRequest,
-    PeriodicNoiseSamplePoint, PeriodicNoiseSampling, PeriodicNoiseSamplingEvidence,
-    PeriodicNoiseSidebands, PnoiseAnalysisResult, PreparedPsp, PspAnalysisResult,
+    HbOperatingPointIdentity, NetlistEnvelopeAdvance, NetlistEnvelopeEvent, NetlistEnvelopeMission,
+    NetlistEnvelopeSample, NetlistEnvelopeState, NetlistEnvelopeTransition, PacAnalysisResult,
+    PeriodicNoiseEdge, PeriodicNoiseEdgeDirection, PeriodicNoiseFigureResult,
+    PeriodicNoiseFigureSpectrum, PeriodicNoiseRequest, PeriodicNoiseSamplePoint,
+    PeriodicNoiseSampling, PeriodicNoiseSamplingEvidence, PeriodicNoiseSidebands,
+    PnoiseAnalysisResult, PreparedPsp, PreparedSpectralEnvelope, PspAnalysisResult,
     PspNoiseCorrelation, QpacAnalysisResult, QpacInputQuantity, QpacRequest, QpacResultMetadata,
     QpnoiseAnalysisResult, QpnoiseContributorRank, QpnoiseFrequencyAxis, QpnoiseInput,
     QpnoiseIntegrated, QpnoiseIntegration, QpnoiseIntegrationMethod, QpnoiseLattices,
@@ -161,7 +160,8 @@ pub use hb::{
     QpssInitialState, QpssOperatingPoint, QpssOperatingPointMetadata, QpssOscillator,
     QpssOscillatorSeed, QpssSourceTone, QpxfAnalysisResult, QpxfFrequencyAxis, QpxfGroupDelay,
     QpxfInputLattices, QpxfInputSource, QpxfOutput, QpxfQuantity, QpxfRequest, QpxfResultMetadata,
-    QpxfSources, QpxfTransfer,
+    QpxfSources, QpxfTransfer, SpectralEnvelopeConfig, SpectralEnvelopeMissionConfig,
+    SpectralEnvelopeStepping,
 };
 pub use health::EngineHealthReport;
 pub use pss::{

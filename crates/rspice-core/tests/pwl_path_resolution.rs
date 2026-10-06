@@ -14,10 +14,7 @@ fn deferred_paths_resolve_without_evaluating_instance_values_or_opening_files() 
     let ElementKind::VoltageSourceDeferred(raw) = kind else {
         panic!("scope must remain deferred: {kind:?}")
     };
-    assert!(
-        raw.contains("{gain}") && raw.contains("{delay}"),
-        "{raw}"
-    );
+    assert!(raw.contains("{gain}") && raw.contains("{delay}"), "{raw}");
     let expected = base.join("wave µ.dat");
     assert_eq!(
         independent_source_file_dependency(kind).unwrap().as_deref(),

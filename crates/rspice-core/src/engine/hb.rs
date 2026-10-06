@@ -60,11 +60,10 @@ pub use pnoise::{
 };
 pub use psp::{PreparedPsp, PspAnalysisResult, PspNoiseCorrelation};
 pub use quasi_periodic::{
-    EnvelopeEventTolerances, EnvelopeCarrierBasis, EnvelopeSourceEvent, EnvelopeSourceSide,
-    NetlistEnvelopeAdvance, NetlistEnvelopeEvent, NetlistEnvelopeState, PreparedSpectralEnvelope,
-    SpectralEnvelopeConfig, NetlistEnvelopeMission, NetlistEnvelopeSample,
-    NetlistEnvelopeTransition, SpectralEnvelopeMissionConfig, SpectralEnvelopeStepping,
-    QpacAnalysisResult, QpacInputQuantity, QpacRequest, QpacResultMetadata, QpnoiseAnalysisResult,
+    EnvelopeCarrierBasis, EnvelopeEventTolerances, EnvelopeSourceEvent, EnvelopeSourceSide,
+    NetlistEnvelopeAdvance, NetlistEnvelopeEvent, NetlistEnvelopeMission, NetlistEnvelopeSample,
+    NetlistEnvelopeState, NetlistEnvelopeTransition, PreparedSpectralEnvelope, QpacAnalysisResult,
+    QpacInputQuantity, QpacRequest, QpacResultMetadata, QpnoiseAnalysisResult,
     QpnoiseContributorRank, QpnoiseFrequencyAxis, QpnoiseInput, QpnoiseIntegrated,
     QpnoiseIntegration, QpnoiseIntegrationMethod, QpnoiseLattices, QpnoiseNoiseFigure,
     QpnoiseObservation, QpnoiseOutput, QpnoiseOutputSpectrum, QpnoiseQuantity, QpnoiseReference,
@@ -73,7 +72,8 @@ pub use quasi_periodic::{
     QpssInitialState, QpssOperatingPoint, QpssOperatingPointMetadata, QpssOscillator,
     QpssOscillatorSeed, QpssSourceTone, QpxfAnalysisResult, QpxfFrequencyAxis, QpxfGroupDelay,
     QpxfInputLattices, QpxfInputSource, QpxfOutput, QpxfQuantity, QpxfRequest, QpxfResultMetadata,
-    QpxfSources, QpxfTransfer,
+    QpxfSources, QpxfTransfer, SpectralEnvelopeConfig, SpectralEnvelopeMissionConfig,
+    SpectralEnvelopeStepping,
 };
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
 
