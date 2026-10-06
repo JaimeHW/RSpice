@@ -39,9 +39,7 @@ impl Engine {
             .into());
             #[cfg(not(target_arch = "wasm32"))]
             {
-                use rspice_veriloga::preprocessor::{
-                    BoundedFileSystemSourceProvider, SourceResource,
-                };
+                use rspice_veriloga::preprocessor::BoundedFileSystemSourceProvider;
                 let limits = self.config.resource_limits;
                 let control = veriloga_cache::VerilogACompileControl { abort };
                 let provider = BoundedFileSystemSourceProvider::new(
@@ -61,29 +59,11 @@ impl Engine {
                 let dependencies = compiler
                     .provider_source_dependencies(&provider, path)
                     .map_err(|error| {
-                        if error.cancelled {
-                            SimulationError::Aborted
-                        } else if let Some(limit) = error.resource_limit {
-                            SimulationError::ResourceLimit(ResourceLimitError {
-                                resource: match limit.resource {
-                                    SourceResource::IncludeDepth => ResourceKind::IncludeDepth,
-                                    SourceResource::ExpandedBytes => {
-                                        ResourceKind::ExpandedSourceBytes
-                                    }
-                                    SourceResource::RootLines => ResourceKind::NetlistLines,
-                                    _ => ResourceKind::DependencySourceBytes,
-                                },
-                                requested: limit.requested,
-                                limit: limit.limit,
-                            })
-                        } else {
-                            crate::ElaborationError::new(
-                                crate::ElaborationErrorKind::CompileRefusal,
-                                format!("source dependency discovery failed: {error}"),
-                            )
-                            .in_source(path)
-                            .into()
-                        }
+                        veriloga_cache::source_admission_error(
+                            path,
+                            "source dependency discovery failed",
+                            error,
+                        )
                     })?;
                 paths.extend(dependencies);
             }

@@ -363,6 +363,38 @@ fn cache_refusal(
         .into()
 }
 
+/// Preserve source admission outcomes for both discovery and compilation.
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+pub(super) fn source_admission_error(
+    path: &Path,
+    context: &str,
+    error: rspice_veriloga::PreprocessorError,
+) -> SimulationError {
+    use rspice_veriloga::preprocessor::SourceResource;
+    if error.cancelled {
+        return SimulationError::Aborted;
+    }
+    if let Some(limit) = error.resource_limit {
+        return SimulationError::ResourceLimit(ResourceLimitError {
+            resource: match limit.resource {
+                SourceResource::IncludeDepth => ResourceKind::IncludeDepth,
+                SourceResource::ExpandedBytes => ResourceKind::ExpandedSourceBytes,
+                SourceResource::RootLines => ResourceKind::NetlistLines,
+                SourceResource::RootBytes
+                | SourceResource::TotalSourceBytes
+                | SourceResource::Dependencies => ResourceKind::DependencySourceBytes,
+            },
+            requested: limit.requested,
+            limit: limit.limit,
+        });
+    }
+    cache_refusal(
+        path,
+        crate::ElaborationErrorKind::CompileRefusal,
+        format!("{context}: {error}"),
+    )
+}
+
 /// On-disk Verilog-A cache statistics.
 #[cfg(feature = "veriloga")]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2035,7 +2067,7 @@ pub(super) fn prepare_veriloga_source(
     let compiler = rspice_veriloga::VerilogACompiler::new(deck_include_compiler_options());
     let control = VerilogACompileControl { abort };
     let preparation_started = crate::time_compat::Instant::now();
-    let prepared = compiler.prepare_file_runtime_source_with_limits_and_control(
+    let prepared = compiler.prepare_file_runtime_source_with_diagnostics(
         path,
         rspice_veriloga::SourceProviderLimits {
             max_dependencies: usize::MAX,
@@ -2054,11 +2086,26 @@ pub(super) fn prepare_veriloga_source(
             .compilations_started
             .fetch_add(1, Relaxed);
         match error {
-            rspice_veriloga::CompileError::Cancelled(_) => {
+            rspice_veriloga::ProviderCompileError::Compile {
+                source: rspice_veriloga::CompileError::Cancelled(_),
+                ..
+            } => {
                 VERILOGA_CACHE_TELEMETRY
                     .compilations_cancelled
                     .fetch_add(1, Relaxed);
                 SimulationError::Aborted
+            }
+            rspice_veriloga::ProviderCompileError::Source(error) => {
+                if error.cancelled {
+                    VERILOGA_CACHE_TELEMETRY
+                        .compilations_cancelled
+                        .fetch_add(1, Relaxed);
+                } else {
+                    VERILOGA_CACHE_TELEMETRY
+                        .compilations_failed
+                        .fetch_add(1, Relaxed);
+                }
+                source_admission_error(path, "preparation failed", error)
             }
             error => {
                 VERILOGA_CACHE_TELEMETRY
@@ -2765,6 +2812,72 @@ endmodule
             canonical_ir: Some(std::sync::Arc::new(runtime.canonical_ir)),
             diagnostics: runtime.diagnostics.into(),
         }
+    }
+
+    #[test]
+    fn runtime_preparation_preserves_source_admission_outcomes() {
+        let root = unique_test_root("preparation-admission");
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("root.va");
+        std::fs::write(&source, "`include \"child.va\"\n").unwrap();
+        std::fs::write(
+            root.join("child.va"),
+            format!(
+                "module m;\n{}endmodule\n",
+                (0..2048)
+                    .map(|index| format!("real r{index};\n"))
+                    .collect::<String>()
+            ),
+        )
+        .unwrap();
+        for (limits, resource, limit) in [
+            (
+                ResourceLimits {
+                    max_include_depth: 1,
+                    ..ResourceLimits::default()
+                },
+                ResourceKind::IncludeDepth,
+                1,
+            ),
+            (
+                ResourceLimits {
+                    max_expanded_source_bytes: 256,
+                    ..ResourceLimits::default()
+                },
+                ResourceKind::ExpandedSourceBytes,
+                256,
+            ),
+            (
+                ResourceLimits {
+                    max_dependency_source_bytes: 256,
+                    ..ResourceLimits::default()
+                },
+                ResourceKind::DependencySourceBytes,
+                256,
+            ),
+        ] {
+            let error = prepare_veriloga_source(&source, limits, &NoAbort).unwrap_err();
+            let SimulationError::ResourceLimit(error) = error else {
+                panic!("{error:?}")
+            };
+            assert_eq!(error.resource, resource);
+            assert_eq!(error.limit, limit);
+            assert!(error.requested > limit);
+        }
+        struct CancelDuringRead(std::sync::atomic::AtomicUsize);
+        impl AbortSignal for CancelDuringRead {
+            fn is_aborted(&self) -> bool {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 8
+            }
+        }
+        let error = prepare_veriloga_source(
+            &source,
+            ResourceLimits::default(),
+            &CancelDuringRead(std::sync::atomic::AtomicUsize::new(0)),
+        )
+        .unwrap_err();
+        assert!(matches!(error, SimulationError::Aborted));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
