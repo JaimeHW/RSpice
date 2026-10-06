@@ -66,6 +66,7 @@ Use `rspice-bench <command> --help` for all flags and defaults.
 | `generated-rust` | Authenticate generated Rust files and report source sizes and workspace/state payload counts |
 | `generated-compile` | Measure isolated generated-package release checks with toolchain, host, and Git provenance |
 | `generated-stamp` | Measure generated-model evaluation/stamping; requires an opt-in model feature |
+| `gp-transient` | Measure public native GP exact-delay/Weil runs, accepted-work cancellation and charged peak transport storage; requires `core-transient` |
 
 Examples:
 
@@ -88,6 +89,57 @@ measures the complete generated-model corpus. Workflows own their thresholds
 and upload retained reports as artifacts. Absolute timing budgets are optional
 and should be chosen on controlled hardware. Different compact models do not
 have a universal runtime ratio.
+
+## Native GP transient qualification
+
+Build from a clean committed checkout and retain the exact Cargo invocation
+alongside the immutable report. The command refuses a debug or dirty build
+unless `--exploratory` is supplied. The common report envelope captures the
+executable and lockfile hashes, current source revision, toolchain and host.
+
+```sh
+cargo run --locked --release -p rspice-bench --features core-transient-default -- \
+  gp-transient --out target/benchmarks/gp-default.json
+cargo run --locked --release -p rspice-bench --features core-transient -- \
+  gp-transient --out target/benchmarks/gp-no-default.json
+```
+
+`core-transient-default` requests the core's default features; `core-transient`
+does not. Cargo dependency features can unify, so retain `cargo tree -e features`
+with comparisons. Neither enables the generated-model corpus. Additional core
+features may be selected explicitly through Cargo.
+
+Each case runs an NPN circuit with private RB/RE/RC nodes in the Ngspice dialect
+with a 4 ps maximum step and adaptive refinement. It exercises both phase operators, 1 and 16 devices, and
+either no checkpoints or three retained checkpoints. The full generated deck,
+its hash, horizon/step policy, checkpoint times and configuration are recorded. `--devices`,
+`--steps` and `--samples` control the workload. One warmup precedes the repeats.
+The report retains every timing, waveform hash, sample count and abort-poll count.
+Repeated waveforms and post-cancellation engine reuse must match exactly.
+
+Cancellation is requested from the first accepted-sample callback at or beyond
+half the simulation horizon, after at least one transport delay. The measured latency ends when the public
+API returns, including cleanup. This avoids a trigger thread's scheduler delay;
+it does not measure cancellation requested in the middle of a matrix solve or
+from another process. No further sample may be accepted on these nonlinear
+workloads. Portable cancellation/restart regressions live in the core tests.
+
+Peak storage is measured through the typed transport-byte quota: follow strictly
+increasing resource requests until the public run succeeds, then verify failure
+at one byte less. Repeat this probe before and after timing; run at the exact
+quota and require the same waveform. The figure includes charged live-record
+capacities, transient copies and retained checkpoints. It excludes fixed BJT
+state, results, solver allocations, allocator overhead and process RSS. Weil's
+finite state therefore correctly reports zero **transport-record** bytes.
+
+Timing includes circuit building, OP, solving, observation and checkpoint
+capture/release. It excludes netlist parsing, waveform hashing/validation and
+waveform release. Quota probes are not timed. Optional `--max-run-ms` (per-case
+median), `--max-cancel-ms` (every measured cancellation) and
+`--max-transport-bytes` fail the run after saving its report. Choose timing gates
+on controlled hardware after inspecting repeatability; this harness does not
+establish a universal performance limit. Its workloads complement the core's
+independent accuracy oracles and do not close the complete GP qualification matrix.
 
 ## Macro workloads
 

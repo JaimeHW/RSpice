@@ -14,6 +14,9 @@ name = "rspice-bench"
 path = "src/main.rs"
 
 [features]
+# Public native GP transient qualification, independent of the generated corpus.
+core-transient = ["dep:rspice-core"]
+core-transient-default = ["core-transient", "rspice-core/default"]
 # Opt-in: pulls the whole generated built-in corpus into this binary. The
 # models are independent packages so Cargo can cache and compile them in
 # parallel, but the complete corpus remains inappropriate for the default
