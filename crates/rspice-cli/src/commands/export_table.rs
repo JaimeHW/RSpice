@@ -166,39 +166,72 @@ impl ExportTable {
             .any(|column| matches!(column.data, ColumnData::Complex { .. }))
     }
 
-    /// Keep only the requested columns (case-insensitive name match).
-    ///
-    /// Names match either the full column name (`V(out)`) or the bare inner
-    /// name (`out`). Unknown names are an error listing what is available.
+    /// Keep only the requested columns, matching names without case sensitivity.
+    /// Qualified names select exactly that column; a bare alias must be unique.
     pub(crate) fn select_variables(&mut self, requested: &[String]) -> Result<(), CliError> {
         if requested.is_empty() {
             return Ok(());
         }
 
-        let matches = |column: &ExportColumn, want: &str| {
-            if column.name.eq_ignore_ascii_case(want) {
-                return true;
-            }
-            // Match `out` against `V(out)` / `I(out)`
-            let inner = column
-                .name
+        let mut aliases = std::collections::HashMap::<String, Vec<usize>>::new();
+        for (index, column) in self.columns.iter().enumerate() {
+            let name = column.name.trim().to_ascii_lowercase();
+            if let Some(inner) = name
                 .split_once('(')
-                .and_then(|(_, rest)| rest.strip_suffix(')'));
-            inner.is_some_and(|inner| inner.eq_ignore_ascii_case(want))
-        };
-
+                .and_then(|(_, rest)| rest.strip_suffix(')'))
+            {
+                aliases
+                    .entry(inner.trim().to_owned())
+                    .or_default()
+                    .push(index);
+            }
+            aliases.entry(name).or_default().push(index);
+        }
+        let mut keep = vec![false; self.columns.len()];
         for want in requested {
-            if !self.columns.iter().any(|column| matches(column, want)) {
-                let available: Vec<&str> = self.columns.iter().map(|c| c.name.as_str()).collect();
-                return Err(CliError::InvalidArgument {
-                    message: format!("variable '{}' not found in input", want),
-                    suggestion: Some(format!("available variables: {}", available.join(", "))),
-                });
+            let name = want.trim().to_ascii_lowercase();
+            let qualified = name.contains('(') && name.ends_with(')');
+            let matches: Vec<_> = aliases
+                .get(&name)
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|&index| {
+                    !qualified || self.columns[index].name.trim().eq_ignore_ascii_case(&name)
+                })
+                .collect();
+            match matches.as_slice() {
+                [] => {
+                    return Err(CliError::InvalidArgument {
+                        message: format!("variable '{want}' not found in input"),
+                        suggestion: Some(format!(
+                            "available variables: {}",
+                            self.columns
+                                .iter()
+                                .map(|column| column.name.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )),
+                    });
+                }
+                [index] => keep[*index] = true,
+                _ => {
+                    return Err(CliError::InvalidArgument {
+                        message: format!("variable selector '{want}' is ambiguous"),
+                        suggestion: Some(format!(
+                            "use a full column name: {}",
+                            matches
+                                .iter()
+                                .map(|&index| self.columns[index].name.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )),
+                    });
+                }
             }
         }
-
-        self.columns
-            .retain(|column| requested.iter().any(|want| matches(column, want)));
+        let mut keep = keep.into_iter();
+        self.columns.retain(|_| keep.next().unwrap_or(false));
         Ok(())
     }
 
