@@ -1,6 +1,7 @@
 //! Constant MNA descriptor closure for coupled charge and flux constraints.
 
 use super::*;
+use crate::engine::exact_constraints::{ConstraintDisposition, close_descriptor};
 
 mod nonlinear;
 use nonlinear::NonlinearForcing;
@@ -123,16 +124,13 @@ impl PssDescriptor {
                 .saturating_add(port_overhead),
             limits.max_result_values,
         )?;
-        let mut dynamic =
-            PssVoltageConstraintBuilder::new(size.saturating_mul(2).saturating_add(1), limits)?;
-        let mut algebraic = PssVoltageConstraintBuilder::new(size.saturating_add(1), limits)?;
         let overhead = size
             .saturating_mul(32)
             .saturating_add(prepared_words)
             .saturating_add(port_overhead);
+        // Reserve both closure reducers while building the physical rows.
         let mut words = overhead
-            .saturating_add(dynamic.retained_words)
-            .saturating_add(algebraic.retained_words)
+            .saturating_add(size.saturating_mul(6).saturating_add(4))
             .saturating_add(size.saturating_mul(VoltageRow::default().words()))
             .saturating_add(triplet_words);
         PssVoltageConstraintBuilder::ensure_words(words, limits.max_result_values)?;
@@ -339,67 +337,34 @@ impl PssDescriptor {
                 rows.push(row);
             }
         }
-        // E*x' + A*x = b(t). Eliminate only derivative columns first.
-        // Each independent residual C*x=d(t) also implies C*x'=d'(t).
-        // Feeding that derivative back exposes hidden higher-index constraints.
-        let mut pending_words = rows.iter().map(VoltageRow::words).sum::<usize>();
-        while let Some(row) = rows.pop() {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            pending_words -= row.words();
-            dynamic.limits.max_result_values = limits.max_result_values.saturating_sub(
-                overhead
-                    .saturating_add(pending_words)
-                    .saturating_add(algebraic.retained_words),
-            );
-            let Some(row) = dynamic.admit(row, size + 1, abort)? else {
-                continue;
-            };
-            algebraic.limits.max_result_values = limits.max_result_values.saturating_sub(
-                overhead
-                    .saturating_add(pending_words)
-                    .saturating_add(dynamic.retained_words),
-            );
-            if let Some(remainder) = algebraic.admit(row, 1, abort)? {
-                if !remainder.values.is_empty() {
-                    if nonlinear_ports.is_some() {
-                        // These are the original port equations (and their
-                        // derivatives), evaluated by NonlinearForcing. The
-                        // first pass already rejected independent source-only
-                        // constraints and ports carrying dynamic coordinates.
-                        continue;
-                    }
-                    // A constitutive inverse or differential nonlinear closure
-                    // is needed here; do not certify it by linearization.
-                    if !circuit.diodes.is_empty() {
-                        return Ok(None);
-                    }
-                    return Err(SimulationError::Circuit("PSS linear descriptor imposes an inconsistent or nonunique source constraint".to_owned()));
+        let Some(mut algebraic) = close_descriptor(
+            size,
+            rows,
+            limits,
+            overhead,
+            abort,
+            ForestValue::differentiated,
+            |_| {
+                if nonlinear_ports.is_some() {
+                    // NonlinearForcing evaluates the original port equations
+                    // and their derivatives. The first pass already excluded
+                    // independent source-only constraints and dynamic ports.
+                    return Ok(ConstraintDisposition::RetainAtOwner);
                 }
-                continue;
-            }
-            let row = &algebraic.rows.last().unwrap().1;
-            algebraic.check_cost(row.words().saturating_mul(3))?;
-            let derivative = VoltageRow {
-                nodes: row
-                    .nodes
-                    .iter()
-                    .map(|(&node, value)| (size + node, value.clone()))
-                    .collect(),
-                values: row
-                    .values
-                    .iter()
-                    .map(|(&source, value)| Ok((source.differentiated()?, value.clone())))
-                    .collect::<Result<_, SimulationError>>()?,
-                query: BigInt::default(),
-            };
-            pending_words = pending_words.saturating_add(derivative.words());
-            rows.push(derivative);
-        }
-        drop(dynamic);
-        drop(rows);
-        algebraic.limits.max_result_values = limits.max_result_values.saturating_sub(overhead);
+                if !circuit.diodes.is_empty() {
+                    // A constitutive inverse or differential nonlinear
+                    // closure is required, not a DC linearization.
+                    return Ok(ConstraintDisposition::Defer);
+                }
+                Err(SimulationError::Circuit(
+                    "PSS linear descriptor imposes an inconsistent or nonunique source constraint"
+                        .to_owned(),
+                ))
+            },
+        )?
+        else {
+            return Ok(None);
+        };
         // Prefer physical winding currents before charge voltages. A voltage
         // controlled by a winding must not displace that winding's coordinate.
         let mut representatives = Vec::new();

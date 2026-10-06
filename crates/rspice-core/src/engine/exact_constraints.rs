@@ -5,6 +5,9 @@ use crate::{AbortSignal, Value};
 use num_bigint::{BigInt, BigUint, Sign};
 use std::collections::BTreeMap;
 
+mod descriptor;
+pub(super) use descriptor::{ConstraintDisposition, close_descriptor};
+
 #[derive(Debug, Clone)]
 pub(super) struct ExactRow<K> {
     pub(super) nodes: BTreeMap<usize, BigInt>,
