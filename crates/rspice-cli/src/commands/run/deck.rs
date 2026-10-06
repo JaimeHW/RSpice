@@ -340,6 +340,7 @@ pub(super) fn preflight_deck_run_count(
     netlist: &Netlist,
     args: &RunArgs,
     config: &Config,
+    run_label: Option<&str>,
 ) -> Result<usize, CliError> {
     validate_step_frontend_compatibility(netlist, args)?;
 
@@ -348,6 +349,18 @@ pub(super) fn preflight_deck_run_count(
         DeckPlan::from_netlist_with_abort(netlist, &resource_limits, &crate::abort::ProcessAbort)
             .map_err(|error| map_deck_plan_error(error, args))?;
     if canonical_plan.axes().is_empty() {
+        super::restart::protect_planned_inputs(
+            netlist,
+            args,
+            run_label,
+            false,
+            canonical_plan
+                .analyses()
+                .iter()
+                .map(|analysis| analysis.id())
+                .filter(|id| id.kind() == rspice_core::execution::AnalysisKind::Tran),
+            resource_limits,
+        )?;
         if requested_mode_name(args).is_none() {
             crate::commands::preflight::netlist(
                 netlist,
@@ -376,6 +389,7 @@ pub(super) fn preflight_deck_run_count(
         &base_signature,
         aggregate_report_values,
         args,
+        run_label,
     )?;
     Ok(materializer.len())
 }

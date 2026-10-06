@@ -135,6 +135,7 @@ pub(super) fn preflight_step_coordinates(
     base_signature: &[&'static str],
     aggregate_report_values: Option<usize>,
     args: &RunArgs,
+    run_label: Option<&str>,
 ) -> Result<Vec<StepCoordinateContract>, CliError> {
     let mut contracts = Vec::with_capacity(materializer.len());
     let mut retained_report_values = aggregate_report_values.unwrap_or(0);
@@ -165,6 +166,19 @@ pub(super) fn preflight_step_coordinates(
                 )
             })?;
         super::sources::protect(materialized.netlist(), engine, args.timeout)?;
+        let label = compose_run_label(run_label, Some(&canonical_coordinate.stable_tag()));
+        super::restart::protect_planned_inputs(
+            materialized.netlist(),
+            args,
+            label.as_deref(),
+            true,
+            materialized
+                .analyses()
+                .iter()
+                .map(|analysis| analysis.id())
+                .filter(|id| id.kind() == rspice_core::execution::AnalysisKind::Tran),
+            engine.config().resource_limits,
+        )?;
         crate::commands::preflight::netlist(
             materialized.netlist(),
             &args.input,
@@ -944,6 +958,7 @@ pub(super) fn run_deck(
         &base_signature,
         aggregate_report_values,
         args,
+        run_label,
     )?;
 
     if base_signature.is_empty() && netlist.control_script.is_none() {

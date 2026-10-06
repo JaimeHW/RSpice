@@ -19,6 +19,7 @@ struct State {
     paths: HashMap<PathBuf, String>,
     declared: HashMap<PathBuf, String>,
     sources: HashSet<PathBuf>,
+    checkpoint_inputs: HashMap<PathBuf, bool>,
     collision: Option<String>,
 }
 
@@ -114,7 +115,7 @@ pub(crate) fn begin(
         }
     }
     for &(role, path) in reports {
-        registry.claim(path, role)?;
+        registry.claim(path, role, false)?;
     }
     registry.lock()?.declared = known
         .into_iter()
@@ -134,6 +135,45 @@ pub(crate) fn enter(registry: Arc<Destinations>) -> DestinationScope {
 }
 
 impl Destinations {
+    /// Resume state may only be replaced by an explicitly requested checkpoint
+    /// at the same path. Ordinary artifacts and reports never own this input.
+    pub(crate) fn protect_checkpoint(
+        &self,
+        source: &Path,
+        renewal: Option<&Path>,
+    ) -> Result<(), CliError> {
+        let source_key = key(source).map_err(|error| CliError::InputReadError {
+            path: source.to_path_buf(),
+            source: error,
+        })?;
+        let renewable = renewal
+            .map(key)
+            .transpose()
+            .map_err(|error| CliError::output_error(renewal.unwrap_or(source), error))?
+            .is_some_and(|path| path == source_key);
+        let mut state = self.lock()?;
+        let conflict_role = state.paths.get(&source_key).or_else(|| {
+            state
+                .declared
+                .get(&source_key)
+                .filter(|role| !renewable || *role != "checkpoint")
+        });
+        if let Some(role) = conflict_role {
+            let message = format!(
+                "{role} would overwrite checkpoint source '{}'",
+                source.display()
+            );
+            state.collision = Some(message.clone());
+            return Err(conflict(message));
+        }
+        state
+            .checkpoint_inputs
+            .entry(source_key)
+            .and_modify(|allowed| *allowed &= renewable)
+            .or_insert(renewable);
+        Ok(())
+    }
+
     /// Reading a source more than once is valid; replacing it with output is not.
     pub(crate) fn protect(&self, source: &Path) -> Result<(), CliError> {
         let source_key = key(source).map_err(|error| CliError::InputReadError {
@@ -160,10 +200,15 @@ impl Destinations {
         })
     }
 
-    fn claim(&self, path: &Path, role: &str) -> Result<(), CliError> {
+    fn claim(&self, path: &Path, role: &str, checkpoint: bool) -> Result<(), CliError> {
         let key = key(path).map_err(|error| CliError::output_error(path, error))?;
         let mut state = self.lock()?;
-        if state.sources.contains(&key) {
+        if state.sources.contains(&key)
+            || state
+                .checkpoint_inputs
+                .get(&key)
+                .is_some_and(|renewable| !checkpoint || !renewable)
+        {
             let message = format!("{role} would overwrite source '{}'", path.display());
             state.collision = Some(message.clone());
             return Err(conflict(message));
@@ -190,5 +235,9 @@ pub(crate) fn protect(source: &Path) -> Result<(), CliError> {
 }
 
 pub(crate) fn claim(path: &Path) -> Result<(), CliError> {
-    current().map_or(Ok(()), |registry| registry.claim(path, "result/checkpoint"))
+    current().map_or(Ok(()), |registry| registry.claim(path, "result", false))
+}
+
+pub(crate) fn claim_checkpoint(path: &Path) -> Result<(), CliError> {
+    current().map_or(Ok(()), |registry| registry.claim(path, "checkpoint", true))
 }

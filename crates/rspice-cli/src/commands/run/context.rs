@@ -25,12 +25,6 @@ pub(super) struct RunContext<'a> {
     pub(super) format: OutputFormat,
     /// Resolved output path; relative paths land in config `output.output_directory`.
     pub(super) output: Option<std::path::PathBuf>,
-    /// Coordinate-local checkpoint output path. Multi-run labels are inserted
-    /// before the extension so independent runs can never overwrite state.
-    pub(super) checkpoint: Option<std::path::PathBuf>,
-    /// Coordinate-local checkpoint input path, using the same namespace rule
-    /// as checkpoint output.
-    pub(super) resume: Option<std::path::PathBuf>,
     /// CLI `--progress` or config `output.show_progress`.
     pub(super) show_progress: bool,
     /// CLI `--compress` or config `simulation.compress_waveforms`.
@@ -253,16 +247,13 @@ impl<'a> RunContext<'a> {
     }
 
     pub(super) fn restart_logical_name(&self, name: &str) -> Result<String, CliError> {
-        let mut name = name.to_owned();
-        if let Some(label) = &self.run_label {
-            name.push('.');
-            name.push_str(&sanitize_run_tag(label));
-        }
-        if self.control_outputs || self.planned_transient_ids.len() > 1 {
-            name.push('.');
-            name.push_str(&self.current_transient_analysis_id()?);
-        }
-        Ok(name)
+        let namespace = self.checkpoint_namespace();
+        let analysis = if namespace.restart_qualifies_analysis() {
+            self.current_transient_analysis_id()?
+        } else {
+            String::new()
+        };
+        Ok(namespace.restart_name(name, &analysis))
     }
 
     pub(super) fn new(
@@ -285,19 +276,11 @@ impl<'a> RunContext<'a> {
             None => parse_format_name(&config.output.format)?,
         };
         let mut output = resolve_output_path(args.output.clone(), config)?;
-        let mut checkpoint = args.checkpoint.clone();
-        let mut resume = args.resume.clone();
         // Multi-run decks tag each run's output so later runs cannot
         // silently overwrite earlier ones: `out.csv` -> `out.hot.csv`.
         if let Some(label) = run_label {
             let tag = sanitize_run_tag(label);
             if let Some(path) = output.as_mut() {
-                *path = tag_output_path(path, &tag);
-            }
-            if let Some(path) = checkpoint.as_mut() {
-                *path = tag_output_path(path, &tag);
-            }
-            if let Some(path) = resume.as_mut() {
                 *path = tag_output_path(path, &tag);
             }
         }
@@ -308,8 +291,6 @@ impl<'a> RunContext<'a> {
             args,
             format,
             output,
-            checkpoint,
-            resume,
             show_progress: args.progress || config.output.show_progress,
             compress: args.compress || config.simulation.compress_waveforms,
             compress_tol: args
@@ -696,7 +677,7 @@ impl<'a> RunContext<'a> {
         &self,
         path: Option<&std::path::Path>,
     ) -> Option<std::path::PathBuf> {
-        let path = path?.to_path_buf();
+        let path = path?;
         let analysis_id = match self.current_transient_analysis_id() {
             Ok(analysis_id) => analysis_id,
             Err(CliError::InternalError { message }) => {
@@ -705,18 +686,16 @@ impl<'a> RunContext<'a> {
             }
             Err(_) => return None,
         };
-        // A deck with one authored transient keeps the requested checkpoint
-        // path so `--checkpoint state.chk` round-trips under its own name.
-        if self
-            .output_tag_multiplicities
-            .get("tran")
-            .is_none_or(|count| *count <= 1)
-            && self.coordinate.is_none()
-            && !self.control_outputs
-        {
-            return Some(path);
-        }
-        Some(tag_output_path(&path, &analysis_id))
+        Some(self.checkpoint_namespace().cli_path(path, &analysis_id))
+    }
+
+    fn checkpoint_namespace(&self) -> super::restart::CheckpointNamespace<'_> {
+        super::restart::CheckpointNamespace::new(
+            self.run_label.as_deref(),
+            self.coordinate.is_some(),
+            self.planned_transient_ids.len() > 1,
+            self.control_outputs,
+        )
     }
 
     pub(super) fn current_transient_analysis_id(&self) -> Result<String, CliError> {

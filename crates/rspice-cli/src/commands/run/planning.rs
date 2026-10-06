@@ -22,8 +22,9 @@ impl PreparedDeck {
         args: &RunArgs,
         config: &Config,
         multi_run: bool,
+        run_label: Option<&str>,
     ) -> Result<usize, CliError> {
-        let check = |netlist: &Netlist, args: &RunArgs| {
+        let check = |netlist: &Netlist, args: &RunArgs, label: Option<&str>| {
             if multi_run
                 && netlist
                     .options
@@ -36,14 +37,18 @@ impl PreparedDeck {
                     suggestion: Some("run each expanded deck separately".into()),
                 });
             }
-            preflight_deck_run_count(netlist, args, config)
+            preflight_deck_run_count(netlist, args, config, label)
         };
         match self {
-            Self::Single(netlist) => check(netlist, args),
+            Self::Single(netlist) => check(netlist, args, run_label),
             Self::Corners(corners) => {
                 let mut count = 0usize;
                 for corner in corners {
-                    count = count.saturating_add(check(&corner.netlist, &corner.args)?);
+                    count = count.saturating_add(check(
+                        &corner.netlist,
+                        &corner.args,
+                        corner.run_label(run_label).as_deref(),
+                    )?);
                 }
                 Ok(count)
             }

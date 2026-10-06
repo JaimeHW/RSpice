@@ -50,6 +50,16 @@ pub(super) struct PreparedCorner {
     pub args: RunArgs,
 }
 
+impl PreparedCorner {
+    pub(super) fn run_label(&self, outer: Option<&str>) -> Option<String> {
+        if self.args.output.is_none() {
+            compose_run_label(outer, Some(&self.name))
+        } else {
+            outer.map(str::to_string)
+        }
+    }
+}
+
 /// Inject the selected library before parsing any expressions or output requests.
 pub(super) fn prepare(
     source: &str,
@@ -136,19 +146,14 @@ pub(super) fn run(
             if crate::abort::reason().is_some() {
                 return Err(cancellation_cli_error(args.timeout));
             }
-            let default_label = prepared
-                .args
-                .output
-                .is_none()
-                .then(|| compose_run_label(run_label, Some(corner)))
-                .flatten();
+            let label = prepared.run_label(run_label);
             run_deck(
                 &prepared.netlist,
                 &prepared.args,
                 config,
                 false,
                 true,
-                default_label.as_deref().or(run_label),
+                label.as_deref(),
             )
         };
         let mut outcome = match execute() {

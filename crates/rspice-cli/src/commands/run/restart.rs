@@ -10,6 +10,19 @@ use super::RunContext;
 use crate::cli::CliError;
 use std::path::{Component, Path, PathBuf};
 
+mod inputs;
+pub(super) use inputs::{CheckpointNamespace, protect_planned_inputs};
+
+pub(super) fn protect_input(path: &Path, renewal: Option<&Path>) -> Result<(), CliError> {
+    if let Some(destinations) = crate::commands::publish::destinations::current() {
+        destinations.protect_checkpoint(path, renewal)?;
+        if let Ok(canonical) = path.canonicalize() {
+            destinations.protect_checkpoint(&canonical, renewal)?;
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn run_authored_restart(
     ctx: &RunContext<'_>,
     restart: &rspice_core::netlist::XyceRestartOptions,
@@ -116,6 +129,7 @@ pub(super) fn run_authored_restart(
             let parent = restart_namespace_parent(&ctx.args.input)?;
             let file = ctx.restart_logical_name(file)?;
             let path = safe_restart_read_path(&parent, &file)?;
+            protect_input(&path, None)?;
             let checkpoint_limit = ctx.engine.config().resource_limits.max_external_data_bytes;
             let checkpoint = rspice_core::engine::TransientCheckpoint::load_with_limit_and_abort(
                 &path,
@@ -305,7 +319,7 @@ pub(super) fn publish_checkpoint(
     let bytes = checkpoint
         .to_persistable_bytes_with_abort(encoding, abort)
         .map_err(|error| map_restart_simulation_error(ctx, error))?;
-    crate::commands::publish::artifact(path, |writer| {
+    crate::commands::publish::checkpoint(path, |writer| {
         if abort.is_aborted() {
             return Err(super::cancellation_cli_error(ctx.args.timeout));
         }

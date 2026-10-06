@@ -175,6 +175,29 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     .filter_map(|(role, path)| path.map(|path| (role, path)))
     .collect();
     let (destinations, destination_scope) = publish::destinations::begin(&declared, &report_paths)?;
+    let result = execute_with_destinations(
+        args,
+        config,
+        verbose,
+        quiet,
+        destinations.clone(),
+        destination_scope,
+    );
+    // Publication can wrap a collision in an I/O or simulation error. Keep its
+    // argument-error category even when execution exits before writing reports.
+    destinations.finish()?;
+    result
+}
+
+fn execute_with_destinations(
+    args: RunArgs,
+    config: &Config,
+    verbose: bool,
+    quiet: bool,
+    destinations: std::sync::Arc<publish::destinations::Destinations>,
+    destination_scope: publish::destinations::DestinationScope,
+) -> Result<(), CliError> {
+    let from_stdin = crate::commands::is_stdin(&args.input);
     for path in config.source_paths() {
         destinations.protect(path)?;
     }
@@ -242,6 +265,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
             &args,
             config,
             multi_run || args.corners.is_some(),
+            deck.label.as_deref(),
         )?);
         prepared.push(prepared_deck);
         if concrete_runs > resource_limits.max_batch_runs {

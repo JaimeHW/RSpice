@@ -174,6 +174,24 @@ where
     F: FnOnce(&mut dyn Write) -> Result<(), E>,
 {
     destinations::claim(path).map_err(joining_error)?;
+    claimed_artifact(path, write)
+}
+
+/// Publish saved solver state, including an explicitly requested in-place renewal.
+pub fn checkpoint<E, F>(path: &Path, write: F) -> Result<(), AtomicArtifactError<E>>
+where
+    E: std::error::Error + 'static,
+    F: FnOnce(&mut dyn Write) -> Result<(), E>,
+{
+    destinations::claim_checkpoint(path).map_err(joining_error)?;
+    claimed_artifact(path, write)
+}
+
+fn claimed_artifact<E, F>(path: &Path, write: F) -> Result<(), AtomicArtifactError<E>>
+where
+    E: std::error::Error + 'static,
+    F: FnOnce(&mut dyn Write) -> Result<(), E>,
+{
     match current() {
         None => write_atomic(path, write),
         Some(state) => {
