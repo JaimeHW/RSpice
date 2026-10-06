@@ -4,8 +4,31 @@ use std::path::PathBuf;
 
 fn candidates(netlist: &Netlist) -> Vec<PathBuf> {
     Engine::default()
-        .xspice_data_file_candidates_with_abort(netlist, &NoAbort)
+        .data_file_candidates_with_abort(netlist, &NoAbort)
         .unwrap()
+}
+
+#[test]
+fn behavioral_dependencies_expand_functions_and_use_the_readers_path_rules() {
+    let root = std::env::temp_dir().join("rspice-behavioral-dependency-paths");
+    let netlist = Netlist::parse_with_path(
+        "behavioral inputs\n\
+         .func wave(x) {tablefile(\"wave.dat\")+x}\n\
+         B1 out 0 V={wave(0)}\n\
+         R1 out 0 R={1000*fasttablefile(\"resistance.dat\")}\n\
+         C1 out 0 {1u*akimafile(\"capacitance.dat\")}\n\
+         B2 other 0 V=table(time,0,1,1,1)\n.end\n",
+        &root.join("deck.cir"),
+    )
+    .unwrap();
+    assert_eq!(
+        candidates(&netlist),
+        vec![
+            root.join("capacitance.dat"),
+            root.join("resistance.dat"),
+            root.join("wave.dat")
+        ]
+    );
 }
 
 #[test]
@@ -121,12 +144,12 @@ fn discovery_preserves_statistical_stream_and_cancellation_and_hierarchy_bounds(
         }
     }
     assert!(matches!(
-        Engine::default().xspice_data_file_candidates_with_abort(&netlist, &Cancel),
+        Engine::default().data_file_candidates_with_abort(&netlist, &Cancel),
         Err(SimulationError::Aborted)
     ));
     let mut config = SimulationConfig::default();
     config.resource_limits.max_flattened_elements = 1;
     assert!(
-        matches!(Engine::new(config).xspice_data_file_candidates_with_abort(&netlist, &NoAbort), Err(SimulationError::ResourceLimit(error)) if error.resource == ResourceKind::FlattenedElements)
+        matches!(Engine::new(config).data_file_candidates_with_abort(&netlist, &NoAbort), Err(SimulationError::ResourceLimit(error)) if error.resource == ResourceKind::FlattenedElements)
     );
 }

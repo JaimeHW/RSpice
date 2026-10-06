@@ -65,7 +65,7 @@ pub(super) fn protect(
         }
     }
     for path in engine
-        .xspice_data_file_candidates_with_abort(netlist, &crate::abort::ProcessAbort)
+        .data_file_candidates_with_abort(netlist, &crate::abort::ProcessAbort)
         .map_err(|error| {
             if matches!(error, rspice_core::SimulationError::Aborted) {
                 cancellation_cli_error(timeout)

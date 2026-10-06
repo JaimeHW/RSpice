@@ -119,6 +119,19 @@ fn lookup_function_mode(func: Function) -> Option<(bool, InterpolationKind)> {
     }
 }
 
+/// The native file consumed by this AST node, using the reader's own function
+/// classification and path resolver. Child expressions are visited by callers.
+pub(crate) fn file_lookup_dependency(expr: &Expr, source_path: Option<&Path>) -> Option<PathBuf> {
+    if let Expr::Function { func, args } = expr
+        && lookup_function_mode(*func).is_some()
+        && let Some(Expr::StringLiteral(path)) = args.first()
+    {
+        Some(resolve_table_path(path, source_path))
+    } else {
+        None
+    }
+}
+
 fn inline_lookup_supported(func: Function) -> bool {
     matches!(func, Function::Table | Function::Akima)
 }
