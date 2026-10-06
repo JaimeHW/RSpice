@@ -1,51 +1,5 @@
 //! Publish the shared control host's completed runs through core documents.
 
-#[cfg(test)]
-mod tests {
-    use super::super::*;
-
-    #[test]
-    fn control_noise_document_matches_direct_current_referred_noise() {
-        let source = "Noise\nI1 0 out DC 0 AC 1\nR1 out 0 1k\n";
-        let direct = run_authored_deck_document_detailed(&format!(
-            "{source}.noise V(out) I1 lin 3 10 100\n.end\n"
-        ))
-        .unwrap();
-        let control = run_authored_deck_document_detailed(&format!(
-            "{source}.control\nnoise V(out) I1 lin 3 10 100\nprint inoise_spectrum dni(R1)\n.endc\n.end\n"
-        )).unwrap();
-        assert_eq!(control.control_datasets, ["noise1"]);
-        assert_eq!(control.results[0].signals(), direct.results[0].signals());
-        assert_eq!(control.results[0].payload(), direct.results[0].payload());
-        assert_eq!(control.control_presentations.len(), 1);
-    }
-
-    #[test]
-    fn control_dc_document_matches_direct_nested_sweep() {
-        let source = "DC\nI1 0 out 0\nR1 out bias 1k\nV2 bias 0 0\n";
-        let direct = run_authored_deck_document_detailed(&format!(
-            "{source}.dc I1 list 1m 0 2m V2 list 1 3\n.end\n"
-        ))
-        .unwrap();
-        for cards in [
-            ".control\ndc I1 list 1m 0 2m V2 list 1 3\nprint v(out) vs v2\n.endc",
-            ".dc I1 list 1m 0 2m V2 list 1 3\n.control\nrun\nprint v(out) vs v2\n.endc",
-        ] {
-            let control =
-                run_authored_deck_document_detailed(&format!("{source}{cards}\n.end\n")).unwrap();
-            assert_eq!(control.control_datasets, ["dc1"]);
-            assert_eq!(control.control_presentations.len(), 1);
-            assert_eq!(control.results[0].axes(), direct.results[0].axes());
-            assert_eq!(control.results[0].signals(), direct.results[0].signals());
-            assert_eq!(
-                control.results[0].device_states(),
-                direct.results[0].device_states()
-            );
-            assert_eq!(control.results[0].axes().len(), 2);
-        }
-    }
-}
-
 use super::*;
 use rspice_core::engine::{
     ControlAnalysisResult, ControlCircuit, ControlCommandEffect, ControlExecutionError,
@@ -288,4 +242,50 @@ fn source_error(mut error: WasmError, line: usize, script: &ControlScriptSource)
         error.primary_line = Some(line);
     }
     Box::new(error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::*;
+
+    #[test]
+    fn control_noise_document_matches_direct_current_referred_noise() {
+        let source = "Noise\nI1 0 out DC 0 AC 1\nR1 out 0 1k\n";
+        let direct = run_authored_deck_document_detailed(&format!(
+            "{source}.noise V(out) I1 lin 3 10 100\n.end\n"
+        ))
+        .unwrap();
+        let control = run_authored_deck_document_detailed(&format!(
+            "{source}.control\nnoise V(out) I1 lin 3 10 100\nprint inoise_spectrum dni(R1)\n.endc\n.end\n"
+        )).unwrap();
+        assert_eq!(control.control_datasets, ["noise1"]);
+        assert_eq!(control.results[0].signals(), direct.results[0].signals());
+        assert_eq!(control.results[0].payload(), direct.results[0].payload());
+        assert_eq!(control.control_presentations.len(), 1);
+    }
+
+    #[test]
+    fn control_dc_document_matches_direct_nested_sweep() {
+        let source = "DC\nI1 0 out 0\nR1 out bias 1k\nV2 bias 0 0\n";
+        let direct = run_authored_deck_document_detailed(&format!(
+            "{source}.dc I1 list 1m 0 2m V2 list 1 3\n.end\n"
+        ))
+        .unwrap();
+        for cards in [
+            ".control\ndc I1 list 1m 0 2m V2 list 1 3\nprint v(out) vs v2\n.endc",
+            ".dc I1 list 1m 0 2m V2 list 1 3\n.control\nrun\nprint v(out) vs v2\n.endc",
+        ] {
+            let control =
+                run_authored_deck_document_detailed(&format!("{source}{cards}\n.end\n")).unwrap();
+            assert_eq!(control.control_datasets, ["dc1"]);
+            assert_eq!(control.control_presentations.len(), 1);
+            assert_eq!(control.results[0].axes(), direct.results[0].axes());
+            assert_eq!(control.results[0].signals(), direct.results[0].signals());
+            assert_eq!(
+                control.results[0].device_states(),
+                direct.results[0].device_states()
+            );
+            assert_eq!(control.results[0].axes().len(), 2);
+        }
+    }
 }
