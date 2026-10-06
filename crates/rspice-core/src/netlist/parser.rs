@@ -1171,6 +1171,22 @@ fn parse_netlist_impl(
         abort,
     )?;
     resolve_static_model_expression_params_with_abort(&mut state, abort)?;
+    // Ready analysis cards retain their authored values. Pending root cards
+    // bind after the existing declaration/source/model completion phases, then
+    // merge their staged effects back into authored order.
+    state.analysis_cards.complete(
+        &state.params,
+        commands::analysis::AnalysisCardSink {
+            analyses: &mut state.analyses,
+            monte_carlo_source_cards: &mut state.monte_carlo_source_cards,
+            lin_analysis: &mut state.lin_analysis,
+            fft_analyses: &mut state.fft_analyses,
+            output_requests: &mut state.output_requests,
+            diagnostics: &mut state.diagnostics,
+            options: &mut state.options,
+        },
+        abort,
+    )?;
     let pending_xyce_diode_model_warnings =
         std::mem::take(&mut state.pending_xyce_diode_model_warnings);
     validate_resistor_model_references_with_abort(&state, abort)?;

@@ -391,12 +391,28 @@ card location. Grouped runtime-dependent sources retain behavioral evaluation.
 
 Analysis cards stage their result, diagnostics, output requests, Monte Carlo
 source identity and transient-noise selection before changing parser state.
-The whole card and cross-card constraints must validate first, including
-trailing fields after `.AC DATA=...`. Function-bearing cards use the same
-isolated sampling probe as independent sources; failed cards retain no live
-draws, and successful fields evaluate once on the live stream. `.LIN` and `.FFT`
-retain their auxiliary roles and authored output order. This transaction
-boundary does not yet defer unresolved analysis operands.
+The whole card must validate before publication, including trailing fields
+after `.AC DATA=...`. Function-bearing cards use the same
+isolated sampling probe as independent sources; failed card probes retain no
+live draws, and successful fields evaluate once on the live stream. Optional
+numeric readers leave failed expressions for validation instead of silently
+omitting authored fields.
+
+Top-level analysis cards that cannot bind immediately retry their original
+grammar after root declarations, source specifications and model expressions
+have completed. Already available scalar/complex values, strings, user functions
+and temperature builtins retain their authored bindings; missing bindings use
+the completed root scope. Ready cards retain their eager values and random draws.
+Pending cards draw in authored order in the completion phase. A shared resolved
+statistical parameter is reused rather than sampled by each consumer.
+
+An ordered parser plan merges primary analyses, `.LIN`/`.FFT` auxiliaries,
+Fourier/FFT outputs, Monte Carlo source identities and diagnostics back into
+their original positions. LIN uniqueness and transient-noise consistency are
+checked in authored order, including when an earlier card was pending. Root
+cards do not inherit child-local bindings. Forward analysis operands inside
+subcircuit definitions remain unfinished; resolving unused instance-dependent
+body declarations eagerly would change their semantics.
 
 General dependency planning remains incomplete: eager analysis cards and
 references to an enclosing scope that is still incomplete need further work.

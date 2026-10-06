@@ -12,7 +12,7 @@ use crate::solver::RealSolverBackend;
 
 use super::*;
 
-mod analysis;
+pub(super) mod analysis;
 
 pub(super) fn parse_command(
     stream: &mut TokenStream,
@@ -23,6 +23,7 @@ pub(super) fn parse_command(
         parameter_direction,
         parameter_overrides,
         logical_line,
+        analysis_cards,
         analyses,
         monte_carlo_source_cards,
         lin_analysis,
@@ -52,7 +53,7 @@ pub(super) fn parse_command(
     } = context;
 
     let cmd = expect_ident(stream, line_num)?;
-    if let Some(card) = analysis::ParsedAnalysisCard::parse(
+    if analysis_cards.parse(
         &cmd,
         stream,
         analysis::AnalysisCardContext {
@@ -64,8 +65,7 @@ pub(super) fn parse_command(
             lin_exists: lin_analysis.is_some(),
             current_noise: options.transient_noise,
         },
-    )? {
-        card.publish(analysis::AnalysisCardSink {
+        analysis::AnalysisCardSink {
             analyses,
             monte_carlo_source_cards,
             lin_analysis,
@@ -73,7 +73,9 @@ pub(super) fn parse_command(
             output_requests,
             diagnostics,
             options,
-        });
+        },
+        matches!(startup_scope, StartupDirectiveScope::TopLevel),
+    )? {
         return Ok(());
     }
     let mut require_line_consumed = true;

@@ -1,8 +1,11 @@
 //! Stage analysis cards and their effects before changing parser-owned state.
 use super::*;
 
+mod plan;
+pub(in crate::netlist::parser) use plan::AnalysisCardPlan;
+
 #[derive(Clone, Copy)]
-pub(super) struct AnalysisCardContext<'a> {
+pub(in crate::netlist::parser) struct AnalysisCardContext<'a> {
     pub(super) line_num: usize,
     pub(super) logical_line: &'a str,
     pub(super) params: &'a ParamContext,
@@ -12,16 +15,18 @@ pub(super) struct AnalysisCardContext<'a> {
     pub(super) current_noise: Option<TransientNoiseConfig>,
 }
 
-pub(super) struct AnalysisCardSink<'a> {
-    pub(super) analyses: &'a mut Vec<AnalysisCommand>,
-    pub(super) monte_carlo_source_cards: &'a mut Vec<monte_carlo_identity::SourceCard>,
-    pub(super) lin_analysis: &'a mut Option<LinAnalysis>,
-    pub(super) fft_analyses: &'a mut Vec<FftAnalysis>,
-    pub(super) output_requests: &'a mut Vec<OutputRequest>,
-    pub(super) diagnostics: &'a mut Vec<ParseDiagnostic>,
-    pub(super) options: &'a mut SimulationOptions,
+pub(in crate::netlist::parser) struct AnalysisCardSink<'a> {
+    pub(in crate::netlist::parser) analyses: &'a mut Vec<AnalysisCommand>,
+    pub(in crate::netlist::parser) monte_carlo_source_cards:
+        &'a mut Vec<monte_carlo_identity::SourceCard>,
+    pub(in crate::netlist::parser) lin_analysis: &'a mut Option<LinAnalysis>,
+    pub(in crate::netlist::parser) fft_analyses: &'a mut Vec<FftAnalysis>,
+    pub(in crate::netlist::parser) output_requests: &'a mut Vec<OutputRequest>,
+    pub(in crate::netlist::parser) diagnostics: &'a mut Vec<ParseDiagnostic>,
+    pub(in crate::netlist::parser) options: &'a mut SimulationOptions,
 }
 
+#[derive(Debug)]
 pub(super) struct ParsedAnalysisCard {
     analysis: Option<AnalysisCommand>,
     lin_analysis: Option<LinAnalysis>,
@@ -380,21 +385,7 @@ impl ParsedAnalysisCard {
             }
         }
         reject_unconsumed_command_tokens(stream, line_num, command)?;
-        if lin_exists && lin_analysis.is_some() {
-            return Err(ParseError::Syntax {
-                line: line_num,
-                message: ".LIN may appear only once in a netlist".into(),
-            });
-        }
-        if let (Some(existing), Some(selected)) = (current_noise, transient_noise)
-            && existing != selected
-        {
-            return Err(ParseError::Syntax {
-                line: line_num,
-                message: "this deck's .TRAN cards request different transient-noise settings; one deck plays one noise realization".into(),
-            });
-        }
-        Ok(Self {
+        let card = Self {
             analysis,
             lin_analysis,
             fft_analysis,
@@ -402,7 +393,32 @@ impl ParsedAnalysisCard {
             output_request,
             transient_noise,
             diagnostics: collected_diagnostics,
-        })
+        };
+        card.validate_constraints(line_num, lin_exists, current_noise)?;
+        Ok(card)
+    }
+
+    fn validate_constraints(
+        &self,
+        line_num: usize,
+        lin_exists: bool,
+        current_noise: Option<TransientNoiseConfig>,
+    ) -> Result<(), ParseError> {
+        if lin_exists && self.lin_analysis.is_some() {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: ".LIN may appear only once in a netlist".into(),
+            });
+        }
+        if let (Some(existing), Some(selected)) = (current_noise, self.transient_noise)
+            && existing != selected
+        {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: "this deck's .TRAN cards request different transient-noise settings; one deck plays one noise realization".into(),
+            });
+        }
+        Ok(())
     }
 
     pub(super) fn publish(self, sink: AnalysisCardSink<'_>) {
@@ -433,7 +449,32 @@ mod tests {
     use super::*;
 
     fn parse(state: &mut ParseState, line: &str) -> Result<(), ParseError> {
-        process_line(line, 7, &NetlistSourceLocation::in_memory(7), state)
+        let mut stream = TokenStream::new(tokenize(line).unwrap());
+        let command = expect_ident(&mut stream, 7)?;
+        let card = ParsedAnalysisCard::parse(
+            &command,
+            &mut stream,
+            AnalysisCardContext {
+                line_num: 7,
+                logical_line: line,
+                params: &state.params,
+                max_analysis_points: state.max_analysis_points,
+                origin: &NetlistSourceLocation::in_memory(7),
+                lin_exists: state.lin_analysis.is_some(),
+                current_noise: state.options.transient_noise,
+            },
+        )?
+        .unwrap();
+        card.publish(AnalysisCardSink {
+            analyses: &mut state.analyses,
+            monte_carlo_source_cards: &mut state.monte_carlo_source_cards,
+            lin_analysis: &mut state.lin_analysis,
+            fft_analyses: &mut state.fft_analyses,
+            output_requests: &mut state.output_requests,
+            diagnostics: &mut state.diagnostics,
+            options: &mut state.options,
+        });
+        Ok(())
     }
 
     fn reference() -> ParamContext {
