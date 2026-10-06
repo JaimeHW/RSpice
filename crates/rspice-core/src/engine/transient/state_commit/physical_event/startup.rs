@@ -331,6 +331,7 @@ impl Engine {
             circuit,
             history,
             PhysicalEventStep {
+                integration_coefficients: None,
                 incoming: solution,
                 time: 0.0,
                 dt: 0.0,

@@ -1288,7 +1288,9 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // small peripheral storage modes without subtracting dominant charges.
     // v99 preserves authenticated operating-point balance during physical
     // startup and avoids inventing a transport event for stationary forcing.
-    hasher.update(b"rspice-transient-resolved-config-v99\0");
+    // v100 initializes continuous-event rates from audited integration
+    // references, with original physical scales and floating-component KCL.
+    hasher.update(b"rspice-transient-resolved-config-v100\0");
     hash_field(
         &mut hasher,
         "gp_transient_phase_model",

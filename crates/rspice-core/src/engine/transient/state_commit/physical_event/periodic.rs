@@ -25,6 +25,7 @@ impl Engine {
             circuit,
             incoming_history,
             PhysicalEventStep {
+                integration_coefficients: None,
                 incoming,
                 time,
                 dt,

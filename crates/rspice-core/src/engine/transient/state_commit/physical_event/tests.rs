@@ -1,4 +1,6 @@
 use super::*;
+
+mod integration;
 use crate::abort_signal::NoAbort;
 
 mod record_ceiling;
@@ -136,6 +138,7 @@ fn physical_event_acceptance_keeps_finite_rlc_currents_separate_from_impulse() {
             &circuit,
             &history,
             PhysicalEventStep {
+                integration_coefficients: None,
                 incoming: &incoming,
                 time: 1.0,
                 dt: 1e-3,
@@ -183,6 +186,7 @@ fn physical_event_acceptance_binds_zero_resistor_and_voltage_source_impulses() {
             &circuit,
             &history,
             PhysicalEventStep {
+                integration_coefficients: None,
                 incoming: &incoming,
                 time: 1.0,
                 dt: 1.0,
@@ -227,6 +231,7 @@ fn physical_event_acceptance_requires_a_record_for_a_changed_gp_input() {
             &circuit,
             &history,
             PhysicalEventStep {
+                integration_coefficients: None,
                 incoming: &incoming,
                 time: 1.0,
                 dt: 1.0,
@@ -265,6 +270,7 @@ fn physical_event_acceptance_keeps_native_gp_charge_rates_and_total_lead_current
                     &circuit,
                     &history,
                     PhysicalEventStep {
+                        integration_coefficients: None,
                         incoming: &incoming,
                         time: 1.0,
                         dt: 1.0,
@@ -329,6 +335,7 @@ fn physical_event_acceptance_rejects_stale_state_and_phase_without_history_rotat
             &circuit,
             &history,
             PhysicalEventStep {
+                integration_coefficients: None,
                 incoming: &incoming,
                 time: 1.0,
                 dt: 1.0,
@@ -405,6 +412,7 @@ fn physical_event_acceptance_preserves_per_device_orders_and_ordinary_samples() 
                 &circuit,
                 &history,
                 PhysicalEventStep {
+                    integration_coefficients: None,
                     incoming: &incoming,
                     time: 1.0,
                     dt: 1.0,
@@ -477,6 +485,7 @@ fn physical_event_acceptance_rejects_positive_order_on_a_later_gp_value_jump() {
             &circuit,
             &history,
             PhysicalEventStep {
+                integration_coefficients: None,
                 incoming: &incoming,
                 time: 1.0,
                 dt: 1.0,
@@ -529,6 +538,7 @@ fn physical_event_acceptance_keeps_order_metadata_private_until_final_validation
             &circuit,
             &history,
             PhysicalEventStep {
+                integration_coefficients: None,
                 incoming: &incoming,
                 time: 1.0,
                 dt: 1.0,
@@ -605,6 +615,7 @@ fn physical_event_acceptance_preflights_order_storage_before_history_rotation() 
             &circuit,
             &history,
             PhysicalEventStep {
+                integration_coefficients: None,
                 incoming: &incoming,
                 time: 1.0,
                 dt: 1.0,

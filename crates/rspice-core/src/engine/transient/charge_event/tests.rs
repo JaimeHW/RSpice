@@ -1,4 +1,6 @@
 use super::*;
+
+mod integrated;
 use crate::abort_signal::NoAbort;
 use crate::device::MatrixStamper;
 

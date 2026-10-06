@@ -6,6 +6,7 @@ use super::*;
 use crate::circuit::SourceTimeSide;
 use charge_event::circuit::{EventPhase, PreparedEventCircuit};
 mod impulses;
+mod integration;
 mod lines;
 mod orders;
 mod periodic;
@@ -16,6 +17,10 @@ pub(in crate::engine::transient) use startup::PhysicalStartupTargets;
 
 pub(in crate::engine::transient) struct PhysicalEventStep<'a> {
     pub incoming: &'a [Value],
+    /// The independently converged incoming interval's history operator.
+    /// It supplies a reference only at a certified continuous event with
+    /// unchanged forcing; original physical KCL/flux audits remain decisive.
+    pub integration_coefficients: Option<&'a CompanionCoefficients>,
     pub time: Value,
     pub dt: Value,
     /// Explicit declarations or solver-owned source/history cause propagation.
@@ -281,27 +286,37 @@ impl Engine {
                 .charge_values()
                 .to_vec()
         };
+        let integrated = if classified.continuous {
+            integration::currents(circuit, history, &step, &sampler, &phases, abort)?
+        } else {
+            None
+        };
         // A continuity certificate cannot repair an inaccurate incoming limit
         // by changing its coordinates. Audit the incoming equations first,
         // including ideal-source constraints and finite-rate regularity.
         let incoming_state = if classified.continuous || (!startup && !circuit.tlines.is_empty()) {
             let left = sampler.topology(step.time, SourceTimeSide::LeftLimit, options, abort)?;
-            Some(left.solve_continuous(
-                step.incoming,
-                &incoming_q,
-                options,
-                abort,
-                |solution, abort| {
-                    sampler.sample(
-                        step.time,
-                        SourceTimeSide::LeftLimit,
-                        solution,
-                        &phases,
-                        options,
-                        abort,
-                    )
-                },
-            )?)
+            let sample = |solution: &[Value], abort: &dyn AbortSignal| {
+                sampler.sample(
+                    step.time,
+                    SourceTimeSide::LeftLimit,
+                    solution,
+                    &phases,
+                    options,
+                    abort,
+                )
+            };
+            Some(if let Some(currents) = &integrated {
+                left.solve_integrated(
+                    (step.incoming, &incoming_q),
+                    currents,
+                    options,
+                    abort,
+                    sample,
+                )?
+            } else {
+                left.solve_continuous(step.incoming, &incoming_q, options, abort, sample)?
+            })
         } else {
             None
         };
@@ -322,7 +337,21 @@ impl Engine {
                 )
             };
             let state = if matches!(step.phase_events, PhysicalEventOrders::Startup(Some(_))) {
-                topology.solve_operating_point(step.incoming, &incoming_q, options, abort, sample)?
+                topology.solve_operating_point(
+                    step.incoming,
+                    &incoming_q,
+                    options,
+                    abort,
+                    sample,
+                )?
+            } else if let Some(currents) = &integrated {
+                topology.solve_integrated(
+                    (step.incoming, &incoming_q),
+                    currents,
+                    options,
+                    abort,
+                    sample,
+                )?
             } else if classified.continuous {
                 topology.solve_continuous(step.incoming, &incoming_q, options, abort, sample)?
             } else {

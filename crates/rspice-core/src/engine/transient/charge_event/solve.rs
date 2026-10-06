@@ -1,10 +1,19 @@
 use super::*;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum CoordinatePolicy {
+#[derive(Clone, Copy)]
+enum CoordinatePolicy<'a> {
     Project,
     Continuous,
     OperatingPoint,
+    Integrated(&'a [Value]),
+}
+
+#[derive(Clone, Copy)]
+struct RateReference<'a> {
+    solution: &'a [Value],
+    // None is an authenticated static balance. Some is an integration
+    // predictor which must fit the original physical equation budgets.
+    storage_currents: Option<&'a [Value]>,
 }
 
 impl ChargeEventTopology {
@@ -69,9 +78,46 @@ impl ChargeEventTopology {
         )
     }
 
+    /// Retain a continuous incoming state and prefer its integration current
+    /// reference wherever the original physical equations permit it. This
+    /// prevents residual cancellation from exciting tiny storage modes while
+    /// retaining real finite currents, source slopes, and every storage row.
+    /// The caller must establish unchanged authored and delayed forcing.
+    pub(in crate::engine::transient) fn solve_integrated(
+        &self,
+        incoming: (&[Value], &[Value]),
+        currents: &[Value],
+        options: &EventOptions,
+        abort: &dyn AbortSignal,
+        mut sample: impl FnMut(&[Value], &dyn AbortSignal) -> Result<EventSample>,
+    ) -> Result<ChargeEventState> {
+        check_abort(abort)?;
+        if currents.len() != self.size {
+            return Err(error("invalid integrated event current population"));
+        }
+        for (index, value) in currents.iter().enumerate() {
+            if index.is_multiple_of(64) {
+                check_abort(abort)?;
+            }
+            if !value.is_finite() {
+                return Err(error("nonfinite integrated event current"));
+            }
+        }
+        self.solve_coordinates(
+            (
+                incoming.0,
+                incoming.1,
+                CoordinatePolicy::Integrated(currents),
+            ),
+            options,
+            abort,
+            &mut sample,
+        )
+    }
+
     fn solve_coordinates(
         &self,
-        coordinates: (&[Value], &[Value], CoordinatePolicy),
+        coordinates: (&[Value], &[Value], CoordinatePolicy<'_>),
         options: &EventOptions,
         abort: &dyn AbortSignal,
         sample: &mut impl FnMut(&[Value], &dyn AbortSignal) -> Result<EventSample>,
@@ -136,10 +182,20 @@ impl ChargeEventTopology {
                     iteration + 1,
                     options,
                     abort,
-                    (policy == CoordinatePolicy::OperatingPoint).then_some(incoming),
+                    match policy {
+                        CoordinatePolicy::OperatingPoint => Some(RateReference {
+                            solution: incoming,
+                            storage_currents: None,
+                        }),
+                        CoordinatePolicy::Integrated(currents) => Some(RateReference {
+                            solution: incoming,
+                            storage_currents: Some(currents),
+                        }),
+                        _ => None,
+                    },
                 );
             }
-            if policy != CoordinatePolicy::Project {
+            if !matches!(policy, CoordinatePolicy::Project) {
                 return Err(error(
                     "continuous event limit fails the unchanged jump equations",
                 ));
@@ -221,25 +277,69 @@ impl ChargeEventTopology {
         iterations: usize,
         options: &EventOptions,
         abort: &dyn AbortSignal,
-        operating_point: Option<&[Value]>,
+        reference: Option<RateReference<'_>>,
     ) -> Result<ChargeEventState> {
         let mut equations = self.rate_equations(&physical, options, abort)?;
-        if let Some(operating_point) = operating_point {
+        let mut group_budget = Vec::new();
+        if reference.is_some_and(|reference| reference.storage_currents.is_some()) {
+            group_budget.resize(self.nodes + 1, Value::INFINITY);
+            // Charge and ideal-source currents sum to zero in each floating
+            // component. A correction to its retained storage rows also
+            // changes the omitted row's KCL residual. Share its remaining
+            // physical budget and reserve half for factorization roundoff.
+            for (root, group) in self.groups.iter().enumerate().skip(1) {
+                if root % 64 == 0 {
+                    check_abort(abort)?;
+                }
+                if group.is_empty() {
+                    continue;
+                }
+                let residual = sum(group.iter().flat_map(|&row| {
+                    [(physical.f.values[row], 1.0), (physical.q_time[row], 1.0)]
+                }))?;
+                let tolerance = options.current_tolerance
+                    + options.relative_tolerance * physical.f.scales[root - 1];
+                group_budget[root] =
+                    0.5 * (tolerance - residual.abs()).max(0.0) / group.len() as Value;
+            }
+        }
+        if let Some(RateReference {
+            solution,
+            storage_currents: currents,
+        }) = reference
+        {
             for row in 0..self.size {
                 if row % 64 == 0 {
                     check_abort(abort)?;
                 }
                 if !self.is_group_row(row) && self.storage_tolerance(row, options).is_some() {
-                    // The OP balances F against ideal-source branch currents.
-                    // Retain that balance while the derivative constraints
-                    // determine any source-driven finite outgoing current.
-                    equations.values[row] = sum(self
+                    // An OP balances F against source currents; a continuous
+                    // integration reference also contains finite storage current.
+                    // Neither changes the matrix or the original equation audit.
+                    let reference = sum(self
                         .source_incidence
                         .get(row)
                         .into_iter()
                         .flatten()
-                        .map(|&(column, sign)| (operating_point[column], -sign))
-                        .chain([(physical.q_time[row], 1.0)]))?;
+                        .map(|&(column, sign)| (solution[column], -sign))
+                        .chain([
+                            (physical.q_time[row], 1.0),
+                            (currents.map_or(0.0, |currents| currents[row]), -1.0),
+                        ]))?;
+                    let difference =
+                        sum([(reference, 1.0), (equations.values[row], -1.0)].into_iter())?;
+                    let mut tolerance = equations.absolute[row]
+                        + options.relative_tolerance
+                            * reference
+                                .abs()
+                                .max(equations.values[row].abs())
+                                .max(physical.f.scales[row]);
+                    if currents.is_some() && row < self.nodes {
+                        tolerance = tolerance.min(group_budget[self.roots[row + 1]]);
+                    }
+                    if currents.is_none() || difference.abs() <= tolerance {
+                        equations.values[row] = reference;
+                    }
                 }
             }
         }
@@ -254,8 +354,8 @@ impl ChargeEventTopology {
                 .iter()
                 .map(|&(column, value)| (value, rates[column]));
             // Audit the original sampled equation, including any flux row.
-            // The OP contract does not authorize a new current/voltage floor.
-            let value = if operating_point.is_some()
+            // A rate reference does not authorize a new current/voltage floor.
+            let value = if reference.is_some()
                 && !self.is_group_row(row)
                 && self.storage_tolerance(row, options).is_some()
             {
@@ -264,7 +364,14 @@ impl ChargeEventTopology {
                 equations.values[row]
             };
             let residual = sum(products.clone().chain([(value, 1.0)]))?;
-            let scale = products.fold(value.abs(), |old, (a, b)| old.max((a * b).abs()));
+            let mut scale = products.fold(value.abs(), |old, (a, b)| old.max((a * b).abs()));
+            if !self.is_group_row(row) && self.storage_tolerance(row, options).is_some() {
+                // A storage rate row is original physical KCL (or flux voltage).
+                // Its static terms can cancel; preserve their current/voltage
+                // scale exactly as the separate original KCL audit does below.
+                // Differentiated algebraic rows retain their own per-second scale.
+                scale = scale.max(physical.f.scales[row]);
+            }
             let tolerance = equations.absolute[row] + options.relative_tolerance * scale;
             if !tolerance.is_finite() || residual.abs() > tolerance {
                 return Err(error(format!("finite-rate equation failed at row {row}")));

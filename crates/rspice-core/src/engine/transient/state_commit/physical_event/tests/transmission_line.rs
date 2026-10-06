@@ -12,6 +12,7 @@ fn line_event_acceptance_is_atomic_and_retains_physical_slopes() {
             &circuit,
             &history,
             PhysicalEventStep {
+                integration_coefficients: None,
                 incoming: &incoming,
                 time: 1.0,
                 dt: 0.001,
@@ -57,6 +58,7 @@ fn line_event_acceptance_is_atomic_and_retains_physical_slopes() {
             &circuit,
             &history,
             PhysicalEventStep {
+                integration_coefficients: None,
                 incoming: &incoming,
                 time: 1.0,
                 dt: 0.001,

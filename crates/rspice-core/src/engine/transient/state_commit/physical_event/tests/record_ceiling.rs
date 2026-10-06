@@ -48,6 +48,7 @@ fn physical_event_record_ceiling_keeps_instance_counts_and_accepted_state() {
             &circuit,
             &history,
             PhysicalEventStep {
+                integration_coefficients: None,
                 incoming: &incoming,
                 time,
                 dt: time,
@@ -83,6 +84,7 @@ fn physical_event_record_ceiling_keeps_instance_counts_and_accepted_state() {
             &circuit,
             &history,
             PhysicalEventStep {
+                integration_coefficients: None,
                 incoming: &incoming,
                 time,
                 dt: time,

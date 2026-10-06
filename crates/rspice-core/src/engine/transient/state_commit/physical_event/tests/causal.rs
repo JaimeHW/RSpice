@@ -33,6 +33,7 @@ fn causal_event_orders_preserve_coordinates_and_accept_finite_source_currents() 
                     &circuit,
                     &history,
                     PhysicalEventStep {
+                        integration_coefficients: None,
                         incoming: &incoming,
                         time: 1.0,
                         dt: 1.0,
@@ -102,6 +103,7 @@ fn causal_event_orders_keep_voltage_jumps_and_algebraic_current_feedback_at_zero
                 &circuit,
                 &history,
                 PhysicalEventStep {
+                    integration_coefficients: None,
                     incoming: &incoming,
                     time: 1.0,
                     dt: 1.0,
@@ -188,6 +190,7 @@ fn causal_event_orders_use_each_tied_delay_owner_before_merging() {
                 &circuit,
                 &history,
                 PhysicalEventStep {
+                    integration_coefficients: None,
                     incoming: &incoming,
                     time: missed_time,
                     dt: missed_time - accepted_time,
@@ -211,6 +214,7 @@ fn causal_event_orders_use_each_tied_delay_owner_before_merging() {
                 &circuit,
                 &history,
                 PhysicalEventStep {
+                    integration_coefficients: None,
                     incoming: &incoming,
                     time: delay,
                     dt: delay - accepted_time,
@@ -256,6 +260,7 @@ fn causal_event_orders_use_each_tied_delay_owner_before_merging() {
                 &circuit,
                 &history,
                 PhysicalEventStep {
+                    integration_coefficients: None,
                     incoming: &incoming,
                     time: delay,
                     dt: delay - accepted_time,
@@ -293,6 +298,7 @@ fn causal_event_orders_refuse_skipped_clocks_and_an_inaccurate_continuous_limit(
                 &circuit,
                 &history,
                 PhysicalEventStep {
+                    integration_coefficients: None,
                     incoming: &incoming,
                     time,
                     dt: time,
@@ -316,6 +322,7 @@ fn causal_event_orders_refuse_skipped_clocks_and_an_inaccurate_continuous_limit(
             &circuit,
             &history,
             PhysicalEventStep {
+                integration_coefficients: None,
                 incoming: &bad,
                 time: 1.0,
                 dt: 1.0,
@@ -348,6 +355,7 @@ fn causal_event_orders_do_not_infer_regularity_from_equal_values_at_a_gp_join() 
             &circuit,
             &history,
             PhysicalEventStep {
+                integration_coefficients: None,
                 incoming: &incoming,
                 time: 1.0,
                 dt: 1.0,
@@ -375,6 +383,7 @@ fn causal_event_orders_preserve_history_on_resource_abort_and_clock_refusals() {
     let sources = roots(&mut circuit, 2.0);
     let before = history.clone();
     let step = |dt| PhysicalEventStep {
+        integration_coefficients: None,
         incoming: &incoming,
         time: 1.0,
         dt,
@@ -430,6 +439,7 @@ fn causal_event_orders_do_not_reuse_waveform_continuity_for_the_dc_startup_trans
             &circuit,
             &history,
             PhysicalEventStep {
+                integration_coefficients: None,
                 incoming: &incoming,
                 time: 0.0,
                 dt: 1.0,

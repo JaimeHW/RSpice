@@ -10312,6 +10312,7 @@ impl Engine {
                         Some(self.prepare_physical_event(
                             &circuit, &bjt_history,
                             state_commit::physical_event::PhysicalEventStep {
+                                integration_coefficients: Some(&coeff),
                                 incoming: &new_solution, time: t, dt,
                                 phase_events: state_commit::physical_event::PhysicalEventOrders::FromCauses {
                                     sources: physical_sources.as_ref().expect("physical source owner"),
@@ -10894,6 +10895,7 @@ impl Engine {
                     &circuit,
                     &bjt_history,
                     state_commit::physical_event::PhysicalEventStep {
+                        integration_coefficients: Some(&coeff),
                         incoming: &new_solution,
                         time: t,
                         dt,

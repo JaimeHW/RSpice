@@ -20,6 +20,7 @@ fn causal_event_orders_current_ramp_gains_continuous_rate_only_through_storage()
                     &circuit,
                     &history,
                     PhysicalEventStep {
+                        integration_coefficients: None,
                         incoming: &incoming,
                         time: 1.0,
                         dt: 1.0,
@@ -116,6 +117,7 @@ fn causal_event_orders_delayed_corners_retain_incidence_and_constitutive_limits(
                     &circuit,
                     &history,
                     PhysicalEventStep {
+                        integration_coefficients: None,
                         incoming: &incoming,
                         time: delay,
                         dt: delay - accepted_time,
@@ -187,6 +189,7 @@ fn causal_event_orders_simultaneous_voltage_corner_limits_current_smoothing() {
             &circuit,
             &history,
             PhysicalEventStep {
+                integration_coefficients: None,
                 incoming: &incoming,
                 time: 1.0,
                 dt: 1.0,
