@@ -294,10 +294,17 @@ fn a_killed_sweep_publishes_nothing_and_the_next_run_reclaims_its_stages() {
             std::time::Instant::now() < deadline,
             "the sweep staged no coordinate before the deadline"
         );
-        assert!(
-            child.try_wait().expect("poll swept deck").is_none(),
-            "the sweep finished before it staged a coordinate"
-        );
+        if let Some(status) = child.try_wait().expect("poll swept deck") {
+            use std::io::Read as _;
+            let mut stdout = String::new();
+            child
+                .stdout
+                .take()
+                .unwrap()
+                .read_to_string(&mut stdout)
+                .unwrap();
+            panic!("the sweep finished before it staged a coordinate ({status}):\n{stdout}");
+        }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     child.kill().expect("kill the swept deck");
