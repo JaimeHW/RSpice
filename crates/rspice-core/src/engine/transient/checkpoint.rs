@@ -7853,6 +7853,25 @@ impl TransientCheckpoint {
             count = count.saturating_add(column.len());
         }
         count = count
+            .saturating_add(
+                bjt.phase
+                    .iter()
+                    .map(|phase| {
+                        phase.as_ref().map_or(1usize, |phase| {
+                            // Delay, three record counts, and every time/value
+                            // or time/order pair in the retained transport image.
+                            4usize
+                                .saturating_add(phase.accepted_sample_count().saturating_mul(2))
+                                .saturating_add(
+                                    phase.accepted_left_limits().len().saturating_mul(2),
+                                )
+                                .saturating_add(
+                                    phase.accepted_event_orders().len().saturating_mul(2),
+                                )
+                        })
+                    })
+                    .fold(0usize, usize::saturating_add),
+            )
             .saturating_add(bjt.phase_outgoing_slopes.len().saturating_mul(2))
             .saturating_add(
                 bjt.weil_phase
@@ -13627,6 +13646,7 @@ mod tests {
             ..AcceptedJunctionTransientHistoryCheckpoint::default()
         };
         let mandatory_bjt_values = 10
+            + 1 // optional exact transport phase presence
             + 1 // optional legacy Weil phase presence
             + 2 // optional outgoing phase slope, including its presence state
             + 4 * BJT_DYNAMIC_CHARGE_COUNT
@@ -13646,6 +13666,94 @@ mod tests {
         assert_eq!(
             populated.retained_value_count(),
             empty.retained_value_count() + expected_delta
+        );
+    }
+
+    #[test]
+    fn exact_delay_checkpoint_records_cannot_bypass_the_public_result_budget() {
+        let deck = Netlist::parse("phase checkpoint budget\nVC c 0 2\nVB b 0 .7\nQ1 c b 0 qm\n.model qm NPN IS=1e-16 BF=100 TF=1n PTF=90\n.end\n").unwrap();
+        let config = SimulationConfig {
+            locked_time_grid: Some(std::sync::Arc::new(
+                (0..=1000).map(|index| f64::from(index) * 1e-12).collect(),
+            )),
+            ..SimulationConfig::default()
+        };
+        let engine = Engine::new(config.clone());
+        let (baseline, checkpoint) = engine.run_tran_checkpointed(&deck, 1e-9, 1e-12).unwrap();
+        let phase = checkpoint.accepted_junction_history.bjt_history.phase[0]
+            .as_ref()
+            .unwrap();
+        assert!(phase.accepted_sample_count() >= 1000);
+        let mut without_transport = checkpoint.clone();
+        without_transport
+            .accepted_junction_history
+            .bjt_history
+            .phase
+            .fill(None);
+        let mut limited = config;
+        // The waveform and every other checkpoint component fit. Only the
+        // retained transport image makes this request exceed its budget.
+        limited.resource_limits.max_result_values = Engine::transient_result_value_count(&baseline)
+            + without_transport.retained_value_count();
+        let limit = limited.resource_limits.max_result_values;
+        let limited = Engine::new(limited);
+        let error = limited
+            .run_tran_checkpointed(&deck, 1e-9, 1e-12)
+            .unwrap_err();
+        let SimulationError::ResourceLimit(error) = error else {
+            panic!("expected a typed result budget refusal, got {error}");
+        };
+        assert_eq!(error.resource, crate::ResourceKind::ResultValues);
+        assert_eq!(error.limit, limit);
+        assert_eq!(
+            error.requested,
+            Engine::transient_result_value_count(&baseline) + checkpoint.retained_value_count()
+        );
+        let rerun = limited.run_tran(&deck, 1e-9, 1e-12).unwrap();
+        assert_eq!(rerun.time, baseline.time);
+        assert_eq!(rerun.voltages, baseline.voltages);
+        assert_eq!(rerun.branch_currents, baseline.branch_currents);
+    }
+
+    #[test]
+    fn exact_delay_budget_includes_event_sides_and_order_provenance() {
+        use rspice_veriloga_runtime::transport_delay::{DelayBuffer, DelayEvent, DelayEventOrder};
+        let mut checkpoint = sample();
+        let initial = checkpoint.retained_value_count();
+        let mut phase = DelayBuffer::new(0);
+        phase.accept_sample(0.0, 1.0, 4.0, None).unwrap();
+        checkpoint.accepted_junction_history.bjt_history.phase[0] = Some(phase);
+        let ordinary = checkpoint.retained_value_count();
+        assert!(ordinary > initial);
+        checkpoint.accepted_junction_history.bjt_history.phase[0]
+            .as_mut()
+            .unwrap()
+            .accept_discontinuity(1.0, 1.0, 2.0, 4.0, None)
+            .unwrap();
+        let jump = checkpoint.retained_value_count();
+        assert_eq!(
+            jump - ordinary,
+            4,
+            "both event sides retain a time and a value"
+        );
+        checkpoint.accepted_junction_history.bjt_history.phase[0]
+            .as_mut()
+            .unwrap()
+            .accept_event(
+                2.0,
+                DelayEvent {
+                    left: 2.0,
+                    right: 2.0,
+                    order: DelayEventOrder::AtLeast(2),
+                },
+                4.0,
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            checkpoint.retained_value_count() - jump,
+            6,
+            "a certified corner also retains its event time and derivative order"
         );
     }
 
