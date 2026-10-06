@@ -149,7 +149,9 @@ fn deck(regime: Regime, polarity: f64, dialect: SpiceDialect) -> Netlist {
 
 #[derive(Debug)]
 struct PrivateError {
+    samples: usize,
     current: [f64; 3],
+    current_time: [f64; 3],
     peak: [f64; 3],
     voltage: [f64; 3],
 }
@@ -168,7 +170,9 @@ fn run_private(regime: Regime, polarity: f64, dialect: SpiceDialect, step: f64) 
         ["vc", "vb", "ve"].map(|name| result.try_branch_current_waveform_named(name).unwrap());
     let voltages = ["c", "b", "e"].map(|name| result.try_voltage_waveform_named(name).unwrap());
     let mut error = PrivateError {
+        samples: result.time.len(),
         current: [0.0; 3],
+        current_time: [0.0; 3],
         peak: [0.0; 3],
         voltage: [0.0; 3],
     };
@@ -185,8 +189,11 @@ fn run_private(regime: Regime, polarity: f64, dialect: SpiceDialect, step: f64) 
         let mut actual_intrinsic = [0.0; 3];
         for terminal in 0..3 {
             let current = -polarity * currents[terminal][index];
-            error.current[terminal] =
-                error.current[terminal].max((current - expected[terminal]).abs());
+            let difference = (current - expected[terminal]).abs();
+            if difference > error.current[terminal] {
+                error.current[terminal] = difference;
+                error.current_time[terminal] = time;
+            }
             error.peak[terminal] = error.peak[terminal].max(expected[terminal].abs());
             // Ohm's law reconstructs private voltages from public terminals;
             // it does not use the core's private-node or device helpers.
@@ -216,7 +223,6 @@ fn run_private(regime: Regime, polarity: f64, dialect: SpiceDialect, step: f64) 
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
-#[ignore = "C03c.2: high-injection private charge recovery still fails; required before qualification closes"]
 fn gp_exact_delay_solves_biased_charge_through_private_terminal_resistances() {
     for dialect in [
         SpiceDialect::Ngspice,
@@ -226,7 +232,29 @@ fn gp_exact_delay_solves_biased_charge_through_private_terminal_resistances() {
         for polarity in [1.0, -1.0] {
             for regime in REGIMES {
                 let coarse = run_private(regime, polarity, dialect, 4e-11);
-                let fine = run_private(regime, polarity, dialect, 4e-12);
+                let mut fine = run_private(regime, polarity, dialect, 4e-12);
+                // BestAvailable's adaptive controller already refines the 40 ps
+                // request to almost the 4 ps grid. Retain that run's accuracy
+                // gate, then require a genuinely finer grid for the same 0.7
+                // refinement gate. Other dialects retain their original pair.
+                if dialect == SpiceDialect::BestAvailable {
+                    for terminal in 0..3 {
+                        assert!(
+                            fine.current[terminal] < 1e-14 + 0.02 * fine.peak[terminal],
+                            "{fine:?}"
+                        );
+                        assert!(fine.voltage[terminal] < 2e-4, "{fine:?}");
+                    }
+                    eprintln!(
+                        "private nodes {}/{dialect:?}/{polarity}: intermediate={fine:?}",
+                        regime.name
+                    );
+                    fine = run_private(regime, polarity, dialect, 4e-13);
+                    assert!(
+                        fine.samples >= 2 * coarse.samples,
+                        "coarse={coarse:?}, fine={fine:?}"
+                    );
+                }
                 eprintln!(
                     "private nodes {}/{dialect:?}/{polarity}: coarse={coarse:?}, fine={fine:?}",
                     regime.name

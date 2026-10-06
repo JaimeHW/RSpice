@@ -71,6 +71,10 @@ pub(super) struct PhysicalStepWindow {
 /// arrival. Fit the still-unaccepted interval so its next gap respects the
 /// minimum; never consume an arrival early or manufacture a subminimum step.
 /// Xyce's floor grows with accepted time, so reserve the floor at the deadline.
+/// Also balance a short remaining tail across two unsolved intervals. Repeated
+/// additions can otherwise leave an interval far smaller than the proposed
+/// step, even when that tail exceeds the hard minimum. Its companion history
+/// would amplify charge-subtraction roundoff unnecessarily.
 ///
 /// The driver calls this only for an adaptive proposal whose earliest exact
 /// event is this physical deadline. Other event policies retain ownership of
@@ -89,21 +93,32 @@ pub(super) fn fit_physical_event_approach(
             window.hard_min_dt
         }
     });
-    let Some(deadline) = physical_event_time.filter(|deadline| {
-        *deadline > proposal.time && *deadline - proposal.time < physical_event_min_dt
-    }) else {
+    let Some(deadline) = physical_event_time.filter(|deadline| *deadline > proposal.time) else {
         return Ok(None);
     };
     let bound = window.controller_maximum.min(window.persistent_maximum);
-    let dt = breakpoints::fit_model_interval(
-        window.accepted_time,
-        deadline,
-        proposal.dt,
-        physical_event_min_dt,
-        window.persistent_maximum,
-        bound,
-        false,
-    )?;
+    let tail = deadline - proposal.time;
+    let dt = if tail < physical_event_min_dt {
+        breakpoints::fit_model_interval(
+            window.accepted_time,
+            deadline,
+            proposal.dt,
+            physical_event_min_dt,
+            window.persistent_maximum,
+            bound,
+            false,
+        )?
+    } else if proposal.exact_event_time.is_none() && tail < 0.5 * proposal.dt {
+        let half = (deadline - window.accepted_time) / 2.0;
+        // This is a scheduling choice, not a new integration floor or license
+        // to exceed a source/model bound already applied to this proposal.
+        if half < physical_event_min_dt || half > bound.min(proposal.dt) {
+            return Ok(None);
+        }
+        half
+    } else {
+        return Ok(None);
+    };
     if dt > bound {
         return Err(SimulationError::Circuit(
             "physical event fitting exceeds the step bound".into(),
@@ -171,6 +186,96 @@ mod tests {
             hard_min_dt: minimum,
             persistent_maximum: 1.0,
             controller_maximum: 1.0,
+        }
+    }
+
+    #[test]
+    fn physical_deadline_balances_accumulated_clock_tail_above_the_hard_minimum() {
+        let deadline = 2e-9;
+        let window = PhysicalStepWindow {
+            accepted_time: deadline - 4e-13 - 1.4e-22,
+            stop_time: 5.37e-9,
+            hard_min_dt: 1e-30,
+            persistent_maximum: 4e-13,
+            controller_maximum: 4e-13,
+        };
+        let proposal = StepProposal {
+            dt: 4e-13,
+            time: window.accepted_time + 4e-13,
+            exact_event_time: None,
+        };
+        assert!(deadline - proposal.time > xyce_hard_min_timestep(deadline));
+        for dialect in [
+            SpiceDialect::Ngspice,
+            SpiceDialect::Xyce,
+            SpiceDialect::BestAvailable,
+        ] {
+            let fitted = fit_physical_event_approach(window, proposal, Some(deadline), dialect)
+                .unwrap()
+                .unwrap();
+            let tail = deadline - fitted.time;
+            assert!(fitted.dt > 1.9e-13 && fitted.dt <= proposal.dt);
+            assert!(tail > 1.9e-13 && tail <= proposal.dt);
+            assert_eq!(fitted.exact_event_time, None);
+            assert_eq!(
+                canonical_transient_step_time_with_device_event(
+                    fitted.time,
+                    tail,
+                    window.stop_time,
+                    Some(deadline),
+                ),
+                deadline
+            );
+            assert_eq!(
+                Some(fitted),
+                fit_physical_event_approach(window, proposal, Some(deadline), dialect).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn balancing_a_short_physical_tail_preserves_other_exact_events_and_step_bounds() {
+        let proposal = StepProposal {
+            dt: 0.9,
+            time: 0.9,
+            exact_event_time: None,
+        };
+        let fitted = fit_physical_event_approach(
+            window(0.01),
+            proposal,
+            Some(1.0),
+            SpiceDialect::BestAvailable,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(fitted.dt, 0.5);
+        assert_eq!(fitted.time, 0.5);
+        for (limits, candidate) in [
+            (
+                window(0.01),
+                StepProposal {
+                    exact_event_time: Some(proposal.time),
+                    ..proposal
+                },
+            ),
+            (
+                PhysicalStepWindow {
+                    controller_maximum: 0.4,
+                    ..window(0.01)
+                },
+                proposal,
+            ),
+        ] {
+            assert!(
+                fit_physical_event_approach(
+                    limits,
+                    candidate,
+                    Some(1.0),
+                    SpiceDialect::BestAvailable,
+                )
+                .unwrap()
+                .is_none()
+            );
         }
     }
 

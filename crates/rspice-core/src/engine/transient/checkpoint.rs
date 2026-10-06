@@ -1290,7 +1290,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // startup and avoids inventing a transport event for stationary forcing.
     // v100 initializes continuous-event rates from audited integration
     // references, with original physical scales and floating-component KCL.
-    hasher.update(b"rspice-transient-resolved-config-v100\0");
+    // v101 balances short unaccepted physical-event tails before integration.
+    hasher.update(b"rspice-transient-resolved-config-v101\0");
     hash_field(
         &mut hasher,
         "gp_transient_phase_model",
