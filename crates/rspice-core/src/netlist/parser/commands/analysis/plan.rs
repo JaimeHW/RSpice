@@ -2,12 +2,12 @@
 //! cards bind in their authored scope after declarations are complete.
 use super::*;
 
-mod scopes;
+mod scoped;
+use crate::netlist::parser::scopes::LexicalScopes;
 
 #[derive(Debug, Default)]
 pub(in crate::netlist::parser) struct AnalysisCardPlan {
     entries: Vec<Entry>,
-    scopes: scopes::AnalysisScopes,
 }
 
 #[derive(Debug)]
@@ -87,15 +87,9 @@ impl PendingCard {
 }
 
 impl AnalysisCardPlan {
-    pub(in crate::netlist::parser) fn open_scope(&mut self) {
-        self.scopes.open();
-    }
-    pub(in crate::netlist::parser) fn close_scope(&mut self, params: ParamContext) {
-        self.scopes.close(params);
-    }
-
     pub(in crate::netlist::parser) fn parse(
         &mut self,
+        scopes: &mut LexicalScopes,
         command: &str,
         stream: &mut TokenStream,
         context: AnalysisCardContext<'_>,
@@ -125,7 +119,7 @@ impl AnalysisCardPlan {
             // again, instead of classifying human-readable error strings.
             Err(error) if !matches!(error, ParseError::ResourceLimit(_)) => {
                 Card::Pending(Box::new(PendingCard::capture(
-                    self.scopes.retain(),
+                    scopes.retain(),
                     command,
                     stream.clone(),
                     context,
@@ -146,6 +140,7 @@ impl AnalysisCardPlan {
 
     pub(in crate::netlist::parser) fn complete(
         &mut self,
+        scopes: &mut LexicalScopes,
         params: &ParamContext,
         sink: AnalysisCardSink<'_>,
         abort: &dyn AbortSignal,
@@ -164,7 +159,8 @@ impl AnalysisCardPlan {
                         .map_err(|error| located_error(error, entry.line, &entry.origin))?;
                     *card
                 }
-                Card::Pending(pending) if pending.scope != 0 => self.scopes.bind(
+                Card::Pending(pending) if pending.scope != 0 => scoped::bind(
+                    scopes,
                     &pending,
                     AnalysisCardContext {
                         line_num: entry.line,
@@ -275,6 +271,7 @@ mod tests {
             let cancelled = crate::abort_signal::CountingAbort::new(5);
             let abort: &dyn AbortSignal = if cancel { &cancelled } else { &NoAbort };
             let result = state.analysis_cards.complete(
+                &mut state.scopes,
                 &state.params,
                 AnalysisCardSink {
                     analyses: &mut state.analyses,
@@ -321,6 +318,7 @@ mod tests {
         let expected = state.params.isolated_random_clone();
         let abort = crate::abort_signal::CountingAbort::new(0);
         let result = state.analysis_cards.complete(
+            &mut state.scopes,
             &state.params,
             AnalysisCardSink {
                 analyses: &mut state.analyses,

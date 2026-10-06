@@ -88,6 +88,7 @@ pub(super) struct ParseState {
     pub(super) element_names: ElementNameRegistry,
     pub(super) analyses: Vec<AnalysisCommand>,
     pub(super) analysis_cards: commands::analysis::AnalysisCardPlan,
+    pub(super) scopes: scopes::LexicalScopes,
     /// Root source specifications that could not bind on their authored card.
     /// The completion pass reports their physical owner, including includes.
     pub(super) deferred_source_origins: HashMap<String, NetlistSourceLocation>,
@@ -148,6 +149,7 @@ impl ParseState {
             element_names: ElementNameRegistry::default(),
             analyses: Vec::new(),
             analysis_cards: commands::analysis::AnalysisCardPlan::default(),
+            scopes: scopes::LexicalScopes::default(),
             deferred_source_origins: HashMap::new(),
             monte_carlo_source_cards: Vec::new(),
             lin_analysis: None,
@@ -346,6 +348,7 @@ fn apply_temp_directive_to_options(netlist: &mut Netlist) {
 
 pub(super) struct ParseLineContext<'a> {
     pub(super) analysis_cards: &'a mut commands::analysis::AnalysisCardPlan,
+    pub(super) scopes: &'a mut scopes::LexicalScopes,
     pub(super) parameter_direction: Option<&'a mut ParameterDirectionCapture>,
     pub(super) parameter_overrides: &'a [ParameterOverride],
     pub(super) analyses: &'a mut Vec<AnalysisCommand>,
@@ -378,6 +381,7 @@ pub(super) struct ParseLineContext<'a> {
 
 pub(super) struct ParseCommandContext<'a> {
     pub(super) analysis_cards: &'a mut commands::analysis::AnalysisCardPlan,
+    pub(super) scopes: &'a mut scopes::LexicalScopes,
     pub(super) parameter_direction: Option<&'a mut ParameterDirectionCapture>,
     pub(super) parameter_overrides: &'a [ParameterOverride],
     /// Complete logical card text used for byte-exact output operand slices.

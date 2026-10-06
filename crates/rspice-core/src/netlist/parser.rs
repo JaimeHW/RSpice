@@ -56,6 +56,7 @@ mod chebyshev_synthesis;
 mod command_parsers;
 mod commands;
 mod temperature;
+mod scopes;
 mod stream;
 use stream::TokenStream;
 
@@ -1177,6 +1178,7 @@ fn parse_netlist_impl(
     // bind after the existing declaration/source/model completion phases, then
     // merge their staged effects back into authored order.
     state.analysis_cards.complete(
+        &mut state.scopes,
         &state.params,
         commands::analysis::AnalysisCardSink {
             analyses: &mut state.analyses,

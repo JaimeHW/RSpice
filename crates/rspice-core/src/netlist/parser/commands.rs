@@ -24,6 +24,7 @@ pub(super) fn parse_command(
         parameter_overrides,
         logical_line,
         analysis_cards,
+        scopes,
         analyses,
         monte_carlo_source_cards,
         lin_analysis,
@@ -54,6 +55,7 @@ pub(super) fn parse_command(
 
     let cmd = expect_ident(stream, line_num)?;
     if analysis_cards.parse(
+        scopes,
         &cmd,
         stream,
         analysis::AnalysisCardContext {

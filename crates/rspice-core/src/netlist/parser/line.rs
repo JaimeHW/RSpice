@@ -256,7 +256,7 @@ pub(super) fn process_line(
                 debug_assert!(acceptance.authoritative);
             }
         }
-        state.analysis_cards.open_scope();
+        state.scopes.open();
         state.subckt_stack.push(SubcktFrame {
             def: subckt,
             qualified_name,
@@ -328,7 +328,7 @@ pub(super) fn process_line(
         let original_name = frame.def.name.to_ascii_uppercase();
         frame.def.name = frame.qualified_name.clone();
         let finalized = frame.def;
-        state.analysis_cards.close_scope(frame.local_params);
+        state.scopes.close(frame.local_params);
 
         if let Some(parent) = state.subckt_stack.last_mut() {
             parent
@@ -410,6 +410,7 @@ pub(super) fn process_line(
                 &mut dummy_measurements,
                 ParseLineContext {
                     analysis_cards: &mut state.analysis_cards,
+                    scopes: &mut state.scopes,
                     parameter_direction: state.parameter_direction.as_deref_mut(),
                     parameter_overrides: &[],
                     analyses,
@@ -481,6 +482,7 @@ pub(super) fn process_line(
         &mut state.measurements,
         ParseLineContext {
             analysis_cards: &mut state.analysis_cards,
+                    scopes: &mut state.scopes,
             parameter_direction: state.parameter_direction.as_deref_mut(),
             parameter_overrides: &state.parameter_overrides,
             analyses: &mut state.analyses,
@@ -552,6 +554,7 @@ pub(super) fn parse_line(
         defer_simple_param_refs || params.expression_references_spectre_statistics(line);
     let ParseLineContext {
         analysis_cards,
+        scopes,
         parameter_direction,
         parameter_overrides,
         analyses,
@@ -613,6 +616,7 @@ pub(super) fn parse_line(
             line_num,
             ParseCommandContext {
                 analysis_cards,
+                scopes,
                 parameter_direction,
                 parameter_overrides,
                 logical_line: line,
