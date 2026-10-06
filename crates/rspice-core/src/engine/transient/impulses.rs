@@ -96,6 +96,8 @@ pub(super) fn initialize(
             }
             DerivedTransientBranchCurrentKind::LinearResistor
             | DerivedTransientBranchCurrentKind::IndependentCurrentSource
+            // Native VCCS output is finite for the finite-voltage event class.
+            | DerivedTransientBranchCurrentKind::VoltageControlledCurrentSource
             // The admitted prescribed B-current is finite and memoryless;
             // its impulse is zero even when a voltage-source impulse occurs.
             | DerivedTransientBranchCurrentKind::BehavioralCurrentSource => {}

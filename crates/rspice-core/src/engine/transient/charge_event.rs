@@ -3,8 +3,8 @@
 //! This operator consumes a prepared charge-incidence topology and physical
 //! F/Q stamps. It does not infer device support or modify accepted history.
 //! Non-nodal flux equations preserve physical linkage at finite-voltage
-//! events. Voltage impulses and controlled-source impulse paths still need
-//! a descriptor transition with independently prepared topology.
+//! events. Voltage impulses and current-controlled source impulse paths
+//! still need a descriptor transition with independently prepared topology.
 
 use super::{AbortSignal, SimulationError, Value};
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};

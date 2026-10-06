@@ -19,6 +19,8 @@ impl<'a> PreparedEventCircuit<'a> {
                 | VoltageSource
                 | CurrentSource
                 | BehavioralSource
+                | Vcvs
+                | Vccs
                 | Bjt
                 | InductorCoupling
                 | CoupledInductorPair
@@ -276,6 +278,82 @@ impl<'a> PreparedEventCircuit<'a> {
                 .physical_time_program()
                 .ok_or_else(|| behavioral::unsupported(&source.name))?;
             terminals(source.node_pos, source.node_neg)?;
+        }
+        let controlled_voltage = &circuit.vcvs;
+        let controlled_current = &circuit.vccs;
+        aligned(
+            "VCVS",
+            controlled_voltage.len(),
+            &[
+                controlled_voltage.node_pos.len(),
+                controlled_voltage.node_neg.len(),
+                controlled_voltage.ctrl_pos.len(),
+                controlled_voltage.ctrl_neg.len(),
+                controlled_voltage.branch_indices.len(),
+                controlled_voltage.gains.len(),
+            ],
+        )?;
+        aligned(
+            "VCCS",
+            controlled_current.len(),
+            &[
+                controlled_current.node_pos.len(),
+                controlled_current.node_neg.len(),
+                controlled_current.ctrl_pos.len(),
+                controlled_current.ctrl_neg.len(),
+                controlled_current.transconductances.len(),
+            ],
+        )?;
+        for index in 0..controlled_voltage.len() {
+            check_abort(abort)?;
+            let source = controlled_voltage;
+            terminals(source.node_pos[index], source.node_neg[index])?;
+            terminals(source.ctrl_pos[index], source.ctrl_neg[index])?;
+            if !source.gains[index].is_finite() {
+                return Err(error(format!(
+                    "VCVS '{}' has nonfinite gain",
+                    source.names[index]
+                )));
+            }
+            claim(
+                &mut equations,
+                source.branch_indices[index],
+                EventBranchEquation::Algebraic(options.voltage_tolerance),
+            )?;
+            ResourceLimitError::ensure(
+                ResourceKind::ResultValues,
+                size.saturating_mul(64).saturating_add(
+                    constant_sources
+                        .len()
+                        .saturating_add(1)
+                        .saturating_mul(SOURCE_STORAGE_VALUES),
+                ),
+                options.limits.max_result_values,
+            )?;
+            constant_sources.push(EventVoltageSource {
+                positive: source.node_pos[index],
+                negative: source.node_neg[index],
+                branch: nodes + source.branch_indices[index] - 1,
+                value: 0.0,
+                slope: 0.0,
+                control: Some(EventVoltageControl {
+                    positive: source.ctrl_pos[index],
+                    negative: source.ctrl_neg[index],
+                    gain: source.gains[index],
+                }),
+            });
+        }
+        for index in 0..controlled_current.len() {
+            check_abort(abort)?;
+            let source = controlled_current;
+            terminals(source.node_pos[index], source.node_neg[index])?;
+            terminals(source.ctrl_pos[index], source.ctrl_neg[index])?;
+            if !source.transconductances[index].is_finite() {
+                return Err(error(format!(
+                    "VCCS '{}' has nonfinite transconductance",
+                    source.names[index]
+                )));
+            }
         }
         for (magnetic, count) in [(false, rb.len()), (true, l.len())] {
             for index in 0..count {

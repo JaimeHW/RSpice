@@ -4,6 +4,7 @@ use rspice_veriloga_runtime::transport_delay::{DelayCheckpoint, DelayConfigurati
 
 mod native;
 mod behavioral;
+mod controlled;
 mod transmission_line;
 
 fn options() -> EventOptions {

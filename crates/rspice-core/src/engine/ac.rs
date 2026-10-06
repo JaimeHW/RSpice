@@ -2661,24 +2661,11 @@ impl Engine {
         }
 
         // Controlled sources: VCCS
-        for i in 0..circuit.vccs.len() {
-            let np = circuit.vccs.node_pos[i];
-            let nn = circuit.vccs.node_neg[i];
-            let cp = circuit.vccs.ctrl_pos[i];
-            let cn = circuit.vccs.ctrl_neg[i];
-            let gm = circuit.vccs.transconductances[i];
-
-            if np > 0 && cp > 0 {
-                ac_matrix.add_real(np - 1, cp - 1, gm);
-            }
-            if np > 0 && cn > 0 {
-                ac_matrix.add_real(np - 1, cn - 1, -gm);
-            }
-            if nn > 0 && cp > 0 {
-                ac_matrix.add_real(nn - 1, cp - 1, -gm);
-            }
-            if nn > 0 && cn > 0 {
-                ac_matrix.add_real(nn - 1, cn - 1, gm);
+        for index in 0..circuit.vccs.len() {
+            for (row, column, value) in circuit.vccs.conductance_entries(index) {
+                if row != 0 && column != 0 {
+                    ac_matrix.add_real(row - 1, column - 1, value);
+                }
             }
         }
 

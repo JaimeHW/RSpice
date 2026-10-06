@@ -2,11 +2,18 @@ use super::*;
 
 // Independent clamped-terminal GP laws. The derivative term belongs to
 // instantaneous charge; only transport sees the delay and constant prehistory.
-fn check(result: &TransientResult, dialect: SpiceDialect, polarity: f64, current: bool, uic: bool) {
+pub(super) fn check(
+    result: &TransientResult,
+    dialect: SpiceDialect,
+    polarity: f64,
+    current: Option<&str>,
+    base_name: &str,
+    uic: bool,
+) {
     let voltage = result.try_voltage_waveform_named("b").unwrap();
     let collector = result.try_branch_current_waveform_named("vc").unwrap();
-    let base = result.try_branch_current_waveform_named("bb").unwrap();
-    let extra = current.then(|| result.try_branch_current_waveform_named("bi").unwrap());
+    let base = result.try_branch_current_waveform_named(base_name).unwrap();
+    let extra = current.map(|name| result.try_branch_current_waveform_named(name).unwrap());
     let omega = std::f64::consts::TAU * 1e9;
     let vt = thermal_voltage(dialect);
     for (index, &time) in result.time.iter().enumerate() {
@@ -15,7 +22,7 @@ fn check(result: &TransientResult, dialect: SpiceDialect, polarity: f64, current
         let delayed = 0.7 + 1e-6 * (omega * (time - DELAY).max(0.0)).sin();
         let (forward, conductance) = diode(vb, vt, dialect);
         let reverse = diode(vb - 2.0, vt, dialect).0;
-        let forcing = if current {
+        let forcing = if current.is_some() {
             1e-6 * (omega * time).cos()
         } else {
             0.0
@@ -93,14 +100,28 @@ fn gp_behavioral_prescribed_forcing_has_physical_event_equations() {
             for current in [false, true] {
                 let source = deck(polarity, current);
                 let result = engine.run_tran(&source, 2.5e-9, 4e-12).unwrap();
-                check(&result, dialect, polarity, current, false);
+                check(
+                    &result,
+                    dialect,
+                    polarity,
+                    current.then_some("bi"),
+                    "bb",
+                    false,
+                );
                 let (_, checkpoint) = engine
                     .run_tran_checkpointed(&source, 1.2e-9, 4e-12)
                     .unwrap();
                 let (resumed, _) = engine
                     .run_tran_resume(&source, &checkpoint, 2.5e-9, 4e-12)
                     .unwrap();
-                check(&resumed, dialect, polarity, current, false);
+                check(
+                    &resumed,
+                    dialect,
+                    polarity,
+                    current.then_some("bi"),
+                    "bb",
+                    false,
+                );
             }
         }
     }
@@ -129,7 +150,7 @@ fn gp_behavioral_uic_preserves_charge_impulses_and_zero_transport_prehistory() {
                     TransientStartupMode::Uic,
                 )
                 .unwrap();
-            check(&result, dialect, polarity, true, true);
+            check(&result, dialect, polarity, Some("bi"), "bb", true);
             let impulses = result.current_impulses.as_ref().unwrap();
             let base = impulses.iter().find(|trace| matches!(
                 &trace.owner, CurrentImpulseOwner::Branch { branch_name } if branch_name.eq_ignore_ascii_case("bb")

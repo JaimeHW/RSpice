@@ -840,6 +840,7 @@ enum DerivedTransientBranchCurrentKind {
     LinearResistor,
     LinearCapacitor,
     IndependentCurrentSource,
+    VoltageControlledCurrentSource,
     NativeDiode,
     #[cfg(feature = "veriloga-builtins-base")]
     GeneratedVerilogA,
@@ -1806,6 +1807,7 @@ impl Engine {
                 .saturating_add(circuit.resistors.names.len())
                 .saturating_add(circuit.capacitors.names.len())
                 .saturating_add(circuit.current_sources.names.len())
+                .saturating_add(circuit.vccs.names.len())
                 .saturating_add(circuit.diodes.devices.len())
                 .saturating_add({
                     #[cfg(feature = "veriloga-builtins-base")]
@@ -1866,6 +1868,15 @@ impl Engine {
                 name,
                 DerivedTransientBranchCurrent {
                     kind: DerivedTransientBranchCurrentKind::IndependentCurrentSource,
+                    index,
+                },
+            );
+        }
+        for (index, name) in circuit.vccs.names.iter().enumerate() {
+            consider(
+                name,
+                DerivedTransientBranchCurrent {
+                    kind: DerivedTransientBranchCurrentKind::VoltageControlledCurrentSource,
                     index,
                 },
             );
@@ -1960,6 +1971,9 @@ impl Engine {
             DerivedTransientBranchCurrentKind::IndependentCurrentSource => {
                 &circuit.current_sources.names[branch.index]
             }
+            DerivedTransientBranchCurrentKind::VoltageControlledCurrentSource => {
+                &circuit.vccs.names[branch.index]
+            }
             DerivedTransientBranchCurrentKind::NativeDiode => {
                 &circuit.diodes.devices[branch.index].name
             }
@@ -2034,6 +2048,21 @@ impl Engine {
             }
             DerivedTransientBranchCurrentKind::IndependentCurrentSource => {
                 circuit.current_sources.value_at_time(branch.index, time)
+            }
+            DerivedTransientBranchCurrentKind::VoltageControlledCurrentSource => {
+                let source = &circuit.vccs;
+                source
+                    .current_at_control_voltage(
+                        branch.index,
+                        Self::solution_node_voltage(solution, source.ctrl_pos[branch.index]),
+                        Self::solution_node_voltage(solution, source.ctrl_neg[branch.index]),
+                    )
+                    .map_err(|error| {
+                        SimulationError::Circuit(format!(
+                            "VCCS '{}' current output failed: {error:?}",
+                            source.names[branch.index]
+                        ))
+                    })?
             }
             DerivedTransientBranchCurrentKind::NativeDiode => {
                 let diode = &circuit.diodes.devices[branch.index];

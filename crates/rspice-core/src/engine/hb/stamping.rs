@@ -1425,19 +1425,17 @@ impl Engine {
         }
         for index in 0..circuit.vccs.len() {
             let name = &circuit.vccs.names[index];
-            let np = checked_node(name, "positive output", circuit.vccs.node_pos[index])?;
-            let nn = checked_node(name, "negative output", circuit.vccs.node_neg[index])?;
-            let cp = checked_node(name, "positive control", circuit.vccs.ctrl_pos[index])?;
-            let cn = checked_node(name, "negative control", circuit.vccs.ctrl_neg[index])?;
+            checked_node(name, "positive output", circuit.vccs.node_pos[index])?;
+            checked_node(name, "negative output", circuit.vccs.node_neg[index])?;
+            checked_node(name, "positive control", circuit.vccs.ctrl_pos[index])?;
+            checked_node(name, "negative control", circuit.vccs.ctrl_neg[index])?;
             let gm = circuit.vccs.transconductances[index];
             if !gm.is_finite() {
                 return Err(SimulationError::Circuit(format!(
                     "periodic MNA VCCS '{name}' has non-finite transconductance"
                 )));
             }
-            for (row, column, coefficient) in
-                [(np, cp, gm), (np, cn, -gm), (nn, cp, -gm), (nn, cn, gm)]
-            {
+            for (row, column, coefficient) in circuit.vccs.conductance_entries(index) {
                 if row > 0 && column > 0 {
                     solver.add_conductance(row - 1, column - 1, coefficient);
                 }

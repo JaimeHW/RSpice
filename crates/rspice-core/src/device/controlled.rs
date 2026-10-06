@@ -9,6 +9,8 @@
 use crate::solver::{StaticMatrix, TripletMatrix};
 use crate::{NodeId, Value};
 
+mod equations;
+
 //=============================================================================
 // VCVS (E-element): V_out = gain * V(nc+, nc-)
 //=============================================================================
@@ -189,25 +191,11 @@ impl Vccs {
     /// I = gm * (V(nc+) - V(nc-))
     #[inline]
     pub fn stamp_all(&self, matrix: &mut TripletMatrix) {
-        for i in 0..self.names.len() {
-            let np = self.node_pos[i];
-            let nn = self.node_neg[i];
-            let cp = self.ctrl_pos[i];
-            let cn = self.ctrl_neg[i];
-            let gm = self.transconductances[i];
-
-            // Stamp gm into the matrix
-            if np > 0 && cp > 0 {
-                matrix.push(np - 1, cp - 1, gm);
-            }
-            if np > 0 && cn > 0 {
-                matrix.push(np - 1, cn - 1, -gm);
-            }
-            if nn > 0 && cp > 0 {
-                matrix.push(nn - 1, cp - 1, -gm);
-            }
-            if nn > 0 && cn > 0 {
-                matrix.push(nn - 1, cn - 1, gm);
+        for index in 0..self.len() {
+            for (row, column, value) in self.conductance_entries(index) {
+                if row != 0 && column != 0 {
+                    matrix.push(row - 1, column - 1, value);
+                }
             }
         }
     }
@@ -215,25 +203,11 @@ impl Vccs {
     /// Stamp all VCCS elements using direct StaticMatrix access
     #[inline]
     pub fn stamp_all_direct(&self, matrix: &mut StaticMatrix) {
-        for i in 0..self.names.len() {
-            let np = self.node_pos[i];
-            let nn = self.node_neg[i];
-            let cp = self.ctrl_pos[i];
-            let cn = self.ctrl_neg[i];
-            let gm = self.transconductances[i];
-
-            // Stamp gm into the matrix
-            if np > 0 && cp > 0 {
-                matrix.add(np - 1, cp - 1, gm);
-            }
-            if np > 0 && cn > 0 {
-                matrix.add(np - 1, cn - 1, -gm);
-            }
-            if nn > 0 && cp > 0 {
-                matrix.add(nn - 1, cp - 1, -gm);
-            }
-            if nn > 0 && cn > 0 {
-                matrix.add(nn - 1, cn - 1, gm);
+        for index in 0..self.len() {
+            for (row, column, value) in self.conductance_entries(index) {
+                if row != 0 && column != 0 {
+                    matrix.add(row - 1, column - 1, value);
+                }
             }
         }
     }

@@ -1292,7 +1292,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // references, with original physical scales and floating-component KCL.
     // v101 balances short unaccepted physical-event tails before integration.
     // v102 adds prescribed smooth behavioral forcing to physical events.
-    hasher.update(b"rspice-transient-resolved-config-v102\0");
+    // v103 adds controlled voltage/current events and VCCS current observations.
+    hasher.update(b"rspice-transient-resolved-config-v103\0");
     hash_field(
         &mut hasher,
         "gp_transient_phase_model",

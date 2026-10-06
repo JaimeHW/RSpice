@@ -76,6 +76,20 @@ impl PreparedEventCircuit<'_> {
                 self.circuit.resistors.conductances[index],
             );
         }
+        for index in 0..self.circuit.vccs.len() {
+            if index.is_multiple_of(64) {
+                check_abort(abort)?;
+            }
+            let source = &self.circuit.vccs;
+            source
+                .stamp_physical_current(
+                    index,
+                    voltage(state, source.ctrl_pos[index]),
+                    voltage(state, source.ctrl_neg[index]),
+                    &mut sample.f,
+                )
+                .map_err(|failure| error(format!("VCCS '{}': {failure:?}", source.names[index])))?;
+        }
         let line_side = match source_side {
             SourceTimeSide::LeftLimit => crate::device::TransmissionLineTimeSide::Incoming,
             SourceTimeSide::RightLimit => crate::device::TransmissionLineTimeSide::Outgoing,
