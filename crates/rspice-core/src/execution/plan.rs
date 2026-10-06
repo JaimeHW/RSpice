@@ -614,6 +614,26 @@ impl PlannedPostProcess {
             .expect("a planned post-process is always bound to its parent")
     }
 
+    /// Bind this authored post-process to a completed control-script transient.
+    /// The host allocates an occurrence ordinal; the family and source card
+    /// remain the planner's, so runtime execution cannot change their meaning.
+    pub fn for_control_execution(
+        &self,
+        parent: AnalysisInstanceId,
+        ordinal: u32,
+    ) -> Result<Self, DeckPlanError> {
+        if parent.kind() != AnalysisKind::Tran {
+            return Err(DeckPlanError::MissingUpstreamAnalysis {
+                card: "control post-process",
+                required: "a completed transient instance",
+            });
+        }
+        let mut rebound = self.clone();
+        rebound.analysis.id = AnalysisInstanceId::new(self.id().kind(), ordinal);
+        rebound.analysis.request.upstream = Some(parent);
+        Ok(rebound)
+    }
+
     /// Which authored card and operand this identity names.
     pub const fn source(&self) -> &PostProcessSource {
         &self.source
@@ -1443,6 +1463,11 @@ fn plan_post_processes(
         .filter(|planned| planned.id.kind() == AnalysisKind::Tran)
         .map(PlannedAnalysis::id)
         .collect::<Vec<_>>();
+    // A script can create its first transient dynamically. Its execution host
+    // binds these cards when that command has a concrete identity and policy.
+    if transients.is_empty() && netlist.control_script.is_some() {
+        return Ok(Vec::new());
+    }
     let first_transient = |card: &'static str| -> Result<AnalysisInstanceId, DeckPlanError> {
         transients
             .first()

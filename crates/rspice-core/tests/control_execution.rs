@@ -566,3 +566,103 @@ fn sealed_source_control_retention_preserves_commands_and_author_locations() {
     assert_eq!(circuit.datasets().len(), 2);
     assert_eq!(circuit.datasets()[1].analysis_id.tag(), "op-002");
 }
+
+#[test]
+fn a_transient_host_gets_runtime_identity_bound_postprocesses_and_resolved_options() {
+    use rspice_core::engine::ControlExecutionError;
+    use rspice_core::netlist::AnalysisCommand;
+    let deck = Netlist::parse("hosted transients\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.tran 10u 2m\n.four 1k V(out)\n.tran 10u 3m\n.four 2k V(out)\n.fft V(out) np=16\n.end\n").unwrap();
+    let vars = deck.params.clone();
+    let mut circuit = ControlCircuit::new(deck).unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let command = |name: &str, arguments: &str| ControlCommand {
+        line: 7,
+        name: name.into(),
+        arguments: arguments.into(),
+    };
+    circuit
+        .execute(&engine, &command("option", "temp=50"), &vars, &NoAbort)
+        .unwrap();
+    let mut observed = Vec::new();
+    circuit
+        .execute_with_transient_runner(
+            &engine,
+            &command("run", ""),
+            &vars,
+            &NoAbort,
+            &mut |engine, deck, command, id, abort| -> Result<_, ControlExecutionError> {
+                assert_eq!(engine.config().temperature, 323.15);
+                let four = deck
+                    .analyses
+                    .iter()
+                    .filter(|card| matches!(card, AnalysisCommand::Four { .. }))
+                    .count();
+                observed.push((
+                    id.tag(),
+                    four,
+                    deck.fft_analyses.len(),
+                    engine.config().resource_limits.max_result_values,
+                ));
+                let AnalysisCommand::Tran { step, stop, .. } = command else {
+                    panic!("transient callback only")
+                };
+                engine
+                    .run_tran_with_abort(deck, *stop, *step, abort)
+                    .map_err(|source| ControlExecutionError::Simulation { line: 7, source })
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        (&observed[0].0, observed[0].1, observed[0].2),
+        (&"tran-001".into(), 1, 1)
+    );
+    assert_eq!(
+        (&observed[1].0, observed[1].1, observed[1].2),
+        (&"tran-002".into(), 1, 0)
+    );
+    assert!(
+        observed[1].3 < observed[0].3,
+        "later callbacks receive the remaining result budget"
+    );
+    assert_eq!(circuit.datasets().len(), 2);
+    assert_eq!(circuit.datasets()[1].analysis_id.tag(), "tran-002");
+}
+
+#[test]
+fn a_transient_host_failure_is_typed_and_does_not_consume_a_dataset_identity() {
+    use rspice_core::engine::ControlExecutionError;
+    use rspice_core::execution::control::ControlError;
+    #[derive(Debug, PartialEq)]
+    enum HostError {
+        Core,
+        Output,
+    }
+    impl From<ControlExecutionError> for HostError {
+        fn from(_: ControlExecutionError) -> Self {
+            Self::Core
+        }
+    }
+    impl From<ControlError> for HostError {
+        fn from(_: ControlError) -> Self {
+            Self::Core
+        }
+    }
+    let deck = Netlist::parse("host failure\nV1 n 0 1\nR1 n 0 1k\n.end\n").unwrap();
+    let vars = deck.params.clone();
+    let mut circuit = ControlCircuit::new(deck).unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let command = ControlCommand {
+        line: 4,
+        name: "tran".into(),
+        arguments: "1u 10u".into(),
+    };
+    let error = circuit
+        .execute_with_transient_runner(&engine, &command, &vars, &NoAbort, &mut |_, _, _, _, _| {
+            Err::<rspice_core::engine::TransientResult, _>(HostError::Output)
+        })
+        .unwrap_err();
+    assert_eq!(error, HostError::Output);
+    assert!(circuit.datasets().is_empty());
+    circuit.execute(&engine, &command, &vars, &NoAbort).unwrap();
+    assert_eq!(circuit.datasets()[0].analysis_id.tag(), "tran-001");
+}

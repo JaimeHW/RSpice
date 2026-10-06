@@ -41,7 +41,6 @@ These combinations remain explicitly unsupported:
 
 | Feature | CLI boundary |
 | :--- | :--- |
-| Control scripts with checkpoint/resume, segmented restart, compression, declarative FFT/Fourier or STEP/TEMP axes | Rejected during frontend preflight |
 | FFT comparison and partial-spectrum conversion | Waveform comparison and `--variables`/`--start`/`--stop` selection cannot represent a complete typed transform and are rejected |
 
 These are feature gaps, not a claim of parity with other commercial simulators.
@@ -101,10 +100,23 @@ no output path was selected. SVG plots require real expressions; use `real`
 or `abs` for complex data. Nonpositive samples remain in JSON and are omitted
 from logarithmic drawings. A failed script publishes none of its staged files.
 
-Control scripts combined with declarative run axes, Fourier/FFT processing,
-checkpoint/resume, segmented restart, or waveform compression are currently
-refused. Other vector functions and general ngspice command compatibility are
-still under development.
+Control scripts run independently at every declarative STEP/TEMP coordinate,
+with separate circuit state and datasets. Their transient commands use the same
+`--checkpoint`, `--resume`, `--tran-stop`, `.OPTIONS RESTART`, and compression
+policy as ordinary `.TRAN` cards. A checkpoint base such as `state.chk` becomes
+`state.tran-001.chk`, with an additional coordinate/run label when applicable;
+pass the same base to `--resume`. Scheduled restart logical names also carry
+the run label and transient identity. Failed scripts and incomplete coordinate
+sets roll back staged checkpoints together with their result files.
+
+A control `run` preserves the deck planner's Fourier/FFT parent bindings.
+An explicit control `tran` applies the deck's post-processing cards to that
+new trajectory, including when there is no declarative `.TRAN` card. Repeated
+commands allocate distinct transient and post-process identities. Compression
+evaluates FFT, Fourier and measurements on the accepted trajectory before
+reducing the published waveform. Print/plot commands see the retained dataset.
+Other vector functions and general ngspice command compatibility remain under
+development.
 
 Quasiperiodic analyses bind each `.QPAC`, `.QPXF`, or `.QPNOISE` card to the
 exact preceding `.QPSS` instance. JSON retains the authenticated carrier,

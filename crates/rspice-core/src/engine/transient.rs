@@ -12210,12 +12210,15 @@ fn compress_transient_result(
         };
         if interval_split.is_none() {
             let t0 = result.time[start];
-            let inverse_dt = 1.0 / (result.time[end] - t0);
+            let duration = result.time[end] - t0;
             for point in (start + 1)..end {
                 if point.is_multiple_of(4096) && abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
-                let fraction = (result.time[point] - t0) * inverse_dt;
+                // Match TransientResultCompressed::interpolate_channel exactly.
+                // Multiplying by a rounded reciprocal can change a small
+                // reconstruction error enough to invalidate its certificate.
+                let fraction = (result.time[point] - t0) / duration;
                 for channel in &channels {
                     // An absent endpoint or sample has no reconstruction to
                     // measure. Skipping it here is the same deterministic rule
@@ -12458,13 +12461,16 @@ fn verify_compressed_transient_error(
             continue;
         }
         let t0 = result.time[start];
-        let inverse_dt = 1.0 / (result.time[end] - t0);
+        let duration = result.time[end] - t0;
         for point in (start + 1)..end {
             scanned_points = scanned_points.saturating_add(1);
             if scanned_points.is_multiple_of(4096) && abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let fraction = (result.time[point] - t0) * inverse_dt;
+            // Match TransientResultCompressed::interpolate_channel exactly.
+            // Multiplying by a rounded reciprocal can change a small
+            // reconstruction error enough to invalidate its certificate.
+            let fraction = (result.time[point] - t0) / duration;
             for channel in &comparable {
                 let (Some(actual), Some(left), Some(right)) = (
                     channel.sample(point),
@@ -15391,6 +15397,46 @@ D1 D 0 DMOD
         assert_eq!(compressed.compression_report.retained_points, 4);
         assert_eq!(compressed.compression_report.worst_observed, None);
         compressed.validate().expect("exact report validates");
+    }
+
+    #[test]
+    fn compression_certificate_uses_the_readers_interpolation_arithmetic() {
+        // 3 / 10 differs from 3 * (1 / 10) in binary64. Subtracting
+        // a nearby actual sample magnifies that difference in the error.
+        let result = TransientResult {
+            current_impulses: None,
+            time: vec![0.0, 3.0, 10.0],
+            step_sizes: vec![0.0, 3.0, 7.0],
+            voltages: vec![vec![0.0, 0.300001, 1.0]],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["out".into()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            digital_buses: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+            fft_results: Vec::new(),
+        };
+        let config = CompressionConfig {
+            enabled: true,
+            abs_tol: 1e-5,
+            rel_tol: 0.0,
+            maximum_retained_interval: 0.0,
+        };
+        let compressed = compress_for_test(&result, &config, &[], &NoAbort).unwrap();
+        assert_eq!(compressed.time, vec![0.0, 10.0]);
+        let observed = compressed
+            .compression_report
+            .worst_observed
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            observed.absolute_error,
+            (0.300001 - compressed.interpolate(0, 3.0).unwrap()).abs()
+        );
+        compressed.validate().unwrap();
     }
 
     #[test]

@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 
 mod options;
 mod presentation;
+mod transient;
 pub use options::ControlSettings;
 pub use presentation::{
     ControlCurrentSource, ControlPlotOptions, ControlPresentation, ControlPresentationKind,
@@ -64,6 +65,11 @@ pub enum ControlCommandEffect {
     Presentation(ControlPresentation),
 }
 
+enum PreparedCommand {
+    Complete(ControlCommandEffect),
+    Analyses(Vec<(AnalysisCommand, Option<usize>)>),
+}
+
 /// Mutable circuit state and immutable completed datasets for one script.
 ///
 /// Construct the netlist from `ControlProgram::declarative_source`, using the
@@ -112,13 +118,13 @@ impl ControlCircuit {
         self.datasets
     }
 
-    pub fn execute(
+    fn prepare_command(
         &mut self,
         engine: &Engine,
         command: &ControlCommand,
         variables: &ParamContext,
         abort: &dyn AbortSignal,
-    ) -> Result<ControlCommandEffect, ControlExecutionError> {
+    ) -> Result<PreparedCommand, ControlExecutionError> {
         let line = command.line;
         if abort.is_aborted() {
             return Err(simulation_error(line, SimulationError::Aborted));
@@ -139,15 +145,21 @@ impl ControlCircuit {
         match command.name.as_str() {
             "option" | "options" => {
                 self.apply_options(engine, command, variables, abort)?;
-                Ok(ControlCommandEffect::CircuitChanged)
+                Ok(PreparedCommand::Complete(
+                    ControlCommandEffect::CircuitChanged,
+                ))
             }
             "set" => {
                 self.apply_set(command, variables)?;
-                Ok(ControlCommandEffect::CircuitChanged)
+                Ok(PreparedCommand::Complete(
+                    ControlCommandEffect::CircuitChanged,
+                ))
             }
             "alter" => {
                 self.alter(engine, command, variables)?;
-                Ok(ControlCommandEffect::CircuitChanged)
+                Ok(PreparedCommand::Complete(
+                    ControlCommandEffect::CircuitChanged,
+                ))
             }
             "op" | "ac" | "tran" => {
                 let source = format!(
@@ -172,28 +184,40 @@ impl ControlCircuit {
                     )
                     .into());
                 };
-                let name = self.run_analysis(engine, analysis.clone(), line, abort)?;
-                Ok(ControlCommandEffect::Analyses(vec![name]))
+                Ok(PreparedCommand::Analyses(vec![(analysis.clone(), None)]))
             }
             "run" => {
                 if !command.arguments.is_empty() {
                     return Err(command_error(line, "run does not accept arguments").into());
                 }
-                let analyses = self.netlist.analyses.clone();
+                let analyses = self
+                    .netlist
+                    .analyses
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, command)| {
+                        !matches!(
+                            command,
+                            AnalysisCommand::Four { .. }
+                                | AnalysisCommand::Step(_)
+                                | AnalysisCommand::Temp { .. }
+                        )
+                    })
+                    .map(|(index, command)| (command.clone(), Some(index)))
+                    .collect::<Vec<_>>();
                 if analyses.is_empty() {
                     return Err(
                         command_error(line, "run has no declarative analysis to execute").into(),
                     );
                 }
-                let mut names = Vec::new();
-                for analysis in analyses {
-                    names.push(self.run_analysis(engine, analysis, line, abort)?);
-                }
-                Ok(ControlCommandEffect::Analyses(names))
+                Ok(PreparedCommand::Analyses(analyses))
             }
-            "plot" | "print" | "settype" => self
-                .present(engine, command, variables, abort)
-                .map(ControlCommandEffect::Presentation),
+            "plot" | "print" | "settype" => {
+                self.present(engine, command, variables, abort)
+                    .map(|request| {
+                        PreparedCommand::Complete(ControlCommandEffect::Presentation(request))
+                    })
+            }
             _ => Err(command_error(
                 line,
                 format!(
@@ -205,13 +229,25 @@ impl ControlCircuit {
         }
     }
 
-    fn run_analysis(
+    fn run_analysis<E, F>(
         &mut self,
         engine: &Engine,
         analysis: AnalysisCommand,
+        authored_index: Option<usize>,
         line: usize,
         abort: &dyn AbortSignal,
-    ) -> Result<String, ControlExecutionError> {
+        runner: &mut F,
+    ) -> Result<String, E>
+    where
+        E: From<ControlExecutionError> + From<ControlError>,
+        F: FnMut(
+            &Engine,
+            &Netlist,
+            &AnalysisCommand,
+            crate::identity::AnalysisInstanceId,
+            &dyn AbortSignal,
+        ) -> Result<TransientResult, E>,
+    {
         engine
             .ensure_batch_runs(self.datasets.len().saturating_add(1))
             .map_err(|error| simulation_error(line, error))?;
@@ -235,8 +271,37 @@ impl ControlCircuit {
         let bounded = engine
             .try_resolved_with_config(configured)
             .map_err(|source| ControlExecutionError::Configuration { line, source })?;
-        let mut netlist = self.netlist.clone();
-        netlist.analyses = vec![analysis.clone()];
+        let (kind, identity_kind) = match &analysis {
+            AnalysisCommand::Op => ("op", crate::identity::AnalysisKind::Op),
+            AnalysisCommand::Ac { .. } => ("ac", crate::identity::AnalysisKind::Ac),
+            AnalysisCommand::Tran { .. } => ("tran", crate::identity::AnalysisKind::Tran),
+            _ => {
+                return Err(command_error(
+                    line,
+                    "this analysis has no control-host execution handler",
+                )
+                .into());
+            }
+        };
+        let ordinal = self
+            .ordinals
+            .get(kind)
+            .copied()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or_else(|| command_error(line, "dataset ordinal overflow"))?;
+        let identity_ordinal = u32::try_from(ordinal - 1)
+            .map_err(|_| command_error(line, "analysis identity ordinal overflow"))?;
+        let analysis_id = crate::identity::AnalysisInstanceId::new(identity_kind, identity_ordinal);
+        let name = format!("{kind}{ordinal}");
+        let netlist = transient::analysis_netlist(
+            &self.netlist,
+            &analysis,
+            authored_index,
+            line,
+            &bounded.config().resource_limits,
+            abort,
+        )?;
         let mut device_op_report = None;
         let (kind, result, count) = match &analysis {
             AnalysisCommand::Op => {
@@ -285,26 +350,8 @@ impl ControlCircuit {
                     .fold(0usize, usize::saturating_add);
                 ("ac", ControlAnalysisResult::Ac(result), count)
             }
-            AnalysisCommand::Tran {
-                step,
-                stop,
-                start,
-                max_step,
-                uic,
-            } => {
-                let maximum_step = crate::analysis::transient::resolve_transient_maximum_step(
-                    *step, *stop, *start, *max_step,
-                )
-                .map_err(|error| command_error(line, error.to_string()))?;
-                let result = bounded
-                    .run_tran_with_startup_mode_and_abort(
-                        &netlist,
-                        *stop,
-                        maximum_step,
-                        TransientStartupMode::from_uic(*uic),
-                        abort,
-                    )
-                    .map_err(|error| simulation_error(line, error))?;
+            AnalysisCommand::Tran { .. } => {
+                let result = runner(&bounded, &netlist, &analysis, analysis_id, abort)?;
                 let count = Engine::transient_result_value_count(&result);
                 (
                     "tran",
@@ -321,30 +368,15 @@ impl ControlCircuit {
             }
         };
         if abort.is_aborted() {
-            return Err(simulation_error(line, SimulationError::Aborted));
+            return Err(simulation_error(line, SimulationError::Aborted).into());
         }
         let retained_values = self.retained_values.saturating_add(count);
         engine
             .ensure_result_values(retained_values)
             .map_err(|error| simulation_error(line, error))?;
-        let ordinal = self
-            .ordinals
-            .get(kind)
-            .copied()
-            .unwrap_or(0)
-            .checked_add(1)
-            .ok_or_else(|| command_error(line, "dataset ordinal overflow"))?;
-        let name = format!("{kind}{ordinal}");
-        let identity_kind = match &result {
-            ControlAnalysisResult::OperatingPoint(_) => crate::identity::AnalysisKind::Op,
-            ControlAnalysisResult::Ac(_) => crate::identity::AnalysisKind::Ac,
-            ControlAnalysisResult::Transient(_) => crate::identity::AnalysisKind::Tran,
-        };
-        let identity_ordinal = u32::try_from(ordinal - 1)
-            .map_err(|_| command_error(line, "analysis identity ordinal overflow"))?;
         self.datasets.push(ControlNamedDataset {
             name: name.clone(),
-            analysis_id: crate::identity::AnalysisInstanceId::new(identity_kind, identity_ordinal),
+            analysis_id,
             device_op_report,
             command: analysis,
             result,
