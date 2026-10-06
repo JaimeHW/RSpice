@@ -6,6 +6,7 @@
 //! and relative tolerances.
 
 use crate::cli::{CliError, Config, OutputFormat, map_atomic_output_error};
+use crate::commands::export_table::ColumnData;
 use crate::commands::publish;
 use crate::commands::waveform_io::{detect_format, load_table_selected};
 use std::collections::HashSet;
@@ -260,7 +261,32 @@ fn bless_golden(
 /// Waveform data structure for comparison
 struct WaveformData {
     variables: Vec<String>,
+    variable_types: Vec<String>,
     values: Vec<Vec<f64>>,
+}
+
+fn quantity_type(value: &str) -> Option<String> {
+    let normalized = match value.trim().to_ascii_lowercase().as_str() {
+        "" | "value" | "unknown" | "parameter" => return None,
+        "v" | "volt" | "volts" | "voltage" => "voltage",
+        "a" | "amp" | "ampere" | "amperes" | "current" => "current",
+        "s" | "sec" | "second" | "seconds" | "time" => "time",
+        "hz" | "hertz" | "frequency" => "frequency",
+        "ohm" | "ohms" | "resistance" | "impedance" => "resistance",
+        "1" | "scalar" | "ratio" | "dimensionless" => "dimensionless",
+        "logic" | "digital" => "digital",
+        other => return Some(other.to_owned()),
+    };
+    Some(normalized.to_owned())
+}
+
+fn types_compatible(left: &str, right: &str) -> bool {
+    match (quantity_type(left), quantity_type(right)) {
+        (Some(left), Some(right)) => left == right,
+        // Legacy table formats cannot declare every quantity. Unknown is
+        // allowed, but two explicitly incompatible quantities never match.
+        _ => true,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -311,8 +337,26 @@ fn load_waveform_data(
     section: Option<&str>,
 ) -> Result<WaveformData, CliError> {
     let table = load_table_selected(path, detect_format(path), resource_limits, section)?;
-    let (variables, values): (Vec<String>, Vec<Vec<f64>>) =
-        table.to_real_series().into_iter().unzip();
+    let mut variables = vec![table.scale_name];
+    let mut variable_types = vec![table.scale_type];
+    let mut values = vec![table.scale];
+    for column in table.columns {
+        match column.data {
+            ColumnData::Real(series) => {
+                variables.push(column.name);
+                variable_types.push(column.var_type);
+                values.push(series);
+            }
+            ColumnData::Complex { real, imag } => {
+                variables.extend([
+                    format!("Re({})", column.name),
+                    format!("Im({})", column.name),
+                ]);
+                variable_types.extend([column.var_type.clone(), column.var_type]);
+                values.extend([real, imag]);
+            }
+        }
+    }
     let mut seen = HashSet::new();
     for variable in &variables {
         if !seen.insert(parse_variable_name(variable).key) {
@@ -324,7 +368,11 @@ fn load_waveform_data(
             });
         }
     }
-    Ok(WaveformData { variables, values })
+    Ok(WaveformData {
+        variables,
+        variable_types,
+        values,
+    })
 }
 
 /// Linearly resample the result's series onto the golden file's scale so
@@ -341,6 +389,12 @@ fn resample_onto_golden(
         return Err(invalid(format!(
             "independent coordinates differ: '{}' versus '{}'",
             result.variables[0], golden.variables[0]
+        )));
+    }
+    if !types_compatible(&result.variable_types[0], &golden.variable_types[0]) {
+        return Err(invalid(format!(
+            "independent coordinate types differ: '{}' versus '{}'",
+            result.variable_types[0], golden.variable_types[0]
         )));
     }
 
@@ -419,6 +473,7 @@ fn resample_onto_golden(
 
     Ok(WaveformData {
         variables: result.variables,
+        variable_types: result.variable_types,
         values,
     })
 }
@@ -669,6 +724,17 @@ fn compare_waveforms(
 
     for (var_idx, golden_idx) in pairs {
         let var_name = &result.variables[var_idx];
+
+        if !types_compatible(
+            &result.variable_types[var_idx],
+            &golden.variable_types[golden_idx],
+        ) {
+            cmp_result.problems.push(format!(
+                "'{var_name}': quantity types differ: '{}' versus '{}'",
+                result.variable_types[var_idx], golden.variable_types[golden_idx]
+            ));
+            continue;
+        }
 
         cmp_result.num_variables += 1;
 

@@ -182,23 +182,6 @@ impl ExportTable {
         }
     }
 
-    /// Flatten to real-valued named series, scale first; complex columns
-    /// expand to `Re(name)` / `Im(name)`. Used for value-wise comparison.
-    pub(crate) fn to_real_series(&self) -> Vec<(String, Vec<f64>)> {
-        let mut series = Vec::with_capacity(self.columns.len() + 1);
-        series.push((self.scale_name.clone(), self.scale.clone()));
-        for column in &self.columns {
-            match &column.data {
-                ColumnData::Real(values) => series.push((column.name.clone(), values.clone())),
-                ColumnData::Complex { real, imag } => {
-                    series.push((format!("Re({})", column.name), real.clone()));
-                    series.push((format!("Im({})", column.name), imag.clone()));
-                }
-            }
-        }
-        series
-    }
-
     /// Write the table to `path` in the requested format.
     ///
     /// VCD is not a table at all — it carries event timelines, which only a
