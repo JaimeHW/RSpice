@@ -552,28 +552,6 @@ pub(super) fn export_pss(
                     crate::hdf5::write_hdf5(path, &data)
                         .map_err(|err| super::shared::map_hdf5_output_error(path, err))?;
                 }
-                crate::cli::OutputFormat::Raw | crate::cli::OutputFormat::RawAscii => {
-                    let node_names: Vec<String> = signals
-                        .iter()
-                        .map(|signal| signal.raw_name.clone())
-                        .collect();
-                    let waveforms: Vec<Vec<f64>> =
-                        signals.iter().map(|signal| signal.values.clone()).collect();
-                    rspice_core::io::export_transient(
-                        path,
-                        &result.time,
-                        &node_names,
-                        &waveforms,
-                        match format {
-                            crate::cli::OutputFormat::RawAscii => rspice_core::io::RawFormat::Ascii,
-                            _ => rspice_core::io::RawFormat::Binary,
-                        },
-                    )
-                    .map_err(|e| CliError::OutputError {
-                        path: path.to_path_buf(),
-                        source: e,
-                    })?;
-                }
                 format => {
                     super::export::scalar_table(
                         "pss",
