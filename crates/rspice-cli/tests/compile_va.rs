@@ -263,3 +263,72 @@ fn an_exclusively_open_source_is_an_io_failure() {
     assert_eq!(error["error"]["code"], "input_read_error", "{error}");
     assert_eq!(error["error"]["path"], root.to_str().unwrap());
 }
+
+#[test]
+fn usage_examples_run_with_nested_paths_and_explicit_module_selection() {
+    for selected in [None, Some("second")] {
+        let dir = common::test_dir("usage_example");
+        let models = dir.join("vendor library/nested");
+        let examples = dir.join("examples");
+        std::fs::create_dir_all(&models).unwrap();
+        std::fs::create_dir(&examples).unwrap();
+        let source = match selected {
+            None => SOURCE.to_owned(),
+            Some(_) => format!(
+                "{SOURCE}\n{}",
+                SOURCE
+                    .replace("module resistor", "module second")
+                    .replace("R=1000", "R=2000")
+            ),
+        };
+        std::fs::write(models.join("two terminal model.va"), source).unwrap();
+        let mut compile = Command::new(env!("CARGO_BIN_EXE_rspice"));
+        compile.current_dir(&dir).args([
+            "compile-va",
+            "vendor library/nested/two terminal model.va",
+            "--show-usage",
+        ]);
+        if let Some(module) = selected {
+            compile.args(["--module", module]);
+        }
+        let output = compile.output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let text = String::from_utf8(output.stdout).unwrap();
+        let cards = text
+            .lines()
+            .filter(|line| line.starts_with("  .va ") || line.starts_with("  X1 "))
+            .map(str::trim)
+            .collect::<Vec<_>>();
+        assert_eq!(cards.len(), 2, "{text}");
+        let deck = examples.join("example.sp");
+        std::fs::write(
+            &deck,
+            format!(
+                "* printed usage example\n{}\nVdrive p 0 1\nRload n 0 1k\n.op\n.end\n",
+                cards.join("\n")
+            ),
+        )
+        .unwrap();
+        let result = examples.join("result.json");
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .current_dir(&examples)
+            .args(["--quiet", "run"])
+            .arg(&deck)
+            .args(["--format", "json", "--output"])
+            .arg(&result)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{text}\n{output:?}");
+        let document = common::read_json(&result);
+        let voltage = document["signals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|signal| signal["descriptor"]["canonicalName"] == "v(n)")
+            .unwrap()["values"]["samples"][0]
+            .as_f64()
+            .unwrap();
+        let expected = if selected.is_some() { 1.0 / 3.0 } else { 0.5 };
+        assert!((voltage - expected).abs() < 1e-8, "{document}");
+    }
+}

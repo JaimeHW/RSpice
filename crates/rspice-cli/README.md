@@ -656,7 +656,9 @@ lines, total dependency bytes, include depth, and expanded bytes obey the
 configured resource limits; compilation supports Ctrl-C cancellation.
 The interface table prints unless `--quiet` is set. Quiet also suppresses
 `--detailed` and `--show-usage` text, while `-o FILE` still writes a versioned
-JSON interface summary. `--strict` returns an unsupported-capability error:
+JSON interface summary. Usage examples include the absolute source path and
+explicit module selection so they can be pasted into a netlist in another
+directory. `--strict` returns an unsupported-capability error:
 strict LRM compliance checking is not yet implemented.
 
 **`health`** is a deployment probe. The default readiness mode validates the

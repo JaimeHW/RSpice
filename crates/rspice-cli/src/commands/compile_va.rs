@@ -22,6 +22,9 @@ pub fn execute(
     if let Some(output) = args.output.as_deref() {
         publish::destinations::protect_sources(output, config.source_paths())?;
     }
+    let usage_source = (args.show_usage && !quiet)
+        .then(|| usage_source_path(&args.input))
+        .transpose()?;
     // Configure compiler options
     let mut options = CompilerOptions {
         strict_mode: args.strict,
@@ -198,18 +201,8 @@ pub fn execute(
     // on an X card that names the module; there is no `.MODEL name VERILOGA`
     // card in RSpice, and no device family binds a model of that type, so the
     // example writes instance parameters where the parser reads them.
-    if args.show_usage && !quiet {
-        let source = args
-            .input
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| args.input.display().to_string());
-        let terminal_list: String = model
-            .terminal_names
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
+    if let Some(source) = usage_source {
+        let terminal_list = model.terminal_names.join(" ");
         let instance_parameters = model
             .parameters
             .first()
@@ -218,7 +211,11 @@ pub fn execute(
 
         crate::console::line(format_args!(""))?;
         crate::console::line(format_args!("Usage in SPICE netlist:"))?;
-        crate::console::line(format_args!("  .va \"{}\"", source))?;
+        crate::console::line(format_args!(
+            "  .va {} module={}",
+            source,
+            quote_netlist_token(&model.name)
+        ))?;
         crate::console::line(format_args!(
             "  X1 {} {}{}",
             terminal_list, model.name, instance_parameters
@@ -231,6 +228,27 @@ pub fn execute(
     }
 
     Ok(())
+}
+
+fn usage_source_path(input: &std::path::Path) -> Result<String, CliError> {
+    let absolute = std::path::absolute(input).map_err(|source| CliError::InputReadError {
+        path: input.to_path_buf(),
+        source,
+    })?;
+    let source = absolute
+        .to_str()
+        .filter(|source| !source.contains(['\r', '\n']))
+        .ok_or_else(|| CliError::InvalidArgument {
+            message: "--show-usage requires a UTF-8 source path without line breaks".into(),
+            suggestion: Some("rename the source file or omit --show-usage".into()),
+        })?;
+    Ok(quote_netlist_token(source))
+}
+
+// The netlist source-directive grammar treats backslashes as escapes inside
+// quotes, including Windows separators. Preserve the literal path and name.
+fn quote_netlist_token(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 struct ProcessControl;
