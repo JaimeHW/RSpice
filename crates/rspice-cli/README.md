@@ -498,17 +498,25 @@ stays byte-identical.
 
 ## Per-command behaviour
 
-**`check`** runs four checks before any flag is considered. Parse diagnostics
+**`check`** validates analysis requests before any flag is considered. Parse diagnostics
 from the netlist reader are reported as warnings; output symbols referenced by
 `.PRINT`/`.PLOT`/`.SAVE`/`.PROBE` must resolve, so an undefined `V(x)` or
 `I(rbogus)` is an error; a loop of ideal voltage sources or inductors is an
 error and a node connected only to current sources warns about its undefined
 voltage; and a deck containing XSPICE devices is built into a circuit with
 external runtimes stubbed out, so a model that cannot be constructed fails here
-rather than at run time. Errors exit 65; `--strict` turns a warning-only deck
+rather than at run time. `--strict` turns a warning-only deck
 into a usage failure, which exits 2. The JSON document reports both verdicts
 separately: `valid` tracks the non-strict exit status, and `strict_valid` stays
 false whenever there are warnings.
+
+Control scripts are checked without executing them. Every authored host command
+must have a handler, and literal OP/AC/TRAN requests are validated in all branches.
+`run` checks the declarative analyses it would execute; a script that replaces
+them with explicit commands may leave those unused cards alone. Arguments using
+`$` substitution receive a `CONTROL_DYNAMIC_ANALYSIS` warning because their
+numeric validation must wait for execution. Circuit changes, control-flow
+conditions and presentation results are not evaluated by this static check.
 
 **`compare`** reads either side in any supported result format, auto-detected
 by extension, so a binary rawfile result can be checked directly against a CSV

@@ -204,7 +204,7 @@ fn validate_netlist(
     args: &CheckArgs,
     resource_limits: rspice_core::ResourceLimits,
 ) -> Result<ValidationResult, CliError> {
-    super::preflight::netlist(netlist, &args.input, resource_limits, None)?;
+    let deferred = super::preflight::check_requests(netlist, &args.input, resource_limits)?;
     rspice_core::netlist::validate_output_symbols_with_abort(netlist, &crate::abort::ProcessAbort)
         .map_err(|error| crate::commands::input::map_error(error, &args.input, None))?;
     let flattened = rspice_core::netlist::flatten_netlist_with_models_config_with_abort(
@@ -218,6 +218,19 @@ fn validate_netlist(
     )
     .map_err(|error| crate::commands::input::map_error(error, &args.input, None))?;
     let mut result = ValidationResult::default();
+    for line in deferred {
+        let origin = netlist
+            .control_script
+            .as_deref()
+            .and_then(|script| script.origin(line));
+        result.warnings.push(ValidationIssue {
+            message: format!("{}control analysis arguments require runtime substitution; numeric validation is deferred",
+                origin.map_or_else(String::new, |origin| format!("{origin}: "))),
+            element: None,
+            line: Some(origin.map_or(line, |origin| origin.line)),
+            code: Some("CONTROL_DYNAMIC_ANALYSIS".into()),
+        });
+    }
     add_parser_diagnostics(netlist, &mut result);
 
     // Always-on topology checks: these decks produce singular systems, so
