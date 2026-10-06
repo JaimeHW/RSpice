@@ -23,7 +23,8 @@ pub(super) fn present(
         ControlPresentationKind::Print(traces) => (traces.as_slice(), None),
         ControlPresentationKind::UnitsChanged { .. } => return Ok(Vec::new()),
     };
-    if options.is_none() {
+    let summary_stdout = args.summary.as_deref() == Some(Path::new("-"));
+    if options.is_none() && !summary_stdout {
         // An authored print is output, including under --quiet. That flag
         // suppresses progress chatter, not the script's requested table.
         let mut stdout = std::io::stdout().lock();
@@ -51,7 +52,7 @@ pub(super) fn present(
         }
     }
     let selected = resolve_output_path(args.output.clone(), config)?;
-    if selected.is_none() && options.is_none() {
+    if selected.is_none() && options.is_none() && !summary_stdout {
         return Ok(Vec::new());
     }
     let mut base = selected.unwrap_or_else(|| {
