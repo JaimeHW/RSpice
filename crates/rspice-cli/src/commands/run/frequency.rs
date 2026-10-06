@@ -1449,11 +1449,43 @@ pub(super) fn run_pz_from_command(
 
 pub(super) fn run_sensitivity(
     ctx: &RunContext<'_>,
-    output_node: usize,
     output_name: &str,
     param_name: &str,
-    param_value: f64,
+    param_value: Option<f64>,
 ) -> Result<(), CliError> {
+    let param_value = param_value
+        .or_else(|| ctx.netlist.params.get(param_name))
+        .ok_or_else(|| CliError::InvalidArgument {
+            message: format!("undefined sensitivity parameter '{param_name}'"),
+            suggestion: Some("define the parameter in the deck or with -D NAME=VALUE".into()),
+        })?;
+    let (nominal_deck, _) =
+        rspice_core::Engine::create_perturbed_netlist_multi_with_limits_and_abort(
+            ctx.netlist,
+            &[(param_name.to_string(), param_value)],
+            ctx.engine.config().resource_limits,
+            &crate::abort::ProcessAbort,
+        )
+        .map_err(|error| map_frequency_error(ctx, "Sensitivity nominal point", error))?;
+    let resolver = shared::NodeResolver::from_netlist(ctx.engine, &nominal_deck, ctx.args.timeout)?;
+    let output_node =
+        resolver
+            .resolve_node(output_name)
+            .ok_or_else(|| CliError::InvalidArgument {
+                message: format!(
+                    "unknown node '{output_name}' for --sens-output at the nominal parameter value"
+                ),
+                suggestion: None,
+            })?;
+    let nominal = ctx
+        .engine
+        .run_dc_op_with_abort(&nominal_deck, &crate::abort::ProcessAbort)
+        .map_err(|error| map_frequency_error(ctx, "Sensitivity nominal point", error))?;
+    let output_value = nominal
+        .try_voltage(output_node)
+        .ok_or_else(|| CliError::InternalError {
+            message: format!("sensitivity nominal point has no voltage for node '{output_name}'"),
+        })?;
     if !ctx.quiet {
         println!(
             "Running Sensitivity analysis: ∂V({})/∂{} at {}={:.6e}",
@@ -1462,7 +1494,7 @@ pub(super) fn run_sensitivity(
     }
 
     match ctx.engine.run_sensitivity_with_abort(
-        ctx.netlist,
+        &nominal_deck,
         output_node,
         param_name,
         param_value,
@@ -1478,17 +1510,21 @@ pub(super) fn run_sensitivity(
                 );
 
                 if ctx.verbose {
-                    let nominal_sens = sensitivity * param_value;
-                    println!(
-                        "  Normalized: {:.2}% change per 1% parameter variation",
-                        nominal_sens * 100.0
-                    );
+                    use rspice_core::analysis::sensitivity::SensitivityValue;
+                    match SensitivityValue::normalized(param_value, sensitivity, output_value) {
+                        SensitivityValue::Available(value) => {
+                            println!("  Normalized: {value:.6e}% change per 1% parameter variation")
+                        }
+                        SensitivityValue::Unavailable { unavailable } => {
+                            println!("  Normalized: unavailable ({})", unavailable.as_str())
+                        }
+                    }
                 }
             }
 
             export_parameter_sensitivity(
                 ctx,
-                output_node,
+                output_value,
                 output_name,
                 param_name,
                 param_value,
@@ -1723,11 +1759,10 @@ pub(super) fn run_sensitivity_from_command(
 /// rather than one device instance parameter, which is what the shared payload
 /// declares as a parameter sensitivity: the parameter's own nominal value, the
 /// absolute derivative, and the normalized derivative against the operating
-/// point the same deck settles at. The operating point is solved here because
-/// the probe's own two perturbed solves deliberately do not report it.
+/// point used to compute the derivative.
 fn export_parameter_sensitivity(
     ctx: &RunContext<'_>,
-    output_node: usize,
+    output_value: f64,
     output_name: &str,
     param_name: &str,
     param_value: f64,
@@ -1749,27 +1784,6 @@ fn export_parameter_sensitivity(
         schema,
         &table,
         || {
-            // Only invoked for the typed representation, so the nominal
-            // operating point is solved only when a consumer asked for a
-            // document that declares it.
-            let nominal = ctx
-                .engine
-                .run_dc_op_with_abort(ctx.netlist, &crate::abort::ProcessAbort)
-                .map_err(
-                    |error| rspice_core::execution::ResultDocumentError::SourceResult {
-                        location: "parameter sensitivity result",
-                        detail: format!(
-                            "the nominal operating point the normalized sensitivity is taken \
-                             against could not be solved: {error}"
-                        ),
-                    },
-                )?;
-            let output_value = nominal.try_voltage(output_node).ok_or(
-                rspice_core::execution::ResultDocumentError::SourceResult {
-                    location: "parameter sensitivity result",
-                    detail: format!("node {output_node} carries no operating-point voltage"),
-                },
-            )?;
             rspice_core::execution::AnalysisResultDocument::from_parameter_sensitivity(
                 analysis_id,
                 &output_label,

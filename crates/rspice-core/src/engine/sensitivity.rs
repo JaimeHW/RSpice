@@ -472,7 +472,9 @@ impl Engine {
         )
     }
 
-    pub(crate) fn create_perturbed_netlist_multi_with_limits_and_abort(
+    /// Materialize parameter overrides using the caller's resource policy and
+    /// cancellation signal. This preserves the original elaboration context.
+    pub fn create_perturbed_netlist_multi_with_limits_and_abort(
         netlist: &Netlist,
         overrides: &[(String, Value)],
         resource_limits: crate::resource::ResourceLimits,

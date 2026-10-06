@@ -1230,15 +1230,7 @@ pub(super) fn run_requested_mode(
         ctx.args.sens_output.as_deref(),
         ctx.args.sens_param.as_deref(),
     ) {
-        let output_name = output_node;
-        let output_node = resolve_node(ctx, output_node, "--sens-output")?;
-        frequency::run_sensitivity(
-            ctx,
-            output_node,
-            output_name,
-            param,
-            ctx.args.sens_value.unwrap_or(1.0),
-        )?;
+        frequency::run_sensitivity(ctx, output_node, param, ctx.args.sens_value)?;
         return Ok(RequestedModeOutcome::RanNeedsMeasurementFinalization);
     }
 
@@ -1248,21 +1240,6 @@ pub(super) fn run_requested_mode(
     }
 
     Ok(RequestedModeOutcome::NotRequested)
-}
-
-/// Resolve an authored node name for analysis flags.
-pub(super) fn resolve_node(
-    ctx: &RunContext<'_>,
-    node: &str,
-    flag: &str,
-) -> Result<usize, CliError> {
-    let resolver = shared::NodeResolver::from_netlist(ctx.engine, ctx.netlist, ctx.args.timeout)?;
-    resolver
-        .resolve_node(node)
-        .ok_or_else(|| CliError::InvalidArgument {
-            message: format!("unknown node '{node}' for {flag}"),
-            suggestion: Some("pass a node name from the netlist".to_string()),
-        })
 }
 
 fn resolve_node_pair(
