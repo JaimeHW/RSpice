@@ -518,26 +518,42 @@ fn hb_envelope_source_selection_and_circuit_subset_fail_closed() {
         .expect_err("unknown source must fail");
     assert!(unknown.to_string().contains("unknown independent source"));
 
-    for (label, deck) in [
-        (
-            "GP excess-phase history",
-            "unsupported GP phase history\nV1 in 0 SIN(.7 .01 1meg)\nR1 in out 1k\nQ1 out in 0 QM\n.model QM NPN TF=1n PTF=30\n.end\n",
-        ),
-        (
-            "MOS charge history",
-            "unsupported MOS history\nV1 in 0 SIN(1 .01 1meg)\nR1 in out 1k\nM1 out in 0 0 MM\n.model MM NMOS\n.end\n",
-        ),
-    ] {
-        let unsupported = Netlist::parse(deck).expect("unsupported deck parses");
-        let error = engine
-            .run_hb_envelope_continuation_state(&unsupported, envelope_hb_config(), &[])
-            .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("the initializer supports R/L/C networks"),
-            "{label} rejection was not the strict subset gate: {error}"
-        );
+    let unsupported = Netlist::parse("unsupported GP phase history\nV1 in 0 SIN(.7 .01 1meg)\nR1 in out 1k\nQ1 out in 0 QM\n.model QM NPN TF=1n PTF=30\n.end\n").unwrap();
+    let error = engine
+        .run_hb_envelope_continuation_state(&unsupported, envelope_hb_config(), &[])
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("the initializer supports R/L/C networks"),
+        "GP phase rejection was not the strict subset gate: {error}"
+    );
+}
+
+#[test]
+fn hb_envelope_accepts_and_resumes_memoryless_classic_mos() {
+    // Classic MOS carrier history was implemented after the original subset
+    // refusal test. Its zero-charge limit must also create usable state.
+    let netlist = Netlist::parse("memoryless MOS history\nV1 in 0 SIN(1 .01 1meg)\nR1 in out 1k\nM1 out in 0 0 MM\n.model MM NMOS\n.end\n").unwrap();
+    let engine = Engine::default();
+    let (_, state) = engine
+        .run_hb_envelope_continuation_state(&netlist, envelope_hb_config(), &[])
+        .unwrap();
+    assert_eq!(
+        state.guarantee(),
+        rspice_core::engine::HbEnvelopeStateGuarantee::ExactClassicMosRlcMnaV1
+    );
+    let (transient, _) = engine
+        .run_tran_from_hb_envelope_state(&netlist, &envelope_hb_config(), &[], &state, 20e-9, 1e-9)
+        .unwrap();
+    let input = transient
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("in"))
+        .unwrap();
+    for (&time, &actual) in transient.time.iter().zip(&transient.voltages[input]) {
+        let expected = 1.0 + 0.01 * (TAU * 1e6 * time).sin();
+        assert!((actual - expected).abs() < 1e-12);
     }
 }
 
