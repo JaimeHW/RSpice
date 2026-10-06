@@ -448,13 +448,46 @@ pub fn independent_source_file_dependency(
             Ok(spec.file_dependency().map(std::borrow::Cow::Borrowed))
         }
         ElementKind::VoltageSourceDeferred(raw) | ElementKind::CurrentSourceDeferred(raw) => {
-            deferred_source_file_dependency(raw).map(|path| path.map(std::borrow::Cow::Owned))
+            deferred_source_file_dependency(raw)
+                .map(|dependency| dependency.map(|file| std::borrow::Cow::Owned(file.path)))
         }
         _ => Ok(None),
     }
 }
 
-fn deferred_source_file_dependency(raw: &str) -> Result<Option<String>, ParseError> {
+struct SourceFileDependency {
+    path: String,
+    span: std::ops::Range<usize>,
+}
+
+/// Resolve only the filename; instance and statistical value expressions must
+/// stay unevaluated until the source's scope is materialized.
+pub(in crate::netlist) fn normalize_deferred_source_file_path(
+    raw: &mut String,
+    base: &std::path::Path,
+) -> Result<(), ParseError> {
+    let Some(file) = deferred_source_file_dependency(raw)? else {
+        return Ok(());
+    };
+    let candidate = std::path::Path::new(&file.path);
+    if candidate.is_absolute() {
+        return Ok(());
+    }
+    let resolved = base.join(candidate).to_string_lossy().into_owned();
+    let quote = if !resolved.contains('"') {
+        '"'
+    } else if !resolved.contains('\'') {
+        '\''
+    } else {
+        return Err(ParseError::InvalidValue(format!(
+            "PWL filename cannot be represented as a quoted SPICE path: {resolved}"
+        )));
+    };
+    raw.replace_range(file.span, &format!("{quote}{resolved}{quote}"));
+    Ok(())
+}
+
+fn deferred_source_file_dependency(raw: &str) -> Result<Option<SourceFileDependency>, ParseError> {
     let tokens = tokenize(raw).map_err(|error| lex_to_parse_error(error, 0))?;
     let mut stream = TokenStream::new(tokens);
     loop {
@@ -476,7 +509,7 @@ fn deferred_source_file_dependency(raw: &str) -> Result<Option<String>, ParseErr
                 }
                 stream.advance();
                 stream.consume(&TokenKind::Equals);
-                return parse_pwl_file_path(&mut stream, 0, has_paren).map(Some);
+                return parse_pwl_file_dependency(&mut stream, 0, has_paren).map(Some);
             }
             // A source has one transient waveform. PWL/FILE names inside a
             // different waveform's samples cannot declare a second waveform.
@@ -1245,8 +1278,17 @@ fn parse_pwl_file_path(
     line_num: usize,
     has_paren: bool,
 ) -> Result<String, ParseError> {
+    parse_pwl_file_dependency(stream, line_num, has_paren).map(|file| file.path)
+}
+
+fn parse_pwl_file_dependency(
+    stream: &mut TokenStream,
+    line_num: usize,
+    has_paren: bool,
+) -> Result<SourceFileDependency, ParseError> {
+    let mut span = stream.peek().span.start..stream.peek().span.end;
     if let Some(path) = super::command_parsers::quoted_path_lexeme(stream) {
-        return Ok(path);
+        return Ok(SourceFileDependency { path, span });
     }
 
     let mut path = String::new();
@@ -1265,7 +1307,7 @@ fn parse_pwl_file_path(
             }
             _ => {
                 path.push_str(&stream.peek().lexeme);
-                stream.advance();
+                span.end = stream.advance().span.end;
             }
         }
     }
@@ -1276,7 +1318,7 @@ fn parse_pwl_file_path(
             line_num
         )))
     } else {
-        Ok(path)
+        Ok(SourceFileDependency { path, span })
     }
 }
 

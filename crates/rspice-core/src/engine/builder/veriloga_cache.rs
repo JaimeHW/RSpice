@@ -1826,7 +1826,7 @@ pub(super) fn resolve_cached_or_compile_veriloga(
 /// canonical artifact a deck's analog `.va` produces are the ones it produced
 /// before.
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
-fn deck_include_compiler_options() -> rspice_veriloga::CompilerOptions {
+pub(super) fn deck_include_compiler_options() -> rspice_veriloga::CompilerOptions {
     rspice_veriloga::CompilerOptions {
         enable_ams: true,
         ..rspice_veriloga::CompilerOptions::default()

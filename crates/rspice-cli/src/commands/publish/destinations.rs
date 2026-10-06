@@ -67,7 +67,7 @@ fn conflict(message: String) -> CliError {
     CliError::InvalidArgument {
         message,
         suggestion: Some(
-            "choose distinct destinations for results, checkpoints and reports".into(),
+            "choose output destinations distinct from each other and from source files".into(),
         ),
     }
 }

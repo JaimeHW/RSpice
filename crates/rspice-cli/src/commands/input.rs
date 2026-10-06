@@ -88,12 +88,7 @@ fn parse_define(definition: &str) -> Result<(String, f64), CliError> {
             "missing parameter name in --define '{definition}'"
         )));
     }
-    let value = rspice_core::netlist::lexer::parse_spice_value(value.trim())
+    let value = crate::cli::spice_value(value.trim())
         .map_err(|error| invalid(format!("invalid value in --define '{definition}': {error}")))?;
-    if !value.is_finite() {
-        return Err(invalid(format!(
-            "--define '{definition}' must have a finite value"
-        )));
-    }
     Ok((name.to_string(), value))
 }

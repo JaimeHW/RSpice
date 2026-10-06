@@ -164,6 +164,7 @@ pub(super) fn preflight_step_coordinates(
                     ),
                 )
             })?;
+        super::sources::protect(materialized.netlist(), engine, args.timeout)?;
         crate::commands::preflight::netlist(
             materialized.netlist(),
             &args.input,

@@ -23,6 +23,7 @@ pub fn execute(
     quiet: bool,
 ) -> Result<(), CliError> {
     validate_range(args.start, args.stop)?;
+    crate::commands::publish::destinations::protect_sources(&args.output, config.source_paths())?;
     if !args.input.exists() {
         return Err(CliError::InputNotFound {
             path: args.input.clone(),

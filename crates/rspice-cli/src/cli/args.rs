@@ -8,7 +8,12 @@ use std::path::PathBuf;
 /// Parse a numeric flag value, accepting SPICE suffixes (`4.7k`, `1u`,
 /// `100meg`) alongside plain and scientific notation.
 pub fn spice_value(s: &str) -> Result<f64, String> {
-    rspice_core::netlist::lexer::parse_spice_value(s).map_err(|e| e.to_string())
+    let value =
+        rspice_core::netlist::lexer::parse_spice_value_complete(s).map_err(|e| e.to_string())?;
+    if !value.is_finite() {
+        return Err("numeric argument must be finite".into());
+    }
+    Ok(value)
 }
 
 /// Format used for fatal diagnostics written to stderr.
@@ -866,6 +871,28 @@ pub enum OutputFormat {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numeric_arguments_keep_engineering_suffixes_and_require_whole_finite_values() {
+        for (text, expected) in [
+            ("4.7k", 4700.0),
+            ("1u", 1e-6),
+            ("100meg", 1e8),
+            ("2MHz", 2e6),
+            ("3ns", 3e-9),
+            ("1e3k", 1e6),
+            (" -2.5mV ", -2.5e-3),
+        ] {
+            let actual = spice_value(text).unwrap();
+            assert!(
+                (actual - expected).abs() <= expected.abs() * 2.0 * f64::EPSILON,
+                "{text}: {actual}"
+            );
+        }
+        for text in ["1+2", "1/2", "1 extra", "1u;", "1.2.3", "1e999", "1e308k"] {
+            assert!(spice_value(text).is_err(), "{text}");
+        }
+    }
 
     #[test]
     fn redefined_parameter_modes_accept_release_spellings_and_map_independently() {

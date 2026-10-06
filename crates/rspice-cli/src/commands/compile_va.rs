@@ -19,6 +19,9 @@ pub fn execute(
         ).into());
     }
     crate::abort::install_interrupt_handler();
+    if let Some(output) = args.output.as_deref() {
+        publish::destinations::protect_sources(output, config.source_paths())?;
+    }
     // Validate input file exists
     if !args.input.exists() {
         return Err(CliError::InputNotFound {
