@@ -46,24 +46,7 @@ pub fn execute(
         println!("Checking: {}", args.input.display());
     }
 
-    let resource_limits = config.resources.limits();
-    let parsed = crate::commands::parse_netlist_input(&args.input, &args.netlist_options, config)
-        .and_then(|netlist| {
-            rspice_core::netlist::validate_output_symbols(&netlist)
-                .map_err(crate::commands::map_parse_error)?;
-            let flattened = rspice_core::netlist::flatten_netlist_with_models_config_with_abort(
-                &netlist,
-                rspice_core::netlist::FlattenerConfig {
-                    max_depth: resource_limits.max_hierarchy_depth,
-                    max_elements: resource_limits.max_flattened_elements,
-                    ..Default::default()
-                },
-                &crate::abort::ProcessAbort,
-            )
-            .map_err(|error| crate::commands::input::map_error(error, &args.input, None))?;
-            Ok((netlist, flattened))
-        });
-    let (netlist, flattened) = match parsed {
+    let result = match validate_input(&args, config) {
         Ok(n) => n,
         Err(e @ CliError::InputNotFound { .. } | e @ CliError::InputReadError { .. }) => {
             return Err(e);
@@ -86,22 +69,6 @@ pub fn execute(
         }
     };
 
-    let mut result = ValidationResult::default();
-    add_parser_diagnostics(&netlist, &mut result);
-
-    // Always-on topology checks: these decks produce singular systems, so
-    // catching them statically beats a NaN at runtime.
-    check_topology(&netlist, &flattened.elements, &mut result);
-    check_xspice_build(&netlist, &mut result, resource_limits)?;
-
-    if args.connectivity {
-        check_connectivity(&netlist, &flattened.elements, &mut result);
-    }
-
-    if args.models {
-        check_model_references(&netlist, &mut result);
-    }
-
     if args.json {
         output_json(&result);
     } else {
@@ -122,6 +89,147 @@ pub fn execute(
     }
 
     Ok(())
+}
+
+fn validate_input(args: &CheckArgs, config: &Config) -> Result<ValidationResult, CliError> {
+    use rspice_core::execution::{DeckPlan, DeckPlanError, MaterializedRunError};
+    let limits = config.resources.limits();
+    let source = crate::commands::read_netlist_input(&args.input, &args.netlist_options, config)?;
+    let decks = rspice_core::netlist::multi_run::try_expand_multi_run_with_limits_and_abort(
+        &source,
+        limits,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|error| {
+        if error.is_aborted() {
+            return CliError::Interrupted;
+        }
+        if let Some(limit) = error.resource_limit_error() {
+            return rspice_core::SimulationError::ResourceLimit(limit).into();
+        }
+        CliError::parse_error(error.to_string())
+    })?;
+    let plan_error = |error| match error {
+        DeckPlanError::Aborted => CliError::Interrupted,
+        DeckPlanError::ResourceLimit(error) => {
+            rspice_core::SimulationError::ResourceLimit(error).into()
+        }
+        error => CliError::parse_error(format!("run planning: {error}")),
+    };
+    let materialization_error = |error| match error {
+        MaterializedRunError::Aborted => CliError::Interrupted,
+        MaterializedRunError::DeckPlan(error) => plan_error(error),
+        MaterializedRunError::Simulation(error) => CliError::from(error),
+        error => CliError::InternalError {
+            message: error.to_string(),
+        },
+    };
+    let mut result = ValidationResult::default();
+    let mut count = 0usize;
+    for deck in decks {
+        let label = deck.label.as_deref().unwrap_or("base");
+        let mut validate = || -> Result<Vec<(String, ValidationResult)>, CliError> {
+            let options =
+                crate::commands::input::parse_options(&args.netlist_options, limits, true);
+            let netlist = crate::commands::input::parse_source(
+                &deck.source,
+                &args.input,
+                &args.netlist_options,
+                config,
+                options,
+                None,
+            )?;
+            let plan =
+                DeckPlan::from_netlist_with_abort(&netlist, &limits, &crate::abort::ProcessAbort)
+                    .map_err(plan_error)?;
+            let simulation_config = rspice_core::resolve_simulation_config(
+                &config.core_simulation_config(),
+                Some(&netlist.options),
+                &Default::default(),
+            );
+            let engine = Engine::try_new(simulation_config)?;
+            let materializer = engine
+                .prepare_deck_plan_materializer_with_abort(
+                    &netlist,
+                    &plan,
+                    &crate::abort::ProcessAbort,
+                )
+                .map_err(materialization_error)?;
+            count = count.saturating_add(materializer.len());
+            if count > limits.max_batch_runs {
+                return Err(rspice_core::SimulationError::ResourceLimit(
+                    rspice_core::ResourceLimitError {
+                        resource: rspice_core::ResourceKind::BatchRuns,
+                        requested: count,
+                        limit: limits.max_batch_runs,
+                    },
+                )
+                .into());
+            }
+            let mut results = Vec::new();
+            for index in 0..materializer.len() {
+                let coordinate = materializer
+                    .materialize_netlist_with_abort(index, &crate::abort::ProcessAbort)
+                    .map_err(materialization_error)?;
+                let name = if plan.axes().is_empty() {
+                    label.to_string()
+                } else {
+                    format!(
+                        "{label} / {}",
+                        materializer.coordinates()[index].stable_tag()
+                    )
+                };
+                results.push((name, validate_netlist(&coordinate, args, limits)?));
+            }
+            Ok(results)
+        };
+        for (label, mut local) in validate().map_err(|error| {
+            CliError::reported(format!("[{label}] {error}"), Some(error.details()))
+        })? {
+            for issue in local.errors.iter_mut().chain(&mut local.warnings) {
+                issue.message = format!("[{label}] {}", issue.message);
+            }
+            result.errors.extend(local.errors);
+            result.warnings.extend(local.warnings);
+        }
+    }
+    Ok(result)
+}
+
+fn validate_netlist(
+    netlist: &Netlist,
+    args: &CheckArgs,
+    resource_limits: rspice_core::ResourceLimits,
+) -> Result<ValidationResult, CliError> {
+    rspice_core::netlist::validate_output_symbols_with_abort(netlist, &crate::abort::ProcessAbort)
+        .map_err(|error| crate::commands::input::map_error(error, &args.input, None))?;
+    let flattened = rspice_core::netlist::flatten_netlist_with_models_config_with_abort(
+        netlist,
+        rspice_core::netlist::FlattenerConfig {
+            max_depth: resource_limits.max_hierarchy_depth,
+            max_elements: resource_limits.max_flattened_elements,
+            ..Default::default()
+        },
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|error| crate::commands::input::map_error(error, &args.input, None))?;
+    let mut result = ValidationResult::default();
+    add_parser_diagnostics(netlist, &mut result);
+
+    // Always-on topology checks: these decks produce singular systems, so
+    // catching them statically beats a NaN at runtime.
+    check_topology(netlist, &flattened.elements, &mut result);
+    check_xspice_build(netlist, &mut result, resource_limits)?;
+
+    if args.connectivity {
+        check_connectivity(netlist, &flattened.elements, &mut result);
+    }
+
+    if args.models {
+        check_model_references(netlist, &mut result);
+    }
+
+    Ok(result)
 }
 
 /// Elaborate an XSPICE deck to prove it builds.

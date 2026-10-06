@@ -70,3 +70,42 @@ fn validation_errors_take_precedence_over_strict_warnings() {
     assert!(!report["warnings"].as_array().unwrap().is_empty());
     assert!(!report["errors"].as_array().unwrap().is_empty());
 }
+
+#[test]
+fn check_validates_alter_variants_and_each_step_coordinate() {
+    let dir = test_dir("check_complete_plan");
+    for (name, source) in [
+        (
+            "alter",
+            "* ALTER validation\nV1 in 0 1\nR1 in 0 1k\n.op\n.alter bad\nX1 in 0 MISSING\n.end\n",
+        ),
+        (
+            "step",
+            "* conditional STEP validation\n.param p=1\nV1 in 0 1\nR1 in 0 1k\n.if (p > 1)\nV2 in 0 2\n.endif\n.step param p list 1 2\n.op\n.end\n",
+        ),
+    ] {
+        let deck = dir.join(format!("{name}.sp"));
+        std::fs::write(&deck, source).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "check"])
+            .arg(deck)
+            .args(["--strict", "--json"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(65), "{output:?}");
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["valid"], false);
+        assert!(!report["errors"].as_array().unwrap().is_empty());
+        assert!(
+            report["errors"][0]["message"]
+                .as_str()
+                .unwrap()
+                .contains(if name == "alter" {
+                    "bad"
+                } else {
+                    "closes a loop"
+                }),
+            "{report}"
+        );
+    }
+}
