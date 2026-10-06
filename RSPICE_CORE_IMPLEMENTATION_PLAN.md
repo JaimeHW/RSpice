@@ -509,10 +509,11 @@ The parser work supporting C04b has delivered these contracts:
 | `0bb6ee975`, `5550bb89a` | Demand-driven analysis operands in lexical scopes; parent/default completion, shared samples, inherited snapshots, suspended lazy operands and per-instance body preservation | `core-scoped-analyses-windows-20261006.json` |
 | `d63caea8a`, `520527555` | Physical source ownership on typed analysis-card errors through root/scoped deferred binding, nested includes and continuations; preserved typed issues and SDK diagnostics | `core-analysis-origins-windows-20261006.json` |
 | `965e40fbd`, `846e41b1c` | Shared lexical environments and delayed TEMP/TNOM completion through unfinished parent/root scopes; completed-owner graphs, preserved local sampling phases, shared option/analysis samples and transactional probes | `core-parent-temperature-windows-20261006.json` |
+| `fbf46d0fa` | Retry invalid deferred-analysis operands after discovering changed TEMP/TNOM options or later scalar `.TEMP`; preserve first errors, physical precedence, sampled order and bounded replay | `core-provisional-analysis-temperature-windows-20261006.json` |
 
 Continue shared dependency binding in these concrete cases:
 
-- Reconcile ngspice expressions that are invalid only at the provisional temperature, such as `1/(TEMP-27)`, before treating them as final domain errors. Preserve bounded replay and cancellation.
+- Reconcile ngspice expressions that are invalid only at the provisional temperature, such as `1/(TEMP-27)`, before treating them as final domain errors. Preserve bounded replay and cancellation. Failed deferred-analysis completion now participates in this reconciliation. Eager `.PARAM` and option-field evaluation, and failures during earlier declaration/source/model completion, still need discovery before final rejection. Preserve every assignment and conditional decision, typed resource/cancellation failures, original errors and statistical phases while extending the same boundary; do not skip invalid cards or substitute successful default values.
 
 General statistical/runtime binding still requires broader qualification, including temperature-dependent sampling, derived-context policies, cancellation inside validation/classification, and allocation/performance bounds. The static global delivery does not close these contracts.
 

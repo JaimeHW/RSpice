@@ -404,6 +404,13 @@ live draws, and successful fields evaluate once on the live stream. Optional
 numeric readers leave failed expressions for validation instead of silently
 omitting authored fields.
 
+A deferred analysis that fails at the provisional temperature retains its error
+while the parser discovers any later `.TEMP` selection. If options or that
+directive select a different temperature, a fresh pass must validate the whole
+deck before publication. The original error remains fatal at a stable setting;
+cancellation and resource errors return immediately. This uses the existing
+three-pass bound and preserves physical study overrides and statistical order.
+
 Typed `AnalysisCardError` values retain the physical card origin in `origin`.
 Both their `source_location()` method and `ParseError::source_location()` expose
 the included or root path and source-local line, including deferred cards and
@@ -435,10 +442,11 @@ sample once in their owner. Original subcircuit bodies remain available for
 per-instance overrides and evaluation. Only scopes needed by pending cards are
 retained beyond `.ENDS`.
 
-General dependency planning remains incomplete: an early expression invalid
-at the provisional temperature can still fail before replay in the ngspice
-dialect. This case and broader statistical/runtime binding qualification remain
-in the implementation plan.
+General dependency planning remains incomplete: eager `.PARAM` or option-field
+evaluation and declaration/source/model completion can still fail at a
+provisional temperature before reaching analysis reconciliation. These cases
+and broader statistical/runtime binding qualification remain in the
+implementation plan.
 
 The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and
 the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.
