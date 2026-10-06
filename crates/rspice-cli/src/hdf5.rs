@@ -1608,6 +1608,9 @@ fn read_string_attr(attrs: &HashMap<String, AttrValue>, name: &str) -> Result<Op
     match attrs.get(name) {
         None => Ok(None),
         Some(AttrValue::String(value)) => Ok(Some(value.clone())),
+        // Older RSpice writers encoded empty scalar strings with width zero;
+        // the backend exposes those as an empty string array on readback.
+        Some(AttrValue::StringArray(values)) if values.is_empty() => Ok(Some(String::new())),
         Some(other) => Err(Hdf5Error::InvalidSchema(format!(
             "attribute '{name}' expected string, found {other:?}"
         ))),
