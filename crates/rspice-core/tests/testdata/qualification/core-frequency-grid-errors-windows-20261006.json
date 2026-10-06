@@ -1,0 +1,154 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C01",
+  "related_packages": [
+    "C00",
+    "C04",
+    "C12"
+  ],
+  "batch": "Frequency-grid and STB allocation error preservation",
+  "status": "scoped_contract_delivered_packages_open",
+  "base_revision": "55bfb869d746071f3161cdfed7d5bb75ffde22b7",
+  "source_revision": "0ee0e3778ceacd10d3aeb9c5686e55ea02991c16",
+  "implementation_commits": [
+    "c13b017910490cff3c56bfb76a31610d77aed094",
+    "0ee0e3778ceacd10d3aeb9c5686e55ea02991c16"
+  ],
+  "captured_utc": "2026-10-06T16:49:47.999836+00:00",
+  "host": "x86_64-pc-windows-msvc",
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+    "cli_rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "cli_toolchain_reason": "Previously reproduced pinned Rust 1.94/faer compiler crash during CLI runtime builds; no repository pin change.",
+    "wasm_target": "wasm32-unknown-unknown",
+    "wasm_profile": "release",
+    "wasm_features": [
+      "wasm",
+      "veriloga-wasm-jit"
+    ],
+    "wasm_runtime": "headless Chrome dedicated worker",
+    "WASM_BINDGEN_TEST_TIMEOUT": "180",
+    "webdriver_config_sha256": "93458ed98943268e089c8c9a793bf2e899872e62941ac54795b0c27b7104785b"
+  },
+  "commands": [
+    {
+      "command": "cargo test --locked -p rspice-core --test frequency_grid_errors --test frequency_data --test control_noise --test control_dc --test control_execution",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        6,
+        8,
+        5,
+        7,
+        4
+      ],
+      "log": "target/core-qualification/frequency-grid-cause-native-final.log",
+      "log_sha256": "d9aae4e93e35cac4cadd96abe645a0e7c65391a57b235ffe4dcb4a383ff0ee02"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib -- analysis::frequency_grid:: analysis::ac:: analysis::stb:: analysis::pac::config::tests analysis::pxf::tests analysis::transfer::ac:: engine::control::analysis::tests engine::stb::tests",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        41
+      ],
+      "log": "target/core-qualification/frequency-grid-cause-units-final.log",
+      "log_sha256": "dca90ac6980f4e413eb98aa694fe99e30ead2e2ae7535b110f211cd2ca9869ae"
+    },
+    {
+      "command": "cargo test --locked -p rspice-wasm -p rspice-engine-adapter --lib --bins frequency_grid_allocation_failure",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1,
+        0,
+        1
+      ],
+      "log": "target/core-qualification/frequency-grid-cause-adapters.log",
+      "log_sha256": "b84bce72a2b23fa41495cb35b7fae9ce72b5eb49dbdfe97416ccc1f210017ecd"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib -- analysis::stb:: engine::stb::tests",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        15
+      ],
+      "log": "target/core-qualification/stb-allocation-cause-units.log",
+      "log_sha256": "48af7a4b5cd7c8ddafe71935be736b0c95633d4330b7858f594b13d27968c5c2"
+    },
+    {
+      "command": "cargo +1.95.0 test --locked -p rspice-cli --bin rspice frequency_grid_allocation_failure --target-dir target/core-cli-195",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1
+      ],
+      "log": "target/core-qualification/stb-allocation-cause-cli.log",
+      "log_sha256": "03d13d0fefe0b778ef60fdceb2d5700d5d44ca96d9c92badb24f34c614e70674"
+    },
+    {
+      "command": "cargo clippy --locked -p rspice-core -p rspice-cli -p rspice-wasm -p rspice-engine-adapter --lib --bins -- -D warnings",
+      "outcome": "passed",
+      "test_target_passed_counts": [],
+      "log": "target/core-qualification/stb-allocation-cause-clippy.log",
+      "log_sha256": "7693dc6bf3c110b2d30f757d7ac82a98353db5cf946b6ac2a429e0bacfac0869"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test frequency_grid_errors -- --nocapture",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        4
+      ],
+      "log": "target/core-qualification/stb-allocation-cause-wasm.log",
+      "log_sha256": "355f9acabb582849a07fcf3d69949d741461fe1539557ee82c4188d4f553205e"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib engine::requirements",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        3
+      ],
+      "log": "target/core-qualification/frequency-grid-cause-requirements.log",
+      "log_sha256": "110bc00bc29315beeaea20d71d0dccd9047699d72c5bf1224ba21066a96585e5"
+    }
+  ],
+  "unique_passed_tests": {
+    "native": 79,
+    "optimized_wasm": 4
+  },
+  "test_count_note": "The 15-test STB suite overlaps 13 tests in the original 41-test selection. Repeated executions are counted once.",
+  "source_files_sha256": {
+    "crates/rspice-cli/src/commands/run/shared.rs": "e113780eb4a2239d08f3a89d7a230b26c90a4e02223220ea3695de4234faaca9",
+    "crates/rspice-core/README.md": "2e9fcd20ac13966d564bf72769447d982873dac131a62d1eabd1978a298bb35a",
+    "crates/rspice-core/src/analysis/ac.rs": "336cb5cd1735ed7b0848288b4022b9cbefc17db7e4ece6989d35221c8d8fd085",
+    "crates/rspice-core/src/analysis/frequency_grid.rs": "2360349c85cdea98b005222ffd6d7ad77db2684635ba792331af037c927d4462",
+    "crates/rspice-core/src/analysis/pxf.rs": "234d3582cc4581285869514e73de5b1502d2a1a86b3e2a1d2bd0850dd3455912",
+    "crates/rspice-core/src/analysis/stb.rs": "d7ce1f7b0c9d87b87c94cb2fd91ae4571068465b89b61b9f4bb85daf3e5626e1",
+    "crates/rspice-core/src/analysis/transfer/ac.rs": "aaf37b69104160cf7342c8fb73edd34c356b2dad1be8029738cbaa8857875455",
+    "crates/rspice-core/src/engine/control/analysis.rs": "82b9b30429053d37b727c2dc5ab01d0d2007859917c6047a57bf046a4af1034d",
+    "crates/rspice-core/src/engine/hb/pac.rs": "5566bf87b79ff4a06bfd8268a94fc6fc4d8dd57ac41eafeb526cd917e419b7bd",
+    "crates/rspice-core/src/engine/hb/psp.rs": "db62a77ca71bf74b43ce6142f0203b02cba9bec915dfc79af74745e10feda6cf",
+    "crates/rspice-core/src/engine/hb/quasi_periodic/frequency_sweep.rs": "b74f5454c778a79b39136938d92674df715b3225ad270aa6d74f2f58aa44f3db",
+    "crates/rspice-core/src/engine/sp.rs": "8cfc98fd47d3390139fbb359aaac54c6e4ddd4b2a6e7912634006e08fbdbe151",
+    "crates/rspice-core/src/engine/stb.rs": "bff24669acddd3f2727e8f56146c4d581578f6639c1997ccf2e08028ab163b04",
+    "crates/rspice-core/tests/frequency_grid_errors.rs": "b036a34cada57e654320665a99503c676ba54c0cfa1247ea7c89bd03a1b1bb92",
+    "crates/rspice-engine-adapter/src/execute/response.rs": "5f2ac5c7cd1d3a0353064466f5c5ffb68876e1940b572567c76a24a7cfb74608",
+    "crates/rspice-wasm/src/runners/deck.rs": "20b825176edcf73c7fdf150a93e178f152c01bbb0eaf2a04a7fcbf5337671e7a",
+    "Cargo.lock": "ce8dc157a78d2268ff926067f15f08002b90185b9abd7320c4952d3a266fcf8a",
+    "rust-toolchain.toml": "d6dadd139dac178482d6cca3a8945b8a7e0f7df1f0733872657cbc420b2d82e6"
+  },
+  "publication_ledger_sha256": "6b8108d289820ea64caac7fe9637924988d41d47ebff507b0b15baa71f9fdc0e",
+  "implementation": {
+    "grid": "Allocation carries requested element count and TryReserveError; Error::source exposes the cause, including STB and PXF wrappers. Conversion into SimulationError preserves allocation_failed, policy limits and cancellation.",
+    "callers": "Control preserves the source line. CLI uses core metadata and resource exit status. WASM and worker adapters preserve core allocation classification. Malformed sweep input keeps its established input/analysis diagnostics.",
+    "stb": "Projection and workspace reservations preserve the original source and buffer object. Native tests cover projection preallocation, engine mapping, unchanged existing buffer values and later reuse.",
+    "compatibility": "FrequencyGridError and StbAnalysisError no longer implement Copy; Clone/Eq remain. Allocation patterns gain source. The legacy infallible AC wrapper still uses its historical empty-result sentinel."
+  },
+  "limitations": [
+    "Failure tests use deterministic Vec capacity overflow, not real OOM or an injected system allocator failure.",
+    "STB string reservation sources are preserved in code; warning/probe allocation failures were not individually injected.",
+    "This is error-contract qualification; it establishes no new numerical accuracy, latency or whole-process memory bound.",
+    "Initial grid native and adapter checks precede the follow-up STB-buffer change. The STB suite, CLI contract, strict consumer Clippy and public optimized WASM tests execute after that change.",
+    "All C00–C14 packages remain unfinished. Control coverage stays 5/29; AcData/NoiseData control and typed-document/adapter integration remain open.",
+    "Parameter-dependent TEMP/TNOM prescanning and resolved table-row option precedence remain open, including .param ambient=27 followed by .options temp={ambient}.",
+    "Other device/model/solver allocation owners and full release qualification remain open."
+  ]
+}
