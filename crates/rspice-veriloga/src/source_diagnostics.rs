@@ -28,6 +28,54 @@ pub struct SourceCompileDiagnostic {
     pub column: Option<usize>,
 }
 
+impl std::fmt::Display for SourceCompileDiagnostic {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let severity = match self.severity {
+            CompileDiagnosticSeverity::Error => "Error",
+            CompileDiagnosticSeverity::Warning => "Warning",
+        };
+        write!(formatter, "{severity}: ")?;
+        if let Some(path) = &self.path {
+            formatter.write_str(path)?;
+        }
+        if let Some(line) = self.line {
+            write!(formatter, ":{line}")?;
+            if let Some(column) = self.column {
+                write!(formatter, ":{column}")?;
+            }
+        }
+        if self.path.as_ref().is_some_and(|path| !path.is_empty()) || self.line.is_some() {
+            formatter.write_str(": ")?;
+        }
+        write!(formatter, "[{}] {}", self.code, self.message)
+    }
+}
+
+impl From<&crate::PreprocessorError> for SourceCompileDiagnostic {
+    fn from(error: &crate::PreprocessorError) -> Self {
+        Self {
+            severity: CompileDiagnosticSeverity::Error,
+            phase: CompileDiagnosticPhase::Input,
+            code: if error.cancelled {
+                "VA-INPUT-CANCELLED"
+            } else if error.resource_limit.is_some() {
+                "VA-INPUT-RESOURCE-LIMIT"
+            } else if error.io_error.is_some() {
+                "VA-INPUT-IO"
+            } else {
+                "VA-INPUT-PREPROCESS"
+            }
+            .into(),
+            message: error.message.clone(),
+            path: error.file.as_ref().map(|path| path.display().to_string()),
+            byte_start: None,
+            byte_end: None,
+            line: (error.line > 0).then_some(error.line),
+            column: None,
+        }
+    }
+}
+
 pub(crate) fn provider_diagnostics(
     error: &CompileError,
     preprocessed: &PreprocessedSource,
