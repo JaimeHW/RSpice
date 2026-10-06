@@ -9104,7 +9104,11 @@ pub(super) fn parameter_error_can_defer(err: &ParseError) -> bool {
 
 fn source_spec_error_can_defer(err: &ParseError, raw_spec: &str, params: &ParamContext) -> bool {
     parameter_error_can_defer(err)
-        || matches!(err, ParseError::Syntax { message, .. } if message.contains("Undefined parameter"))
+        // A name in a numeric position can also be a source keyword, e.g.
+        // `DC=DC`. The grammar, not a keyword scan, identifies that binding.
+        || matches!(err, ParseError::Syntax { message, .. }
+            if message.contains("Undefined parameter")
+                || message.contains("Expected value, found identifier '"))
         || raw_source_spec_has_unresolved_parameter(raw_spec, params)
 }
 
@@ -9114,7 +9118,7 @@ fn raw_source_spec_has_unresolved_parameter(raw_spec: &str, params: &ParamContex
     };
 
     tokens.into_iter().any(|token| match token.kind {
-        TokenKind::Expression(expr) => eval_expression(&expr, params)
+        TokenKind::Expression(expr) => eval_expression(&expr, &params.isolated_random_clone())
             .is_err_and(|err| err.to_string().contains("Undefined parameter")),
         TokenKind::Ident(name) => source_ident_could_be_later_parameter(&name, params),
         _ => false,

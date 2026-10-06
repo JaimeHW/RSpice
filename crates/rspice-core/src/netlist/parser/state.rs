@@ -87,6 +87,9 @@ pub(super) struct ParseState {
     pub(super) elements: Vec<Element>,
     pub(super) element_names: ElementNameRegistry,
     pub(super) analyses: Vec<AnalysisCommand>,
+    /// Root source specifications that could not bind on their authored card.
+    /// The completion pass reports their physical owner, including includes.
+    pub(super) deferred_source_origins: HashMap<String, NetlistSourceLocation>,
     pub(super) monte_carlo_source_cards: Vec<monte_carlo_identity::SourceCard>,
     pub(super) lin_analysis: Option<LinAnalysis>,
     pub(super) fft_analyses: Vec<FftAnalysis>,
@@ -143,6 +146,7 @@ impl ParseState {
             elements: Vec::new(),
             element_names: ElementNameRegistry::default(),
             analyses: Vec::new(),
+            deferred_source_origins: HashMap::new(),
             monte_carlo_source_cards: Vec::new(),
             lin_analysis: None,
             fft_analyses: Vec::new(),

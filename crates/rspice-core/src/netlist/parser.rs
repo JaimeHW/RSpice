@@ -1149,15 +1149,8 @@ fn parse_netlist_impl(
     }
     normalize_pspice_u_timing_aliases_with_abort(&mut state, abort)?;
     validate_timeint_option_aggregate(&state.options, lines.len())?;
-    resolve_top_level_deferred_source_specs_with_abort(&mut state.elements, &state.params, abort)?;
-    resolve_top_level_deferred_chebyshev_with_abort(
-        &mut state.elements,
-        &state.params,
-        &mut state.element_names,
-        abort,
-    )?;
-    // Resolve ordinary declarations in their owning scope before models read
-    // them. Materializing a shared-random clone here and the original scope
+    // Resolve ordinary declarations in their owning scope before sources and
+    // models read them. Materializing a shared-random clone and the original scope
     // later would sample a forward statistical parameter twice, giving the
     // model and the returned netlist different values.
     crate::netlist::expr::finalize_parameter_expressions_with_abort(&mut state.params, abort)
@@ -1165,6 +1158,18 @@ fn parse_netlist_impl(
             crate::netlist::expr::ParameterResolutionError::Aborted => ParseWithAbortError::Aborted,
             error => ParseError::InvalidValue(error.to_string()).into(),
         })?;
+    resolve_top_level_deferred_source_specs_with_abort(
+        &mut state.elements,
+        &state.params,
+        &state.deferred_source_origins,
+        abort,
+    )?;
+    resolve_top_level_deferred_chebyshev_with_abort(
+        &mut state.elements,
+        &state.params,
+        &mut state.element_names,
+        abort,
+    )?;
     resolve_static_model_expression_params_with_abort(&mut state, abort)?;
     let pending_xyce_diode_model_warnings =
         std::mem::take(&mut state.pending_xyce_diode_model_warnings);
@@ -3385,17 +3390,28 @@ fn validate_source_subckt_depth(
 fn resolve_top_level_deferred_source_specs_with_abort(
     elements: &mut [Element],
     params: &ParamContext,
+    origins: &HashMap<String, NetlistSourceLocation>,
     abort: &dyn AbortSignal,
 ) -> Result<(), ParseWithAbortError> {
     for (index, element) in elements.iter_mut().enumerate() {
         poll_parse_abort(abort, index)?;
+        let source_error = |error: ParseError| -> ParseWithAbortError {
+            match origins.get(&element.name) {
+                Some(origin) => ParseError::Syntax {
+                    line: origin.line,
+                    message: format!("{origin}: {error}"),
+                }
+                .into(),
+                None => error.into(),
+            }
+        };
         let replacement = match &element.kind {
             ElementKind::VoltageSourceDeferred(raw_spec)
                 if !params.expression_references_spectre_statistics(raw_spec) =>
             {
                 Some(
                     resolve_top_level_source_kind(&element.name, raw_spec, params, true)
-                        .map_err(ParseWithAbortError::from)?,
+                        .map_err(source_error)?,
                 )
             }
             ElementKind::CurrentSourceDeferred(raw_spec)
@@ -3403,7 +3419,7 @@ fn resolve_top_level_deferred_source_specs_with_abort(
             {
                 Some(
                     resolve_top_level_source_kind(&element.name, raw_spec, params, false)
-                        .map_err(ParseWithAbortError::from)?,
+                        .map_err(source_error)?,
                 )
             }
             _ => None,

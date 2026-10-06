@@ -370,15 +370,22 @@ Both expression dialects retain ordinary forward `.PARAM` declarations,
 including bare and signed aliases. Failed probes preserve the random stream;
 selected definitions retain their source location, and duplicate selection and
 diagnostic policies still apply. Ordinary static declarations finalize before
-model expressions read them, so a model and its parameter share one sample.
+deferred source specifications and model expressions read them, so sources,
+models, and their parameters share one sample.
 Ngspice ordinary parameters remain static; Xyce runtime expressions remain
 symbolic where required.
 
-General dependency planning remains incomplete: eager analysis cards, deferred
-source specifications, and references to an enclosing scope that is still
-incomplete need further work. An early expression invalid at the provisional
-temperature can also fail before replay in the ngspice dialect. These cases
-remain in the implementation plan.
+Independent-source specifications containing function calls are probed using an
+isolated random stream before live evaluation. Failed forward-binding attempts
+and deferral classification consume no live draws, including when a sampled
+field precedes a missing field. Deferred root-source errors retain their physical
+card location. Grouped runtime-dependent sources retain behavioral evaluation.
+
+General dependency planning remains incomplete: eager analysis cards, unresolved
+global bindings in deferred sources, and references to an enclosing scope that
+is still incomplete need further work. An early expression invalid at the
+provisional temperature can also fail before replay in the ngspice dialect.
+These cases remain in the implementation plan.
 
 The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and
 the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.

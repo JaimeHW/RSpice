@@ -78,6 +78,21 @@ pub(super) fn parse_source_spec_with_direction(
     params: &ParamContext,
     direction: Option<&std::cell::RefCell<[Derivative; 3]>>,
 ) -> Result<SourceSpec, ParseError> {
+    // A later unresolved field may follow an already sampled field. A failed
+    // attempt must not advance the live stream before the whole card is
+    // deferred. Use the same grammar for the probe, including lazy values and
+    // optional waveform fields; complete specifications draw live only once.
+    if source_spec_may_sample(stream) {
+        parse_source_spec_impl(
+            &mut stream.clone(),
+            line_num,
+            &SourceParseContext {
+                params: &params.isolated_random_clone(),
+                mapping: None,
+                direction: None,
+            },
+        )?;
+    }
     parse_source_spec_impl(
         stream,
         line_num,
@@ -87,6 +102,36 @@ pub(super) fn parse_source_spec_with_direction(
             direction,
         },
     )
+}
+
+fn source_spec_may_sample(stream: &TokenStream) -> bool {
+    // Any call may sample directly or through a user function. This avoids a
+    // second builtin registry (including overloaded LIMIT) and leaves literal
+    // sources and scalar parameter reads free of environment snapshots.
+    stream
+        .remaining_line_tokens()
+        .iter()
+        .any(|token| match &token.kind {
+            TokenKind::Expression(expression) => {
+                let Ok(parsed) = crate::netlist::expr::parse_expression(expression) else {
+                    return false;
+                };
+                let mut pending = vec![&parsed];
+                while let Some(node) = pending.pop() {
+                    match node {
+                        crate::netlist::expr::Expr::FnCall { .. } => return true,
+                        crate::netlist::expr::Expr::BinOp { left, right, .. } => {
+                            pending.push(left);
+                            pending.push(right);
+                        }
+                        crate::netlist::expr::Expr::UnaryOp { operand, .. } => pending.push(operand),
+                        _ => {}
+                    }
+                }
+                false
+            }
+            _ => false,
+        })
 }
 
 fn parse_source_spec_impl(

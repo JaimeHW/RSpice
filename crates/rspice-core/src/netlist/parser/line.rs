@@ -505,6 +505,16 @@ pub(super) fn process_line(
         "TOP_LEVEL",
         line_num,
     )?;
+    for element in &state.elements[first_new_element..] {
+        if matches!(
+            element.kind,
+            ElementKind::VoltageSourceDeferred(_) | ElementKind::CurrentSourceDeferred(_)
+        ) {
+            state
+                .deferred_source_origins
+                .insert(element.name.clone(), origin.clone());
+        }
+    }
     MutualInductorSemanticRecord::append_parsed_elements(
         &mut state.mutual_inductor_records,
         &state.elements[first_new_element..],
