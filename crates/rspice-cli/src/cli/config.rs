@@ -31,6 +31,10 @@ pub struct Config {
 
     /// Resource ceilings for untrusted and batch workloads
     pub resources: ResourceConfig,
+
+    /// Files actually consumed while merging configuration, including aliases.
+    #[serde(skip)]
+    source_paths: Vec<PathBuf>,
 }
 
 /// Simulation-related configuration
@@ -208,6 +212,8 @@ struct ConfigLayer {
     output: OutputLayer,
     paths: PathConfig,
     resources: ResourceLayer,
+    #[serde(skip)]
+    source_paths: Vec<PathBuf>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -255,6 +261,10 @@ struct ResourceLayer {
 }
 
 impl Config {
+    pub(crate) fn source_paths(&self) -> impl Iterator<Item = &std::path::Path> {
+        self.source_paths.iter().map(PathBuf::as_path)
+    }
+
     /// Translate the validated frontend configuration into the engine's base
     /// configuration. Command-specific and netlist-specific overrides are
     /// applied after this shared boundary.
@@ -316,10 +326,22 @@ impl Config {
             source: e,
         })?;
 
-        toml::from_str(&content).map_err(|e| ConfigError::ParseError {
+        let mut layer: ConfigLayer =
+            toml::from_str(&content).map_err(|e| ConfigError::ParseError {
+                path: path.to_path_buf(),
+                message: e.to_string(),
+            })?;
+        let absolute = std::path::absolute(path).map_err(|source| ConfigError::IoError {
             path: path.to_path_buf(),
-            message: e.to_string(),
-        })
+            source,
+        })?;
+        if let Ok(canonical) = path.canonicalize()
+            && canonical != absolute
+        {
+            layer.source_paths.push(canonical);
+        }
+        layer.source_paths.push(absolute);
+        Ok(layer)
     }
 
     /// Load user configuration from standard locations
@@ -352,6 +374,7 @@ impl Config {
 
     /// Apply one file layer; only the fields the file set are overridden.
     fn apply_layer(&mut self, layer: ConfigLayer) {
+        self.source_paths.extend(layer.source_paths);
         let sim = layer.simulation;
         if let Some(v) = sim.temperature {
             self.simulation.temperature = v;

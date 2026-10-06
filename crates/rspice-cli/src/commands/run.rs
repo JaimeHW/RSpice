@@ -175,6 +175,9 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     .filter_map(|(role, path)| path.map(|path| (role, path)))
     .collect();
     let (destinations, destination_scope) = publish::destinations::begin(&declared, &report_paths)?;
+    for path in config.source_paths() {
+        destinations.protect(path)?;
+    }
     if !from_stdin {
         destinations.protect(&args.input)?;
         // Also retain the target of a root source accessed through a file alias.

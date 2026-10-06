@@ -112,6 +112,9 @@ pub fn execute(
 ) -> Result<(), CliError> {
     validate_compare_tolerance("--abstol", args.abstol)?;
     validate_compare_tolerance("--reltol", args.reltol)?;
+    if args.bless {
+        publish::destinations::protect_sources(&args.golden, config.source_paths())?;
+    }
     if args.section.is_some()
         && !supports_sections(detect_format(&args.result))
         && !supports_sections(detect_format(&args.golden))
