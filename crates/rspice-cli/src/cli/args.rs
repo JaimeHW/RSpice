@@ -651,7 +651,11 @@ pub struct CompileVaArgs {
     #[arg(short = 'I', long = "include", value_name = "DIR")]
     pub includes: Vec<PathBuf>,
 
-    /// Enable strict LRM compliance mode
+    /// Select a module when the source declares more than one
+    #[arg(long, value_name = "NAME")]
+    pub module: Option<String>,
+
+    /// Request strict LRM checking (currently unsupported; returns a capability error)
     #[arg(long)]
     pub strict: bool,
 

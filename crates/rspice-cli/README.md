@@ -559,9 +559,16 @@ declaration saying that N of its columns are one word. Columns are named
 its first change a logic signal reads `0.5`; a real signal, which has no
 unknown to show, holds its first value backwards.
 
-**`compile-va`** searches includes in order: `-I` directories, then config
-`paths.veriloga_includes`, then the source file's own directory. Terminals,
-internal node count, and the parameter table always print to stdout.
+**`compile-va`** resolves includes relative to the including source first,
+then searches source directories discovered by preprocessing, `-I` directories,
+and config `paths.veriloga_includes`. Built-in standard headers are the fallback.
+Use `--module NAME` to select a module in a multi-module source. Root bytes and
+lines, total dependency bytes, include depth, and expanded bytes obey the
+configured resource limits; compilation supports Ctrl-C cancellation.
+The interface table prints unless `--quiet` is set. Quiet also suppresses
+`--detailed` and `--show-usage` text, while `-o FILE` still writes a versioned
+JSON interface summary. `--strict` returns an unsupported-capability error:
+strict LRM compliance checking is not yet implemented.
 
 **`health`** is a deployment probe. The default readiness mode validates the
 effective engine configuration and executes a deterministic, bounded in-memory
