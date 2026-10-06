@@ -162,7 +162,7 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
 
-    /// Enable verbose output (debug level logging)
+    /// Enable verbose output and debug logging (unless --log-level is set)
     #[arg(short, long, global = true)]
     pub verbose: bool,
 
@@ -174,7 +174,7 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "FILE")]
     pub config: Option<PathBuf>,
 
-    /// Set log level
+    /// Set log level, overriding RUST_LOG and --verbose
     #[arg(
         long,
         global = true,

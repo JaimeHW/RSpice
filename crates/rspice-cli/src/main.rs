@@ -183,17 +183,16 @@ fn main() -> ExitCode {
     // env_logger's filters and formatter on the latency-sensitive batch path.
     // Machine-readable fatal diagnostics still obtain their run ID lazily.
     if !cli.quiet {
-        let log_level = if cli.verbose {
-            "debug"
-        } else {
-            cli.log_level.as_deref().unwrap_or("warn")
-        };
+        let log_level = cli.log_level.as_deref().or(cli.verbose.then_some("debug"));
         let log_format = if error_format == cli::ErrorFormat::Json {
             cli::LogFormat::Json
         } else {
             cli.log_format
         };
-        observability::init(log_level, log_format);
+        if let Err(error) = observability::init(log_level, log_format) {
+            print_cli_error(&error, error_format);
+            return error.exit_code().into();
+        }
     }
 
     // Load configuration

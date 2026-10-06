@@ -59,3 +59,30 @@ fn non_unicode_configuration_values_never_disable_requested_settings() {
         );
     }
 }
+
+#[cfg(any(windows, unix))]
+#[test]
+fn non_unicode_logging_values_report_configuration_errors() {
+    let directory = common::test_dir("logging_encoding");
+    let config = directory.join("empty.toml");
+    std::fs::write(&config, "").unwrap();
+    for variable in ["RUST_LOG", "RUST_LOG_STYLE"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--error-format", "json", "--config"])
+            .arg(&config)
+            .args(["health", "--mode", "liveness", "--json"])
+            .env_remove("RUST_LOG")
+            .env_remove("RUST_LOG_STYLE")
+            .env(variable, non_unicode_value())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(78), "{variable}: {output:?}");
+        assert!(output.stdout.is_empty(), "{variable}: {output:?}");
+        let diagnostic: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+        let message = diagnostic["error"]["message"].as_str().unwrap();
+        assert!(
+            message.contains(variable) && message.contains("Unicode"),
+            "{message}"
+        );
+    }
+}

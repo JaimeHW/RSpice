@@ -21,6 +21,8 @@ clap.workspace = true
 clap_complete.workspace = true
 log.workspace = true
 env_logger.workspace = true
+# Validate the same filter grammar env_logger uses without its stderr warnings.
+env_filter = "2"
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true

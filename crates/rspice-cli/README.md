@@ -674,6 +674,13 @@ so a bare `--device diode` does not spool tens of thousands of lines.
 
 ## Observability
 
+Logging uses `--log-level` first, then debug logging for `--verbose`, then
+`RUST_LOG`, and finally `warn`. `RUST_LOG` supports module directives and
+message regexes, such as `rspice=info/Loading`. `RUST_LOG_STYLE` accepts `auto`,
+`always`, or `never`; JSON logs remain free of terminal color codes. Invalid
+active logging settings fail with configuration exit code 78 in the selected
+diagnostic format. `--quiet` skips logging and its environment settings.
+
 `rspice --version` reports the crate version, build target, profile, and exact
 source commit. The same commit appears in health documents, structured fatal
 diagnostics, and run summaries so operators can correlate an installed binary
