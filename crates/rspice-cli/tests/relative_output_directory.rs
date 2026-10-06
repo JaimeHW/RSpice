@@ -43,9 +43,10 @@ fn configured_relative_directory_is_resolved_once_for_composed_runs() {
             .collect::<Vec<_>>();
         assert!(!files.is_empty());
         assert!(
-            files
-                .iter()
-                .all(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "csv" || ext == "json")),
+            files.iter().all(|path| path.is_file()
+                && path
+                    .extension()
+                    .is_some_and(|ext| ext == "csv" || ext == "json")),
             "{files:?}"
         );
         assert!(!dir.join("results/results").exists());

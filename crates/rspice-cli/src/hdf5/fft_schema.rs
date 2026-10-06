@@ -268,7 +268,11 @@ impl Hdf5FftSection {
 }
 
 impl Hdf5FftResult {
-    pub(super) fn validate(&self, expected_ordinal: usize, expected_analysis_id: &str) -> Result<()> {
+    pub(super) fn validate(
+        &self,
+        expected_ordinal: usize,
+        expected_analysis_id: &str,
+    ) -> Result<()> {
         self.status
             .validate_history(self.start_time_s, self.stop_time_s, self.point_count)
             .map_err(Hdf5Error::InvalidSchema)?;

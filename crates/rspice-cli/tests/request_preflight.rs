@@ -13,7 +13,11 @@ fn check_and_run_reject_invalid_requests_before_publication() {
         ("ac", ".ac dec 1 100 1", "stop frequency"),
         ("dc", ".dc V1 0 1 0", "DC sweep"),
         ("control-dc", ".control\ndc V1 0 1 0\n.endc", "DC sweep"),
-        ("control-dc-run", ".dc V1 0 1 0\n.control\nrun\n.endc", "DC sweep"),
+        (
+            "control-dc-run",
+            ".dc V1 0 1 0\n.control\nrun\n.endc",
+            "DC sweep",
+        ),
         (
             "control-op-args",
             ".control\nop unexpected\n.endc",

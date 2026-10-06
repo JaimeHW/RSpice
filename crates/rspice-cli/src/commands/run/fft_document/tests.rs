@@ -22,8 +22,8 @@ struct FftTestDirectory(PathBuf);
 impl FftTestDirectory {
     fn new() -> Self {
         let id = NEXT_FFT_TEST.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir()
-            .join(format!("rspice-cli-fft-raw-{}-{id}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("rspice-cli-fft-raw-{}-{id}", std::process::id()));
         std::fs::create_dir(&path).expect("create FFT RAW test directory");
         Self(path)
     }
@@ -115,21 +115,11 @@ fn fft_publication_rejects_count_identity_and_core_invariant_corruption_in_every
     let directory = FftTestDirectory::new();
 
     assert!(validate_fft_result_count(&[], &netlist.fft_analyses).is_err());
-    assert_fft_publication_rejected_for_every_format(
-        &directory,
-        "missing-results",
-        &[],
-        &netlist,
-    );
+    assert_fft_publication_rejected_for_every_format(&directory, "missing-results", &[], &netlist);
 
     let mut reordered = results.clone();
     reordered.swap(0, 1);
-    assert_fft_publication_rejected_for_every_format(
-        &directory,
-        "reordered",
-        &reordered,
-        &netlist,
-    );
+    assert_fft_publication_rejected_for_every_format(&directory, "reordered", &reordered, &netlist);
 
     let mut wrong_mode = results.clone();
     wrong_mode[0].mode = rspice_core::netlist::XyceFftMode::SpectreCompatible;
@@ -419,16 +409,13 @@ fn binary_and_ascii_fft_raw_artifacts_round_trip_typed_metadata_and_ragged_bins(
         );
         assert!((decoded.bins[1].real - transient.fft_results[0].bins[1].real).abs() < 1e-14);
         assert!(
-            (decoded.bins[1].imaginary - transient.fft_results[0].bins[1].imaginary).abs()
-                < 1e-14
+            (decoded.bins[1].imaginary - transient.fft_results[0].bins[1].imaginary).abs() < 1e-14
         );
         assert!(
-            (decoded.bins[1].magnitude - transient.fft_results[0].bins[1].magnitude).abs()
-                < 1e-14
+            (decoded.bins[1].magnitude - transient.fft_results[0].bins[1].magnitude).abs() < 1e-14
         );
         assert!(
-            (decoded.bins[1].phase_degrees - transient.fft_results[0].bins[1].phase_degrees)
-                .abs()
+            (decoded.bins[1].phase_degrees - transient.fft_results[0].bins[1].phase_degrees).abs()
                 < 1e-14
         );
         let entries = std::fs::read_dir(&directory.0)
@@ -497,9 +484,7 @@ fn binary_and_ascii_fft_raw_artifacts_round_trip_typed_metadata_and_ragged_bins(
                 .expect("metric fixture")
                 .largest_harmonics[0]
                 .magnitude += 1.0e-6;
-            assert!(
-                validate_fft_raw_metrics_against_bins(&wrong_harmonic, first_bins).is_err()
-            );
+            assert!(validate_fft_raw_metrics_against_bins(&wrong_harmonic, first_bins).is_err());
 
             let original = std::fs::read(&path).expect("read binary FFT RAW bytes");
             let mut corrupt_schema = original.clone();
@@ -518,8 +503,7 @@ fn binary_and_ascii_fft_raw_artifacts_round_trip_typed_metadata_and_ragged_bins(
                 .position(|window| window == b"Binary:\n")
                 .expect("find FFT RAW binary payload")
                 + b"Binary:\n".len();
-            non_finite[binary_offset..binary_offset + 8]
-                .copy_from_slice(&f64::NAN.to_le_bytes());
+            non_finite[binary_offset..binary_offset + 8].copy_from_slice(&f64::NAN.to_le_bytes());
             std::fs::write(&path, &non_finite).expect("write non-finite FFT RAW row");
             assert!(read_fft_raw_artifact(&path).is_err());
 
@@ -545,8 +529,7 @@ fn binary_and_ascii_fft_raw_artifacts_round_trip_typed_metadata_and_ragged_bins(
                 let offset = binary_offset + (normalized_peak * 7 + column) * 8;
                 not_normalized[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
             }
-            std::fs::write(&path, &not_normalized)
-                .expect("write non-normalized FFT RAW spectrum");
+            std::fs::write(&path, &not_normalized).expect("write non-normalized FFT RAW spectrum");
             assert!(read_fft_raw_artifact(&path).is_err());
 
             let mut negative_sub_pico = original.clone();
