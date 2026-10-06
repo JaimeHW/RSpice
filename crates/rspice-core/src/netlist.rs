@@ -1117,6 +1117,9 @@ pub struct Netlist {
     /// Optional source path for the netlist used to resolve relative includes
     /// and model-file references during reparsing workflows.
     pub source_path: Option<PathBuf>,
+    /// Resolved `.INCLUDE`/`.LIB` source identities retained by the parser.
+    /// Shared across clones; not part of electrical or checkpoint identity.
+    pub(crate) included_source_paths: std::sync::Arc<[PathBuf]>,
     /// Resolver provenance for safe, behaviorally identical source replay.
     pub(crate) replay_context: Option<NetlistReplayContext>,
     /// Canonical electrical overrides layered over the parsed source AST.
@@ -1125,6 +1128,27 @@ pub struct Netlist {
 }
 
 impl Netlist {
+    /// Resolved paths read by `.INCLUDE`/`.LIB` expansion, including empty
+    /// files and library sections. Excludes the root (`source_path`) and files
+    /// loaded later by device elaboration. Sealed inputs retain virtual paths.
+    pub fn included_source_paths(&self) -> &[PathBuf] {
+        &self.included_source_paths
+    }
+
+    fn retain_included_source_paths(
+        &mut self,
+        processor: &IncludeProcessor,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ParseWithAbortError> {
+        let mut paths = std::collections::BTreeSet::new();
+        for (index, dependency) in processor.resolved_dependencies().iter().enumerate() {
+            poll_parse_abort(abort, index)?;
+            paths.insert(dependency.resolved_path().to_path_buf());
+        }
+        self.included_source_paths = paths.into_iter().collect();
+        ensure_parse_not_aborted(abort)
+    }
+
     /// Replace authored SAVE/PROBE/PRINT/PLOT selection for this run and any
     /// parameter replay it performs. Measurement and post-processing requests
     /// retain their own contracts. Callers validate symbols after applying it.
@@ -1803,6 +1827,7 @@ impl Netlist {
             abort,
         )?;
         netlist.source_path = Some(file_path.to_path_buf());
+        netlist.retain_included_source_paths(&include_processor, abort)?;
         netlist
             .resolve_device_initial_condition_source_with_abort(&initcond_source_provider, abort)?;
         ensure_parse_not_aborted(abort)?;
@@ -2196,6 +2221,7 @@ impl Netlist {
         netlist.resolve_veriloga_source_paths_with_abort(&processor, path, abort)?;
         Self::apply_spef_includes_with_abort(&mut netlist, path, options.resource_limits, abort)?;
         netlist.source_path = Some(path.to_path_buf());
+        netlist.retain_included_source_paths(&processor, abort)?;
         let mut initcond_resource_limits = options.resource_limits;
         initcond_resource_limits.max_dependency_source_bytes = initcond_resource_limits
             .max_dependency_source_bytes
@@ -3621,6 +3647,7 @@ impl Default for Netlist {
             source_text: None,
             monte_carlo_source_cards: Vec::new(),
             source_path: None,
+            included_source_paths: Default::default(),
             replay_context: None,
             ast_overlay: NetlistAstOverlay::default(),
             parameter_direction: None,
