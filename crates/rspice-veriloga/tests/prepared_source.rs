@@ -47,6 +47,10 @@ fn file_and_provider_compilation_retain_warnings_in_original_includes() {
         )
         .unwrap();
     assert_eq!(from_file.diagnostics, from_provider.diagnostics);
+    let prepared = compiler.prepare_file_runtime_source(&root).unwrap();
+    assert_eq!(prepared.diagnostics(), from_file.diagnostics);
+    let runtime = prepared.compile_runtime(None).unwrap();
+    assert_eq!(runtime.diagnostics, from_file.diagnostics);
     assert_eq!(from_file.diagnostics.len(), 1);
     let warning = &from_file.diagnostics[0];
     assert_eq!(warning.severity, CompileDiagnosticSeverity::Warning);

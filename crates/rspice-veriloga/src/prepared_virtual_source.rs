@@ -33,6 +33,11 @@ impl PreparedVirtualSource {
         self.prepared.module_names()
     }
 
+    /// Nonfatal findings in the original sealed source documents.
+    pub fn diagnostics(&self) -> &[crate::SourceCompileDiagnostic] {
+        self.prepared.diagnostics()
+    }
+
     pub fn is_connect_library(&self) -> bool {
         self.prepared.is_connect_library()
     }
@@ -212,8 +217,22 @@ impl VerilogACompiler {
                 content_identity: *blake3::hash(document.source.as_bytes()).as_bytes(),
             })
             .collect();
+        let diagnostics = crate::source_diagnostics::map_diagnostics_with_sources(
+            crate::runtime_report::semantic_warning_diagnostics(
+                &preprocessed.source,
+                &analyzed.warnings,
+            ),
+            &preprocessed,
+            |path| {
+                dependency_closure
+                    .iter()
+                    .find(|document| std::path::Path::new(&document.logical_path) == path)
+                    .map(|document| document.source.as_str())
+            },
+        );
         Ok(PreparedVirtualSource {
             prepared: PreparedRuntimeSource {
+                diagnostics,
                 source_package: bundle.root_path().to_owned(),
                 source: preprocessed.source,
                 analyzed,

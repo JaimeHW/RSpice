@@ -30,6 +30,7 @@ pub struct PreparedRuntimeSource {
     pub(crate) dependencies: Vec<PreparedSourceDependency>,
     pub(crate) compiler_options: CompilerOptions,
     pub(crate) metrics: PipelineMetrics,
+    pub(crate) diagnostics: Vec<crate::SourceCompileDiagnostic>,
 }
 
 impl PreparedRuntimeSource {
@@ -61,6 +62,11 @@ impl PreparedRuntimeSource {
 
     pub fn metrics(&self) -> &PipelineMetrics {
         &self.metrics
+    }
+
+    /// Nonfatal findings mapped to the exact source closure prepared here.
+    pub fn diagnostics(&self) -> &[crate::SourceCompileDiagnostic] {
+        &self.diagnostics
     }
 
     pub fn connect_specification(&self) -> ConnectSpecification {

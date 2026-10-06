@@ -638,11 +638,20 @@ impl Preprocessor {
         path: &Path,
         limits: SourceProviderLimits,
     ) -> Result<String, PreprocessorError> {
+        self.preprocess_file_with_limits_mapped(path, limits)
+            .map(|source| source.source)
+    }
+
+    pub(crate) fn preprocess_file_with_limits_mapped(
+        &mut self,
+        path: &Path,
+        limits: SourceProviderLimits,
+    ) -> Result<PreprocessedSource, PreprocessorError> {
         let provider = LimitedSourceProvider {
             inner: &FileSystemSourceProvider,
             limits,
         };
-        self.preprocess_provider_root(&provider, path)
+        self.preprocess_provider_root_mapped(&provider, path)
     }
 
     /// Preprocess a provider-backed root and capture its exact dependency

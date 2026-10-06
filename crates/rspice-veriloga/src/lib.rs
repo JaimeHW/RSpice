@@ -280,6 +280,8 @@ pub struct CompiledRuntimeFile {
     pub source_dependencies: Vec<PreparedSourceDependency>,
     /// Structured phase timings and work-size counters.
     pub metrics: PipelineMetrics,
+    /// Nonfatal findings mapped to original source documents.
+    pub diagnostics: Vec<SourceCompileDiagnostic>,
 }
 
 /// Main compiler entry point
@@ -1724,26 +1726,27 @@ impl VerilogACompiler {
         measurements.checkpoint(PipelinePhase::Preprocess)?;
         let phase_started = web_time::Instant::now();
         let preprocessed = pp
-            .preprocess_file_with_limits(path, limits)
+            .preprocess_file_with_limits_mapped(path, limits)
             .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;
         let dependencies: Vec<_> = pp
-            .take_dependency_documents()
-            .into_iter()
+            .dependency_documents()
+            .iter()
             .filter(|document| document.origin == SourceDocumentOrigin::Provider)
             .map(|document| PreparedSourceDependency {
-                path: document.logical_path,
+                path: document.logical_path.clone(),
                 byte_len: document.source.len(),
                 content_identity: *blake3::hash(document.source.as_bytes()).as_bytes(),
             })
             .collect();
         measurements.record(PipelinePhase::Preprocess, phase_started.elapsed())?;
-        measurements.metrics_mut().preprocessed_bytes = metrics::usize_to_u64(preprocessed.len());
+        measurements.metrics_mut().preprocessed_bytes =
+            metrics::usize_to_u64(preprocessed.source.len());
         measurements.metrics_mut().dependency_count = metrics::usize_to_u64(dependencies.len());
         let source_package_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
 
         if std::env::var("RSPICE_DEBUG_PP").is_ok() {
             let debug_path = path.with_extension("pp.va");
-            let _ = std::fs::write(&debug_path, &preprocessed);
+            let _ = std::fs::write(&debug_path, &preprocessed.source);
             eprintln!(
                 "DEBUG: Preprocessed output written to {}",
                 debug_path.display()
@@ -1753,10 +1756,16 @@ impl VerilogACompiler {
         let diagnostic_source = source_package_path.display().to_string();
         let source_package = self.logical_file_source_package(&source_package_path);
         let analyzed =
-            self.analyze_preprocessed(&diagnostic_source, &preprocessed, &mut measurements)?;
+            self.analyze_preprocessed(&diagnostic_source, &preprocessed.source, &mut measurements)?;
+        let diagnostics = source_diagnostics::map_diagnostics(
+            runtime_report::semantic_warning_diagnostics(&preprocessed.source, &analyzed.warnings),
+            &preprocessed,
+            pp.dependency_documents(),
+        );
         Ok(PreparedRuntimeSource {
+            diagnostics,
             source_package,
-            source: preprocessed,
+            source: preprocessed.source,
             analyzed,
             dependencies,
             compiler_options: self.options.clone(),
@@ -1807,6 +1816,7 @@ impl VerilogACompiler {
         Self::renumber_state_slots(&mut model, &canonical_ir)?;
 
         Ok(CompiledRuntimeFile {
+            diagnostics: prepared.diagnostics.clone(),
             model,
             canonical_ir,
             dependencies: prepared

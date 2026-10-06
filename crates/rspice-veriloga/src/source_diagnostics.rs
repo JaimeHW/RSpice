@@ -4,7 +4,7 @@ use crate::preprocessor::{PreprocessedDependency, PreprocessedSource};
 use crate::{
     CompileDiagnosticPhase, CompileDiagnosticSeverity, CompileDiagnosticSpan, CompileError,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// A compiler diagnostic with locations in the source the author supplied.
@@ -14,7 +14,7 @@ use std::path::Path;
 /// changed a line (for example, a macro invocation), its entire original line
 /// is selected instead of presenting an expanded token as an authored range.
 /// Diagnostics without a source span retain `None` locations.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SourceCompileDiagnostic {
     pub severity: CompileDiagnosticSeverity,
     pub phase: CompileDiagnosticPhase,
@@ -45,17 +45,26 @@ pub(crate) fn map_diagnostics(
     preprocessed: &PreprocessedSource,
     dependencies: &[PreprocessedDependency],
 ) -> Vec<SourceCompileDiagnostic> {
+    map_diagnostics_with_sources(diagnostics, preprocessed, |path| {
+        dependencies
+            .iter()
+            .find(|dependency| dependency.logical_path == path)
+            .map(|dependency| dependency.source.as_str())
+    })
+}
+
+pub(crate) fn map_diagnostics_with_sources<'a>(
+    diagnostics: Vec<crate::CompileDiagnostic>,
+    preprocessed: &'a PreprocessedSource,
+    source_for_path: impl Fn(&Path) -> Option<&'a str>,
+) -> Vec<SourceCompileDiagnostic> {
     diagnostics
         .into_iter()
         .map(|diagnostic| {
-            let mapped = diagnostic.span.as_ref().and_then(|span| {
-                preprocessed.map_span(span, |path| {
-                    dependencies
-                        .iter()
-                        .find(|dependency| dependency.logical_path == path)
-                        .map(|dependency| dependency.source.as_str())
-                })
-            });
+            let mapped = diagnostic
+                .span
+                .as_ref()
+                .and_then(|span| preprocessed.map_span(span, &source_for_path));
             SourceCompileDiagnostic {
                 severity: diagnostic.severity,
                 phase: diagnostic.phase,

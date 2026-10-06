@@ -193,6 +193,26 @@ fn included_file_diagnostic_retains_its_exact_path_content_and_location() {
 }
 
 #[test]
+fn prepared_virtual_warnings_identify_original_includes() {
+    let child = "module chatty(p,n);\ninout p,n; electrical p,n;\nanalog begin\n $display(\"ignored\");\n I(p,n) <+ V(p,n);\nend\nendmodule\n";
+    let bundle = VirtualSourceBundle::from_sources(
+        "root.va",
+        [("root.va", "`include \"child.va\"\n"), ("child.va", child)],
+    )
+    .unwrap();
+    let prepared = VerilogACompiler::default()
+        .prepare_virtual_runtime_source(&bundle, VirtualCompileLimits::default())
+        .unwrap();
+    let [warning] = prepared.diagnostics() else {
+        panic!("expected one compiler warning")
+    };
+    assert_eq!(warning.path.as_deref(), Some("child.va"));
+    assert_eq!(warning.line, Some(4));
+    assert_eq!(warning.column, Some(2));
+    assert!(child[warning.byte_start.unwrap()..warning.byte_end.unwrap()].contains("$display"));
+}
+
+#[test]
 fn include_graph_contains_only_conditionally_active_resolutions() {
     let bundle = VirtualSourceBundle::from_sources(
         "top.va",

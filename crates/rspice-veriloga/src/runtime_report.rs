@@ -864,7 +864,7 @@ pub enum RuntimeArtifactIntegrityError {
 }
 
 /// Compiler phase associated with a typed source diagnostic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CompileDiagnosticPhase {
     Input,
     Lexer,
@@ -877,7 +877,7 @@ pub enum CompileDiagnosticPhase {
 }
 
 /// How a source diagnostic bears on the compilation that produced it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CompileDiagnosticSeverity {
     /// The compilation failed. Errors only ever arrive through
     /// [`compile_diagnostics`]; a report never carries one.
