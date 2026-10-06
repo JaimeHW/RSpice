@@ -1,6 +1,7 @@
 //! Shooting coordinates and accepted physical charge for the PSS traversal.
 
 use super::*;
+use crate::engine::transient::BjtTransientHistory;
 use crate::numerics::integration::TwoTerminalChargeHistory;
 
 mod delay;
@@ -695,7 +696,7 @@ impl PssCircuit {
             &circuit,
             &solution_scratch[1..],
             super::super::transient::ReactiveHistorySeed::SolvedBias,
-        );
+        )?;
         let bjt_snapshot_cache = vec![None; circuit.bjts.len()];
         let jfet_history = Engine::initialize_jfet_history(
             &circuit,
@@ -953,6 +954,7 @@ impl PssCircuit {
             self.state_dimension(),
             "PSS shooting-state shape must match its basis"
         );
+        let bjt_storage = BjtTransientHistory::try_unseeded(self.circuit.bjts.len())?;
         let physical_count = self.physical_state_dimension();
         let behavioral_end = physical_count + self.behavioral_sources.integral_count();
         let integral_end = behavioral_end + self.capacitors.integral_count();
@@ -1052,11 +1054,12 @@ impl PssCircuit {
         // accepted history generations for each shooting perturbation; a
         // prior period or derivative probe must never leak into the next.
         circuit.reset_coupled_inductor_pair_state(&self.solution_scratch[1..]);
-        self.bjt_history = Engine::initialize_bjt_history(
+        self.bjt_history = Engine::seed_bjt_history(
             circuit,
             &self.solution_scratch[1..],
             super::super::transient::ReactiveHistorySeed::SolvedBias,
-        );
+            bjt_storage,
+        )?;
         self.bjt_snapshot_cache.fill(None);
         self.jfet_history = Engine::initialize_jfet_history(
             circuit,
@@ -1082,16 +1085,20 @@ impl PssCircuit {
         Ok(())
     }
 
-    pub(super) fn seed_charge_history(&mut self, solution: &[Value]) {
+    pub(super) fn seed_charge_history(
+        &mut self,
+        solution: &[Value],
+    ) -> Result<(), SimulationError> {
+        let bjt_history = Engine::initialize_bjt_history(
+            &self.circuit,
+            solution,
+            super::super::transient::ReactiveHistorySeed::SolvedBias,
+        )?;
         self.solution_scratch[1..].copy_from_slice(solution);
         self.circuit
             .capacitors
             .initialize_solution_dependent_from_dc(solution, 0.0);
-        self.bjt_history = Engine::initialize_bjt_history(
-            &self.circuit,
-            solution,
-            super::super::transient::ReactiveHistorySeed::SolvedBias,
-        );
+        self.bjt_history = bjt_history;
         self.bjt_snapshot_cache.fill(None);
         self.jfet_history = Engine::initialize_jfet_history(
             &self.circuit,
@@ -1114,6 +1121,7 @@ impl PssCircuit {
         }
         self.bsim3_history = Engine::initialize_bsim3_history(&self.circuit, solution);
         self.bsim4_history = Engine::initialize_bsim4_history(&self.circuit, solution);
+        Ok(())
     }
 
     pub(in crate::engine) fn bjt_noise_snapshots(
@@ -2019,6 +2027,48 @@ mod tests {
     use super::*;
 
     #[test]
+    fn bjt_initialization_failure_preserves_shooting_and_bias_state() {
+        let netlist = Netlist::parse("PSS BJT allocation\nVc c 0 1\nR1 b 0 1k\nC1 b 0 1p\nL1 c x 1u\nR2 x 0 1k\nQ1 c b 0 vm\n.model vm NPN(LEVEL=4 CJE=10p CJC=20p RCX=0 RCI=0 RBX=0 RBI=0 RBP=0 TF=0 TR=0)\n.end\n").unwrap();
+        let engine = Engine::default();
+        let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap()).unwrap();
+        let initial = vec![0.1; circuit.state_dimension()];
+        circuit.set_state(&initial).unwrap();
+        let before = format!("{circuit:?}");
+        let changed = vec![0.2; circuit.state_dimension()];
+        let bias = vec![0.0; circuit.matrix_size()];
+        for count in [0, 1, 21] {
+            let error = BjtTransientHistory::with_allocation_failure_after(count, || {
+                circuit.set_state(&changed)
+            })
+            .unwrap_err();
+            assert!(matches!(
+                error,
+                SimulationError::Allocation {
+                    object: "BJT state initialization",
+                    ..
+                }
+            ));
+            assert_eq!(format!("{circuit:?}"), before);
+            let error = BjtTransientHistory::with_allocation_failure_after(count, || {
+                circuit.seed_charge_history(&bias)
+            })
+            .unwrap_err();
+            assert!(matches!(
+                error,
+                SimulationError::Allocation {
+                    object: "BJT state initialization",
+                    ..
+                }
+            ));
+            assert_eq!(format!("{circuit:?}"), before);
+        }
+        circuit.set_state(&changed).unwrap();
+        circuit.set_state(&initial).unwrap();
+        assert_eq!(circuit.extract_state(), initial);
+        circuit.seed_charge_history(&bias).unwrap();
+    }
+
+    #[test]
     fn bsim3_nqs_state_preserves_charge_with_algebraic_terminal_motion() {
         let engine = Engine::default();
         for (kind, polarity) in [("NMOS", 1.0), ("PMOS", -1.0)] {
@@ -2036,7 +2086,7 @@ mod tests {
                     seed[node - 1] = polarity * voltage;
                 }
             }
-            circuit.seed_charge_history(&seed);
+            circuit.seed_charge_history(&seed).unwrap();
             let state = circuit.extract_state();
             let mut direction = vec![0.0; seed.len()];
             for (node, value) in nodes.into_iter().zip([0.3, -0.2, 0.1, 0.0, 1e-5]) {

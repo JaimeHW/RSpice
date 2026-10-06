@@ -4082,7 +4082,8 @@ Q1 n n 0 0 qmod
             .expect("operating point converges");
         let dt = 1.0e-10;
         let mut history =
-            Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+            Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias)
+                .unwrap();
         history.accepted_dt_prev = dt;
         history.accepted_dt_prev_prev = dt;
         let node = circuit.get_node_by_name("n").expect("base node");
@@ -4139,7 +4140,8 @@ Q1 n n 0 0 qmod
             .expect("operating point converges");
         let dt = 1.0e-10;
         let mut history =
-            Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+            Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias)
+                .unwrap();
         history.accepted_dt_prev = dt;
         history.accepted_dt_prev_prev = dt;
         let node = circuit.get_node_by_name("n").expect("clamp node");
@@ -5157,7 +5159,8 @@ M1 d g s 0 VTRUNC W=1 L=1u
             .expect("operating point converges");
 
         let mut bjt_history =
-            Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+            Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias)
+                .unwrap();
         let mut jfet_history =
             Engine::initialize_jfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
         let mut diode_history =
@@ -5248,7 +5251,8 @@ VB b 0 -1
             .expect("operating point converges");
 
         let mut bjt_history =
-            Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+            Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias)
+                .unwrap();
         let mut jfet_history =
             Engine::initialize_jfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
         let mut diode_history =
@@ -5330,7 +5334,8 @@ J1 d g s PS area=1
             .expect("operating point converges");
 
         let mut bjt_history =
-            Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+            Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias)
+                .unwrap();
         let mut jfet_history =
             Engine::initialize_jfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
         let mut diode_history =

@@ -666,8 +666,7 @@ impl Engine {
                 [&solutions[1], &solutions[2], &solutions[3]],
                 &node_rates,
                 history_step,
-            )
-            .map_err(SimulationError::Circuit)?;
+            )?;
             let bsim3_history = Self::initialize_periodic_bsim3_history(
                 &mut circuit,
                 [&solutions[1], &solutions[2], &solutions[3]],

@@ -27,7 +27,8 @@ fn fixture() -> (Engine, crate::CircuitData, BjtTransientHistory, Vec<Value>) {
         .accept_transient_step(&solution, 0.0)
         .unwrap();
     let mut history =
-        Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+        Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias)
+            .unwrap();
     Engine::initialize_bjt_phase_history(&circuit, &mut history).unwrap();
     (engine, circuit, history, solution)
 }
@@ -396,7 +397,8 @@ fn gp_phase_event_acceptance_keeps_unselected_devices_smooth_and_survives_restar
                 bsim4: &mut Default::default(),
                 ekv26: &mut Default::default(),
             },
-        );
+        )
+        .unwrap();
         assert_eq!(history.phase, accepted);
     }
 }

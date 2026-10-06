@@ -452,7 +452,8 @@ mod tests {
         circuit.update_nonlinear(&seed);
         circuit.update_nonlinear(&seed);
         let history =
-            Engine::initialize_bjt_history(&circuit, &seed, ReactiveHistorySeed::SolvedBias);
+            Engine::initialize_bjt_history(&circuit, &seed, ReactiveHistorySeed::SolvedBias)
+                .unwrap();
         let snapshot = circuit.bjts.devices[0].charge_snapshot(1.0, 1.0, 1.0, 0.0);
         let mut cache = [Some(snapshot)];
         let expected_cache = circuit.bjts.devices[0]

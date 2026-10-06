@@ -55,7 +55,8 @@ fn fixture(
         circuit.capacitors.v_prev_prev_prev[index] = v;
     }
     let mut history =
-        Engine::initialize_bjt_history(&circuit, &incoming, ReactiveHistorySeed::SolvedBias);
+        Engine::initialize_bjt_history(&circuit, &incoming, ReactiveHistorySeed::SolvedBias)
+            .unwrap();
     Engine::initialize_bjt_phase_history(&circuit, &mut history).unwrap();
     (engine, circuit, matrix, incoming, history)
 }

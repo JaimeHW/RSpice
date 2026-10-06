@@ -1,12 +1,15 @@
-//! Fallible copies of native BJT accepted state, including transport records.
+//! Fallible initialization and copies of native BJT accepted state.
 
 use super::*;
 
-fn reserve_values<T>(count: usize, object: &'static str) -> Result<Vec<T>, SimulationError> {
+pub(in crate::engine::transient) fn reserve_values<T>(
+    count: usize,
+    object: &'static str,
+) -> Result<Vec<T>, SimulationError> {
     let mut result = Vec::new();
     #[cfg(test)]
     if count != 0 {
-        copy_reservation_attempt()
+        history_reservation_attempt()
             .map_err(|source| SimulationError::Allocation { object, source })?;
     }
     result
@@ -22,6 +25,62 @@ fn copy_values<T: Copy>(source: &[T]) -> Result<Vec<T>, SimulationError> {
 }
 
 impl BjtTransientHistory {
+    #[cfg(test)]
+    pub(in crate::engine) fn with_allocation_failure_after<T>(
+        count: usize,
+        operation: impl FnOnce() -> T,
+    ) -> T {
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                HISTORY_RESERVATIONS_BEFORE_FAILURE.set(None);
+            }
+        }
+        HISTORY_RESERVATIONS_BEFORE_FAILURE.set(Some(count));
+        let _reset = Reset;
+        operation()
+    }
+
+    /// Reserve every fixed lane before reading bias or changing accepted state.
+    /// Numeric lanes are filled by `seed_bjt_history`; phase owners and accepted
+    /// external current already have their zero/empty initial values.
+    pub(in crate::engine) fn try_unseeded(count: usize) -> Result<Self, SimulationError> {
+        fn lane<T>(count: usize) -> Result<Vec<T>, SimulationError> {
+            reserve_values(count, "BJT state initialization")
+        }
+        let mut history = Self {
+            phase: lane(count)?,
+            weil_phase: lane(count)?,
+            phase_outgoing_slopes: lane(count)?,
+            vbe_prev: lane(count)?,
+            vbe_prev_prev: lane(count)?,
+            ibe_prev: lane(count)?,
+            vbc_prev: lane(count)?,
+            vbc_prev_prev: lane(count)?,
+            ibc_prev: lane(count)?,
+            vcs_prev: lane(count)?,
+            vcs_prev_prev: lane(count)?,
+            ics_prev: lane(count)?,
+            charge_q_prev: lane(count)?,
+            charge_q_prev_prev: lane(count)?,
+            charge_q_prev_prev_prev: lane(count)?,
+            charge_cq_prev: lane(count)?,
+            accepted_external_bc_current: lane(count)?,
+            accepted_terminal_currents: lane(count)?,
+            dynamic_internal_prev: lane(count)?,
+            dynamic_internal_prev_prev: lane(count)?,
+            dynamic_linear_prev: lane(count)?,
+            dynamic_linear_prev_prev: lane(count)?,
+            accepted_dt_prev: 0.0,
+            accepted_dt_prev_prev: 0.0,
+        };
+        history.phase.resize_with(count, || None);
+        history.weil_phase.resize(count, None);
+        history.phase_outgoing_slopes.resize(count, None);
+        history.accepted_external_bc_current.resize(count, 0.0);
+        Ok(history)
+    }
+
     pub(in crate::engine::transient) fn try_clone(&self) -> Result<Self, SimulationError> {
         let mut phase = reserve_values(self.phase.len(), "BJT phase-history owners")?;
         for history in &self.phase {
@@ -67,12 +126,12 @@ impl BjtTransientHistory {
 
 #[cfg(test)]
 thread_local! {
-    static COPY_RESERVATIONS_BEFORE_FAILURE: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    static HISTORY_RESERVATIONS_BEFORE_FAILURE: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
 }
 
 #[cfg(test)]
-fn copy_reservation_attempt() -> Result<(), std::collections::TryReserveError> {
-    COPY_RESERVATIONS_BEFORE_FAILURE.with(|remaining| match remaining.get() {
+fn history_reservation_attempt() -> Result<(), std::collections::TryReserveError> {
+    HISTORY_RESERVATIONS_BEFORE_FAILURE.with(|remaining| match remaining.get() {
         Some(0) => {
             remaining.set(None);
             Vec::<u8>::new().try_reserve(usize::MAX)
@@ -90,16 +149,10 @@ mod tests {
     use super::*;
     use crate::{SimulationConfig, SimulationErrorCategory, SimulationErrorCode};
 
-    fn fail_copy_after<T>(count: usize, operation: impl FnOnce() -> T) -> T {
-        struct Reset;
-        impl Drop for Reset {
-            fn drop(&mut self) {
-                COPY_RESERVATIONS_BEFORE_FAILURE.set(None);
-            }
-        }
-        COPY_RESERVATIONS_BEFORE_FAILURE.set(Some(count));
-        let _reset = Reset;
-        operation()
+    mod initialization;
+
+    fn fail_reservation_after<T>(count: usize, operation: impl FnOnce() -> T) -> T {
+        BjtTransientHistory::with_allocation_failure_after(count, operation)
     }
 
     fn assert_allocation(error: &SimulationError) {
@@ -126,14 +179,14 @@ mod tests {
     fn public_capture_and_restore_preserve_allocation_failures_and_accepted_state() {
         let netlist = Netlist::parse("phase copy failures\nVC c 0 2\nVB b 0 .7\nQ1 c b 0 qm\n.model qm NPN IS=1e-16 BF=100 TF=1n PTF=90\n.end\n").unwrap();
         let engine = Engine::new(SimulationConfig::default());
-        // Count the startup copies through the same public run route, so each
+        // Count the startup reservations through the same public run route, so each
         // capture fault lands in final checkpoint materialization rather than
         // accidentally testing an earlier physical-startup copy.
-        let (baseline, startup_copies) = fail_copy_after(usize::MAX, || {
+        let (baseline, startup_reservations) = fail_reservation_after(usize::MAX, || {
             let result = engine.run_tran(&netlist, 1e-10, 1e-12).unwrap();
             (
                 result,
-                usize::MAX - COPY_RESERVATIONS_BEFORE_FAILURE.get().unwrap(),
+                usize::MAX - HISTORY_RESERVATIONS_BEFORE_FAILURE.get().unwrap(),
             )
         });
         let (_, checkpoint) = engine
@@ -143,9 +196,9 @@ mod tests {
         let mut limited_config = SimulationConfig::default();
         limited_config.resource_limits.max_transport_history_bytes = 0;
         let limited = Engine::new(limited_config);
-        let policy_error = fail_copy_after(0, || {
+        let policy_error = fail_reservation_after(0, || {
             let result = limited.run_tran_resume(&netlist, &checkpoint, 2e-10, 1e-12);
-            assert_eq!(COPY_RESERVATIONS_BEFORE_FAILURE.get(), Some(0));
+            assert_eq!(HISTORY_RESERVATIONS_BEFORE_FAILURE.get(), Some(0));
             result.unwrap_err()
         });
         assert!(matches!(policy_error, SimulationError::ResourceLimit(error)
@@ -155,11 +208,11 @@ mod tests {
             .run_tran_resume(&netlist, &checkpoint, 2e-10, 1e-12)
             .unwrap();
         for count in [0, 1, 5, 12] {
-            let failed_capture = fail_copy_after(startup_copies + count, || {
+            let failed_capture = fail_reservation_after(startup_reservations + count, || {
                 engine.run_tran_checkpointed(&netlist, 1e-10, 1e-12)
             });
             assert_allocation(&failed_capture.unwrap_err());
-            let failed_restore = fail_copy_after(count, || {
+            let failed_restore = fail_reservation_after(count, || {
                 engine.run_tran_resume(&netlist, &checkpoint, 2e-10, 1e-12)
             });
             assert_allocation(&failed_restore.unwrap_err());

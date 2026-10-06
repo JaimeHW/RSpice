@@ -129,7 +129,8 @@ fn physical_startup_solves_coupled_rates_in_the_selected_gp_charge_chart() {
                 &circuit,
                 &solution,
                 ReactiveHistorySeed::SolvedBias,
-            );
+            )
+            .unwrap();
             Engine::initialize_bjt_phase_history(&circuit, &mut history).unwrap();
             let sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options(), &NoAbort).unwrap();
             let static_base = sampler.models()[0].mna_terminal_currents_at_solution(&solution)[1];
@@ -664,7 +665,8 @@ fn physical_startup_uses_authored_bjt_ic_charge_and_transport_prehistory() {
             p * 1.1,
         ));
         let mut history =
-            Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::UicStartup);
+            Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::UicStartup)
+                .unwrap();
         Engine::initialize_bjt_phase_history(&circuit, &mut history).unwrap();
         let before = history.charge_q_prev[0];
         let prehistory = history.phase[0]

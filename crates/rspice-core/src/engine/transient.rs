@@ -5763,7 +5763,13 @@ impl Engine {
         } else {
             ReactiveHistorySeed::SolvedBias
         };
-        let mut bjt_history = Self::initialize_bjt_history(&circuit, &solution, reactive_seed);
+        // Restored BJT lanes are already validated and owned by this run.
+        // Avoid allocating and evaluating a fresh history only to discard it.
+        let mut bjt_history = if restored_accepted_junction_history.is_some() {
+            BjtTransientHistory::default()
+        } else {
+            Self::initialize_bjt_history(&circuit, &solution, reactive_seed)?
+        };
         if restored_accepted_junction_history.is_none() {
             Self::initialize_bjt_phase_history_for_model(
                 &circuit,
@@ -6337,7 +6343,7 @@ impl Engine {
                                 bsim4: &mut bsim4_history,
                                 ekv26: &mut ekv26_history,
                             },
-                        );
+                        )?;
                     }
                     vbic_snapshot_cache.fill(None);
                     xyce_static_history = None;
@@ -6455,7 +6461,7 @@ impl Engine {
                             bsim4: &mut bsim4_history,
                             ekv26: &mut ekv26_history,
                         },
-                    );
+                    )?;
                     if lte_estimator.uses_accepted_solution_reference() {
                         lte_estimator.restart_history_from(&solution);
                     } else {

@@ -1175,7 +1175,8 @@ mod tests {
                 &circuit,
                 &solution,
                 ReactiveHistorySeed::SolvedBias,
-            );
+            )
+            .unwrap();
             circuit
                 .prepare_veriloga_timepoint(0.0, 0.0, &coeff, true, false)
                 .unwrap();

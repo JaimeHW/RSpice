@@ -34,7 +34,8 @@ fn check_core_evaluation_ownership(shared: bool) {
     let p = circuit.get_node_by_name("p").unwrap() - 1;
     let branch = circuit.get_branch_matrix_index(circuit.inductors.branch_indices[0]) - 1;
     circuit.initialize_xyce_core_q_histories();
-    let bjt = Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+    let bjt = Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias)
+        .unwrap();
     let jfet =
         Engine::initialize_jfet_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
     let diode =

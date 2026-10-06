@@ -260,7 +260,9 @@ mod tests {
             let seed = engine
                 .pss_initial_node_solution(&mut circuit, &NoAbort)
                 .unwrap();
-            engine.pss_initialize_reactive_state(&mut circuit, &seed);
+            engine
+                .pss_initialize_reactive_state(&mut circuit, &seed)
+                .unwrap();
             let (stabilized, _) = engine
                 .pss_run_stabilization(&mut circuit, &mut matrix, &seed, &config, &NoAbort)
                 .unwrap();
@@ -320,7 +322,9 @@ mod tests {
             let seed = engine
                 .pss_initial_node_solution(&mut circuit, &NoAbort)
                 .unwrap();
-            engine.pss_initialize_reactive_state(&mut circuit, &seed);
+            engine
+                .pss_initialize_reactive_state(&mut circuit, &seed)
+                .unwrap();
             let (waveform, _) = engine
                 .pss_run_stabilization(&mut circuit, &mut matrix, &seed, &config, &NoAbort)
                 .unwrap();

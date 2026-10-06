@@ -522,7 +522,8 @@ fn gp_startup_phase_seed_respects_adjacent_biases_without_changing_newton_cache(
                     &circuit,
                     &point,
                     ReactiveHistorySeed::SolvedBias,
-                );
+                )
+                .unwrap();
                 Engine::initialize_bjt_phase_history(&circuit, &mut history).unwrap();
                 let (charges, internal, _) =
                     sampler.models()[0].mna_charge_state_at_solution(&point);
@@ -575,7 +576,7 @@ fn gp_startup_phase_seed_keeps_authored_uic_separate_from_solved_bias() {
                 expected_point[circuit.get_node_by_name("b").unwrap() - 1] = p * 0.4;
                 expected_point[circuit.get_node_by_name("c").unwrap() - 1] = p * 1.1;
             }
-            let mut history = Engine::initialize_bjt_history(&circuit, &incoming, seed);
+            let mut history = Engine::initialize_bjt_history(&circuit, &incoming, seed).unwrap();
             Engine::initialize_bjt_phase_history(&circuit, &mut history).unwrap();
             let expected = sampler.forward_inputs(&expected_point, &NoAbort).unwrap()[0].unwrap();
             assert_eq!(

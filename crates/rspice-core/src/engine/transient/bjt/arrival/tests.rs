@@ -32,7 +32,8 @@ fn fixture() -> (crate::CircuitData, BjtTransientHistory) {
     let circuit = engine.build_circuit(&deck).unwrap();
     let solution = vec![0.0; circuit.matrix_size()];
     let mut history =
-        Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+        Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias)
+            .unwrap();
     Engine::initialize_bjt_phase_history(&circuit, &mut history).unwrap();
     for (index, phase) in history.phase.iter_mut().enumerate() {
         if let Some(phase) = phase {
@@ -399,7 +400,8 @@ fn gp_phase_arrival_preserves_sub_ulp_delays_and_exact_equation_clocks() {
         &circuit,
         &vec![0.0; circuit.matrix_size()],
         ReactiveHistorySeed::SolvedBias,
-    );
+    )
+    .unwrap();
     Engine::initialize_bjt_phase_history(&circuit, &mut history).unwrap();
     let delay = circuit.bjts.devices[0].legacy_excess_phase_delay();
     assert!(delay > 0.0 && delay < Value::EPSILON);
@@ -509,7 +511,8 @@ fn gp_phase_arrival_groups_only_one_representable_clock_interval() {
         &circuit,
         &vec![0.0; circuit.matrix_size()],
         ReactiveHistorySeed::SolvedBias,
-    );
+    )
+    .unwrap();
     Engine::initialize_bjt_phase_history(&circuit, &mut history).unwrap();
     let delay = circuit.bjts.devices[0].legacy_excess_phase_delay();
     for (time, order) in [

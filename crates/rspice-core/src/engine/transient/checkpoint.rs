@@ -13893,7 +13893,8 @@ mod tests {
             &circuit,
             &solution,
             super::super::ReactiveHistorySeed::SolvedBias,
-        );
+        )
+        .unwrap();
         let diode_history = Engine::initialize_diode_history(
             &circuit,
             &solution,

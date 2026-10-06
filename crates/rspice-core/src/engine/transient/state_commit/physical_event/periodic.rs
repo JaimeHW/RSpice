@@ -105,7 +105,8 @@ mod tests {
         circuit.tlines[0].update_history(0.0, 0.0, 0.0, 0.0, 0.0);
         circuit.tlines[0].update_history(1.0, 0.25, 0.005, 0.0, 0.0);
         let old =
-            Engine::initialize_bjt_history(&circuit, &incoming, ReactiveHistorySeed::SolvedBias);
+            Engine::initialize_bjt_history(&circuit, &incoming, ReactiveHistorySeed::SolvedBias)
+                .unwrap();
         let mut history = old.clone();
         let saved = circuit.tlines[0].checkpoint_state().unwrap();
         let mut bad = incoming.clone();

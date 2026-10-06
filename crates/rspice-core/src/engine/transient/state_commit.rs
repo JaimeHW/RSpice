@@ -1871,7 +1871,8 @@ mod tests {
             .accept_transient_step(&solution, 0.0)
             .unwrap();
         let mut bjt =
-            Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+            Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias)
+                .unwrap();
         Engine::initialize_bjt_phase_history(&circuit, &mut bjt).unwrap();
         let before = bjt.clone();
         // Snapshot every mutable passive history generation.

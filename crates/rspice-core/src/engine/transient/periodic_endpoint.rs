@@ -173,7 +173,8 @@ mod tests {
         circuit.tlines[0].update_history(1.0, 1.0, 0.02, 0.0, 0.0);
         let saved = circuit.tlines[0].checkpoint_state().unwrap();
         let history =
-            Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+            Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias)
+                .unwrap();
         let rates = engine
             .pss_endpoint_line_rates(
                 &circuit,

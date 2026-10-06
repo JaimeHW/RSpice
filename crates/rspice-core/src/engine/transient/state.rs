@@ -91,13 +91,29 @@ impl Engine {
         seed: ReactiveHistorySeed,
         differences: &[(usize, usize, Option<Value>)],
     ) -> std::borrow::Cow<'a, [Value]> {
+        match Self::seeded_device_solution_with(solution, seed, differences, |values| {
+            Ok::<_, std::convert::Infallible>(values.to_vec())
+        }) {
+            Ok(seeded) => seeded,
+            Err(impossible) => match impossible {},
+        }
+    }
+
+    // One IC transformation, with a caller-owned allocation policy. Existing
+    // non-BJT initializers retain their policy until their C01 conversion.
+    fn seeded_device_solution_with<'a, E>(
+        solution: &'a [Value],
+        seed: ReactiveHistorySeed,
+        differences: &[(usize, usize, Option<Value>)],
+        copy: impl FnOnce(&[Value]) -> Result<Vec<Value>, E>,
+    ) -> Result<std::borrow::Cow<'a, [Value]>, E> {
         if seed != ReactiveHistorySeed::UicStartup
             || differences.iter().all(|(_, _, target)| target.is_none())
         {
-            return std::borrow::Cow::Borrowed(solution);
+            return Ok(std::borrow::Cow::Borrowed(solution));
         }
 
-        let mut seeded = solution.to_vec();
+        let mut seeded = copy(solution)?;
         for (pos, neg, target) in differences {
             let Some(target) = *target else {
                 continue;
@@ -112,7 +128,7 @@ impl Engine {
                 seeded[*neg - 1] = -target;
             }
         }
-        std::borrow::Cow::Owned(seeded)
+        Ok(std::borrow::Cow::Owned(seeded))
     }
 
     #[inline]
@@ -182,7 +198,7 @@ impl Engine {
         hinted_max_step: Value,
         accepted_junction_history_restart: AcceptedJunctionHistoryRestart,
         histories: TransientDeviceHistories<'_>,
-    ) {
+    ) -> Result<(), SimulationError> {
         let TransientDeviceHistories {
             bjt: bjt_history,
             jfet: jfet_history,
@@ -194,6 +210,14 @@ impl Engine {
             bsim4: bsim4_history,
             ekv26: ekv26_history,
         } = histories;
+        let replacement_bjt = match accepted_junction_history_restart {
+            AcceptedJunctionHistoryRestart::Reinitialize => Some(Self::initialize_bjt_history(
+                circuit,
+                solution,
+                ReactiveHistorySeed::SolvedBias,
+            )?),
+            AcceptedJunctionHistoryRestart::Preserve => None,
+        };
         for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
             let v = Self::differential_voltage(solution, cap.pp.row, cap.nn.row);
             circuit.capacitors.v_prev[cap_idx] = v;
@@ -223,8 +247,8 @@ impl Engine {
         // A restart re-seeds from a solution the run already accepted, which is
         // a real bias every device must follow; the t=0 `IC=` vectors are spent.
         let seed = ReactiveHistorySeed::SolvedBias;
-        match accepted_junction_history_restart {
-            AcceptedJunctionHistoryRestart::Preserve => {
+        match replacement_bjt {
+            None => {
                 Self::flatten_bjt_and_diode_histories_for_order_one_restart(
                     bjt_history,
                     diode_history,
@@ -232,12 +256,10 @@ impl Engine {
                 );
                 jfet_history.normalize_for_order_one(hinted_max_step);
             }
-            AcceptedJunctionHistoryRestart::Reinitialize => {
-                let phase = std::mem::take(&mut bjt_history.phase);
-                let weil_phase = std::mem::take(&mut bjt_history.weil_phase);
-                *bjt_history = Self::initialize_bjt_history(circuit, solution, seed);
-                bjt_history.phase = phase;
-                bjt_history.weil_phase = weil_phase;
+            Some(mut replacement) => {
+                replacement.phase = std::mem::take(&mut bjt_history.phase);
+                replacement.weil_phase = std::mem::take(&mut bjt_history.weil_phase);
+                *bjt_history = replacement;
                 bjt_history.accepted_dt_prev = hinted_max_step;
                 bjt_history.accepted_dt_prev_prev = hinted_max_step;
                 *diode_history = Self::initialize_diode_history(circuit, solution, seed);
@@ -264,6 +286,7 @@ impl Engine {
         *ekv26_history = Self::initialize_ekv26_history(circuit, solution);
         ekv26_history.accepted_dt_prev = hinted_max_step;
         ekv26_history.accepted_dt_prev_prev = hinted_max_step;
+        Ok(())
     }
 
     /// Starts a new order-one integration epoch without re-evaluating accepted
@@ -313,35 +336,24 @@ impl Engine {
         circuit: &crate::circuit::CircuitData,
         solution: &[Value],
         seed: ReactiveHistorySeed,
-    ) -> BjtTransientHistory {
-        let n = circuit.bjts.devices.len();
-        let mut history = BjtTransientHistory {
-            phase: vec![None; n],
-            weil_phase: vec![None; n],
-            phase_outgoing_slopes: vec![None; n],
-            vbe_prev: Vec::with_capacity(n),
-            vbe_prev_prev: Vec::with_capacity(n),
-            ibe_prev: Vec::with_capacity(n),
-            vbc_prev: Vec::with_capacity(n),
-            vbc_prev_prev: Vec::with_capacity(n),
-            ibc_prev: Vec::with_capacity(n),
-            vcs_prev: Vec::with_capacity(n),
-            vcs_prev_prev: Vec::with_capacity(n),
-            ics_prev: Vec::with_capacity(n),
-            charge_q_prev: Vec::with_capacity(n),
-            charge_q_prev_prev: Vec::with_capacity(n),
-            charge_q_prev_prev_prev: Vec::with_capacity(n),
-            charge_cq_prev: Vec::with_capacity(n),
-            accepted_external_bc_current: vec![0.0; n],
-            accepted_terminal_currents: Vec::with_capacity(n),
-            dynamic_internal_prev: Vec::with_capacity(n),
-            dynamic_internal_prev_prev: Vec::with_capacity(n),
-            dynamic_linear_prev: Vec::with_capacity(n),
-            dynamic_linear_prev_prev: Vec::with_capacity(n),
-            accepted_dt_prev: 0.0,
-            accepted_dt_prev_prev: 0.0,
-        };
+    ) -> Result<BjtTransientHistory, SimulationError> {
+        Self::seed_bjt_history(
+            circuit,
+            solution,
+            seed,
+            BjtTransientHistory::try_unseeded(circuit.bjts.devices.len())?,
+        )
+    }
 
+    /// Fill freshly reserved lanes. Solved-bias seeding makes no history or
+    /// solution-copy allocation, so periodic callers can reserve before they
+    /// mutate their accepted circuit state.
+    pub(in crate::engine) fn seed_bjt_history(
+        circuit: &crate::circuit::CircuitData,
+        solution: &[Value],
+        seed: ReactiveHistorySeed,
+        mut history: BjtTransientHistory,
+    ) -> Result<BjtTransientHistory, SimulationError> {
         for bjt in &circuit.bjts.devices {
             // `IC=VBE,VCE` (`bjt/bjt.c:24`, `N_DEV_BJT.C:114`) states the
             // base-emitter and collector-emitter drops this instance opens at.
@@ -366,7 +378,7 @@ impl Engine {
             let external_base_seed = bjt
                 .legacy_external_bc_charge_nodes()
                 .map_or((0, 0, None), |nodes| (nodes[0], bjt.node_emitter, ic_vbe));
-            let seeded = Self::seeded_device_solution(
+            let seeded = Self::seeded_device_solution_with(
                 solution,
                 seed,
                 &[
@@ -395,7 +407,12 @@ impl Engine {
                         if bjt.mna_promoted() { ic_vce } else { None },
                     ),
                 ],
-            );
+                |values| {
+                    let mut copy = history::reserve_values(values.len(), "BJT UIC solution seed")?;
+                    copy.extend_from_slice(values);
+                    Ok::<_, SimulationError>(copy)
+                },
+            )?;
             let solution = seeded.as_ref();
             let vc = Self::node_voltage(solution, bjt.node_collector);
             let vb = Self::node_voltage(solution, bjt.node_base);
@@ -490,7 +507,7 @@ impl Engine {
             history.dynamic_linear_prev_prev.push(predictor_linear);
         }
 
-        history
+        Ok(history)
     }
 
     /// Restore native BJT storage from periodic samples. A prepared copy exposes
@@ -501,7 +518,7 @@ impl Engine {
         solutions: [&[Value]; 3],
         node_rates: &[Value],
         history_step: Value,
-    ) -> Result<BjtTransientHistory, String> {
+    ) -> Result<BjtTransientHistory, SimulationError> {
         if solutions.iter().any(|solution| {
             solution.len() != circuit.matrix_size()
                 || solution.iter().any(|value| !value.is_finite())
@@ -510,25 +527,45 @@ impl Engine {
             || !history_step.is_finite()
             || history_step <= 0.0
         {
-            return Err("periodic BJT history has invalid samples or rates".into());
+            return Err(SimulationError::Circuit(
+                "periodic BJT history has invalid samples or rates".into(),
+            ));
         }
-        for bjt in &mut circuit.bjts.devices {
+        for bjt in &circuit.bjts.devices {
             if bjt.uses_legacy_gummel_poon()
                 && (bjt.node_rth != 0 || bjt.td > 0.0 || bjt.legacy_excess_phase_delay() != 0.0)
             {
-                return Err(format!(
+                return Err(SimulationError::Circuit(format!(
                     "BJT '{}' has no periodic history initializer",
                     bjt.name
-                ));
+                )));
             }
+        }
+        let count = circuit.bjts.devices.len();
+        let older_storage = BjtTransientHistory::try_unseeded(count)?;
+        let previous_storage = BjtTransientHistory::try_unseeded(count)?;
+        let current_storage = BjtTransientHistory::try_unseeded(count)?;
+        for bjt in &mut circuit.bjts.devices {
             bjt.seed_accepted_periodic_bias(solutions[2]);
         }
-        let older =
-            Self::initialize_bjt_history(circuit, solutions[0], ReactiveHistorySeed::SolvedBias);
-        let previous =
-            Self::initialize_bjt_history(circuit, solutions[1], ReactiveHistorySeed::SolvedBias);
-        let mut history =
-            Self::initialize_bjt_history(circuit, solutions[2], ReactiveHistorySeed::SolvedBias);
+        let older = Self::seed_bjt_history(
+            circuit,
+            solutions[0],
+            ReactiveHistorySeed::SolvedBias,
+            older_storage,
+        )?;
+        let previous = Self::seed_bjt_history(
+            circuit,
+            solutions[1],
+            ReactiveHistorySeed::SolvedBias,
+            previous_storage,
+        )?;
+        let mut history = Self::seed_bjt_history(
+            circuit,
+            solutions[2],
+            ReactiveHistorySeed::SolvedBias,
+            current_storage,
+        )?;
         history.charge_q_prev_prev = previous.charge_q_prev;
         history.charge_q_prev_prev_prev = older.charge_q_prev;
         history.vbe_prev_prev = previous.vbe_prev;
@@ -538,7 +575,9 @@ impl Engine {
         history.dynamic_linear_prev_prev = previous.dynamic_linear_prev;
         for (index, bjt) in circuit.bjts.devices.iter().enumerate() {
             let mut model = bjt.clone();
-            model.prepare_periodic_mna(circuit.num_nodes())?;
+            model
+                .prepare_periodic_mna(circuit.num_nodes())
+                .map_err(SimulationError::Circuit)?;
             let (branches, _, _) = model.mna_charge_state_at_solution(solutions[2]);
             let internal_rates: [Value; BJT_INTERNAL_STATE_DIM] =
                 std::array::from_fn(|i| Self::node_voltage(node_rates, model.mna_internal_node(i)));
@@ -577,10 +616,10 @@ impl Engine {
                 .chain(&terminal)
                 .any(|value| !value.is_finite())
             {
-                return Err(format!(
+                return Err(SimulationError::Circuit(format!(
                     "BJT '{}' has nonfinite periodic currents",
                     bjt.name
-                ));
+                )));
             }
             history.charge_cq_prev[index] = currents;
             history.accepted_external_bc_current[index] = currents[BJT_QBCX_BRANCH_INDEX];
@@ -2285,7 +2324,8 @@ mod tests {
                 bsim4: &mut Bsim4TransientHistory::default(),
                 ekv26: &mut Ekv26TransientHistory::default(),
             },
-        );
+        )
+        .unwrap();
         assert_eq!(history.jfet2_vgstrap_prev, [-0.73]);
         assert_eq!(history.jfet2_vgdtrap_prev, [-2.1]);
         assert_eq!(history.jfet2_power_prev, [0.031]);

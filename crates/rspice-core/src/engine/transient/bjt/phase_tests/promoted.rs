@@ -39,7 +39,7 @@ fn initial_state(circuit: &crate::CircuitData, snapshot: &BjtChargeSnapshot) -> 
 
 fn accepted_history(circuit: &crate::CircuitData, solution: &[Value]) -> BjtTransientHistory {
     let mut history =
-        Engine::initialize_bjt_history(circuit, solution, ReactiveHistorySeed::SolvedBias);
+        Engine::initialize_bjt_history(circuit, solution, ReactiveHistorySeed::SolvedBias).unwrap();
     let device = &circuit.bjts.devices[0];
     let forward = device
         .legacy_forward_transport_branch(&history.dynamic_internal_prev[0])

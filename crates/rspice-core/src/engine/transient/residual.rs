@@ -1700,8 +1700,7 @@ impl Engine {
                 dt,
             },
             ctx.bsim3_history,
-            evaluation_mode
-                == crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+            evaluation_mode == crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
         );
         Self::stamp_bsim4_transient_companions(
             circuit,
@@ -1714,7 +1713,8 @@ impl Engine {
                 dt,
             },
             ctx.bsim4_history,
-            evaluation_mode == crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+            evaluation_mode
+                == crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
         );
         Self::stamp_ekv26_transient_companions(
             circuit,
@@ -3085,7 +3085,8 @@ D2 in out DMOD
         let coupled_tline_refs =
             Engine::initialize_coupled_tline_history(&mut circuit, &solution, 0.0);
         let bjt_history =
-            Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+            Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias)
+                .unwrap();
         let jfet_history =
             Engine::initialize_jfet_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
         let diode_history =
@@ -3306,7 +3307,8 @@ M1 d g 0 0 NM W=10u L=1u
         let coupled_tline_refs =
             Engine::initialize_coupled_tline_history(&mut circuit, &solution, 0.0);
         let bjt_history =
-            Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+            Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias)
+                .unwrap();
         let jfet_history =
             Engine::initialize_jfet_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
         let diode_history =
@@ -3870,7 +3872,8 @@ Q1 C B E 0 QN
         let tline_dc_refs = Engine::initialize_tline_history(&mut circuit, &base, 0.0);
         let coupled_tline_refs = Engine::initialize_coupled_tline_history(&mut circuit, &base, 0.0);
         let mut bjt_history =
-            Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+            Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias)
+                .unwrap();
         bjt_history.accepted_dt_prev = dt;
         bjt_history.accepted_dt_prev_prev = dt;
         let mut jfet_history =
@@ -4338,7 +4341,8 @@ Q1 C B E 0 QN
             let coupled_tline_refs =
                 Engine::initialize_coupled_tline_history(&mut circuit, &base, 0.0);
             let bjt_history =
-                Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
+                Engine::initialize_bjt_history(&circuit, &base, ReactiveHistorySeed::SolvedBias)
+                    .unwrap();
             let jfet_history =
                 Engine::initialize_jfet_history(&circuit, &base, ReactiveHistorySeed::SolvedBias);
             let diode_history =

@@ -18,7 +18,8 @@ fn gp_phase_history_acceptance_uses_actual_time_and_survives_integration_restart
     solution[circuit.bjts.devices[0].node_collector - 1] = 2.0;
     solution[base] = 0.6;
     let mut history =
-        Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+        Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias)
+            .unwrap();
     Engine::initialize_bjt_phase_history(&circuit, &mut history).unwrap();
     let delay = circuit.bjts.devices[0].legacy_excess_phase_delay();
     let coeff = CompanionCoefficients::backward_euler();
@@ -96,7 +97,8 @@ fn gp_phase_history_acceptance_uses_actual_time_and_survives_integration_restart
                 bsim4: &mut Bsim4TransientHistory::default(),
                 ekv26: &mut Ekv26TransientHistory::default(),
             },
-        );
+        )
+        .unwrap();
         assert_eq!(
             history.phase, accepted,
             "integration restart erased physical memory"

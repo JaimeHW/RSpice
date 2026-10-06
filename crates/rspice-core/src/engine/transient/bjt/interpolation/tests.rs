@@ -167,7 +167,8 @@ fn phase_interpolation_rejects_before_history_capture_and_cannot_waive_a_floor_o
     solution[bjt.node_collector - 1] = 2.0;
     solution[bjt.node_base - 1] = 0.6;
     let mut accepted =
-        Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+        Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias)
+            .unwrap();
     Engine::initialize_bjt_phase_history(&circuit, &mut accepted).unwrap();
     let before = accepted.clone();
     let coeff = CompanionCoefficients::backward_euler();

@@ -2320,7 +2320,7 @@ impl Engine {
 
         // A closed descriptor supplies a consistent instantaneous seed
         // even when OP-only IC clamps would duplicate ideal source equations.
-        self.pss_initialize_reactive_state(&mut circuit, &initial_solution);
+        self.pss_initialize_reactive_state(&mut circuit, &initial_solution)?;
         circuit.initialize_prescribed_currents()?;
 
         // ==================================================================
@@ -2941,8 +2941,12 @@ impl Engine {
     }
 
     /// Initialize reactive element state from DC solution
-    fn pss_initialize_reactive_state(&self, circuit: &mut PssCircuit, dc_solution: &[Value]) {
-        circuit.seed_charge_history(dc_solution);
+    fn pss_initialize_reactive_state(
+        &self,
+        circuit: &mut PssCircuit,
+        dc_solution: &[Value],
+    ) -> Result<(), SimulationError> {
+        circuit.seed_charge_history(dc_solution)?;
         Self::initialize_tline_history(&mut circuit.circuit, dc_solution, 0.0);
         let PssCircuit {
             circuit,
@@ -2999,6 +3003,7 @@ impl Engine {
             }
         }
         circuit.reset_coupled_inductor_pair_state(dc_solution);
+        Ok(())
     }
 
     /// Extract independent physical storage coordinates.
@@ -3226,7 +3231,7 @@ impl Engine {
                 solution.truncate(size);
                 // Cross-coupled device charge also depends on algebraic node
                 // biases resolved by this consistency solve.
-                circuit.seed_charge_history(&solution);
+                circuit.seed_charge_history(&solution)?;
                 Ok(solution)
             }
             None => Err(SimulationError::ConvergenceFailed(
@@ -5138,7 +5143,9 @@ mod tests {
         let start = engine
             .pss_initial_node_solution(&mut circuit, &NoAbort)
             .unwrap();
-        engine.pss_initialize_reactive_state(&mut circuit, &start);
+        engine
+            .pss_initialize_reactive_state(&mut circuit, &start)
+            .unwrap();
         let output = circuit.get_node_by_name("out").unwrap();
         // Deliberately leave the compiled descriptor stale. Its proposed E1
         // current omits this load; the physical check must reject that proposal
@@ -5561,7 +5568,9 @@ mod tests {
         circuit.capacitors.i_prev = vec![14.0];
         circuit.capacitors.i_eq = vec![15.0];
 
-        engine.pss_initialize_reactive_state(&mut circuit, &[2.5]);
+        engine
+            .pss_initialize_reactive_state(&mut circuit, &[2.5])
+            .unwrap();
         assert_eq!(circuit.capacitors.v_prev, vec![2.5]);
         assert_eq!(circuit.capacitors.v_prev_prev, vec![2.5]);
         assert_eq!(circuit.capacitors.v_prev_prev_prev, vec![2.5]);
