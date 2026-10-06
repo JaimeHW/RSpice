@@ -130,3 +130,16 @@ fn signal_selection_still_compares_the_independent_coordinate() {
         String::from_utf8_lossy(&interpolated.stderr).contains("independent coordinates differ")
     );
 }
+
+#[test]
+fn duplicate_quantities_cannot_hide_later_columns_or_be_blessed() {
+    let unique = "time,V(x)\n0,1\n1,2\n";
+    let duplicate = "time,V(x),v(X)\n0,1,9\n1,2,8\n";
+    for flags in [&[][..], &["--variables", "V(x)"][..], &["--bless"][..]] {
+        for (result, golden) in [(unique, duplicate), (duplicate, unique)] {
+            let output = compare(result, golden, flags);
+            assert_eq!(output.status.code(), Some(3), "{output:?}");
+            assert!(String::from_utf8_lossy(&output.stderr).contains("duplicate variable"));
+        }
+    }
+}

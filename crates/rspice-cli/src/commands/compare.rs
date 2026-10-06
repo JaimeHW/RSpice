@@ -296,7 +296,19 @@ fn load_waveform_data(
     resource_limits: rspice_core::ResourceLimits,
 ) -> Result<WaveformData, CliError> {
     let table = load_table(path, detect_format(path), resource_limits)?;
-    let (variables, values) = table.to_real_series().into_iter().unzip();
+    let (variables, values): (Vec<String>, Vec<Vec<f64>>) =
+        table.to_real_series().into_iter().unzip();
+    let mut seen = HashSet::new();
+    for variable in &variables {
+        if !seen.insert(parse_variable_name(variable).key) {
+            return Err(CliError::VerificationFailed {
+                message: format!(
+                    "{} contains duplicate variable '{variable}'",
+                    path.display()
+                ),
+            });
+        }
+    }
     Ok(WaveformData { variables, values })
 }
 
