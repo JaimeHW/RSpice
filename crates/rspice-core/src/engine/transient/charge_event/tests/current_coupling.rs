@@ -1,6 +1,48 @@
 use super::*;
 
 #[test]
+fn charge_event_preserves_small_storage_in_floating_star_for_every_node_order() {
+    let options = options();
+    for [hub, first, second] in [
+        [1, 2, 3],
+        [1, 3, 2],
+        [2, 1, 3],
+        [2, 3, 1],
+        [3, 1, 2],
+        [3, 2, 1],
+    ] {
+        let topology = ChargeEventTopology::new(
+            3,
+            3,
+            &[(hub, first), (hub, second)],
+            vec![],
+            vec![],
+            &options,
+            &NoAbort,
+        )
+        .unwrap();
+        let state = topology
+            .solve(&[0.0; 3], &[0.0; 3], &options, &NoAbort, |state, _| {
+                let mut sample = EventSample::new(3, &options)?;
+                branch(&mut sample.q, state, hub, first, 1e-9);
+                branch(&mut sample.q, state, hub, second, 1e-30);
+                for node in 1..=3 {
+                    branch(&mut sample.f, state, node, 0, 1e-3);
+                    // Three equal ramps cause a unit common-mode voltage rate
+                    // and zero differential charge rates, regardless of C ratio.
+                    sample.f_time[node - 1] = -1e-3;
+                }
+                Ok(sample)
+            })
+            .unwrap_or_else(|error| panic!("hub={hub}, first={first}, second={second}: {error}"));
+        for (value, rate) in state.solution.into_iter().zip(state.coordinate_rates) {
+            close(value, 0.0, 1e-15);
+            close(rate.unwrap(), 1.0, 1e-12);
+        }
+    }
+}
+
+#[test]
 fn current_event_coupling_distinguishes_floating_differential_and_common_mode() {
     let options = options();
     let topology =

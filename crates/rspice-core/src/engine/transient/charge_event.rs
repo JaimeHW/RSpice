@@ -219,6 +219,7 @@ impl ChargeEventTopology {
             }
             node
         }
+        let mut degree = vec![0usize; nodes + 1];
         for (index, (p, n)) in charge_ports
             .iter()
             .copied()
@@ -235,6 +236,10 @@ impl ChargeEventTopology {
             if p > nodes || n > nodes {
                 return Err(error("charge port outside the node population"));
             }
+            if p != n {
+                degree[p] += 1;
+                degree[n] += 1;
+            }
             let p = root(&mut parents, p);
             let n = root(&mut parents, n);
             parents[p.max(n)] = p.min(n);
@@ -245,6 +250,28 @@ impl ChargeEventTopology {
                 check_abort(abort)?;
             }
             roots.push(root(&mut parents, node));
+        }
+        // Replace the charge row at a component's most connected node by
+        // its algebraic KCL sum. Keeping the peripheral rows avoids forming
+        // a tiny storage mode as the difference of two large hub charges
+        // (for example GP Q_BE and a much smaller Q_BC). This is a structural
+        // choice of equivalent equations, not a capacitance cutoff. Ground
+        // remains the representative of every grounded component.
+        let mut representatives = roots.clone();
+        for node in 1..=nodes {
+            if node % 64 == 0 {
+                check_abort(abort)?;
+            }
+            let component = roots[node];
+            if component != 0 && degree[node] > degree[representatives[component]] {
+                representatives[component] = node;
+            }
+        }
+        for (index, component) in roots.iter_mut().enumerate() {
+            if index % 64 == 0 {
+                check_abort(abort)?;
+            }
+            *component = representatives[*component];
         }
         let mut groups = vec![Vec::new(); nodes + 1];
         for node in 1..=nodes {
