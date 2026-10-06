@@ -50,6 +50,7 @@ fn operating_point_rates_retain_prescribed_slope_and_finite_source_current() {
         2,
         &[(1, 0)],
         vec![EventVoltageSource {
+            control: None,
             positive: 1,
             negative: 0,
             branch: 1,

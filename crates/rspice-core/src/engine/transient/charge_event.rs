@@ -44,6 +44,16 @@ fn sum(terms: impl Iterator<Item = (Value, Value)> + Clone) -> Result<Value> {
 }
 
 #[derive(Clone, Copy)]
+pub(super) struct EventVoltageControl {
+    pub positive: usize,
+    pub negative: usize,
+    pub gain: Value,
+}
+
+// Descriptor plus sparse incidence and allocator headroom, in Value units.
+const SOURCE_STORAGE_VALUES: usize = 16;
+
+#[derive(Clone, Copy)]
 pub(super) struct EventVoltageSource {
     pub positive: usize,
     pub negative: usize,
@@ -51,6 +61,22 @@ pub(super) struct EventVoltageSource {
     pub branch: usize,
     pub value: Value,
     pub slope: Value,
+    /// V(out) - gain * V(control) = value. Slope differentiates only the
+    /// prescribed right-hand side; control-coordinate rates remain unknowns.
+    pub control: Option<EventVoltageControl>,
+}
+
+impl EventVoltageSource {
+    fn voltage_terms(&self) -> impl Iterator<Item = (usize, Value)> + Clone {
+        [(self.positive, 1.0), (self.negative, -1.0)]
+            .into_iter()
+            .chain(self.control.into_iter().flat_map(|control| {
+                [
+                    (control.positive, -control.gain),
+                    (control.negative, control.gain),
+                ]
+            }))
+    }
 }
 
 pub(super) struct EventOptions {
@@ -175,7 +201,7 @@ impl ChargeEventTopology {
             ResourceKind::ResultValues,
             size.saturating_mul(64)
                 .saturating_add(charge_ports.len().saturating_mul(2))
-                .saturating_add(sources.len().saturating_mul(8)),
+                .saturating_add(sources.len().saturating_mul(SOURCE_STORAGE_VALUES)),
             options.limits.max_result_values,
         )?;
         if size == 0
@@ -201,6 +227,11 @@ impl ChargeEventTopology {
                     .is_some()
                 || !source.value.is_finite()
                 || !source.slope.is_finite()
+                || source.control.is_some_and(|control| {
+                    control.positive > nodes
+                        || control.negative > nodes
+                        || !control.gain.is_finite()
+                })
             {
                 return Err(error("invalid or duplicate voltage-source descriptor"));
             }
@@ -381,12 +412,19 @@ impl ChargeEventTopology {
                 }
             }
             equations.source_row(source, source.value, options.voltage_tolerance)?;
-            equations.values[source.branch] = sum([
-                (voltage(trial, source.positive), 1.0),
-                (voltage(trial, source.negative), -1.0),
-                (source.value, -1.0),
-            ]
-            .into_iter())?;
+            equations.values[source.branch] = sum(source
+                .voltage_terms()
+                .map(|(node, coefficient)| (voltage(trial, node), coefficient))
+                .chain([(source.value, -1.0)]))?;
+            if let Some(control) = source.control {
+                let controlled = sum([
+                    (voltage(trial, control.positive), control.gain),
+                    (voltage(trial, control.negative), -control.gain),
+                ]
+                .into_iter())?;
+                equations.scales[source.branch] =
+                    equations.scales[source.branch].max(controlled.abs());
+            }
         }
         Ok(equations)
     }
@@ -499,11 +537,10 @@ impl Equations {
         let row = source.branch;
         self.terms -= self.rows[row].len();
         self.rows[row].clear();
-        if source.positive != 0 {
-            self.add(row, source.positive - 1, 1.0)?;
-        }
-        if source.negative != 0 {
-            self.add(row, source.negative - 1, -1.0)?;
+        for (node, coefficient) in source.voltage_terms() {
+            if node != 0 {
+                self.add(row, node - 1, coefficient)?;
+            }
         }
         self.scales[row] = value.abs();
         self.absolute[row] = tolerance;

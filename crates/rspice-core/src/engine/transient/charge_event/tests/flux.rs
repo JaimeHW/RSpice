@@ -34,6 +34,7 @@ fn rl_topology(options: &EventOptions) -> ChargeEventTopology {
         4,
         &[],
         vec![EventVoltageSource {
+            control: None,
             positive: 1,
             negative: 0,
             branch: 3,
@@ -89,6 +90,7 @@ fn flux_event_solves_capacitive_impulse_and_inductor_flux_in_one_system() {
         4,
         &[(1, 2), (2, 0)],
         vec![EventVoltageSource {
+            control: None,
             positive: 1,
             negative: 0,
             branch: 3,
@@ -132,6 +134,7 @@ fn flux_event_conserves_coupled_linkage_with_both_mutual_polarities() {
     let options = options();
     let sources = vec![
         EventVoltageSource {
+            control: None,
             positive: 1,
             negative: 0,
             branch: 4,
@@ -139,6 +142,7 @@ fn flux_event_conserves_coupled_linkage_with_both_mutual_polarities() {
             slope: 0.0,
         },
         EventVoltageSource {
+            control: None,
             positive: 2,
             negative: 0,
             branch: 5,
@@ -289,6 +293,7 @@ fn flux_event_requires_explicit_units_and_refuses_unowned_or_singular_storage() 
             2,
             &[],
             vec![EventVoltageSource {
+                control: None,
                 positive: 1,
                 negative: 0,
                 branch: 1,

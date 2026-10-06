@@ -92,7 +92,7 @@ impl PreparedEventCircuit<'_> {
                         .len()
                         .saturating_add(self.circuit.voltage_sources.len())
                         .saturating_add(self.circuit.behavioral_sources.voltage_sources.len())
-                        .saturating_mul(8),
+                        .saturating_mul(SOURCE_STORAGE_VALUES),
                 ),
             options.limits.max_result_values,
         )?;
@@ -116,6 +116,7 @@ impl PreparedEventCircuit<'_> {
                     ))
                 })?;
             sources.push(EventVoltageSource {
+                control: None,
                 positive: table.node_pos[index],
                 negative: table.node_neg[index],
                 branch: self.circuit.num_nodes() + table.branch_indices[index] - 1,
@@ -132,6 +133,7 @@ impl PreparedEventCircuit<'_> {
                 abort,
             )?;
             sources.push(EventVoltageSource {
+                control: None,
                 positive: source.node_pos,
                 negative: source.node_neg,
                 branch: self.circuit.num_nodes() + source.branch_ordinal - 1,

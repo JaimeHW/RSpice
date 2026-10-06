@@ -8,6 +8,7 @@ mod current_coupling;
 mod flux;
 mod native;
 mod operating_point;
+mod voltage_control;
 
 fn options() -> EventOptions {
     EventOptions {
@@ -34,6 +35,7 @@ fn branch(stamp: &mut EventStamp, state: &[Value], pos: usize, neg: usize, coeff
 
 fn source(positive: usize, negative: usize, value: Value, slope: Value) -> EventVoltageSource {
     EventVoltageSource {
+        control: None,
         positive,
         negative,
         branch: 2,

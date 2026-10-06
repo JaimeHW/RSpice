@@ -78,6 +78,7 @@ fn integrated_reference_retains_the_outgoing_prescribed_voltage_slope() {
         2,
         &[(1, 0)],
         vec![EventVoltageSource {
+            control: None,
             positive: 1,
             negative: 0,
             branch: 1,

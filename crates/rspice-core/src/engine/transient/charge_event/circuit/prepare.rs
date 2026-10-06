@@ -309,6 +309,7 @@ impl<'a> PreparedEventCircuit<'a> {
                 claim(&mut equations, ordinal, row)?;
                 if value == 0.0 {
                     constant_sources.push(EventVoltageSource {
+                        control: None,
                         positive: p,
                         negative: n,
                         branch: nodes + ordinal - 1,

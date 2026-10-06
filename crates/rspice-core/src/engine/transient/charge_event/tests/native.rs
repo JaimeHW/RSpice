@@ -126,6 +126,7 @@ fn charge_event_solves_native_coupled_bjt_charge_and_held_transport_history() {
                     polarity * value,
                 );
                 EventVoltageSource {
+                    control: None,
                     positive,
                     negative: 0,
                     branch: nodes + branch - 1,
@@ -295,6 +296,7 @@ fn flux_event_retains_active_gp_transport_memory_in_finite_terminal_currents() {
         }
         let sources = vec![
             EventVoltageSource {
+                control: None,
                 positive: 1,
                 negative: 0,
                 branch: 5,
@@ -302,6 +304,7 @@ fn flux_event_retains_active_gp_transport_memory_in_finite_terminal_currents() {
                 slope: 0.0,
             },
             EventVoltageSource {
+                control: None,
                 positive: 2,
                 negative: 0,
                 branch: 6,
@@ -309,6 +312,7 @@ fn flux_event_retains_active_gp_transport_memory_in_finite_terminal_currents() {
                 slope: 0.0,
             },
             EventVoltageSource {
+                control: None,
                 positive: 3,
                 negative: 0,
                 branch: 7,

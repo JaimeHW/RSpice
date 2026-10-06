@@ -37,7 +37,7 @@ impl PreparedEventCircuit<'_> {
                     .len()
                     .saturating_add(self.circuit.voltage_sources.len())
                     .saturating_add(self.circuit.behavioral_sources.voltage_sources.len())
-                    .saturating_mul(8),
+                    .saturating_mul(SOURCE_STORAGE_VALUES),
             );
         let available = options.limits.max_result_values.saturating_sub(retained);
         let values = TimeDerivatives::new(program, 1, available, abort)

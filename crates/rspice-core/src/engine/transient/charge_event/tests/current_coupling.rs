@@ -157,6 +157,7 @@ fn current_event_coupling_does_not_certify_continuous_source_current_or_regular_
         2,
         &[],
         vec![EventVoltageSource {
+            control: None,
             positive: 1,
             negative: 0,
             branch: 1,
