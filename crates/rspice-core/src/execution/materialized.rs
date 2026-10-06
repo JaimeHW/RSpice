@@ -201,12 +201,7 @@ impl DeckPlanMaterializer<'_> {
         if abort.is_aborted() {
             return Err(MaterializedRunError::Aborted);
         }
-        let coordinate = self.coordinates.get(run_index).cloned().ok_or(mismatch(
-            MaterializationMismatchError::CoordinateIndex {
-                index: run_index,
-                coordinate_count: self.coordinates.len(),
-            },
-        ))?;
+        let coordinate = self.coordinate_at(run_index)?;
 
         let mut netlist = match &self.step_plan {
             Some(step_plan) => {
@@ -252,7 +247,7 @@ impl DeckPlanMaterializer<'_> {
             && netlist.spectre_statistical_coordinate.is_none()
         {
             netlist.spectre_statistical_coordinate =
-                Some(self.spectre_statistical_coordinate(&coordinate, &netlist)?);
+                Some(self.spectre_statistical_coordinate(coordinate, &netlist)?);
         }
 
         // A concrete run must never feed its meta-analysis cards back into an
@@ -266,6 +261,15 @@ impl DeckPlanMaterializer<'_> {
         Ok(netlist)
     }
 
+    fn coordinate_at(&self, run_index: usize) -> Result<&RunCoordinate, MaterializedRunError> {
+        self.coordinates.get(run_index).ok_or_else(|| {
+            mismatch(MaterializationMismatchError::CoordinateIndex {
+                index: run_index,
+                coordinate_count: self.coordinates.len(),
+            })
+        })
+    }
+
     /// Materialize a coordinate together with analysis and topology identities.
     pub fn materialize_run_with_abort(
         &self,
@@ -273,7 +277,7 @@ impl DeckPlanMaterializer<'_> {
         abort: &dyn AbortSignal,
     ) -> Result<MaterializedRun, MaterializedRunError> {
         let netlist = self.materialize_netlist_with_abort(run_index, abort)?;
-        let coordinate = self.coordinates[run_index].clone();
+        let coordinate = self.coordinate_at(run_index)?.clone();
         let mut configured_count = 0usize;
         for analysis in &netlist.analyses {
             ensure_not_aborted(abort)?;
