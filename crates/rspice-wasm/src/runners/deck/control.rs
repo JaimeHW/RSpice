@@ -1,5 +1,35 @@
 //! Publish the shared control host's completed runs through core documents.
 
+#[cfg(test)]
+mod tests {
+    use super::super::*;
+
+    #[test]
+    fn control_dc_document_matches_direct_nested_sweep() {
+        let source = "DC\nI1 0 out 0\nR1 out bias 1k\nV2 bias 0 0\n";
+        let direct = run_authored_deck_document_detailed(&format!(
+            "{source}.dc I1 list 1m 0 2m V2 list 1 3\n.end\n"
+        ))
+        .unwrap();
+        for cards in [
+            ".control\ndc I1 list 1m 0 2m V2 list 1 3\nprint v(out) vs v2\n.endc",
+            ".dc I1 list 1m 0 2m V2 list 1 3\n.control\nrun\nprint v(out) vs v2\n.endc",
+        ] {
+            let control =
+                run_authored_deck_document_detailed(&format!("{source}{cards}\n.end\n")).unwrap();
+            assert_eq!(control.control_datasets, ["dc1"]);
+            assert_eq!(control.control_presentations.len(), 1);
+            assert_eq!(control.results[0].axes(), direct.results[0].axes());
+            assert_eq!(control.results[0].signals(), direct.results[0].signals());
+            assert_eq!(
+                control.results[0].device_states(),
+                direct.results[0].device_states()
+            );
+            assert_eq!(control.results[0].axes().len(), 2);
+        }
+    }
+}
+
 use super::*;
 use rspice_core::engine::{
     ControlAnalysisResult, ControlCircuit, ControlCommandEffect, ControlExecutionError,
@@ -154,6 +184,9 @@ pub(super) fn run(
                     result,
                     dataset.device_op_report.as_deref(),
                 )
+            }
+            ControlAnalysisResult::DcSweep(result) => {
+                AnalysisResultDocument::from_dc_analysis(dataset.analysis_id, result)
             }
             ControlAnalysisResult::Ac(points) => {
                 AnalysisResultDocument::from_ac(dataset.analysis_id, points)

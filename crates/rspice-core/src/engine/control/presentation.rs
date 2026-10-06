@@ -79,6 +79,7 @@ enum Column {
     Node(usize),
     Branch(usize),
     Scale,
+    DcAxis(usize),
 }
 
 struct Selected<'a> {
@@ -93,6 +94,7 @@ impl ControlNamedDataset {
         match &self.result {
             ControlAnalysisResult::OperatingPoint(_) => 1,
             ControlAnalysisResult::Ac(points) => points.len(),
+            ControlAnalysisResult::DcSweep(result) => result.points.len(),
             ControlAnalysisResult::Transient(result) => result.time.len(),
         }
     }
@@ -101,14 +103,21 @@ impl ControlNamedDataset {
         match &self.result {
             ControlAnalysisResult::OperatingPoint(_) => SignalUnit::Dimensionless,
             ControlAnalysisResult::Ac(_) => SignalUnit::Hertz,
+            ControlAnalysisResult::DcSweep(result) => result
+                .axes
+                .last()
+                .map_or(SignalUnit::Unspecified, |a| a.unit.clone()),
             ControlAnalysisResult::Transient(_) => SignalUnit::Second,
         }
     }
 
-    fn scale_name(&self) -> &'static str {
+    fn scale_name(&self) -> &str {
         match &self.result {
             ControlAnalysisResult::OperatingPoint(_) => "index",
             ControlAnalysisResult::Ac(_) => "frequency",
+            ControlAnalysisResult::DcSweep(result) => {
+                result.axes.last().map_or("sweep", |a| a.name.as_str())
+            }
             ControlAnalysisResult::Transient(_) => "time",
         }
     }
@@ -117,6 +126,7 @@ impl ControlNamedDataset {
         match &self.result {
             ControlAnalysisResult::OperatingPoint(_) => (row == 0).then_some(0.0),
             ControlAnalysisResult::Ac(points) => points.get(row).map(|point| point.frequency),
+            ControlAnalysisResult::DcSweep(result) => result.points.get(row).map(|p| p.sweep_value),
             ControlAnalysisResult::Transient(result) => result.time.get(row).copied(),
         }
     }
@@ -125,6 +135,10 @@ impl ControlNamedDataset {
         match &self.result {
             ControlAnalysisResult::OperatingPoint(result) => &result.branch_names,
             ControlAnalysisResult::Ac(points) => points.first().map_or(&[], |p| &p.branch_names),
+            ControlAnalysisResult::DcSweep(result) => result
+                .points
+                .first()
+                .map_or(&[], |p| &p.result.branch_names),
             ControlAnalysisResult::Transient(result) => &result.branch_names,
         }
     }
@@ -138,6 +152,22 @@ impl Selected<'_> {
         match (self.column, &self.dataset.result) {
             (Column::Ground, _) => Some(0.0.into()),
             (Column::Scale, _) => self.dataset.scale_value(row).map(Into::into),
+            (Column::DcAxis(axis), ControlAnalysisResult::DcSweep(result)) => {
+                result.axis_value(axis, row).map(Into::into)
+            }
+            (Column::DcAxis(_), _) => None,
+            (Column::Node(index), ControlAnalysisResult::DcSweep(result)) => {
+                let point = result.points.get(row)?;
+                (point.result.node_names == result.points.first()?.result.node_names)
+                    .then(|| point.result.try_voltage(index).map(Into::into))
+                    .flatten()
+            }
+            (Column::Branch(index), ControlAnalysisResult::DcSweep(result)) => {
+                let point = result.points.get(row)?;
+                (point.result.branch_names == result.points.first()?.result.branch_names)
+                    .then(|| point.result.branch_current(index).map(Into::into))
+                    .flatten()
+            }
             (Column::Node(index), ControlAnalysisResult::OperatingPoint(result)) => {
                 result.try_voltage(index).map(Into::into)
             }
@@ -222,10 +252,27 @@ impl ControlCircuit {
             )
         } else if probe.is_none() && lower == dataset.scale_name() {
             (Column::Scale, lower, dataset.scale_unit())
+        } else if probe.is_none()
+            && let ControlAnalysisResult::DcSweep(result) = &dataset.result
+            && let Some((index, axis)) = result
+                .axes
+                .iter()
+                .enumerate()
+                .find(|(_, a)| a.name == lower)
+        {
+            (Column::DcAxis(index), lower, axis.unit.clone())
         } else if matches!(lower.as_str(), "0" | "gnd" | "gnd!") {
             (Column::Ground, "v(0)".into(), SignalUnit::Volt)
         } else {
             let names = match &dataset.result {
+                ControlAnalysisResult::DcSweep(result) => {
+                    &result
+                        .points
+                        .first()
+                        .ok_or_else(|| unavailable(line, dataset, name))?
+                        .result
+                        .node_names
+                }
                 ControlAnalysisResult::OperatingPoint(result) => &result.node_names,
                 ControlAnalysisResult::Ac(points) => {
                     &points
@@ -478,7 +525,16 @@ impl<'a> Resolver<'a> {
         if std::ptr::eq(a, b) {
             return Ok(());
         }
-        if a.scale_unit() != b.scale_unit() || a.length() != b.length() {
+        let same_axes = match (&a.result, &b.result) {
+            (ControlAnalysisResult::DcSweep(a), ControlAnalysisResult::DcSweep(b)) => {
+                a.axes == b.axes
+            }
+            (ControlAnalysisResult::DcSweep(_), _) | (_, ControlAnalysisResult::DcSweep(_)) => {
+                false
+            }
+            _ => true,
+        };
+        if !same_axes || a.scale_unit() != b.scale_unit() || a.length() != b.length() {
             return Err(command_error(
                 self.line,
                 format!("{} and {} have different sample grids", a.name, b.name),

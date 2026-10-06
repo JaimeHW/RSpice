@@ -28,7 +28,7 @@ use rspice_core::engine::{
     CompressionConfig, HbOperatingPoint, PssOperatingPoint, SensitivityCardResult,
     TransientStartupMode,
 };
-use rspice_core::execution::result_document::{DcSweepAxisDocument, FftChildReference};
+use rspice_core::execution::result_document::FftChildReference;
 use rspice_core::execution::{
     AnalysisInstanceId, AnalysisKind, AnalysisResultDocument, AnalysisResultDocumentBuilder,
     DeckPlan, DeckPlanError, MaterializedRunError, PlannedPostProcess, PostProcessSource,
@@ -321,34 +321,12 @@ fn execute_analysis(
                 step: *step,
                 mode: mode.clone(),
             };
-            let points = engine
-                .run_dc_sweep2_spec_with_report_and_abort(
-                    netlist,
-                    source,
-                    &spec,
-                    sweep2.as_ref(),
-                    abort,
-                )
+            let result = engine
+                .run_dc_analysis_with_abort(netlist, source, &spec, sweep2.as_ref(), abort)
                 .map_err(simulation_error)?;
             ensure_not_aborted(abort)?;
-            // The outer source of a nested sweep is authored evidence: without
-            // it the flattened point list cannot be told apart, so both axes
-            // are declared and the core constructor checks the grid shape.
-            let mut axes = Vec::new();
-            if let Some(outer) = sweep2 {
-                axes.push(DcSweepAxisDocument {
-                    name: outer.source.trim().to_ascii_lowercase(),
-                    unit: dc_sweep_unit(&outer.source),
-                    value_count: outer.spec().points().len(),
-                });
-            }
-            axes.push(DcSweepAxisDocument {
-                name: source.trim().to_ascii_lowercase(),
-                unit: dc_sweep_unit(source),
-                value_count: spec.points().len(),
-            });
             Ok(vec![
-                AnalysisResultDocument::from_nested_dc_sweep(id, &axes, &points)
+                AnalysisResultDocument::from_dc_analysis(id, &result)
                     .map_err(document_projection_error)?,
             ])
         }
@@ -1098,26 +1076,6 @@ fn fft_output_unit(physical_type: &str, format: FftFormat) -> DetailedWasmResult
         other => Err(document_error(format!(
             "core reported unknown FFT physical quantity '{other}'"
         ))),
-    }
-}
-
-/// Unit of a `.DC` sweep axis.
-///
-/// A sweep over an independent source carries that source's unit; `V`-prefixed
-/// instances are voltage sources and `I`-prefixed are current sources, which
-/// is the same first-letter element contract the parser itself uses. Anything
-/// else is a swept parameter, whose unit the deck never declared — which is
-/// `Unspecified`, not the pure ratio `Dimensionless` asserts.
-fn dc_sweep_unit(source: &str) -> SignalUnit {
-    match source
-        .trim()
-        .chars()
-        .next()
-        .map(|first| first.to_ascii_uppercase())
-    {
-        Some('V') => SignalUnit::Volt,
-        Some('I') => SignalUnit::Ampere,
-        _ => SignalUnit::Unspecified,
     }
 }
 

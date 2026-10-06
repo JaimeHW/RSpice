@@ -398,159 +398,148 @@ pub(super) fn write_dc_op_output(
 pub(super) fn run_dc_sweep(
     ctx: &RunContext<'_>,
     source: &str,
-    start: f64,
-    stop: f64,
-    step: f64,
+    spec: &rspice_core::netlist::DcSweepSpec,
     sweep2: Option<&rspice_core::netlist::DcSecondSweep>,
 ) -> Result<(), CliError> {
-    if !ctx.quiet {
-        match sweep2 {
-            Some(outer) => crate::console::line(format_args!(
-                "Running DC sweep on {} from {} to {} by {} for each {} from {} to {} by {}...",
-                source, start, stop, step, outer.source, outer.start, outer.stop, outer.step
-            ))?,
-            None => crate::console::line(format_args!(
-                "Running DC sweep on {} from {} to {} by {}...",
-                source, start, stop, step
-            ))?,
-        }
-    }
-
-    // The reporting form is used so the typed result document can carry each
-    // point's device operating report. The flat exporters read the same points.
-    match ctx
+    let result = ctx
         .engine
-        .run_dc_sweep2_spec_with_report_and_abort(
+        .run_dc_analysis_with_abort(
             ctx.netlist,
             source,
-            &rspice_core::netlist::DcSweepSpec::linear(start, stop, step),
+            spec,
             sweep2,
             &crate::abort::ProcessAbort,
         )
-        .map(|points| {
-            let pairs = points
-                .iter()
-                .map(|point| (point.sweep_value, point.result.clone()))
-                .collect::<Vec<_>>();
-            (points, pairs)
-        }) {
-        Ok((points, results)) => {
-            for (_, point) in &results {
-                super::shared::ensure_finite_series(
-                    ctx.args.allow_nonfinite,
-                    "DC Sweep",
-                    (1..point.node_voltages.len()).map(|node| {
-                        let name = point
-                            .node_names
-                            .get(node)
-                            .map(|n| n.as_str())
-                            .unwrap_or("node");
-                        (name, std::slice::from_ref(&point.node_voltages[node]))
-                    }),
-                )?;
-            }
-
-            if !ctx.quiet {
-                crate::console::line(format_args!("DC Sweep: {} points computed", results.len()))?;
-            }
-
-            let measurements = rspice_core::analysis::evaluate_dc_measurements_with_abort(
-                ctx.netlist,
-                &results,
-                &crate::abort::ProcessAbort,
-            )
-            .map_err(|source| CliError::CoreSimulationError {
-                source,
-                analysis: Some("DC measurement projection".to_string()),
-            })?;
-            ctx.record_measurements("DC", measurements)?;
-            let continuous_measurements =
-                rspice_core::analysis::evaluate_dc_continuous_measurements(ctx.netlist, &results);
-            super::shared::record_continuous_measurements(ctx, "DC_CONT", continuous_measurements)?;
-
-            // Resolve the authored output contract even when the caller did
-            // not request a file. A valid `.SAVE @device[param]` is part of
-            // deck execution semantics; an unavailable probe must not become
-            // a silent successful run merely because `-o` was omitted.
-            let signals = dc_export_signals(
-                ctx.netlist,
-                &results,
-                ctx.engine.config().resource_limits,
-                &crate::abort::ProcessAbort,
-            )
-            .map_err(|error| map_output_projection_error(ctx, error, "DC"))?;
-
-            if let Some(output) = ctx.resolve_output("dc") {
-                let analysis_id = output.analysis("dc")?;
-                let sweep_vals: Vec<f64> = results.iter().map(|(v, _)| *v).collect();
-                super::shared::ensure_finite_series(
-                    ctx.args.allow_nonfinite,
-                    "DC Sweep output projection",
-                    signals
-                        .iter()
-                        .map(|signal| (signal.display_name.as_str(), signal.values.as_slice())),
-                )?;
-                super::document::publish_analysis_result(
-                    ctx,
-                    &output.path,
-                    analysis_id,
-                    super::document::scalar_schema(&signals)?,
-                    || {
-                        rspice_core::execution::AnalysisResultDocument::from_dc_sweep(
-                            analysis_id,
-                            source,
-                            rspice_core::execution::SignalUnit::Volt,
-                            &points,
-                        )
-                    },
-                    |path, format| match format {
-                        OutputFormat::Hdf5 => {
-                            let mut data = Hdf5SimulationData::new();
-                            data.title = "DC Sweep".to_string();
-                            data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
-
-                            let mut dc_sweep = Hdf5WaveformSection::new(source, sweep_vals.clone());
-                            for signal in &signals {
-                                dc_sweep.add_typed_signal(
-                                    signal.display_name.clone(),
-                                    signal.raw_variable_type(),
-                                    signal.unit_symbol(),
-                                    signal.values.clone(),
-                                );
-                            }
-                            data.dc_sweep = Some(dc_sweep);
-                            write_hdf5(path, &data).map_err(|err| map_hdf5_output_error(path, err))
-                        }
-                        format => super::export::scalar_table(
-                            "dc_sweep",
-                            "DC transfer characteristic",
-                            source,
-                            "voltage",
-                            sweep_vals.clone(),
-                            &signals,
-                        )
-                        .write(path, format),
-                    },
-                )?;
-
-                if !ctx.quiet {
-                    crate::console::line(format_args!(
-                        "Results exported to: {}",
-                        output.path.display()
-                    ))?;
-                }
-            }
-            Ok(())
-        }
-        // Carry the engine's typed failure rather than its text. Stringifying
-        // here re-decided every DC-sweep failure as the simulation category,
-        // so a refused capability and a singular matrix left this process with
-        // the same status.
-        Err(source) => Err(CliError::CoreSimulationError {
+        .map_err(|source| CliError::CoreSimulationError {
             source,
             analysis: Some("DC Sweep".to_string()),
-        }),
+        })?;
+    finish_dc_sweep_result(ctx, &result)
+}
+
+pub(super) fn finish_dc_sweep_result(
+    ctx: &RunContext<'_>,
+    result: &rspice_core::engine::DcSweepResult,
+) -> Result<(), CliError> {
+    let axis = result.axes.last().ok_or_else(|| CliError::InternalError {
+        message: "DC sweep result has no axis".into(),
+    })?;
+    let source = axis.name.as_str();
+    let axis_type = match &axis.unit {
+        rspice_core::execution::SignalUnit::Volt => "voltage",
+        rspice_core::execution::SignalUnit::Ampere => "current",
+        rspice_core::execution::SignalUnit::Custom(unit) if unit == "degC" => "temperature",
+        _ => "notype",
+    };
+    let results = result
+        .points
+        .iter()
+        .map(|p| (p.sweep_value, p.result.clone()))
+        .collect::<Vec<_>>();
+    for (_, point) in &results {
+        super::shared::ensure_finite_series(
+            ctx.args.allow_nonfinite,
+            "DC Sweep",
+            (1..point.node_voltages.len()).map(|node| {
+                let name = point
+                    .node_names
+                    .get(node)
+                    .map(|n| n.as_str())
+                    .unwrap_or("node");
+                (name, std::slice::from_ref(&point.node_voltages[node]))
+            }),
+        )?;
     }
+
+    if !ctx.quiet {
+        crate::console::line(format_args!("DC Sweep: {} points computed", results.len()))?;
+    }
+
+    let measurements = rspice_core::analysis::evaluate_dc_measurements_with_abort(
+        ctx.netlist,
+        &results,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|source| CliError::CoreSimulationError {
+        source,
+        analysis: Some("DC measurement projection".to_string()),
+    })?;
+    ctx.record_measurements("DC", measurements)?;
+    let continuous_measurements =
+        rspice_core::analysis::evaluate_dc_continuous_measurements(ctx.netlist, &results);
+    super::shared::record_continuous_measurements(ctx, "DC_CONT", continuous_measurements)?;
+
+    // Resolve the authored output contract even when the caller did
+    // not request a file. A valid `.SAVE @device[param]` is part of
+    // deck execution semantics; an unavailable probe must not become
+    // a silent successful run merely because `-o` was omitted.
+    let signals = dc_export_signals(
+        ctx.netlist,
+        &results,
+        ctx.engine.config().resource_limits,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|error| map_output_projection_error(ctx, error, "DC"))?;
+
+    if let Some(output) = ctx.resolve_output("dc") {
+        let analysis_id = output.analysis("dc")?;
+        let sweep_vals: Vec<f64> = results.iter().map(|(v, _)| *v).collect();
+        super::shared::ensure_finite_series(
+            ctx.args.allow_nonfinite,
+            "DC Sweep output projection",
+            signals
+                .iter()
+                .map(|signal| (signal.display_name.as_str(), signal.values.as_slice())),
+        )?;
+        super::document::publish_analysis_result(
+            ctx,
+            &output.path,
+            analysis_id,
+            super::document::scalar_schema(&signals)?,
+            || {
+                rspice_core::execution::AnalysisResultDocument::from_dc_analysis(
+                    analysis_id,
+                    result,
+                )
+            },
+            |path, format| match format {
+                OutputFormat::Hdf5 => {
+                    let mut data = Hdf5SimulationData::new();
+                    data.title = "DC Sweep".to_string();
+                    data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
+
+                    let mut dc_sweep = Hdf5WaveformSection::new(source, sweep_vals.clone());
+                    for signal in &signals {
+                        dc_sweep.add_typed_signal(
+                            signal.display_name.clone(),
+                            signal.raw_variable_type(),
+                            signal.unit_symbol(),
+                            signal.values.clone(),
+                        );
+                    }
+                    data.dc_sweep = Some(dc_sweep);
+                    write_hdf5(path, &data).map_err(|err| map_hdf5_output_error(path, err))
+                }
+                format => super::export::scalar_table(
+                    "dc_sweep",
+                    "DC transfer characteristic",
+                    source,
+                    axis_type,
+                    sweep_vals.clone(),
+                    &signals,
+                )
+                .write(path, format),
+            },
+        )?;
+
+        if !ctx.quiet {
+            crate::console::line(format_args!(
+                "Results exported to: {}",
+                output.path.display()
+            ))?;
+        }
+    }
+    Ok(())
 }
 
 /// One line of compression evidence: which signal came closest to leaving its

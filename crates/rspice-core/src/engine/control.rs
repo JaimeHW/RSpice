@@ -44,6 +44,7 @@ pub enum ControlExecutionError {
 pub enum ControlAnalysisResult {
     OperatingPoint(Box<crate::solver::SimulationResult>),
     Ac(Vec<AcResult>),
+    DcSweep(Box<super::DcSweepResult>),
     Transient(Box<TransientResult>),
 }
 
@@ -86,7 +87,7 @@ impl CommandKind {
             "option" | "options" => Self::Options,
             "set" => Self::Set,
             "alter" => Self::Alter,
-            "op" | "ac" | "tran" => Self::Analysis,
+            "op" | "dc" | "ac" | "tran" => Self::Analysis,
             "run" => Self::Run,
             "plot" | "print" | "settype" => Self::Presentation,
             _ => {
@@ -277,6 +278,7 @@ impl ControlCircuit {
             .map_err(|source| ControlExecutionError::Configuration { line, source })?;
         let (kind, identity_kind) = match &analysis {
             AnalysisCommand::Op => ("op", crate::identity::AnalysisKind::Op),
+            AnalysisCommand::Dc { .. } => ("dc", crate::identity::AnalysisKind::Dc),
             AnalysisCommand::Ac { .. } => ("ac", crate::identity::AnalysisKind::Ac),
             AnalysisCommand::Tran { .. } => ("tran", crate::identity::AnalysisKind::Tran),
             _ => {
@@ -320,6 +322,30 @@ impl ControlCircuit {
                 (
                     "op",
                     ControlAnalysisResult::OperatingPoint(Box::new(result)),
+                    count,
+                )
+            }
+            AnalysisCommand::Dc {
+                source,
+                start,
+                stop,
+                step,
+                mode,
+                sweep2,
+            } => {
+                let spec = crate::netlist::DcSweepSpec {
+                    start: *start,
+                    stop: *stop,
+                    step: *step,
+                    mode: mode.clone(),
+                };
+                let result = bounded
+                    .run_dc_analysis_with_abort(&netlist, source, &spec, sweep2.as_ref(), abort)
+                    .map_err(|error| simulation_error(line, error))?;
+                let count = result.value_count();
+                (
+                    "dc",
+                    ControlAnalysisResult::DcSweep(Box::new(result)),
                     count,
                 )
             }

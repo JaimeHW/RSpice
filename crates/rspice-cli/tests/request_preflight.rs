@@ -12,6 +12,8 @@ fn check_and_run_reject_invalid_requests_before_publication() {
         ("tran", ".tran 1u -1m", "TSTOP"),
         ("ac", ".ac dec 1 100 1", "stop frequency"),
         ("dc", ".dc V1 0 1 0", "DC sweep"),
+        ("control-dc", ".control\ndc V1 0 1 0\n.endc", "DC sweep"),
+        ("control-dc-run", ".dc V1 0 1 0\n.control\nrun\n.endc", "DC sweep"),
         (
             "control-op-args",
             ".control\nop unexpected\n.endc",
@@ -36,12 +38,12 @@ fn check_and_run_reject_invalid_requests_before_publication() {
         ),
         (
             "control-unsupported",
-            ".control\ndc V1 0 1 0.1\n.endc",
+            ".control\ntf V(in) V1\n.endc",
             "no electrical or presentation handler",
         ),
         (
             "control-unsupported-run",
-            ".dc V1 0 1 0.1\n.control\nrun\n.endc",
+            ".tf V(in) V1\n.control\nrun\n.endc",
             "no control-host execution handler",
         ),
         (

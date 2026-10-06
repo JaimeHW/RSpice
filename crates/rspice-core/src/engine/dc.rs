@@ -12,6 +12,9 @@ use crate::resource::{ResourceKind, ResourceLimitError};
 use crate::solver::{SimulationResult, StaticMatrix};
 use crate::{CircuitData, Netlist, Value};
 
+mod result;
+pub use result::{DcSweepAxis, DcSweepResult};
+
 const DC_SWEEP_CONTINUATION_MAX_SUBDIVISIONS: usize = 128;
 const DC_SWEEP_RESULT_PREALLOC_LIMIT: usize = 4096;
 

@@ -285,7 +285,10 @@ pub(crate) fn check_requests(
                 }
                 if !matches!(
                     analysis,
-                    AnalysisCommand::Op | AnalysisCommand::Ac { .. } | AnalysisCommand::Tran { .. }
+                    AnalysisCommand::Op
+                        | AnalysisCommand::Dc { .. }
+                        | AnalysisCommand::Ac { .. }
+                        | AnalysisCommand::Tran { .. }
                 ) {
                     return Err(located(invalid(
                         "this analysis has no control-host execution handler",
@@ -299,7 +302,7 @@ pub(crate) fn check_requests(
                     "run has no declarative analysis to execute",
                 )));
             }
-        } else if matches!(command.name.as_str(), "op" | "ac" | "tran") {
+        } else if matches!(command.name.as_str(), "op" | "dc" | "ac" | "tran") {
             if command.arguments.contains('$') {
                 deferred.push(command.line);
                 continue;

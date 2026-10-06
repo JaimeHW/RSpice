@@ -846,8 +846,18 @@ impl<'a> RunContext<'a> {
                 stop,
                 step,
                 sweep2,
-                mode: _,
-            } => basic::run_dc_sweep(self, source, *start, *stop, *step, sweep2.as_ref())?,
+                mode,
+            } => basic::run_dc_sweep(
+                self,
+                source,
+                &rspice_core::netlist::DcSweepSpec {
+                    start: *start,
+                    stop: *stop,
+                    step: *step,
+                    mode: mode.clone(),
+                },
+                sweep2.as_ref(),
+            )?,
             AnalysisCommand::Tran {
                 step,
                 stop,

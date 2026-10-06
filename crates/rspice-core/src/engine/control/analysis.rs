@@ -9,7 +9,7 @@ impl ControlCircuit {
         CommandKind::parse(command).map(|_| ())
     }
 
-    /// Parse one OP, AC or TRAN request using the execution grammar and limits.
+    /// Parse one OP, DC, AC or TRAN request using the execution grammar and limits.
     /// Arguments must already be literal or substituted. No analysis is run.
     pub fn parse_analysis_command(
         command: &ControlCommand,
@@ -18,7 +18,9 @@ impl ControlCircuit {
     ) -> Result<AnalysisCommand, ControlExecutionError> {
         let line = command.line;
         if !matches!(CommandKind::parse(command)?, CommandKind::Analysis) {
-            return Err(command_error(line, "expected an OP, AC or TRAN analysis command").into());
+            return Err(
+                command_error(line, "expected an OP, DC, AC or TRAN analysis command").into(),
+            );
         }
         if command.arguments.contains(['\r', '\n']) {
             return Err(command_error(

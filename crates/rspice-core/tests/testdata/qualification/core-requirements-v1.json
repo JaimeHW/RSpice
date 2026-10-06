@@ -29,7 +29,7 @@
     },
     {
       "id": "C04",
-      "status": "open",
+      "status": "in_progress",
       "requirement": "Control execution",
       "qualification_task": "Compare every command with direct execution; verify producer dependencies, alteration, nested sweeps, limits and cancellation."
     },
@@ -113,7 +113,7 @@
         "path": "src/engine/dc.rs",
         "symbol": "run_dc_sweep2_spec_with_report_and_abort"
       },
-      "control_host": "missing",
+      "control_host": "implemented",
       "owner": "C04",
       "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
     },

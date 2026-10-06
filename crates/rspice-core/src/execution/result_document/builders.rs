@@ -12,6 +12,8 @@
 //!
 //! [`AnalysisResultDocument`]: super::AnalysisResultDocument
 
+mod dc;
+
 use std::collections::BTreeMap;
 
 use num_complex::Complex64;

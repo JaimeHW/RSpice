@@ -135,6 +135,9 @@ pub(super) fn run(
                                     })?;
                                 basic::finish_dc_op_result(&ctx, result, report)?;
                             }
+                            ControlAnalysisResult::DcSweep(result) => {
+                                basic::finish_dc_sweep_result(&ctx, result)?;
+                            }
                             ControlAnalysisResult::Ac(result) => {
                                 frequency::finish_ac_results(&ctx, result)?
                             }
