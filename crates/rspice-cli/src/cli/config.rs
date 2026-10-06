@@ -348,16 +348,14 @@ impl Config {
     fn load_user_layer() -> Result<Option<ConfigLayer>, ConfigError> {
         if let Some(config_dir) = dirs::config_dir() {
             let config_path = config_dir.join("rspice").join("config.toml");
-            if config_path.exists() {
-                return Self::load_layer(&config_path).map(Some);
+            if let Some(layer) = Self::load_optional_layer(&config_path)? {
+                return Ok(Some(layer));
             }
         }
 
         if let Some(home) = dirs::home_dir() {
             let rc_path = home.join(".rspicerc");
-            if rc_path.exists() {
-                return Self::load_layer(&rc_path).map(Some);
-            }
+            return Self::load_optional_layer(&rc_path);
         }
 
         Ok(None)
@@ -365,11 +363,20 @@ impl Config {
 
     /// Load project configuration from current directory
     fn load_project_layer() -> Result<Option<ConfigLayer>, ConfigError> {
-        let rc_path = PathBuf::from(".rspicerc");
-        if rc_path.exists() {
-            return Self::load_layer(&rc_path).map(Some);
+        Self::load_optional_layer(std::path::Path::new(".rspicerc"))
+    }
+
+    fn load_optional_layer(path: &std::path::Path) -> Result<Option<ConfigLayer>, ConfigError> {
+        // Only an absent entry permits fallback. Follow an existing symlink in
+        // load_layer so a broken target or access failure cannot erase a layer.
+        match std::fs::symlink_metadata(path) {
+            Ok(_) => Self::load_layer(path).map(Some),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(source) => Err(ConfigError::IoError {
+                path: path.to_path_buf(),
+                source,
+            }),
         }
-        Ok(None)
     }
 
     /// Apply one file layer; only the fields the file set are overridden.
@@ -711,7 +718,7 @@ fn validate_celsius(field: &str, value: f64) -> Result<(), ConfigError> {
 /// Configuration loading errors
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("Failed to read config file: {path}")]
+    #[error("Failed to read config file {path}: {source}")]
     IoError {
         path: PathBuf,
         #[source]

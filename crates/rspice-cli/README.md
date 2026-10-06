@@ -702,7 +702,9 @@ Configuration is loaded and merged in order of increasing priority: built-in
 defaults, user config (`~/.config/rspice/config.toml`, falling back to
 `~/.rspicerc`), project config (`./.rspicerc`), environment variables, then
 command-line arguments. `--config <FILE>` replaces the user and project layers
-with that single file. Scalar keys override the layer below; the `[paths]`
+with that single file. Only absent default config files are skipped; unreadable
+files and broken config symlinks fail with the path and filesystem reason.
+Scalar keys override the layer below; the `[paths]`
 lists accumulate, so a project file adds search directories rather than
 discarding the user's.
 

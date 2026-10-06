@@ -86,3 +86,62 @@ fn non_unicode_logging_values_report_configuration_errors() {
         );
     }
 }
+
+#[test]
+fn configuration_read_errors_retain_the_filesystem_reason() {
+    let directory = common::test_dir("config_read_error");
+    for path in [directory.join("missing.toml"), directory.to_path_buf()] {
+        let reason = std::fs::read_to_string(&path).unwrap_err().to_string();
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "--error-format", "json", "--config"])
+            .arg(&path)
+            .args(["health", "--mode", "liveness", "--json"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(78), "{output:?}");
+        assert!(output.stdout.is_empty(), "{output:?}");
+        let diagnostic: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+        let message = diagnostic["error"]["message"].as_str().unwrap();
+        assert!(message.contains(path.to_str().unwrap()), "{message}");
+        assert!(
+            message.contains(&reason),
+            "missing {reason:?} in {message:?}"
+        );
+    }
+}
+
+#[cfg(any(windows, unix))]
+#[test]
+fn a_dangling_project_configuration_is_not_treated_as_absent() {
+    let directory = common::test_dir("config_symlink");
+    let target = directory.join("missing.toml");
+    let config = directory.join(".rspicerc");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&target, &config).unwrap();
+    #[cfg(windows)]
+    if let Err(error) = std::os::windows::fs::symlink_file(&target, &config) {
+        if error.raw_os_error() == Some(1314) {
+            eprintln!("Windows symlink privilege unavailable; skipping runtime assertion");
+            return;
+        }
+        panic!("create configuration symlink: {error}");
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .current_dir(&directory)
+        .args([
+            "--quiet",
+            "--error-format",
+            "json",
+            "health",
+            "--mode",
+            "liveness",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(78), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    let diagnostic: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    let message = diagnostic["error"]["message"].as_str().unwrap();
+    assert!(message.contains(".rspicerc"), "{message}");
+}
