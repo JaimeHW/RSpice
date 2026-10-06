@@ -1023,6 +1023,13 @@ struct PreparedTransientCircuit {
     resume_continuation: Option<ProposedIntegrationContinuation>,
 }
 
+/// Identity construction can parse expanded behavioral expressions. Finish it
+/// after admission and before reserving the integration body's large frame.
+struct AdmittedTransientCircuit {
+    prepared: PreparedTransientCircuit,
+    identity: CheckpointIdentity,
+}
+
 struct TransientCapturePlan {
     voltages: Vec<bool>,
     branch_currents: Vec<bool>,
@@ -4114,7 +4121,16 @@ impl Engine {
         SimulationError,
     > {
         Self::ensure_bjt_transient_phase_support(&prepared.circuit, abort)?;
-        self.run_tran_admitted(netlist, checkpoint_netlist, window, abort, plan, prepared)
+        let admitted = AdmittedTransientCircuit {
+            prepared,
+            identity: CheckpointIdentity {
+                fingerprint: netlist_fingerprint(checkpoint_netlist),
+                netlist_identity: netlist_checkpoint_identity(checkpoint_netlist),
+                restart_identity: restart_checkpoint_identity(checkpoint_netlist),
+                simulation_identity: simulation_checkpoint_identity(&self.config),
+            },
+        };
+        self.run_tran_admitted(netlist, checkpoint_netlist, window, abort, plan, admitted)
     }
 
     /// The production integration body, after public capability admission.
@@ -4127,7 +4143,7 @@ impl Engine {
         window: TransientRunWindow<'_>,
         abort: &dyn AbortSignal,
         plan: TransientResumePlan<'_>,
-        prepared: PreparedTransientCircuit,
+        admitted: AdmittedTransientCircuit,
     ) -> Result<
         (
             TransientResult,
@@ -4136,11 +4152,19 @@ impl Engine {
         ),
         SimulationError,
     > {
-        let PreparedTransientCircuit {
-            mut circuit,
-            modified_trapezoidal_coefficients,
-            resume_continuation,
-        } = prepared;
+        let AdmittedTransientCircuit {
+            prepared: PreparedTransientCircuit {
+                mut circuit,
+                modified_trapezoidal_coefficients,
+                resume_continuation,
+            },
+            identity: CheckpointIdentity {
+                fingerprint,
+                netlist_identity,
+                restart_identity,
+                simulation_identity,
+            },
+        } = admitted;
         let TransientRunWindow {
             tstop,
             max_step,
@@ -4155,10 +4179,6 @@ impl Engine {
             final_checkpoint_retention,
             scheduled_checkpoint_times,
         } = plan;
-        let fingerprint = netlist_fingerprint(checkpoint_netlist);
-        let netlist_identity = netlist_checkpoint_identity(checkpoint_netlist);
-        let restart_identity = restart_checkpoint_identity(checkpoint_netlist);
-        let simulation_identity = simulation_checkpoint_identity(&self.config);
         let mut scheduled_checkpoints = Vec::with_capacity(scheduled_checkpoint_times.len());
         let mut scheduled_checkpoint_cursor = 0_usize;
         let mut retained_scheduled_checkpoint_values = 0_usize;
