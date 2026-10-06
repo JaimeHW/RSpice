@@ -137,10 +137,11 @@ pub enum DefinitionScope {
 }
 
 impl DefinitionScope {
-    fn parse(value: &str) -> Self {
+    fn parse(value: &str) -> Option<Self> {
         match value {
-            "nested" => DefinitionScope::Nested,
-            _ => DefinitionScope::TopLevel,
+            "top" => Some(DefinitionScope::TopLevel),
+            "nested" => Some(DefinitionScope::Nested),
+            _ => None,
         }
     }
 
@@ -853,15 +854,26 @@ impl SpiceLibraryIndex {
         mut visit: impl FnMut(CatalogEntry) -> bool,
     ) -> io::Result<()> {
         let path = self.root.join(self.catalog_index);
-        let reader = BufReader::new(fs::File::open(path)?);
-        for line in reader.lines() {
-            let line = line?;
-            if line.starts_with('#') || line.is_empty() {
+        let reader = BufReader::new(fs::File::open(&path).map_err(|error| {
+            io::Error::new(error.kind(), format!("{}: {error}", path.display()))
+        })?);
+        let packs: HashSet<_> = self.packs.iter().map(|pack| pack.id.as_str()).collect();
+        for (index, line) in reader.lines().enumerate() {
+            let located = |kind, message| {
+                io::Error::new(
+                    kind,
+                    format!("{}: catalog line {}: {message}", path.display(), index + 1),
+                )
+            };
+            let line = line.map_err(|error| located(error.kind(), error.to_string()))?;
+            if line.starts_with('#') || line.trim().is_empty() {
                 continue;
             }
-            let Some(entry) = parse_catalog_row(&line) else {
-                continue;
-            };
+            let invalid = |message| located(io::ErrorKind::InvalidData, message);
+            let entry = parse_catalog_row(&line).map_err(invalid)?;
+            if !packs.contains(entry.pack.as_str()) {
+                return Err(invalid(format!("unknown pack '{}'", entry.pack)));
+            }
             if !visit(entry) {
                 break;
             }
@@ -903,23 +915,56 @@ fn index_path(value: &str) -> PathBuf {
     value.split('/').filter(|part| !part.is_empty()).collect()
 }
 
-fn parse_catalog_row(line: &str) -> Option<CatalogEntry> {
+fn parse_catalog_row(line: &str) -> Result<CatalogEntry, String> {
     let mut fields = line.split('\t');
-    let name = fields.next()?;
-    let kind = fields.next()?;
-    let device = fields.next()?;
-    let pack = fields.next()?;
-    let path = fields.next()?;
-    let line_number = fields.next()?.parse().ok()?;
+    let mut required = || {
+        fields
+            .next()
+            .ok_or_else(|| "expected at least 6 tab-separated fields".to_owned())
+    };
+    let name = required()?;
+    let kind = required()?;
+    let device = required()?;
+    let pack = required()?;
+    let path = required()?;
+    let location = required()?;
+    for (field, value) in [
+        ("name", name),
+        ("device", device),
+        ("pack", pack),
+        ("path", path),
+    ] {
+        if value.trim().is_empty() {
+            return Err(format!("missing {field}"));
+        }
+    }
+    if !kind.eq_ignore_ascii_case("model") && !kind.eq_ignore_ascii_case("subckt") {
+        return Err(format!("unknown definition kind '{kind}'"));
+    }
+    let line_number = location
+        .parse::<usize>()
+        .ok()
+        .filter(|line| *line != 0)
+        .ok_or_else(|| format!("invalid one-based source line '{location}'"))?;
     // Older catalogs predate the restriction column; absent means unflagged.
-    let restricted = fields.next().is_some_and(|value| value == "1");
+    let restricted = match fields.next() {
+        None | Some("0") => false,
+        Some("1") => true,
+        Some(value) => {
+            return Err(format!(
+                "invalid restricted flag '{value}'; expected 0 or 1"
+            ));
+        }
+    };
     // Likewise for scope: a catalog without the column predates nesting being
     // tracked, and treating those rows as addressable preserves the old
     // behaviour rather than silently emptying a browser.
-    let scope = fields
-        .next()
-        .map_or(DefinitionScope::TopLevel, DefinitionScope::parse);
-    Some(CatalogEntry {
+    let scope = match fields.next() {
+        None => DefinitionScope::TopLevel,
+        Some(value) => DefinitionScope::parse(value)
+            .ok_or_else(|| format!("unknown definition scope '{value}'"))?,
+    };
+    Ok(CatalogEntry {
         name: name.to_string(),
         kind: kind.to_string(),
         device: device.to_string(),
@@ -1323,6 +1368,77 @@ mod tests {
         fs::write(root.join(PACKS_INDEX), packs_index).expect("write fixture pack index");
         fs::write(root.join(CATALOG_INDEX), catalog_index).expect("write fixture catalog");
         FixtureCorpus { root }
+    }
+
+    #[test]
+    fn malformed_catalog_rows_never_become_partial_or_unrestricted_results() {
+        let corpus = fixture_corpus("invalid-catalog");
+        let good = "GOOD\tmodel\tdiode\tfixture-open\tparts.lib\t1\t0\ttop";
+        let bad = "BAD\tmodel\tdiode\tfixture-open\tparts.lib\t2\t0\ttop";
+        for (column, value) in [
+            (0, ""),
+            (1, "device"),
+            (2, ""),
+            (3, "absent-pack"),
+            (4, ""),
+            (5, "0"),
+            (5, "bad"),
+            (5, "18446744073709551616"),
+            (6, "yes"),
+            (6, ""),
+            (7, "private"),
+            (7, ""),
+        ] {
+            let mut fields: Vec<_> = bad.split('\t').collect();
+            fields[column] = value;
+            fs::write(
+                corpus.root.join(CATALOG_INDEX),
+                format!("# header\n{good}\n{}\n", fields.join("\t")),
+            )
+            .unwrap();
+            let index = corpus.index();
+            for result in [
+                index.browse_parts(10),
+                index.find_part("GOOD"),
+                index.load_catalog(),
+            ] {
+                let error = result.unwrap_err();
+                assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                assert!(
+                    error.to_string().contains("CATALOG.tsv: catalog line 3"),
+                    "{error}"
+                );
+            }
+        }
+        fs::write(corpus.root.join(CATALOG_INDEX), "BAD\tmodel\n").unwrap();
+        assert!(
+            corpus
+                .index()
+                .load_catalog()
+                .unwrap_err()
+                .to_string()
+                .contains("at least 6")
+        );
+        corpus.discard();
+    }
+
+    #[test]
+    fn legacy_catalog_columns_keep_their_explicit_defaults() {
+        let base = "PART\tmodel\tdiode\tok\tparts.lib\t1";
+        for suffix in ["", "\t0", "\t0\ttop"] {
+            let entry = parse_catalog_row(&format!("{base}{suffix}")).unwrap();
+            assert!(!entry.restricted);
+            assert!(entry.scope.is_addressable());
+        }
+        for suffix in ["\t1", "\t1\ttop"] {
+            assert!(
+                parse_catalog_row(&format!("{base}{suffix}"))
+                    .unwrap()
+                    .restricted
+            );
+        }
+        let nested = parse_catalog_row(&format!("{base}\t0\tnested")).unwrap();
+        assert!(!nested.scope.is_addressable());
     }
 
     #[test]

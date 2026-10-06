@@ -704,6 +704,10 @@ listing to packs whose metadata says redistributable. Browse queries are capped
 so a bare `--device diode` does not spool tens of thousands of lines.
 Malformed pack statistics, inconsistent top-level counts, and overflowing
 totals are rejected with the index filename and line number.
+Invalid catalog records also stop a query with their file and line location;
+they cannot silently disappear or become unrestricted, selectable parts.
+Older catalogs without restriction or scope columns retain their documented
+defaults; present columns must contain valid values.
 
 ## Observability
 
