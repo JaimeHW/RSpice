@@ -1,0 +1,209 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C03",
+  "batch": "C03d.1 analytic current impulse derivatives through every FFT window",
+  "status": "partial_observation_contract_not_ccvs_event_admission",
+  "source_revision": "bcaefd8a3cdfa1151fd143ca614cc1718613d09a",
+  "base_revision": "f277b353202db17e2bb458486b65a36463ad17ef",
+  "captured_utc": "2026-10-06T13:16:07.232188+00:00",
+  "implementation_commits": [
+    "bcaefd8a3cdfa1151fd143ca614cc1718613d09a"
+  ],
+  "host": "x86_64-pc-windows-msvc",
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "rustc": "1.94.0 (4a4ef493e 2026-03-02)",
+    "cargo": "1.94.0 (85eff7c80 2026-01-15)",
+    "wasm_features": "--no-default-features --features wasm,veriloga-wasm-jit",
+    "wasm_profile": "release, Chrome dedicated worker",
+    "wasm_bindgen_test_runner": "0.2.126",
+    "chromedriver": "154.0.8037.92",
+    "chrome": "154.0.8037.98",
+    "webdriver_config_sha256": "93458ed98943268e089c8c9a793bf2e899872e62941ac54795b0c27b7104785b",
+    "native_features": "Default features for rspice-core, rspice-results and rspice-simulation.",
+    "python": "3.12.14",
+    "mpmath": "1.3.0, 100 decimal digits; oracle generation only"
+  },
+  "source_hash_scope": "Working-tree bytes for every file in the implementation commit and dependency/toolchain locks.",
+  "source_sha256": {
+    "crates/rspice-core/src/engine/transient/fft.rs": "89c09ab4496255c368de1e0698ab23fa1e4b1babf38f4e72ee6000658ccba0e9",
+    "crates/rspice-core/src/engine/transient/fft/current_impulse_tests.rs": "a23492fd93ddc8abdd0b73491bf370b3a47f76aff7802cc1107df46039078f44",
+    "crates/rspice-core/src/engine/transient/fft/current_impulses.rs": "3ba0a284224304b6beede13e61b8f0cc58c42dbf8259db246aa04dccf5afa07d",
+    "crates/rspice-core/src/engine/transient/fft/window.rs": "a5ec02c36852a3dd3a8ff5626cf972624e88f70ba11ee066c0e57ce0a09f2bc2",
+    "crates/rspice-core/src/engine/transient/fft/window_derivatives.rs": "0284221276aac44ca6480960b1b15d9a18b1467f8af9c935c921b5c6798c7cdc",
+    "crates/rspice-core/tests/fft_current_derivatives.rs": "f2d6bf324cae2b62d2d99aa0b8720ceae2bea3cd701a2d44cd31d357b5ee0df6",
+    "crates/rspice-core/tests/testdata/qualification/fft-window-derivative-oracle.json": "3ff70465107aa02d02aae587617413fb4e7d36a5eac3f321c1aaf02916f96760",
+    "crates/rspice-core/tests/testdata/qualification/generate_fft_window_derivative_oracle.py": "6f7ddcbbcb65f1a7086d62bc067197ba0f4d67897bedde7b6266dd58181f6495",
+    "Cargo.lock": "ce8dc157a78d2268ff926067f15f08002b90185b9abd7320c4952d3a266fcf8a",
+    "rust-toolchain.toml": "d6dadd139dac178482d6cca3a8945b8a7e0f7df1f0733872657cbc420b2d82e6"
+  },
+  "publication_ledger_sha256": "389e268acb3d3867c5d726f51653a4ec22efd6f829a3f68c0e312b291c8b6700",
+  "implementation": {
+    "shared_window_law": "Finite samples and analytic derivatives share canonical nonnegative sine-polynomial windows. Reflection preserves small endpoint distances; Hann/Blackman/Cosine4/Sine6 no longer lose representable endpoint weights to cosine cancellation. Gaussian and Kaiser retain their authored alpha conventions.",
+    "derivatives": "Leibniz derivatives combine raw analytic window derivatives with the complex exponential at the exact retained event time. Polynomial convolution, a Gaussian recurrence and a positive hypergeometric Kaiser derivative series use retained binary exponents and exact product sums. Rectangular windows keep their logarithmic-order fast path.",
+    "public_route": "Engine::evaluate_transient_fft_results uses the same preflight and evaluation as transient post-processing. Finite samples, ordinary charge impulses and higher current derivatives combine before normalization and metrics, including affine current/voltage expressions.",
+    "boundaries": "Ownership is (START,STOP]. Periodic windows wrap at STOP; symmetric windows have compact support through the last sample. Classical derivatives are evaluated where they exist. Genuine triangular corners and insufficiently smooth support boundaries return explicit errors. A normalized interior coordinate that rounds onto a boundary also returns a distinct numerical error.",
+    "resources": "Checked workspace accounting, fallible vector reserves and bounded-stride cancellation cover derivative accumulation. A filtered-term regression limits work before cancellation. Resource refusal and cancellation preserve subsequent reuse.",
+    "runtime_admission": "The transition kernel remains cfg(test); no physical event provider generates higher derivatives, H-family event admission remains absent, and checkpoint identity remains v105."
+  },
+  "coverage": {
+    "independent_oracle": "mpmath 1.3.0 differentiates the original cosine/Bessel definitions at 100 decimal digits, independently of production polynomial jets and Kaiser recurrence. 400 spectra / 2000 complex coefficients cover all 16 windows, both window conventions, orders 1/2/3/5/8 and positions 5/16 and 11/16. Gaussian/Kaiser alpha values are 1/3/20. Eight points, START=0.5, duration=1.25 and coefficient=-1e-6.",
+    "gates": "Complex error <2e-12*max(reference norm,1e-30); coherent gain relative error <2e-14. Separate cases cover support endpoints, corners, affine weighting, finite samples plus charge plus derivatives, normalized/unnormalized output and metrics.",
+    "range": "Five taper families preserve compensating duration/coefficient scales (1e-150,1e-300) and (1e150,1e300) for order two. u32::MAX order receives bounded typed refusal; an order-128 Kaiser operation can be cancelled and a subsequent operation succeeds.",
+    "scope": "Selected native tests and five optimized WASM integration tests; no all-order/all-parameter or full-core qualification, benchmark, public CCVS solve, external-model/JIT execution or product-readiness claim."
+  },
+  "runs": [
+    {
+      "command": "cargo test --locked -p rspice-core --test fft_current_derivatives -- --nocapture",
+      "source_scope": "Final production implementation before commit; matches source_revision. The unit cancellation assertion was strengthened afterward without changing production code.",
+      "outcome": "passed",
+      "test_target_totals": [
+        {
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 0
+        }
+      ],
+      "log": "target/core-qualification/window-derivatives-public-final.log",
+      "log_sha256": "5321db24fc6aa95cbce06de3a2fe3cd826edbc7e63c7b06e387175999ccd2a77",
+      "maximum_relative_complex_coefficient_error": 1.247069348598779e-14
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib engine::transient::fft -- --nocapture",
+      "source_scope": "Final production implementation before commit; matches source_revision. The unit cancellation assertion was strengthened afterward without changing production code.",
+      "outcome": "passed",
+      "test_target_totals": [
+        {
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 4912
+        }
+      ],
+      "log": "target/core-qualification/window-derivatives-core-fft-final.log",
+      "log_sha256": "ab2b18910b7e1520c7b0853b1e9df202a7e829530286e1354a37fd49f55ef5ef"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib filtered_window_derivative_sums_poll_cancellation -- --nocapture",
+      "source_scope": "Final source before commit, including the bounded-work cancellation assertion.",
+      "outcome": "passed",
+      "test_target_totals": [
+        {
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 4932
+        }
+      ],
+      "log": "target/core-qualification/window-derivatives-cancellation-final.log",
+      "log_sha256": "72b5992398fbdf87de7c9994549d546a36252ab6af845f70318e7eee64c1dd17"
+    },
+    {
+      "command": "cargo clippy --locked --keep-going -p rspice-core --lib --tests -- -D warnings",
+      "source_scope": "Final production source; before the cancellation fixture poll threshold changed from two to one.",
+      "outcome": "passed",
+      "test_target_totals": [],
+      "log": "target/core-qualification/window-derivatives-clippy-final.log",
+      "log_sha256": "1de5f7c63cc0e0e23b32f8cb31d52b15477c1e9b0498a9db938e90cc03648036"
+    },
+    {
+      "command": "cargo test --locked -p rspice-results -p rspice-simulation --lib fft -- --nocapture",
+      "source_scope": "Development source with the shared window law and analytic derivatives; before the strengthened cancellation unit assertion.",
+      "outcome": "passed",
+      "test_target_totals": [
+        {
+          "passed": 53,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 393
+        },
+        {
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 1064
+        }
+      ],
+      "log": "target/core-qualification/window-derivatives-adapters.log",
+      "log_sha256": "dd640a83796463ad9bcddba02869645d4fee73dd7ff148462b7e61c4d8463e40"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test fft_current_derivatives -- --nocapture",
+      "source_scope": "bcaefd8a3cdfa1151fd143ca614cc1718613d09a; clean committed checkout at dispatch.",
+      "outcome": "passed",
+      "test_target_totals": [
+        {
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 0
+        }
+      ],
+      "log": "target/core-qualification/window-derivatives-wasm.log",
+      "log_sha256": "526c7d9a6d222aaad2163c7fb8cd7fa323ba855bd8f689d749a0ed79ae313d42"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib requirements -- --nocapture",
+      "source_scope": "bcaefd8a3cdfa1151fd143ca614cc1718613d09a; production source unchanged; updated requirement prose and test inventory.",
+      "outcome": "passed",
+      "test_target_totals": [
+        {
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 4930
+        }
+      ],
+      "log": "target/core-qualification/window-derivatives-requirements.log",
+      "log_sha256": "dfc4167a32f4ee4ebcc394784961fe7e13bc85e74a3b6a0950bcb87da7ab290f"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test fft_current_derivatives -- --nocapture",
+      "source_scope": "Development test fixture.",
+      "outcome": "compile_failure: non-exhaustive ResourceLimits struct literal; corrected to default plus field assignment",
+      "test_target_totals": [],
+      "log": "target/core-qualification/window-derivatives-public.log",
+      "log_sha256": "715146a3d8177b7dced1b8fa72006a6471e67cbc50e3ed97de34f461c4c9a8ca"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib engine::transient::fft -- --nocapture",
+      "source_scope": "Development endpoint regression.",
+      "outcome": "compile_failure: ambiguous floating-point literal in regression; corrected to explicit f64",
+      "test_target_totals": [],
+      "log": "target/core-qualification/window-derivatives-core-fft.log",
+      "log_sha256": "94478a699a9801977196ac7da235465c804f347af4f9ae6327e1b0e84b4e2ff0"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib filtered_window_derivative_sums_poll_cancellation -- --nocapture",
+      "source_scope": "Development bounded-work cancellation assertion.",
+      "outcome": "test_fixture_failure: threshold two permits two successful polls (129 terms); changed to threshold one for the intended 65-term bound",
+      "test_target_totals": [
+        {
+          "passed": 0,
+          "failed": 1,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 4932
+        }
+      ],
+      "log": "target/core-qualification/window-derivatives-cancellation-threshold.log",
+      "log_sha256": "675b6071f7a31c0e86f4d386d12a7cea175ac2853011965f1c08ddc7c6f7e5b4"
+    }
+  ],
+  "remaining": [
+    "Typed voltage impulse observations and actual circuit/provider generation of higher current derivatives.",
+    "Generalized INTEG/AVG boundary state and envelope projection; their temporary refusals remain incomplete functionality.",
+    "Structurally certified descriptor assembly, nonlinear GP coupling, sided forcing derivatives and startup storage.",
+    "Atomic finite/rate/winding acceptance, rejection, restart and public CCVS startup/event/continuation evidence before admission.",
+    "All C00-C14 packages retain their open/in-progress status."
+  ]
+}
