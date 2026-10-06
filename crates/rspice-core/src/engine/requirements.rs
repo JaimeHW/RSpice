@@ -194,6 +194,14 @@ fn analysis_inventory_parses_and_matches_control_execution() {
             panic!("{name}: inventory card must name exactly one command");
         };
         assert_eq!(variant(command), name);
+        // `run` selects standalone producers. Result-dependent Fourier and
+        // sweep/temperature cards need a producer; their presence alone does
+        // not constitute an executable analysis. Their missing control-host
+        // behavior still belongs to C04 and must not be marked implemented.
+        let needs_producer = matches!(
+            command,
+            AnalysisCommand::Four { .. } | AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. }
+        );
         let route = &row["route"];
         let implementation =
             std::fs::read_to_string(root.join(route["path"].as_str().unwrap())).unwrap();
@@ -223,10 +231,12 @@ fn analysis_inventory_parses_and_matches_control_execution() {
                         "new control support needs a ledger update and numerical qualification",
                     )
                     .to_string();
-                assert!(
-                    error.contains("no control-host execution handler"),
-                    "{name}: {error}"
-                );
+                let expected = if needs_producer {
+                    "run has no declarative analysis to execute"
+                } else {
+                    "no control-host execution handler"
+                };
+                assert!(error.contains(expected), "{name}: {error}");
                 assert!(host.datasets().is_empty());
             }
             status => panic!("unknown control implementation status {status}"),
