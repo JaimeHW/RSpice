@@ -2034,6 +2034,18 @@ fn read_required_f64_attr(attrs: &HashMap<String, AttrValue>, name: &str) -> Res
     }
 }
 
+/// Preserve resource admission and publication failures across every HDF5 producer.
+pub(crate) fn map_output_error(path: &Path, error: Hdf5Error) -> crate::cli::CliError {
+    match error {
+        Hdf5Error::ResourceLimit(source) => crate::cli::CliError::ResourceLimit {
+            path: path.to_path_buf(),
+            source,
+        },
+        Hdf5Error::Publication(error) => rspice_core::SimulationError::from(error).into(),
+        error => crate::cli::CliError::output_error(path, std::io::Error::other(error)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2576,17 +2588,5 @@ mod tests {
             let fft_error = read_hdf5(&fft_path).expect_err("reject unsupported FFT schema");
             assert!(matches!(fft_error, Hdf5Error::InvalidSchema(_)));
         }
-    }
-}
-
-/// Preserve resource admission and publication failures across every HDF5 producer.
-pub(crate) fn map_output_error(path: &Path, error: Hdf5Error) -> crate::cli::CliError {
-    match error {
-        Hdf5Error::ResourceLimit(source) => crate::cli::CliError::ResourceLimit {
-            path: path.to_path_buf(),
-            source,
-        },
-        Hdf5Error::Publication(error) => rspice_core::SimulationError::from(error).into(),
-        error => crate::cli::CliError::output_error(path, std::io::Error::other(error)),
     }
 }

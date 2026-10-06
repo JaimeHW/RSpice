@@ -189,7 +189,6 @@ impl DeckPlanMaterializer<'_> {
         self.materialize_run_with_abort(run_index, &NoAbort)
     }
 
-    /// Materialize one coordinate while observing cooperative cancellation.
     /// Re-elaborate one coordinate without constructing a circuit or allocating
     /// a solver matrix. Validators use this to inspect every concrete deck under
     /// the same parameter, temperature, DATA and statistical replay rules.
@@ -273,7 +272,12 @@ impl DeckPlanMaterializer<'_> {
         abort: &dyn AbortSignal,
     ) -> Result<MaterializedRun, MaterializedRunError> {
         let netlist = self.materialize_netlist_with_abort(run_index, abort)?;
-        let coordinate = self.coordinates[run_index].clone();
+        let coordinate = self.coordinates.get(run_index).cloned().ok_or(mismatch(
+            MaterializationMismatchError::CoordinateIndex {
+                index: run_index,
+                coordinate_count: self.coordinates.len(),
+            },
+        ))?;
         let mut configured_count = 0usize;
         for analysis in &netlist.analyses {
             ensure_not_aborted(abort)?;
