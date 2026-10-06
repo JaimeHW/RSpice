@@ -5,6 +5,7 @@ use crate::device::MatrixStamper;
 mod current_coupling;
 mod flux;
 mod native;
+mod operating_point;
 
 fn options() -> EventOptions {
     EventOptions {

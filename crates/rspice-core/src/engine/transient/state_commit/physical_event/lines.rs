@@ -72,7 +72,7 @@ pub(super) fn prepare(
             return Err(SimulationError::Aborted);
         }
         let (incoming, incoming_wave_slopes) =
-            if matches!(step.phase_events, PhysicalEventOrders::Startup) {
+            if matches!(step.phase_events, PhysicalEventOrders::Startup(_)) {
                 // Startup's incoming wave is the selected DC/IC history. It need
                 // not solve the transient source's independently authored left limit.
                 let anchor = line

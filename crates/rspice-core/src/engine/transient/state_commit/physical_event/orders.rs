@@ -9,7 +9,7 @@ use crate::engine::transient::source_events::{PhysicalSourceEvents, PhysicalSour
 pub(in crate::engine::transient) enum PhysicalEventOrders<'a> {
     /// The selected DC/IC history precedes the first outgoing transient
     /// point. Its waveform continuity is not a DC-to-transient certificate.
-    Startup,
+    Startup(Option<startup::OperatingPointStartup>),
     /// An independently justified declaration, retained for explicit event
     /// owners and their acceptance-contract tests.
     Declared(&'a [Option<DelayEventOrder>]),
@@ -61,14 +61,21 @@ pub(super) fn classify(
     topology: &charge_event::ChargeEventTopology,
     abort: &dyn AbortSignal,
 ) -> Result<ClassifiedOrders, SimulationError> {
-    if matches!(step.phase_events, PhysicalEventOrders::Startup) {
+    if let PhysicalEventOrders::Startup(operating_point) = &step.phase_events {
+        // An unchanged autonomous equilibrium extends its constant prehistory.
+        // Inventing a time-zero discontinuity here creates a false delay
+        // arrival and reprojects that equilibrium after each transport time.
+        // Only the separately authenticated OP/forcing contract can omit it.
         return Ok(ClassifiedOrders {
             orders: sampler
                 .models()
                 .iter()
                 .map(|model| {
-                    (model.legacy_excess_phase_delay() != 0.0)
-                        .then_some(DelayEventOrder::AtLeast(0))
+                    (model.legacy_excess_phase_delay() != 0.0
+                        && !operating_point
+                            .as_ref()
+                            .is_some_and(|point| point.stationary))
+                    .then_some(DelayEventOrder::AtLeast(0))
                 })
                 .collect(),
             continuous: false,

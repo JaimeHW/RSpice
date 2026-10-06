@@ -6,7 +6,6 @@ use super::*;
 /// RB/RC/RE drops, calculated from the independent DC transport equations.
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
-#[ignore = "C03c.2: weak reverse-charge DC startup still fails at requested accuracy; required qualification"]
 fn gp_exact_phase_retains_a_small_reverse_charge_mode_at_private_dc_bias() {
     for dialect in [
         SpiceDialect::Ngspice,

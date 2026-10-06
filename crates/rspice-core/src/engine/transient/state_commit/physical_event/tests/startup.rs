@@ -23,6 +23,7 @@ fn physical_startup_observation_preflight_refusal_preserves_all_model_targets() 
             circuit: &mut circuit,
             solution: &mut solution,
             history: &mut history,
+            operating_point: None,
         },
         &options(),
         1e-20,

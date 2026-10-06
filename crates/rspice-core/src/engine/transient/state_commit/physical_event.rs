@@ -226,7 +226,7 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        let startup = matches!(step.phase_events, PhysicalEventOrders::Startup);
+        let startup = matches!(step.phase_events, PhysicalEventOrders::Startup(_));
         let valid_interval = if startup {
             step.time == 0.0 && step.dt == 0.0
         } else {
@@ -321,7 +321,9 @@ impl Engine {
                     abort,
                 )
             };
-            let state = if classified.continuous {
+            let state = if matches!(step.phase_events, PhysicalEventOrders::Startup(Some(_))) {
+                topology.solve_operating_point(step.incoming, &incoming_q, options, abort, sample)?
+            } else if classified.continuous {
                 topology.solve_continuous(step.incoming, &incoming_q, options, abort, sample)?
             } else {
                 topology.solve(step.incoming, &incoming_q, options, abort, sample)?

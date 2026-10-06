@@ -3,6 +3,90 @@
 //! nominal incoming side. All fallible work precedes publication.
 
 use super::*;
+use crate::engine::convergence::{
+    AcceptedTransientOperatingPointContract, TransientOperatingPointLinearSystem,
+};
+
+/// An unconstrained operating point still belongs to the outgoing equations.
+/// Construction checks source-side and conditioning identity; the event solve
+/// independently audits charge, algebraic constraints and finite-current KCL.
+pub(in crate::engine::transient) struct OperatingPointStartup {
+    pub(super) stationary: bool,
+}
+
+#[cfg(test)]
+#[path = "startup_contract_tests.rs"]
+mod contract_tests;
+
+fn constant_source(spec: &crate::netlist::SourceSpec) -> bool {
+    use crate::netlist::SourceSpec as S;
+    match spec {
+        S::Dc(_) | S::Ac { .. } | S::DcAc { .. } => true,
+        S::Distortion { inner, .. } => constant_source(inner),
+        S::DcTransient { transient, .. }
+        | S::AcTransient { transient, .. }
+        | S::DcAcTransient { transient, .. } => constant_source(transient),
+        // RF annotations can add a transient tone. Noise and even apparently
+        // flat sampled waveforms need their own forcing proof.
+        _ => false,
+    }
+}
+
+impl Engine {
+    fn physical_startup_operating_point(
+        &self,
+        circuit: &crate::CircuitData,
+        contract: Option<AcceptedTransientOperatingPointContract>,
+        options: &charge_event::EventOptions,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<OperatingPointStartup>, SimulationError> {
+        let Some(contract) = contract else {
+            return Ok(None);
+        };
+        if contract.linear_system != TransientOperatingPointLinearSystem::IdealInductorShorts
+            // A line owns incoming waves as well as electrical coordinates;
+            // an OP certificate alone does not authenticate that history.
+            || !circuit.tlines.is_empty()
+            || contract.nodal_gmin != options.nodal_gmin
+            || contract.junction_gmin.is_some_and(|gmin| {
+                gmin != self.effective_device_junction_gmin(self.config.convergence_config.gmin_target)
+            })
+        {
+            return Ok(None);
+        }
+        let voltage = &circuit.voltage_sources;
+        let current = &circuit.current_sources;
+        // Compare the authored forcing itself, not its residual after it is
+        // summed with other contributions: a tiny source jump remains real.
+        for i in 0..voltage.len().max(current.len()) {
+            if i.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            if (i < voltage.len()
+                && voltage.transient_value_at_on_side(i, 0.0, SourceTimeSide::Published)
+                    != voltage.transient_value_at_on_side(i, 0.0, SourceTimeSide::RightLimit))
+                || (i < current.len()
+                    && current.value_at_time_on_side(i, 0.0, SourceTimeSide::Published)
+                        != current.value_at_time_on_side(i, 0.0, SourceTimeSide::RightLimit))
+            {
+                return Ok(None);
+            }
+        }
+        let mut stationary = true;
+        for (index, spec) in voltage
+            .source_specs
+            .iter()
+            .chain(&current.source_specs)
+            .enumerate()
+        {
+            if index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            stationary &= spec.as_ref().is_none_or(constant_source);
+        }
+        Ok(Some(OperatingPointStartup { stationary }))
+    }
+}
 
 pub(super) struct StartupSeed {
     pub charges: Vec<Value>,
@@ -184,6 +268,7 @@ pub(in crate::engine::transient) struct PhysicalStartupTargets<'a> {
     pub circuit: &'a mut crate::CircuitData,
     pub solution: &'a mut Vec<Value>,
     pub history: &'a mut BjtTransientHistory,
+    pub operating_point: Option<AcceptedTransientOperatingPointContract>,
 }
 
 impl Engine {
@@ -205,6 +290,7 @@ impl Engine {
                 circuit,
                 solution,
                 history,
+                operating_point: None,
             },
             options,
             flux_tolerance,
@@ -228,6 +314,7 @@ impl Engine {
             circuit,
             solution,
             history,
+            operating_point,
         } = targets;
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
@@ -247,7 +334,12 @@ impl Engine {
                 incoming: solution,
                 time: 0.0,
                 dt: 0.0,
-                phase_events: PhysicalEventOrders::Startup,
+                phase_events: PhysicalEventOrders::Startup(self.physical_startup_operating_point(
+                    circuit,
+                    operating_point,
+                    options,
+                    abort,
+                )?),
             },
             options,
             flux_tolerance,

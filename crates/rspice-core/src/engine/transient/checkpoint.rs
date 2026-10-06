@@ -1286,7 +1286,9 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v97 balances rounding-sized event remainders before model floor fitting.
     // v98 selects charge-component hubs for the algebraic event rows, retaining
     // small peripheral storage modes without subtracting dominant charges.
-    hasher.update(b"rspice-transient-resolved-config-v98\0");
+    // v99 preserves authenticated operating-point balance during physical
+    // startup and avoids inventing a transport event for stationary forcing.
+    hasher.update(b"rspice-transient-resolved-config-v99\0");
     hash_field(
         &mut hasher,
         "gp_transient_phase_model",

@@ -9,8 +9,19 @@ use rspice_core::{
 };
 
 fn deck(devices: usize, phase: f64) -> Netlist {
+    deck_with_startup_event(devices, phase, false)
+}
+
+fn deck_with_startup_event(devices: usize, phase: f64, startup_event: bool) -> Netlist {
+    // A sampled waveform conservatively retains its startup event provenance,
+    // even when its knots are equal. A constant-source OP needs no such record.
+    let base = if startup_event {
+        "PWL(0 .7 1 .7)"
+    } else {
+        ".7"
+    };
     let mut text = format!(
-        "GP history budget\nVC c 0 2\nVB b 0 .7\n.model qm NPN IS=1e-16 BF=100 TF=1n PTF={phase}\n"
+        "GP history budget\nVC c 0 2\nVB b 0 {base}\n.model qm NPN IS=1e-16 BF=100 TF=1n PTF={phase}\n"
     );
     for index in 0..devices {
         text.push_str(&format!("Q{index} c b 0 qm\n"));
@@ -31,10 +42,11 @@ fn config(limit: usize) -> SimulationConfig {
 }
 
 // Delay exceeds the run horizon, so every observed accepted point remains
-// retained. Initial physical startup also keeps one sided knot and its known
-// derivative order. Account for spare capacity independently from result size.
-fn live_bytes(points: usize) -> usize {
-    (points.max(4).next_power_of_two() + 2 * 4) * std::mem::size_of::<(f64, f64)>()
+// retained. An initial event also keeps one sided knot and its derivative
+// order. Account for spare capacity independently from result size.
+fn live_bytes(points: usize, startup_event: bool) -> usize {
+    (points.max(4).next_power_of_two() + if startup_event { 2 * 4 } else { 0 })
+        * std::mem::size_of::<(f64, f64)>()
 }
 
 fn assert_limit(error: SimulationError, limit: usize) -> usize {
@@ -50,12 +62,18 @@ fn assert_limit(error: SimulationError, limit: usize) -> usize {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn live_transport_storage_is_bounded_independently_of_waveform_retention() {
-    let netlist = deck(1, 90.0);
+    for startup_event in [false, true] {
+        check_live_transport_storage(startup_event);
+    }
+}
+
+fn check_live_transport_storage(startup_event: bool) {
+    let netlist = deck_with_startup_event(1, 90.0, startup_event);
     let baseline = Engine::new(config(usize::MAX))
         .run_tran(&netlist, 1e-9, 1e-12)
         .unwrap();
     assert!(baseline.time.len() >= 1001);
-    let bytes = live_bytes(baseline.time.len());
+    let bytes = live_bytes(baseline.time.len(), startup_event);
     Engine::new(config(bytes))
         .run_tran(&netlist, 1e-9, 1e-12)
         .unwrap();
@@ -87,7 +105,7 @@ fn the_history_budget_is_aggregate_across_devices_and_startup_modes() {
     let baseline = Engine::new(config(usize::MAX))
         .run_tran(&deck(1, 90.0), 1e-9, 1e-12)
         .unwrap();
-    let bytes = live_bytes(baseline.time.len());
+    let bytes = live_bytes(baseline.time.len(), false);
     let engine = Engine::new(config(bytes));
     for mode in [
         TransientStartupMode::OperatingPoint,
@@ -122,12 +140,19 @@ fn the_history_budget_is_aggregate_across_devices_and_startup_modes() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn checkpoint_capture_accounts_for_the_live_history_and_all_retained_copies() {
-    let netlist = deck(1, 90.0);
+    for startup_event in [false, true] {
+        check_checkpoint_capture(startup_event);
+    }
+}
+
+fn check_checkpoint_capture(startup_event: bool) {
+    let netlist = deck_with_startup_event(1, 90.0, startup_event);
     let baseline = Engine::new(config(usize::MAX))
         .run_tran(&netlist, 1e-9, 1e-12)
         .unwrap();
-    let live = live_bytes(baseline.time.len());
-    let copy = (baseline.time.len() + 2) * std::mem::size_of::<(f64, f64)>();
+    let live = live_bytes(baseline.time.len(), startup_event);
+    let copy = (baseline.time.len() + if startup_event { 2 } else { 0 })
+        * std::mem::size_of::<(f64, f64)>();
     let engine = Engine::new(config(live));
     assert_eq!(
         assert_limit(

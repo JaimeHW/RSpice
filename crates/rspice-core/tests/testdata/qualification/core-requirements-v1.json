@@ -25,7 +25,7 @@
       "id": "C03",
       "status": "in_progress",
       "requirement": "GP transient excess phase",
-      "qualification_task": "Public phase execution, independent oracles, restart, fallible phase storage and fixed BJT/UIC initialization, typed allocation and per-site record-ceiling diagnostics, retained result accounting, and aggregate live/copy transport-record budgets are exercised. Accepted-work and continuation cancellation, native default/minimal test/release configurations, and repeated public-run/charged-transport measurements are exercised in core-gp-measurements-windows-20261005.json. Independent prescribed-terminal saturation/reverse-active/high-injection oracles and the rounding-sized event-remainder repair are exercised in core-gp-regimes-windows-20261005.json. The same 18 GP integration tests execute as WebAssembly in Node, a Chrome window and an optimized Chrome dedicated worker in core-gp-wasm-windows-20261006.json; native registration, strict WASM Clippy and a permanent Firefox worker CI selection are delivered. Complete remaining feedback/private-node and parameter cases, configuration coverage, whole-run memory/allocation, inner-solve cancellation and broader performance limits. Other state owners, VM transactions and full route coverage remain C01/C09/C12/C14 work. da18bfa88 adds independent bias-dependent forward/reverse charge oracles. 50523d8fb preserves small peripheral event-charge modes, with a six-node-order regression; the subsequent private high-injection convergence failures remain unresolved. Required ignored regressions private_nodes::gp_exact_delay_solves_biased_charge_through_private_terminal_resistances and static_private::gp_exact_phase_retains_a_small_reverse_charge_mode_at_private_dc_bias must pass and become active before C03c closes. C03d must supply missing physical-event device equations, starting with the behavioral-source reproducer in gp_phase_regimes/coverage_gaps.rs; its explicit refusal is not implementation completion."
+      "qualification_task": "Public phase execution, independent oracles, restart, fallible phase storage and fixed BJT/UIC initialization, typed allocation and per-site record-ceiling diagnostics, retained result accounting, and aggregate live/copy transport-record budgets are exercised. Accepted-work and continuation cancellation, native default/minimal test/release configurations, and repeated public-run/charged-transport measurements are exercised in core-gp-measurements-windows-20261005.json. Independent prescribed-terminal saturation/reverse-active/high-injection oracles and the rounding-sized event-remainder repair are exercised in core-gp-regimes-windows-20261005.json. The same 18 GP integration tests execute as WebAssembly in Node, a Chrome window and an optimized Chrome dedicated worker in core-gp-wasm-windows-20261006.json; native registration, strict WASM Clippy and a permanent Firefox worker CI selection are delivered. Complete remaining feedback/private-node and parameter cases, configuration coverage, whole-run memory/allocation, inner-solve cancellation and broader performance limits. Other state owners, VM transactions and full route coverage remain C01/C09/C12/C14 work. da18bfa88 adds independent bias-dependent forward/reverse charge oracles. 50523d8fb preserves small peripheral event-charge modes, with a six-node-order regression; the subsequent driven private high-injection convergence failure remains unresolved. Authenticated operating-point rate initialization and stationary-history event provenance repair the constant-bias private-node failure; static_private::gp_exact_phase_retains_a_small_reverse_charge_mode_at_private_dc_bias is active with unchanged accuracy limits. Required ignored regression private_nodes::gp_exact_delay_solves_biased_charge_through_private_terminal_resistances must still pass and become active before C03c closes. C03d must supply missing physical-event device equations, starting with the behavioral-source reproducer in gp_phase_regimes/coverage_gaps.rs; its explicit refusal is not implementation completion."
     },
     {
       "id": "C04",
@@ -461,12 +461,6 @@
       "symbol": "gp_exact_delay_solves_biased_charge_through_private_terminal_resistances",
       "owner": "C03",
       "disposition": "Required C03c.2 positive numerical regression, currently fails in high injection during timestep recovery. Fix the underlying weak-charge/private-node integration; preserve the independent forcing, refinement and physical accuracy gates, then remove ignore."
-    },
-    {
-      "path": "tests/gp_phase_regimes/static_private.rs",
-      "symbol": "gp_exact_phase_retains_a_small_reverse_charge_mode_at_private_dc_bias",
-      "owner": "C03",
-      "disposition": "Required C03c.2 constant-bias numerical regression, currently fails at RELTOL=1e-7. Fix startup/continuation without suppressing physical charge or loosening its accuracy gate, then remove ignore."
     }
   ],
   "existing_evidence": [
@@ -482,7 +476,8 @@
     "tests/transient_source_events.rs",
     "tests/resource_and_commit_faults.rs",
     "tests/gp_phase_regimes/charge.rs",
-    "tests/gp_phase_regimes/coverage_gaps.rs"
+    "tests/gp_phase_regimes/coverage_gaps.rs",
+    "tests/gp_phase_regimes/static_private.rs"
   ],
   "open_inventory_tasks": [
     "Enumerate every per-instance predicate and pair it with supported/unsupported numerical fixtures; family declarations alone are insufficient.",

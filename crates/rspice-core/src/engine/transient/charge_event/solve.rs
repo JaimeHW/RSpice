@@ -1,5 +1,12 @@
 use super::*;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CoordinatePolicy {
+    Project,
+    Continuous,
+    OperatingPoint,
+}
+
 impl ChargeEventTopology {
     /// Solve the outgoing charge/flux constraints and its finite rate/current
     /// equations at one physical time. The sampler operates on private model
@@ -12,7 +19,12 @@ impl ChargeEventTopology {
         abort: &dyn AbortSignal,
         mut sample: impl FnMut(&[Value], &dyn AbortSignal) -> Result<EventSample>,
     ) -> Result<ChargeEventState> {
-        self.solve_coordinates((incoming, incoming_q, false), options, abort, &mut sample)
+        self.solve_coordinates(
+            (incoming, incoming_q, CoordinatePolicy::Project),
+            options,
+            abort,
+            &mut sample,
+        )
     }
 
     /// Audit an invariant physical coordinate limit without projecting it to
@@ -28,17 +40,43 @@ impl ChargeEventTopology {
         abort: &dyn AbortSignal,
         mut sample: impl FnMut(&[Value], &dyn AbortSignal) -> Result<EventSample>,
     ) -> Result<ChargeEventState> {
-        self.solve_coordinates((incoming, incoming_q, true), options, abort, &mut sample)
+        self.solve_coordinates(
+            (incoming, incoming_q, CoordinatePolicy::Continuous),
+            options,
+            abort,
+            &mut sample,
+        )
+    }
+
+    /// Initialize rates from an authenticated, unchanged operating point.
+    /// Its static balance is an accepted equation, not a tiny excitation to
+    /// divide by a potentially much smaller capacitance. Only rate RHS values
+    /// use that balance; original charge, rank, KCL and flux audits remain.
+    /// The caller must separately exclude released ICs and changed forcing.
+    pub(in crate::engine::transient) fn solve_operating_point(
+        &self,
+        incoming: &[Value],
+        incoming_q: &[Value],
+        options: &EventOptions,
+        abort: &dyn AbortSignal,
+        mut sample: impl FnMut(&[Value], &dyn AbortSignal) -> Result<EventSample>,
+    ) -> Result<ChargeEventState> {
+        self.solve_coordinates(
+            (incoming, incoming_q, CoordinatePolicy::OperatingPoint),
+            options,
+            abort,
+            &mut sample,
+        )
     }
 
     fn solve_coordinates(
         &self,
-        coordinates: (&[Value], &[Value], bool),
+        coordinates: (&[Value], &[Value], CoordinatePolicy),
         options: &EventOptions,
         abort: &dyn AbortSignal,
         sample: &mut impl FnMut(&[Value], &dyn AbortSignal) -> Result<EventSample>,
     ) -> Result<ChargeEventState> {
-        let (incoming, incoming_q, preserve) = coordinates;
+        let (incoming, incoming_q, policy) = coordinates;
         check_abort(abort)?;
         options.validate()?;
         ResourceLimitError::ensure(
@@ -92,9 +130,16 @@ impl ChargeEventTopology {
             }
             if residual <= 1.0 && update <= 1.0 {
                 self.audit_storage(&trial, incoming_q, &physical, options, abort)?;
-                return self.finish(trial, physical, iteration + 1, options, abort);
+                return self.finish(
+                    trial,
+                    physical,
+                    iteration + 1,
+                    options,
+                    abort,
+                    (policy == CoordinatePolicy::OperatingPoint).then_some(incoming),
+                );
             }
-            if preserve {
+            if policy != CoordinatePolicy::Project {
                 return Err(error(
                     "continuous event limit fails the unchanged jump equations",
                 ));
@@ -176,8 +221,28 @@ impl ChargeEventTopology {
         iterations: usize,
         options: &EventOptions,
         abort: &dyn AbortSignal,
+        operating_point: Option<&[Value]>,
     ) -> Result<ChargeEventState> {
-        let equations = self.rate_equations(&physical, options, abort)?;
+        let mut equations = self.rate_equations(&physical, options, abort)?;
+        if let Some(operating_point) = operating_point {
+            for row in 0..self.size {
+                if row % 64 == 0 {
+                    check_abort(abort)?;
+                }
+                if !self.is_group_row(row) && self.storage_tolerance(row, options).is_some() {
+                    // The OP balances F against ideal-source branch currents.
+                    // Retain that balance while the derivative constraints
+                    // determine any source-driven finite outgoing current.
+                    equations.values[row] = sum(self
+                        .source_incidence
+                        .get(row)
+                        .into_iter()
+                        .flatten()
+                        .map(|&(column, sign)| (operating_point[column], -sign))
+                        .chain([(physical.q_time[row], 1.0)]))?;
+                }
+            }
+        }
         let rates = equations.solve(options, abort)?;
         // Audit the differentiated constraints in their own units. No time
         // interval converts an amp/volt floor into an invented rate tolerance.
@@ -188,10 +253,18 @@ impl ChargeEventTopology {
             let products = equations.rows[row]
                 .iter()
                 .map(|&(column, value)| (value, rates[column]));
-            let residual = sum(products.clone().chain([(equations.values[row], 1.0)]))?;
-            let scale = products.fold(equations.values[row].abs(), |old, (a, b)| {
-                old.max((a * b).abs())
-            });
+            // Audit the original sampled equation, including any flux row.
+            // The OP contract does not authorize a new current/voltage floor.
+            let value = if operating_point.is_some()
+                && !self.is_group_row(row)
+                && self.storage_tolerance(row, options).is_some()
+            {
+                sum([(physical.f.values[row], 1.0), (physical.q_time[row], 1.0)].into_iter())?
+            } else {
+                equations.values[row]
+            };
+            let residual = sum(products.clone().chain([(value, 1.0)]))?;
+            let scale = products.fold(value.abs(), |old, (a, b)| old.max((a * b).abs()));
             let tolerance = equations.absolute[row] + options.relative_tolerance * scale;
             if !tolerance.is_finite() || residual.abs() > tolerance {
                 return Err(error(format!("finite-rate equation failed at row {row}")));

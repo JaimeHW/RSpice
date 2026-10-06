@@ -5861,6 +5861,7 @@ impl Engine {
                     circuit: &mut circuit,
                     solution: &mut solution,
                     history: &mut bjt_history,
+                    operating_point: accepted_transient_op,
                 },
                 &physical_options,
                 physical_flux_tolerance,
