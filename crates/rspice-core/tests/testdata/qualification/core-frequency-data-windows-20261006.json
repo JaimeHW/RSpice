@@ -1,0 +1,168 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C04",
+  "related_packages": [
+    "C00",
+    "C01",
+    "C13"
+  ],
+  "batch": "C04b compact direct AC/noise frequency tables and resistor override repairs",
+  "status": "partial_package_core_table_result_delivered_control_and_adapters_remaining",
+  "base_revision": "7f8524770069b87e5f987bd87a0094d52464ace9",
+  "source_revision": "2bb484dbd317ac6988b702ac15b98596463f49ea",
+  "implementation_commits": [
+    "733fc6c662937f428e38fcf6b3fb68e3d2c1bcba",
+    "2bb484dbd317ac6988b702ac15b98596463f49ea"
+  ],
+  "qualification_delta": "The publication adds explicit expected-value assertions for all authored coordinate columns to frequency_data.rs. That test is rerun natively and as optimized WASM. Production Rust source is unchanged after source_revision; hashes below identify the final tests and implementation.",
+  "captured_utc": "2026-10-06T16:04:53.380375+00:00",
+  "host": "x86_64-pc-windows-msvc",
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+    "cargo": "cargo 1.94.0 (85eff7c80 2026-01-15)",
+    "wasm_target": "wasm32-unknown-unknown",
+    "wasm_profile": "release",
+    "wasm_features": [
+      "wasm",
+      "veriloga-wasm-jit"
+    ],
+    "wasm_runtime": "headless Chrome dedicated worker",
+    "WASM_BINDGEN_TEST_TIMEOUT": "180",
+    "webdriver_config_sha256": "93458ed98943268e089c8c9a793bf2e899872e62941ac54795b0c27b7104785b"
+  },
+  "source_files_sha256": {
+    "crates/rspice-core/src/analysis/ac.rs": "dcddd06c6d01a45842f667dff9a5b11db229564df039ce9b94ef03226b2ba244",
+    "crates/rspice-core/src/engine.rs": "20389e7063d331e18030d1c325bf408a351d962ccf00dc64d67f411e49bb8a3e",
+    "crates/rspice-core/src/engine/ac.rs": "b16d2573722847ddfd948a3469286bf27deddabe0734a7920c0ddd2793dd44cb",
+    "crates/rspice-core/src/engine/data.rs": "cbf2f2436e898607416fd9b6d2717f91d2def59a90fe8ba15892f217abf9ca02",
+    "crates/rspice-core/src/engine/data/result.rs": "0148b3989a796cefb3adb5cc13e21c7ad62006a1fa4ddf84614e9f7205672993",
+    "crates/rspice-core/src/engine/data/tests.rs": "54795da11068ad18bcf7fb01cb29996a3b07c3cfde39ec857009c018a310f19a",
+    "crates/rspice-core/src/engine/noise.rs": "29b5c553e3729afa7206ac678117bd7d985a297d9e828d60a5783f2b4e5450db",
+    "crates/rspice-core/src/engine/step.rs": "c6831dffa3558383a615cb67ae6b8f725b98ecd58360e13e6976642c8ff968d3",
+    "crates/rspice-core/src/netlist/data_table.rs": "cafa02894ddd52b1e657d43db144f94414f912401beea237843c1e56f8d1f56d",
+    "crates/rspice-core/tests/frequency_data.rs": "86046aca819b12e75aaddcaa3c91f67bd3153aea41a003fa200f28f7c094bb25",
+    "crates/rspice-core/tests/resistor_override_admission.rs": "a7c442946eb3f388b10efe9eddf2d32b28a97d5330802921c29054b7040403c2",
+    "Cargo.lock": "ce8dc157a78d2268ff926067f15f08002b90185b9abd7320c4952d3a266fcf8a",
+    "rust-toolchain.toml": "d6dadd139dac178482d6cca3a8945b8a7e0f7df1f0733872657cbc420b2d82e6"
+  },
+  "publication_ledger_sha256": "fe68b05cf4b0cc1d5a241b180548d2591fec7e3cbc0f553b30ba0917c813f7bf",
+  "implementation": {
+    "coordinates": "Authored table/column spelling, canonical frequency/parameter/device targets, and column values in original row order. Declared parameters win over identically named devices. Physical frequency stays on each solved point.",
+    "executor": "One row loop for compact and legacy APIs, shared borrowed validation, fallible outer vector reservations, original model lifecycle and ordinary AC/noise solvers. Only legacy calls retain full row netlists.",
+    "limits": "Point/run/coordinate admission precedes metadata allocation. Each row gets the caller replay policy and remaining result allowance; errors report the cumulative request and original limit. Legacy retained root source and typed scalar bindings use the aggregate expanded-source allowance.",
+    "termination": "Failures/cancellation return no partial result. The compact result carries requested row count and a model-finish cause for a successful prefix. Driver tests cover finish after an accepted point, finish before the next point, no-data finish and independent later runs.",
+    "resistor_overrides": "Unknown instance targets fail explicitly. Canonical aliases update the binding consumed by the solver, including M/MULT, TC/TC1 and NOISE/NOISY. Existing step regression coverage remains active."
+  },
+  "independent_oracles": [
+    "RC voltage response = 1/(1+j*2*pi*f*R*C).",
+    "Selected-unit voltage noise referral = 4*k*T*R; output PSD = 4*k*T*R/(1+(2*pi*f*R*C)^2), k=1.380649e-23 under BestAvailable.",
+    "DC current-driven resistance gives V=I*R/M; temperature coefficient gives R=R0*(1+TC1*(T-TNOM)). Checks include the configured DC shunt conductance tolerance.",
+    "Setting the resistor NOISE alias to zero suppresses its spectrum despite an authored NOISY=1 binding."
+  ],
+  "commands": [
+    {
+      "command": "cargo test --locked -p rspice-core --lib engine::step",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        31
+      ],
+      "log": "target/core-qualification/frequency-data-step-regression.log",
+      "log_sha256": "e42fc2c683d9eb6b347a9b61dfbabba8d3dc1edf10056d780b5409abeef1f40b"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib -- engine::data engine::ac::tests::ac_data netlist::data_table engine::noise::tests::noise_data",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        9
+      ],
+      "log": "target/core-qualification/frequency-data-unit.log",
+      "log_sha256": "f042fdde5a95baea5b06f3f4c3488ec904e41e45a1daeee67b91bf303ae39cc0"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test frequency_data --test frequency_data_zero --test resistor_override_admission --test control_dc --test control_noise --test control_execution --test noise_input_reference",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        6,
+        8,
+        5,
+        7,
+        2,
+        5,
+        3
+      ],
+      "log": "target/core-qualification/frequency-data-native.log",
+      "log_sha256": "3d99036dfd44e4f5cfa4730be6d1837d0d2de69f654d4fccbdea6066234f6a71"
+    },
+    {
+      "command": "cargo clippy --locked -p rspice-core -p rspice-cli -p rspice-wasm --lib --bins -- -D warnings",
+      "outcome": "passed",
+      "test_target_passed_counts": [],
+      "log": "target/core-qualification/frequency-data-clippy.log",
+      "log_sha256": "537139078aa2d299c89020ec1548c30708fc5c573df05cbeb80edc8363252f62"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test frequency_data --test resistor_override_admission -- --nocapture",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        7,
+        3
+      ],
+      "log": "target/core-qualification/frequency-data-wasm.log",
+      "log_sha256": "6c02718b17cac1bbbf613974587aca988b2679f09d77824102c3b56f47289f49"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test frequency_data",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        7
+      ],
+      "log": "target/core-qualification/frequency-data-coordinate-final.log",
+      "log_sha256": "125010b15523d3bab86fc88bf8d70f1e9eb6391a1e0b8dc7fdf470921b96103a"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib engine::requirements",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        3
+      ],
+      "log": "target/core-qualification/frequency-data-requirements.log",
+      "log_sha256": "ec15175dcbf20443854fb8f89f8081d0ad0aad554e06c180a1116c4ccfede126"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test frequency_data -- --nocapture",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        7
+      ],
+      "log": "target/core-qualification/frequency-data-wasm-coordinate-final.log",
+      "log_sha256": "b878e767e2d7957a98940cba2cd19b82933ab14c40dac99c4d60f007c5a743fb"
+    }
+  ],
+  "unique_passed_tests": {
+    "native": 79,
+    "optimized_wasm": 10
+  },
+  "remaining": [
+    "All 15 work packages remain unfinished. Control implementation count stays 5 of 29; AcData/NoiseData are not yet control-host implementations.",
+    "Add table control dispatch, presentation, full-coordinate grid matching, immutable dataset ordinal behavior and direct/control equivalence.",
+    "Resolve row options against already-resolved caller settings and source-ordered runtime option precedence.",
+    "Fix TEMP/TNOM expression prescanning, preserving scope/conditionals/redefinition/seeded evaluation and temperature scalar synchronization.",
+    "Migrate typed documents and CLI/WASM adapters to the compact results; preserve per-row expression/projection context and define a valid noise-integration policy.",
+    "Whole-heap/AST storage, inner-loop cancellation latency and performance qualification remain C13 work; numeric and retained root-source budgets are not whole-process memory bounds.",
+    "Frequency-grid allocator-cause propagation remains open. Row-vector allocator errors are typed here."
+  ],
+  "open_reproducer": {
+    "owner": "C04b/C01 parameter-dependent temperature options",
+    "source": "RC table\n.param resistance=1k ambient=27\n.options temp={ambient}\nV1 in 0 AC 1\nR1 in out {resistance}\nC1 out 0 1u\n.data MixedRows resistance HERTZ C1:CAP ambient\n1k 100 1u 27\n2k 10 2u 127\n3k 100 3u -73\n.enddata\n.end\n",
+    "observed_error": "Netlist::parse: InvalidValue(\"Undefined parameter: AMBIENT\")",
+    "cause": "Temperature prescan runs before authored parameter declarations are collected.",
+    "qualification_boundary": "The passing table-temperature oracle uses literal .options temp=27 and TEMP table overrides, not a parameter expression in .OPTIONS."
+  },
+  "scope_limits": [
+    "WASM tests exercise public native-device core paths. Enabling the veriloga-wasm-jit feature is not evidence of executing a JIT model.",
+    "No CLI/WASM adapter migration or adapter runtime qualification is claimed by this slice; strict Clippy checks their build integration.",
+    "No product certification, complete simulator parity or production-readiness claim."
+  ]
+}

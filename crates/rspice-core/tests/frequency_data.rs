@@ -63,6 +63,9 @@ fn compact_coordinates_and_row_solutions_match_independent_rc_equations() {
         }
     );
     assert_eq!(ac.columns[1].values, [100.0, 10.0, 100.0]);
+    assert_eq!(ac.columns[0].values, [1000.0, 2000.0, 3000.0]);
+    assert_eq!(ac.columns[2].values, [1e-6, 2e-6, 3e-6]);
+    assert_eq!(ac.columns[3].values, [27.0, 127.0, -73.0]);
     for (index, (a, n)) in ac.points.iter().zip(&noise.points).enumerate() {
         let resistance = ac.columns[0].values[index];
         let frequency = ac.columns[1].values[index];
