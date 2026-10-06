@@ -650,7 +650,7 @@ impl ParseError {
             Self::DuplicateModelParameter(error) => Some(error.model_origin.clone()),
             Self::MissingSubcircuitEnds(error) => Some(error.detected_at.clone()),
             Self::MissingDeviceModel(error) => Some(NetlistSourceLocation::in_memory(error.line)),
-            Self::AnalysisCard(error) => Some(NetlistSourceLocation::in_memory(error.line)),
+            Self::AnalysisCard(error) => Some(error.source_location()),
             Self::UndefinedMutualInductorReference(error) => Some(error.origin.clone()),
             Self::ResourceLimit(_)
             | Self::UnknownDevice(_)

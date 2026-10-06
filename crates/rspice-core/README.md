@@ -398,6 +398,14 @@ live draws, and successful fields evaluate once on the live stream. Optional
 numeric readers leave failed expressions for validation instead of silently
 omitting authored fields.
 
+Typed `AnalysisCardError` values retain the physical card origin in `origin`.
+Both their `source_location()` method and `ParseError::source_location()` expose
+the included or root path and source-local line, including deferred cards and
+continuations. The typed card and issue remain available for programmatic handling.
+In-memory errors keep line-only locations. SDK callers constructing these errors
+should use `AnalysisCardError::new`; existing struct literals need the added
+`origin` field (`None` when no physical owner is known).
+
 Top-level analysis cards that cannot bind immediately retry their original
 grammar after root declarations, source specifications and model expressions
 have completed. Already available scalar/complex values, strings, user functions

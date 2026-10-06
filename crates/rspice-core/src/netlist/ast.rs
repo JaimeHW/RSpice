@@ -13,6 +13,7 @@ use crate::solver::RealSolverBackend;
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 
+use super::NetlistSourceLocation;
 use super::expr::FunctionDef;
 
 /// Internal instance marker for Xyce resistor lines whose value field is
@@ -3081,16 +3082,31 @@ impl std::fmt::Display for AnalysisCardIssue {
 
 /// Source-located failure of one authored analysis card.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
-#[error("{card} at line {line}: {issue}")]
+#[error("{card} at {location}: {issue}", location = self.source_location())]
 pub struct AnalysisCardError {
     pub card: AnalysisCard,
+    /// Physical source line once attributed; otherwise the parser's input line.
     pub line: usize,
     pub issue: AnalysisCardIssue,
+    /// Physical owner of the logical card, including an expanded include path.
+    pub origin: Option<NetlistSourceLocation>,
 }
 
 impl AnalysisCardError {
     pub fn new(card: AnalysisCard, line: usize, issue: AnalysisCardIssue) -> Self {
-        Self { card, line, issue }
+        Self {
+            card,
+            line,
+            issue,
+            origin: None,
+        }
+    }
+
+    /// Physical owner when available, with a line-only fallback for constructors.
+    pub fn source_location(&self) -> NetlistSourceLocation {
+        self.origin
+            .clone()
+            .unwrap_or_else(|| NetlistSourceLocation::in_memory(self.line))
     }
 }
 

@@ -3112,9 +3112,9 @@ fn source_map_diagnostics(diagnostics: &mut [ParseDiagnostic], origin: &NetlistS
     }
 }
 
-/// Preserve the physical owner of ordinary-card syntax failures after include
-/// expansion. `ParseError::Syntax::line` remains the source-local physical
-/// line, while the stable `path:line` prefix lets downstream diagnostics show
+/// Preserve the physical owner of typed analysis and ordinary syntax failures
+/// after include expansion. `ParseError::Syntax::line` remains source-local,
+/// while the stable `path:line` prefix lets downstream diagnostics show
 /// an included source without projecting it onto the root editor gutter.
 fn source_map_logical_line_error(
     error: ParseError,
@@ -3123,6 +3123,13 @@ fn source_map_logical_line_error(
     source_is_included: bool,
 ) -> ParseError {
     let (line, message) = match error {
+        ParseError::AnalysisCard(mut error) => {
+            if error.origin.is_none() && error.line == expanded_line {
+                error.line = origin.line;
+                error.origin = Some(origin.clone());
+            }
+            return ParseError::AnalysisCard(error);
+        }
         ParseError::Syntax { line, message } => (line, message),
         other => return other,
     };
@@ -3143,6 +3150,30 @@ fn source_map_logical_line_error(
 #[cfg(test)]
 mod source_mapping_tests {
     use super::*;
+
+    #[test]
+    fn typed_analysis_origin_is_attached_once_without_changing_the_issue() {
+        let issue = AnalysisCardIssue::MissingField { field: "FUND" };
+        let original = ParseError::AnalysisCard(Box::new(AnalysisCardError::new(
+            AnalysisCard::Pss,
+            30,
+            issue.clone(),
+        )));
+        let child = NetlistSourceLocation::in_file("child.inc", 2);
+        let once = source_map_logical_line_error(original, 30, &child, true);
+        let twice = source_map_logical_line_error(
+            once,
+            2,
+            &NetlistSourceLocation::in_file("root.cir", 99),
+            false,
+        );
+        assert_eq!(twice.source_location(), Some(child));
+        let ParseError::AnalysisCard(error) = twice else {
+            panic!("typed card")
+        };
+        assert_eq!(error.line, 2);
+        assert_eq!(error.issue, issue);
+    }
 
     #[test]
     fn included_card_syntax_error_retains_included_path_and_physical_line() {
