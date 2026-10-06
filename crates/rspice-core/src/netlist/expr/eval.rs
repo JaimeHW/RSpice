@@ -47,6 +47,13 @@ pub(crate) fn evaluate_complex_raw(
 /// repeatedly without cloning its AST or allocating evaluator stacks. Runtime
 /// parameter reads are exposed through a resolver so live measurements can
 /// implement Xyce's first-read semantics at the exact lazy evaluation point.
+/// A suspended read retains evaluator stacks and already-consumed random draws.
+#[derive(Debug)]
+pub(crate) enum PreparedProgress {
+    Complete(ComplexValue),
+    MissingParameter(String),
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct PreparedExpression {
     programs: std::sync::Arc<[PreparedProgram]>,
@@ -296,6 +303,14 @@ impl PreparedExpression {
         ctx: &ParamContext,
         evaluation: &mut E,
     ) -> Result<ComplexValue, ExprError> {
+        self.begin_evaluation();
+        match self.resume_using::<E, false>(ctx, evaluation)? {
+            PreparedProgress::Complete(value) => Ok(value),
+            PreparedProgress::MissingParameter(name) => Err(ExprError::UndefinedParam(name)),
+        }
+    }
+
+    pub(crate) fn begin_evaluation(&mut self) {
         self.frames.clear();
         self.values.clear();
         self.numeric_args.clear();
@@ -305,7 +320,21 @@ impl PreparedExpression {
             expression: self.root,
             scope: None,
         });
+    }
 
+    pub(crate) fn resume_with(
+        &mut self,
+        ctx: &ParamContext,
+        resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
+    ) -> Result<PreparedProgress, ExprError> {
+        self.resume_using::<_, true>(ctx, resolver)
+    }
+
+    fn resume_using<E: PreparedEvaluation, const SUSPEND: bool>(
+        &mut self,
+        ctx: &ParamContext,
+        evaluation: &mut E,
+    ) -> Result<PreparedProgress, ExprError> {
         while let Some(frame) = self.frames.pop() {
             match frame {
                 PreparedEvalFrame::Eval { expression, scope } => {
@@ -346,18 +375,28 @@ impl PreparedExpression {
                             } else {
                                 let value = if let Some(value) = evaluation.resolve(name)? {
                                     value
+                                } else if let Some(value) = ctx.get_complex(name) {
+                                    evaluation.constant(value)?
+                                } else if SUSPEND {
+                                    self.frames
+                                        .push(PreparedEvalFrame::Eval { expression, scope });
+                                    return Ok(PreparedProgress::MissingParameter(name.clone()));
                                 } else {
-                                    evaluation.constant(ctx.get_complex(name).ok_or_else(
-                                        || ExprError::UndefinedParam(name.to_string()),
-                                    )?)?
+                                    return Err(ExprError::UndefinedParam(name.clone()));
                                 };
                                 self.values.push(EvaluatedValue::runtime(value));
                             }
                         }
                         PreparedNode::External(name) => {
-                            let value = evaluation
-                                .resolve(name)?
-                                .ok_or_else(|| ExprError::UndefinedParam(name.to_string()))?;
+                            let value = if let Some(value) = evaluation.resolve(name)? {
+                                value
+                            } else if SUSPEND {
+                                self.frames
+                                    .push(PreparedEvalFrame::Eval { expression, scope });
+                                return Ok(PreparedProgress::MissingParameter(name.clone()));
+                            } else {
+                                return Err(ExprError::UndefinedParam(name.clone()));
+                            };
                             self.values.push(EvaluatedValue::runtime(value));
                         }
                         PreparedNode::Unary { op, operand } => {
@@ -575,7 +614,9 @@ impl PreparedExpression {
         }
 
         if self.values.len() == 1 {
-            Ok(self.values.pop().expect("length checked").numeric)
+            Ok(PreparedProgress::Complete(
+                self.values.pop().expect("length checked").numeric,
+            ))
         } else {
             Err(ExprError::InvalidArgument(format!(
                 "prepared expression evaluation produced {} values",
@@ -649,7 +690,10 @@ impl<'a> PreparedExpressionBuilder<'a> {
             Expr::Number(value) => PreparedNode::Number(*value),
             Expr::ComplexNumber(value) => PreparedNode::ComplexNumber(*value),
             Expr::StringLiteral(value) => PreparedNode::StringLiteral(value.clone()),
-            Expr::Param(name) if self.external_parameters.contains(name) => {
+            Expr::Param(name)
+                if self.external_parameters.contains(name)
+                    && !self.programs[program].formal_args.contains(name) =>
+            {
                 PreparedNode::External(name.clone())
             }
             Expr::Param(name) => PreparedNode::Param {

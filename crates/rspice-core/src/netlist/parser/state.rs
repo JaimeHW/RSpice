@@ -197,9 +197,11 @@ impl ParseState {
             .into());
         }
         let mut params = self.params;
-        super::super::expr::finalize_parameter_expressions(&mut params)
-            .map_err(ParseError::InvalidValue)
-            .map_err(ParseWithAbortError::from)?;
+        super::super::expr::finalize_parameter_expressions_with_abort(&mut params, abort)
+            .map_err(|error| match error {
+                super::super::expr::ParameterResolutionError::Aborted => ParseWithAbortError::Aborted,
+                error => ParseError::InvalidValue(error.to_string()).into(),
+            })?;
 
         validate_mutual_inductor_semantic_records_with_abort(&self.mutual_inductor_records, abort)?;
 

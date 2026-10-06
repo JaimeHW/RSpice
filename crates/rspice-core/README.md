@@ -359,10 +359,18 @@ Inactive branches and text after `.END` cannot author temperature options.
 table/study `TEMP` coordinate takes precedence over options and a single `.TEMP`
 directive. Temperature selections that keep changing on replay are rejected.
 
-General dependency planning remains incomplete: retained parameter-expression
-chains and references to an enclosing scope that is still incomplete need
-further work. An early expression that is invalid at the provisional temperature
-can also fail before replay. These cases remain in the implementation plan.
+Retained ordinary/global parameter chains resolve on demand for temperature
+options, including subcircuit scopes. Numeric evaluation preserves complex
+values, function-argument shadowing and lazy branches. Shared dependencies
+materialize once, so repeated references do not resample statistical parameters.
+Static parameter validation uses the numeric expression language, including
+complex functions such as `IMG`.
+
+General dependency planning remains incomplete: the ngspice expression dialect
+still rejects forward ordinary `.PARAM` declarations, and references to an
+enclosing scope that is still incomplete need further work. An early expression
+that is invalid at the provisional temperature can also fail before replay in
+the ngspice dialect. These cases remain in the implementation plan.
 
 The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and
 the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.

@@ -36,6 +36,7 @@ mod error;
 mod eval;
 mod parameter_direction;
 mod parser;
+mod resolution;
 mod scalar_direction;
 mod types;
 
@@ -54,8 +55,8 @@ pub use api::{
 };
 pub(crate) use behavioral::{
     BehavioralPreparationError, expand_output_user_functions_with_abort,
-    prepare_behavioral_expression_preserving_parameters, prepare_behavioral_expression_with_abort,
-    validate_prepared_behavioral_runtime_expression,
+    finalize_parameter_expressions_with_abort, prepare_behavioral_expression_preserving_parameters,
+    prepare_behavioral_expression_with_abort, validate_prepared_behavioral_runtime_expression,
 };
 pub use behavioral::{
     ParameterCircuitProbe, ParameterCircuitProbeKind, RuntimeSpecialQuantity,
@@ -72,9 +73,10 @@ pub use context::{
 };
 pub use error::ExprError;
 pub(crate) use eval::{
-    PreparedExpression, evaluate_complex_raw, normalize_xyce_expression_component,
-    normalize_xyce_expression_result,
+    PreparedExpression, PreparedProgress, evaluate_complex_raw,
+    normalize_xyce_expression_component, normalize_xyce_expression_result,
 };
 pub use eval::{evaluate, evaluate_complex};
 pub(crate) use parameter_direction::ComplexDirection;
+pub(crate) use resolution::{ParameterResolutionError, ParameterResolver};
 pub use types::{BinOpKind, Expr, UnaryOpKind, is_real};

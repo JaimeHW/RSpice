@@ -1,7 +1,10 @@
 //! Forward temperature option bindings, owned by the parser's lexical scopes.
 
 use super::*;
-use crate::netlist::expr::{PreparedExpression, parse_expression};
+use crate::netlist::expr::{
+    ParameterResolutionError, ParameterResolver, PreparedExpression, PreparedProgress,
+    parse_expression,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub(in super::super) enum TemperatureOption {
@@ -141,21 +144,49 @@ impl TemperatureOptionPlan {
     pub(in super::super) fn resolve_scope(
         &mut self,
         depth: usize,
-        params: &ParamContext,
+        params: &mut ParamContext,
         options: &mut SimulationOptions,
         abort: &dyn AbortSignal,
     ) -> Result<(), ParseWithAbortError> {
         let Some(scope) = self.scopes.get_mut(depth) else {
             return Ok(());
         };
+        let mut resolver = ParameterResolver::default();
         for pending in scope.iter_mut() {
             ensure_parse_not_aborted(abort)?;
-            let value = pending
-                .expression
-                .evaluate_with(params, &mut |name| {
-                    Ok(pending.bound_values.get(name).copied())
-                })
-                .map_err(|error| pending.error(error.to_string()))?;
+            pending.expression.begin_evaluation();
+            let value = loop {
+                ensure_parse_not_aborted(abort)?;
+                match pending
+                    .expression
+                    .resume_with(params, &mut |name| {
+                        Ok(pending
+                            .bound_values
+                            .get(name)
+                            .copied()
+                            .or_else(|| resolver.value(name, params)))
+                    })
+                    .map_err(|error| pending.error(error.to_string()))?
+                {
+                    PreparedProgress::Complete(value) => break value,
+                    PreparedProgress::MissingParameter(name) => {
+                        let result = if params.has_parameter_binding(&name) {
+                            params.get_parameter_expression(&name).map(|expression| {
+                                resolver.resolve(&name, expression, params, abort)
+                            })
+                        } else {
+                            params.get_global_expression(&name).map(|expression| {
+                                resolver.resolve_global(&name, expression, params, abort)
+                            })
+                        }
+                        .ok_or_else(|| pending.error(format!("Undefined parameter: {name}")))?;
+                        result.map_err(|error| match error {
+                            ParameterResolutionError::Aborted => ParseWithAbortError::Aborted,
+                            error => pending.error(error.to_string()).into(),
+                        })?;
+                    }
+                }
+            };
             let value = if params.expression_dialect() == ExpressionDialect::Xyce {
                 crate::netlist::expr::normalize_xyce_expression_result(value)
             } else {
@@ -170,6 +201,7 @@ impl TemperatureOptionPlan {
                 pending.option.install(options, value);
             }
         }
+        resolver.materialize_into(params);
         scope.clear();
         Ok(())
     }
@@ -245,7 +277,7 @@ mod tests {
         params.set("ambient", 85.0);
         let abort = crate::abort_signal::CountingAbort::new(1);
         assert!(matches!(
-            plan.resolve_scope(1, &params, &mut options, &abort),
+            plan.resolve_scope(1, &mut params, &mut options, &abort),
             Err(ParseWithAbortError::Aborted)
         ));
         assert_eq!(abort.polls_after_abort(), 0);

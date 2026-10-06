@@ -58,6 +58,73 @@ fn forward_options_preserve_complex_bindings_before_real_projection() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn retained_parameter_chains_resolve_before_temperature_options_and_device_values() {
+    let netlist = Netlist::parse_with_options(
+        "Retained temperature chain\n.param z={sqrt(-1)}\n.options temp={ambient}\n.param ambient={base+img(z)}\n.param base={later+5}\n.param later=80\nI1 0 out 1m\nR1 out 0 {ambient}\n.end\n",
+        rspice_core::netlist::NetlistParseOptions {
+            expression_dialect: rspice_core::config::ExpressionDialect::Xyce,
+            ..Default::default()
+        },
+    ).unwrap();
+    assert_eq!(netlist.options.temp, Some(84.0));
+    assert_eq!(netlist.params.get("ambient"), Some(84.0));
+    assert_eq!(netlist.params.get("base"), Some(85.0));
+    close(
+        Engine::default()
+            .run_dc_op(&netlist)
+            .unwrap()
+            .try_voltage_named("out")
+            .unwrap(),
+        0.084,
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn scoped_retained_chains_and_authoritative_globals_set_temperature() {
+    for (body, expected) in [
+        (
+            ".subckt local p n\n.options temp={ambient}\n.param ambient={base+5}\n.param base=80\n.ends\n",
+            85.0,
+        ),
+        (
+            ".param a=2\n.global_param g={a}\n.options temp={ambient}\n.param ambient={g+later}\n.param a=5 later=80\n",
+            85.0,
+        ),
+    ] {
+        let netlist = Netlist::parse_with_options(
+            &format!("Retained scope\n{body}.end\n"),
+            rspice_core::netlist::NetlistParseOptions {
+                expression_dialect: rspice_core::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(netlist.options.temp, Some(expected), "{body}");
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn option_dependencies_materialize_shared_statistical_parameters_once() {
+    let netlist = Netlist::parse_with_options(
+        "Shared retained draw\n.options seed=37 temp={ambient} tnom={ambient}\n.param ambient={base+aunif(0,1)}\n.param base=85\n.end\n",
+        rspice_core::netlist::NetlistParseOptions { expression_dialect: rspice_core::config::ExpressionDialect::Xyce, ..Default::default() },
+    ).unwrap();
+    let mut reference = ParamContext::new();
+    reference.set_random_seed(37);
+    let expected = 85.0 + eval_expression("aunif(0,1)", &reference).unwrap();
+    assert_eq!(netlist.options.temp, Some(expected));
+    assert_eq!(netlist.options.tnom, Some(expected));
+    assert_eq!(netlist.params.get("ambient"), Some(expected));
+    assert_eq!(
+        eval_expression("aunif(0,1)", &netlist.params).unwrap(),
+        eval_expression("aunif(0,1)", &reference).unwrap()
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn forward_options_resolve_in_their_scope_and_keep_global_assignment_order() {
     for (body, temperature) in [
         (

@@ -5,7 +5,7 @@
 //! the behavioral compiler and final circuit binding pass.
 
 use super::{
-    BinOpKind, Expr as NetExpr, ParamContext,
+    BinOpKind, Expr as NetExpr, ParamContext, ParameterResolutionError, ParameterResolver,
     ParseExpressionWithAbortError as NetExpressionParseWithAbortError, UnaryOpKind,
     eval_expression_complex, parse_expression as parse_net_expr,
     parse_expression_with_abort as parse_net_expr_with_abort,
@@ -693,17 +693,40 @@ pub fn validate_parameter_expressions(params: &ParamContext) -> Result<(), Strin
 /// Definitions that still reference `TIME` or `FREQ` remain symbolic for
 /// device binding at the active analysis point.
 pub fn finalize_parameter_expressions(params: &mut ParamContext) -> Result<(), String> {
-    validate_parameter_expressions(params)?;
+    finalize_parameter_expressions_with_abort(params, &NoAbort).map_err(|error| error.to_string())
+}
+
+pub(crate) fn finalize_parameter_expressions_with_abort(
+    params: &mut ParamContext,
+    abort: &dyn AbortSignal,
+) -> Result<(), ParameterResolutionError> {
+    if abort.is_aborted() {
+        return Err(ParameterResolutionError::Aborted);
+    }
+    validate_parameter_expressions(params).map_err(ParameterResolutionError::Definition)?;
+    let mut resolver = ParameterResolver::default();
     let mut definitions = params.all_parameter_expressions();
     definitions.sort_by(|left, right| left.0.cmp(&right.0));
-    for (name, _) in definitions {
-        let prepared = prepare_behavioral_expression(&name, params)
-            .map_err(|error| format!("Unable to resolve parameter {name}: {error}"))?;
+    for (name, expression) in definitions {
+        if abort.is_aborted() {
+            return Err(ParameterResolutionError::Aborted);
+        }
+        let prepared = prepare_behavioral_expression(&name, params).map_err(|error| {
+            ParameterResolutionError::Definition(format!(
+                "Unable to resolve parameter {name}: {error}"
+            ))
+        })?;
         if behavioral_expression_references_runtime_quantity(&prepared) {
             continue;
         }
-        let value = eval_expression_complex(&prepared, params)
-            .map_err(|error| format!("Unable to resolve parameter {name}: {error}"))?;
+        let value = resolver
+            .resolve(&name, &expression, params, abort)
+            .map_err(|error| match error {
+                ParameterResolutionError::Aborted => ParameterResolutionError::Aborted,
+                error => ParameterResolutionError::Definition(format!(
+                    "Unable to resolve parameter {name}: {error}"
+                )),
+            })?;
         params.set_complex(&name, value);
     }
     Ok(())
@@ -768,6 +791,8 @@ fn validate_parameter_expression_definitions(
         ParameterExpressionKind::Ordinary => "parameter",
         ParameterExpressionKind::Global => "global parameter",
     };
+    let mut static_context = None;
+    let mut static_resolver = ParameterResolver::default();
     for (name, expression) in definitions {
         // Expand the definition body itself. Looking up the root by name
         // would select a same-name ordinary binding while validating the
@@ -797,13 +822,29 @@ fn validate_parameter_expression_definitions(
                 }
             ));
         }
-        if let Some(identifier) = first_unresolved_global_identifier(&parsed) {
-            return Err(format!(
-                "Unable to resolve {description} {name}: Undefined parameter: {identifier}"
-            ));
+        if net_expr_references_runtime_quantity(&parsed) {
+            if let Some(identifier) = first_unresolved_global_identifier(&parsed) {
+                return Err(format!(
+                    "Unable to resolve {description} {name}: Undefined parameter: {identifier}"
+                ));
+            }
+            crate::expr::parse_expression_strict(&prepared)
+                .map_err(|error| format!("Unable to resolve {description} {name}: {error}"))?;
+        } else {
+            // Static definitions use the complex numeric language, which has
+            // functions (such as IMG) that the real runtime compiler lacks.
+            // Validation must not consume the authored statistical stream.
+            let isolated = static_context.get_or_insert_with(|| params.isolated_random_clone());
+            let result = match kind {
+                ParameterExpressionKind::Ordinary => {
+                    static_resolver.resolve(name, expression, isolated, &NoAbort)
+                }
+                ParameterExpressionKind::Global => {
+                    static_resolver.resolve_global(name, expression, isolated, &NoAbort)
+                }
+            };
+            result.map_err(|error| format!("Unable to resolve {description} {name}: {error}"))?;
         }
-        crate::expr::parse_expression_strict(&prepared)
-            .map_err(|error| format!("Unable to resolve {description} {name}: {error}"))?;
     }
     Ok(())
 }
@@ -954,13 +995,13 @@ fn first_unresolved_behavioral_identifier(expression: &NetExpr) -> Option<&str> 
     }
 }
 
-fn contains_runtime_identifier(expression: &str) -> bool {
+pub(super) fn contains_runtime_identifier(expression: &str) -> bool {
     expression
         .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
         .any(|token| runtime_special_quantity(token).is_some())
 }
 
-fn contains_statistical_function_call(expression: &str) -> bool {
+pub(super) fn contains_statistical_function_call(expression: &str) -> bool {
     let bytes = expression.as_bytes();
     let mut index = 0usize;
     while index < bytes.len() {
