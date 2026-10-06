@@ -56,11 +56,14 @@ pub(super) fn present(
         return Ok(Vec::new());
     }
     let mut base = selected.unwrap_or_else(|| {
-        if args.input.as_os_str() == "-" {
+        let path = if args.input.as_os_str() == "-" {
             PathBuf::from("rspice-control")
         } else {
             args.input.with_extension("control")
-        }
+        };
+        args.selected_corner
+            .as_deref()
+            .map_or_else(|| path.clone(), |corner| tag_output_path(&path, corner))
     });
     if let Some(label) = run_label {
         base = tag_output_path(&base, &sanitize_run_tag(label));

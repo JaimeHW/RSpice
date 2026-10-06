@@ -50,16 +50,6 @@ pub(super) struct PreparedCorner {
     pub args: RunArgs,
 }
 
-impl PreparedCorner {
-    pub(super) fn run_label(&self, outer: Option<&str>) -> Option<String> {
-        if self.args.output.is_none() {
-            compose_run_label(outer, Some(&self.name))
-        } else {
-            outer.map(str::to_string)
-        }
-    }
-}
-
 /// Inject the selected library before parsing any expressions or output requests.
 pub(super) fn prepare(
     source: &str,
@@ -90,14 +80,11 @@ pub(super) fn prepare(
         .map(|name| {
             let mut child = args.clone();
             child.corners = None;
+            child.selected_corner = Some(name.clone());
             child.corner_lib = None;
             child.jobs = 1;
-            child.output = corner_output_path(
-                resolve_output_path(args.output.clone(), config)?.as_deref(),
-                &name,
-            );
-            child.checkpoint = corner_output_path(args.checkpoint.as_deref(), &name);
-            child.resume = corner_output_path(args.resume.as_deref(), &name);
+            child.output = resolve_output_path(args.output.clone(), config)?
+                .map(|path| tag_output_path(&path, &name));
             let source = if let Some(library) = &library {
                 let (title, body) = source.split_once('\n').unwrap_or((source, ""));
                 format!("{title}\n.lib \"{}\" {name}\n{body}", library.display())
@@ -146,14 +133,13 @@ pub(super) fn run(
             if crate::abort::reason().is_some() {
                 return Err(cancellation_cli_error(args.timeout));
             }
-            let label = prepared.run_label(run_label);
             run_deck(
                 &prepared.netlist,
                 &prepared.args,
                 config,
                 false,
                 true,
-                label.as_deref(),
+                run_label,
             )
         };
         let mut outcome = match execute() {
@@ -281,24 +267,6 @@ fn corner_summary_row(name: &str, passed: bool) -> String {
         name_width = CORNER_SUMMARY_NAME_WIDTH,
         status_width = CORNER_SUMMARY_STATUS_WIDTH
     )
-}
-
-/// `results.csv` -> `results.ss.csv` so corner exports cannot collide.
-fn corner_output_path(
-    output: Option<&std::path::Path>,
-    corner: &str,
-) -> Option<std::path::PathBuf> {
-    let path = output?;
-    let mut file_name = path
-        .file_stem()
-        .map(|stem| stem.to_os_string())
-        .unwrap_or_default();
-    file_name.push(format!(".{corner}"));
-    if let Some(ext) = path.extension() {
-        file_name.push(".");
-        file_name.push(ext);
-    }
-    Some(path.with_file_name(file_name))
 }
 
 #[cfg(test)]

@@ -570,6 +570,11 @@ pub struct RunArgs {
     )]
     pub corners: Option<String>,
 
+    /// Internal identity of one prepared corner after the sweep is expanded.
+    /// Kept separate from display labels so valid '-' and '_' names stay distinct.
+    #[arg(skip)]
+    pub(crate) selected_corner: Option<String>,
+
     /// Two-port S-parameter extraction: four port nodes as
     /// "P1+,P1-,P2+,P2-" (use 0 for grounded references). Uses the deck's
     /// .AC card for the sweep; ports are driven through Z0 with the other

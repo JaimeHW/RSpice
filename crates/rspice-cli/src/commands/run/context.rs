@@ -692,6 +692,7 @@ impl<'a> RunContext<'a> {
     fn checkpoint_namespace(&self) -> super::restart::CheckpointNamespace<'_> {
         super::restart::CheckpointNamespace::new(
             self.run_label.as_deref(),
+            self.args.selected_corner.as_deref(),
             self.coordinate.is_some(),
             self.planned_transient_ids.len() > 1,
             self.control_outputs,

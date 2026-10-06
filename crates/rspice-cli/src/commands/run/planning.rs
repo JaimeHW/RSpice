@@ -44,11 +44,7 @@ impl PreparedDeck {
             Self::Corners(corners) => {
                 let mut count = 0usize;
                 for corner in corners {
-                    count = count.saturating_add(check(
-                        &corner.netlist,
-                        &corner.args,
-                        corner.run_label(run_label).as_deref(),
-                    )?);
+                    count = count.saturating_add(check(&corner.netlist, &corner.args, run_label)?);
                 }
                 Ok(count)
             }

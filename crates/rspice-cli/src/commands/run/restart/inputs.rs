@@ -7,15 +7,23 @@ use rspice_core::execution::{AnalysisInstanceId, AnalysisKind};
 /// Shared by preflight and execution so neither can invent a different state path.
 pub(crate) struct CheckpointNamespace<'a> {
     label: Option<&'a str>,
+    corner: Option<&'a str>,
     coordinate: bool,
     repeated: bool,
     control: bool,
 }
 
 impl<'a> CheckpointNamespace<'a> {
-    pub fn new(label: Option<&'a str>, coordinate: bool, repeated: bool, control: bool) -> Self {
+    pub fn new(
+        label: Option<&'a str>,
+        corner: Option<&'a str>,
+        coordinate: bool,
+        repeated: bool,
+        control: bool,
+    ) -> Self {
         Self {
             label,
+            corner,
             coordinate,
             repeated,
             control,
@@ -23,10 +31,14 @@ impl<'a> CheckpointNamespace<'a> {
     }
 
     fn cli_base(&self, path: &Path) -> PathBuf {
-        self.label.map_or_else(
-            || path.to_path_buf(),
-            |label| naming::tag_output_path(path, &naming::sanitize_run_tag(label)),
-        )
+        let mut path = path.to_path_buf();
+        if let Some(corner) = self.corner {
+            path = naming::tag_output_path(&path, corner);
+        }
+        if let Some(label) = self.label {
+            path = naming::tag_output_path(&path, &naming::sanitize_run_tag(label));
+        }
+        path
     }
 
     pub fn cli_path(&self, path: &Path, analysis: &str) -> PathBuf {
@@ -39,10 +51,16 @@ impl<'a> CheckpointNamespace<'a> {
     }
 
     fn restart_base(&self, name: &str) -> String {
-        self.label.map_or_else(
-            || name.to_string(),
-            |label| format!("{name}.{}", naming::sanitize_run_tag(label)),
-        )
+        let mut name = name.to_string();
+        if let Some(corner) = self.corner {
+            name.push('.');
+            name.push_str(corner);
+        }
+        if let Some(label) = self.label {
+            name.push('.');
+            name.push_str(&naming::sanitize_run_tag(label));
+        }
+        name
     }
 
     pub fn restart_qualifies_analysis(&self) -> bool {
@@ -83,6 +101,7 @@ pub(crate) fn protect_planned_inputs(
         > 1;
     let namespace = CheckpointNamespace::new(
         label,
+        args.selected_corner.as_deref(),
         coordinate,
         repeated,
         netlist.control_script.is_some(),

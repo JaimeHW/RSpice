@@ -486,6 +486,17 @@ into the same filename, so no run can overwrite or resume another run's solver
 state. Checkpoint options on a `.STEP` deck without an authored `.TRAN` are
 rejected before execution.
 
+Corner checkpoint names include the validated corner spelling exactly once:
+`--corners tt-fast,tt_fast --checkpoint state.chk` writes `state.tt-fast.chk`
+and `state.tt_fast.chk` for a single transient. Adding or removing `-o` does
+not change checkpoint names. Scheduled `.OPTIONS RESTART` files and default
+control presentation files also retain distinct corner names.
+
+Resume inputs are reserved before publication, including inputs belonging to
+later runs. Results and reports cannot replace them, even when a simulation
+fails. To explicitly renew a CLI checkpoint in place, pass the same base to
+both `--resume` and `--checkpoint` and choose a separate result destination.
+
 `--compress` decimates the published transient waveform, and the run prints the
 worst reconstruction error it accepted beside the compression ratio. It changes
 nothing else: `.MEASURE`, `.FOUR`, and `.FFT` are evaluated on the exact
