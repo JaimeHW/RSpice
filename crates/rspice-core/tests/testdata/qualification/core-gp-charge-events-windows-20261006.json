@@ -1,0 +1,257 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C03",
+  "batch": "C03c.1 bias-dependent charge, weak-charge event row repair, and mandatory C03c.2/C03d failures",
+  "status": "partial_with_required_failures",
+  "source_revision": "36a5606f82b8df0679ca9b655bc3f509b594975d",
+  "captured_utc": "2026-10-06T06:33:29.651960+00:00",
+  "implementation_commits": [
+    "da18bfa88",
+    "50523d8fb",
+    "4fb1105d8"
+  ],
+  "host": "x86_64-pc-windows-msvc",
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "rustc": "1.94.0 (4a4ef493e 2026-03-02)",
+    "cargo": "1.94.0 (85eff7c80 2026-01-15)",
+    "llvm": "21.1.8"
+  },
+  "current_source_hash_scope": "Hashes below identify the committed source_revision checkout; historical development runs retain their separate source-state descriptions. Plan/evidence documentation is uncommitted while capturing this record.",
+  "source_sha256": {
+    "Cargo.lock": "ea7ed4e97284b27608b8ea02399cf875e017e93b291f165794d467ae3384bde7",
+    "crates/rspice-core/src/engine/transient/charge_event.rs": "dee80c4804e99aa6f5e5e2fbfb5c06b2d0558a44e4e6f697221d25f8f06887eb",
+    "crates/rspice-core/src/engine/transient/charge_event/tests/current_coupling.rs": "eaebb3595c69744530b1cadeb18e53d50d50b1167daef91b4d905c3e5b51f35d",
+    "crates/rspice-core/src/engine/transient/checkpoint.rs": "13a80fceab362114cd56de403fc326807714a4fa3eeed56b52977bd7716f95ce",
+    "crates/rspice-core/tests/gp_phase_regimes.rs": "f2c5afe202caccc4cd58378c891163f696a81f2bf0bf613304c96849a9880fbf",
+    "crates/rspice-core/tests/gp_phase_regimes/charge.rs": "1e1d31b7115542e192132c7cc52a87f2fc2b6bc64da8efc4a24fa072a1b64390",
+    "crates/rspice-core/tests/gp_phase_regimes/coverage_gaps.rs": "b59dd798263f878cae22626c640b3d79413f38101ac2527c0ebfab00c66049b8",
+    "crates/rspice-core/tests/gp_phase_regimes/private_nodes.rs": "3dbfe0375afa4b2db02e4c12ce60c46974e1747dada02e5c0d3270b47b720ce4",
+    "crates/rspice-core/tests/gp_phase_regimes/static_private.rs": "2cc36d31be87a2fc5ea3bb0b91d599391162c35f4b02b343bd5d84200b95c43e",
+    "crates/rspice-core/tests/testdata/qualification/gp-behavioral-event-gap.cir": "3e08464351dd18c85c7b87cd8917200ec58b1c8b2a3d893aa86faf23636d685c",
+    "crates/rspice-core/tests/testdata/qualification/core-requirements-v1.json": "36bebaf3af2b6a8b743a6d6da00b1e27079ab5ab2792d4c391f2e096a955d0cf"
+  },
+  "independent_reference": {
+    "path": "C:/Users/James/Desktop/ngspice-46-release/ngspice-46/src/spicelib/devices/bjt/bjtload.c",
+    "sha256": "1b557959b6bc5a7123673106f41c4cacb2170b7b53df3ec8448d7f27fed70be9",
+    "use": "Analytical GP transport, bias-dependent TF and reverse TR charge formulas plus the separate ngspice Weil recurrence. No live simulator execution is claimed for this batch."
+  },
+  "coverage": {
+    "charge": "New 72 public runs across exact/Weil, three dialects, NPN/PNP, saturation/reverse-active/high injection and two timestep sizes, in addition to the prior 54 prescribed-terminal runs.",
+    "physical_current_gate": "Fine-grid maximum error < 1e-14 A + 0.02 * peak reference current; fine error < 1e-14 A + 0.7 * coarse error.",
+    "conservation_gate": "Existing unmodulated cases retain 1e-14 A + 1e-9 * sum(abs(lead currents)). Added biased charge cases include 256 * epsilon * 2/dt times the independently computed charge-Jacobian/voltage row norm. This accounts for companion subtraction conditioning, not extra physical-current error.",
+    "event_row_fix": "Highest-incidence representative in floating charge components preserves a small peripheral Q row; stable node-ID tie break. Unit test covers all six orderings of a three-node star with 1e-9 F and 1e-30 F, common-mode rate 1 and zero differential rate. This is not a universally optimal basis for arbitrary charge graphs.",
+    "checkpoint_identity": "v98 after numerical event-equation row-selection change."
+  },
+  "required_failures": [
+    {
+      "test": "static_private::gp_exact_phase_retains_a_small_reverse_charge_mode_at_private_dc_bias",
+      "owner": "C03c.2",
+      "outcome": "Ngspice NPN constant high-injection bias: convergence failure after 15 iterations with RELTOL=1e-7.",
+      "gate": "All three dialects and both polarities maintain independent lead currents within 1e-12 A + 1e-5 * abs(reference), to 2.5 ns. Remove ignore only after this passes."
+    },
+    {
+      "test": "private_nodes::gp_exact_delay_solves_biased_charge_through_private_terminal_resistances",
+      "owner": "C03c.2",
+      "outcome": "Ngspice NPN high-injection case fails convergence after 374 iterations near 2 ns; preceding saturation/reverse-active cases pass their independent comparisons.",
+      "gate": "Native-source manufactured forcing is independently checked within 1e-12 A. Preserve 2% peak current, 2e-4 V intrinsic-voltage and 0.7 refinement limits, complete all cases, then remove ignore."
+    },
+    {
+      "test": "coverage_gaps::gp_behavioral_physical_event_gap_is_explicit",
+      "owner": "C03d",
+      "outcome": "The disposition test passes because exact-delay GP refuses the behavioral voltage source during physical-event preparation while ordinary Weil transient executes it.",
+      "gate": "Implement the missing physical-event equations and replace the refusal disposition with independent numerical event/continuation qualification; a passing refusal test does not deliver the feature."
+    }
+  ],
+  "rejected_experiment": "A temporary zero-rate candidate accepted solely by residual tolerance did not fix the private cases and was reverted before 50523d8fb. Small absolute current into tiny storage can imply a large physical rate; an eventual stationary OP path needs an explicit valid-state contract.",
+  "runs": [
+    {
+      "source_state": "Development source later committed as da18bfa88; the unlinked private-node draft was not compiled.",
+      "configuration": "native default features, test profile",
+      "observed_test_totals": {
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0
+      },
+      "outcome": "passed",
+      "log": "target/core-qualification/gp-charge-native-development.log",
+      "log_sha256": "642cc678b42d018549c80a2e2d8c92042755018919b7ec229afc231e16763983",
+      "reproduction_command": "cargo test --locked -p rspice-core --test gp_phase_regimes -- --nocapture",
+      "command_provenance": "Reproduction invocation for the recorded scope; historical log preserves actual outcomes, not the complete shell invocation."
+    },
+    {
+      "source_state": "Development source later committed as da18bfa88; the unlinked private-node draft was not compiled.",
+      "configuration": "native default features, release profile",
+      "observed_test_totals": {
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0
+      },
+      "outcome": "passed",
+      "log": "target/core-qualification/gp-charge-release-development.log",
+      "log_sha256": "04f927ab48aa8d04bf090def41369d84f55ac76758c480147a210c357c0af10c",
+      "reproduction_command": "cargo test --locked -p rspice-core --release --test gp_phase_regimes -- --nocapture",
+      "command_provenance": "Reproduction invocation for the recorded scope; historical log preserves actual outcomes, not the complete shell invocation."
+    },
+    {
+      "source_state": "Development source later committed as da18bfa88; the unlinked private-node draft was not compiled.",
+      "configuration": "optimized Chrome dedicated worker",
+      "observed_test_totals": {
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0
+      },
+      "outcome": "passed",
+      "log": "target/core-qualification/gp-charge-worker-development.log",
+      "log_sha256": "4b38744ba03545836a99d260ab7d66383182493775f338f26804836d1ebfda59",
+      "reproduction_command": "cargo test --locked -p rspice-core --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test gp_phase_regimes",
+      "command_provenance": "Reproduction invocation for the recorded scope; historical log preserves actual outcomes, not the complete shell invocation."
+    },
+    {
+      "source_state": "Development source of 50523d8fb before concurrent output-overlay/RAW I/O merges; default library suite.",
+      "configuration": "native default features, test profile",
+      "observed_test_totals": {
+        "passed": 4872,
+        "failed": 0,
+        "ignored": 3
+      },
+      "outcome": "passed",
+      "log": "target/core-qualification/gp-event-hubs-unit-development.log",
+      "log_sha256": "87d7b0ed26b7c1ce9caedf5c6d3e784479aea991d80f3f13ffc415c762c84886",
+      "reproduction_command": "cargo test --locked -p rspice-core --lib",
+      "command_provenance": "Reproduction invocation for the recorded scope; historical log preserves actual outcomes, not the complete shell invocation."
+    },
+    {
+      "source_state": "Development source of 50523d8fb plus behavioral admission probe; private ignored modules were not linked.",
+      "configuration": "native default features, test profile",
+      "observed_test_totals": {
+        "passed": 73,
+        "failed": 0,
+        "ignored": 0
+      },
+      "outcome": "passed",
+      "log": "target/core-qualification/gp-event-hubs-integration-development.log",
+      "log_sha256": "1a56d8ba2b402cc2bb0e4e241ef098ed364b69ab6a7a0934168e20b12159ab6c",
+      "reproduction_command": "cargo test --locked -p rspice-core --test bjt_excess_phase_transient --test gp_history_resources --test gp_phase_cancellation --test gp_phase_regimes --test resource_and_commit_faults --test transient_checkpoint --test transient_source_events -- --nocapture",
+      "command_provenance": "Reproduction invocation for the recorded scope; historical log preserves actual outcomes, not the complete shell invocation."
+    },
+    {
+      "source_state": "f669e0f59; 34 charge-event unit cases after concurrent main integration.",
+      "configuration": "native default features, test profile",
+      "observed_test_totals": {
+        "passed": 34,
+        "failed": 0,
+        "ignored": 0
+      },
+      "outcome": "passed",
+      "log": "target/core-qualification/gp-event-hubs-merged-unit.log",
+      "log_sha256": "5fa0c70599b4a9dd677aed25e95724bb34d3a6aaf3c248093064b29bac9a7f7b",
+      "reproduction_command": "cargo test --locked -p rspice-core --lib engine::transient::charge_event -- --nocapture",
+      "command_provenance": "Reproduction invocation for the recorded scope; historical log preserves actual outcomes, not the complete shell invocation."
+    },
+    {
+      "source_state": "f669e0f59 plus behavioral admission probe, before private modules were linked.",
+      "configuration": "native default features, test profile",
+      "observed_test_totals": {
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0
+      },
+      "outcome": "passed",
+      "log": "target/core-qualification/gp-event-hubs-merged-regimes.log",
+      "log_sha256": "963fd1bca95cf91674da79eafbc8ff6e0d6420171142581fc162a0d8f2c01f80",
+      "reproduction_command": "cargo test --locked -p rspice-core --test gp_phase_regimes -- --nocapture",
+      "command_provenance": "Reproduction invocation for the recorded scope; historical log preserves actual outcomes, not the complete shell invocation."
+    },
+    {
+      "source_state": "f669e0f59 plus private regressions later committed as 4fb1105d8; the subsequent slice into_iter-to-iter lint correction does not change either failing solver request.",
+      "configuration": "native default features, test profile; explicit execution of required ignored tests",
+      "observed_test_totals": {
+        "passed": 0,
+        "failed": 2,
+        "ignored": 0
+      },
+      "outcome": "required_regressions_fail",
+      "log": "target/core-qualification/gp-private-required-failures.log",
+      "log_sha256": "136f6386da9cd90e10964ccbbeccf9a7ffcb7e0ed2b89b37f9dcb59ae0768d3f",
+      "reproduction_command": "cargo test --locked -p rspice-core --test gp_phase_regimes private_ -- --ignored --nocapture",
+      "command_provenance": "Reproduction invocation for the recorded scope; historical log preserves actual outcomes, not the complete shell invocation."
+    },
+    {
+      "command": "cargo clippy --locked -p rspice-core --lib --test gp_phase_regimes -- -D warnings",
+      "source_state": "743ca9097 plus test/ledger sources later committed as 4fb1105d8.",
+      "configuration": "native default features, strict static analysis",
+      "observed_test_totals": null,
+      "outcome": "passed",
+      "log": "target/core-qualification/gp-private-plan-clippy.log",
+      "log_sha256": "090dd931a41ae3bc81b3e91e4f6712bff9da970e783830ad37752209d52f4fa5"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib engine::requirements -- --nocapture",
+      "source_state": "743ca9097 plus test/ledger sources later committed as 4fb1105d8.",
+      "configuration": "native default features, test profile",
+      "observed_test_totals": {
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0
+      },
+      "outcome": "passed",
+      "log": "target/core-qualification/gp-private-plan-ledger.log",
+      "log_sha256": "641accb0290ade223b4596f3fd9c1de36b0bc041e989bbfc04dcb395e80c6451"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib io::ltspice_raw -- --nocapture",
+      "source_state": "743ca9097 plus test/ledger sources later committed as 4fb1105d8; includes concurrent RAW unit metadata support.",
+      "configuration": "native default features, test profile",
+      "observed_test_totals": {
+        "passed": 17,
+        "failed": 0,
+        "ignored": 0
+      },
+      "outcome": "passed",
+      "log": "target/core-qualification/gp-private-plan-raw.log",
+      "log_sha256": "4687323ce22ce6ee08dc63dbf7383c247a0a3cf99aa1766f6b21db1b56424cc8"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test bjt_excess_phase_transient --test gp_history_resources --test gp_phase_cancellation --test gp_phase_regimes -- --nocapture",
+      "source_state": "All compiled sources committed at 36a5606f82b8df0679ca9b655bc3f509b594975d; only the plan/evidence documentation changed during execution.",
+      "configuration": "Optimized wasm32-unknown-unknown core in a headless Chrome dedicated worker; wasm,veriloga-wasm-jit features without defaults.",
+      "observed_test_totals": {
+        "passed": 20,
+        "failed": 0,
+        "ignored": 2
+      },
+      "outcome": "passed_with_two_required_unresolved_ignores",
+      "log": "target/core-qualification/gp-charge-event-worker-committed.log",
+      "log_sha256": "98b3edd64ccfc22e29c420e0b5518f7aea78338fff61b5703c7b82fec9426e8c",
+      "artifact_sha256": {
+        "target/wasm32-unknown-unknown/release/deps/bjt_excess_phase_transient-b80ba5c9d0d9b715.wasm": "ef8406885c3914fb3fc792fe310931ede9b5dcb64576cd583c7815d4fdcf63a1",
+        "target/wasm32-unknown-unknown/release/deps/gp_history_resources-dd4bc7fcfdd93a35.wasm": "77e6dc1bb50c07c68568464c69695070ec11d056f2b8336423cd33cac694d256",
+        "target/wasm32-unknown-unknown/release/deps/gp_phase_cancellation-ca0c4be0b8d28a2b.wasm": "fef54d3ec8e26bda65cb837a3a4d197cbd06398791339423a25a93f84a61619e",
+        "target/wasm32-unknown-unknown/release/deps/gp_phase_regimes-f241bb5de8d6db51.wasm": "274661555e2e5f4553e9af695abb5e64bff4ba311913e581b3021b4a9fb216b9"
+      }
+    }
+  ],
+  "limitations": [
+    "All C00-C14 packages remain open. Two required positive numerical regressions are ignored by default and still fail when explicitly executed.",
+    "Historical successful checks overlap; do not add them as unique tests or claim a full library run on source_revision.",
+    "No whole-run heap/RSS qualification or inner-factorization cancellation measurement is supplied by this batch.",
+    "No new real external-model/JIT evaluation, live ngspice/Xyce comparison, or complete model/feature/target corpus is supplied by enabling a Cargo feature.",
+    "Physical-event family and per-instance integration gaps remain C03d work. Other parameter/topology, private Weil, restart and configuration gates remain C03c work."
+  ],
+  "worker_environment": {
+    "CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER": "C:/Users/James/.cargo/bin/wasm-bindgen-test-runner.exe",
+    "WASM_BINDGEN_TEST_TIMEOUT": "180",
+    "WASM_BINDGEN_USE_DEDICATED_WORKER": "1",
+    "WASM_BINDGEN_USE_BROWSER": "unset",
+    "NO_HEADLESS": "unset",
+    "CHROMEDRIVER": "target/core-qualification/chromedriver-154/chromedriver-win64/chromedriver.exe",
+    "WASM_BINDGEN_TEST_WEBDRIVER_JSON": "target/core-qualification/gp-webdriver.json",
+    "webdriver_config_sha256": "93458ed98943268e089c8c9a793bf2e899872e62941ac54795b0c27b7104785b",
+    "runner_sha256": "e451b278c106269fa9a2731a4f8e77f888ccd2694b2b3a1760319198f6c2a68e",
+    "chromedriver_sha256": "10396edca82a0e3e13a8e8cd97909d8d16fc5a23ca62ffd2b3cc7e3d99325994",
+    "provisioning_reference": "core-gp-wasm-windows-20261006.json",
+    "scope": "Runner timeout is not a measured performance limit. Enabling Verilog-A features does not qualify external model evaluation. The two ignored tests remain required failures."
+  }
+}
