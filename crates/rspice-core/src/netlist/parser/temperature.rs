@@ -16,6 +16,77 @@ pub(super) struct ParserTemperatures {
     tnom: Option<Value>,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(super) enum TemperatureDirective {
+    Single(Value),
+    Sweep,
+}
+
+impl TemperatureDirective {
+    pub(super) fn from_values(values: &[Value]) -> Self {
+        match values {
+            [single] => Self::Single(*single),
+            _ => Self::Sweep,
+        }
+    }
+}
+
+/// A failed completion can still discover an authoritative temperature. The
+/// public error survives unless a fresh parse confirms a different setting.
+#[derive(Debug)]
+pub(super) struct TemperaturePassError {
+    error: Box<ParseWithAbortError>,
+    selected: Option<ParserTemperatures>,
+}
+
+impl From<ParseWithAbortError> for TemperaturePassError {
+    fn from(error: ParseWithAbortError) -> Self {
+        Self {
+            error: Box::new(error),
+            selected: None,
+        }
+    }
+}
+
+impl From<ParseError> for TemperaturePassError {
+    fn from(error: ParseError) -> Self {
+        ParseWithAbortError::from(error).into()
+    }
+}
+
+impl TemperaturePassError {
+    pub(super) fn after_analysis_completion(
+        error: ParseWithAbortError,
+        used: ParserTemperatures,
+        options: &SimulationOptions,
+        last_directive: Option<TemperatureDirective>,
+        overrides: &[ParameterOverride],
+    ) -> Self {
+        if matches!(
+            &error,
+            ParseWithAbortError::Aborted | ParseWithAbortError::Parse(ParseError::ResourceLimit(_))
+        ) {
+            return error.into();
+        }
+        let mut resolved = ParserTemperatures {
+            temp: options.temp,
+            tnom: options.tnom,
+        };
+        if let Some(TemperatureDirective::Single(single)) = last_directive {
+            resolved.temp = Some(single);
+        }
+        // Overrides were validated before parsing; retain a validation error
+        // if that contract ever changes instead of choosing another value.
+        if let Err(error) = resolved.apply_override(overrides) {
+            return error.into();
+        }
+        Self {
+            error: Box::new(error),
+            selected: (used != resolved).then_some(resolved),
+        }
+    }
+}
+
 impl ParserTemperatures {
     pub(super) fn apply_override(
         &mut self,
@@ -51,11 +122,21 @@ impl ParserTemperatures {
 pub(super) fn parse_with_consistent_temperatures(
     mut parse: impl FnMut(
         Option<ParserTemperatures>,
-    ) -> Result<(Netlist, ParserTemperatures), ParseWithAbortError>,
+    ) -> Result<(Netlist, ParserTemperatures), TemperaturePassError>,
 ) -> Result<Netlist, ParseWithAbortError> {
     let mut selected = None;
     for _ in 0..3 {
-        let (netlist, used) = parse(selected)?;
+        let (netlist, used) = match parse(selected) {
+            Ok(result) => result,
+            Err(TemperaturePassError {
+                selected: Some(temperatures),
+                ..
+            }) => {
+                selected = Some(temperatures);
+                continue;
+            }
+            Err(error) => return Err(*error.error),
+        };
         let resolved = ParserTemperatures::resolved(&netlist);
         if used == resolved {
             return Ok(netlist);
@@ -173,6 +254,86 @@ fn scan_temperature_option_line(line: &str, line_num: usize, hints: &mut ParserT
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn physical_temperature_override_survives_failed_analysis_completion() {
+        let source = "Physical replay\n.ac lin 1 {1/(TNOM-27)} 100\n.temp 27\n.param nominal=55\n.options tnom={nominal}\n.end\n";
+        let netlist = parse_netlist_with_parameter_overrides_and_abort(
+            source,
+            NetlistParseOptions::default(),
+            &[ParameterOverride {
+                name: "TEMP".into(),
+                value: 85.0,
+                global: false,
+                direction: false,
+            }],
+            &NoAbort,
+        )
+        .unwrap();
+        assert_eq!(netlist.options.temp, Some(85.0));
+        assert_eq!(netlist.options.tnom, Some(55.0));
+        assert_eq!(netlist.params.get("TEMP"), Some(85.0));
+        let AnalysisCommand::Ac { start_freq, .. } = netlist.analyses[0] else {
+            panic!("AC")
+        };
+        assert_eq!(start_freq, 1.0 / 28.0);
+    }
+
+    #[test]
+    fn completion_cancellation_and_resource_errors_never_request_replay() {
+        let limit = crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::AnalysisPoints,
+            2,
+            1,
+        )
+        .unwrap_err();
+        for error in [ParseWithAbortError::Aborted, ParseError::from(limit).into()] {
+            let mut failure = Some(error);
+            let mut calls = 0;
+            let result = parse_with_consistent_temperatures(|_| {
+                calls += 1;
+                Err(TemperaturePassError::after_analysis_completion(
+                    failure.take().expect("terminal errors must not replay"),
+                    ParserTemperatures::default(),
+                    &SimulationOptions {
+                        temp: Some(85.0),
+                        ..Default::default()
+                    },
+                    None,
+                    &[],
+                ))
+            });
+            assert_eq!(calls, 1);
+            assert!(matches!(
+                result,
+                Err(ParseWithAbortError::Aborted
+                    | ParseWithAbortError::Parse(ParseError::ResourceLimit(_)))
+            ));
+        }
+    }
+
+    #[test]
+    fn replay_after_a_provisional_analysis_error_remains_cancellable() {
+        let source = "Provisional analysis\n.ac lin 1 {1/(TEMP-27)} {1/(TEMP-27)}\n.param ambient=85\n.options temp={ambient}\n.end\n";
+        let counter = crate::abort_signal::CountingAbort::new(usize::MAX);
+        let failure = parse_netlist_impl(
+            source,
+            NetlistParseOptions::default(),
+            None,
+            None,
+            ParserReplay::default(),
+            &[],
+            &counter,
+        )
+        .unwrap_err();
+        assert_eq!(failure.selected.unwrap().temp, Some(85.0));
+        let abort = crate::abort_signal::CountingAbort::new(counter.count());
+        assert!(matches!(
+            parse_netlist_with_options_and_abort(source, NetlistParseOptions::default(), &abort),
+            Err(ParseWithAbortError::Aborted)
+        ));
+        assert_eq!(abort.polls_after_abort(), 0);
+    }
 
     #[test]
     fn literal_fast_path_and_parameter_dependency_pass_counts_are_bounded() {

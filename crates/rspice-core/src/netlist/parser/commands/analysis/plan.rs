@@ -142,6 +142,7 @@ impl AnalysisCardPlan {
         &mut self,
         scopes: &mut LexicalScopes,
         params: &ParamContext,
+        last_temperature_directive: &mut Option<TemperatureDirective>,
         sink: AnalysisCardSink<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<(), ParseWithAbortError> {
@@ -151,52 +152,86 @@ impl AnalysisCardPlan {
         let mut lin_exists = sink.lin_analysis.is_some();
         let mut current_noise = sink.options.transient_noise;
         let mut ready = Vec::new();
-        for entry in std::mem::take(&mut self.entries) {
+        let mut first_error = None;
+        let last_temperature_position = self.entries.iter().rposition(|entry| match &entry.card {
+            Card::Ready(card) => matches!(card.analysis, Some(AnalysisCommand::Temp { .. })),
+            Card::Pending(card) => card.command.eq_ignore_ascii_case(".TEMP"),
+        });
+        for (position, entry) in std::mem::take(&mut self.entries).into_iter().enumerate() {
             ensure_parse_not_aborted(abort)?;
-            let card = match entry.card {
-                Card::Ready(card) => {
-                    card.validate_constraints(entry.line, lin_exists, current_noise)
-                        .map_err(|error| located_error(error, entry.line, &entry.origin))?;
-                    *card
-                }
-                Card::Pending(pending) if pending.scope != 0 => scoped::bind(
-                    scopes,
-                    &pending,
-                    AnalysisCardContext {
-                        line_num: entry.line,
-                        logical_line: &pending.logical_line,
-                        params,
-                        max_analysis_points: pending.max_analysis_points,
-                        origin: &entry.origin,
-                        lin_exists,
-                        current_noise,
-                    },
-                    abort,
-                )?,
-                Card::Pending(pending) => {
-                    let bound = pending.context(params);
-                    ParsedAnalysisCard::parse(
-                        &pending.command,
-                        &mut pending.stream.clone(),
+            let bound = (|| -> Result<ParsedAnalysisCard, ParseWithAbortError> {
+                Ok(match entry.card {
+                    Card::Ready(card) => {
+                        card.validate_constraints(entry.line, lin_exists, current_noise)
+                            .map_err(|error| located_error(error, entry.line, &entry.origin))?;
+                        *card
+                    }
+                    Card::Pending(pending) if pending.scope != 0 => scoped::bind(
+                        scopes,
+                        &pending,
                         AnalysisCardContext {
                             line_num: entry.line,
                             logical_line: &pending.logical_line,
-                            params: &bound,
+                            params,
                             max_analysis_points: pending.max_analysis_points,
                             origin: &entry.origin,
                             lin_exists,
                             current_noise,
                         },
-                    )
-                    .map_err(|error| located_error(error, entry.line, &entry.origin))?
-                    .expect("saved analysis head")
+                        abort,
+                    )?,
+                    Card::Pending(pending) => {
+                        let bound = pending.context(params);
+                        ParsedAnalysisCard::parse(
+                            &pending.command,
+                            &mut pending.stream.clone(),
+                            AnalysisCardContext {
+                                line_num: entry.line,
+                                logical_line: &pending.logical_line,
+                                params: &bound,
+                                max_analysis_points: pending.max_analysis_points,
+                                origin: &entry.origin,
+                                lin_exists,
+                                current_noise,
+                            },
+                        )
+                        .map_err(|error| located_error(error, entry.line, &entry.origin))?
+                        .expect("saved analysis head")
+                    }
+                })
+            })();
+            let card = match bound {
+                Ok(card) => card,
+                Err(
+                    error @ (ParseWithAbortError::Aborted
+                    | ParseWithAbortError::Parse(ParseError::ResourceLimit(_))),
+                ) => return Err(error),
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                    if last_temperature_position.is_none_or(|last| position >= last) {
+                        return Err(first_error.take().expect("failed card retained"));
+                    }
+                    continue;
                 }
             };
+            if let Some(AnalysisCommand::Temp { temperatures }) = &card.analysis {
+                *last_temperature_directive = Some(TemperatureDirective::from_values(temperatures));
+            }
+            // Continue a failed pass only far enough to discover a later
+            // physical temperature. No staged effects from it are published.
+            if last_temperature_position.is_some_and(|last| position >= last)
+                && let Some(error) = first_error.take()
+            {
+                return Err(error);
+            }
             lin_exists |= card.lin_analysis.is_some();
             current_noise = card.transient_noise.or(current_noise);
             ready.push((entry.output_position, entry.diagnostic_position, card));
         }
         ensure_parse_not_aborted(abort)?;
+        if let Some(error) = first_error {
+            return Err(error);
+        }
         // Non-analysis directives have continued to append outputs/warnings.
         // Merge once at their saved boundaries; repeated Vec::insert would be
         // quadratic and scope-close order must not become publication order.
@@ -273,6 +308,7 @@ mod tests {
             let result = state.analysis_cards.complete(
                 &mut state.scopes,
                 &state.params,
+                &mut None,
                 AnalysisCardSink {
                     analyses: &mut state.analyses,
                     monte_carlo_source_cards: &mut state.monte_carlo_source_cards,
@@ -320,6 +356,7 @@ mod tests {
         let result = state.analysis_cards.complete(
             &mut state.scopes,
             &state.params,
+            &mut None,
             AnalysisCardSink {
                 analyses: &mut state.analyses,
                 monte_carlo_source_cards: &mut state.monte_carlo_source_cards,

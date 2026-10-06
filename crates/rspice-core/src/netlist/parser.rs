@@ -61,8 +61,9 @@ mod temperature;
 use stream::TokenStream;
 
 use temperature::{
-    ParserTemperatures, apply_replayed_temperature, parse_with_consistent_temperatures,
-    prescan_temperature_options_with_abort, replayed_temperature,
+    ParserTemperatures, TemperatureDirective, TemperaturePassError, apply_replayed_temperature,
+    parse_with_consistent_temperatures, prescan_temperature_options_with_abort,
+    replayed_temperature,
 };
 
 pub use commands::{option_package_key_is_known, parse_save_probe};
@@ -682,7 +683,7 @@ fn parse_netlist_impl(
     replay: ParserReplay,
     overrides: &[ParameterOverride],
     abort: &dyn AbortSignal,
-) -> Result<(Netlist, ParserTemperatures), ParseWithAbortError> {
+) -> Result<(Netlist, ParserTemperatures), TemperaturePassError> {
     ensure_parse_not_aborted(abort)?;
     crate::resource::ResourceLimitError::ensure(
         crate::resource::ResourceKind::NetlistBytes,
@@ -1181,20 +1182,39 @@ fn parse_netlist_impl(
     // Ready analysis cards retain their authored values. Pending root cards
     // bind after the existing declaration/source/model completion phases, then
     // merge their staged effects back into authored order.
-    state.analysis_cards.complete(
-        &mut state.scopes,
-        &state.params,
-        commands::analysis::AnalysisCardSink {
-            analyses: &mut state.analyses,
-            monte_carlo_source_cards: &mut state.monte_carlo_source_cards,
-            lin_analysis: &mut state.lin_analysis,
-            fft_analyses: &mut state.fft_analyses,
-            output_requests: &mut state.output_requests,
-            diagnostics: &mut state.diagnostics,
-            options: &mut state.options,
-        },
-        abort,
-    )?;
+    let mut last_temperature_directive = state.analyses.iter().rev().find_map(|analysis| {
+        if let AnalysisCommand::Temp { temperatures } = analysis {
+            Some(TemperatureDirective::from_values(temperatures))
+        } else {
+            None
+        }
+    });
+    state
+        .analysis_cards
+        .complete(
+            &mut state.scopes,
+            &state.params,
+            &mut last_temperature_directive,
+            commands::analysis::AnalysisCardSink {
+                analyses: &mut state.analyses,
+                monte_carlo_source_cards: &mut state.monte_carlo_source_cards,
+                lin_analysis: &mut state.lin_analysis,
+                fft_analyses: &mut state.fft_analyses,
+                output_requests: &mut state.output_requests,
+                diagnostics: &mut state.diagnostics,
+                options: &mut state.options,
+            },
+            abort,
+        )
+        .map_err(|error| {
+            TemperaturePassError::after_analysis_completion(
+                error,
+                temperatures,
+                &state.options,
+                last_temperature_directive,
+                overrides,
+            )
+        })?;
     let pending_xyce_diode_model_warnings =
         std::mem::take(&mut state.pending_xyce_diode_model_warnings);
     validate_resistor_model_references_with_abort(&state, abort)?;
