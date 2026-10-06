@@ -63,31 +63,5 @@ pub(super) fn validate(netlist: &Netlist, args: &RunArgs, config: &Config) -> Re
             }
         }
     }
-    if args.output.is_none() {
-        return Ok(());
-    }
-    let format = args
-        .format
-        .map_or_else(|| parse_format_name(&config.output.format), Ok)?;
-    if format == OutputFormat::Hdf5 {
-        if args.pz_input.is_some() {
-            return frequency::reject_hdf5(format, "pole-zero");
-        }
-        if args.sens_output.is_some() {
-            return frequency::reject_hdf5(format, "sensitivity");
-        }
-        if runs_cards {
-            for analysis in &netlist.analyses {
-                let family = match analysis {
-                    AnalysisCommand::Tf { .. } => "transfer function",
-                    AnalysisCommand::PoleZero { .. } => "pole-zero",
-                    AnalysisCommand::Sensitivity { .. } => "sensitivity",
-                    AnalysisCommand::DcMatch(_) => "DC mismatch",
-                    _ => continue,
-                };
-                frequency::reject_hdf5(format, family)?;
-            }
-        }
-    }
     Ok(())
 }

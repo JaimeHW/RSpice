@@ -767,7 +767,7 @@ fn transient_rawfile_appends_lossless_event_plots() {
 /// `convert` and `compare` read the analysis plot and are untroubled by the
 /// plots behind it.
 #[test]
-fn generic_conversion_still_reads_plot_one_of_a_multi_plot_rawfile() {
+fn explicit_grid_selection_reads_a_multi_plot_rawfile() {
     let dir = test_dir("tran_xspice_event_convert");
     // `compare` resolves each side's format from its extension, so the golden
     // is published under its own.
@@ -801,6 +801,7 @@ fn generic_conversion_still_reads_plot_one_of_a_multi_plot_rawfile() {
             .arg(&converted)
             .arg("--to")
             .arg("csv")
+            .args(["--section", "Transient Analysis"])
             .output()
             .expect("convert a rawfile carrying event plots");
         assert!(
@@ -824,6 +825,7 @@ fn generic_conversion_still_reads_plot_one_of_a_multi_plot_rawfile() {
             .arg(&golden)
             .arg("--abstol")
             .arg("1e-9")
+            .args(["--section", "Transient Analysis"])
             .output()
             .expect("compare a rawfile carrying event plots");
         assert!(

@@ -118,13 +118,13 @@ pub(super) fn finish_dc_op_result(
             .collect::<Vec<_>>();
         println!("DC Operating Point:");
         for signal in voltage_signals.iter().take(10) {
-            println!("  {} = {:.6} V", signal.display_name, signal.values[0]);
+            println!("  {} = {:.9e} V", signal.display_name, signal.values[0]);
         }
         if voltage_signals.len() > 10 {
             println!("  ... ({} more node voltages)", voltage_signals.len() - 10);
         }
         for signal in current_signals.iter().take(5) {
-            println!("  {} = {:.6} A", signal.display_name, signal.values[0]);
+            println!("  {} = {:.9e} A", signal.display_name, signal.values[0]);
         }
         if current_signals.len() > 5 {
             println!("  ... ({} more branch currents)", current_signals.len() - 5);
@@ -1072,10 +1072,14 @@ pub(super) fn finish_transient_result(
             }
             OutputFormat::Vcd => {
                 if result.digital_traces.is_empty() && result.real_traces.is_empty() {
-                    eprintln!(
-                        "Warning: this transient captured no digital or real event node; \
+                    crate::observability::diagnostic(
+                        "empty_event_capture",
+                        None,
+                        format_args!(
+                            "Warning: this transient captured no digital or real event node; \
                          {} declares no signal and records no change",
-                        output_path.display()
+                            output_path.display()
+                        ),
                     );
                 }
                 TransientOutputDocument::Vcd(Box::new(crate::commands::vcd_io::event_document(

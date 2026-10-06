@@ -608,6 +608,46 @@ fn hdf5_groups_are_keyed_by_analysis_identity() {
 }
 
 #[test]
+fn report_families_publish_hdf5_tables_with_identity_and_match_csv() {
+    for kind in [
+        AnalysisResultKind::TransferFunction,
+        AnalysisResultKind::PoleZero,
+        AnalysisResultKind::Sensitivity,
+        AnalysisResultKind::DcMatch,
+        AnalysisResultKind::Pstb,
+    ] {
+        let FamilyCoverage::Document(family) = coverage(kind) else {
+            panic!("expected a document family");
+        };
+        let dir = test_dir("report_hdf5");
+        if let Some(library) = family.library {
+            std::fs::write(dir.join("statistics.scs"), library).unwrap();
+        }
+        let mut artifacts = Vec::new();
+        for format in ["hdf5", "csv"] {
+            let (output, requested) = run(&dir, family.circuit, family.cards, family.flags, format);
+            assert!(output.status.success(), "{kind:?}/{format}: {output:?}");
+            artifacts.push(artifact_path(&requested, family.artifact));
+        }
+        let file = rustyhdf5::File::open(&artifacts[0]).unwrap();
+        let group = file.group(family.analysis_tag).unwrap();
+        let attrs = group.attrs().unwrap();
+        assert!(
+            matches!(attrs.get("section_type"), Some(rustyhdf5::AttrValue::String(value)) if value == "table")
+        );
+        assert!(attrs.contains_key("coordinate_type"));
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "compare"])
+            .arg(&artifacts[0])
+            .arg(&artifacts[1])
+            .args(["--abstol", "0", "--reltol", "0"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{kind:?}: {output:?}");
+    }
+}
+
+#[test]
 fn every_result_family_publishes_a_typed_document() {
     for kind in AnalysisResultKind::ALL {
         match coverage(kind) {

@@ -7,13 +7,14 @@
 
 use crate::cli::{CliError, Config, OutputFormat, map_atomic_output_error};
 use crate::commands::publish;
-use crate::commands::waveform_io::{detect_format, load_table};
+use crate::commands::waveform_io::{detect_format, load_table_selected};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
 /// Arguments for the compare command
 #[derive(Debug, Clone)]
 pub struct CompareArgs {
+    pub section: Option<String>,
     /// Result file to compare
     pub result: PathBuf,
     /// Golden (reference) file
@@ -41,6 +42,7 @@ pub struct CompareArgs {
 impl Default for CompareArgs {
     fn default() -> Self {
         Self {
+            section: None,
             result: PathBuf::new(),
             golden: PathBuf::new(),
             abstol: 1e-9,
@@ -119,7 +121,11 @@ pub fn execute(
             // Missing-golden bootstrap is still a promotion of a result
             // artifact. Validate the result before copying so malformed CSV,
             // JSON, RAW, etc. cannot become the accepted baseline.
-            let data = load_waveform_data(&args.result, config.resources.limits())?;
+            let data = load_waveform_data(
+                &args.result,
+                config.resources.limits(),
+                args.section.as_deref(),
+            )?;
             bless_golden(&args.result, &args.golden, quiet, "no golden file yet")?;
             if args.format == OutputFormat::Json {
                 let mut comparison = compare_waveforms(&data, &data, &args)?;
@@ -127,7 +133,7 @@ pub fn execute(
                 comparison
                     .problems
                     .push("golden file did not exist".to_string());
-                output_json(&comparison, true);
+                output_json(&comparison, true, args.section.as_deref());
             }
             return Ok(());
         }
@@ -150,8 +156,16 @@ pub fn execute(
     }
 
     // Load and parse files
-    let result_data = load_waveform_data(&args.result, config.resources.limits())?;
-    let golden_data = load_waveform_data(&args.golden, config.resources.limits())?;
+    let result_data = load_waveform_data(
+        &args.result,
+        config.resources.limits(),
+        args.section.as_deref(),
+    )?;
+    let golden_data = load_waveform_data(
+        &args.golden,
+        config.resources.limits(),
+        args.section.as_deref(),
+    )?;
 
     let result_data = if args.interpolate {
         resample_onto_golden(result_data, &golden_data)?
@@ -170,7 +184,7 @@ pub fn execute(
         if blessed {
             bless_golden(&args.result, &args.golden, quiet, "differences accepted")?;
         }
-        output_json(&cmp_result, blessed);
+        output_json(&cmp_result, blessed, args.section.as_deref());
     } else {
         output_text(&cmp_result, quiet);
         if blessed {
@@ -294,8 +308,9 @@ fn find_variable_index(variables: &[String], requested: &str) -> Option<usize> {
 fn load_waveform_data(
     path: &std::path::Path,
     resource_limits: rspice_core::ResourceLimits,
+    section: Option<&str>,
 ) -> Result<WaveformData, CliError> {
-    let table = load_table(path, detect_format(path), resource_limits)?;
+    let table = load_table_selected(path, detect_format(path), resource_limits, section)?;
     let (variables, values): (Vec<String>, Vec<Vec<f64>>) =
         table.to_real_series().into_iter().unzip();
     let mut seen = HashSet::new();
@@ -727,10 +742,11 @@ fn compare_waveforms(
 }
 
 /// Output comparison result as JSON
-fn output_json(result: &CompareResult, blessed: bool) {
+fn output_json(result: &CompareResult, blessed: bool, section: Option<&str>) {
     let accepted = result.passed || blessed;
     let json = serde_json::json!({
         "passed": accepted,
+        "section": section,
         "comparison_passed": result.passed,
         "accepted": accepted,
         "blessed": blessed,
@@ -752,6 +768,7 @@ fn output_json(result: &CompareResult, blessed: bool) {
             })
         }).collect::<Vec<_>>(),
     });
+    let json = crate::observability::envelope("rspice.comparison", json);
     match serde_json::to_string_pretty(&json) {
         Ok(text) => println!("{text}"),
         Err(e) => eprintln!("Error: failed to serialize comparison report: {e}"),

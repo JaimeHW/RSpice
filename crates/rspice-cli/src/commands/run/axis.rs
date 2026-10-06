@@ -491,20 +491,28 @@ fn run_implicit_step_op_table(
             .ok_or_else(|| CliError::InternalError {
                 message: "one-dimensional implicit plan has no scale name".to_string(),
             })?;
-        let results = preflight
-            .iter()
-            .map(|run| {
-                run.value
-                    .map(|value| (value, run.result.clone()))
-                    .ok_or_else(|| CliError::InternalError {
-                        message: format!(
-                            "one-dimensional implicit coordinate {} has no scalar axis value",
-                            run.coordinate_id
-                        ),
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        advanced::export_step_sweep(&ctx, scale_name, &results)?;
+        // Reuse the already projected, schema-checked coordinate inventory.
+        // Rebuilding from voltage vectors drops branch currents and observables.
+        let mut signals = preflight
+            .first()
+            .map(|run| run.signals.clone())
+            .unwrap_or_default();
+        for signal in &mut signals {
+            signal.values.clear();
+        }
+        let mut scale = Vec::with_capacity(preflight.len());
+        for run in &preflight {
+            scale.push(run.value.ok_or_else(|| CliError::InternalError {
+                message: format!(
+                    "one-dimensional implicit coordinate {} has no scalar axis value",
+                    run.coordinate_id
+                ),
+            })?);
+            for (signal, point) in signals.iter_mut().zip(&run.signals) {
+                signal.values.extend_from_slice(&point.values);
+            }
+        }
+        advanced::export_step_sweep(&ctx, scale_name, scale, &signals)?;
         outputs.extend(ctx.outputs.borrow().iter().cloned());
     } else if let Some(base_output) = ctx.output.clone() {
         // Flat artifacts stay coordinate-local when topology changes.  Every

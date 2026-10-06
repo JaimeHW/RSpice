@@ -79,7 +79,6 @@ pub(super) fn run_tf_from_command(
     }
 
     if let Some(output) = ctx.resolve_output("tf") {
-        reject_hdf5(ctx.format, "transfer function")?;
         let analysis_id = output.analysis("tf")?;
         use super::export::{ColumnData, ExportColumn, ExportTable};
 
@@ -129,18 +128,6 @@ pub(super) fn run_tf_from_command(
         }
     }
 
-    Ok(())
-}
-
-/// The report-shaped analyses (TF, PZ, sensitivity) have no natural HDF5
-/// section; fail with a clear message instead of writing a misleading file.
-pub(super) fn reject_hdf5(format: OutputFormat, what: &str) -> Result<(), CliError> {
-    if matches!(format, OutputFormat::Hdf5) {
-        return Err(CliError::InvalidArgument {
-            message: format!("HDF5 output is not supported for {what} results"),
-            suggestion: Some("use --format csv, json, or raw".to_string()),
-        });
-    }
     Ok(())
 }
 
@@ -1335,7 +1322,6 @@ fn report_pz(
     }
 
     if let Some(output) = ctx.resolve_output("pz") {
-        reject_hdf5(ctx.format, "pole-zero")?;
         let analysis_id = output.analysis("pz")?;
         use super::export::{ColumnData, ExportColumn, ExportTable};
 
@@ -1658,7 +1644,6 @@ pub(super) fn run_sensitivity_from_command(
         }
 
         if let Some(resolved) = ctx.resolve_output("sens") {
-            reject_hdf5(ctx.format, "sensitivity")?;
             let analysis_id = resolved.analysis("sens")?;
             use super::export::{ColumnData, ExportColumn, ExportTable};
 
@@ -1773,7 +1758,7 @@ fn export_parameter_sensitivity(
     let Some(resolved) = ctx.resolve_output("sens") else {
         return Ok(());
     };
-    reject_hdf5(ctx.format, "sensitivity")?;
+
     let analysis_id = resolved.analysis("sens")?;
     let table = dc_sensitivity_table(&output_label, &results);
     let schema = table_schema(&table)?;
@@ -1833,7 +1818,7 @@ fn export_dc_sensitivity_result(
     let Some(resolved) = ctx.resolve_output("sens") else {
         return Ok(());
     };
-    reject_hdf5(ctx.format, "sensitivity")?;
+
     let analysis_id = resolved.analysis("sens")?;
     let table = dc_sensitivity_table(output, results);
     let schema = table_schema(&table)?;

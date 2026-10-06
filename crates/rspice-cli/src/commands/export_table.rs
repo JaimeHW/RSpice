@@ -2,8 +2,8 @@
 //!
 //! Every analysis that honors `--output` routes its tabular results through
 //! [`ExportTable`], which renders the same data in any requested
-//! [`OutputFormat`] (HDF5 is handled separately by callers because its
-//! sections are analysis-specific):
+//! [`OutputFormat`]. HDF5 retains a typed table section; analyses with richer
+//! HDF5 sections may use their own projections:
 //!
 //! - `raw` / `ascii`: SPICE rawfile (binary or ASCII values), with
 //!   `Flags: complex` and interleaved real/imaginary pairs for AC data
@@ -201,14 +201,11 @@ impl ExportTable {
 
     /// Write the table to `path` in the requested format.
     ///
-    /// HDF5 has analysis-specific sections and must be handled by the caller.
     /// VCD is not a table at all — it carries event timelines, which only a
     /// transient captures — so it is refused here rather than flattened.
     pub(crate) fn write(&self, path: &Path, format: OutputFormat) -> Result<(), CliError> {
         if format == OutputFormat::Hdf5 {
-            return Err(CliError::InternalError {
-                message: "HDF5 export must be handled by the analysis-specific writer".to_string(),
-            });
+            return crate::hdf5::write_table(path, self, None);
         }
         if format == OutputFormat::Vcd {
             return Err(crate::commands::vcd_io::unsupported_analysis(
@@ -233,9 +230,10 @@ impl ExportTable {
             OutputFormat::Csv => self.write_delimited(writer, path, ','),
             OutputFormat::Tsv => self.write_delimited(writer, path, '\t'),
             OutputFormat::Json => self.write_json(writer, path),
-            OutputFormat::Hdf5 => Err(CliError::InternalError {
-                message: "HDF5 export must be handled by the analysis-specific writer".to_string(),
-            }),
+            OutputFormat::Hdf5 => {
+                crate::hdf5::write_hdf5_to_writer(writer, &crate::hdf5::table_data(self, None))
+                    .map_err(|error| crate::hdf5::map_output_error(path, error))
+            }
             OutputFormat::Vcd => Err(crate::commands::vcd_io::unsupported_analysis(
                 &self.analysis,
             )),
@@ -382,10 +380,12 @@ impl ExportTable {
             .map(|column| match &column.data {
                 ColumnData::Real(values) => serde_json::json!({
                     "name": column.name,
+                    "type": column.var_type,
                     "values": values,
                 }),
                 ColumnData::Complex { real, imag } => serde_json::json!({
                     "name": column.name,
+                    "type": column.var_type,
                     "real": real,
                     "imag": imag,
                 }),
@@ -394,8 +394,10 @@ impl ExportTable {
 
         let json = serde_json::json!({
             "analysis": self.analysis,
+            "plot_name": self.plot_name,
             "scale": {
                 "name": self.scale_name,
+                "type": self.scale_type,
                 "values": self.scale,
             },
             "signals": signals,
@@ -487,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn analysis_specific_hdf5_rejection_does_not_touch_existing_destination() {
+    fn invalid_hdf5_table_rejection_does_not_touch_existing_destination() {
         let directory = std::env::temp_dir().join(format!(
             "rspice-export-table-hdf5-rejection-{}",
             std::process::id()
@@ -501,14 +503,14 @@ mod tests {
             plot_name: "test".to_string(),
             scale_name: "time".to_string(),
             scale_type: "time".to_string(),
-            scale: vec![0.0],
+            scale: vec![f64::NAN],
             columns: Vec::new(),
         };
 
         let error = table
             .write(&destination, OutputFormat::Hdf5)
-            .expect_err("generic HDF5 table write must be rejected");
-        assert!(matches!(error, CliError::InternalError { .. }));
+            .expect_err("non-finite HDF5 data must be rejected");
+        assert!(error.to_string().contains("finite"), "{error}");
         assert_eq!(
             std::fs::read(&destination).expect("read preserved destination"),
             b"old complete artifact"

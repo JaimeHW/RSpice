@@ -81,7 +81,11 @@ pub(super) fn publish_table_result(
     document: impl FnOnce() -> Result<AnalysisResultDocumentBuilder, ResultDocumentError>,
 ) -> Result<(), CliError> {
     publish_analysis_result(ctx, path, analysis_id, schema, document, |path, format| {
-        table.write(path, format)
+        if format == OutputFormat::Hdf5 {
+            crate::hdf5::write_table(path, table, Some(hdf5_identity(ctx, analysis_id)?))
+        } else {
+            table.write(path, format)
+        }
     })
 }
 

@@ -160,6 +160,7 @@ pub struct Hdf5Limits<'a> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Hdf5SectionFamily {
+    Table(crate::WaveformDomain),
     Transient,
     DcSweep,
     Ac,
@@ -229,6 +230,7 @@ fn finish_hdf5(decoded: DecodedHdf5, format: &str) -> Result<DecodedNumericDatas
                 Hdf5SectionFamily::Transient => crate::WaveformDomain::Transient,
                 Hdf5SectionFamily::DcSweep => crate::WaveformDomain::DcSweep,
                 Hdf5SectionFamily::Ac => crate::WaveformDomain::Ac,
+                Hdf5SectionFamily::Table(domain) => domain,
             };
             Ok(DecodedNumericDataset {
                 domain,
@@ -309,6 +311,18 @@ fn hdf5_section_family(file: &rustyhdf5::File, group: &str) -> Option<Hdf5Sectio
         "transient" => Some(Hdf5SectionFamily::Transient),
         "dc_sweep" => Some(Hdf5SectionFamily::DcSweep),
         "ac" => Some(Hdf5SectionFamily::Ac),
+        "table" => {
+            let attrs = file.group(group).ok()?.attrs().ok()?;
+            let coordinate_type = hdf_optional_string_attr(&attrs, "coordinate_type")?;
+            let domain = match coordinate_type.as_str() {
+                "time" => crate::WaveformDomain::Transient,
+                "frequency" => crate::WaveformDomain::Ac,
+                "voltage" | "current" | "temperature" => crate::WaveformDomain::DcSweep,
+                // Report/index coordinates have no waveform-domain equivalent.
+                _ => return None,
+            };
+            Some(Hdf5SectionFamily::Table(domain))
+        }
         _ => None,
     }
 }
@@ -404,6 +418,49 @@ fn parse_rspice_hdf5_section(
             imag: None,
             unit: hdf_stated_unit(&attrs, &format!("{prefix}_unit")),
         });
+    }
+    if matches!(family, Hdf5SectionFamily::Table(_)) {
+        let mut decoded = Vec::new();
+        let mut columns = signals.into_iter().enumerate().peekable();
+        while let Some((index, mut signal)) = columns.next() {
+            let kind = hdf_optional_string_attr(&attrs, &format!("signal_{index:04}_type"))
+                .unwrap_or_default();
+            if let Some(quantity) = kind.strip_prefix("complex_real:") {
+                let name = signal
+                    .name
+                    .strip_prefix("Re(")
+                    .and_then(|name| name.strip_suffix(')'))
+                    .unwrap_or(&signal.name)
+                    .to_owned();
+                let expected = format!("Im({name})");
+                let valid = columns.peek().is_some_and(|(next, imag)| {
+                    imag.name == expected
+                        && hdf_optional_string_attr(&attrs, &format!("signal_{next:04}_type"))
+                            .as_deref()
+                            == Some(format!("complex_imag:{quantity}").as_str())
+                });
+                if !valid {
+                    return Err(adapter_error(
+                        format,
+                        Hdf5ReadFailure::ComplexColumns(
+                            crate::numeric::ComplexColumnError::MissingImaginary(name),
+                        ),
+                    ));
+                }
+                let (_, imaginary) = columns.next().expect("validated imaginary column");
+                signal.name = name;
+                signal.imag = Some(imaginary.real);
+            } else if kind.starts_with("complex_imag:") {
+                return Err(adapter_error(
+                    format,
+                    Hdf5ReadFailure::ComplexColumns(
+                        crate::numeric::ComplexColumnError::MissingReal(signal.name),
+                    ),
+                ));
+            }
+            decoded.push(signal);
+        }
+        signals = decoded;
     }
     Ok(DecodedHdf5::Section {
         family,
@@ -686,6 +743,60 @@ fn ensure_table_value_limit(
 #[cfg(test)]
 mod tests {
     use super::{Hdf5Limits, Hdf5ReadFailure, decode_hdf5};
+
+    #[test]
+    fn typed_tables_preserve_waveform_domains_and_complex_columns() {
+        use rustyhdf5::{AttrValue, FileBuilder};
+        for (coordinate, domain) in [
+            ("time", crate::WaveformDomain::Transient),
+            ("frequency", crate::WaveformDomain::Ac),
+        ] {
+            let mut file = FileBuilder::new();
+            let mut group = file.create_group("converted");
+            for (key, value) in [
+                ("section_type", "table"),
+                ("coordinate_type", coordinate),
+                ("independent_name", coordinate),
+                ("analysis", "converted"),
+                ("signal_0000_name", "Re(I(V1))"),
+                ("signal_0001_name", "Im(I(V1))"),
+                ("signal_0000_type", "complex_real:current"),
+                ("signal_0001_type", "complex_imag:current"),
+                ("signal_0000_unit", "A"),
+            ] {
+                group.set_attr(key, AttrValue::String(value.to_owned()));
+            }
+            group.set_attr("signal_count", AttrValue::I64(2));
+            group
+                .create_dataset("independent")
+                .with_f64_data(&[1.0, 2.0]);
+            group
+                .create_dataset("signal_0000")
+                .with_f64_data(&[3.0, 4.0]);
+            group
+                .create_dataset("signal_0001")
+                .with_f64_data(&[5.0, 6.0]);
+            file.add_group(group.finish());
+            let bytes = file.finish().unwrap();
+            let dataset = decode_hdf5(
+                &bytes,
+                Hdf5Limits {
+                    max_columns: 3,
+                    max_values: 6,
+                    coordinate_names: &["time", "frequency"],
+                },
+                "hdf5",
+            )
+            .unwrap();
+            assert_eq!(dataset.domain, domain);
+            assert_eq!(dataset.coordinate, [1.0, 2.0]);
+            assert_eq!(dataset.signals.len(), 1);
+            assert_eq!(dataset.signals[0].name, "I(V1)");
+            assert_eq!(dataset.signals[0].real, [3.0, 4.0]);
+            assert_eq!(dataset.signals[0].imag.as_deref(), Some(&[5.0, 6.0][..]));
+            assert_eq!(dataset.signals[0].unit.as_deref(), Some("A"));
+        }
+    }
 
     #[test]
     fn root_reader_preserves_coordinate_and_numeric_bounds() {

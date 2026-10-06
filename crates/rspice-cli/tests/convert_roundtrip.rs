@@ -118,6 +118,29 @@ fn convert(input: &Path, output: &Path, to: &str, extra: &[&str]) {
     rspice(&args);
 }
 
+#[test]
+fn typed_table_coordinates_and_quantities_survive_json_hdf5_and_raw() {
+    let dir = test_dir("typed_table_cycle");
+    let input = dir.join("source.json");
+    let hdf5 = dir.join("table.h5");
+    let raw = dir.join("table.raw");
+    let output = dir.join("result.json");
+    let source = serde_json::json!({
+        "analysis": "pz", "plot_name": "Pole-Zero Analysis",
+        "scale": {"name": "point", "type": "index", "values": [0.0]},
+        "signals": [{"name": "pole(1)", "type": "frequency", "real": [-1000.0], "imag": [12.0]}]
+    });
+    std::fs::write(&input, source.to_string()).unwrap();
+    convert(&input, &hdf5, "hdf5", &[]);
+    convert(&hdf5, &raw, "ascii", &[]);
+    convert(&raw, &output, "json", &[]);
+    let result: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(output).unwrap()).unwrap();
+    assert_eq!(result["scale"], source["scale"]);
+    assert_eq!(result["signals"], source["signals"]);
+    assert_eq!(result["plot_name"], source["plot_name"]);
+}
+
 /// Parse a CSV file into (header, rows).
 fn read_csv(path: &Path) -> (Vec<String>, Vec<Vec<f64>>) {
     let text = std::fs::read_to_string(path).expect("read csv");
@@ -470,7 +493,8 @@ fn a_bus_reaches_a_table_as_one_column_per_bit_from_either_artifact() {
     let raw = simulate(&dir, &deck, "raw", "run.raw");
 
     let grid = dir.join("grid.csv");
-    convert(&raw, &grid, "csv", &[]);
+    // Choose the sampled analysis grid explicitly; the other plots carry exact events.
+    convert(&raw, &grid, "csv", &["--section", "Transient Analysis"]);
     let (header, _) = read_csv(&grid);
     for member in ["D(COUNT#1)", "D(COUNT#0)"] {
         assert!(

@@ -157,9 +157,8 @@ fn a_saved_parameter_the_model_does_not_publish_fails_with_no_artifact() {
 // parameter is not: its validity belongs to device metadata, so it reaches
 // output projection and is exactly the symbol these paths used to drop.
 //
-// The `.STEP` sweep table publishes node voltages, so a branch current is the
-// symbol it cannot supply; it used to disappear from the table instead.
-const STEP_TABLE_DECK: &str = "* implicit .STEP sweep table with an unsupplied save\n\
+// Implicit OP sweeps retain the same current inventory as explicit .OP.
+const STEP_TABLE_DECK: &str = "* implicit .STEP sweep table with a current save\n\
      V1 in 0 5\n\
      R1 in out {rval}\n\
      R2 out 0 1k\n\
@@ -169,10 +168,36 @@ const STEP_TABLE_DECK: &str = "* implicit .STEP sweep table with an unsupplied s
      .end\n";
 
 #[test]
-fn a_step_sweep_table_refuses_a_signal_it_cannot_supply() {
-    let run = run_deck("step_table_unknown", STEP_TABLE_DECK, &[]);
-    assert_typed_unavailable(&run, "I(V1)", "Step");
-    cleanup(&run.dir);
+fn a_step_sweep_table_publishes_the_selected_branch_current() {
+    let run = run_deck("step_table_current", STEP_TABLE_DECK, &[]);
+    assert!(run.output.status.success(), "{:?}", run.output);
+    let csv = std::fs::read_to_string(&run.output_path).unwrap();
+    let currents = csv_column(&csv, "I(V1)");
+    assert_eq!(currents.len(), 3);
+    for (current, resistance) in currents.iter().zip([1000.0, 2000.0, 3000.0]) {
+        assert!((current + 5.0 / (resistance + 1000.0)).abs() < 1e-12);
+    }
+    assert_eq!(header_columns(&csv).len(), 2);
+}
+
+#[test]
+fn implicit_step_raw_retains_current_type_and_destination_ownership() {
+    for format in ["raw", "ascii"] {
+        let run = run_deck("step_table_current_raw", STEP_TABLE_DECK, &[]);
+        // Exercise both RAW carriers with the same projected current.
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "run"])
+            .arg(run.dir.join("input.cir"))
+            .arg("-o")
+            .arg(&run.output_path)
+            .args(["-f", format])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let raw = rspice_core::io::parse_raw_file(&run.output_path).unwrap();
+        assert_eq!(raw.variables[1].var_type, "current");
+        assert!(raw.variables[1].name.eq_ignore_ascii_case("I(V1)"));
+    }
 }
 
 const PERIODIC_DECK: &str = "* periodic analysis with an unknown save\n\

@@ -537,15 +537,6 @@ pub(crate) fn dc_sweep_signals(
     Ok(aggregated)
 }
 
-pub(crate) fn dc_sweep_voltage_signals(
-    results: &[(Value, SimulationResult)],
-) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
-    Ok(dc_sweep_signals(results)?
-        .into_iter()
-        .filter(|signal| signal.kind == SignalKind::Voltage)
-        .collect())
-}
-
 fn ac_point_signals(
     result: &AcResult,
     point: &str,

@@ -81,34 +81,18 @@ pub(super) fn run_hb_from_command(
 }
 
 /// Write the .STEP sweep table: one row per step value, one column per
-/// node voltage — the same shape as a DC sweep with the stepped quantity
+/// projected operating-point signal, with the stepped quantity
 /// as the abscissa.
 pub(super) fn export_step_sweep(
     ctx: &RunContext<'_>,
     step_name: &str,
-    sweep_results: &[(f64, rspice_core::solver::SimulationResult)],
+    sweep_vals: Vec<f64>,
+    signals: &[crate::commands::run_signals::ScalarSignal],
 ) -> Result<(), CliError> {
     ensure_not_cancelled(ctx)?;
     let Some(ref output_path) = ctx.output_path_for("step") else {
         return Ok(());
     };
-
-    let sweep_vals: Vec<f64> = sweep_results.iter().map(|(v, _)| *v).collect();
-    let step_error = |source| CliError::CoreSimulationError {
-        source,
-        analysis: Some("Step output projection".to_string()),
-    };
-    let inventory = crate::commands::run_signals::dc_sweep_voltage_signals(sweep_results)
-        .map_err(step_error)?;
-    let signals = crate::commands::run_signals::scalar_export_signals(
-        ctx.netlist,
-        rspice_core::execution::AnalysisResultKind::DcSweep,
-        "Step",
-        &sweep_vals,
-        &inventory,
-        &crate::abort::ProcessAbort,
-    )
-    .map_err(step_error)?;
 
     match ctx.format {
         crate::cli::OutputFormat::Hdf5 => {
@@ -116,7 +100,7 @@ pub(super) fn export_step_sweep(
             data.title = "Step Sweep".to_string();
 
             let mut sweep = crate::hdf5::Hdf5WaveformSection::new(step_name, sweep_vals.clone());
-            for signal in &signals {
+            for signal in signals {
                 sweep.add_typed_signal(
                     signal.display_name.clone(),
                     signal.raw_variable_type(),
@@ -129,29 +113,7 @@ pub(super) fn export_step_sweep(
             crate::hdf5::write_hdf5(output_path, &data)
                 .map_err(|err| super::shared::map_hdf5_output_error(output_path, err))?;
         }
-        crate::cli::OutputFormat::Raw | crate::cli::OutputFormat::RawAscii => {
-            let node_names: Vec<String> = signals
-                .iter()
-                .map(|signal| signal.raw_name.clone())
-                .collect();
-            let node_waveforms: Vec<Vec<f64>> =
-                signals.iter().map(|signal| signal.values.clone()).collect();
-            rspice_core::io::export_dc_sweep(
-                output_path,
-                &sweep_vals,
-                step_name,
-                &node_names,
-                &node_waveforms,
-                match ctx.format {
-                    crate::cli::OutputFormat::RawAscii => rspice_core::io::RawFormat::Ascii,
-                    _ => rspice_core::io::RawFormat::Binary,
-                },
-            )
-            .map_err(|e| CliError::OutputError {
-                path: output_path.clone(),
-                source: e,
-            })?;
-        }
+        crate::cli::OutputFormat::Raw | crate::cli::OutputFormat::RawAscii |
         crate::cli::OutputFormat::Csv
         | crate::cli::OutputFormat::Tsv
         | crate::cli::OutputFormat::Json
@@ -164,7 +126,7 @@ pub(super) fn export_step_sweep(
                 step_name,
                 "value",
                 sweep_vals,
-                &signals,
+                signals,
             )
             .write(output_path, ctx.format)?;
         }
@@ -248,10 +210,14 @@ pub(super) fn run_monte_carlo(
                 ));
             }
             if result.num_failures > 0 {
-                eprintln!(
-                    "Warning: {}/{} Monte Carlo runs failed to converge; statistics \
+                crate::observability::diagnostic(
+                    "monte_carlo_partial",
+                    None,
+                    format_args!(
+                        "Warning: {}/{} Monte Carlo runs failed to converge; statistics \
                      cover the surviving runs only",
-                    result.num_failures, num_runs
+                        result.num_failures, num_runs
+                    ),
                 );
             }
 
@@ -585,28 +551,6 @@ pub(super) fn export_pss(
                     data.transient = Some(section);
                     crate::hdf5::write_hdf5(path, &data)
                         .map_err(|err| super::shared::map_hdf5_output_error(path, err))?;
-                }
-                crate::cli::OutputFormat::Raw | crate::cli::OutputFormat::RawAscii => {
-                    let node_names: Vec<String> = signals
-                        .iter()
-                        .map(|signal| signal.raw_name.clone())
-                        .collect();
-                    let waveforms: Vec<Vec<f64>> =
-                        signals.iter().map(|signal| signal.values.clone()).collect();
-                    rspice_core::io::export_transient(
-                        path,
-                        &result.time,
-                        &node_names,
-                        &waveforms,
-                        match format {
-                            crate::cli::OutputFormat::RawAscii => rspice_core::io::RawFormat::Ascii,
-                            _ => rspice_core::io::RawFormat::Binary,
-                        },
-                    )
-                    .map_err(|e| CliError::OutputError {
-                        path: path.to_path_buf(),
-                        source: e,
-                    })?;
                 }
                 format => {
                     super::export::scalar_table(
@@ -1322,7 +1266,6 @@ fn export_dc_match(
     let Some(resolved) = ctx.resolve_output("dcmatch") else {
         return Ok(());
     };
-    super::frequency::reject_hdf5(ctx.format, "DC mismatch")?;
     let analysis_id = resolved.analysis("dcmatch")?;
     use super::export::{ColumnData, ExportColumn, ExportTable};
 

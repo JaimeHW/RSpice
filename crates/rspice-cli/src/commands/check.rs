@@ -55,12 +55,15 @@ pub fn execute(
             if args.json {
                 println!(
                     "{}",
-                    serde_json::json!({
-                        "valid": false,
-                        "strict_valid": false,
-                        "errors": [{"message": e.to_string()}],
-                        "warnings": [],
-                    })
+                    crate::observability::envelope(
+                        "rspice.check",
+                        serde_json::json!({
+                            "valid": false,
+                            "strict_valid": false,
+                            "errors": [{"message": e.to_string()}],
+                            "warnings": [],
+                        })
+                    )
                 );
             } else {
                 println!("✗ Netlist error: {}", e);
@@ -618,6 +621,7 @@ fn output_json(result: &ValidationResult) {
             "code": &w.code,
         })).collect::<Vec<_>>(),
     });
+    let json = crate::observability::envelope("rspice.check", json);
     match serde_json::to_string_pretty(&json) {
         Ok(text) => println!("{text}"),
         Err(e) => eprintln!("Error: failed to serialize check report: {e}"),

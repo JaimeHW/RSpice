@@ -10,6 +10,8 @@ fn options_cannot_be_silently_ignored() {
         ["--resume", "missing.checkpoint"],
         ["--tran-stop", "1m"],
         ["--sens-output", "in"],
+        ["--report-format", "junit"],
+        ["--meas-format", "csv"],
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
             .args(["--quiet", "--error-format", "json", "run"])

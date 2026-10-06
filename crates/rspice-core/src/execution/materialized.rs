@@ -189,7 +189,6 @@ impl DeckPlanMaterializer<'_> {
         self.materialize_run_with_abort(run_index, &NoAbort)
     }
 
-    /// Materialize one coordinate while observing cooperative cancellation.
     /// Re-elaborate one coordinate without constructing a circuit or allocating
     /// a solver matrix. Validators use this to inspect every concrete deck under
     /// the same parameter, temperature, DATA and statistical replay rules.

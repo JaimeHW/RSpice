@@ -43,7 +43,6 @@ These combinations remain explicitly unsupported:
 | :--- | :--- |
 | QPSS, QPAC, QPXF, QPNOISE | No shared result-document projection; rejected before solving with a typed capability diagnostic |
 | Control scripts with checkpoint/resume, segmented restart, compression, declarative FFT/Fourier or STEP/TEMP axes | Rejected during frontend preflight |
-| TF, PZ, sensitivity or DCMATCH exported as HDF5 | Rejected before solving; use JSON, CSV, TSV or RAW |
 | Generic conversion of typed FFT artifacts | Rejected where conversion would discard FFT metadata |
 
 These are feature gaps, not a claim of parity with other commercial simulators.
@@ -358,8 +357,13 @@ shapes:
 | `.SP` | `S_i_j` complex columns for the deck's N ports (Touchstone instead when `-o` ends in a matching `.sNp`) |
 | `--sparam` | `S11`/`S21`/`S12`/`S22` complex columns over frequency (Touchstone instead when `-o` ends in `.s2p`) |
 
-TF, pole-zero, sensitivity, and DCMATCH tables have no HDF5 section and reject
-`-f hdf5` with a clear error; use `csv`, `json`, or `raw`.
+TF, pole-zero, sensitivity, DCMATCH and periodic stability support HDF5
+through a general `table` section. The group retains its analysis identity,
+coordinate name and type, and each column's quantity type. Complex columns
+carry paired `complex_real:<type>` / `complex_imag:<type>` markers. Conversion
+uses the same section for arbitrary coordinates, preserving an index as an
+index and a time coordinate as time. JSON tables likewise retain these types;
+readers continue to accept older JSON tables that did not declare them.
 
 ### `vcd`
 
@@ -474,6 +478,20 @@ golden file defines the contract: golden variables missing from the result
 fail, point-count mismatches fail (a result truncated by a crashed run cannot
 pass on the overlap it wrote), and NaN never matches anything. `--bless`
 accepts the result as the new reference.
+
+RAW and HDF5 inputs are validated in full before any section is selected.
+When they contain multiple results, `compare` and tabular `convert` require
+`--section NAME_OR_INDEX`: an exact RAW plot name or HDF5 group name, or a
+one-based index from the available-section list in the diagnostic. This
+selector applies to container inputs; a CSV or other single-table reference
+still supplies its sole result. Repeated RAW plot names require an index.
+Comparison JSON identifies the selected section. Section selection cannot
+be combined with `--bless`, which replaces an entire reference file.
+
+For example, `convert mixed.raw grid.csv --to csv --section "Transient Analysis"`
+selects the sampled grid of a mixed-signal result. `convert mixed.raw events.vcd
+--to vcd` preserves its complete event timelines. RAW numeric admission limits
+cover all plots together, including plots outside the selection.
 
 **`convert`** preserves complex AC data across every round trip
 (`Re(..)`/`Im(..)` column pairs in CSV and TSV, `Flags: complex` in rawfiles,

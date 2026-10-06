@@ -133,7 +133,43 @@ impl Hdf5WaveformSection {
     }
 
     fn validate(&self, section_name: &str) -> Result<()> {
-        for signal in &self.signals {
+        finite_samples(&self.independent_name, &self.independent_values)?;
+        for (index, signal) in self.signals.iter().enumerate() {
+            finite_samples(&signal.name, &signal.values)?;
+            let paired = if let Some(quantity) = signal.var_type.strip_prefix("complex_real:") {
+                signal
+                    .name
+                    .strip_prefix("Re(")
+                    .and_then(|name| name.strip_suffix(')'))
+                    .is_some_and(|name| {
+                        self.signals.get(index + 1).is_some_and(|imag| {
+                            imag.name == format!("Im({name})")
+                                && imag.var_type == format!("complex_imag:{quantity}")
+                        })
+                    })
+            } else if let Some(quantity) = signal.var_type.strip_prefix("complex_imag:") {
+                signal
+                    .name
+                    .strip_prefix("Im(")
+                    .and_then(|name| name.strip_suffix(')'))
+                    .is_some_and(|name| {
+                        index
+                            .checked_sub(1)
+                            .and_then(|index| self.signals.get(index))
+                            .is_some_and(|real| {
+                                real.name == format!("Re({name})")
+                                    && real.var_type == format!("complex_real:{quantity}")
+                            })
+                    })
+            } else {
+                true
+            };
+            if !paired {
+                return Err(Hdf5Error::InvalidSchema(format!(
+                    "unpaired complex column '{}' in {section_name}",
+                    signal.name
+                )));
+            }
             if signal.values.len() != self.independent_values.len() {
                 return Err(Hdf5Error::InvalidSchema(format!(
                     "{section_name} signal '{}' has {} points, expected {}",
@@ -198,7 +234,10 @@ impl Hdf5AcSection {
     }
 
     fn validate(&self) -> Result<()> {
+        finite_samples("frequency", &self.frequency)?;
         for signal in &self.signals {
+            finite_samples(&signal.name, &signal.real)?;
+            finite_samples(&signal.name, &signal.imag)?;
             if signal.real.len() != self.frequency.len() {
                 return Err(Hdf5Error::InvalidSchema(format!(
                     "AC signal '{}' real part has {} points, expected {}",
@@ -824,8 +863,18 @@ impl Hdf5FftMetrics {
     }
 }
 
+fn finite_samples(name: &str, values: &[f64]) -> Result<()> {
+    if let Some(index) = values.iter().position(|value| !value.is_finite()) {
+        return Err(Hdf5Error::InvalidSchema(format!(
+            "non-finite value in '{name}' at sample {index}"
+        )));
+    }
+    Ok(())
+}
+
 impl Hdf5DistortionSection {
     fn validate(&self) -> Result<()> {
+        finite_samples("f1_frequency", &self.f1_frequency)?;
         if self.mode != "harmonic" && self.mode != "two_tone" {
             return Err(Hdf5Error::InvalidSchema(format!(
                 "distortion mode must be 'harmonic' or 'two_tone', got '{}'",
@@ -888,6 +937,7 @@ impl Hdf5DistortionSection {
 
         for (series, &(expected_label, expected_product)) in self.series.iter().zip(expected_series)
         {
+            finite_samples(&series.label, &series.physical_frequency)?;
             if series.label != expected_label || series.is_product != expected_product {
                 return Err(Hdf5Error::InvalidSchema(format!(
                     "distortion series expected label '{expected_label}' with is_product={expected_product}, got '{}' with is_product={}",
@@ -908,6 +958,17 @@ impl Hdf5DistortionSection {
                 ));
             }
             for signal in &series.signals {
+                for values in [
+                    &signal.real,
+                    &signal.imag,
+                    &signal.magnitude,
+                    &signal.phase_degrees,
+                ] {
+                    finite_samples(&signal.name, values)?;
+                }
+                if let Some(ratio) = &signal.magnitude_ratio_to_f1 {
+                    finite_samples(&signal.name, ratio)?;
+                }
                 for (quantity, actual) in [
                     ("real", signal.real.len()),
                     ("imaginary", signal.imag.len()),
@@ -973,6 +1034,14 @@ pub struct Hdf5ResultIdentity {
     pub topology_fingerprint: Option<String>,
 }
 
+/// A general result projection with explicit coordinate and quantity types.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Hdf5TableSection {
+    pub analysis: String,
+    pub coordinate_type: String,
+    pub waveform: Hdf5WaveformSection,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Hdf5SimulationData {
     pub title: String,
@@ -989,6 +1058,7 @@ pub struct Hdf5SimulationData {
     pub distortion: Option<Hdf5DistortionSection>,
     pub fft: Option<Hdf5FftSection>,
     pub measurements: Vec<Hdf5Measurement>,
+    pub table: Option<Hdf5TableSection>,
 }
 
 impl Hdf5SimulationData {
@@ -997,6 +1067,9 @@ impl Hdf5SimulationData {
     }
 
     fn validate(&self) -> Result<()> {
+        if let Some(table) = &self.table {
+            table.waveform.validate("table")?;
+        }
         if let Some(operating_point) = &self.operating_point {
             operating_point.validate("operating_point")?;
         }
@@ -1027,6 +1100,58 @@ pub fn write_hdf5(path: &Path, data: &Hdf5SimulationData) -> Result<()> {
     write_hdf5_staged(path, |file| {
         rspice_core::io::write_hdf5(file, &document).map_err(Hdf5StagingError::Core)
     })
+}
+
+/// Publish a projected table, retaining coordinate/quantity types for every family.
+pub(crate) fn write_table(
+    path: &Path,
+    table: &crate::commands::export_table::ExportTable,
+    identity: Option<Hdf5ResultIdentity>,
+) -> std::result::Result<(), crate::cli::CliError> {
+    let data = table_data(table, identity);
+    write_hdf5(path, &data).map_err(|error| map_output_error(path, error))
+}
+
+pub(crate) fn table_data(
+    table: &crate::commands::export_table::ExportTable,
+    identity: Option<Hdf5ResultIdentity>,
+) -> Hdf5SimulationData {
+    use crate::commands::export_table::ColumnData;
+    let mut waveform = Hdf5WaveformSection::new(table.scale_name.clone(), table.scale.clone());
+    for column in &table.columns {
+        match &column.data {
+            ColumnData::Real(values) => waveform.add_typed_signal(
+                column.name.clone(),
+                column.var_type.clone(),
+                None,
+                values.clone(),
+            ),
+            ColumnData::Complex { real, imag } => {
+                waveform.add_typed_signal(
+                    format!("Re({})", column.name),
+                    format!("complex_real:{}", column.var_type),
+                    None,
+                    real.clone(),
+                );
+                waveform.add_typed_signal(
+                    format!("Im({})", column.name),
+                    format!("complex_imag:{}", column.var_type),
+                    None,
+                    imag.clone(),
+                );
+            }
+        }
+    }
+    Hdf5SimulationData {
+        title: table.plot_name.clone(),
+        identity,
+        table: Some(Hdf5TableSection {
+            analysis: table.analysis.clone(),
+            coordinate_type: table.scale_type.clone(),
+            waveform,
+        }),
+        ..Hdf5SimulationData::default()
+    }
 }
 
 /// Serialize an HDF5 document into an already prepared artifact. Callers that
@@ -1115,6 +1240,17 @@ fn build_hdf5(data: &Hdf5SimulationData) -> Result<Hdf5Document> {
     if let Some(fft) = &data.fft {
         add_fft_section(&mut document, &section_name("fft"), fft)?;
     }
+    if let Some(table) = &data.table {
+        let name = section_name("table");
+        add_waveform_section(&mut document, &name, "table", &table.waveform)?;
+        if let Some(group) = document.groups.last_mut() {
+            group.set_attr("analysis", Hdf5Attribute::Text(table.analysis.clone()));
+            group.set_attr(
+                "coordinate_type",
+                Hdf5Attribute::Text(table.coordinate_type.clone()),
+            );
+        }
+    }
     if !data.measurements.is_empty() {
         add_measurements(&mut document, &data.measurements)?;
     }
@@ -1142,10 +1278,50 @@ pub(crate) fn read_hdf5(path: &Path) -> Result<Hdf5SimulationData> {
     read_hdf5_with_limits(path, rspice_core::ResourceLimits::default())
 }
 
+/// Read the legacy family view, rejecting repeated families instead of replacing them.
+#[cfg(test)]
 pub fn read_hdf5_with_limits(
     path: &Path,
     limits: rspice_core::ResourceLimits,
 ) -> Result<Hdf5SimulationData> {
+    let Hdf5Readback {
+        metadata: mut data,
+        sections,
+    } = read_hdf5_sections_with_limits(path, limits)?;
+    for (name, section) in sections {
+        macro_rules! merge {
+            ($field:ident) => {
+                if let Some(value) = section.$field {
+                    if data.$field.replace(value).is_some() {
+                        return Err(Hdf5Error::InvalidSchema(format!(
+                            "repeated {} section '{name}'; select an explicit result section",
+                            stringify!($field)
+                        )));
+                    }
+                }
+            };
+        }
+        merge!(operating_point);
+        merge!(transient);
+        merge!(dc_sweep);
+        merge!(noise);
+        merge!(ac);
+        merge!(distortion);
+        merge!(fft);
+        merge!(table);
+    }
+    Ok(data)
+}
+
+pub struct Hdf5Readback {
+    pub metadata: Hdf5SimulationData,
+    pub sections: Vec<(String, Hdf5SimulationData)>,
+}
+
+pub fn read_hdf5_sections_with_limits(
+    path: &Path,
+    limits: rspice_core::ResourceLimits,
+) -> Result<Hdf5Readback> {
     let bytes = std::fs::metadata(path).map_err(rustyhdf5::Error::Io)?.len();
     admission::admit(
         rspice_core::ResourceKind::ExternalDataBytes,
@@ -1184,6 +1360,7 @@ pub fn read_hdf5_with_limits(
         identity,
         ..Hdf5SimulationData::default()
     };
+    let mut sections = Vec::new();
     for group_name in &root_groups {
         if group_name == "measurements" {
             data.measurements = read_measurements(&file)?;
@@ -1195,25 +1372,43 @@ pub fn read_hdf5_with_limits(
                 "group '{group_name}' declares no section_type, so its result family is unknown"
             ))
         })?;
+        let mut section = Hdf5SimulationData::default();
         match family.as_str() {
             "operating_point" => {
-                data.operating_point = Some(read_waveform_section(&file, group_name)?);
+                section.operating_point = Some(read_waveform_section(&file, group_name)?);
             }
-            "transient" => data.transient = Some(read_waveform_section(&file, group_name)?),
-            "dc_sweep" => data.dc_sweep = Some(read_waveform_section(&file, group_name)?),
-            "noise" => data.noise = Some(read_waveform_section(&file, group_name)?),
-            "ac" => data.ac = Some(read_ac_section(&file, group_name)?),
-            "distortion" => data.distortion = Some(read_distortion_section(&file, group_name)?),
-            "fft" => data.fft = Some(read_fft_section(&file, group_name)?),
+            "transient" => section.transient = Some(read_waveform_section(&file, group_name)?),
+            "dc_sweep" => section.dc_sweep = Some(read_waveform_section(&file, group_name)?),
+            "noise" => section.noise = Some(read_waveform_section(&file, group_name)?),
+            "ac" => section.ac = Some(read_ac_section(&file, group_name)?),
+            "distortion" => section.distortion = Some(read_distortion_section(&file, group_name)?),
+            "fft" => section.fft = Some(read_fft_section(&file, group_name)?),
+            "table" => {
+                section.table = Some(Hdf5TableSection {
+                    analysis: read_required_string_attr(
+                        &file.group(group_name)?.attrs()?,
+                        "analysis",
+                    )?,
+                    coordinate_type: read_required_string_attr(
+                        &file.group(group_name)?.attrs()?,
+                        "coordinate_type",
+                    )?,
+                    waveform: read_waveform_section(&file, group_name)?,
+                })
+            }
             other => {
                 return Err(Hdf5Error::InvalidSchema(format!(
                     "group '{group_name}' declares unknown section_type '{other}'"
                 )));
             }
         }
+        sections.push((group_name.clone(), section));
     }
 
-    Ok(data)
+    Ok(Hdf5Readback {
+        metadata: data,
+        sections,
+    })
 }
 
 fn add_waveform_section(
@@ -2034,6 +2229,18 @@ fn read_required_f64_attr(attrs: &HashMap<String, AttrValue>, name: &str) -> Res
     }
 }
 
+/// Preserve resource admission and publication failures across every HDF5 producer.
+pub(crate) fn map_output_error(path: &Path, error: Hdf5Error) -> crate::cli::CliError {
+    match error {
+        Hdf5Error::ResourceLimit(source) => crate::cli::CliError::ResourceLimit {
+            path: path.to_path_buf(),
+            source,
+        },
+        Hdf5Error::Publication(error) => rspice_core::SimulationError::from(error).into(),
+        error => crate::cli::CliError::output_error(path, std::io::Error::other(error)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2576,17 +2783,5 @@ mod tests {
             let fft_error = read_hdf5(&fft_path).expect_err("reject unsupported FFT schema");
             assert!(matches!(fft_error, Hdf5Error::InvalidSchema(_)));
         }
-    }
-}
-
-/// Preserve resource admission and publication failures across every HDF5 producer.
-pub(crate) fn map_output_error(path: &Path, error: Hdf5Error) -> crate::cli::CliError {
-    match error {
-        Hdf5Error::ResourceLimit(source) => crate::cli::CliError::ResourceLimit {
-            path: path.to_path_buf(),
-            source,
-        },
-        Hdf5Error::Publication(error) => rspice_core::SimulationError::from(error).into(),
-        error => crate::cli::CliError::output_error(path, std::io::Error::other(error)),
     }
 }
