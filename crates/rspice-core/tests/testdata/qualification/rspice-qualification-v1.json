@@ -1129,6 +1129,238 @@
               }
             }
           }
+        },
+        {
+          "result": "qpss",
+          "surfaces": {
+            "CLI": {
+              "scalar": {
+                "status": "mapped"
+              },
+              "stepped": {
+                "status": "mapped"
+              },
+              "temperature": {
+                "status": "mapped"
+              }
+            },
+            "Engine adapter": {
+              "scalar": {
+                "reason": "the engine adapter has no shared quasiperiodic document projection",
+                "status": "unsupported"
+              },
+              "stepped": {
+                "reason": "the engine adapter has no shared quasiperiodic document projection",
+                "status": "unsupported"
+              },
+              "temperature": {
+                "reason": "the engine adapter has no shared quasiperiodic document projection",
+                "status": "unsupported"
+              }
+            },
+            "Python": {
+              "scalar": {
+                "reason": "the Python frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              },
+              "stepped": {
+                "reason": "the Python frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              },
+              "temperature": {
+                "reason": "the Python frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              }
+            },
+            "WASM": {
+              "scalar": {
+                "reason": "the WASM frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              },
+              "stepped": {
+                "reason": "the WASM frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              },
+              "temperature": {
+                "reason": "the WASM frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              }
+            }
+          }
+        },
+        {
+          "result": "qpac",
+          "surfaces": {
+            "CLI": {
+              "scalar": {
+                "status": "mapped"
+              },
+              "stepped": {
+                "status": "mapped"
+              },
+              "temperature": {
+                "status": "mapped"
+              }
+            },
+            "Engine adapter": {
+              "scalar": {
+                "reason": "the engine adapter has no shared quasiperiodic document projection",
+                "status": "unsupported"
+              },
+              "stepped": {
+                "reason": "the engine adapter has no shared quasiperiodic document projection",
+                "status": "unsupported"
+              },
+              "temperature": {
+                "reason": "the engine adapter has no shared quasiperiodic document projection",
+                "status": "unsupported"
+              }
+            },
+            "Python": {
+              "scalar": {
+                "reason": "the Python frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              },
+              "stepped": {
+                "reason": "the Python frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              },
+              "temperature": {
+                "reason": "the Python frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              }
+            },
+            "WASM": {
+              "scalar": {
+                "reason": "the WASM frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              },
+              "stepped": {
+                "reason": "the WASM frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              },
+              "temperature": {
+                "reason": "the WASM frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              }
+            }
+          }
+        },
+        {
+          "result": "qpxf",
+          "surfaces": {
+            "CLI": {
+              "scalar": {
+                "status": "mapped"
+              },
+              "stepped": {
+                "status": "mapped"
+              },
+              "temperature": {
+                "status": "mapped"
+              }
+            },
+            "Engine adapter": {
+              "scalar": {
+                "reason": "the engine adapter has no shared quasiperiodic document projection",
+                "status": "unsupported"
+              },
+              "stepped": {
+                "reason": "the engine adapter has no shared quasiperiodic document projection",
+                "status": "unsupported"
+              },
+              "temperature": {
+                "reason": "the engine adapter has no shared quasiperiodic document projection",
+                "status": "unsupported"
+              }
+            },
+            "Python": {
+              "scalar": {
+                "reason": "the Python frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              },
+              "stepped": {
+                "reason": "the Python frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              },
+              "temperature": {
+                "reason": "the Python frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              }
+            },
+            "WASM": {
+              "scalar": {
+                "reason": "the WASM frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              },
+              "stepped": {
+                "reason": "the WASM frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              },
+              "temperature": {
+                "reason": "the WASM frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              }
+            }
+          }
+        },
+        {
+          "result": "qpnoise",
+          "surfaces": {
+            "CLI": {
+              "scalar": {
+                "status": "mapped"
+              },
+              "stepped": {
+                "status": "mapped"
+              },
+              "temperature": {
+                "status": "mapped"
+              }
+            },
+            "Engine adapter": {
+              "scalar": {
+                "reason": "the engine adapter has no shared quasiperiodic document projection",
+                "status": "unsupported"
+              },
+              "stepped": {
+                "reason": "the engine adapter has no shared quasiperiodic document projection",
+                "status": "unsupported"
+              },
+              "temperature": {
+                "reason": "the engine adapter has no shared quasiperiodic document projection",
+                "status": "unsupported"
+              }
+            },
+            "Python": {
+              "scalar": {
+                "reason": "the Python frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              },
+              "stepped": {
+                "reason": "the Python frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              },
+              "temperature": {
+                "reason": "the Python frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              }
+            },
+            "WASM": {
+              "scalar": {
+                "reason": "the WASM frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              },
+              "stepped": {
+                "reason": "the WASM frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              },
+              "temperature": {
+                "reason": "the WASM frontend has no shared quasiperiodic document adapter",
+                "status": "unsupported"
+              }
+            }
+          }
         }
       ],
       "signals": [
