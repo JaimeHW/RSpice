@@ -80,6 +80,8 @@ pub use veriloga_cache::{
 };
 #[cfg(feature = "veriloga")]
 mod veriloga_sources;
+#[cfg(feature = "veriloga")]
+mod source_dependencies;
 
 #[cfg(feature = "veriloga")]
 mod connect_modules;

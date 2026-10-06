@@ -1474,6 +1474,20 @@ impl VerilogACompiler {
         })
     }
 
+    /// Discover the active provider-backed source closure without parsing or
+    /// compiling a module. Uses the compiler's include paths and macro options;
+    /// the provider supplies admission limits and cancellation checkpoints.
+    /// Built-in headers have no provider path and are excluded from the result.
+    pub fn provider_source_dependencies(
+        &self,
+        provider: &dyn SourceProvider,
+        root: &std::path::Path,
+    ) -> Result<Vec<std::path::PathBuf>, PreprocessorError> {
+        let mut pp = self.configured_preprocessor();
+        pp.preprocess_provider_root(provider, root)?;
+        Ok(pp.take_dependencies())
+    }
+
     /// Compile an admitted source closure, retaining typed loader failures.
     /// The provider owns bounded reads and preprocessing cancellation; `control`
     /// supplies cancellation checkpoints in the subsequent compiler phases.
