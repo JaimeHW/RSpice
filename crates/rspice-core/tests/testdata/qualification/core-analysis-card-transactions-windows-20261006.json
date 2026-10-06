@@ -1,0 +1,159 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C04",
+  "related_packages": [
+    "C00",
+    "C01",
+    "C12"
+  ],
+  "batch": "Atomic analysis-card parsing as a prerequisite for deferred numeric operands",
+  "status": "analysis_card_transactions_delivered_deferred_operands_remain",
+  "base_revision": "039ab26c5b6dc1d04cbf10a93d286b28a0551788",
+  "source_revision": "9912113eee7a4f6fb75051f8ea48ae66ce7d65f0",
+  "implementation_commits": [
+    "9912113eee7a4f6fb75051f8ea48ae66ce7d65f0"
+  ],
+  "remote_integration": "Integrated four concurrent CLI-only commits through 039ab26c5 before pushing. All core files, Cargo.lock and the toolchain are unchanged by the rebase; core native/WASM tests carry forward, and CLI/combined Clippy checks were rerun on the integrated revision.",
+  "captured_utc": "2026-10-06T20:20:21.112207+00:00",
+  "host": "x86_64-pc-windows-msvc",
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+    "cli_rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "cli_toolchain_reason": "Previously reproduced pinned Rust 1.94/faer compiler crash in CLI runtime builds; repository pin unchanged.",
+    "wasm_target": "wasm32-unknown-unknown",
+    "wasm_profile": "release",
+    "wasm_features": [
+      "wasm",
+      "veriloga-wasm-jit"
+    ],
+    "wasm_runtime": "headless Chrome dedicated worker",
+    "WASM_BINDGEN_TEST_TIMEOUT": "180",
+    "webdriver_config_sha256": "93458ed98943268e089c8c9a793bf2e899872e62941ac54795b0c27b7104785b"
+  },
+  "commands": [
+    {
+      "command": "cargo test --locked -p rspice-core --lib --test analysis_card_transactions --test forward_globals --test forward_sources --test forward_parameters --test temperature_options --test statistical_params --test frequency_data --test netlist_conditionals --test bsource_temper --test step_temp --test control_noise --test control_dc --test control_execution --test expression_stack_safety --test subckt_instance_params --test measurements_scalar_contract --test measurements_statistics_contract --test measure_bound_reference --test ac_physical_dependents --test transient_passive_currents --test fourier_fail_closed --test transient_noise -- --test-threads=8",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        4955,
+        22,
+        3,
+        4,
+        6,
+        8,
+        5,
+        5,
+        8,
+        11,
+        11,
+        22,
+        7,
+        3,
+        11,
+        10,
+        12,
+        31,
+        2,
+        8,
+        21,
+        14,
+        10
+      ],
+      "log": "target/core-qualification/analysis-cards-native-verified.log",
+      "log_sha256": "d9b3ebde636683cf663073351687b376b413108655a799c7c849d89e25ddc9e2"
+    },
+    {
+      "command": "cargo +1.95.0 test --locked -p rspice-cli --test temperature_axis --test control_noise --test control_dc --target-dir target/core-cli-195",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1,
+        1,
+        6
+      ],
+      "log": "target/core-qualification/analysis-cards-cli-integrated.log",
+      "log_sha256": "c74e847436e27bac8dda04b2a3d845b6a6c599c361d0c4a31fa7af75db34de93"
+    },
+    {
+      "command": "cargo clippy --locked -p rspice-core -p rspice-cli -p rspice-wasm -p rspice-engine-adapter --lib --bins -- -D warnings",
+      "outcome": "passed",
+      "test_target_passed_counts": [],
+      "log": "target/core-qualification/analysis-cards-clippy-integrated.log",
+      "log_sha256": "75418238ef0999a5fc93b00b6bc47f728e5a2e6cb88f7e41694bbbfdef7cd191"
+    },
+    {
+      "command": "cargo clippy --locked -p rspice-core --test analysis_card_transactions -- -D warnings",
+      "outcome": "passed",
+      "test_target_passed_counts": [],
+      "log": "target/core-qualification/analysis-cards-test-clippy-verified.log",
+      "log_sha256": "7f0f7382bd92d56d3aef65f9f4b042fd2d416ef5b544d9c3e854f55753ed16eb"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test analysis_card_transactions --test forward_globals --test forward_sources --test forward_parameters --test temperature_options --test frequency_data -- --nocapture",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        3,
+        8,
+        10,
+        10,
+        7,
+        19
+      ],
+      "log": "target/core-qualification/analysis-cards-wasm-verified.log",
+      "log_sha256": "bf159f42e51e2e302de5353840990adace2c7cff39869df7a5caffbcaccd7e86"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib engine::requirements",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        3
+      ],
+      "log": "target/core-qualification/analysis-cards-ledger.log",
+      "log_sha256": "20e955a148611a2d0c7f96c09d28d708417f0a6e1195b894a40a66298b966645"
+    }
+  ],
+  "unique_passed_tests": {
+    "native": 5197,
+    "optimized_wasm": 57
+  },
+  "test_accounting": "4955 default core unit tests + 234 selected core integration tests + 8 CLI tests. Focused development and publication reruns are excluded from unique totals.",
+  "ignored_default_core_unit_tests": [
+    "device::mosfet::bsim3v3::tests::live_ngspice_oracle_dc_and_charge",
+    "device::mosfet::bsim4v8::tests::live_ngspice_oracle_dc_and_charge",
+    "engine::transient::residual::tests::diffamp_one_step_map_spectral_radius_probe"
+  ],
+  "source_files_sha256": {
+    "crates/rspice-core/README.md": "c1abf201282795a99b06619ebf754560631289a03886f069217861e8c3606640",
+    "crates/rspice-core/src/netlist/parser/commands.rs": "1fe498482b0c631f75eab7b0cf41d1f48fdbce7f847bf7c6b02983fcb584fa78",
+    "crates/rspice-core/src/netlist/parser/commands/analysis.rs": "806c64c80e244627bcc16a6afec5d04904e996e445107b5490db7dad6deb6765",
+    "crates/rspice-core/src/netlist/parser/source_specs.rs": "0ef387ec01ffd84402c79e0e0b8c4fa626c63dbac3e767ef869d169a119d744b",
+    "crates/rspice-core/src/netlist/parser/values.rs": "b2e2fe8c2f36a54b09a9cf940826c6120cc82859de46a4b1e3daa48a1e0ebb8d",
+    "crates/rspice-core/tests/analysis_card_transactions.rs": "0bfa239366c78f11b0f20be81f6f2258c807785baf8621381bb644465b83b0d6",
+    "Cargo.lock": "ce8dc157a78d2268ff926067f15f08002b90185b9abd7320c4952d3a266fcf8a",
+    "rust-toolchain.toml": "d6dadd139dac178482d6cca3a8945b8a7e0f7df1f0733872657cbc420b2d82e6"
+  },
+  "publication_ledger_sha256": "c89c127415496bd8ab722e0a3ef8156d02ced55ccfffe0a80c5327b46d1859bb",
+  "implementation": [
+    "Extract the existing analysis grammar into a parser-private typed head and staged outcome; retain existing helpers and the public AST.",
+    "Stage the primary analysis, LIN/FFT auxiliary result, output request, Monte Carlo source card, diagnostics and transient-noise selection; publish after complete grammar and cross-card validation.",
+    "Share function-bearing card detection with independent sources. Probe the same grammar with an isolated random context, including trailing fields and LIN/noise constraints, before evaluating live once.",
+    "AC DATA no longer returns before the common unconsumed-token check; unknown trailing fields now fail instead of being silently discarded.",
+    "Keep source ordering, physical owners, source-byte spans, implicit STEP handling and existing control dispatch unchanged."
+  ],
+  "regression_file": "crates/rspice-core/tests/analysis_card_transactions.rs",
+  "acceptance_evidence": [
+    "Public AC DATA accepts a valid named table and rejects extra identifiers, numeric fields, expressions and duplicate DATA clauses.",
+    "Private parser tests confirm failed OP/AC/DC/TRAN/FFT/MC cards publish no partial analysis, warnings, output requests, Monte Carlo identity or noise selection.",
+    "A failed sampled DC card can retry after its missing value is supplied and uses the first live draw; AUNIF, two-argument LIMIT and user functions are included.",
+    "Conflicting sampled transient-noise cards preserve the previous realization and the next live draw; duplicate LIN retains the original auxiliary result.",
+    "Mixed public cards preserve OP/DC/AC/TRAN/NOISE/FOUR/MC order and separate Fourier/FFT output ownership. DC/AC/FFT sampled fields draw once in authored order.",
+    "The full unit suite includes the existing 29-variant analysis inventory. Selected numerical/control, Fourier, transient-noise and adapter regressions also pass."
+  ],
+  "limits": [
+    "Unresolved numeric analysis operands are still rejected. This commit supplies their transaction boundary; pending storage, lexical completion and ordered deferred publication are required next.",
+    "All C00-C14 packages remain unfinished, and control dispatch remains 5/29. Analysis parsing does not implement missing solver or control routes.",
+    "Function-bearing cards clone a parameter context and parse twice; cancellation latency, total allocation budgets, throughput and peak-memory gates remain open.",
+    "Three pre-existing unit tests remain ignored. Selected integrations and optimized WASM tests do not qualify every feature, model, provider or platform."
+  ]
+}
