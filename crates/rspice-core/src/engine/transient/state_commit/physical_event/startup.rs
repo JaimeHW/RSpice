@@ -271,17 +271,33 @@ impl Engine {
         }
         let impulses: Vec<_> = point.impulses().collect();
         let observation = prepare_observation(&point)?;
+        self.ensure_transport_history_copy(history, 0)?;
+        let incoming_transport_bytes = history.transport_allocated_bytes();
         let mut outgoing = history.try_clone()?;
         // The incoming anchor was a private prehistory seed. Build the first
         // accepted sided knot in fresh buffers; appending another t=0 sample
         // to the seed buffer would violate the transport ownership contract.
+        let mut outgoing_transport_bytes = outgoing.transport_allocated_bytes();
+        let fresh_bytes = DelayBuffer::new(0).allocation_after_sample(None);
         for phase in outgoing.phase.iter_mut().flatten() {
+            self.ensure_transport_history_bytes(
+                incoming_transport_bytes
+                    .saturating_add(outgoing_transport_bytes)
+                    .saturating_add(fresh_bytes),
+            )?;
+            outgoing_transport_bytes = outgoing_transport_bytes
+                .saturating_sub(phase.allocated_bytes())
+                .saturating_add(fresh_bytes);
             *phase = DelayBuffer::try_new(4).map_err(|source| SimulationError::Allocation {
                 object: "GP startup phase history",
                 source,
             })?;
         }
-        point.bjt.reserve_phase_storage(&mut outgoing)?;
+        point.bjt.reserve_phase_storage(
+            &mut outgoing,
+            incoming_transport_bytes,
+            &self.config.resource_limits,
+        )?;
         Self::commit_bjt_history(&mut outgoing, point.bjt);
         outgoing
             .charge_q_prev_prev

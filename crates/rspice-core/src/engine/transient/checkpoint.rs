@@ -6913,6 +6913,19 @@ impl TransientCheckpoint {
         )
     }
 
+    /// Backing bytes retained by this checkpoint's transport records.
+    pub(super) fn transport_allocated_bytes(&self) -> usize {
+        self.accepted_junction_history
+            .bjt_history
+            .transport_allocated_bytes()
+    }
+
+    pub(super) fn transport_copy_bytes(&self) -> usize {
+        self.accepted_junction_history
+            .bjt_history
+            .transport_copy_bytes()
+    }
+
     /// Validate and decode accepted engine-owned junction state without
     /// mutating the freshly built circuit or any live runtime history.
     pub(super) fn restore_accepted_junction_transient_history(

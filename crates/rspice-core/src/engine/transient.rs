@@ -987,6 +987,7 @@ struct ScheduledCheckpointHistories<'a> {
 struct ScheduledCheckpointSink<'a> {
     retained_result_values: usize,
     retained_scheduled_checkpoint_values: &'a mut usize,
+    retained_scheduled_transport_bytes: &'a mut usize,
     captured: &'a mut Vec<ScheduledTransientCheckpoint>,
 }
 
@@ -3733,6 +3734,7 @@ impl Engine {
         let ScheduledCheckpointSink {
             retained_result_values,
             retained_scheduled_checkpoint_values,
+            retained_scheduled_transport_bytes,
             captured,
         } = sink;
         let ScheduledCheckpointHistories {
@@ -3787,6 +3789,7 @@ impl Engine {
         } else {
             integration_continuation
         };
+        self.ensure_transport_history_copy(bjt_history, *retained_scheduled_transport_bytes)?;
         let accepted_junction_history =
             Self::capture_accepted_junction_transient_history_checkpoint(
                 circuit,
@@ -3894,6 +3897,8 @@ impl Engine {
                 .saturating_add(*retained_scheduled_checkpoint_values)
                 .saturating_add(retained_checkpoint_values),
         )?;
+        *retained_scheduled_transport_bytes = retained_scheduled_transport_bytes
+            .saturating_add(checkpoint.transport_allocated_bytes());
         captured.push(ScheduledTransientCheckpoint {
             nominal_time: requested_time,
             checkpoint,
@@ -4102,6 +4107,7 @@ impl Engine {
         let mut scheduled_checkpoints = Vec::with_capacity(scheduled_checkpoint_times.len());
         let mut scheduled_checkpoint_cursor = 0_usize;
         let mut retained_scheduled_checkpoint_values = 0_usize;
+        let mut retained_scheduled_transport_bytes = 0_usize;
         let record_xspice_event_traces = netlist.options.xspice_event_trace_save.unwrap_or(true);
         let record_device_op_traces = Self::should_record_transient_device_op_traces(netlist);
         // Pre-simulation effects also belong to models with no matrix unknowns.
@@ -5573,6 +5579,9 @@ impl Engine {
         // runtime pieces before checkpoint injection mutates the circuit. A
         // legacy checkpoint is admitted here only when the live elaboration
         // has no BJT or diode topology.
+        if let Some(checkpoint) = resume {
+            self.ensure_transport_history_bytes(checkpoint.transport_copy_bytes())?;
+        }
         let restored_accepted_junction_history = resume
             .map(|checkpoint| checkpoint.restore_accepted_junction_transient_history(&circuit))
             .transpose()?;
@@ -5755,11 +5764,14 @@ impl Engine {
             ReactiveHistorySeed::SolvedBias
         };
         let mut bjt_history = Self::initialize_bjt_history(&circuit, &solution, reactive_seed);
-        Self::initialize_bjt_phase_history_for_model(
-            &circuit,
-            &mut bjt_history,
-            self.config.gp_transient_phase_model,
-        )?;
+        if restored_accepted_junction_history.is_none() {
+            Self::initialize_bjt_phase_history_for_model(
+                &circuit,
+                &mut bjt_history,
+                self.config.gp_transient_phase_model,
+                &self.config.resource_limits,
+            )?;
+        }
         let mut vbic_snapshot_cache = vec![None; circuit.bjts.devices.len()];
         // On a fresh run, ngspice seeds CKTdeltaOld[] with maxstep before the
         // first transient point. Mirror that only at startup so early
@@ -6222,6 +6234,7 @@ impl Engine {
             ScheduledCheckpointSink {
                 retained_result_values,
                 retained_scheduled_checkpoint_values: &mut retained_scheduled_checkpoint_values,
+                retained_scheduled_transport_bytes: &mut retained_scheduled_transport_bytes,
                 captured: &mut scheduled_checkpoints,
             },
         )?;
@@ -10348,6 +10361,7 @@ impl Engine {
                         analysis_initial_step,
                         analysis_final_step,
                         Some(acceptance::NativeHistoryAcceptance {
+                            retained_transport_bytes: retained_scheduled_transport_bytes,
                             histories: TransientDeviceHistories {
                                 bjt: &mut bjt_history,
                                 jfet: &mut jfet_history,
@@ -10680,6 +10694,8 @@ impl Engine {
                             retained_result_values,
                             retained_scheduled_checkpoint_values:
                                 &mut retained_scheduled_checkpoint_values,
+                            retained_scheduled_transport_bytes:
+                                &mut retained_scheduled_transport_bytes,
                             captured: &mut scheduled_checkpoints,
                         },
                     )?;
@@ -10932,6 +10948,7 @@ impl Engine {
                 analysis_initial_step,
                 analysis_final_step,
                 Some(acceptance::NativeHistoryAcceptance {
+                    retained_transport_bytes: retained_scheduled_transport_bytes,
                     histories: TransientDeviceHistories {
                         bjt: &mut bjt_history,
                         jfet: &mut jfet_history,
@@ -11411,6 +11428,7 @@ impl Engine {
                 ScheduledCheckpointSink {
                     retained_result_values,
                     retained_scheduled_checkpoint_values: &mut retained_scheduled_checkpoint_values,
+                    retained_scheduled_transport_bytes: &mut retained_scheduled_transport_bytes,
                     captured: &mut scheduled_checkpoints,
                 },
             )?;
@@ -11528,6 +11546,7 @@ impl Engine {
             )));
         }
         let final_checkpoint = if final_checkpoint_retention.is_retained() {
+            self.ensure_transport_history_copy(&bjt_history, retained_scheduled_transport_bytes)?;
             let final_runtime_resume_blockers =
                 Self::exact_integration_runtime_resume_blockers(&circuit, accepted_interval_count);
             let final_accepted_junction_history =

@@ -61,6 +61,58 @@ fn physical_startup_observation_preflight_refusal_preserves_all_model_targets() 
 }
 
 #[test]
+fn physical_startup_transport_budget_refusal_preserves_accepted_state() {
+    let (mut engine, mut circuit, _, mut solution, mut history) = fixture(
+        "startup history budget\nVc c 0 DC 0 PWL(0 1 1 1)\nC1 c 0 1p\nR1 c 0 1k\nVb b 0 .6\nQ1 0 b 0 qm\n.model qm NPN(IS=1e-16 TF=1n PTF=30)\n.end\n",
+    );
+    let before_solution = solution.clone();
+    let before_history = history.clone();
+    let before_caps = (
+        circuit.capacitors.v_prev.clone(),
+        circuit.capacitors.i_prev.clone(),
+    );
+    let before_models: Vec<_> = circuit
+        .bjts
+        .devices
+        .iter()
+        .map(|bjt| bjt.accepted_nonlinear_checkpoint().unwrap())
+        .collect();
+    let bytes = history.transport_allocated_bytes();
+    engine.config.resource_limits.max_transport_history_bytes = bytes;
+    let error = engine
+        .transition_physical_startup(
+            &mut circuit,
+            &mut solution,
+            &mut history,
+            &options(),
+            1e-20,
+            &NoAbort,
+        )
+        .err()
+        .expect("startup copy must exceed the history budget");
+    assert!(matches!(error, SimulationError::ResourceLimit(error)
+        if error.resource == crate::ResourceKind::TransportHistoryBytes && error.limit == bytes));
+    assert_eq!(solution, before_solution);
+    assert_eq!(history, before_history);
+    assert_eq!(
+        (
+            circuit.capacitors.v_prev.clone(),
+            circuit.capacitors.i_prev.clone()
+        ),
+        before_caps
+    );
+    assert_eq!(
+        circuit
+            .bjts
+            .devices
+            .iter()
+            .map(|bjt| bjt.accepted_nonlinear_checkpoint().unwrap())
+            .collect::<Vec<_>>(),
+        before_models
+    );
+}
+
+#[test]
 fn physical_startup_solves_coupled_rates_in_the_selected_gp_charge_chart() {
     for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
         for direction in [-1.0, 1.0] {

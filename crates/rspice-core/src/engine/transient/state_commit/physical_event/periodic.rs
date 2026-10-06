@@ -57,8 +57,16 @@ impl Engine {
         }
         // Append the event to the history preceding the incoming interval.
         // The ordinary PSS acceptance may already have sampled its left limit.
+        self.ensure_transport_history_copy(incoming_history, history.transport_allocated_bytes())?;
+        let retained_transport_bytes = history
+            .transport_allocated_bytes()
+            .saturating_add(incoming_history.transport_allocated_bytes());
         let mut outgoing_history = incoming_history.try_clone()?;
-        point.bjt.reserve_phase_storage(&mut outgoing_history)?;
+        point.bjt.reserve_phase_storage(
+            &mut outgoing_history,
+            retained_transport_bytes,
+            &self.config.resource_limits,
+        )?;
         Self::commit_bjt_history(&mut outgoing_history, point.bjt);
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);

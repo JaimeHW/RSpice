@@ -371,6 +371,7 @@ fn gp_phase_promoted_newton_solution_matches_private_currents_and_reduced_jacobi
                             dt,
                             time,
                             None,
+                            &crate::ResourceLimits::unlimited(),
                         )
                         .unwrap();
                         let reported = accepted.accepted_terminal_currents[0].unwrap();

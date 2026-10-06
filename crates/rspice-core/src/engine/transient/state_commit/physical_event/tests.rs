@@ -82,6 +82,7 @@ fn accept(
         false,
         false,
         Some(acceptance::NativeHistoryAcceptance {
+            retained_transport_bytes: 0,
             histories: TransientDeviceHistories {
                 bjt: history,
                 jfet: &mut Default::default(),

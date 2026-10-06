@@ -46,6 +46,7 @@ fn gp_phase_history_acceptance_uses_actual_time_and_survives_integration_restart
             0.4 * delay,
             time,
             None,
+            &crate::ResourceLimits::unlimited(),
         )
         .unwrap();
         let forward = circuit.bjts.devices[0]
@@ -67,7 +68,8 @@ fn gp_phase_history_acceptance_uses_actual_time_and_survives_integration_restart
                 &coeff,
                 delay,
                 time,
-                None
+                None,
+                &crate::ResourceLimits::unlimited(),
             )
             .is_err()
         );

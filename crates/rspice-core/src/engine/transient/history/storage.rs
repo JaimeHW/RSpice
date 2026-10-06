@@ -126,15 +126,36 @@ mod tests {
     fn public_capture_and_restore_preserve_allocation_failures_and_accepted_state() {
         let netlist = Netlist::parse("phase copy failures\nVC c 0 2\nVB b 0 .7\nQ1 c b 0 qm\n.model qm NPN IS=1e-16 BF=100 TF=1n PTF=90\n.end\n").unwrap();
         let engine = Engine::new(SimulationConfig::default());
-        let (baseline, checkpoint) = engine
+        // Count the startup copies through the same public run route, so each
+        // capture fault lands in final checkpoint materialization rather than
+        // accidentally testing an earlier physical-startup copy.
+        let (baseline, startup_copies) = fail_copy_after(usize::MAX, || {
+            let result = engine.run_tran(&netlist, 1e-10, 1e-12).unwrap();
+            (
+                result,
+                usize::MAX - COPY_RESERVATIONS_BEFORE_FAILURE.get().unwrap(),
+            )
+        });
+        let (_, checkpoint) = engine
             .run_tran_checkpointed(&netlist, 1e-10, 1e-12)
             .unwrap();
         let encoded = checkpoint.to_text();
+        let mut limited_config = SimulationConfig::default();
+        limited_config.resource_limits.max_transport_history_bytes = 0;
+        let limited = Engine::new(limited_config);
+        let policy_error = fail_copy_after(0, || {
+            let result = limited.run_tran_resume(&netlist, &checkpoint, 2e-10, 1e-12);
+            assert_eq!(COPY_RESERVATIONS_BEFORE_FAILURE.get(), Some(0));
+            result.unwrap_err()
+        });
+        assert!(matches!(policy_error, SimulationError::ResourceLimit(error)
+            if error.resource == crate::ResourceKind::TransportHistoryBytes));
+
         let (continued, _) = engine
             .run_tran_resume(&netlist, &checkpoint, 2e-10, 1e-12)
             .unwrap();
         for count in [0, 1, 5, 12] {
-            let failed_capture = fail_copy_after(count, || {
+            let failed_capture = fail_copy_after(startup_copies + count, || {
                 engine.run_tran_checkpointed(&netlist, 1e-10, 1e-12)
             });
             assert_allocation(&failed_capture.unwrap_err());

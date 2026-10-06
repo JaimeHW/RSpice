@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::device::semiconductor::AcceptedBjtChargeSnapshotCheckpoint;
+mod memory;
 mod storage;
 
 /// Maximum allowed per-iteration node update during Newton damping.

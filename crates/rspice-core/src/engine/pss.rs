@@ -4985,6 +4985,7 @@ impl Engine {
                     dt,
                     t,
                     Some(bjt_snapshot_cache),
+                    &self.config.resource_limits,
                 )?;
                 Self::accept_jfet_history(circuit, jfet_history, &new_solution, &coeff, dt, false);
                 for device in &mut circuit.mosfets.devices {

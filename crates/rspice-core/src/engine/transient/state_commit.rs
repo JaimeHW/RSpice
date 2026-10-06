@@ -117,7 +117,29 @@ impl PreparedBjtHistory {
     fn reserve_phase_storage(
         &self,
         history: &mut BjtTransientHistory,
+        retained_transport_bytes: usize,
+        limits: &crate::ResourceLimits,
     ) -> Result<(), SimulationError> {
+        let requested = self
+            .values
+            .iter()
+            .zip(&history.phase)
+            .map(|(value, phase)| {
+                phase.as_ref().map_or(0, |phase| {
+                    value.phase_sample.map_or_else(
+                        || phase.allocated_bytes(),
+                        |sample| {
+                            phase.allocation_after_sample(sample.event.map(|event| event.order))
+                        },
+                    )
+                })
+            })
+            .fold(retained_transport_bytes, usize::saturating_add);
+        crate::resource::ResourceLimitError::ensure(
+            crate::ResourceKind::TransportHistoryBytes,
+            requested,
+            limits.max_transport_history_bytes,
+        )?;
         for (index, value) in self.values.iter().enumerate() {
             if let Some(sample) = value.phase_sample {
                 history.phase[index]
@@ -367,6 +389,7 @@ impl Engine {
 
     /// Prepare the complete BJT family before rotating any accepted history.
     /// Shared by ordinary transient integration and periodic traversals.
+    #[allow(clippy::too_many_arguments)]
     pub(in crate::engine) fn accept_bjt_history(
         circuit: &crate::circuit::CircuitData,
         history: &mut BjtTransientHistory,
@@ -375,6 +398,7 @@ impl Engine {
         dt: Value,
         accepted_time: Value,
         vbic_snapshots: Option<&[Option<BjtChargeSnapshot>]>,
+        limits: &crate::ResourceLimits,
     ) -> Result<(), SimulationError> {
         let prepared = Self::prepare_bjt_history(
             circuit,
@@ -386,7 +410,7 @@ impl Engine {
             vbic_snapshots,
             Default::default(),
         )?;
-        prepared.reserve_phase_storage(history)?;
+        prepared.reserve_phase_storage(history, 0, limits)?;
         Self::commit_bjt_history(history, prepared);
         Ok(())
     }
@@ -745,6 +769,7 @@ impl Engine {
         step: AcceptedReactiveStep<'_>,
         histories: &mut TransientDeviceHistories<'_>,
         snapshots: AcceptedReactiveSnapshots<'_>,
+        retained_transport_bytes: usize,
     ) -> Result<PreparedReactiveHistory<'engine>, SimulationError> {
         if snapshots.bjt_phase.incoming_arrival {
             return Err(SimulationError::Circuit(
@@ -847,7 +872,11 @@ impl Engine {
         // Reserve every growing transport buffer while failure can still
         // reject the complete all-device transaction. The commit below must
         // not allocate after another device has advanced its accepted state.
-        bjt.reserve_phase_storage(histories.bjt)?;
+        bjt.reserve_phase_storage(
+            histories.bjt,
+            retained_transport_bytes,
+            &self.config.resource_limits,
+        )?;
         Ok(PreparedReactiveHistory {
             bjt,
             behavioral,
@@ -869,7 +898,8 @@ impl Engine {
         scheduling: ReactiveBreakpointScheduling<'_>,
         sink: DynamicBreakpointSink<'_>,
     ) -> Result<(), SimulationError> {
-        let prepared = self.prepare_reactive_history(circuit, step, &mut histories, snapshots)?;
+        let prepared =
+            self.prepare_reactive_history(circuit, step, &mut histories, snapshots, 0)?;
         self.commit_reactive_history(
             circuit, step, histories, snapshots, scheduling, sink, prepared,
         );

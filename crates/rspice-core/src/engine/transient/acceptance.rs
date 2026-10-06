@@ -7,6 +7,7 @@ use super::*;
 /// Borrowed native state carried through the same validation barrier as HDL.
 /// Preparation owns only new values; accepted history storage stays in place.
 pub(super) struct NativeHistoryAcceptance<'state, 'inputs> {
+    pub retained_transport_bytes: usize,
     pub histories: TransientDeviceHistories<'state>,
     pub bsim4_trnqs_coeff: &'inputs CompanionCoefficients,
     pub snapshots: AcceptedReactiveSnapshots<'inputs>,
@@ -168,6 +169,7 @@ impl Engine {
                             },
                             &mut native.histories,
                             native.snapshots,
+                            native.retained_transport_bytes,
                         )
                     })
                     .transpose()?;
@@ -1116,6 +1118,7 @@ mod tests {
             false,
             false,
             Some(NativeHistoryAcceptance {
+                retained_transport_bytes: 0,
                 histories: TransientDeviceHistories {
                     bjt,
                     jfet: &mut JfetTransientHistory::default(),

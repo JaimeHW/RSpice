@@ -400,3 +400,50 @@ fn gp_phase_event_acceptance_keeps_unselected_devices_smooth_and_survives_restar
         assert_eq!(history.phase, accepted);
     }
 }
+
+#[test]
+fn gp_event_memory_refusal_preserves_every_accepted_participant() {
+    let (mut engine, mut circuit, mut history, solution) = fixture();
+    let before = history.clone();
+    let passive_before = format!("{:?}{:?}", circuit.capacitors, circuit.inductors);
+    let behavior_before = format!("{:?}", circuit.behavioral_sources);
+    let left = limits(&history);
+    let bytes = history.transport_allocated_bytes();
+    engine.config.resource_limits.max_transport_history_bytes = bytes;
+    let error = commit(
+        &engine,
+        &mut circuit,
+        &mut history,
+        &solution,
+        1e-12,
+        BjtPhaseContext {
+            incoming_arrival: false,
+            input_left_limits: Some(&left),
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(error, SimulationError::ResourceLimit(error)
+        if error.resource == crate::ResourceKind::TransportHistoryBytes
+            && error.requested > bytes && error.limit == bytes));
+    assert_eq!(history, before);
+    assert_eq!(history.transport_allocated_bytes(), bytes);
+    assert_eq!(
+        format!("{:?}{:?}", circuit.capacitors, circuit.inductors),
+        passive_before
+    );
+    assert_eq!(format!("{:?}", circuit.behavioral_sources), behavior_before);
+    engine.config.resource_limits.max_transport_history_bytes = usize::MAX;
+    commit(
+        &engine,
+        &mut circuit,
+        &mut history,
+        &solution,
+        1e-12,
+        BjtPhaseContext {
+            incoming_arrival: false,
+            input_left_limits: Some(&left),
+        },
+    )
+    .unwrap();
+    assert!(history.transport_allocated_bytes() > bytes);
+}

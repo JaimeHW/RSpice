@@ -13,6 +13,7 @@ impl Engine {
             circuit,
             history,
             crate::config::GpTransientPhaseModel::ExactDelay,
+            &crate::ResourceLimits::unlimited(),
         )
     }
 
@@ -20,7 +21,25 @@ impl Engine {
         circuit: &crate::circuit::CircuitData,
         history: &mut BjtTransientHistory,
         model: crate::config::GpTransientPhaseModel,
+        limits: &crate::ResourceLimits,
     ) -> Result<(), SimulationError> {
+        if model == crate::config::GpTransientPhaseModel::ExactDelay {
+            let active = circuit
+                .bjts
+                .devices
+                .iter()
+                .filter(|bjt| bjt.legacy_excess_phase_delay() != 0.0)
+                .count();
+            let initial_bytes = rspice_veriloga_runtime::transport_delay::DelayBuffer::new(0)
+                .allocation_after_sample(None);
+            crate::resource::ResourceLimitError::ensure(
+                crate::ResourceKind::TransportHistoryBytes,
+                active
+                    .saturating_mul(initial_bytes)
+                    .saturating_add(history.transport_allocated_bytes()),
+                limits.max_transport_history_bytes,
+            )?;
+        }
         let count = circuit.bjts.devices.len();
         let allocation_error = |source| SimulationError::Allocation {
             object: "BJT phase initialization",
