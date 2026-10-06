@@ -456,6 +456,8 @@ fn gp_phase_cancellation_does_not_contaminate_a_later_run() {
             engine.run_tran_with_abort(&source, 2e-9, 4e-12, &abort),
             Err(SimulationError::Aborted)
         ));
+        assert_eq!(abort.observed_at(), Some(501));
+        assert_eq!(abort.polls_after_abort(), 0);
         let after = engine.run_tran(&source, 2e-9, 4e-12).unwrap();
         assert_eq!(baseline.time, after.time);
         assert_eq!(baseline.voltages, after.voltages);
