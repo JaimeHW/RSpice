@@ -348,6 +348,14 @@ pub(super) fn preflight_deck_run_count(
         DeckPlan::from_netlist_with_abort(netlist, &resource_limits, &crate::abort::ProcessAbort)
             .map_err(|error| map_deck_plan_error(error, args))?;
     if canonical_plan.axes().is_empty() {
+        if requested_mode_name(args).is_none() {
+            crate::commands::preflight::netlist(
+                netlist,
+                &args.input,
+                resource_limits,
+                args.tran_stop,
+            )?;
+        }
         return Ok(1);
     }
 

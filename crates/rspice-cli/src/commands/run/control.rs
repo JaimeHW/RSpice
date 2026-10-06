@@ -4,9 +4,7 @@ use super::*;
 use rspice_core::engine::{
     ControlAnalysisResult, ControlCircuit, ControlCommandEffect, ControlExecutionError,
 };
-use rspice_core::execution::control::{
-    ControlError, ControlErrorKind, ControlLimits, ControlProgram,
-};
+use rspice_core::execution::control::{ControlError, ControlErrorKind};
 use rspice_core::netlist::ControlScriptSource;
 
 mod output;
@@ -28,17 +26,14 @@ pub(super) fn run(
             message: "control execution requires retained script source".into(),
         })?;
     let limits = config.resources.limits();
-    let program = ControlProgram::parse_deck_with_abort(
-        script.text(),
-        ControlLimits {
-            max_source_bytes: limits.max_expanded_source_bytes,
-            max_source_lines: limits.max_netlist_lines,
-            max_loop_values: limits.max_batch_runs,
-            ..ControlLimits::default()
-        },
-        &crate::abort::ProcessAbort,
-    )
-    .map_err(|error| map_command(error, script, args))?;
+    let program = crate::commands::preflight::control_program(script, &args.input, limits)
+        .map_err(|error| {
+            if matches!(error, CliError::Interrupted) {
+                cancellation_cli_error(args.timeout)
+            } else {
+                error
+            }
+        })?;
     let engine = build_engine(args, config, netlist)?;
     let mut circuit =
         ControlCircuit::new(netlist.clone()).map_err(|error| map_execution(error, script, args))?;

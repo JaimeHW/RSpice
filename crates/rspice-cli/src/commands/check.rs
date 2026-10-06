@@ -60,7 +60,7 @@ pub fn execute(
                         serde_json::json!({
                             "valid": false,
                             "strict_valid": false,
-                            "errors": [{"message": e.to_string()}],
+                            "errors": [{"message": e.to_string(), "details": e.details()}],
                             "warnings": [],
                         })
                     )
@@ -150,7 +150,7 @@ fn validate_input(args: &CheckArgs, config: &Config) -> Result<ValidationResult,
                 Some(&netlist.options),
                 &Default::default(),
             );
-            let engine = Engine::try_new(simulation_config)?;
+            let engine = Engine::try_new_with_resolved_config(simulation_config)?;
             let materializer = engine
                 .prepare_deck_plan_materializer_with_abort(
                     &netlist,
@@ -204,6 +204,7 @@ fn validate_netlist(
     args: &CheckArgs,
     resource_limits: rspice_core::ResourceLimits,
 ) -> Result<ValidationResult, CliError> {
+    super::preflight::netlist(netlist, &args.input, resource_limits, None)?;
     rspice_core::netlist::validate_output_symbols_with_abort(netlist, &crate::abort::ProcessAbort)
         .map_err(|error| crate::commands::input::map_error(error, &args.input, None))?;
     let flattened = rspice_core::netlist::flatten_netlist_with_models_config_with_abort(

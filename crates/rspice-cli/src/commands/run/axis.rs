@@ -164,6 +164,12 @@ pub(super) fn preflight_step_coordinates(
                     ),
                 )
             })?;
+        crate::commands::preflight::netlist(
+            materialized.netlist(),
+            &args.input,
+            engine.config().resource_limits,
+            args.tran_stop,
+        )?;
         let signature = step_analysis_signature(materialized.netlist());
         if signature != base_signature {
             return Err(CliError::InvalidArgument {
