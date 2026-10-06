@@ -704,6 +704,13 @@ listing to packs whose metadata says redistributable. Browse queries are capped
 so a bare `--device diode` does not spool tens of thousands of lines.
 Malformed pack statistics, inconsistent top-level counts, and overflowing
 totals are rejected with the index filename and line number.
+Invalid catalog records encountered during a query stop it with their file
+and line location. Older catalogs without restriction or scope columns default
+to unrestricted, top-level definitions. Present flags must be `0` or `1`, and
+scope must be `top` or `nested`.
+Pack IDs must be unique and catalog rows must name a known pack. Index paths
+use forward slashes relative to their pack or model root; absolute paths,
+parent traversal, and Windows drive or stream syntax are rejected.
 
 ## Observability
 
