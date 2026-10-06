@@ -64,6 +64,7 @@ mod data;
 mod dc;
 mod dcmatch;
 mod distortion;
+mod exact_constraints;
 use crate::analysis::error;
 mod hb;
 mod health;
