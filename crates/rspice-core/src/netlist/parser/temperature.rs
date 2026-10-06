@@ -7,6 +7,9 @@
 
 use super::*;
 
+mod options;
+pub(super) use options::{TemperatureOption, TemperatureOptionPlan, TemperatureOptionSink};
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct ParserTemperatures {
     temp: Option<Value>,

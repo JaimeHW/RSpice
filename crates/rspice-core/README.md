@@ -344,7 +344,13 @@ migrate to the engine planner, which validates dimensions and total run counts
 before executing the same sweep path used by the frontends.
 
 Temperature options accept expressions using parameters available at the option
-card, for example `.param ambient=85` followed by `.options temp={ambient}`.
+card, or scalar parameters declared later in the same lexical scope. For
+example, `.options temp={ambient}` can precede `.param ambient=85`.
+Already-bound values and functions keep their option-card meaning. Forward
+expressions resolve when their root or subcircuit scope closes, in authored
+order within that scope; any random draws occur then, after its declarations.
+An unsuccessful forward-reference probe consumes no retained random draws.
+Later option assignments still win, and superseded assignments are validated.
 The parser reconciles the selected temperature with earlier eager expressions
 through bounded replay of the same immutable source and statistical seed.
 Inactive branches and text after `.END` cannot author temperature options.
@@ -353,10 +359,10 @@ Inactive branches and text after `.END` cannot author temperature options.
 table/study `TEMP` coordinate takes precedence over options and a single `.TEMP`
 directive. Temperature selections that keep changing on replay are rejected.
 
-Two parser limits remain: option expressions cannot yet reference parameters
-declared later, and an early expression that is invalid at the provisional
-temperature can fail before replay. The implementation plan tracks both;
-these cases are not covered by the temperature-option support above.
+General dependency planning remains incomplete: retained parameter-expression
+chains and references to an enclosing scope that is still incomplete need
+further work. An early expression that is invalid at the provisional temperature
+can also fail before replay. These cases remain in the implementation plan.
 
 The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and
 the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.

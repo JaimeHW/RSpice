@@ -2094,7 +2094,7 @@ fn token_is_value_like(kind: &TokenKind, params: &ParamContext) -> bool {
     }
 }
 
-fn parse_boolean_literal(raw: &str) -> Option<Value> {
+pub(super) fn parse_boolean_literal(raw: &str) -> Option<Value> {
     if raw.eq_ignore_ascii_case("true") {
         Some(1.0)
     } else if raw.eq_ignore_ascii_case("false") {

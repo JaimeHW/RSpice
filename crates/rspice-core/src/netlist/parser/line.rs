@@ -192,6 +192,7 @@ pub(super) fn process_line(
     origin: &NetlistSourceLocation,
     state: &mut ParseState,
 ) -> Result<(), ParseError> {
+    let temperature_depth = state.subckt_stack.len();
     let authored_element_name = line
         .split_whitespace()
         .next()
@@ -418,6 +419,11 @@ pub(super) fn process_line(
                     saves,
                     output_requests,
                     options,
+                    temperature_options: temperature::TemperatureOptionSink {
+                        plan: &mut state.temperature_options,
+                        depth: temperature_depth,
+                        origin,
+                    },
                     max_analysis_points: state.max_analysis_points,
                     diagnostics,
                     pspice_chebyshev_source_count: &mut state.pspice_chebyshev_source_count,
@@ -480,6 +486,11 @@ pub(super) fn process_line(
             saves: &mut state.saves,
             output_requests: &mut state.output_requests,
             options: &mut state.options,
+            temperature_options: temperature::TemperatureOptionSink {
+                plan: &mut state.temperature_options,
+                depth: 0,
+                origin,
+            },
             max_analysis_points: state.max_analysis_points,
             diagnostics: &mut state.diagnostics,
             pspice_chebyshev_source_count: &mut state.pspice_chebyshev_source_count,
@@ -533,6 +544,7 @@ pub(super) fn parse_line(
         saves,
         output_requests,
         options,
+        temperature_options,
         max_analysis_points,
         diagnostics,
         pspice_chebyshev_source_count,
@@ -597,6 +609,7 @@ pub(super) fn parse_line(
                 saves,
                 output_requests,
                 options,
+                temperature_options,
                 max_analysis_points,
                 diagnostics,
                 spef_includes,

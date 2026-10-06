@@ -38,6 +38,7 @@ pub(super) fn parse_command(
         startup_directives,
         startup_scope,
         options,
+        temperature_options,
         max_analysis_points,
         diagnostics,
         spef_includes,
@@ -453,6 +454,7 @@ pub(super) fn parse_command(
                 diagnostics,
                 parameter_direction,
                 false,
+                Some(temperature_options),
             )?;
         }
         ".MEAS" | ".MEASURE" => {
@@ -1730,6 +1732,7 @@ pub(super) fn parse_options_command(
     diagnostics: &mut Vec<ParseDiagnostic>,
     mut parameter_direction: Option<&mut ParameterDirectionCapture>,
     control_command: bool,
+    mut temperature_options: Option<temperature::TemperatureOptionSink<'_>>,
 ) -> Result<(), ParseError> {
     let mut option_package: Option<String> = None;
 
@@ -2611,12 +2614,32 @@ pub(super) fn parse_options_command(
                 options.pivrel = Some(parse_positive_real_option("PIVREL", value, line_num)?);
             }
             (None | Some("DEVICE"), "TEMP") => {
-                let value = expect_value(stream, line_num, params)?;
-                options.temp = Some(parse_celsius_option("TEMP", value, line_num)?);
+                if let Some(sink) = temperature_options.as_mut() {
+                    sink.parse(
+                        temperature::TemperatureOption::Temp,
+                        stream,
+                        line_num,
+                        params,
+                        options,
+                    )?;
+                } else {
+                    let value = expect_value(stream, line_num, params)?;
+                    options.temp = Some(parse_celsius_option("TEMP", value, line_num)?);
+                }
             }
             (None | Some("DEVICE"), "TNOM") => {
-                let value = expect_value(stream, line_num, params)?;
-                options.tnom = Some(parse_celsius_option("TNOM", value, line_num)?);
+                if let Some(sink) = temperature_options.as_mut() {
+                    sink.parse(
+                        temperature::TemperatureOption::Tnom,
+                        stream,
+                        line_num,
+                        params,
+                        options,
+                    )?;
+                } else {
+                    let value = expect_value(stream, line_num, params)?;
+                    options.tnom = Some(parse_celsius_option("TNOM", value, line_num)?);
+                }
             }
             (_, "SCALE") => {
                 // Element geometry scale factor. ngspice exposes it as the

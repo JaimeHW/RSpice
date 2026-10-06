@@ -142,6 +142,7 @@ fn options_overlay(
         &mut diagnostics,
         None,
         control_command,
+        None,
     )?;
     ensure_parse_not_aborted(abort)?;
     // An options overlay has no parser-diagnostic publication channel. Refuse
@@ -1133,6 +1134,9 @@ fn parse_netlist_impl(
     if let Some(seed) = options.statistical_seed {
         state.options.seed = Some(seed);
     }
+    state
+        .temperature_options
+        .resolve_scope(0, &state.params, &mut state.options, abort)?;
     // Authored option cards must not undo a physical replay coordinate.
     apply_replayed_temperature(&mut state)?;
     if let Some(policy) = state.options.remove_unused.clone() {
@@ -3049,11 +3053,14 @@ fn flush_pending_logical_line(
         return Ok(());
     }
     let first_new_diagnostic = state.diagnostics.len();
-    process_line_gated(continuation, logical_line, &logical_origin, state)
-        .map_err(|error| {
-            source_map_logical_line_error(error, logical_line, &logical_origin, source_is_included)
-        })
-        .map_err(ParseWithAbortError::from)?;
+    process_line_gated(
+        continuation,
+        logical_line,
+        &logical_origin,
+        state,
+        source_is_included,
+        abort,
+    )?;
     for diagnostic in &mut state.diagnostics[first_new_diagnostic..] {
         if diagnostic.origin.is_none() {
             diagnostic.line = logical_origin.line;
@@ -4482,17 +4489,37 @@ fn process_line_gated(
     line_num: usize,
     origin: &NetlistSourceLocation,
     state: &mut ParseState,
-) -> Result<(), ParseError> {
+    source_is_included: bool,
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    let map_current_error = |error| -> ParseWithAbortError {
+        source_map_logical_line_error(error, line_num, origin, source_is_included).into()
+    };
     if let Some(directive) = parse_conditional_directive(line) {
         if let Some(capture) = &mut state.parameter_direction {
             capture.has_uncaptured_dependencies = true;
         }
-        return state.apply_conditional_directive(directive, line_num);
+        return state
+            .apply_conditional_directive(directive, line_num)
+            .map_err(map_current_error);
     }
     if state.conditionals_suppress() {
         return Ok(());
     }
-    process_line(line, line_num, origin, state)
+    if line
+        .split_whitespace()
+        .next()
+        .is_some_and(|head| head.eq_ignore_ascii_case(".ends"))
+        && let Some(frame) = state.subckt_stack.last()
+    {
+        state.temperature_options.resolve_scope(
+            state.subckt_stack.len(),
+            &frame.local_params,
+            &mut state.options,
+            abort,
+        )?;
+    }
+    process_line(line, line_num, origin, state).map_err(map_current_error)
 }
 
 /// Pre-scan for `.options seed=<n>` (alias `rndseed=<n>`) so the statistical

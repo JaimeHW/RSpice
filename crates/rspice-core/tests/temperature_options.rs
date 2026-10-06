@@ -11,6 +11,147 @@ fn close(actual: f64, expected: f64) {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn forward_temperature_options_reconcile_earlier_values_and_nominal_dependencies() {
+    for expression_dialect in [
+        rspice_core::config::ExpressionDialect::Ngspice,
+        rspice_core::config::ExpressionDialect::Xyce,
+    ] {
+        let source = "Forward temperatures\n.param observed={TEMP}\nI1 0 out 1m\nR1 out 0 {TEMP}\n.options DEVICE temp={ambient+TNOM} tnom=+nominal\n.param ambient=50 nominal=35\n.end\n";
+        let netlist = Netlist::parse_with_options(
+            source,
+            rspice_core::netlist::NetlistParseOptions {
+                expression_dialect,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(netlist.options.temp, Some(85.0));
+        assert_eq!(netlist.options.tnom, Some(35.0));
+        close(eval_expression("observed", &netlist.params).unwrap(), 85.0);
+        close(
+            Engine::default()
+                .run_dc_op(&netlist)
+                .unwrap()
+                .try_voltage_named("out")
+                .unwrap(),
+            0.085,
+        );
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn forward_options_capture_known_bindings_and_local_functions() {
+    let source = "Forward scope capture\n.param offset=5\n.func adjust(x) {x+offset}\n.options temp={adjust(ambient)} tnom=-nominal\n.param offset=90 ambient=80 nominal=10\n.func adjust(x) {x+100}\n.end\n";
+    let netlist = Netlist::parse(source).unwrap();
+    assert_eq!(netlist.options.temp, Some(85.0));
+    assert_eq!(netlist.options.tnom, Some(-10.0));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn forward_options_preserve_complex_bindings_before_real_projection() {
+    let netlist = Netlist::parse("Complex temperature dependency\n.param z={sqrt(-1)} expected={85+img(z)}\n.options temp={85+img(z)+ambient}\n.param z={sqrt(-4)} ambient=0\n.end\n").unwrap();
+    assert_eq!(netlist.options.temp, netlist.params.get("expected"));
+    assert_eq!(netlist.options.temp, Some(84.0));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn forward_options_resolve_in_their_scope_and_keep_global_assignment_order() {
+    for (body, temperature) in [
+        (
+            ".options temp={ambient}\n.param ambient=80\n.options temp=65\n",
+            65.0,
+        ),
+        (
+            ".options temp={ambient}\n.subckt child p n\n.options temp={local}\n.param local=75\n.ends\n.param ambient=80\n",
+            75.0,
+        ),
+        (
+            ".subckt child p n\n.options temp={local}\n.subckt inner p n\n.options temp=65\n.ends\n.param local=75\n.ends\n",
+            65.0,
+        ),
+        (
+            ".subckt child p n\n.options temp={local}\n.param local=75\n.ends\n.options temp={ambient}\n.param ambient=80\n",
+            80.0,
+        ),
+    ] {
+        let source = format!("Forward option precedence\n{body}.end\n");
+        let netlist = Netlist::parse(&source).unwrap();
+        assert_eq!(netlist.options.temp, Some(temperature), "{body}");
+    }
+    let error = Netlist::parse("No sibling binding\n.subckt a p n\n.options temp={ambient}\n.ends\n.subckt b p n\n.param ambient=75\n.ends\n.end\n").unwrap_err();
+    assert!(
+        error.to_string().contains("Undefined parameter: AMBIENT"),
+        "{error}"
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn deferred_temperature_draws_follow_scope_declarations_without_failed_probe_draws() {
+    let source = "Forward sampled options\n.options seed=37 temp={aunif(0,1)+ambient} tnom={nominal+aunif(0,1)}\n.param ambient=85 nominal=35 after={aunif(0,1)}\n.end\n";
+    let netlist = Netlist::parse(source).unwrap();
+    let mut reference = ParamContext::new();
+    reference.set_random_seed(37);
+    assert_eq!(
+        netlist.params.get("after"),
+        Some(eval_expression("aunif(0,1)", &reference).unwrap())
+    );
+    assert_eq!(
+        netlist.options.temp,
+        Some(85.0 + eval_expression("aunif(0,1)", &reference).unwrap())
+    );
+    assert_eq!(
+        netlist.options.tnom,
+        Some(35.0 + eval_expression("aunif(0,1)", &reference).unwrap())
+    );
+    assert_eq!(
+        eval_expression("aunif(0,1)", &netlist.params).unwrap(),
+        eval_expression("aunif(0,1)", &reference).unwrap()
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn deferred_options_validate_superseded_cards_and_keep_their_origin() {
+    for tail in [".param ambient=-274\n", ".param other=85\n"] {
+        let source = format!(
+            "Deferred error\n.options reltol=1e-5\n+ temp={{ambient}}\n.options temp=65\n{tail}.end\n"
+        );
+        let error = Netlist::parse(&source).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                rspice_core::netlist::ParseError::Syntax { line: 2, .. }
+            ),
+            "{error}"
+        );
+        assert!(error.to_string().contains("TEMP"), "{error}");
+    }
+    let netlist = Netlist::parse("Inactive forward option\n.if 0\n.options temp={missing}\n.endif\n.options temp=65\n.end\n.options tnom={also_missing}\n").unwrap();
+    assert_eq!(netlist.options.temp, Some(65.0));
+    assert_eq!(netlist.options.tnom, None);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn lazy_and_user_function_options_preserve_statistical_evaluation() {
+    let source = "Function sampled options\n.options seed=37\n.func twice(x) {x+x}\n.options temp={85+twice(aunif(0,1))+ambient}\n.options tnom={if(1,35+aunif(0,1),missing)}\n.param ambient=0 after={aunif(0,1)}\n.end\n";
+    let netlist = Netlist::parse(source).unwrap();
+    let reference = Netlist::parse("Reference draws\n.options seed=37\n.func twice(x) {x+x}\n.param nominal={35+aunif(0,1)} after={aunif(0,1)} temperature={85+twice(aunif(0,1))}\n.end\n").unwrap();
+    assert_eq!(netlist.options.tnom, reference.params.get("nominal"));
+    assert_eq!(netlist.params.get("after"), reference.params.get("after"));
+    assert_eq!(netlist.options.temp, reference.params.get("temperature"));
+    assert_eq!(
+        eval_expression("aunif(0,1)", &netlist.params).unwrap(),
+        eval_expression("aunif(0,1)", &reference.params).unwrap()
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn parameter_options_apply_to_earlier_primitives_and_temperature_builtins() {
     let netlist = Netlist::parse("Temperature parameters\n.param ambient=85 nominal=35\n.param before={TEMP} nominal_before={TNOM} vt_before={VT}\nI1 0 out 1m\nR1 out 0 {TEMP}\n.options DEVICE temp={ambient} tnom={nominal}\n.end\n").unwrap();
     assert_eq!(netlist.options.temp, Some(85.0));
@@ -201,4 +342,57 @@ fn expanded_source_boundaries_and_parameter_options_share_the_same_replay() {
     assert_eq!(netlist.options.temp, Some(85.0));
     assert_eq!(netlist.params.get("observed"), Some(85.0));
     assert_eq!(netlist.source_path.as_ref(), Some(&root));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn deferred_included_option_errors_keep_the_card_path_and_local_line() {
+    use rspice_core::netlist::{
+        NetlistParseOptions, ParseError, SealedSourceBundle, SealedSourceEdge,
+    };
+    let root = std::env::temp_dir().join("rspice-forward-temperature-root.cir");
+    let child = root.with_file_name("rspice-forward-temperature-child.inc");
+    for (source, include, expected_line) in [
+        (
+            "Included root option\n.include child.inc\n.param ambient=-274\n.end\n",
+            ".options temp={ambient}\n",
+            1,
+        ),
+        (
+            "Included child scope\n.include child.inc\n.end\n",
+            ".subckt local p n\n.options temp={ambient}\n.param ambient=-274\n.ends\n",
+            2,
+        ),
+    ] {
+        let bundle = SealedSourceBundle::try_new_with_edges(
+            [
+                (root.clone(), source.to_owned()),
+                (child.clone(), include.to_owned()),
+            ],
+            [SealedSourceEdge {
+                owner: root.clone(),
+                requested_path: "child.inc".into(),
+                target: child.clone(),
+            }],
+        )
+        .unwrap();
+        let error = Netlist::parse_with_path_and_sealed_sources_and_options_and_abort(
+            source,
+            &root,
+            bundle,
+            NetlistParseOptions::default(),
+            &rspice_core::NoAbort,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&error, rspice_core::netlist::ParseWithAbortError::Parse(ParseError::Syntax { line, .. }) if *line == expected_line),
+            "{error}"
+        );
+        let message = error.to_string();
+        assert!(
+            message.contains(&format!("{}:{expected_line}", child.display())),
+            "{message}"
+        );
+        assert!(!message.contains(&root.display().to_string()), "{message}");
+    }
 }
