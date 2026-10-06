@@ -1,12 +1,22 @@
 # RSpice core remaining implementation plan
 
-Status: implementation in progress; no package is closed yet. Prepared October 5, 2026 against revision `20fd0d6350596c0cfc814ee729f4e2286dd30d2b`; initial execution baseline is `f24e2ea28f2322e78086c14837ea53bc2d4c18c3`.
+Status: implementation in progress; no package is closed yet. Remaining work reviewed October 6, 2026 against committed revision `ba5595d50209750f8e15c61e05681b2f76d23903`. Originally prepared October 5 against `20fd0d6350596c0cfc814ee729f4e2286dd30d2b`; initial execution baseline is `f24e2ea28f2322e78086c14837ea53bc2d4c18c3`.
 
 Remaining-work reconciliation includes fallible BJT history initialization and reseeding at `6b32f5bb330993d7f6b3e150a364d42d4334a17b`, in addition to the native GP transport-memory implementation at `4006fa60a1fa5e0e0aa47433578d59e4b6f01468`. C03b record-ceiling diagnostics and their adapter contracts are delivered in `d01e555b8` and `948fd90ff`. Recorded tests qualify their stated paths and configurations; they do not close whole packages.
 
 Complete the unfinished work identified by the core audit: missing analysis and model support, incomplete control execution, IMD measurements, architecture and duplication problems, and core qualification. This plan covers `rspice-core`, its public Rust interfaces, and the dependency contracts needed by its solvers. Application UI, packaging, deployment, and product-level platform certification are outside this plan.
 
 The previous repair batch fixed the reproduced transient, transfer-function, stability, and measurement defects. It did not complete the capability gaps below. An unsupported-capability error protects callers while implementation proceeds; adding that error, hiding an option, or changing documentation does not complete a missing implementation.
+
+## Current planning baseline
+
+- The executable ledger has 15 packages: C00–C03 are in progress and C04–C14 are open. The execution record below identifies delivered portions; none establishes completion of its whole package.
+- Of 29 analysis-command variants, the core control host currently executes OP, AC, and transient. The remaining 26 need control execution or producer/orchestration semantics. Their direct solver routes already exist; this is not a claim that 26 solvers are absent.
+- The periodic declaration snapshot contains 228 rows: 38 families across six contracts. There are 77 complete, 27 restricted, 64 absent, and 60 inapplicable declarations. The 91 restricted/absent rows identify work to resolve against actual instance predicates. They are not 91 independent missing solvers, and the 77 complete declarations still require numerical qualification.
+- `ImdResult` remains a measurement container without checked estimators. The existing `.DISTO` product contract includes `2*f1-f2` but not `2*f2-f1`; preserve the existing solver while completing the product and measurement contracts.
+- Bias-dependent GP forward/reverse charge tests are present as uncommitted development work. Review and qualify them in C03c.1; do not count them as delivered or include them incidentally in a documentation commit. Quantitative private-node/feedback coverage remains separate.
+
+Use `core-requirements-v1.json` and `core-periodic-requirements-v1.json` under `crates/rspice-core/tests/testdata/qualification/` as the executable inventory. Record newly reproduced defects there with a package, regression, and acceptance gate. The next-batch tables below provide the delivery order; the package definitions remain the full completion contract.
 
 ## Completed repairs to preserve
 
@@ -23,7 +33,7 @@ The previous repair batch fixed the reproduced transient, transfer-function, sta
 | Static analysis | Remove stale lint expectations and correct iterator and conditional warnings | `23236d5ee` |
 | Pole-zero admission | Reject irrational transmission delays from finite rational descriptors while preserving eligible periodic analyses; integrated from concurrent core work | `0815435d6` |
 
-The repair batch recorded 4,843 passing core unit tests, three ignored tests, 126 passing selected integration tests, strict library Clippy, and successful core/dependent build checks. These are historical validation results, not a certificate for every model or analysis. Re-establish the baseline in C00 before further implementation.
+The repair batch recorded 4,843 passing core unit tests, three ignored tests, 126 passing selected integration tests, strict library Clippy, and successful core/dependent build checks. These are historical validation results, not a certificate for every model or analysis. C00 has since established the committed baseline recorded below; preserve it and complete the outstanding coverage rather than repeating its delivered setup.
 
 ## Completion rules
 
@@ -282,9 +292,9 @@ Within each model family, deliver residual and derivative tests, transient/state
 - Coordinate source-derivative changes with [project audit IP05](C:/Users/James/Desktop/RSpice/PROJECT_AUDIT_IMPLEMENTATION_PLAN.md). Coordinate compiler/runtime metadata and mixed-state contracts with the existing Verilog-AMS and mixed simulation plans. Those dependencies do not broaden this plan into the product-level tasks in those documents.
 - Preserve current unrelated edits. Validate and commit only package-owned changes. If remote `main` advances, integrate its committed changes without including unrelated local files, then rerun checks affected by the integration.
 
-## Initial execution batch
+## Original execution batch
 
-Start with C00 and the smallest C01/C02 state-boundary extraction: create the requirements ledger, capture a clean baseline, document accepted versus trial ownership, and extract physical-event step fitting with its existing regressions. Establish state invariants before opening GP PTF admission. Prepare the C04 result/dispatch design and C05 measurement contract alongside that work; neither requires rewriting the remaining device families first.
+The original starting batch was C00 and the smallest C01/C02 state-boundary extraction: create the requirements ledger, capture a clean baseline, document accepted versus trial ownership, and extract physical-event step fitting with its existing regressions. The execution record below identifies what has been delivered. Continue from the next implementation batches rather than recreating this baseline or reopening delivered GP admission work.
 
 Update this plan after each delivered package with implementation commits, permanent tests, evidence, and unresolved rows. All packages remain open.
 
@@ -332,11 +342,59 @@ Update this plan after each delivered package with implementation commits, perma
 
 ## Next implementation batches
 
-1. Continue C03c after its measurement, prescribed-terminal nonlinear and executed WebAssembly deliveries: extend the remaining feedback/private-node and bias-dependent transit-time/reverse-charge cases; complete remaining allocation, inner-solve cancellation and performance rows; reconcile the remaining configuration matrix with C14. C03a and C03b are delivered with the scoped evidence recorded here. Preserve the delivered transport-byte quota, event-remainder repair and shared native/WASM exact-delay and discrete Weil oracles. Keep C03 open until its remaining allocation boundaries and qualification gates pass.
-2. Extend C04 in focused result families: DC/nested DC first; AC data and noise tables with row identity; scalar/complex analyses; periodic producer/consumer analyses; then bounded STEP/TEMP/Monte Carlo orchestration. Each batch includes public core control execution, vector/scalar presentation, retained-value limits, and core result adapters.
-3. Implement C05's checked tone/product and power-reference contracts before adding intercept calculations. Add the missing upper third-order product and independent polynomial cases; expose results through the C04 contracts.
-4. Continue C01/C02 extractions at actual state boundaries as those batches need them. Deliver C06–C11 one model/operator family at a time with equations, state, applicable analyses, and independent evidence together.
-5. Maintain C12 route coverage with every delivery. Close C13 and C14 only after all required implementations and qualification rows have passed; no package is closed by this execution record.
+Finish the finite C03c checklist below, then proceed through C04 and C05. C04 result-contract design and independent existing-solver adapters do not depend on completing every C03 qualification row. Keep any unfinished C03 gate explicit when progressing on those independent tasks.
+
+### C03c remaining qualification batches
+
+| Batch | Work and commit boundary | Completion evidence |
+|---|---|---|
+| C03c.1: bias-dependent charge | Review the uncommitted independent `XTF/VTF/ITF/TR` cases; verify instantaneous forward/reverse charge alongside delayed forward transport. Commit regression tests separately from any reproduced numerical repair | Both phase laws, three dialects, both polarities, saturation/reverse-active/high-injection, and timestep refinement. Derive conservation roundoff budgets from companion-system conditioning; document changes to existing thresholds and preserve independent physical-current accuracy gates |
+| C03c.2: private nodes and feedback | Add quantitative independent cases with actual BJT base/collector/emitter resistances and circuit feedback, including charge coupling. Start with a manufactured exact-delay solution; use a separately derived discrete recurrence or a matched ngspice reference for Weil | Intrinsic voltages and terminal currents, conservation, refinement, rejection/restart, and OP/UIC where applicable. Include remaining cutoff, depletion/overlap, parameter-boundary, temperature, and scaling gaps identified by the existing matrix. Successful or finite output alone is insufficient |
+| C03c.3: allocation and cancellation | Inventory remaining allocations in initialization, accepted history, capture/restore, and retained output; exercise failures at the actual owners. Measure cancellation inside expensive nonlinear/factorization work and add propagation where absent | Requested/allowed resource diagnostics, bounded whole-run memory as well as transport-record quota, unchanged accepted state/checkpoints on failure, successful reuse, and measured cancellation latency with the specific inner operation identified |
+| C03c.4: configuration and performance | Reconcile native features/profiles and executed core target coverage with C14. Run remaining distinct configurations and representative feedback/history workloads; retain the existing shared test registration and benchmark harness | Committed source, exact configuration, independent numerical errors, work counts, memory/allocation measurements, and repeatable runtime limits. Record any unexecuted configuration explicitly; compilation alone does not qualify execution |
+| C03c.5: closure review | Reconcile every C03 requirement against the delivered tests and evidence, remove superseded temporary qualification paths, and update the ledger in a separate documentation commit | No unassigned C03 requirement, no unexplained accuracy or resource regression, and every required configuration with an outcome. GP periodic continuation remains C06; unrelated provider contracts remain with their named packages |
+
+Preserve C03a/C03b, the delivered transport-byte quota, event-remainder repair, exact-delay oracles, and discrete Weil oracles throughout these batches. Do not expand a qualification task indefinitely without recording a specific missing case and completion test.
+
+### C04 control-host commit sequence
+
+Each result-family batch includes public control/direct equivalence, result identities and units, vector/scalar access, cancellation, cumulative retention limits, and the affected result adapters. Reuse the existing solver entry points. Update the ledger only when the command executes correctly through the core control host.
+
+| Batch | Command variants or shared work | Required behavior |
+|---|---|---|
+| C04a | Typed results, atomic dataset publication, and producer identity | Extend the existing result contract without changing qualified OP/AC/transient behavior; failed execution cannot consume a dataset identity or publish a partial result |
+| C04b | `Dc`, `AcData`, `Noise`, `NoiseData` | Single/nested DC axes and table row identity, device operating-point reports where provided, complex AC values and noise units |
+| C04c | `Tf`, `PoleZero`, `Sensitivity`, `Stb`, `Sp`, `Disto`, `DcMatch` | Preserve each existing solver's scalar/complex/result structure, options, reference/probe identity, and error contract |
+| C04d | `Four` | Explicit compatible transient producer and interval; retain checked measurement failures and distinguish no producer from invalid data |
+| C04e | `Hb`, `Pss`, `Qpss` | Retain complete steady-state producer configuration and state so dependent analyses can authenticate it |
+| C04f | `Pac`, `Pxf`, `Pnoise`, `Pstb`, `Envelope`, `Qpac`, `Qpxf`, `Qpnoise` | Validate producer compatibility; preserve sideband/lattice identity, conversion data, correlations, and continuation |
+| C04g | `Step`, `Temp`, `MonteCarlo` | Bounded child-analysis orchestration, nested identities, deterministic seeds, completed-child retention, cancellation, and circuit/configuration invalidation |
+
+These groups enumerate all 26 remaining variants exactly once. Keep OP/AC/transient and mixed-script regressions in every affected contract check; producer cards and wrappers must not be forced into standalone analysis semantics.
+
+### C05 IMD commit sequence
+
+1. Define checked tone/product identities, amplitude and power references, and explicit measurement availability. Preserve valid existing post-processing APIs and provide migration guidance for changed fields.
+2. Add the missing `2*f2-f1` distortion product and qualify both third-order products and second-order products with independent polynomial circuits, exchanged tones, and signed/coincident frequencies.
+3. Implement constructors from qualified Volterra, spectrum, and waveform data, reusing existing Fourier/HB/QPSS infrastructure. Qualify window/resolution limits, unequal tones, noise, and dynamic range.
+4. Add intercept estimates with documented assumptions and drive-sweep slope/compression checks; expose them through public core and control result routes. Unavailable or invalid estimates remain explicit.
+
+### Remaining architecture, model, and integration sequence
+
+| Order | Packages | Bounded delivery slices |
+|---|---|---|
+| Throughout | C00, C01, C02 | Finish predicate and auxiliary-route fixtures; establish residual/charge/state contracts as each provider needs them. Extract transient setup, trial/reject, commit, observation, and checkpoint boundaries in separate behavior-preserving commits |
+| Native devices | C06 | Diode/JFET restrictions; B3SOI DD, FD, PD; EKV 2.6; EKV3; VDMOS; remaining classic-MOS predicates; GP thermal and phase-aware periodic state. Deliver each family with equations, derivatives, applicable analysis routes, and independent evidence |
+| Stateful devices | C07 | Thermal resistors/memristors; controlled/hysteretic switches; scalar/coupled lines; mutual/multi-winding/nonlinear magnetics; capacitor/behavioral dynamic operators. Complete capture, rollback, and continuation with each physical implementation |
+| External providers | C09 | Runtime Verilog-A adapters, generated-model adapters, and individual XSPICE model classes. Depend on the existing compiler/runtime workstreams; qualify actual evaluators and state, including allocation failures |
+| Noise | C08 | Follow each completed noisy-device/provider slice with orbit-dependent sources, correlations, folding, and independent integrated-power/convergence checks |
+| Mixed equilibrium | C10 | Complete cross-domain accepted state and rollback first; then coupled equilibrium and eligible linear analyses. Reuse the existing scheduler and mixed-state contracts |
+| Mixed periodic | C11 | Period closure with pending events/digital state; event-time and state-jump derivatives; applicable periodic conversion/noise; envelope continuation |
+| Integration | C12 | Accompany every slice with parser/direct/control/result tests and producer-state checks; finish the full public-route matrix after C03–C11 |
+| Organization and measured cost | C13 | Remove demonstrated duplicate numerical contracts and improve responsibility boundaries; profile and optimize the remaining measured bottlenecks in separate commits with unchanged physics gates |
+| Final acceptance | C14 | Execute the full declared core configuration/reference corpus on committed source, resolve each ignored/omitted check, and publish the completed ledger and generated support matrix |
+
+Before each implementation commit, run the affected regression and contract checks. Broaden checks when a shared numerical/state interface changes. Push each validated, focused commit to remote `main`; keep implementation, structural refactors, tolerance changes, and evidence updates separately reviewable. Do not commit unrelated in-progress work. No package closes until its acceptance criteria above are met.
 
 ### Immediate C03 implementation commits
 
