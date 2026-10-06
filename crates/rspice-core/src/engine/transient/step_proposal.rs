@@ -123,6 +123,43 @@ pub(super) fn fit_physical_event_approach(
     }))
 }
 
+/// Fit a rounding-sized final remainder before solving an exact-history step.
+/// Such histories cannot use the ordinary post-solve breakpoint snap: that
+/// would label state evaluated at another clock as the requested endpoint.
+/// Land exactly when the current bound permits it; otherwise divide the last
+/// two intervals so both obey the bound without a near-zero final solve.
+/// Real event endpoints and proposals at the clock's own resolution retain
+/// their original owner/policy.
+pub(super) fn fit_roundoff_stop_approach(
+    window: PhysicalStepWindow,
+    proposal: StepProposal,
+) -> Option<StepProposal> {
+    let roundoff = 64.0 * Value::EPSILON * window.accepted_time.abs().max(window.stop_time.abs());
+    let tail = window.stop_time - proposal.time;
+    if proposal.exact_event_time.is_some()
+        || tail <= 0.0
+        || tail > roundoff
+        || proposal.dt <= roundoff
+    {
+        return None;
+    }
+    let remaining = window.stop_time - window.accepted_time;
+    let bound = window.controller_maximum.min(window.persistent_maximum);
+    let dt = if remaining <= bound {
+        remaining
+    } else {
+        remaining / 2.0
+    };
+    if !dt.is_finite() || dt < window.hard_min_dt || dt > bound {
+        return None;
+    }
+    Some(StepProposal {
+        dt,
+        time: canonical_transient_step_time(window.accepted_time, dt, window.stop_time),
+        exact_event_time: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,6 +172,73 @@ mod tests {
             persistent_maximum: 1.0,
             controller_maximum: 1.0,
         }
+    }
+
+    #[test]
+    fn rounded_final_remainder_is_split_without_exceeding_the_step_bound() {
+        let window = PhysicalStepWindow {
+            accepted_time: 2e-9 - 4e-12 - 6e-24,
+            stop_time: 2e-9,
+            hard_min_dt: xyce_hard_min_timestep(2e-9),
+            persistent_maximum: 4e-12,
+            controller_maximum: 4e-12,
+        };
+        let proposal = StepProposal {
+            dt: 4e-12,
+            time: window.accepted_time + 4e-12,
+            exact_event_time: None,
+        };
+        let fitted = fit_roundoff_stop_approach(window, proposal).unwrap();
+        assert!(fitted.dt <= window.controller_maximum);
+        assert!(fitted.dt > 1.9e-12);
+        assert!(window.stop_time - fitted.time > 1.9e-12);
+        assert_eq!(fitted.exact_event_time, None);
+        assert_eq!(
+            canonical_transient_step_time(
+                fitted.time,
+                window.stop_time - fitted.time,
+                window.stop_time
+            ),
+            window.stop_time
+        );
+    }
+
+    #[test]
+    fn rounded_final_remainder_lands_directly_when_the_bound_allows_it() {
+        let window = PhysicalStepWindow {
+            accepted_time: 1.0,
+            stop_time: 2.0,
+            ..window(0.1)
+        };
+        let proposal = StepProposal {
+            dt: 1.0 - Value::EPSILON,
+            time: 2.0 - Value::EPSILON,
+            exact_event_time: None,
+        };
+        let fitted = fit_roundoff_stop_approach(window, proposal).unwrap();
+        assert_eq!(fitted.dt, 1.0);
+        assert_eq!(fitted.time, 2.0);
+        assert!(
+            fit_roundoff_stop_approach(
+                window,
+                StepProposal {
+                    exact_event_time: Some(proposal.time),
+                    ..proposal
+                }
+            )
+            .is_none()
+        );
+        assert!(
+            fit_roundoff_stop_approach(
+                window,
+                StepProposal {
+                    dt: 0.5,
+                    time: 1.5,
+                    exact_event_time: None
+                }
+            )
+            .is_none()
+        );
     }
 
     #[test]

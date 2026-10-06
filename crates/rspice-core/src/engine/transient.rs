@@ -751,6 +751,7 @@ mod step_proposal;
 use step_proposal::{
     PhysicalStepWindow, StepProposal, canonical_transient_step_time,
     canonical_transient_step_time_with_device_event, fit_physical_event_approach,
+    fit_roundoff_stop_approach,
 };
 mod truncation;
 use truncation::{
@@ -7101,6 +7102,32 @@ impl Engine {
                 expected_source_delta =
                     Self::max_expected_source_delta(&circuit, t, candidate_step_time);
             }
+            // Exact histories cannot be snapped to the horizon after solving.
+            // Avoid a separate near-zero solve for accumulated clock roundoff.
+            if has_exact_transient_history
+                && locked_grid.is_none()
+                && let Some(fitted) = fit_roundoff_stop_approach(
+                    PhysicalStepWindow {
+                        accepted_time: t,
+                        stop_time: tstop,
+                        hard_min_dt: timestep.hard_min_dt(),
+                        persistent_maximum: max_step,
+                        // Preserve source-activity and model bounds already applied.
+                        controller_maximum: timestep.max_dt().min(dt),
+                    },
+                    StepProposal {
+                        dt,
+                        time: candidate_step_time,
+                        exact_event_time: exact_device_event_time,
+                    },
+                )
+            {
+                dt = fitted.dt;
+                candidate_step_time = fitted.time;
+                at_breakpoint = breakpoints.at_breakpoint(candidate_step_time);
+                expected_source_delta =
+                    Self::max_expected_source_delta(&circuit, t, candidate_step_time);
+            }
             // Reapply after replay, source bias and interval fitting. Even an
             // addition rounded onto the deadline must use its original clock.
             if let Some(deadline) = physical_event_time
@@ -10238,7 +10265,9 @@ impl Engine {
                     let capture_xyce_static_history = size > 0
                         && self.config.spice_dialect == SpiceDialect::Xyce
                         && !uses_direct_xyce_dae
-                        && (xyce_one_step_order2 || xyce_promotes_order_two);
+                        && (xyce_static_history.is_some()
+                            || xyce_one_step_order2
+                            || xyce_promotes_order_two);
                     let mut xyce_static_history_candidate = None;
                     if uses_direct_xyce_dae {
                         capture_direct_xyce_histories(
@@ -10804,10 +10833,16 @@ impl Engine {
             };
             total_trap_trial_nanos += trap_trial_phase_start.elapsed().as_nanos();
 
+            // Once retained, F(x)-B(t) must describe the latest accepted point
+            // even while TrapGear uses Gear2. Returning to OneStep with an old
+            // residual injects stale terminal currents and can collapse LTE
+            // recovery. The same rule applies to the force-accept path above.
             let capture_xyce_static_history = size > 0
                 && self.config.spice_dialect == SpiceDialect::Xyce
                 && !uses_direct_xyce_dae
-                && (xyce_one_step_order2 || xyce_promotes_order_two);
+                && (xyce_static_history.is_some()
+                    || xyce_one_step_order2
+                    || xyce_promotes_order_two);
             let mut xyce_static_history_candidate = None;
             if uses_direct_xyce_dae {
                 capture_direct_xyce_histories(

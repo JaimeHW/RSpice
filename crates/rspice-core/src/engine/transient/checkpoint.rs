@@ -1279,7 +1279,9 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v93 binds native GP physical-event integration epochs and passive clocks.
     // v94 binds ngspice's native GP thermal constants.
     // v95 binds the selected GP transient phase law and legacy filter memory.
-    hasher.update(b"rspice-transient-resolved-config-v95\0");
+    // v96 fits rounding-sized stop remainders before exact-history solves
+    // and retains current OneStep static residuals across hybrid Gear2 steps.
+    hasher.update(b"rspice-transient-resolved-config-v96\0");
     hash_field(
         &mut hasher,
         "gp_transient_phase_model",
