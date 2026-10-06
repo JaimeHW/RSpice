@@ -5,8 +5,8 @@
 //! `.DISTO` exports the actual sinusoidal peak phasors produced by the core's
 //! third-order Volterra solver, together with each product's physical
 //! frequency and explicit magnitude normalization to the F1 response. The
-//! report-shaped analyses (`.TF`, `.PZ`, `.SENS`) have no natural HDF5 section
-//! and reject `-f hdf5` rather than write a misleading file.
+//! report-shaped analyses (`.TF`, `.PZ`, `.SENS`) use typed table sections
+//! for HDF5 export, retaining their signal quantities and coordinates.
 
 use super::RunContext;
 use super::shared::{self, generate_frequency_sweep, map_hdf5_output_error};
