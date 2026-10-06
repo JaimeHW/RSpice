@@ -1,0 +1,332 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C03",
+  "batch": "C03d.1 native voltage-controlled physical events and current observations",
+  "status": "partial_with_vcvs_vccs_event_providers_implemented",
+  "source_revision": "92b9a0fbfb5ceb15270d66b23aa454836234bc9a",
+  "captured_utc": "2026-10-06T09:34:23.716397+00:00",
+  "publication_revision": "918af5383aafb913fc1e67b1f49c5a6cd98b9ce1",
+  "concurrent_changes": "After the optimized run started, remote CLI-only commits were merged normally and the provider was pushed. No compiled core source, test, dependency, lockfile or toolchain changed during that run.",
+  "implementation_commits": [
+    "eed21ead107e46ffd4ff7b59a532a44bbd87c4f1",
+    "5619108f737cd1575c1cbf7830bd69e5280317b2"
+  ],
+  "host": "x86_64-pc-windows-msvc",
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "rustc": "1.94.0 (4a4ef493e 2026-03-02)",
+    "cargo": "1.94.0 (85eff7c80 2026-01-15)",
+    "llvm": "21.1.8",
+    "wasm_target": "wasm32-unknown-unknown",
+    "wasm_bindgen_test_runner": "0.2.126",
+    "wasm_bindgen_test": "0.3.76",
+    "chrome": "154.0.8037.98",
+    "chromedriver": "154.0.8037.92",
+    "WASM_BINDGEN_USE_DEDICATED_WORKER": "1",
+    "WASM_BINDGEN_TEST_TIMEOUT": "180",
+    "webdriver_configuration": "target/core-qualification/gp-webdriver.json",
+    "webdriver_configuration_sha256": "93458ed98943268e089c8c9a793bf2e899872e62941ac54795b0c27b7104785b",
+    "timeout_scope": "Harness timeout, not a measured performance acceptance bound."
+  },
+  "source_hash_scope": "Committed compiled source for the optimized worker run. Native development/final runs have separate source scopes below. Hashes cover local working-tree bytes of committed files changed by the two implementation commits, plus the lockfile and toolchain.",
+  "source_sha256": {
+    "Cargo.lock": "ea7ed4e97284b27608b8ea02399cf875e017e93b291f165794d467ae3384bde7",
+    "crates/rspice-core/src/device/controlled.rs": "c45453a5a754b5b5a52e7710f5fb6abed31f0090ae8b486a4c1b657054bc28f6",
+    "crates/rspice-core/src/device/controlled/equations.rs": "2fa6cd8c20e205169e661104eda9d0602ed36f719fe3b672463e6421e4536fc1",
+    "crates/rspice-core/src/engine/ac.rs": "d544b40eab604e356bed1d2dc6af3b14b893620dde14ca1d3e978e3f4d4638bc",
+    "crates/rspice-core/src/engine/hb/stamping.rs": "dd39b87c9258331502ced2feab4f16b530b22370bb1ac786448b94da056e0ef6",
+    "crates/rspice-core/src/engine/transient.rs": "695e6ac6dda70755706c957c736950d6134432f39a79f55cd5eaa22aa2843b8c",
+    "crates/rspice-core/src/engine/transient/charge_event.rs": "f882b7083f4cf7dbe63082ecc0a39279c5b239008fa2a81cd7721bc4b55db238",
+    "crates/rspice-core/src/engine/transient/charge_event/circuit.rs": "0392c313361c3adb2caeaa4e04b2e213e50731c0eeb4a14b69a4419dd9c27f35",
+    "crates/rspice-core/src/engine/transient/charge_event/circuit/behavioral.rs": "c5705fc23666a12b7b902ae688d6b6b6651e2d952d1151149e0852983e491a39",
+    "crates/rspice-core/src/engine/transient/charge_event/circuit/prepare.rs": "5882bd266d77dbad5da3c066545e25643c2bc8efc1b9cca547378eba318dd659",
+    "crates/rspice-core/src/engine/transient/charge_event/circuit/sample.rs": "e153ab84cf709036ebaa74df953acb034841963ad9f7fe98dcd879723fb678fd",
+    "crates/rspice-core/src/engine/transient/charge_event/circuit/tests.rs": "ce60e00702e88a542ba7ee298ce989e35b536cdc3e9604c5f008d3d411b67bbd",
+    "crates/rspice-core/src/engine/transient/charge_event/circuit/tests/controlled.rs": "935b10f6edba6a07ba1c26e3fcf2fa002c63702c4f7087d0cad98a1a24fc709f",
+    "crates/rspice-core/src/engine/transient/charge_event/tests.rs": "e38aa450743cedd9ac7325a329cb3850cbc97eff24f174d3382c6a14cfbfec1b",
+    "crates/rspice-core/src/engine/transient/charge_event/tests/current_coupling.rs": "701afa0d8d3a3631cb16ae78b08edb795daa8fde57d7260115741f8bc7b5028b",
+    "crates/rspice-core/src/engine/transient/charge_event/tests/flux.rs": "3d6bf559b80b33def162339f08fd6770c162eb28a1abe2050efda5bc059973c4",
+    "crates/rspice-core/src/engine/transient/charge_event/tests/integrated.rs": "f8b306f1dae68ec7163e39408361f963935e2d649454d5300710a1980f2ac094",
+    "crates/rspice-core/src/engine/transient/charge_event/tests/native.rs": "cba39399728a5a3b72ff129020a98d96d842ddebab26bbcba167646e57b954b0",
+    "crates/rspice-core/src/engine/transient/charge_event/tests/operating_point.rs": "600853c9611d9e490bd18fdc3a3a8f941d7603eabb14d790a63e4c47a564f476",
+    "crates/rspice-core/src/engine/transient/charge_event/tests/voltage_control.rs": "8761aa707208c8a887de21d118769a3ef911f727aea13f15e2127c19fef69ae5",
+    "crates/rspice-core/src/engine/transient/checkpoint.rs": "2dbb3ef891898b1f07b2278867fa4bfba229aa24923f85458c622159175565c4",
+    "crates/rspice-core/src/engine/transient/impulses.rs": "0c8e0cf6f613973e009071e520ca42550f6213546d21d0b367db82e9a5b8805f",
+    "crates/rspice-core/tests/controlled_sources_ext.rs": "d2cdca184dd4c304525ccbeb6cacb3547c5fbfad4f3dbc23190b1eea62122773",
+    "crates/rspice-core/tests/gp_phase_regimes.rs": "23916d79f37013323cac75ef3481ab3a4843b938d31ab92d302d4ce4b1c409d7",
+    "crates/rspice-core/tests/gp_phase_regimes/behavioral.rs": "70f3b55b12d36442e3d7774b505ddb08f578fa311ea957d076e2d5a5969319ee",
+    "crates/rspice-core/tests/gp_phase_regimes/controlled.rs": "cf94c3a6372e8953eb552140bd348eee5208a29dfd34d8bf656ce468d98ff57f",
+    "crates/rspice-core/tests/testdata/qualification/core-requirements-v1.json": "6d894bfa46d8b5fbb9664d0914ba793fe4a57dd4f67431797368714ae3ec24e8",
+    "crates/rspice-core/tests/transient_transmission_line.rs": "eb27ee51ba39dd38ec83d7c1ca07b8c29410b5e23cec16dcd3e6b053305bf65a",
+    "rust-toolchain.toml": "d6dadd139dac178482d6cca3a8945b8a7e0f7df1f0733872657cbc420b2d82e6"
+  },
+  "wasm_artifact_sha256": {
+    "target/wasm32-unknown-unknown/release/deps/bjt_excess_phase_transient-b80ba5c9d0d9b715.wasm": "fad6c0a187b56c8dc6b76c59b030638650b07b44a81fd04fb4ecb30895114343",
+    "target/wasm32-unknown-unknown/release/deps/gp_history_resources-dd4bc7fcfdd93a35.wasm": "f7172b3be6f5ac90b98476ee3d17478ff01da13292fa6d8674a5cea5319699e3",
+    "target/wasm32-unknown-unknown/release/deps/gp_phase_cancellation-ca0c4be0b8d28a2b.wasm": "af6cbde4d51e03346d998161ffd543d936d42c7779cdfdbef8e21bbfe5ccbc44",
+    "target/wasm32-unknown-unknown/release/deps/gp_phase_regimes-f241bb5de8d6db51.wasm": "e72a8bd8b63ca24fe72a9b7ba8c7fb6f6f44afadf502ca2c232de6b0ce978064"
+  },
+  "implementation": {
+    "admission": "Native constant-coefficient VCVS and VCCS join the finite-voltage physical-event operator. All source tables, terminals, branch ownership and finite coefficients are validated before preparation.",
+    "equations": "VCVS constraints Vout - gain*Vcontrol = 0 are solved jointly in jump and rate equations, including feedback; output source branches own finite and impulsive currents while control ports draw no current. VCCS contributes its finite current and Jacobian with zero current impulse in this finite-voltage event class.",
+    "shared_equations": "One VCCS coefficient helper now serves triplet/direct DC-transient stamps, AC, HB and the physical-event sampler. Current observations and physical KCL use the existing bounded sum-of-products arithmetic, preserving representable currents even when the unscaled control-voltage difference overflows.",
+    "observations": "Native G-element current is selectable and retained through ordinary transient, physical events and restart. It joins the derived branch inventory and complete impulse inventory.",
+    "resources": "Source-storage accounting includes optional control terminals/gain. Preparation and source sampling retain cancellation and typed resource checks. Whole-run allocation and memory qualification remains open.",
+    "checkpoint_identity": "v103",
+    "physical_family_census": "13 of 38 families admitted, with instance predicates; 25 other families and remaining admitted-instance restrictions still require disposition/implementation."
+  },
+  "coverage": {
+    "new_unit_cases": 6,
+    "unit_contracts": "Three descriptor cases cover grounded/floating controlled outputs, charge/rates, zero input impulse, feedback, singular-loop refusal and invalid controls. Two native-provider cases cover real VCVS/VCCS rates, KCL/Jacobians, impulse ownership and malformed tables/coefficients. One arithmetic case covers huge finite controls and nonfinite rejection.",
+    "gp_positive_matrix": "30 public execution calls in two new tests: all three dialects and both polarities; six smooth feedback OP runs, six UIC runs, six checkpoint runs, six resumes, and six controlled step runs. Independent GP collector/base-charge/current laws are checked at every published sample, including outgoing transport arrivals.",
+    "gp_oracle_limits": {
+      "base_voltage_V": 1e-10,
+      "smooth_collector_current_A": 2e-11,
+      "smooth_base_current_A": 3e-10,
+      "step_collector_and_base_current_A": 2e-11,
+      "vccs_current_A": 1e-16,
+      "ideal_input_current_A": 1e-16,
+      "uic_base_impulse_C": "1e-25 + 1e-10 * abs(expected)",
+      "step_base_impulse_C": "1e-25 + 1e-9 * abs(expected)",
+      "arrival_clock_s": "8 * f64::EPSILON * event time, for identifying the authored clock"
+    },
+    "line_matrix": "Nine public execution calls: full run, checkpoint and resume in all three dialects. VCVS/VCCS drive a matched 50-ohm delayed line; independent 0.05 V delayed sine and G-current oracles, first wavefront timing, complete impulse inventory and no forced acceptance. Waveform gate 5e-6 V covers the 2 ps linear-history interpolation error; G-current gate 1e-12 A, unloaded E-current gate 1e-16 A.",
+    "ordinary_transient_matrix": "Three dialects with negative transconductance, nonground differential controls and selected I(G1) output; independent current and resistor-output voltage equations.",
+    "native_integration_scope": "118 selected tests across 11 targets with zero failures/ignores. Includes controlled-source, AC/HB, periodic response/noise and multiplicity regressions for the shared coefficient helper.",
+    "wasm_scope": "26 selected tests across four targets, zero failures/ignores on committed optimized core source in a Chrome dedicated worker. The new line and ordinary-transient current targets are native-only in this batch. Enabling veriloga-wasm-jit is not external-model/JIT qualification.",
+    "transient_unit_scope": "582 passed; one existing diagnostic ignored. The descriptor and provider cases overlap this selection and are not additional distinct tests."
+  },
+  "runs": [
+    {
+      "command": "cargo test --locked -p rspice-core --lib engine::transient::charge_event -- --nocapture",
+      "source_state": "Descriptor foundation subsequently committed as eed21ead107e46ffd4ff7b59a532a44bbd87c4f1",
+      "outcome": "passed",
+      "test_target_totals": [
+        {
+          "passed": 45,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "log": "target/core-qualification/gp-voltage-control-descriptor.log",
+      "log_sha256": "f3da0dada3f81c6caa1510ca899bf358d78564b7bc29f4b52cbf9f3f49ecefcd"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test gp_phase_regimes gp_voltage_controlled -- --nocapture",
+      "source_state": "Development before feedback topology refinement and explicit ideal-input nodal-GMIN configuration.",
+      "outcome": "one_new_test_assertion_failure",
+      "test_target_totals": [
+        {
+          "passed": 0,
+          "failed": 1,
+          "ignored": 0
+        }
+      ],
+      "log": "target/core-qualification/gp-voltage-control-public.log",
+      "log_sha256": "5d6003e533ee330c6037241fd8731ca7bf81644337429e8af5711b2594be55c8"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test gp_phase_regimes gp_voltage_controlled_sources -- --nocapture",
+      "source_state": "Feedback topology with explicitly zero nodal conditioning shunt.",
+      "outcome": "passed",
+      "test_target_totals": [
+        {
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "log": "target/core-qualification/gp-voltage-control-feedback-final.log",
+      "log_sha256": "8a041030fdf7499dbf865db782b559bc95378be53284b45581df44f3fde4663b"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test gp_phase_regimes gp_voltage_controlled -- --nocapture",
+      "source_state": "Step fixture still inherited a charge tolerance exceeding its complete 2 fC signal.",
+      "outcome": "one_new_test_assertion_failure",
+      "test_target_totals": [
+        {
+          "passed": 1,
+          "failed": 1,
+          "ignored": 0
+        }
+      ],
+      "log": "target/core-qualification/gp-voltage-control-public-final.log",
+      "log_sha256": "8bcd749ab58762ba12ad3d58e776c8b4a31ba4a319896fcc79e45e598ee5490b"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test gp_phase_regimes gp_voltage_controlled -- --nocapture",
+      "source_state": "Final provider implementation and ledger based on 8983035f67617f8f7f870238594a5a8108020961, subsequently committed as 5619108f737cd1575c1cbf7830bd69e5280317b2",
+      "outcome": "passed",
+      "test_target_totals": [
+        {
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "log": "target/core-qualification/gp-voltage-control-public-qualified.log",
+      "log_sha256": "27a59639b2da5fa8f961f94593f190999968c21782622988777f5434061e1f1c"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib engine::transient -- --nocapture",
+      "source_state": "Final provider implementation and ledger based on 8983035f67617f8f7f870238594a5a8108020961, subsequently committed as 5619108f737cd1575c1cbf7830bd69e5280317b2",
+      "outcome": "passed_with_one_existing_diagnostic_ignore",
+      "test_target_totals": [
+        {
+          "passed": 582,
+          "failed": 0,
+          "ignored": 1
+        }
+      ],
+      "log": "target/core-qualification/gp-voltage-control-transient-final.log",
+      "log_sha256": "91fced922902c8c3eeb95c71596cb01c81d39332e32c1a4f0043262ad61ceb53"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib device::controlled -- --nocapture",
+      "source_state": "Final provider implementation and ledger based on 8983035f67617f8f7f870238594a5a8108020961, subsequently committed as 5619108f737cd1575c1cbf7830bd69e5280317b2",
+      "outcome": "passed",
+      "test_target_totals": [
+        {
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "log": "target/core-qualification/gp-voltage-control-device.log",
+      "log_sha256": "57acf8fbaa65d3b136c23d972fcb8159c580f1c3d5f0c8009c671f9f99a9b7f6"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test bjt_excess_phase_transient --test gp_history_resources --test gp_phase_cancellation --test gp_phase_regimes --test transient_checkpoint --test transient_source_events --test resource_and_commit_faults --test transient_transmission_line --test controlled_sources_ext --test hb_controlled_sources --test multiplicity -- --nocapture",
+      "source_state": "Final provider implementation and ledger based on 8983035f67617f8f7f870238594a5a8108020961, subsequently committed as 5619108f737cd1575c1cbf7830bd69e5280317b2",
+      "outcome": "passed",
+      "test_target_totals": [
+        {
+          "passed": 10,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 17,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 10,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 36,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 10,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "log": "target/core-qualification/gp-voltage-control-integrations-final.log",
+      "log_sha256": "11f353786e4ce21acb9c1706da540c8b9df34649ad1d63753d70d5dcad467756"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib engine::requirements -- --nocapture",
+      "source_state": "Final provider implementation and ledger based on 8983035f67617f8f7f870238594a5a8108020961, subsequently committed as 5619108f737cd1575c1cbf7830bd69e5280317b2",
+      "outcome": "passed",
+      "test_target_totals": [
+        {
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "log": "target/core-qualification/gp-voltage-control-requirements.log",
+      "log_sha256": "30fe2d8dcb3f874785102cddb4930ff97bc87ebba51eb259f4a03801c33729e0"
+    },
+    {
+      "command": "cargo clippy --locked -p rspice-core --lib --test gp_phase_regimes --test gp_history_resources --test transient_transmission_line --test controlled_sources_ext --test hb_controlled_sources --test multiplicity -- -D warnings",
+      "source_state": "Final provider implementation and ledger based on 8983035f67617f8f7f870238594a5a8108020961, subsequently committed as 5619108f737cd1575c1cbf7830bd69e5280317b2",
+      "outcome": "passed",
+      "test_target_totals": [],
+      "log": "target/core-qualification/gp-voltage-control-clippy.log",
+      "log_sha256": "c45774e2db4e279a13237296db393ff667896110bfe894fedea41b84af58a0fb"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test bjt_excess_phase_transient --test gp_history_resources --test gp_phase_cancellation --test gp_phase_regimes -- --nocapture",
+      "source_state": "92b9a0fbfb5ceb15270d66b23aa454836234bc9a",
+      "outcome": "passed",
+      "test_target_totals": [
+        {
+          "passed": 10,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "passed": 10,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "log": "target/core-qualification/gp-voltage-control-wasm-worker.log",
+      "log_sha256": "97005a6dca0aab1bab2444770dc8460889ce8eba12d1d3f56986b7d8d6c6c367"
+    }
+  ],
+  "resolved_development_failures": [
+    "The ideal-input test initially inherited a 1e-15 S nodal conditioning shunt; VB consequently drew -1.05e-15 A. Deck GMIN selects the junction floor, while nodal conditioning is a separate configuration. The fixture now explicitly sets nodal gmin_target=0; its 1e-16 A current gate was preserved.",
+    "The controlled step initially used a default charge tolerance exceeding the entire roughly 2 fC jump. Newton therefore accepted the first linearized charge, differing from the nonlinear oracle by about 4.293e-17 C. The deck now requests CHGTOL=1e-26, consistent with the existing precise-impulse fixtures; all current and impulse oracle gates were preserved."
+  ],
+  "diagnostic_logs": {
+    "gp-voltage-control-feedback-probe.log": "b7e1119d91e21525935f5a46417aa6896bfcb4302b5d300bfa46f47e25fd6351",
+    "gp-voltage-control-impulse-probe.log": "b6428092599d1eb93d9bb88decca1f3ca819c691b104ab17799053e8f5b2fdd2"
+  },
+  "remaining": [
+    "All C00-C14 packages remain open. This delivers the native voltage-controlled physical-event subset, not C03d.1 or the entire C03 package.",
+    "CCCS needs generalized current/impulse incidence and conservation constraints. CCVS can require voltage impulses and inductor-current jumps when driven by an impulsive controlling current. Both remain missing C03d implementations; a sampled control value or omitted stamp is not a substitute.",
+    "Circuit-dependent, switched, stateful and other unsupported behavioral expression domains remain C03d.1 work.",
+    "C03d.2-.5 retain the other native/stateful/external family and instance predicates. Physical-event support is distinct from periodic support.",
+    "C03c still requires separate Weil feedback/private-node oracles, further parameter/cutoff/depletion/overlap/temperature/scaling and rejection/restart cases.",
+    "Whole-run allocation/memory, inner-solve cancellation latency, remaining configurations and measured performance limits remain open.",
+    "No new live ngspice/Xyce comparison or full-crate test run is claimed."
+  ]
+}
