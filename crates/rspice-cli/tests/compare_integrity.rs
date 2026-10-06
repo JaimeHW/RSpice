@@ -143,3 +143,45 @@ fn duplicate_quantities_cannot_hide_later_columns_or_be_blessed() {
         }
     }
 }
+
+#[test]
+fn interpolation_preserves_finite_values_across_the_binary64_range() {
+    for (result, golden) in [
+        // Subtracting finite opposite-sign values must not overflow.
+        (
+            "time,V(x)\n0,-1e308\n1,1e308\n",
+            "time,V(x)\n0,-1e308\n0.5,0\n1,1e308\n",
+        ),
+        // The coordinate interval itself can exceed f64::MAX.
+        (
+            "time,V(x)\n-1e308,-1\n1e308,1\n",
+            "time,V(x)\n-1e308,-1\n0,0\n1e308,1\n",
+        ),
+        // Multiplying before division overflows or underflows needlessly.
+        (
+            "time,V(x)\n0,0\n1e200,1e200\n",
+            "time,V(x)\n0,0\n5e199,5e199\n1e200,1e200\n",
+        ),
+        (
+            "time,V(x)\n0,0\n1e-200,1e-200\n",
+            "time,V(x)\n0,0\n5e-201,5e-201\n1e-200,1e-200\n",
+        ),
+        // Even a normalized weight can underflow before scaling the signal.
+        (
+            "time,V(x)\n0,0\n1e308,1e308\n",
+            "time,V(x)\n0,0\n1e-308,1e-308\n1e308,1e308\n",
+        ),
+        // Exact grid points retain their source sample, including tiny endpoints.
+        (
+            "time,V(x)\n0,1e308\n1,1e-308\n2,0\n",
+            "time,V(x)\n0,1e308\n1,1e-308\n2,0\n",
+        ),
+    ] {
+        let output = compare(
+            result,
+            golden,
+            &["--interpolate", "--abstol", "0", "--reltol", "0"],
+        );
+        assert!(output.status.success(), "{result} => {golden}: {output:?}");
+    }
+}

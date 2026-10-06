@@ -5408,6 +5408,7 @@ dependencies = [
  "rspice-formats",
  "rspice-output",
  "rspice-veriloga",
+ "rspice-veriloga-runtime",
  "rustyhdf5",
  "serde",
  "serde_json",

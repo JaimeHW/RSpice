@@ -486,10 +486,18 @@ fn resample_onto_golden(
             }
             let (x0, x1) = (result_scale[upper - 1], result_scale[upper]);
             let (y0, y1) = (series[upper - 1], series[upper]);
-            if x1 == x0 {
-                return Ok(y0);
+            if x == x1 {
+                return Ok(y1);
             }
-            Ok(y0 + (y1 - y0) * (x - x0) / (x1 - x0))
+            // Evaluate (y0 * (x1 - x) + y1 * (x - x0)) / (x1 - x0)
+            // with a single rounding. Both differences and intermediate products
+            // can overflow, while even a normalized weight can underflow before
+            // multiplication by a large signal. Reuse the shared exact arithmetic.
+            rspice_veriloga_runtime::arithmetic::sum_products_ratio(
+                [(y0, x1), (-y0, x), (y1, x), (-y1, x0)].into_iter(),
+                [(x1, 1.0), (x0, -1.0)].into_iter(),
+            )
+            .map_err(|error| invalid(format!("cannot interpolate at {x:e}: {error:?}")))
         };
 
     let mut values = Vec::with_capacity(result.values.len());
