@@ -32,12 +32,12 @@ pub fn execute(
     }
 
     if !quiet {
-        println!(
+        crate::console::line(format_args!(
             "Converting: {} -> {} ({})",
             args.input.display(),
             args.output.display(),
             format!("{:?}", args.to).to_lowercase()
-        );
+        ))?;
     }
 
     let from_format = args.from.unwrap_or_else(|| detect_format(&args.input));
@@ -62,7 +62,10 @@ pub fn execute(
         }
         vcd_io::write_vcd_artifact(&args.output, &document)?;
         if !quiet {
-            println!("✓ Conversion complete: {}", args.output.display());
+            crate::console::line(format_args!(
+                "✓ Conversion complete: {}",
+                args.output.display()
+            ))?;
         }
         return Ok(());
     }
@@ -82,7 +85,10 @@ pub fn execute(
             }
             fft.write(&args.output, args.to)?;
             if !quiet {
-                println!("✓ Conversion complete: {}", args.output.display());
+                crate::console::line(format_args!(
+                    "✓ Conversion complete: {}",
+                    args.output.display()
+                ))?;
             }
             return Ok(());
         }
@@ -110,7 +116,10 @@ pub fn execute(
     }
 
     if !quiet {
-        println!("✓ Conversion complete: {}", args.output.display());
+        crate::console::line(format_args!(
+            "✓ Conversion complete: {}",
+            args.output.display()
+        ))?;
     }
 
     Ok(())

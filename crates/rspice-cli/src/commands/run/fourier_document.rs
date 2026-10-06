@@ -51,10 +51,10 @@ pub(super) fn run_fourier(
     }
 
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "Running Fourier analysis: fundamental = {} Hz, {} harmonics",
             fundamental, num_harmonics
-        );
+        ))?;
     }
 
     // The plan names this card's operands and the transient it post-processes;
@@ -134,8 +134,10 @@ pub(super) fn run_fourier(
     };
 
     if !ctx.quiet {
-        println!();
-        render_fourier_frame(&analyzed, &mut |line| println!("{line}"));
+        crate::console::line(format_args!(""))?;
+        render_fourier_frame(&analyzed, &mut |line| {
+            crate::console::line(format_args!("{line}"))
+        })?;
     }
 
     // The core evaluates one spectrum per resolved operand and the shared
@@ -198,7 +200,10 @@ pub(super) fn run_fourier(
             },
         )?;
         if !ctx.quiet {
-            println!("\nResults written to: {}", output_path.display());
+            crate::console::line(format_args!(
+                "\nResults written to: {}",
+                output_path.display()
+            ))?;
         }
     }
 
@@ -262,27 +267,31 @@ fn fourier_frame_interior(harmonic_width: usize) -> usize {
 /// The lines are handed to `emit` one at a time rather than collected: a card
 /// authoring many harmonics for many operands prints a frame far larger than
 /// the spectra it was rendered from.
-fn render_fourier_frame(analyzed: &[AnalyzedSpectrum], emit: &mut impl FnMut(&str)) {
+fn render_fourier_frame(
+    analyzed: &[AnalyzedSpectrum],
+    emit: &mut impl FnMut(&str) -> Result<(), CliError>,
+) -> Result<(), CliError> {
     let harmonic_width = fourier_harmonic_width(analyzed);
-    emit(&fourier_frame_rule('┌', '┐', harmonic_width));
-    emit(&fourier_title_row(harmonic_width));
-    emit(&fourier_frame_rule('├', '┤', harmonic_width));
+    emit(&fourier_frame_rule('┌', '┐', harmonic_width))?;
+    emit(&fourier_title_row(harmonic_width))?;
+    emit(&fourier_frame_rule('├', '┤', harmonic_width))?;
 
     for (output, physical_type, result) in analyzed {
-        emit(&fourier_output_row(output, physical_type, harmonic_width));
-        emit(&fourier_dc_row(result.dc_component, harmonic_width));
-        emit(&fourier_frame_rule('├', '┤', harmonic_width));
-        emit(&fourier_harmonic_header_row(harmonic_width));
-        emit(&fourier_frame_rule('├', '┤', harmonic_width));
+        emit(&fourier_output_row(output, physical_type, harmonic_width))?;
+        emit(&fourier_dc_row(result.dc_component, harmonic_width))?;
+        emit(&fourier_frame_rule('├', '┤', harmonic_width))?;
+        emit(&fourier_harmonic_header_row(harmonic_width))?;
+        emit(&fourier_frame_rule('├', '┤', harmonic_width))?;
 
         for harmonic in result.harmonics.iter().filter(|h| h.harmonic_number > 0) {
-            emit(&fourier_harmonic_row(harmonic, harmonic_width));
+            emit(&fourier_harmonic_row(harmonic, harmonic_width))?;
         }
 
-        emit(&fourier_frame_rule('├', '┤', harmonic_width));
-        emit(&fourier_thd_row(result.thd, harmonic_width));
-        emit(&fourier_frame_rule('└', '┘', harmonic_width));
+        emit(&fourier_frame_rule('├', '┤', harmonic_width))?;
+        emit(&fourier_thd_row(result.thd, harmonic_width))?;
+        emit(&fourier_frame_rule('└', '┘', harmonic_width))?;
     }
+    Ok(())
 }
 
 /// One horizontal rule of the frame, with the corners the caller needs.
@@ -471,7 +480,11 @@ mod tests {
     /// Every line the frame prints for one document, in order.
     fn frame_lines(analyzed: &[AnalyzedSpectrum]) -> Vec<String> {
         let mut lines = Vec::new();
-        render_fourier_frame(analyzed, &mut |line| lines.push(line.to_string()));
+        render_fourier_frame(analyzed, &mut |line| {
+            lines.push(line.to_string());
+            Ok(())
+        })
+        .unwrap();
         lines
     }
 

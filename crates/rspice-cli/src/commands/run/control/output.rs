@@ -37,7 +37,7 @@ pub(super) fn present(
                 trace.x.expression,
                 trace.x.unit.symbol()
             )
-            .map_err(|error| CliError::output_error(Path::new("<stdout>"), error))?;
+            .map_err(|error| CliError::output_error(Path::new("stdout"), error))?;
             for (x, y) in trace.x.samples.iter().zip(&trace.y.samples) {
                 rspice_core::AbortSignal::is_aborted(&crate::abort::ProcessAbort)
                     .then(|| cancellation_cli_error(args.timeout))
@@ -47,9 +47,12 @@ pub(super) fn present(
                     "{:.17e}\t{:.17e}\t{:.17e}\t{:.17e}",
                     x.re, x.im, y.re, y.im
                 )
-                .map_err(|error| CliError::output_error(Path::new("<stdout>"), error))?;
+                .map_err(|error| CliError::output_error(Path::new("stdout"), error))?;
             }
         }
+        stdout
+            .flush()
+            .map_err(|error| CliError::output_error(Path::new("stdout"), error))?;
     }
     let selected = resolve_output_path(args.output.clone(), config)?;
     if selected.is_none() && options.is_none() && !summary_stdout {
@@ -110,7 +113,7 @@ pub(super) fn present(
     }
     if !quiet {
         for path in &paths {
-            println!("Control output: {}", path.display());
+            crate::console::line(format_args!("Control output: {}", path.display()))?;
         }
     }
     Ok(paths)

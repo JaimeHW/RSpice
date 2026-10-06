@@ -616,7 +616,7 @@ fn run_implicit_step_op_table(
         outputs.push(manifest_path);
         outputs.extend(set_manifest_path);
     }
-    ctx.record_unevaluated_measurements();
+    ctx.record_unevaluated_measurements()?;
     let measurements = ctx.measurements.borrow().clone();
     let base_name = args
         .input
@@ -976,11 +976,11 @@ pub(super) fn run_deck(
     }
 
     if !quiet {
-        println!(
+        crate::console::line(format_args!(
             "Canonical Cartesian run plan: {} dimension(s), {} run(s); first canonical dimension varies fastest",
             canonical_plan.axes().len(),
             materializer.len()
-        );
+        ))?;
     }
     // Every coordinate of one axis deck is one result. The transaction holds
     // each coordinate's complete artifact in a staging file beside its
@@ -1042,11 +1042,11 @@ pub(super) fn run_deck(
             }
         })?;
         if verbose && !quiet {
-            println!(
+            crate::console::line(format_args!(
                 "\n=== {label} ({}): {} ===",
                 canonical_coordinate.stable_tag(),
                 canonical_coordinate_description(canonical_coordinate)
-            );
+            ))?;
         }
         let outcome = match run_concrete_deck(
             materialized.netlist(),
@@ -1089,11 +1089,11 @@ pub(super) fn run_deck(
         // destination directory keeps exactly the artifacts it had before.
         drop(transaction);
         if !quiet {
-            println!(
+            crate::console::line(format_args!(
                 "Cancelled after {} of {} coordinates: the incomplete set was discarded and no coordinate artifact was published",
                 reports.len(),
                 materializer.len()
-            );
+            ))?;
         }
         return Ok(DeckOutcome {
             reports,
@@ -1116,14 +1116,14 @@ pub(super) fn run_deck(
     if reports.iter().any(|report| report.error.is_some()) {
         drop(transaction);
         if !quiet {
-            println!(
+            crate::console::line(format_args!(
                 "{} of {} coordinates failed: the incomplete set was discarded and no coordinate artifact was published",
                 reports
                     .iter()
                     .filter(|report| report.error.is_some())
                     .count(),
                 materializer.len()
-            );
+            ))?;
         }
         return Ok(DeckOutcome {
             reports,

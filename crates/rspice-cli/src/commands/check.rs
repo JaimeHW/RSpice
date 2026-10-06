@@ -43,7 +43,7 @@ pub fn execute(
     quiet: bool,
 ) -> Result<(), CliError> {
     if !quiet && !args.json {
-        println!("Checking: {}", args.input.display());
+        crate::console::line(format_args!("Checking: {}", args.input.display()))?;
     }
 
     let result = match validate_input(&args, config) {
@@ -53,7 +53,7 @@ pub fn execute(
         }
         Err(e) => {
             if args.json {
-                println!(
+                crate::console::line(format_args!(
                     "{}",
                     crate::observability::envelope(
                         "rspice.check",
@@ -64,18 +64,18 @@ pub fn execute(
                             "warnings": [],
                         })
                     )
-                );
+                ))?;
             } else {
-                println!("✗ Netlist error: {}", e);
+                crate::console::line(format_args!("✗ Netlist error: {}", e))?;
             }
             return Err(e);
         }
     };
 
     if args.json {
-        output_json(&result);
+        output_json(&result)?;
     } else {
-        output_text(&result, quiet);
+        output_text(&result, quiet)?;
     }
 
     if !result.is_ok() {
@@ -629,7 +629,7 @@ fn check_model_references(netlist: &Netlist, result: &mut ValidationResult) {
     }
 }
 
-fn output_json(result: &ValidationResult) {
+fn output_json(result: &ValidationResult) -> Result<(), CliError> {
     let json = serde_json::json!({
         "valid": result.is_ok(),
         "strict_valid": result.is_ok() && result.warnings.is_empty(),
@@ -647,32 +647,30 @@ fn output_json(result: &ValidationResult) {
         })).collect::<Vec<_>>(),
     });
     let json = crate::observability::envelope("rspice.check", json);
-    match serde_json::to_string_pretty(&json) {
-        Ok(text) => println!("{text}"),
-        Err(e) => eprintln!("Error: failed to serialize check report: {e}"),
-    }
+    crate::console::json(&json, true)
 }
 
-fn output_text(result: &ValidationResult, quiet: bool) {
+fn output_text(result: &ValidationResult, quiet: bool) -> Result<(), CliError> {
     for error in &result.errors {
-        println!("✗ Error: {}", error.message);
+        crate::console::line(format_args!("✗ Error: {}", error.message))?;
     }
     for warning in &result.warnings {
         if warning.element.is_none()
             && let Some(line) = warning.line
         {
-            println!("Warning [line {line}]: {}", warning.message);
+            crate::console::line(format_args!("Warning [line {line}]: {}", warning.message))?;
             continue;
         }
         if let Some(ref elem) = warning.element {
-            println!("⚠ Warning [{}]: {}", elem, warning.message);
+            crate::console::line(format_args!("⚠ Warning [{}]: {}", elem, warning.message))?;
         } else {
-            println!("⚠ Warning: {}", warning.message);
+            crate::console::line(format_args!("⚠ Warning: {}", warning.message))?;
         }
     }
     if !quiet && result.is_ok() && result.warnings.is_empty() {
-        println!("✓ Netlist is valid");
+        crate::console::line(format_args!("✓ Netlist is valid"))?;
     }
+    Ok(())
 }
 
 #[cfg(test)]

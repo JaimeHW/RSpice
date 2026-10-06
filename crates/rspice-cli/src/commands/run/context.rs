@@ -333,37 +333,41 @@ impl<'a> RunContext<'a> {
         &self,
         analysis: &str,
         results: Vec<rspice_core::MeasureResult>,
-    ) {
+    ) -> Result<(), CliError> {
         if results.is_empty() {
-            return;
+            return Ok(());
         }
         self.evaluated_meas
             .borrow_mut()
             .insert(analysis.to_ascii_uppercase());
 
         if self.args.meas && !self.quiet {
-            println!("  Measurement Results ({}, {}):", analysis, results.len());
+            crate::console::line(format_args!(
+                "  Measurement Results ({}, {}):",
+                analysis,
+                results.len()
+            ))?;
             for mr in &results {
                 match (mr.value, mr.passed) {
-                    (Some(value), true) => println!(
+                    (Some(value), true) => crate::console::line(format_args!(
                         "    {} = {}",
                         mr.name,
                         crate::report::format_spice_exponent(value)
-                    ),
+                    ))?,
                     // Evaluated, but failed an authored verification contract.
-                    (Some(value), false) => println!(
+                    (Some(value), false) => crate::console::line(format_args!(
                         "    {} = {} FAILED ({})",
                         mr.name,
                         crate::report::format_spice_exponent(value),
                         mr.error
                             .as_deref()
                             .unwrap_or("verification contract failed")
-                    ),
-                    (None, _) => println!(
+                    ))?,
+                    (None, _) => crate::console::line(format_args!(
                         "    {} = FAILED ({})",
                         mr.name,
                         mr.error.as_deref().unwrap_or("not evaluated")
-                    ),
+                    ))?,
                 }
             }
         }
@@ -386,12 +390,13 @@ impl<'a> RunContext<'a> {
                 target_axis: None,
                 aggregate_policy: None,
             }));
+        Ok(())
     }
 
     /// Convert .MEAS statements whose analysis never evaluated them into
     /// explicit failures, so automation cannot mistake a skipped check for
     /// a passing one.
-    pub(super) fn record_unevaluated_measurements(&self) {
+    pub(super) fn record_unevaluated_measurements(&self) -> Result<(), CliError> {
         let mut analyses: Vec<String> = self
             .netlist
             .measurements
@@ -413,8 +418,9 @@ impl<'a> RunContext<'a> {
             };
             let results =
                 rspice_core::analysis::unevaluated_measurements(self.netlist, &analysis, &reason);
-            self.record_measurements(&analysis, results);
+            self.record_measurements(&analysis, results)?;
         }
+        Ok(())
     }
 
     /// Output path for one analysis.

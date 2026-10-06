@@ -43,7 +43,7 @@ pub(super) fn run_tf_from_command(
     input_source: &str,
 ) -> Result<(), CliError> {
     if !ctx.quiet {
-        println!("Running DC transfer function analysis...");
+        crate::console::line(format_args!("Running DC transfer function analysis..."))?;
     }
 
     let result = ctx
@@ -67,14 +67,17 @@ pub(super) fn run_tf_from_command(
         let gain = format_spice_exponent(result.gain);
         let zin = format_spice_exponent(result.input_impedance);
         let zout = format_spice_exponent(result.output_impedance);
-        println!("Transfer function information:");
-        println!("transfer_function = {gain}");
+        crate::console::line(format_args!("Transfer function information:"))?;
+        crate::console::line(format_args!("transfer_function = {gain}"))?;
         if output_is_current {
-            println!("{source}#input_impedance = {zin}");
-            println!("{}#output_impedance = {zout}", output_node.to_lowercase());
+            crate::console::line(format_args!("{source}#input_impedance = {zin}"))?;
+            crate::console::line(format_args!(
+                "{}#output_impedance = {zout}",
+                output_node.to_lowercase()
+            ))?;
         } else {
-            println!("output_impedance_at_{probe} = {zout}");
-            println!("{source}#input_impedance = {zin}");
+            crate::console::line(format_args!("output_impedance_at_{probe} = {zout}"))?;
+            crate::console::line(format_args!("{source}#input_impedance = {zin}"))?;
         }
     }
 
@@ -126,7 +129,10 @@ pub(super) fn run_tf_from_command(
         )?;
 
         if !ctx.quiet {
-            println!("  Transfer function exported to: {}", output.path.display());
+            crate::console::line(format_args!(
+                "  Transfer function exported to: {}",
+                output.path.display()
+            ))?;
         }
     }
 
@@ -147,9 +153,9 @@ pub(super) fn run_disto(
         "single-tone harmonic"
     };
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "Running DISTO {mode} analysis: {start_freq} to {stop_freq} Hz ({points} points)..."
-        );
+        ))?;
     }
 
     let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq)?;
@@ -165,7 +171,7 @@ pub(super) fn run_disto(
 
     let projection = distortion_projection(ctx, &result)?;
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "DISTO Analysis: {} F1 points, products: {}",
             result.points.len(),
             projection
@@ -175,11 +181,11 @@ pub(super) fn run_disto(
                 .map(|series| series.label.as_str())
                 .collect::<Vec<_>>()
                 .join(", ")
-        );
+        ))?;
         if ctx.verbose {
-            println!(
+            crate::console::line(format_args!(
                 "  Values are actual sinusoidal peak phasors; every non-F1 ratio is |response|/|F1| for the same signal"
-            );
+            ))?;
         }
     }
 
@@ -211,10 +217,10 @@ pub(super) fn run_disto(
             },
         )?;
         if !ctx.quiet {
-            println!(
+            crate::console::line(format_args!(
                 "  Volterra distortion products exported to: {}",
                 output.path.display()
-            );
+            ))?;
         }
     }
 
@@ -601,11 +607,11 @@ pub(super) fn run_ac_data(ctx: &RunContext<'_>, table_name: &str) -> Result<(), 
         .map_err(|error| invalid_ac_data(format!(".AC DATA {error}")))?;
 
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "Running AC DATA analysis from table {} ({} points)...",
             table_name,
             points.len()
-        );
+        ))?;
     }
 
     let (_row_netlists, results) = ctx
@@ -630,10 +636,10 @@ pub(super) fn run_ac(
     stop_freq: f64,
 ) -> Result<(), CliError> {
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "Running AC analysis: {} to {} Hz ({} points)...",
             start_freq, stop_freq, points
-        );
+        ))?;
     }
 
     let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq)?;
@@ -683,13 +689,16 @@ pub(super) fn finish_ac_results(
         source,
         analysis: Some("AC measurement projection".to_string()),
     })?;
-    ctx.record_measurements("AC", measurements);
+    ctx.record_measurements("AC", measurements)?;
     let continuous_measurements =
         rspice_core::analysis::evaluate_ac_continuous_measurements(ctx.netlist, results);
-    super::shared::record_continuous_measurements(ctx, "AC_CONT", continuous_measurements);
+    super::shared::record_continuous_measurements(ctx, "AC_CONT", continuous_measurements)?;
 
     if !ctx.quiet {
-        println!("AC Analysis: {} frequency points", results.len());
+        crate::console::line(format_args!(
+            "AC Analysis: {} frequency points",
+            results.len()
+        ))?;
         if ctx.verbose
             && let (Some(first), Some(last)) = (results.first(), results.last())
         {
@@ -697,18 +706,18 @@ pub(super) fn finish_ac_results(
                 .node_names
                 .first()
                 .map_or_else(|| "V(1)".to_string(), |name| voltage_display_name(name, 1));
-            println!(
+            crate::console::line(format_args!(
                 "  @ {:e} Hz: |{}| = {:.4}",
                 first.frequency,
                 first_label,
                 first.voltage_magnitude(1)
-            );
-            println!(
+            ))?;
+            crate::console::line(format_args!(
                 "  @ {:e} Hz: |{}| = {:.4}",
                 last.frequency,
                 first_label,
                 last.voltage_magnitude(1)
-            );
+            ))?;
         }
     }
 
@@ -764,7 +773,10 @@ pub(super) fn finish_ac_results(
             },
         )?;
         if !ctx.quiet {
-            println!("  AC response exported to: {}", output.path.display());
+            crate::console::line(format_args!(
+                "  AC response exported to: {}",
+                output.path.display()
+            ))?;
         }
     }
     Ok(())
@@ -792,10 +804,10 @@ pub(super) fn run_stb(
         });
     };
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "Running STB (loop stability) analysis: {} to {} Hz, probe {}...",
             start_freq, stop_freq, probe
-        );
+        ))?;
     }
 
     // The card is the whole request: one conversion in the engine crate, so
@@ -826,34 +838,34 @@ pub(super) fn run_stb(
 
     let margins = &stb.result.margins;
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "STB Analysis: {} frequency points, probe {}",
             stb.frequencies.len(),
             stb.probe_name
-        );
+        ))?;
         if margins.num_crossovers == 0 {
-            println!(
+            crate::console::line(format_args!(
                 "  Loop gain never crosses unity ({:.1} dB at DC); no phase margin to report",
                 margins.dc_gain_db
-            );
+            ))?;
         } else {
-            println!(
+            crate::console::line(format_args!(
                 "  Phase margin: {:.2} deg at {:.4e} Hz (unity-gain crossover)",
                 margins.phase_margin_deg, margins.phase_margin_freq
-            );
-            println!(
+            ))?;
+            crate::console::line(format_args!(
                 "  Gain margin: {:.2} dB at {:.4e} Hz",
                 margins.gain_margin_db, margins.gain_margin_freq
-            );
+            ))?;
             if margins.conditionally_stable {
-                println!(
+                crate::console::line(format_args!(
                     "  Conditionally stable: {} unity-gain crossovers",
                     margins.num_crossovers
-                );
+                ))?;
             }
         }
         for warning in &stb.result.warnings {
-            println!("  Warning: {warning}");
+            crate::console::line(format_args!("  Warning: {warning}"))?;
         }
     }
 
@@ -940,7 +952,10 @@ pub(super) fn run_stb(
             },
         )?;
         if !ctx.quiet {
-            println!("  Loop gain exported to: {}", output.path.display());
+            crate::console::line(format_args!(
+                "  Loop gain exported to: {}",
+                output.path.display()
+            ))?;
         }
     }
 
@@ -977,10 +992,10 @@ pub(super) fn run_noise(
     stop_freq: f64,
 ) -> Result<(), CliError> {
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "Running Noise analysis on {} from {} to {} Hz ({} points)...",
             output_node, start_freq, stop_freq, points
-        );
+        ))?;
     }
 
     let input_source_exists = ctx.netlist.elements.iter().any(|element| {
@@ -1029,7 +1044,9 @@ pub(super) fn run_noise_data(
     table_name: &str,
 ) -> Result<(), CliError> {
     if !ctx.quiet {
-        println!("Running Noise DATA analysis from table {table_name}...");
+        crate::console::line(format_args!(
+            "Running Noise DATA analysis from table {table_name}..."
+        ))?;
     }
     let execution = ctx
         .engine
@@ -1094,45 +1111,51 @@ fn finish_noise(
                 source,
                 analysis: Some("Noise measurement projection".to_string()),
             })?;
-            ctx.record_measurements("NOISE", measurements);
+            ctx.record_measurements("NOISE", measurements)?;
 
             if !ctx.quiet {
-                println!("Noise Analysis: {} frequency points", results.len());
+                crate::console::line(format_args!(
+                    "Noise Analysis: {} frequency points",
+                    results.len()
+                ))?;
                 if let Some(reference) = reference_node {
-                    println!("  Output node: V({},{})", output_node, reference);
+                    crate::console::line(format_args!(
+                        "  Output node: V({},{})",
+                        output_node, reference
+                    ))?;
                 } else {
-                    println!("  Output node: V({})", output_node);
+                    crate::console::line(format_args!("  Output node: V({})", output_node))?;
                 }
-                println!("  Input source: {}", input_source);
+                crate::console::line(format_args!("  Input source: {}", input_source))?;
                 if let (Some(first), Some(last)) = (results.first(), results.last()) {
-                    println!(
+                    crate::console::line(format_args!(
                         "  @ {:e} Hz: output_noise={:.6e} V/sqrt(Hz)",
                         first.frequency,
                         first.output_noise_rms()
-                    );
-                    println!(
+                    ))?;
+                    crate::console::line(format_args!(
                         "  @ {:e} Hz: input_referred={:.6e} /sqrt(Hz)",
                         first.frequency,
                         first.input_referred_rms()
-                    );
-                    println!(
+                    ))?;
+                    crate::console::line(format_args!(
                         "  @ {:e} Hz: output_noise={:.6e} V/sqrt(Hz)",
                         last.frequency,
                         last.output_noise_rms()
-                    );
-                    println!(
+                    ))?;
+                    crate::console::line(format_args!(
                         "  @ {:e} Hz: input_referred={:.6e} /sqrt(Hz)",
                         last.frequency,
                         last.input_referred_rms()
-                    );
+                    ))?;
                 }
 
                 if integrate {
-                    print_noise_contribution_summary(&results, ctx.verbose);
+                    print_noise_contribution_summary(&results, ctx.verbose)?;
                 } else {
-                    println!(
+                    crate::console::line(format_args!(
                         "  Total-noise integration disabled: DATA frequencies are not strictly increasing"
-                    );
+                    ))?;
                 }
             }
 
@@ -1209,7 +1232,10 @@ fn finish_noise(
                 )?;
 
                 if !ctx.quiet {
-                    println!("  Noise spectra exported to: {}", output.path.display());
+                    crate::console::line(format_args!(
+                        "  Noise spectra exported to: {}",
+                        output.path.display()
+                    ))?;
                 }
             }
             Ok(())
@@ -1223,40 +1249,46 @@ fn finish_noise(
 /// Compact (top 10) by default; `verbose` lifts the cap. Rows carry the
 /// device, mechanism, integrated output power, and share of the total so
 /// the dominant contributor is visible at a glance.
-fn print_noise_contribution_summary(results: &[rspice_core::analysis::NoiseResult], verbose: bool) {
+fn print_noise_contribution_summary(
+    results: &[rspice_core::analysis::NoiseResult],
+    verbose: bool,
+) -> Result<(), CliError> {
     let integrated = rspice_core::analysis::IntegratedNoise::new(results.to_vec());
     let summary = integrated.contribution_summary();
     if summary.is_empty() {
-        return;
+        return Ok(());
     }
 
     const COMPACT_ROW_CAP: usize = 10;
     let cap = if verbose { usize::MAX } else { COMPACT_ROW_CAP };
 
-    println!("  Noise Contributors (band-integrated, ranked):");
-    println!(
+    crate::console::line(format_args!(
+        "  Noise Contributors (band-integrated, ranked):"
+    ))?;
+    crate::console::line(format_args!(
         "    {:<20} {:<9} {:>14} {:>8}",
         "DEVICE", "TYPE", "POWER (V^2)", "SHARE"
-    );
+    ))?;
     for contribution in summary.iter().take(cap) {
-        println!(
+        crate::console::line(format_args!(
             "    {:<20} {:<9} {:>14.4e} {:>7.2}%",
             contribution.device_name,
             contribution.noise_type.label(),
             contribution.integrated_power,
             contribution.percentage
-        );
+        ))?;
     }
     if summary.len() > cap {
-        println!(
+        crate::console::line(format_args!(
             "    ... ({} more contributors; rerun with --verbose for all)",
             summary.len() - cap
-        );
+        ))?;
     }
-    println!(
+    crate::console::line(format_args!(
         "  Total integrated output noise: {:.6e} V rms",
         integrated.total_output_noise()
-    );
+    ))?;
+    Ok(())
 }
 
 pub(super) fn run_pz(
@@ -1266,7 +1298,7 @@ pub(super) fn run_pz(
     input_is_current: bool,
 ) -> Result<(), CliError> {
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "Running Pole-Zero analysis: input=node {} ({}), output=node {}",
             input_node,
             if input_is_current {
@@ -1275,7 +1307,7 @@ pub(super) fn run_pz(
                 "voltage"
             },
             output_node
-        );
+        ))?;
     }
 
     match ctx.engine.run_pz_ports_with_abort(
@@ -1308,12 +1340,12 @@ fn report_pz(
     let poles = result.poles.as_slice();
     let zeros = result.zeros.as_slice();
     if !ctx.quiet {
-        println!("✓ Pole-Zero analysis complete");
-        println!("  Poles: {}", poles.len());
-        println!("  Zeros: {}", zeros.len());
+        crate::console::line(format_args!("✓ Pole-Zero analysis complete"))?;
+        crate::console::line(format_args!("  Poles: {}", poles.len()))?;
+        crate::console::line(format_args!("  Zeros: {}", zeros.len()))?;
 
         if ctx.verbose {
-            println!("\n  Poles:");
+            crate::console::line(format_args!("\n  Poles:"))?;
             for (i, pole) in poles.iter().enumerate() {
                 let freq = pole.im / (2.0 * std::f64::consts::PI);
                 let q = if pole.re.abs() > 1e-15 {
@@ -1321,18 +1353,21 @@ fn report_pz(
                 } else {
                     f64::INFINITY
                 };
-                println!(
+                crate::console::line(format_args!(
                     "    P{}: {:.3e} + j{:.3e}  (f={:.3e} Hz, Q={:.2})",
                     i,
                     pole.re,
                     pole.im,
                     freq.abs(),
                     q
-                );
+                ))?;
             }
-            println!("\n  Zeros:");
+            crate::console::line(format_args!("\n  Zeros:"))?;
             for (i, zero) in zeros.iter().enumerate() {
-                println!("    Z{}: {:.3e} + j{:.3e}", i, zero.re, zero.im);
+                crate::console::line(format_args!(
+                    "    Z{}: {:.3e} + j{:.3e}",
+                    i, zero.re, zero.im
+                ))?;
             }
         }
     }
@@ -1383,7 +1418,10 @@ fn report_pz(
         )?;
 
         if !ctx.quiet {
-            println!("  Poles/zeros exported to: {}", output.path.display());
+            crate::console::line(format_args!(
+                "  Poles/zeros exported to: {}",
+                output.path.display()
+            ))?;
         }
     }
 
@@ -1426,10 +1464,10 @@ pub(super) fn run_pz_from_command(
     };
 
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "Running Pole-Zero analysis from netlist command: in=({},{}) out=({},{}) transfer={:?} mode={:?}",
             in_pos, in_neg, out_pos, out_neg, transfer_type, analysis_type
-        );
+        ))?;
     }
 
     match ctx.engine.run_pz_ports_with_abort(
@@ -1491,10 +1529,10 @@ pub(super) fn run_sensitivity(
             message: format!("sensitivity nominal point has no voltage for node '{output_name}'"),
         })?;
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "Running Sensitivity analysis: ∂V({})/∂{} at {}={:.6e}",
             output_name, param_name, param_name, param_value
-        );
+        ))?;
     }
 
     match ctx.engine.run_sensitivity_with_abort(
@@ -1507,21 +1545,21 @@ pub(super) fn run_sensitivity(
     ) {
         Ok(sensitivity) => {
             if !ctx.quiet {
-                println!("✓ Sensitivity analysis complete");
-                println!(
+                crate::console::line(format_args!("✓ Sensitivity analysis complete"))?;
+                crate::console::line(format_args!(
                     "  ∂V({})/∂{} = {:.6e} V/unit",
                     output_name, param_name, sensitivity
-                );
+                ))?;
 
                 if ctx.verbose {
                     use rspice_core::analysis::sensitivity::SensitivityValue;
                     match SensitivityValue::normalized(param_value, sensitivity, output_value) {
-                        SensitivityValue::Available(value) => {
-                            println!("  Normalized: {value:.6e}% change per 1% parameter variation")
-                        }
-                        SensitivityValue::Unavailable { unavailable } => {
-                            println!("  Normalized: unavailable ({})", unavailable.as_str())
-                        }
+                        SensitivityValue::Available(value) => crate::console::line(format_args!(
+                            "  Normalized: {value:.6e}% change per 1% parameter variation"
+                        ))?,
+                        SensitivityValue::Unavailable { unavailable } => crate::console::line(
+                            format_args!("  Normalized: unavailable ({})", unavailable.as_str()),
+                        )?,
                     }
                 }
             }
@@ -1594,11 +1632,11 @@ pub(super) fn run_sensitivity_from_command(
         let freqs = generate_frequency_sweep(ac.variation, ac.points, ac.start_freq, ac.stop_freq)?;
 
         if !ctx.quiet {
-            println!(
+            crate::console::line(format_args!(
                 "Running AC Sensitivity analysis: {} over {} frequencies",
                 output_label,
                 freqs.len()
-            );
+            ))?;
         }
 
         let result = ctx
@@ -1624,7 +1662,7 @@ pub(super) fn run_sensitivity_from_command(
                     .last()
                     .map(|value| format!("{value:.6e}"))
                     .unwrap_or_else(|| "not retained".to_owned());
-                println!(
+                crate::console::line(format_args!(
                     "  d|{}|/d{}: {} {} per native parameter unit @ {:e} Hz, {} @ {:e} Hz",
                     output_label,
                     trace.vector_name,
@@ -1633,7 +1671,7 @@ pub(super) fn run_sensitivity_from_command(
                     freqs.first().copied().unwrap_or(0.0),
                     last,
                     freqs.last().copied().unwrap_or(0.0)
-                );
+                ))?;
             }
 
             if ctx.verbose && !ctx.quiet {
@@ -1649,7 +1687,7 @@ pub(super) fn run_sensitivity_from_command(
                 let peak = peak
                     .map(|value| format!("{value:.6e}"))
                     .unwrap_or_else(|| "unavailable".to_owned());
-                println!(
+                crate::console::line(format_args!(
                     "    peak |d|{}|/d{}| = {} {} per native parameter unit ({} of {} points available)",
                     output_label,
                     trace.vector_name,
@@ -1657,7 +1695,7 @@ pub(super) fn run_sensitivity_from_command(
                     output_unit,
                     available,
                     combined.len()
-                );
+                ))?;
             }
         }
 
@@ -1706,7 +1744,10 @@ pub(super) fn run_sensitivity_from_command(
             )?;
 
             if !ctx.quiet {
-                println!("  Sensitivities exported to: {}", resolved.path.display());
+                crate::console::line(format_args!(
+                    "  Sensitivities exported to: {}",
+                    resolved.path.display()
+                ))?;
             }
         }
 
@@ -1714,7 +1755,9 @@ pub(super) fn run_sensitivity_from_command(
     }
 
     if !ctx.quiet {
-        println!("Running DC Sensitivity analysis: {output_label}");
+        crate::console::line(format_args!(
+            "Running DC Sensitivity analysis: {output_label}"
+        ))?;
     }
 
     let result = ctx
@@ -1737,16 +1780,16 @@ pub(super) fn run_sensitivity_from_command(
     });
 
     if !ctx.quiet {
-        println!("✓ Sensitivity analysis complete");
+        crate::console::line(format_args!("✓ Sensitivity analysis complete"))?;
         for sensitivity in &sensitivities {
-            println!(
+            crate::console::line(format_args!(
                 "  ∂{}/∂{} = {:.6e} {} per native parameter unit (normalized: {:.6e})",
                 output_label,
                 sensitivity.vector_name,
                 sensitivity.absolute,
                 output_unit,
                 sensitivity.normalized
-            );
+            ))?;
         }
     }
 
@@ -1801,7 +1844,10 @@ fn export_parameter_sensitivity(
     )?;
 
     if !ctx.quiet {
-        println!("  Sensitivities exported to: {}", resolved.path.display());
+        crate::console::line(format_args!(
+            "  Sensitivities exported to: {}",
+            resolved.path.display()
+        ))?;
     }
     Ok(())
 }
@@ -1854,7 +1900,10 @@ fn export_dc_sensitivity_result(
     )?;
 
     if !ctx.quiet {
-        println!("  Sensitivities exported to: {}", resolved.path.display());
+        crate::console::line(format_args!(
+            "  Sensitivities exported to: {}",
+            resolved.path.display()
+        ))?;
     }
     Ok(())
 }

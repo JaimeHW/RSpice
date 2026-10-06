@@ -29,7 +29,7 @@ use crate::commands::run_signals::{ComplexSignal, SignalKind};
 pub(super) fn run_pss_card(ctx: &RunContext<'_>, card: &PssCard) -> Result<(), CliError> {
     let config = rspice_core::analysis::PssConfig::from(card);
     let artifact = ctx.resolve_periodic_analysis("pss")?;
-    super::advanced::announce_pss(ctx, &config);
+    super::advanced::announce_pss(ctx, &config)?;
     // The operating-point entry point is what retains the shooting state a
     // dependent `.PAC`/`.PNOISE` consumes; the plain PSS entry point returns
     // the result only and would force a second large-signal solve per card.
@@ -39,7 +39,7 @@ pub(super) fn run_pss_card(ctx: &RunContext<'_>, card: &PssCard) -> Result<(), C
         .map_err(|error| map_periodic_error(ctx, "PSS", error))?;
     ensure_not_cancelled(ctx)?;
     let analysis = operating_point.analysis();
-    super::advanced::report_pss(ctx, analysis.iterations, analysis.period, &analysis.result);
+    super::advanced::report_pss(ctx, analysis.iterations, analysis.period, &analysis.result)?;
     if let Some(path) = &artifact.path {
         super::advanced::export_pss(ctx, artifact.analysis, path, &analysis.result)?;
     }
@@ -54,10 +54,10 @@ pub(super) fn run_pac_card(ctx: &RunContext<'_>, card: &PacCard) -> Result<(), C
     let upstream = ctx.planned_upstream(artifact.analysis, "PAC")?;
     let config = rspice_core::analysis::PacConfig::from(card);
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "Running PAC analysis around {upstream}: {} points, sidebands {}..={}",
             card.sweep.points, card.sideband_min, card.sideband_max
-        );
+        ))?;
     }
 
     let result = {
@@ -84,10 +84,10 @@ pub(super) fn run_pac_card(ctx: &RunContext<'_>, card: &PacCard) -> Result<(), C
     ensure_not_cancelled(ctx)?;
 
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "✓ PAC converged in {} iterations (residual {:.3e})",
             result.result.iterations, result.result.residual
-        );
+        ))?;
     }
     let Some(path) = &artifact.path else {
         return Ok(());
@@ -101,10 +101,10 @@ pub(super) fn run_pxf_card(ctx: &RunContext<'_>, card: &PxfCard) -> Result<(), C
     preflight_periodic_sweep(ctx, &card.sweep, "PXF")?;
     let upstream = ctx.planned_upstream(artifact.analysis, "PXF")?;
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "Running PXF analysis around {upstream}: {} points, sideband {} -> {} on {}",
             card.sweep.points, card.input_sideband, card.output_sideband, card.output_node
-        );
+        ))?;
     }
 
     let result = {
@@ -131,12 +131,12 @@ pub(super) fn run_pxf_card(ctx: &RunContext<'_>, card: &PxfCard) -> Result<(), C
     ensure_not_cancelled(ctx)?;
 
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "✓ PXF complete: {} transfer points from sideband {} to sideband {}",
             result.points.len(),
             result.input_sideband,
             result.output_sideband
-        );
+        ))?;
     }
     let Some(path) = &artifact.path else {
         return Ok(());
@@ -154,10 +154,10 @@ pub(super) fn run_pstb_card(ctx: &RunContext<'_>, card: &PstbCard) -> Result<(),
     let artifact = ctx.resolve_periodic_analysis("pstb")?;
     let upstream = ctx.planned_upstream(artifact.analysis, "PSTB")?;
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "Running PSTB analysis around {upstream}: loop probe {}",
             card.probe_instance
-        );
+        ))?;
     }
 
     let result = {
@@ -177,12 +177,12 @@ pub(super) fn run_pstb_card(ctx: &RunContext<'_>, card: &PstbCard) -> Result<(),
     ensure_not_cancelled(ctx)?;
 
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "✓ PSTB complete: {} Floquet modes at {}, {} unstable",
             result.result.multipliers.len(),
             result.probe_instance,
             result.result.num_unstable
-        );
+        ))?;
     }
     let Some(path) = &artifact.path else {
         return Ok(());
@@ -196,10 +196,10 @@ pub(super) fn run_pnoise_card(ctx: &RunContext<'_>, card: &PnoiseCard) -> Result
     preflight_periodic_sweep(ctx, &card.sweep, "PNoise")?;
     let upstream = ctx.planned_upstream(artifact.analysis, "PNoise")?;
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "Running PNOISE analysis around {upstream}: {} offsets on {}",
             card.sweep.points, card.output_node
-        );
+        ))?;
     }
 
     let result = {
@@ -226,11 +226,11 @@ pub(super) fn run_pnoise_card(ctx: &RunContext<'_>, card: &PnoiseCard) -> Result
     ensure_not_cancelled(ctx)?;
 
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "✓ PNOISE complete: {} offsets on {}",
             result.offset_frequencies().len(),
             result.output()
-        );
+        ))?;
     }
     let Some(path) = &artifact.path else {
         return Ok(());
@@ -249,10 +249,10 @@ pub(super) fn run_envelope_card(ctx: &RunContext<'_>, card: &EnvelopeCard) -> Re
     let artifact = ctx.resolve_periodic_analysis("env")?;
     let upstream = ctx.planned_upstream(artifact.analysis, "Envelope")?;
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "Running ENVELOPE continuation of {upstream}: {:.3e} s slow time",
             card.duration
-        );
+        ))?;
     }
 
     let config = {
@@ -282,10 +282,10 @@ pub(super) fn run_envelope_card(ctx: &RunContext<'_>, card: &EnvelopeCard) -> Re
     ensure_not_cancelled(ctx)?;
 
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "✓ ENVELOPE complete: {} slow-time points",
             result.continued_transient().time.len()
-        );
+        ))?;
     }
     let Some(path) = &artifact.path else {
         return Ok(());
@@ -354,7 +354,10 @@ fn export_pac(
     )?;
     ctx.record_output(path.to_path_buf());
     if !ctx.quiet {
-        println!("  PAC sidebands exported to: {}", path.display());
+        crate::console::line(format_args!(
+            "  PAC sidebands exported to: {}",
+            path.display()
+        ))?;
     }
     Ok(())
 }
@@ -585,7 +588,10 @@ fn export_pxf(
     )?;
     ctx.record_output(path.to_path_buf());
     if !ctx.quiet {
-        println!("  PXF transfer exported to: {}", path.display());
+        crate::console::line(format_args!(
+            "  PXF transfer exported to: {}",
+            path.display()
+        ))?;
     }
     Ok(())
 }
@@ -667,7 +673,10 @@ fn export_pstb(
     })?;
     ctx.record_output(path.to_path_buf());
     if !ctx.quiet {
-        println!("  PSTB spectrum exported to: {}", path.display());
+        crate::console::line(format_args!(
+            "  PSTB spectrum exported to: {}",
+            path.display()
+        ))?;
     }
     Ok(())
 }
@@ -735,7 +744,10 @@ fn export_pnoise(
     )?;
     ctx.record_output(path.to_path_buf());
     if !ctx.quiet {
-        println!("  PNOISE spectrum exported to: {}", path.display());
+        crate::console::line(format_args!(
+            "  PNOISE spectrum exported to: {}",
+            path.display()
+        ))?;
     }
     Ok(())
 }
@@ -875,7 +887,10 @@ fn export_envelope(
     )?;
     ctx.record_output(path.to_path_buf());
     if !ctx.quiet {
-        println!("  Envelope trajectory exported to: {}", path.display());
+        crate::console::line(format_args!(
+            "  Envelope trajectory exported to: {}",
+            path.display()
+        ))?;
     }
     Ok(())
 }

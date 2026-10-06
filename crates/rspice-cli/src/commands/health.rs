@@ -22,7 +22,7 @@ pub fn execute(
         Ok(engine) => engine,
         Err(error) => {
             let error = CliError::from(error);
-            emit_failure(&args, started.elapsed().as_secs_f64(), &error);
+            emit_failure(&args, started.elapsed().as_secs_f64(), &error)?;
             return Err(error);
         }
     };
@@ -34,12 +34,12 @@ pub fn execute(
                 Ok(report) => Some(report),
                 Err(rspice_core::SimulationError::Aborted) => {
                     let error = CliError::Interrupted;
-                    emit_failure(&args, started.elapsed().as_secs_f64(), &error);
+                    emit_failure(&args, started.elapsed().as_secs_f64(), &error)?;
                     return Err(error);
                 }
                 Err(error) => {
                     let error = CliError::from(error);
-                    emit_failure(&args, started.elapsed().as_secs_f64(), &error);
+                    emit_failure(&args, started.elapsed().as_secs_f64(), &error)?;
                     return Err(error);
                 }
             }
@@ -48,21 +48,24 @@ pub fn execute(
 
     let duration_secs = started.elapsed().as_secs_f64();
     if args.json {
-        println!("{}", success_payload(&args, duration_secs, report.as_ref()));
+        crate::console::line(format_args!(
+            "{}",
+            success_payload(&args, duration_secs, report.as_ref())
+        ))?;
     } else if !quiet {
         match report {
-            Some(report) => println!(
+            Some(report) => crate::console::line(format_args!(
                 "RSpice backend ready ({}, {:.3} ms; parser={} elements, solver=V(out)={:.6})",
                 args.mode.as_str(),
                 duration_secs * 1_000.0,
                 report.element_count,
                 report.output_voltage,
-            ),
-            None => println!(
+            ))?,
+            None => crate::console::line(format_args!(
                 "RSpice backend alive ({}, {:.3} ms)",
                 args.mode.as_str(),
                 duration_secs * 1_000.0,
-            ),
+            ))?,
         }
     }
     Ok(())
@@ -99,12 +102,12 @@ fn success_payload(
     })
 }
 
-fn emit_failure(args: &HealthArgs, duration_secs: f64, error: &CliError) {
+fn emit_failure(args: &HealthArgs, duration_secs: f64, error: &CliError) -> Result<(), CliError> {
     if !args.json {
-        return;
+        return Ok(());
     }
     let details = error.details();
-    println!(
+    crate::console::line(format_args!(
         "{}",
         serde_json::json!({
             "schema_version": 1,
@@ -125,7 +128,8 @@ fn emit_failure(args: &HealthArgs, duration_secs: f64, error: &CliError) {
                 "limit": details.limit,
             },
         })
-    );
+    ))?;
+    Ok(())
 }
 
 fn tool_identity() -> serde_json::Value {

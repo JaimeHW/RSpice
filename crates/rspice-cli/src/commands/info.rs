@@ -102,15 +102,14 @@ fn print_summary(out: &mut impl Write, netlist: &Netlist, args: &InfoArgs) -> st
     }
 
     if args.params {
-        let mut params = netlist.params.all_params();
-        params.sort_by(|a, b| a.0.cmp(&b.0));
+        let params = parameters::root_parameters(&netlist.params);
         if params.is_empty() {
             writeln!(out, "Parameters: none")?;
             writeln!(out)?;
         } else {
             writeln!(out, "Parameters ({}):", params.len())?;
-            for (name, value) in &params {
-                writeln!(out, "  {} = {}", name, value)?;
+            for parameter in &params {
+                writeln!(out, "  {parameter}")?;
             }
             writeln!(out)?;
         }
@@ -170,11 +169,15 @@ fn print_json(out: &mut impl Write, netlist: &Netlist, args: &InfoArgs) -> Resul
         })).collect::<Vec<_>>()),
         "params": if args.params {
             let mut params = netlist.params.all_params();
+            // The compatibility list contains only real numeric projections.
+            // Never publish a complex value with its imaginary part discarded.
+            params.retain(|(name, _)| netlist.params.get_complex(name).is_some_and(|value| value.im == 0.0));
             params.sort_by(|a, b| a.0.cmp(&b.0));
             Some(params.into_iter().map(|(name, value)| {
                 serde_json::json!({"name": name, "value": value})
             }).collect::<Vec<_>>())
         } else { None },
+        "parameter_definitions": args.params.then(|| parameters::root_parameters(&netlist.params)),
         "subcircuits": if args.hierarchy { Some(netlist.subcircuits.iter().map(|s| &s.name).collect::<Vec<_>>()) } else { None },
         "hierarchy": args.hierarchy.then(|| hierarchy::Hierarchy::new(&netlist.elements, &netlist.subcircuits, args.detailed)),
         "measurements": netlist.measurements.len(),
@@ -189,9 +192,7 @@ fn print_json(out: &mut impl Write, netlist: &Netlist, args: &InfoArgs) -> Resul
     });
     let json = crate::observability::envelope("rspice.info", json);
 
-    serde_json::to_writer_pretty(&mut *out, &json)
-        .map_err(|error| CliError::output_json_error(Path::new("stdout"), error))?;
-    writeln!(out).map_err(|error| CliError::output_error(Path::new("stdout"), error))
+    crate::console::write_json(out, &json, true)
 }
 
 struct ElementCounts {

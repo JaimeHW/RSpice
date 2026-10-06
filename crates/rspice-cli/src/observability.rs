@@ -27,7 +27,7 @@ pub fn set_machine_diagnostics(enabled: bool) {
 
 pub fn diagnostic(code: &str, line: Option<usize>, message: impl std::fmt::Display) {
     if MACHINE_DIAGNOSTICS.get().copied().unwrap_or(false) {
-        eprintln!(
+        crate::console::diagnostic_line(format_args!(
             "{}",
             envelope(
                 "rspice.diagnostic",
@@ -35,9 +35,9 @@ pub fn diagnostic(code: &str, line: Option<usize>, message: impl std::fmt::Displ
                     "diagnostic": { "code": code, "line": line, "message": message.to_string() },
                 })
             )
-        );
+        ));
     } else {
-        eprintln!("{message}");
+        crate::console::diagnostic_line(format_args!("{message}"));
     }
 }
 

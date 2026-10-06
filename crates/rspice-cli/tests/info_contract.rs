@@ -109,6 +109,47 @@ fn detailed_waveform_defaults_are_distinct_from_zero_and_optional_fields() {
 }
 
 #[test]
+fn parameter_inspection_preserves_strings_complex_values_and_runtime_expressions() {
+    let deck = "Parameter inspection\n.param z={2+3j} label=\"run A\" live={time+1} gain=2\n.global_param global_only={time*2} mask={time+4}\n.param mask=\"local\"\n.end\n";
+    let json: serde_json::Value = serde_json::from_str(&inspect(
+        deck,
+        &["--params", "--json", "--spice-dialect", "xyce"],
+    ))
+    .unwrap();
+    let definitions = json["parameter_definitions"].as_array().unwrap();
+    let names: Vec<_> = definitions
+        .iter()
+        .map(|p| p["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["GAIN", "GLOBAL_ONLY", "LABEL", "LIVE", "MASK", "Z"]);
+    assert_eq!(definitions[1]["kind"], "expression");
+    assert_eq!(definitions[1]["value"], "time*2");
+    assert_eq!(definitions[2]["kind"], "string");
+    assert_eq!(definitions[2]["value"], "run A");
+    assert_eq!(definitions[3]["kind"], "expression");
+    assert_eq!(definitions[3]["value"], "time+1");
+    assert_eq!(definitions[4]["kind"], "string");
+    assert_eq!(definitions[4]["value"], "local");
+    assert_eq!(definitions[5]["kind"], "complex");
+    assert_eq!(
+        definitions[5]["value"],
+        serde_json::json!({"real":2.0,"imaginary":3.0})
+    );
+    assert_eq!(
+        json["params"],
+        serde_json::json!([{"name":"GAIN", "value":2.0}])
+    );
+    let text = inspect(deck, &["--params", "--spice-dialect", "xyce"]);
+    assert!(text.contains("Parameters (6):"), "{text}");
+    assert!(text.contains("LABEL = \"run A\""), "{text}");
+    assert!(text.contains("Z = 2 +3j"), "{text}");
+    assert!(text.contains("LIVE = {time+1}"), "{text}");
+    let plain: serde_json::Value =
+        serde_json::from_str(&inspect(deck, &["--json", "--spice-dialect", "xyce"])).unwrap();
+    assert!(plain["parameter_definitions"].is_null());
+}
+
+#[test]
 fn model_definitions_include_typed_parameters_and_preserve_summary_fields() {
     let deck = "Model inspection\n.model diode D(IS=2p N=1.2)\n.model curve pwl(x_array=[0 1] y_array=[0 2])\n.model event d_source(input_file=\"events.txt\")\nD1 in 0 diode\n.end\n";
     let json: serde_json::Value =
