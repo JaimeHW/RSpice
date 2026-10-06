@@ -6,6 +6,9 @@ use rspice_core::Netlist;
 use std::io::Write;
 use std::path::Path;
 
+mod hierarchy;
+mod parameters;
+
 /// Execute the info command
 pub fn execute(
     args: InfoArgs,
@@ -86,10 +89,13 @@ fn print_summary(out: &mut impl Write, netlist: &Netlist, args: &InfoArgs) -> st
         print_detailed_elements(out, netlist)?;
     }
 
-    if args.models && !netlist.models.is_empty() {
+    if args.models {
         writeln!(out, "Models ({}):", netlist.models.len())?;
         for model in &netlist.models {
             writeln!(out, "  {} ({})", model.name, model.model_type)?;
+            for parameter in parameters::model_parameters(model) {
+                writeln!(out, "    {parameter}")?;
+            }
         }
         writeln!(out)?;
     }
@@ -109,17 +115,9 @@ fn print_summary(out: &mut impl Write, netlist: &Netlist, args: &InfoArgs) -> st
         }
     }
 
-    if args.hierarchy && !netlist.subcircuits.is_empty() {
-        writeln!(out, "Subcircuits ({}):", netlist.subcircuits.len())?;
-        for subckt in &netlist.subcircuits {
-            writeln!(
-                out,
-                "  {} ({} ports, {} elements)",
-                subckt.name,
-                subckt.ports.len(),
-                subckt.elements.len()
-            )?;
-        }
+    if args.hierarchy {
+        writeln!(out, "Subcircuit definitions and instance references:")?;
+        hierarchy::Hierarchy::new(&netlist.elements, &netlist.subcircuits).write(out, 2)?;
         writeln!(out)?;
     }
 
@@ -162,6 +160,11 @@ fn print_json(out: &mut impl Write, netlist: &Netlist, args: &InfoArgs) -> Resul
         },
         "analyses": netlist.analyses.len(),
         "models": if args.models { Some(netlist.models.iter().map(|m| &m.name).collect::<Vec<_>>()) } else { None },
+        "model_definitions": args.models.then(|| netlist.models.iter().map(|model| serde_json::json!({
+            "name": model.name,
+            "model_type": model.model_type,
+            "parameters": parameters::model_parameters(model),
+        })).collect::<Vec<_>>()),
         "params": if args.params {
             let mut params = netlist.params.all_params();
             params.sort_by(|a, b| a.0.cmp(&b.0));
@@ -170,6 +173,7 @@ fn print_json(out: &mut impl Write, netlist: &Netlist, args: &InfoArgs) -> Resul
             }).collect::<Vec<_>>())
         } else { None },
         "subcircuits": if args.hierarchy { Some(netlist.subcircuits.iter().map(|s| &s.name).collect::<Vec<_>>()) } else { None },
+        "hierarchy": args.hierarchy.then(|| hierarchy::Hierarchy::new(&netlist.elements, &netlist.subcircuits)),
         "measurements": netlist.measurements.len(),
         "diagnostics": netlist.diagnostics.iter().map(|diagnostic| serde_json::json!({
             "severity": match diagnostic.severity {

@@ -633,7 +633,7 @@ pub struct InfoArgs {
     #[arg(long)]
     pub models: bool,
 
-    /// Show subcircuit hierarchy
+    /// Show subcircuit definitions and instance references by scope
     #[arg(long)]
     pub hierarchy: bool,
 
