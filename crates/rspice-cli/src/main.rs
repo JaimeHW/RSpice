@@ -20,7 +20,8 @@ use std::process::ExitCode;
 /// many small allocations of parsing, netlist expansion, and result
 /// recording. Scoped to the CLI binary: rspice-core stays
 /// allocator-agnostic and the Python module must not override the
-/// interpreter's allocator.
+/// interpreter's allocator. Cargo.toml selects the v2 backend qualified
+/// against Windows sweep replay and interrupted-output recovery.
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
