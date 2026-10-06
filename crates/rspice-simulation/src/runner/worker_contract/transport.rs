@@ -1411,7 +1411,7 @@ fn validate_transient_source_payload_size(result: &WorkerSimulationResult) -> Re
     {
         values = values.saturating_add(2);
         for trace in &history.traces {
-            values = values.saturating_add(trace.points.len().saturating_mul(2));
+            values = values.saturating_add(trace.numeric_value_count());
         }
     }
     if let WorkerSimulationResult::Transient { spectra, .. } = result {

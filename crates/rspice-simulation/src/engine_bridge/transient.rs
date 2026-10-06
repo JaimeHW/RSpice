@@ -480,6 +480,12 @@ fn evaluate_transient_measurements(
             traces
                 .iter()
                 .map(|trace| rspice_core::CurrentImpulseTrace {
+                    derivatives: trace
+                        .derivatives
+                        .iter()
+                        .copied()
+                        .filter(|point| point.time >= start)
+                        .collect(),
                     owner: trace.owner.clone(),
                     complete: trace.complete,
                     // An impulse is an action at its original time, not held
@@ -491,7 +497,9 @@ fn evaluate_transient_measurements(
                         .filter(|point| point.time >= start)
                         .collect(),
                 })
-                .filter(|trace| trace.complete || !trace.points.is_empty())
+                .filter(|trace| {
+                    trace.complete || !trace.points.is_empty() || !trace.derivatives.is_empty()
+                })
                 .collect()
         }),
         time: filtered_time.to_vec(),
@@ -666,7 +674,17 @@ fn collect_event_history(
                             points.push(*point);
                         }
                     }
+                    let mut derivatives = Vec::new();
+                    for (index, point) in trace.derivatives.iter().enumerate() {
+                        if index.is_multiple_of(64) {
+                            ensure_not_aborted(abort)?;
+                        }
+                        if retained(point.time) {
+                            derivatives.push(*point);
+                        }
+                    }
                     traces.push(rspice_core::CurrentImpulseTrace {
+                        derivatives,
                         owner: trace.owner.clone(),
                         complete: trace.complete,
                         points,
@@ -674,7 +692,9 @@ fn collect_event_history(
                 }
                 // An incomplete trace with no retained points supplies neither
                 // observations nor a coverage claim for this window.
-                traces.retain(|trace| trace.complete || !trace.points.is_empty());
+                traces.retain(|trace| {
+                    trace.complete || !trace.points.is_empty() || !trace.derivatives.is_empty()
+                });
                 traces.sort_by(|left, right| left.owner.cmp(&right.owner));
                 let history = rspice_results::current_impulses::CurrentImpulseHistoryEvidence {
                     start_time_s: window_start.max(full_start),
@@ -719,6 +739,7 @@ mod tests {
             store_traces: vec![],
             fft_results: vec![],
             current_impulses: Some(vec![CurrentImpulseTrace {
+                derivatives: Vec::new(),
                 owner: CurrentImpulseOwner::Branch {
                     branch_name: "V1".into(),
                 },
@@ -730,6 +751,14 @@ mod tests {
             }]),
         };
         let source = result.current_impulses.as_mut().unwrap();
+        source[0].derivatives = [0.3, 0.7]
+            .into_iter()
+            .map(|time| rspice_core::CurrentImpulseDerivative {
+                time,
+                order: 1,
+                coefficient: -1e-21,
+            })
+            .collect();
         source[0].points.push(CurrentImpulsePoint {
             time: 0.7,
             charge_coulombs: 0.004,
@@ -739,6 +768,7 @@ mod tests {
             branch_name: "V2".into(),
         };
         zero.points.clear();
+        zero.derivatives.clear();
         source.push(zero);
         let cropped =
             collect_event_history(&result, 0.5, &rspice_core::abort_signal::NoAbort).unwrap();
@@ -753,6 +783,14 @@ mod tests {
             }]
         );
         assert!(retained.traces[1].complete && retained.traces[1].points.is_empty());
+        assert_eq!(
+            retained.traces[0].derivatives,
+            [rspice_core::CurrentImpulseDerivative {
+                time: 0.7,
+                order: 1,
+                coefficient: -1e-21,
+            }]
+        );
         let full =
             collect_event_history(&result, 0.0, &rspice_core::abort_signal::NoAbort).unwrap();
         assert_eq!(

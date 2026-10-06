@@ -303,8 +303,11 @@ pub(crate) fn clip_transient_to_start(
         for trace in traces.iter_mut() {
             // Impulses are newly accepted actions, never held state at TSTART.
             trace.points.retain(|point| point.time >= retained_start);
+            trace.derivatives.retain(|point| point.time >= retained_start);
         }
-        traces.retain(|trace| trace.complete || !trace.points.is_empty());
+        traces.retain(|trace| {
+            trace.complete || !trace.points.is_empty() || !trace.derivatives.is_empty()
+        });
     }
     result.time.drain(..start_index);
     for series in &mut result.voltages {
@@ -388,9 +391,17 @@ mod structural_tests {
 
     #[test]
     fn impulse_clipping_discards_past_actions_without_replaying_them() {
-        use rspice_core::{CurrentImpulsePoint, CurrentImpulseTrace};
+        use rspice_core::{CurrentImpulseDerivative, CurrentImpulsePoint, CurrentImpulseTrace};
         let mut result = two_point_result();
         result.current_impulses = Some(vec![CurrentImpulseTrace {
+            derivatives: [0.0, 0.5e-9, 1e-9]
+                .into_iter()
+                .map(|time| CurrentImpulseDerivative {
+                    time,
+                    order: 1,
+                    coefficient: -2e-21,
+                })
+                .collect(),
             owner: rspice_core::CurrentImpulseOwner::Branch {
                 branch_name: "V1".into(),
             },
@@ -412,6 +423,9 @@ mod structural_tests {
         }]);
         let mut past_only = result.clone();
         past_only.current_impulses.as_mut().unwrap()[0].points.pop();
+        past_only.current_impulses.as_mut().unwrap()[0].derivatives.pop();
+        let mut derivative_only = result.clone();
+        derivative_only.current_impulses.as_mut().unwrap()[0].points.clear();
         clip_transient_to_start(&mut result, 1e-9).unwrap();
         assert_eq!(
             result.current_impulses.as_ref().unwrap()[0].points,
@@ -421,6 +435,20 @@ mod structural_tests {
             },]
         );
         result.validate_current_impulses().unwrap();
+        assert_eq!(
+            result.current_impulses.as_ref().unwrap()[0].derivatives,
+            vec![CurrentImpulseDerivative {
+                time: 1e-9,
+                order: 1,
+                coefficient: -2e-21,
+            }]
+        );
+        clip_transient_to_start(&mut derivative_only, 1e-9).unwrap();
+        assert_eq!(
+            derivative_only.current_impulses.as_ref().unwrap()[0].derivatives,
+            result.current_impulses.as_ref().unwrap()[0].derivatives
+        );
+        derivative_only.validate_current_impulses().unwrap();
         clip_transient_to_start(&mut past_only, 1e-9).unwrap();
         assert_eq!(past_only.current_impulses, Some(Vec::new()));
     }

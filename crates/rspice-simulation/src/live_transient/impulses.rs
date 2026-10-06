@@ -2,7 +2,9 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
-use rspice_core::{CurrentImpulseOwner, CurrentImpulsePoint, CurrentImpulseTrace};
+use rspice_core::{
+    CurrentImpulseDerivative, CurrentImpulseOwner, CurrentImpulsePoint, CurrentImpulseTrace,
+};
 use serde::{Deserialize, Serialize};
 
 use super::{MAX_PENDING_LIVE_TRANSIENT_SAMPLES, TransientSampleDelta};
@@ -35,6 +37,8 @@ pub struct CurrentImpulseUpdate {
     pub owner: CurrentImpulseOwner,
     pub complete: bool,
     pub points: Vec<CurrentImpulsePoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub derivatives: Vec<CurrentImpulseDerivative>,
 }
 
 fn owner_key(owner: &CurrentImpulseOwner) -> Option<CurrentImpulseOwner> {
@@ -72,7 +76,9 @@ impl CurrentImpulseDelta {
         let mut count = 0usize;
         let mut owners = HashSet::new();
         for trace in &self.traces {
-            count = count.saturating_add(trace.points.len());
+            count = count
+                .saturating_add(trace.points.len())
+                .saturating_add(trace.derivatives.len());
             let Some(key) = owner_key(&trace.owner) else {
                 return false;
             };
@@ -92,6 +98,20 @@ impl CurrentImpulseDelta {
                 }
                 previous = Some(point.time);
             }
+            let mut previous = None;
+            for point in &trace.derivatives {
+                if !point.time.is_finite()
+                    || point.time < self.start_time_s
+                    || point.time > self.stop_time_s
+                    || point.order == 0
+                    || !point.coefficient.is_finite()
+                    || point.coefficient == 0.0
+                    || previous.is_some_and(|pair| (point.time, point.order) <= pair)
+                {
+                    return false;
+                }
+                previous = Some((point.time, point.order));
+            }
         }
         true
     }
@@ -100,6 +120,7 @@ impl CurrentImpulseDelta {
 #[derive(Debug, Default)]
 struct PublishedCursor {
     count: usize,
+    derivatives: usize,
     complete: bool,
 }
 
@@ -151,17 +172,31 @@ impl PublishedCurrentImpulses {
                     &[]
                 }
             };
-            if new || !suffix.is_empty() || cursor.complete != trace.complete {
+            let derivatives = match trace.derivatives.get(cursor.derivatives..) {
+                Some(suffix) => suffix,
+                None => {
+                    self.lost = true;
+                    &[]
+                }
+            };
+            if new
+                || !suffix.is_empty()
+                || !derivatives.is_empty()
+                || cursor.complete != trace.complete
+            {
                 let count = suffix.len().min(remaining);
-                self.lost |= count != suffix.len();
+                let derivative_count = derivatives.len().min(remaining - count);
+                self.lost |= count != suffix.len() || derivative_count != derivatives.len();
                 updates.push(CurrentImpulseUpdate {
                     owner: trace.owner.clone(),
                     complete: trace.complete,
                     points: suffix[..count].to_vec(),
+                    derivatives: derivatives[..derivative_count].to_vec(),
                 });
-                remaining -= count;
+                remaining -= count + derivative_count;
             }
             cursor.count = trace.points.len();
+            cursor.derivatives = trace.derivatives.len();
             cursor.complete = trace.complete;
         }
         Some(CurrentImpulseDelta {
@@ -246,6 +281,7 @@ impl CurrentImpulseBuffer {
                     owner: update.owner.clone(),
                     complete: update.complete,
                     points: Vec::new(),
+                    derivatives: Vec::new(),
                 });
             trace.complete &= update.complete;
             for point in update.points {
@@ -262,6 +298,20 @@ impl CurrentImpulseBuffer {
                 trace.points.push(point);
                 batch.point_count += 1;
             }
+            for point in update.derivatives {
+                if let Some(last) = trace.derivatives.last()
+                    && (point.time, point.order) <= (last.time, last.order)
+                {
+                    self.lost |= point != *last;
+                    continue;
+                }
+                if batch.point_count >= MAX_CURRENT_POINTS {
+                    self.lost = true;
+                    continue;
+                }
+                trace.derivatives.push(point);
+                batch.point_count += 1;
+            }
         }
     }
 
@@ -274,8 +324,11 @@ impl CurrentImpulseBuffer {
             traces: batch
                 .traces
                 .values()
-                .filter(|trace| trace.complete || !trace.points.is_empty())
+                .filter(|trace| {
+                    trace.complete || !trace.points.is_empty() || !trace.derivatives.is_empty()
+                })
                 .map(|trace| CurrentImpulseTrace {
+                    derivatives: trace.derivatives.clone(),
                     owner: trace.owner.clone(),
                     complete: trace.complete,
                     points: trace.points.clone(),
@@ -356,6 +409,7 @@ mod tests {
             last_sequence: sequence,
             delivery_complete: true,
             traces: vec![CurrentImpulseUpdate {
+                derivatives: Vec::new(),
                 owner: CurrentImpulseOwner::Branch {
                     branch_name: "V1".into(),
                 },
@@ -369,6 +423,72 @@ mod tests {
                     .collect(),
             }],
         }
+    }
+
+    #[test]
+    fn live_current_derivatives_keep_same_time_orders_and_coverage() {
+        let first = CurrentImpulseDerivative {
+            time: 0.25,
+            order: 1,
+            coefficient: -1e-21,
+        };
+        let mut update = delta(1, &[]);
+        update.first_sequence = 0;
+        update.traces[0].complete = false;
+        update.traces[0].derivatives = vec![first, CurrentImpulseDerivative { order: 2, ..first }];
+        let wire = serde_json::to_string(&update).unwrap();
+        let restored: CurrentImpulseDelta = serde_json::from_str(&wire).unwrap();
+        assert_eq!(restored, update);
+        let expected = update.traces[0].derivatives.clone();
+        let mut buffer = CurrentImpulseBuffer::default();
+        buffer.ingest(restored);
+        let history = buffer.history().unwrap();
+        assert!(history.delivery_complete);
+        assert_eq!(history.traces.len(), 1);
+        assert_eq!(history.traces[0].derivatives, expected);
+        history.validate().unwrap();
+        buffer.ingest(update); // An entirely replayed batch adds nothing.
+        assert_eq!(buffer.history().unwrap(), history);
+    }
+
+    #[test]
+    fn live_current_derivative_suffixes_are_bounded_and_never_replayed() {
+        let source = [CurrentImpulseTrace {
+            owner: CurrentImpulseOwner::Branch {
+                branch_name: "H1".into(),
+            },
+            complete: true,
+            points: vec![],
+            derivatives: (0..=MAX_CURRENT_POINTS)
+                .map(|index| CurrentImpulseDerivative {
+                    time: index as f64,
+                    order: 1,
+                    coefficient: -1e-21,
+                })
+                .collect(),
+        }];
+        let sample = rspice_core::abort_signal::TransientSample {
+            time: &[0.0, MAX_CURRENT_POINTS as f64],
+            node_names: &[],
+            node_voltages: &[],
+            branch_names: &[],
+            branch_currents: &[],
+            current_impulses: Some(&source),
+            digital_values: &[],
+            digital_buses: &[],
+            real_values: &[],
+        };
+        let mut publisher = PublishedCurrentImpulses::default();
+        let first = publisher.publish(&sample).unwrap();
+        assert!(!first.delivery_complete);
+        assert_eq!(first.traces[0].derivatives.len(), MAX_CURRENT_POINTS);
+        assert!(publisher.publish(&sample).unwrap().traces.is_empty());
+        let mut buffer = CurrentImpulseBuffer::default();
+        buffer.ingest(first);
+        let history = buffer.history().unwrap();
+        assert!(!history.delivery_complete);
+        assert_eq!(history.traces[0].derivatives.len(), MAX_CURRENT_POINTS);
+        history.validate().unwrap();
     }
 
     #[test]
@@ -461,6 +581,7 @@ mod tests {
     #[test]
     fn live_current_impulses_bound_aggregate_storage_and_preserve_loss_across_drains() {
         let source = [CurrentImpulseTrace {
+            derivatives: Vec::new(),
             owner: CurrentImpulseOwner::Branch {
                 branch_name: "V1".into(),
             },

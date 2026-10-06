@@ -1253,6 +1253,11 @@ fn current_impulse_history_survives_worker_transfer_and_rejects_invalid_charge()
         stop_time_s: 1.0,
         delivery_complete: true,
         traces: vec![rspice_core::CurrentImpulseTrace {
+            derivatives: vec![rspice_core::CurrentImpulseDerivative {
+                time: 0.3,
+                order: 2,
+                coefficient: -2.5e-30,
+            }],
             owner: rspice_core::CurrentImpulseOwner::Branch {
                 branch_name: "V1".into(),
             },
@@ -1272,6 +1277,9 @@ fn current_impulse_history_survives_worker_transfer_and_rejects_invalid_charge()
     };
     *time = vec![0.0, 1.0];
     events.current_impulses = Some(history.clone());
+    // Two extent values, two coverage flags, charge time/value, and
+    // derivative time/order/coefficient. This is independent of samples.
+    assert_eq!(conversions::event_history_payload_bytes(events), 54);
     let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
     let metadata = serde_json::to_string(&transport.response).unwrap();
     let transported = WorkerResponseTransport {

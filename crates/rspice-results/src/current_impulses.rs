@@ -57,6 +57,7 @@ mod tests {
             stop_time_s: 1.0,
             delivery_complete: true,
             traces: vec![CurrentImpulseTrace {
+                derivatives: Vec::new(),
                 owner: CurrentImpulseOwner::Branch {
                     branch_name: "V1".into(),
                 },

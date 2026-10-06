@@ -18,6 +18,7 @@ fn fixture() -> TransientResult {
         store_traces: vec![],
         fft_results: vec![],
         current_impulses: Some(vec![CurrentImpulseTrace {
+            derivatives: Vec::new(),
             owner: CurrentImpulseOwner::Branch {
                 branch_name: "V1".into(),
             },
@@ -62,6 +63,34 @@ fn current_fft_uses_exact_charge_time_without_snapping_to_the_sample_grid() {
             close(bin.real, scale * phase.cos());
             close(bin.imaginary, scale * phase.sin());
         }
+    }
+}
+
+#[test]
+fn current_fft_derivatives_have_analytic_phase_and_no_fabricated_taper_result() {
+    for order in 1..=4 {
+        let mut result = fixture();
+        let trace = &mut result.current_impulses.as_mut().unwrap()[0];
+        trace.points.clear();
+        trace.derivatives = vec![crate::CurrentImpulseDerivative {
+            time: 0.3,
+            order,
+            coefficient: -1e-6,
+        }];
+        let fft = spectrum(&result, ".fft I(V1) np=8 format=unorm window=rect").unwrap();
+        close(fft.bins[0].real, 0.0);
+        for bin in &fft.bins[1..] {
+            let omega = 2.0 * PI * bin.index as Value;
+            let one_sided = if bin.index == 4 { 1.0 } else { 2.0 };
+            let expected = -1e-6
+                * one_sided
+                * Complex::new(0.0, omega).powu(order)
+                * Complex::from_polar(1.0, -omega * 0.3);
+            let actual = Complex::new(bin.real, bin.imaginary);
+            assert!((actual - expected).norm() < 2e-13 * expected.norm());
+        }
+        let error = spectrum(&result, ".fft I(V1) np=8 format=unorm window=hann").unwrap_err();
+        assert!(error.to_string().contains("analytic taper derivatives"));
     }
 }
 
@@ -196,6 +225,7 @@ fn current_fft_lead_and_projection_aliases_share_the_impulse_owner() {
         .as_mut()
         .unwrap()
         .push(CurrentImpulseTrace {
+            derivatives: Vec::new(),
             owner: CurrentImpulseOwner::DeviceLead {
                 device_name: "Q1".into(),
                 parameter: "ic".into(),

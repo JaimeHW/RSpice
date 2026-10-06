@@ -75,12 +75,13 @@ def test_current_impulses_pickle_preserves_availability_and_legacy_shape(result)
     assert result.current_impulses is None
     restore, state = result.__reduce__()
     assert restore(*state[:-1]).current_impulses is None
-    for rows in [None, []]:
-        recorded = with_impulses(result, rows)
-        restored = pickle.loads(pickle.dumps(recorded))
-        assert restored.current_impulses == rows
-        with pytest.raises(rspice.RSpiceNotImplementedError, match="restored from pickled state"):
-            restored.document()
+    for version in [1, 2, 3]:
+        for rows in [None, []]:
+            recorded = with_impulses(result, rows, version)
+            restored = pickle.loads(pickle.dumps(recorded))
+            assert restored.current_impulses == rows
+            with pytest.raises(rspice.RSpiceNotImplementedError, match="restored from pickled state"):
+                restored.document()
 
 
 def test_current_impulses_preserve_signed_charge_without_changing_amperes(result):
@@ -98,7 +99,7 @@ def test_current_impulses_preserve_signed_charge_without_changing_amperes(result
         restored.document()
 
 
-@pytest.mark.parametrize("version", [0, 3, 999])
+@pytest.mark.parametrize("version", [0, 4, 999])
 def test_current_impulses_refuse_unknown_versions(result, version):
     with pytest.raises(ValueError, match="current impulse pickle version"):
         with_impulses(result, None, version)
@@ -127,7 +128,7 @@ def test_current_impulses_preserve_typed_coverage_and_readonly_snapshots(result)
         ("device_lead", "Q1", "ib", True, []),
     ]
     restored = pickle.loads(pickle.dumps(with_impulses(result, rows, 2)))
-    assert restored.__reduce__()[1][-1] == (2, rows)
+    assert restored.__reduce__()[1][-1] == (3, [(*row, []) for row in rows])
     assert [(t.owner_kind, t.name, t.parameter, t.complete, t.points)
             for t in restored.current_impulses] == rows
     trace = restored.current_impulses[1]
@@ -154,6 +155,8 @@ def test_current_impulses_refuse_ambiguous_owner_or_version_shape(result):
     for version, rows in [
         (1, [("branch", branch, None, True, [])]),
         (2, [(branch, [(0.0, 1e-12)])]),
+        (2, [("branch", branch, None, True, [], [(0.0, 1, 1e-21)])]),
+        (3, [("branch", branch, None, True, [])]),
     ]:
         with pytest.raises(ValueError, match="current impulse pickle version"):
             with_impulses(result, rows, version)
@@ -161,3 +164,45 @@ def test_current_impulses_refuse_ambiguous_owner_or_version_shape(result):
             ("device_lead", "q1", "IC", True, [])]
     with pytest.raises(ValueError, match="duplicate current impulse"):
         with_impulses(result, rows, 2)
+
+
+def test_current_impulse_derivatives_preserve_units_order_and_pickle_shape(result):
+    branch = result.branch_names[0]
+    time = float(result.time[-1]) / 3
+    derivatives = [(time, 1, -2e-21), (time, 3, 4e-39)]
+    rows = [("branch", branch, None, True, [], derivatives)]
+    restored = pickle.loads(pickle.dumps(with_impulses(result, rows, 3)))
+    assert restored.__reduce__()[1][-1] == (3, rows)
+    trace = restored.current_impulses[0]
+    assert trace.derivatives == derivatives
+    assert trace.points == []
+    np.testing.assert_array_equal(
+        restored.branch_current_waveform(branch), result.branch_current_waveform(branch)
+    )
+    with pytest.raises(AttributeError):
+        trace.derivatives = []
+    trace.derivatives.clear()
+    assert restored.current_impulses[0].derivatives == derivatives
+    for invalid in [
+        [(time, 0, 1e-21)], [(time, 1, 0.0)], [(time, 1, float("nan"))],
+        [(float("inf"), 1, 1e-21)], [(2 * float(result.time[-1]), 1, 1e-21)],
+        [derivatives[0], derivatives[0]], list(reversed(derivatives)),
+    ]:
+        with pytest.raises(ValueError, match="current impulse"):
+            with_impulses(result, [("branch", branch, None, True, [], invalid)], 3)
+
+
+def test_fourier_current_derivatives_survive_python_pickle(engine):
+    deck = rspice.Netlist.parse("* derivative Fourier\nV1 out 0 0\nR1 out 0 1000\n.end\n")
+    transient = engine.run_tran(deck, stop_time=1.0, max_step=1.0 / 256)
+    branch = transient.branch_names[0]
+    for order in range(1, 5):
+        rows = [("branch", branch, None, True, [], [(0.3, order, -1e-6)])]
+        restored = pickle.loads(pickle.dumps(with_impulses(transient, rows, 3)))
+        spectrum = restored.fourier_current(branch, 1.0, 4)
+        assert spectrum.dc_component == 0.0
+        for index, harmonic in enumerate(spectrum.harmonics, start=1):
+            omega = 2 * np.pi * index
+            expected = -2e-6 * (1j * omega) ** order * np.exp(-1j * omega * 0.3)
+            actual = harmonic.magnitude * np.exp(1j * np.deg2rad(harmonic.phase_degrees))
+            assert actual == pytest.approx(expected, rel=2e-13, abs=1e-18)

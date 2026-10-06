@@ -1340,6 +1340,11 @@ fn current_impulses_are_authenticated_and_preserved_in_fourier_dependencies() {
                 stop_time_s: 1.0,
                 delivery_complete: true,
                 traces: vec![rspice_core::CurrentImpulseTrace {
+                    derivatives: vec![rspice_core::CurrentImpulseDerivative {
+                        time: 0.3,
+                        order: 1,
+                        coefficient: -2.5e-21,
+                    }],
                     owner: rspice_core::CurrentImpulseOwner::Branch {
                         branch_name: "V1".into(),
                     },
@@ -1376,6 +1381,27 @@ fn current_impulses_are_authenticated_and_preserved_in_fourier_dependencies() {
         .unwrap()
         .unwrap();
     assert_eq!(current.points[0].charge_coulombs, -0.002);
+    assert_eq!(current.derivatives[0].coefficient, -2.5e-21);
+    let mut tampered: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+    fn change_derivative(value: &mut serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::Object(map) => {
+                if map.contains_key("coefficient") && map.contains_key("order") {
+                    map.insert("coefficient".into(), serde_json::json!(-3.5e-21));
+                    true
+                } else {
+                    map.values_mut().any(change_derivative)
+                }
+            }
+            serde_json::Value::Array(values) => values.iter_mut().any(change_derivative),
+            _ => false,
+        }
+    }
+    assert!(change_derivative(&mut tampered));
+    assert!(matches!(
+        ResolvedExecutionDependencies::decode_transfer(&tampered.to_string(), buffers.clone()),
+        Err(ExecutionArtifactError::PayloadDigestMismatch { .. })
+    ));
     assert!(
         restored
             .transient_trajectory()

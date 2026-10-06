@@ -4,6 +4,8 @@ use crate::Value;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+mod derivative;
+
 /// A current's physical identity, independent of its displayed probe spelling.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
@@ -89,6 +91,20 @@ pub struct CurrentImpulsePoint {
     pub charge_coulombs: Value,
 }
 
+/// A nonzero coefficient of a derivative of a current Dirac impulse.
+///
+/// This contributes `coefficient * delta^(order)(t - time)` to the current.
+/// Its SI units are ampere * second^(order + 1), not coulombs or amperes.
+/// `order` is strictly positive; ordinary charge impulses use
+/// [`CurrentImpulsePoint`]. These terms must never be put on a sample grid.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CurrentImpulseDerivative {
+    pub time: Value,
+    pub order: u32,
+    pub coefficient: Value,
+}
+
 /// Newly accepted impulses and coverage for one current in a run segment.
 ///
 /// Fresh startup can contribute an impulse at zero. A checkpoint resume
@@ -108,6 +124,10 @@ pub struct CurrentImpulseTrace {
     pub complete: bool,
     /// Nonzero finite charge impulses in strictly increasing time order.
     pub points: Vec<CurrentImpulsePoint>,
+    /// Higher derivatives, ordered by (time, order), with no duplicate pair.
+    /// `complete` covers both this list and the ordinary charge impulses.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub derivatives: Vec<CurrentImpulseDerivative>,
 }
 
 impl<'de> Deserialize<'de> for CurrentImpulseTrace {
@@ -121,6 +141,8 @@ impl<'de> Deserialize<'de> for CurrentImpulseTrace {
             #[serde(default)]
             complete: bool,
             points: Vec<CurrentImpulsePoint>,
+            #[serde(default)]
+            derivatives: Vec<CurrentImpulseDerivative>,
         }
         let wire = Wire::deserialize(deserializer)?;
         let owner = match (wire.branch_name, wire.device_name, wire.parameter) {
@@ -139,15 +161,37 @@ impl<'de> Deserialize<'de> for CurrentImpulseTrace {
             owner,
             complete: wire.complete,
             points: wire.points,
+            derivatives: wire.derivatives,
         })
     }
 }
 
 impl CurrentImpulseTrace {
+    /// Numeric scalar count for result and transport budgets, including each
+    /// derivative's time, order and coefficient. Excludes owner metadata.
+    pub fn numeric_value_count(&self) -> usize {
+        self.points
+            .len()
+            .saturating_mul(2)
+            .saturating_add(self.derivatives.len().saturating_mul(3))
+    }
+
+    /// Whether the singular current has an action in the owned interval
+    /// `(start, stop]`, including derivatives that integrate to zero charge.
+    pub fn has_impulses_in_window(&self, start: Value, stop: Value) -> bool {
+        self.points
+            .iter()
+            .any(|point| point.time > start && point.time <= stop)
+            || self
+                .derivatives
+                .iter()
+                .any(|point| point.time > start && point.time <= stop)
+    }
+
     /// Validate the trace against its result's time extent.
     pub fn validate(&self, start: Value, stop: Value) -> Result<(), String> {
         self.owner.validate()?;
-        if self.points.is_empty() && !self.complete {
+        if self.points.is_empty() && self.derivatives.is_empty() && !self.complete {
             return Err(
                 "current impulse trace has neither observations nor complete coverage".into(),
             );
@@ -170,6 +214,23 @@ impl CurrentImpulseTrace {
                 ));
             }
             previous = Some(point.time);
+        }
+        let mut previous = None;
+        for point in &self.derivatives {
+            if !point.time.is_finite()
+                || point.time < start
+                || point.time > stop
+                || point.order == 0
+                || !point.coefficient.is_finite()
+                || point.coefficient == 0.0
+                || previous.is_some_and(|pair| (point.time, point.order) <= pair)
+            {
+                return Err(format!(
+                    "current impulse trace '{}' has an invalid derivative",
+                    self.owner
+                ));
+            }
+            previous = Some((point.time, point.order));
         }
         Ok(())
     }
@@ -211,7 +272,7 @@ pub(crate) fn validate_current_impulse_traces<'a>(
 pub(crate) fn current_impulse_value_count(traces: Option<&[CurrentImpulseTrace]>) -> usize {
     traces.into_iter().flatten().fold(0usize, |count, trace| {
         count
-            .saturating_add(trace.points.len().saturating_mul(2))
+            .saturating_add(trace.numeric_value_count())
             .saturating_add(trace.owner.value_count())
     })
 }
@@ -227,6 +288,7 @@ mod tests {
         assert!(!branch.complete);
         assert!(!serde_json::to_string(&branch).unwrap().contains("complete"));
         let lead = CurrentImpulseTrace {
+            derivatives: Vec::new(),
             owner: CurrentImpulseOwner::DeviceLead {
                 device_name: "Q1".into(),
                 parameter: "ic".into(),
@@ -269,6 +331,7 @@ mod tests {
 
     fn trace() -> CurrentImpulseTrace {
         CurrentImpulseTrace {
+            derivatives: Vec::new(),
             owner: CurrentImpulseOwner::Branch {
                 branch_name: "Vdrive".into(),
             },

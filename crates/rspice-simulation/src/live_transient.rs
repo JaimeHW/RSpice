@@ -333,6 +333,7 @@ mod tests {
         let samples = Arc::new(Mutex::new(LiveTransientQueue::default()));
         let signal = LiveTransientPublisher::new(Some(Arc::clone(&samples)), None);
         let mut traces = vec![CurrentImpulseTrace {
+            derivatives: Vec::new(),
             owner: CurrentImpulseOwner::DeviceLead {
                 device_name: "Q1".into(),
                 parameter: "ic".into(),

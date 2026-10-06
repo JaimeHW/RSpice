@@ -280,7 +280,7 @@ impl TransientTrajectoryArtifact {
             ))
             .saturating_add(self.current_impulses.as_ref().map_or(0, |history| {
                 history.traces.iter().fold(2usize, |sum, trace| {
-                    sum.saturating_add(trace.points.len().saturating_mul(2))
+                    sum.saturating_add(trace.numeric_value_count())
                 })
             }))
             .saturating_add(
@@ -432,6 +432,15 @@ impl TransientTrajectoryArtifact {
                 for point in &trace.points {
                     writer.f64(point.time);
                     writer.f64(point.charge_coulombs);
+                }
+                if !trace.derivatives.is_empty() {
+                    writer.domain("current-impulse-derivatives-v1");
+                    writer.sequence(trace.derivatives.len());
+                    for point in &trace.derivatives {
+                        writer.f64(point.time);
+                        writer.u64(u64::from(point.order));
+                        writer.f64(point.coefficient);
+                    }
                 }
             }
         }

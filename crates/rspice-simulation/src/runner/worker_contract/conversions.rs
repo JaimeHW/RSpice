@@ -948,6 +948,12 @@ pub(super) fn event_history_payload_bytes(events: &WorkerEventHistory) -> usize 
                 total
                     .saturating_add(1)
                     .saturating_add(f64_payload_bytes(trace.points.len().saturating_mul(2)))
+                    .saturating_add(
+                        trace
+                            .derivatives
+                            .len()
+                            .saturating_mul(2 * size_of::<f64>() + size_of::<u32>()),
+                    )
             })
     });
     real.saturating_add(events.buses.len().saturating_mul(2 * size_of::<i64>()))

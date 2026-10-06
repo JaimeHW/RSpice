@@ -146,17 +146,14 @@ impl<'a> Resolver<'a, '_> {
         trace
             .validate(self.extent.0, self.extent.1)
             .map_err(failure)?;
-        let has_impulses = trace
-            .points
-            .iter()
-            .any(|point| point.time > self.window.0 && point.time <= self.window.1);
+        let has_impulses = trace.has_impulses_in_window(self.window.0, self.window.1);
         if projection
             .as_deref()
             .is_some_and(|prefix| !matches!(prefix, "I" | "IR"))
             && has_impulses
         {
             return Err(failure(format!(
-                "current projection '{authored}' is not defined for charge impulses"
+                "current projection '{authored}' is not defined for current impulses"
             )));
         }
         let mut form = Form::default();
@@ -542,6 +539,7 @@ mod tests {
             fft_results: vec![],
             current_impulses: Some(vec![
                 CurrentImpulseTrace {
+                    derivatives: Vec::new(),
                     owner: CurrentImpulseOwner::Branch {
                         branch_name: "X1.V1".into(),
                     },
@@ -552,6 +550,7 @@ mod tests {
                     }],
                 },
                 CurrentImpulseTrace {
+                    derivatives: Vec::new(),
                     owner: CurrentImpulseOwner::DeviceLead {
                         device_name: "X1.Q1".into(),
                         parameter: "ic".into(),

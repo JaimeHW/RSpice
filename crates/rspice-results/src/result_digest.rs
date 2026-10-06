@@ -1176,6 +1176,17 @@ fn encode_result_payload(
                             writer.f64(point.time);
                             writer.f64(point.charge_coulombs);
                         }
+                        // Typed extension preserves every pre-derivative digest.
+                        // The string tag cannot alias the following owner/sequence tag.
+                        if !trace.derivatives.is_empty() {
+                            writer.string("current-impulse-derivatives-v1");
+                            writer.sequence(trace.derivatives.len());
+                            for point in &trace.derivatives {
+                                writer.f64(point.time);
+                                writer.u64(u64::from(point.order));
+                                writer.f64(point.coefficient);
+                            }
+                        }
                     }
                 });
             }

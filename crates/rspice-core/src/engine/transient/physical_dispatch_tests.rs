@@ -799,6 +799,7 @@ fn run_original(text: &str, stop: Value, max_step: Value) {
                 .filter(|point| point.time > checkpoint.time)
                 .collect();
             (trace.complete || !points.is_empty()).then(|| crate::CurrentImpulseTrace {
+                derivatives: Vec::new(),
                 owner: trace.owner.clone(),
                 complete: trace.complete,
                 points,

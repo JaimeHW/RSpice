@@ -15110,6 +15110,11 @@ D1 D 0 DMOD
             .collect::<Vec<_>>();
         let result = TransientResult {
             current_impulses: Some(vec![crate::CurrentImpulseTrace {
+                derivatives: vec![crate::CurrentImpulseDerivative {
+                    time: time[1],
+                    order: 1,
+                    coefficient: -2.5e-21,
+                }],
                 owner: crate::CurrentImpulseOwner::Branch {
                     branch_name: "VINPUT".into(),
                 },
@@ -15171,7 +15176,7 @@ D1 D 0 DMOD
         no_impulses.current_impulses = None;
         assert_eq!(
             Engine::transient_result_value_count(&result),
-            Engine::transient_result_value_count(&no_impulses) + 6
+            Engine::transient_result_value_count(&no_impulses) + 9
         );
         compressed.validate().expect("compressed inventory aligns");
         assert_eq!(compressed.node_names(), result.node_names);

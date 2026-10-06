@@ -38,6 +38,18 @@ pub(super) fn add_to_bins(
         analysis.points - 1
     } as Value;
     let last_sample = sample_time(analysis, transient_stop, analysis.points - 1);
+    if analysis.window != FftWindow::Rectangular
+        && terms.iter().any(|term| {
+            term.trace
+                .derivatives
+                .iter()
+                .any(|point| point.time > start && point.time <= stop)
+        })
+    {
+        return Err(invalid(
+            "current impulse derivatives require analytic taper derivatives; this FFT window is not yet implemented for them",
+        ));
+    }
     for (bin, coefficient) in bins.iter_mut().enumerate() {
         if abort.is_aborted() {
             return Err(CurrentObservationError::Aborted);
@@ -97,6 +109,36 @@ pub(super) fn add_to_bins(
                 let (sine, cosine) = phase.sin_cos();
                 compensated_add(&mut real, &mut real_correction, rate * cosine);
                 compensated_add(&mut imaginary, &mut imaginary_correction, rate * sine);
+            }
+            for (index, point) in term.trace.derivatives.iter().enumerate() {
+                if index.is_multiple_of(64) && abort.is_aborted() {
+                    return Err(CurrentObservationError::Aborted);
+                }
+                if point.time <= start || point.time > stop {
+                    continue;
+                }
+                let rate = point
+                    .periodic_rate(
+                        bin as Value / duration,
+                        term.weight,
+                        duration,
+                        coherent_gain / one_sided,
+                    )
+                    .map_err(|detail| CurrentObservationError::Invalid { detail })?;
+                let fraction = (point.time - start) / duration;
+                let (sine, cosine) = (-2.0 * PI * (bin as Value * fraction).fract()).sin_cos();
+                let (real_phase, imaginary_phase) = match point.order % 4 {
+                    0 => (cosine, sine),
+                    1 => (-sine, cosine),
+                    2 => (-cosine, -sine),
+                    _ => (sine, -cosine),
+                };
+                compensated_add(&mut real, &mut real_correction, rate * real_phase);
+                compensated_add(
+                    &mut imaginary,
+                    &mut imaginary_correction,
+                    rate * imaginary_phase,
+                );
             }
         }
         *coefficient = Complex::new(real + real_correction, imaginary + imaginary_correction);

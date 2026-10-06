@@ -1929,6 +1929,7 @@ mod tests {
         let time = (0..=4096).map(|i| i as f64 / 2048.0).collect::<Vec<_>>();
         let samples = vec![1.0; time.len()];
         let mut trace = rspice_core::CurrentImpulseTrace {
+            derivatives: Vec::new(),
             owner: rspice_core::CurrentImpulseOwner::Branch {
                 branch_name: "V1".into(),
             },

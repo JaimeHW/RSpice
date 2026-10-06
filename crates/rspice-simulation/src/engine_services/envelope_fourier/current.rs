@@ -18,6 +18,11 @@ pub(super) fn projection_prefixes(
     trace
         .validate(time[0], time[time.len() - 1])
         .map_err(ServiceRunError::Failure)?;
+    if !trace.derivatives.is_empty() {
+        return Err(ServiceRunError::Failure(
+            "Envelope projection of current impulse derivatives is not yet implemented".into(),
+        ));
+    }
     let mut prefixes = Vec::with_capacity(basis.len());
     for &component in basis {
         ensure_not_aborted(abort)?;
@@ -62,6 +67,7 @@ mod tests {
         let time = [0.0, 0.25, 0.5, 0.75, 1.0];
         let values = [0.0; 5];
         let mut trace = CurrentImpulseTrace {
+            derivatives: Vec::new(),
             owner: CurrentImpulseOwner::Branch {
                 branch_name: "V1".into(),
             },
@@ -107,6 +113,27 @@ mod tests {
             .contains("incomplete")
         );
         trace.complete = true;
+        trace
+            .derivatives
+            .push(rspice_core::CurrentImpulseDerivative {
+                time: 0.5,
+                order: 1,
+                coefficient: -2e-21,
+            });
+        assert!(
+            compute_carrier_envelopes_with_abort(
+                &time,
+                &values,
+                &[0.5],
+                &[1.0],
+                Some(&trace),
+                &NoAbort
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("impulse derivatives")
+        );
+        trace.derivatives.clear();
         let cancelled = rspice_core::abort_signal::CountingAbort::new(0);
         assert!(matches!(
             compute_carrier_envelopes_with_abort(

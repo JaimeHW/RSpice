@@ -1,6 +1,8 @@
 //! Lossless, versioned persistence of physical current ownership and charge.
 use pyo3::prelude::*;
-use rspice_core::{CurrentImpulseOwner, CurrentImpulsePoint, CurrentImpulseTrace};
+use rspice_core::{
+    CurrentImpulseDerivative, CurrentImpulseOwner, CurrentImpulsePoint, CurrentImpulseTrace,
+};
 
 /// Readable, immutable snapshot independent of finite waveform retention.
 #[pyclass(
@@ -21,23 +23,34 @@ pub(crate) struct PyCurrentImpulseTrace {
     complete: bool,
     #[pyo3(get)]
     points: Vec<(f64, f64)>,
+    #[pyo3(get)]
+    derivatives: Vec<(f64, u32, f64)>,
 }
 
 #[pymethods]
 impl PyCurrentImpulseTrace {
     fn __repr__(&self) -> String {
         format!(
-            "CurrentImpulseTrace(owner_kind={:?}, name={:?}, parameter={:?}, complete={}, points={})",
+            "CurrentImpulseTrace(owner_kind={:?}, name={:?}, parameter={:?}, complete={}, points={}, derivatives={})",
             self.owner_kind,
             self.name,
             self.parameter,
             self.complete,
-            self.points.len()
+            self.points.len(),
+            self.derivatives.len()
         )
     }
 }
 
-type ImpulseRow = (String, String, Option<String>, bool, Vec<(f64, f64)>);
+type OwnedImpulseRow = (String, String, Option<String>, bool, Vec<(f64, f64)>);
+type ImpulseRow = (
+    String,
+    String,
+    Option<String>,
+    bool,
+    Vec<(f64, f64)>,
+    Vec<(f64, u32, f64)>,
+);
 type ImpulseRows = Option<Vec<ImpulseRow>>;
 type LegacyImpulseRows = Option<Vec<(String, Vec<(f64, f64)>)>>;
 pub(super) type ImpulsePersistenceState = (usize, ImpulseRows);
@@ -46,6 +59,8 @@ pub(super) type ImpulsePersistenceState = (usize, ImpulseRows);
 pub(super) enum VersionedImpulseState {
     #[pyo3(transparent)]
     Current(ImpulsePersistenceState),
+    #[pyo3(transparent)]
+    Owned((usize, Option<Vec<OwnedImpulseRow>>)),
     #[pyo3(transparent)]
     Legacy((usize, LegacyImpulseRows)),
 }
@@ -77,6 +92,11 @@ pub(super) fn impulse_rows(
                     name,
                     parameter,
                     complete: trace.complete,
+                    derivatives: trace
+                        .derivatives
+                        .iter()
+                        .map(|point| (point.time, point.order, point.coefficient))
+                        .collect(),
                     points: trace
                         .points
                         .iter()
@@ -92,7 +112,7 @@ pub(super) fn impulse_persistence_state(
     traces: Option<&[CurrentImpulseTrace]>,
 ) -> ImpulsePersistenceState {
     (
-        2,
+        3,
         traces.map(|traces| {
             traces
                 .iter()
@@ -108,6 +128,11 @@ pub(super) fn impulse_persistence_state(
                             .iter()
                             .map(|point| (point.time, point.charge_coulombs))
                             .collect(),
+                        trace
+                            .derivatives
+                            .iter()
+                            .map(|point| (point.time, point.order, point.coefficient))
+                            .collect(),
                     )
                 })
                 .collect()
@@ -122,31 +147,43 @@ pub(super) fn restore_impulses(
 ) -> Result<Option<Vec<CurrentImpulseTrace>>, String> {
     let rows = match state {
         None => return Ok(None),
-        Some(VersionedImpulseState::Current((2, rows))) => rows,
-        // Python's empty/None containers fit both shapes. Preserve v1's lack
-        // of owner coverage, regardless of which extractor matched first.
-        Some(VersionedImpulseState::Current((1, rows)))
+        Some(VersionedImpulseState::Current((3, rows))) => rows,
+        // Empty Python containers can match more than one row shape.
+        Some(VersionedImpulseState::Current((1 | 2, rows)))
             if rows.as_ref().is_none_or(Vec::is_empty) =>
         {
             rows
         }
+        Some(VersionedImpulseState::Owned((2, rows))) => rows.map(|rows| {
+            rows.into_iter()
+                .map(|(kind, name, parameter, complete, points)| {
+                    (kind, name, parameter, complete, points, vec![])
+                })
+                .collect()
+        }),
+        Some(VersionedImpulseState::Owned((1, rows)))
+            if rows.as_ref().is_none_or(Vec::is_empty) =>
+        {
+            rows.map(|_| vec![])
+        }
         Some(VersionedImpulseState::Legacy((1, rows))) => rows.map(|rows| {
             rows.into_iter()
-                .map(|(name, points)| ("branch".into(), name, None, false, points))
+                .map(|(name, points)| ("branch".into(), name, None, false, points, vec![]))
                 .collect()
         }),
         Some(
             VersionedImpulseState::Current((version, _))
+            | VersionedImpulseState::Owned((version, _))
             | VersionedImpulseState::Legacy((version, _)),
         ) => {
             return Err(format!(
-                "unsupported current impulse pickle version or row shape {version}; expected version 1 legacy rows or version 2 owned rows"
+                "unsupported current impulse pickle version or row shape {version}; expected versions 1, 2 or 3"
             ));
         }
     };
     rows.map(|rows| {
         rows.into_iter()
-            .map(|(kind, name, parameter, complete, points)| {
+            .map(|(kind, name, parameter, complete, points, derivatives)| {
                 let owner = match (kind.as_str(), parameter) {
                     ("branch", None) => CurrentImpulseOwner::Branch { branch_name: name },
                     ("device_lead", Some(parameter)) => CurrentImpulseOwner::DeviceLead {
@@ -156,6 +193,14 @@ pub(super) fn restore_impulses(
                     _ => return Err("invalid current impulse owner kind or parameter".into()),
                 };
                 Ok(CurrentImpulseTrace {
+                    derivatives: derivatives
+                        .into_iter()
+                        .map(|(time, order, coefficient)| CurrentImpulseDerivative {
+                            time,
+                            order,
+                            coefficient,
+                        })
+                        .collect(),
                     owner,
                     complete,
                     points: points
@@ -180,6 +225,11 @@ mod tests {
     fn impulse_pickle_preserves_availability_sign_float_bits_and_coverage() {
         let traces = vec![
             CurrentImpulseTrace {
+                derivatives: vec![CurrentImpulseDerivative {
+                    time: 0.5,
+                    order: 2,
+                    coefficient: -1e-30,
+                }],
                 owner: CurrentImpulseOwner::Branch {
                     branch_name: "Vdrive".into(),
                 },
@@ -196,6 +246,7 @@ mod tests {
                 ],
             },
             CurrentImpulseTrace {
+                derivatives: Vec::new(),
                 owner: CurrentImpulseOwner::DeviceLead {
                     device_name: "Q1".into(),
                     parameter: "ic".into(),
@@ -225,7 +276,14 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(!restored[0].complete);
-        for version in [0, 3, usize::MAX] {
+        let restored = restore_impulses(Some(VersionedImpulseState::Owned((
+            2,
+            Some(vec![("branch".into(), "V1".into(), None, true, vec![])]),
+        ))))
+        .unwrap()
+        .unwrap();
+        assert!(restored[0].complete && restored[0].derivatives.is_empty());
+        for version in [0, 4, usize::MAX] {
             assert!(
                 restore_impulses(Some(VersionedImpulseState::Current((version, None)))).is_err()
             );

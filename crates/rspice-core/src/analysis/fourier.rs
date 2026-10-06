@@ -664,6 +664,18 @@ impl<'a> FourierQuadrature<'a> {
                 }
                 scale = scale.max(rate.abs().min(1.0));
             }
+            for (index, point) in term.trace.derivatives.iter().enumerate() {
+                if index.is_multiple_of(256) && abort.is_aborted() {
+                    return Err(FourierError::Aborted);
+                }
+                if point.time <= self.time[0] || point.time > self.time[self.time.len() - 1] {
+                    continue;
+                }
+                let rate = point
+                    .periodic_rate(frequency, term.weight, self.duration, 1.0)
+                    .map_err(|detail| FourierError::CurrentObservation { detail })?;
+                scale = scale.max(rate.abs().min(1.0));
+            }
         }
         if scale == 0.0 {
             return Ok((0.0, 0.0));
@@ -731,6 +743,34 @@ impl<'a> FourierQuadrature<'a> {
                     sample * cosine,
                 );
                 if harmonic != 0 {
+                    compensated_add(&mut sine_integral, &mut sine_correction, sample * sine);
+                }
+            }
+            if harmonic != 0 {
+                for (index, point) in term.trace.derivatives.iter().enumerate() {
+                    if index.is_multiple_of(256) && abort.is_aborted() {
+                        return Err(FourierError::Aborted);
+                    }
+                    if point.time <= self.time[0] || point.time > self.time[self.time.len() - 1] {
+                        continue;
+                    }
+                    let sample = point
+                        .periodic_rate(frequency, term.weight, self.duration, scale)
+                        .map_err(|detail| FourierError::CurrentObservation { detail })?;
+                    let (sine, cosine) = phase(point.time).sin_cos();
+                    // (-1)^n times the n-th derivative of the real Fourier
+                    // basis. Integer quarter turns preserve exact axis zeros.
+                    let (cosine, sine) = match point.order % 4 {
+                        0 => (cosine, sine),
+                        1 => (sine, -cosine),
+                        2 => (-cosine, -sine),
+                        _ => (-sine, cosine),
+                    };
+                    compensated_add(
+                        &mut cosine_integral,
+                        &mut cosine_correction,
+                        sample * cosine,
+                    );
                     compensated_add(&mut sine_integral, &mut sine_correction, sample * sine);
                 }
             }

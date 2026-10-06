@@ -138,6 +138,16 @@ pub(super) fn compile<'a>(
         let terms = current_observation::resolve(Some(netlist), result, spec, window, abort)?;
         if terms.is_empty() {
             Ok(())
+        } else if terms.iter().any(|term| {
+            term.trace
+                .derivatives
+                .iter()
+                .any(|point| point.time > window.0 && point.time <= window.1)
+        }) {
+            Err(invalid(format!(
+                "measurement '{}' requires a finite-valued signal: '{spec}' has current impulse derivatives in its observation window",
+                statement.name
+            )))
         } else {
             Err(invalid(format!(
                 "measurement '{}' requires a finite-valued signal: '{spec}' has charge impulses in its observation window; use INTEG or AVG for total current",
@@ -179,6 +189,16 @@ pub(super) fn compile<'a>(
             )?;
             if terms.is_empty() {
                 return Ok(None);
+            }
+            if terms.iter().any(|term| {
+                term.trace
+                    .derivatives
+                    .iter()
+                    .any(|point| point.time > start && point.time <= stop)
+            }) {
+                return Err(invalid(
+                    "INTEG/AVG of current impulse derivatives needs distributional boundary state, which is not yet implemented",
+                ));
             }
             let mut cursors = Vec::new();
             cursors
@@ -317,6 +337,7 @@ mod tests {
             fft_results: vec![],
             current_impulses: Some(vec![
                 CurrentImpulseTrace {
+                    derivatives: Vec::new(),
                     owner: CurrentImpulseOwner::Branch {
                         branch_name: "V1".into(),
                     },
@@ -336,6 +357,7 @@ mod tests {
                     .collect(),
                 },
                 CurrentImpulseTrace {
+                    derivatives: Vec::new(),
                     owner: CurrentImpulseOwner::DeviceLead {
                         device_name: "Q1".into(),
                         parameter: "ic".into(),
@@ -381,6 +403,38 @@ mod tests {
         value(&results, "middle_avg", 1.002);
         value(&results, "lead", -0.002);
         value(&results, "affine", 2.014);
+    }
+
+    #[test]
+    fn current_measure_impulse_derivatives_are_not_silently_dropped() {
+        let mut result = fixture();
+        let trace = &mut result.current_impulses.as_mut().unwrap()[0];
+        trace.points.clear();
+        trace.derivatives = vec![crate::CurrentImpulseDerivative {
+            time: 0.5,
+            order: 1,
+            coefficient: -2e-21,
+        }];
+        let netlist = deck(
+            ".meas tran charge INTEG I(V1)\n.meas tran mean AVG I(V1)\n.meas tran peak MAX I(V1)\n.meas tran at_event FIND I(V1) AT=.5\n.meas tran away FIND I(V1) AT=.625\n.meas tran before INTEG I(V1) FROM=0 TO=.25",
+        );
+        let measured = evaluate_tran_measurements(&netlist, &result);
+        for name in ["charge", "mean", "peak", "at_event"] {
+            let failed = measured
+                .iter()
+                .find(|m| m.name.eq_ignore_ascii_case(name))
+                .unwrap();
+            assert!(!failed.passed && failed.value.is_none(), "{failed:?}");
+            assert!(
+                failed
+                    .error
+                    .as_ref()
+                    .unwrap()
+                    .contains("impulse derivatives")
+            );
+        }
+        value(&measured, "away", 1.0);
+        value(&measured, "before", 0.25);
     }
 
     #[test]

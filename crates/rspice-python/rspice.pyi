@@ -1135,11 +1135,13 @@ class BusEvent:
 
 @final
 class CurrentImpulseTrace:
-    """A current owner and sparse charge observations, separate from amperes.
+    """A current owner and singular observations, separate from finite amperes.
 
     owner_kind is 'branch' or 'device_lead'; parameter identifies the lead.
-    points contains (seconds, coulombs). Only an empty complete trace proves
-    no impulses for that owner. Missing owners have no coverage claim.
+    points contains (seconds, coulombs). derivatives contains (seconds, order,
+    coefficient), with positive order and coefficient units A*s**(order+1).
+    A complete trace with both lists empty proves no impulses for that owner.
+    Missing owners have no coverage claim.
     """
     @property
     def owner_kind(self) -> str: ...
@@ -1151,6 +1153,8 @@ class CurrentImpulseTrace:
     def complete(self) -> bool: ...
     @property
     def points(self) -> list[tuple[float, float]]: ...
+    @property
+    def derivatives(self) -> list[tuple[float, int, float]]: ...
 
 @final
 class TransientResult:

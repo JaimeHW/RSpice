@@ -90,6 +90,7 @@ pub(super) fn initialize(
             return Err(SimulationError::Aborted);
         }
         traces.push(CurrentImpulseTrace {
+            derivatives: Vec::new(),
             owner: CurrentImpulseOwner::Branch {
                 branch_name: copied(name)?,
             },
@@ -149,6 +150,7 @@ pub(super) fn initialize(
         let first = traces.len();
         for parameter in ["ic", "ib", "ie", "is"] {
             traces.push(CurrentImpulseTrace {
+                derivatives: Vec::new(),
                 owner: CurrentImpulseOwner::DeviceLead {
                     device_name: copied(&model.name)?,
                     parameter: copied(parameter)?,
@@ -359,6 +361,7 @@ mod tests {
                 ["Vdrive", "Rzero"]
                     .into_iter()
                     .map(|name| CurrentImpulseTrace {
+                        derivatives: Vec::new(),
                         owner: CurrentImpulseOwner::Branch {
                             branch_name: name.into(),
                         },

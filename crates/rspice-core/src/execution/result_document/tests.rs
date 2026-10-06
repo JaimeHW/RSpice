@@ -145,6 +145,7 @@ fn current_impulse_document_preserves_charge_availability_and_versions() {
     let unavailable = document(&result);
     let base_count = unavailable.total_value_count();
     result.current_impulses = Some(vec![crate::CurrentImpulseTrace {
+        derivatives: Vec::new(),
         owner: crate::CurrentImpulseOwner::Branch {
             branch_name: "v1".into(),
         },
@@ -207,6 +208,7 @@ fn current_impulse_document_requires_version_seven_for_owned_coverage() {
     let mut result = transient_result();
     result.current_impulses = Some(vec![
         crate::CurrentImpulseTrace {
+            derivatives: Vec::new(),
             owner: crate::CurrentImpulseOwner::Branch {
                 branch_name: "v1".into(),
             },
@@ -214,6 +216,7 @@ fn current_impulse_document_requires_version_seven_for_owned_coverage() {
             points: vec![],
         },
         crate::CurrentImpulseTrace {
+            derivatives: Vec::new(),
             owner: crate::CurrentImpulseOwner::DeviceLead {
                 device_name: "Q1".into(),
                 parameter: "ic".into(),
@@ -243,6 +246,45 @@ fn current_impulse_document_requires_version_seven_for_owned_coverage() {
     let mut wire: serde_json::Value = serde_json::from_str(&json).unwrap();
     wire["payload"]["currentImpulses"][1]["branchName"] = "v1".into();
     assert!(AnalysisResultDocument::from_json(&wire.to_string()).is_err());
+}
+
+#[test]
+fn current_impulse_derivative_document_requires_version_ten_and_counts_all_terms() {
+    let mut result = transient_result();
+    result.current_impulses = Some(vec![crate::CurrentImpulseTrace {
+        owner: crate::CurrentImpulseOwner::Branch {
+            branch_name: "v1".into(),
+        },
+        complete: true,
+        points: vec![],
+        derivatives: vec![crate::CurrentImpulseDerivative {
+            time: 1e-6,
+            order: 1,
+            coefficient: -1e-21,
+        }],
+    }]);
+    let document =
+        AnalysisResultDocument::from_transient(instance(AnalysisKind::Tran), &result, None, vec![])
+            .unwrap()
+            .build()
+            .unwrap();
+    let json = document.to_json().unwrap();
+    assert_eq!(AnalysisResultDocument::from_json(&json).unwrap(), document);
+    let count = document.total_value_count();
+    let mut wire: serde_json::Value = serde_json::from_str(&json).unwrap();
+    wire["schemaVersion"] = 9.into();
+    assert!(
+        AnalysisResultDocument::from_json(&wire.to_string())
+            .unwrap_err()
+            .to_string()
+            .contains("version 10")
+    );
+    wire["payload"]["currentImpulses"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("derivatives");
+    let legacy = AnalysisResultDocument::from_json(&wire.to_string()).unwrap();
+    assert_eq!(legacy.total_value_count() + 3, count);
 }
 
 fn noise_points() -> Vec<NoiseResult> {
