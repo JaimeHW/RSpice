@@ -366,11 +366,19 @@ materialize once, so repeated references do not resample statistical parameters.
 Static parameter validation uses the numeric expression language, including
 complex functions such as `IMG`.
 
-General dependency planning remains incomplete: the ngspice expression dialect
-still rejects forward ordinary `.PARAM` declarations, and references to an
-enclosing scope that is still incomplete need further work. An early expression
-that is invalid at the provisional temperature can also fail before replay in
-the ngspice dialect. These cases remain in the implementation plan.
+Both expression dialects retain ordinary forward `.PARAM` declarations,
+including bare and signed aliases. Failed probes preserve the random stream;
+selected definitions retain their source location, and duplicate selection and
+diagnostic policies still apply. Ordinary static declarations finalize before
+model expressions read them, so a model and its parameter share one sample.
+Ngspice ordinary parameters remain static; Xyce runtime expressions remain
+symbolic where required.
+
+General dependency planning remains incomplete: eager analysis cards, deferred
+source specifications, and references to an enclosing scope that is still
+incomplete need further work. An early expression invalid at the provisional
+temperature can also fail before replay in the ngspice dialect. These cases
+remain in the implementation plan.
 
 The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and
 the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.

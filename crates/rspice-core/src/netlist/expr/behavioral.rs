@@ -690,8 +690,8 @@ pub fn validate_parameter_expressions(params: &ParamContext) -> Result<(), Strin
 
 /// Validate retained expressions, then collapse declaration-order-dependent
 /// ordinary expressions that become static once the complete scope is known.
-/// Definitions that still reference `TIME` or `FREQ` remain symbolic for
-/// device binding at the active analysis point.
+/// Xyce definitions that still reference `TIME` or `FREQ` remain symbolic
+/// for device binding at the active analysis point.
 pub fn finalize_parameter_expressions(params: &mut ParamContext) -> Result<(), String> {
     finalize_parameter_expressions_with_abort(params, &NoAbort).map_err(|error| error.to_string())
 }
@@ -712,19 +712,27 @@ pub(crate) fn finalize_parameter_expressions_with_abort(
             return Err(ParameterResolutionError::Aborted);
         }
         let prepared = prepare_behavioral_expression(&name, params).map_err(|error| {
-            ParameterResolutionError::Definition(format!(
-                "Unable to resolve parameter {name}: {error}"
+            ParameterResolutionError::Definition(parameter_error_with_origin(
+                params,
+                &name,
+                false,
+                format!("Unable to resolve parameter {name}: {error}"),
             ))
         })?;
-        if behavioral_expression_references_runtime_quantity(&prepared) {
+        if params.expression_dialect() == crate::config::ExpressionDialect::Xyce
+            && behavioral_expression_references_runtime_quantity(&prepared)
+        {
             continue;
         }
         let value = resolver
             .resolve(&name, &expression, params, abort)
             .map_err(|error| match error {
                 ParameterResolutionError::Aborted => ParameterResolutionError::Aborted,
-                error => ParameterResolutionError::Definition(format!(
-                    "Unable to resolve parameter {name}: {error}"
+                error => ParameterResolutionError::Definition(parameter_error_with_origin(
+                    params,
+                    &name,
+                    false,
+                    format!("Unable to resolve parameter {name}: {error}"),
                 )),
             })?;
         params.set_complex(&name, value);
@@ -794,59 +802,81 @@ fn validate_parameter_expression_definitions(
     let mut static_context = None;
     let mut static_resolver = ParameterResolver::default();
     for (name, expression) in definitions {
-        // Expand the definition body itself. Looking up the root by name
-        // would select a same-name ordinary binding while validating the
-        // independent global namespace.
-        let root = if kind == ParameterExpressionKind::Global && params.has_parameter_binding(name)
-        {
-            expression.as_str()
-        } else {
-            name.as_str()
-        };
-        let prepared = prepare_behavioral_expression(root, params)
-            .map_err(|error| format!("Unable to resolve {description} {name}: {error}"))?;
-        let parsed = parse_net_expr(&prepared)
-            .map_err(|error| format!("Unable to resolve {description} {name}: {error}"))?;
-        if kind == ParameterExpressionKind::Global
-            && net_expr_references_special(&parsed, RuntimeSpecialQuantity::Gmin)
-        {
-            return Err(format!("Global parameter {name} may not reference GMIN"));
-        }
-        if net_expr_contains_circuit_probe(&parsed) {
-            return Err(format!(
-                "{} {name} may not reference node voltages or branch currents",
-                if kind == ParameterExpressionKind::Global {
-                    "Global parameter"
-                } else {
-                    "Parameter"
-                }
-            ));
-        }
-        if net_expr_references_runtime_quantity(&parsed) {
-            if let Some(identifier) = first_unresolved_global_identifier(&parsed) {
+        let result = (|| -> Result<(), String> {
+            // Expand the definition body itself. Looking up the root by name
+            // would select a same-name ordinary binding while validating the
+            // independent global namespace.
+            let root = if kind == ParameterExpressionKind::Global
+                && params.has_parameter_binding(name)
+            {
+                expression.as_str()
+            } else {
+                name.as_str()
+            };
+            let prepared = prepare_behavioral_expression(root, params)
+                .map_err(|error| format!("Unable to resolve {description} {name}: {error}"))?;
+            let parsed = parse_net_expr(&prepared)
+                .map_err(|error| format!("Unable to resolve {description} {name}: {error}"))?;
+            if kind == ParameterExpressionKind::Global
+                && net_expr_references_special(&parsed, RuntimeSpecialQuantity::Gmin)
+            {
+                return Err(format!("Global parameter {name} may not reference GMIN"));
+            }
+            if net_expr_contains_circuit_probe(&parsed) {
                 return Err(format!(
-                    "Unable to resolve {description} {name}: Undefined parameter: {identifier}"
+                    "{} {name} may not reference node voltages or branch currents",
+                    if kind == ParameterExpressionKind::Global {
+                        "Global parameter"
+                    } else {
+                        "Parameter"
+                    }
                 ));
             }
-            crate::expr::parse_expression_strict(&prepared)
-                .map_err(|error| format!("Unable to resolve {description} {name}: {error}"))?;
-        } else {
-            // Static definitions use the complex numeric language, which has
-            // functions (such as IMG) that the real runtime compiler lacks.
-            // Validation must not consume the authored statistical stream.
-            let isolated = static_context.get_or_insert_with(|| params.isolated_random_clone());
-            let result = match kind {
-                ParameterExpressionKind::Ordinary => {
-                    static_resolver.resolve(name, expression, isolated, &NoAbort)
+            if (kind == ParameterExpressionKind::Global
+                || params.expression_dialect() == crate::config::ExpressionDialect::Xyce)
+                && net_expr_references_runtime_quantity(&parsed)
+            {
+                if let Some(identifier) = first_unresolved_global_identifier(&parsed) {
+                    return Err(format!(
+                        "Unable to resolve {description} {name}: Undefined parameter: {identifier}"
+                    ));
                 }
-                ParameterExpressionKind::Global => {
-                    static_resolver.resolve_global(name, expression, isolated, &NoAbort)
-                }
-            };
-            result.map_err(|error| format!("Unable to resolve {description} {name}: {error}"))?;
-        }
+                crate::expr::parse_expression_strict(&prepared)
+                    .map_err(|error| format!("Unable to resolve {description} {name}: {error}"))?;
+            } else {
+                // Static definitions use the complex numeric language, which has
+                // functions (such as IMG) that the real runtime compiler lacks.
+                // Validation must not consume the authored statistical stream.
+                let isolated = static_context.get_or_insert_with(|| params.isolated_random_clone());
+                let result = match kind {
+                    ParameterExpressionKind::Ordinary => {
+                        static_resolver.resolve(name, expression, isolated, &NoAbort)
+                    }
+                    ParameterExpressionKind::Global => {
+                        static_resolver.resolve_global(name, expression, isolated, &NoAbort)
+                    }
+                };
+                result.map_err(|error| format!("Unable to resolve {description} {name}: {error}"))?;
+            }
+            Ok(())
+        })();
+        result.map_err(|error| {
+            parameter_error_with_origin(params, name, kind == ParameterExpressionKind::Global, error)
+        })?;
     }
     Ok(())
+}
+
+fn parameter_error_with_origin(
+    params: &ParamContext,
+    name: &str,
+    global: bool,
+    message: String,
+) -> String {
+    match params.expression_origin(name, global) {
+        Some(origin) => format!("{origin}: {message}"),
+        None => message,
+    }
 }
 
 fn net_expr_references_special(expression: &NetExpr, special: RuntimeSpecialQuantity) -> bool {

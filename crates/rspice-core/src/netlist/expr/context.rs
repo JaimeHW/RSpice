@@ -320,11 +320,14 @@ pub struct ParamContext {
     params: HashMap<String, Value>,
     complex_params: HashMap<String, ComplexValue>,
     string_params: HashMap<String, String>,
-    /// Retained ordinary `.PARAM`/`.CSPARAM` expressions whose value depends
-    /// on an active analysis quantity such as `TIME` or `FREQ`. Ordinary
-    /// expressions remain scoped and settable; a numeric or string binding in
-    /// a child scope removes the inherited symbolic definition.
+    /// Retained ordinary `.PARAM`/`.CSPARAM` expressions awaiting a forward
+    /// dependency, or an active analysis quantity in the Xyce dialect. These
+    /// remain scoped and settable; a numeric or string binding in a child
+    /// scope removes the inherited symbolic definition.
     parameter_expressions: HashMap<String, String>,
+    /// Physical origins of retained definitions, keyed by global namespace
+    /// and canonical name. Numeric bindings do not retain this metadata.
+    retained_expression_origins: HashMap<(bool, String), crate::netlist::NetlistSourceLocation>,
     /// Definition-time bindings for ordinary root parameters that depend on a
     /// statistical coordinate. Immutable captures share prior alias versions.
     statistical_captures: HashMap<String, Arc<CapturedStatisticalParameter>>,
@@ -377,6 +380,7 @@ impl ParamContext {
     /// Set a parameter value
     pub fn set(&mut self, name: &str, value: Value) {
         let key = name.to_uppercase();
+        self.forget_expression_origin(&key, false);
         self.params.insert(key.clone(), value);
         self.complex_params.remove(&key);
         self.string_params.remove(&key);
@@ -390,6 +394,7 @@ impl ParamContext {
     /// Set a parameter value while preserving its imaginary component.
     pub fn set_complex(&mut self, name: &str, value: ComplexValue) {
         let key = name.to_uppercase();
+        self.forget_expression_origin(&key, false);
         self.params.insert(key.clone(), value.re);
         self.string_params.remove(&key);
         self.parameter_expressions.remove(&key);
@@ -407,6 +412,7 @@ impl ParamContext {
     /// Set a string parameter value.
     pub fn set_string(&mut self, name: &str, value: impl Into<String>) {
         let key = name.to_uppercase();
+        self.forget_expression_origin(&key, false);
         self.string_params.insert(key.clone(), value.into());
         self.params.remove(&key);
         self.complex_params.remove(&key);
@@ -428,6 +434,7 @@ impl ParamContext {
         static_value: Option<ComplexValue>,
     ) {
         let key = name.to_uppercase();
+        self.forget_expression_origin(&key, false);
         self.statistical_captures.remove(&key);
         if let Some(directions) = &mut self.parameter_directions {
             directions.ordinary.remove(&key);
@@ -442,6 +449,42 @@ impl ParamContext {
             }
         }
         self.parameter_expressions.insert(key, expression.into());
+    }
+
+    pub(crate) fn retain_expression_origin(
+        &mut self,
+        name: &str,
+        global: bool,
+        origin: &crate::netlist::NetlistSourceLocation,
+    ) {
+        let key = name.to_uppercase();
+        let retained = if global {
+            self.global_expressions.contains_key(&key)
+        } else {
+            self.parameter_expressions.contains_key(&key)
+        };
+        if retained {
+            self.retained_expression_origins
+                .insert((global, key), origin.clone());
+        }
+    }
+
+    pub(crate) fn expression_origin(
+        &self,
+        name: &str,
+        global: bool,
+    ) -> Option<&crate::netlist::NetlistSourceLocation> {
+        if self.retained_expression_origins.is_empty() {
+            return None;
+        }
+        self.retained_expression_origins
+            .get(&(global, name.to_uppercase()))
+    }
+
+    fn forget_expression_origin(&mut self, key: &str, global: bool) {
+        if !self.retained_expression_origins.is_empty() {
+            self.retained_expression_origins.remove(&(global, key.to_owned()));
+        }
     }
 
     /// Return a retained ordinary scoped parameter expression.
@@ -470,6 +513,7 @@ impl ParamContext {
         static_value: Option<ComplexValue>,
     ) {
         let key = name.to_uppercase();
+        self.forget_expression_origin(&key, true);
         if let Some(directions) = &mut self.parameter_directions {
             directions.global.remove(&key);
         }
@@ -489,6 +533,7 @@ impl ParamContext {
     /// ordinary `.PARAM` binding.
     pub fn set_global(&mut self, name: &str, value: Value) {
         let key = name.to_uppercase();
+        self.forget_expression_origin(&key, true);
         if let Some(directions) = &mut self.parameter_directions {
             directions.global.remove(&key);
         }
@@ -501,6 +546,7 @@ impl ParamContext {
     /// Set a complex `.GLOBAL_PARAM` value without crossing namespaces.
     pub fn set_global_complex(&mut self, name: &str, value: ComplexValue) {
         let key = name.to_uppercase();
+        self.forget_expression_origin(&key, true);
         if let Some(directions) = &mut self.parameter_directions {
             directions.global.remove(&key);
         }
@@ -517,6 +563,7 @@ impl ParamContext {
     /// Set a string `.GLOBAL_PARAM` value without crossing namespaces.
     pub fn set_global_string(&mut self, name: &str, value: impl Into<String>) {
         let key = name.to_uppercase();
+        self.forget_expression_origin(&key, true);
         if let Some(directions) = &mut self.parameter_directions {
             directions.global.remove(&key);
         }
@@ -766,6 +813,12 @@ impl ParamContext {
                 .or_else(|| other.global_params.get(k).copied().map(ComplexValue::from));
             self.define_global_expression(k, expression.clone(), value);
         }
+        self.retained_expression_origins.extend(
+            other
+                .retained_expression_origins
+                .iter()
+                .map(|(key, origin)| (key.clone(), origin.clone())),
+        );
         for (k, v) in &other.functions {
             self.functions.insert(k.clone(), v.clone());
         }

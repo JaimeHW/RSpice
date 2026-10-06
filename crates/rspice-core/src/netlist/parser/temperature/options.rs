@@ -83,9 +83,9 @@ impl TemperatureOptionSink<'_> {
             }
             _ => None,
         };
-        let deferred = if let Some(expression) =
-            expression.filter(|expression| needs_forward_probe(expression, params))
-        {
+        let deferred = if let Some(expression) = expression.filter(|expression| {
+            crate::netlist::expr::needs_forward_reference_probe(expression, params)
+        }) {
             // A failed evaluation can already have sampled a random function.
             // Probe on an isolated stream; immediate values are evaluated on
             // the live stream exactly once. Forward expressions draw only when
@@ -214,38 +214,6 @@ impl PendingTemperatureOption {
             message: format!("{}: {}: {message}", self.origin, self.option.name()),
         }
     }
-}
-
-/// Known scalar bindings and builtin functions cannot introduce a missing name.
-/// Keep their common path free of full parameter-environment snapshots. User
-/// functions and retained bindings are conservatively probed because their
-/// bodies can hide both forward references and statistical calls.
-fn needs_forward_probe(expression: &str, params: &ParamContext) -> bool {
-    use crate::netlist::expr::Expr;
-    let Ok(parsed) = parse_expression(expression) else {
-        return false;
-    };
-    let mut pending = vec![&parsed];
-    while let Some(node) = pending.pop() {
-        match node {
-            Expr::Param(name)
-                if params.get_complex(name).is_none()
-                    || params.get_parameter_expression(name).is_some()
-                    || params.get_global_expression(name).is_some() =>
-            {
-                return true;
-            }
-            Expr::FnCall { name, .. } if params.get_function(name).is_some() => return true,
-            Expr::FnCall { args, .. } => pending.extend(args.iter()),
-            Expr::BinOp { left, right, .. } => {
-                pending.push(right);
-                pending.push(left);
-            }
-            Expr::UnaryOp { operand, .. } => pending.push(operand),
-            _ => {}
-        }
-    }
-    false
 }
 
 #[cfg(test)]

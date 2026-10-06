@@ -68,7 +68,11 @@ impl ParameterResolver {
         }
         for (name, value) in &self.values[1] {
             if let Some(expression) = params.get_global_expression(name).map(str::to_owned) {
+                let origin = params.expression_origin(name, true).cloned();
                 params.define_global_expression(name, expression, Some(*value));
+                if let Some(origin) = origin {
+                    params.retain_expression_origin(name, true, &origin);
+                }
             }
         }
     }

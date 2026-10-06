@@ -70,3 +70,34 @@ pub fn eval_simple(input: &str) -> Result<Value, ExprError> {
 pub fn eval_simple_complex(input: &str) -> Result<ComplexValue, ExprError> {
     eval_expression_complex(input, &ParamContext::new())
 }
+
+/// Known scalar bindings and builtin functions cannot introduce a missing name.
+/// Keep their common path free of full parameter-environment snapshots. User
+/// functions and retained bindings are conservatively probed because their
+/// bodies can hide both forward references and statistical calls.
+pub(crate) fn needs_forward_reference_probe(expression: &str, params: &ParamContext) -> bool {
+    let Ok(parsed) = parse_expression(expression) else {
+        return false;
+    };
+    let mut pending = vec![&parsed];
+    while let Some(node) = pending.pop() {
+        match node {
+            Expr::Param(name)
+                if params.get_complex(name).is_none()
+                    || params.get_parameter_expression(name).is_some()
+                    || params.get_global_expression(name).is_some() =>
+            {
+                return true;
+            }
+            Expr::FnCall { name, .. } if params.get_function(name).is_some() => return true,
+            Expr::FnCall { args, .. } => pending.extend(args.iter()),
+            Expr::BinOp { left, right, .. } => {
+                pending.push(right);
+                pending.push(left);
+            }
+            Expr::UnaryOp { operand, .. } => pending.push(operand),
+            _ => {}
+        }
+    }
+    false
+}

@@ -5971,6 +5971,7 @@ pub(super) fn parse_param_statement(
                 name.clone(),
                 parameter_override.map(|parameter| parameter.value),
             )?;
+            params.retain_expression_origin(&name, retain_global_expression, origin);
             if parameter_override.is_some_and(|parameter| parameter.direction) {
                 params.seed_parameter_direction(&name, retain_global_expression);
             }
@@ -6246,6 +6247,15 @@ fn parse_param_assignment_value(
                 Err(err) => {
                     let expr = collect_param_rhs_expression(stream, line_num, &name)?;
                     reject_parameter_expression_circuit_probe(&name, &expr, line_num, params)?;
+                    let err = match crate::netlist::expr::eval_expression_complex(
+                        &expr,
+                        &params.isolated_random_clone(),
+                    ) {
+                        Err(error @ crate::netlist::expr::ExprError::UndefinedParam(_)) => {
+                            ParseError::InvalidValue(format!("line {line_num}: {error}"))
+                        }
+                        _ => err,
+                    };
                     defer_param_expression_or_error(
                         deferred_params,
                         params,
@@ -6277,6 +6287,11 @@ fn eval_and_bind_param_expression(
     global: bool,
     root_scope: bool,
 ) -> Result<(), crate::netlist::expr::ExprError> {
+    if crate::netlist::expr::needs_forward_reference_probe(expression, params) {
+        // An unresolved declaration must not retain draws from a failed
+        // partial evaluation. The full expression draws once when resolved.
+        crate::netlist::expr::eval_expression_complex(expression, &params.isolated_random_clone())?;
+    }
     // Capture before evaluation so random operators replay the same draw
     // positions without consuming additional draws from the authored stream.
     let capture = if root_scope && !global {
@@ -6347,16 +6362,14 @@ fn defer_param_expression_or_error(
     if parameter_error_can_defer(&err) {
         if retain_global_expression {
             params.define_global_expression(&name, &expr, None);
-        } else if params.expression_dialect() == ExpressionDialect::Xyce {
+        } else {
             params.define_parameter_expression(&name, &expr, None);
         }
         if let Some(deferred_params) = deferred_params {
             upsert_param_expression(deferred_params, name, expr);
             return Ok(());
         }
-        if retain_global_expression || params.expression_dialect() == ExpressionDialect::Xyce {
-            return Ok(());
-        }
+        return Ok(());
     }
     Err(err)
 }

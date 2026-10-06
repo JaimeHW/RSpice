@@ -1156,6 +1156,15 @@ fn parse_netlist_impl(
         &mut state.element_names,
         abort,
     )?;
+    // Resolve ordinary declarations in their owning scope before models read
+    // them. Materializing a shared-random clone here and the original scope
+    // later would sample a forward statistical parameter twice, giving the
+    // model and the returned netlist different values.
+    crate::netlist::expr::finalize_parameter_expressions_with_abort(&mut state.params, abort)
+        .map_err(|error| match error {
+            crate::netlist::expr::ParameterResolutionError::Aborted => ParseWithAbortError::Aborted,
+            error => ParseError::InvalidValue(error.to_string()).into(),
+        })?;
     resolve_static_model_expression_params_with_abort(&mut state, abort)?;
     let pending_xyce_diode_model_warnings =
         std::mem::take(&mut state.pending_xyce_diode_model_warnings);
