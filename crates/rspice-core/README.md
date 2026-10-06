@@ -933,10 +933,17 @@ outside this analysis's ownership. Fixed device state, other model providers,
 and solver workspaces are outside this specific record-storage budget.
 
 These policy refusals carry `ResourceKind::TransportHistoryBytes`. Fallible GP
-transport initialization, growth, and BJT history copies preserve
-`SimulationError::Allocation` and the stable `allocation_failed` code,
-including through capture and restore.
+transport initialization, growth, fixed BJT history lanes, owned UIC solution
+seeds, and BJT history copies preserve `SimulationError::Allocation` and the
+stable `allocation_failed` code, including through capture and restore.
 Both belong to the resource-error category and are not automatically retried.
+
+BJT restart and shooting initialization prepare this storage before changing
+accepted state; periodic reconstruction reserves all history generations before
+installing BJT bias. Resume uses restored BJT history without constructing a
+discarded replacement. This allocation contract covers BJT history storage and
+its UIC copies; other model state, caches, and solver workspaces have separate
+allocation paths.
 
 The GP exact-transport path tracks all unknown events and
 known discontinuities through derivative order two. Solver-certified C2
