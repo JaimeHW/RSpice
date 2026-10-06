@@ -8,6 +8,11 @@ use std::collections::BTreeMap;
 mod descriptor;
 pub(super) use descriptor::{ConstraintDisposition, close_descriptor};
 
+// The circuit adapter is being implemented alongside this kernel. Keep the
+// unfinished adapter out of production until its complete contract is wired.
+#[cfg(test)]
+mod transition;
+
 #[derive(Debug, Clone)]
 pub(super) struct ExactRow<K> {
     pub(super) nodes: BTreeMap<usize, BigInt>,
