@@ -493,6 +493,15 @@ selects the sampled grid of a mixed-signal result. `convert mixed.raw events.vcd
 --to vcd` preserves its complete event timelines. RAW numeric admission limits
 cover all plots together, including plots outside the selection.
 
+Touchstone `.sNp` and `.ts` inputs are auto-detected; `convert --from touchstone`
+selects the parser for another extension. RI, magnitude/angle and dB/angle
+values become complex coefficients on a hertz coordinate. Port references
+remain numeric `Z0(port)` columns, so two equal coefficient arrays with
+unequal reference impedances do not compare equal. If a file carries noise,
+select `--section network` or `--section noise`: the latter keeps its own
+frequency grid, noise resistance in ohms, optimum complex reflection, and
+reference temperature. All sections are parsed and bounded before selection.
+
 **`convert`** preserves complex AC data across every round trip
 (`Re(..)`/`Im(..)` column pairs in CSV and TSV, `Flags: complex` in rawfiles,
 real/imag arrays in JSON and HDF5). One sample is a result: an operating point

@@ -6,33 +6,48 @@
 //! A VCD is not a table on disk; [`crate::commands::vcd_io`] makes one out of
 //! it, so a dump reads here like everything else.
 
-use crate::cli::{CliError, OutputFormat};
+#[cfg(test)]
+use crate::cli::OutputFormat;
+use crate::cli::{CliError, InputFormat};
 use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
 use crate::hdf5::read_hdf5_sections_with_limits;
 use std::io::Read;
 use std::path::Path;
 
+mod touchstone;
+
 /// Guess a format from the file extension; rawfile when unknown.
-pub(crate) fn detect_format(path: &Path) -> OutputFormat {
+pub(crate) fn detect_format(path: &Path) -> InputFormat {
     match path
         .extension()
         .and_then(|e| e.to_str())
         .map(|e| e.to_ascii_lowercase())
         .as_deref()
     {
-        Some("csv") => OutputFormat::Csv,
-        Some("tsv") => OutputFormat::Tsv,
-        Some("json") => OutputFormat::Json,
-        Some("h5") | Some("hdf5") => OutputFormat::Hdf5,
-        Some("vcd") => OutputFormat::Vcd,
-        _ => OutputFormat::Raw,
+        Some("csv") => InputFormat::Csv,
+        Some("tsv") => InputFormat::Tsv,
+        Some("json") => InputFormat::Json,
+        Some("h5") | Some("hdf5") => InputFormat::Hdf5,
+        Some("vcd") => InputFormat::Vcd,
+        Some(ext)
+            if ext == "ts"
+                || ext
+                    .strip_prefix('s')
+                    .and_then(|ext| ext.strip_suffix('p'))
+                    .is_some_and(|ports| {
+                        !ports.is_empty() && ports.bytes().all(|byte| byte.is_ascii_digit())
+                    }) =>
+        {
+            InputFormat::Touchstone
+        }
+        _ => InputFormat::Raw,
     }
 }
 
 /// Load a result file into a table.
 pub(crate) fn load_table(
     path: &Path,
-    format: OutputFormat,
+    format: impl Into<InputFormat>,
     resource_limits: rspice_core::ResourceLimits,
 ) -> Result<ExportTable, CliError> {
     load_table_selected(path, format, resource_limits, None)
@@ -41,17 +56,18 @@ pub(crate) fn load_table(
 /// Select one fully validated container section by exact name or one-based index.
 pub(crate) fn load_table_selected(
     path: &Path,
-    format: OutputFormat,
+    format: impl Into<InputFormat>,
     resource_limits: rspice_core::ResourceLimits,
     section: Option<&str>,
 ) -> Result<ExportTable, CliError> {
-    let table = match format {
-        OutputFormat::Raw | OutputFormat::RawAscii => load_rawfile(path, resource_limits, section),
-        OutputFormat::Csv => load_delimited(path, ',', resource_limits),
-        OutputFormat::Tsv => load_delimited(path, '\t', resource_limits),
-        OutputFormat::Json => load_json(path, resource_limits),
-        OutputFormat::Hdf5 => load_hdf5(path, resource_limits, section),
-        OutputFormat::Vcd => crate::commands::vcd_io::load_vcd_table(path, resource_limits),
+    let table = match format.into() {
+        InputFormat::Raw | InputFormat::RawAscii => load_rawfile(path, resource_limits, section),
+        InputFormat::Csv => load_delimited(path, ',', resource_limits),
+        InputFormat::Tsv => load_delimited(path, '\t', resource_limits),
+        InputFormat::Json => load_json(path, resource_limits),
+        InputFormat::Hdf5 => load_hdf5(path, resource_limits, section),
+        InputFormat::Vcd => crate::commands::vcd_io::load_vcd_table(path, resource_limits),
+        InputFormat::Touchstone => touchstone::load(path, resource_limits, section),
     }?;
     validate_table_shape(path, table, resource_limits)
 }
@@ -242,7 +258,11 @@ fn validate_values(path: &Path, signal: &str, part: &str, values: &[f64]) -> Res
 
 /// The default is safe only when the container carries one result. Names are
 /// exact; a one-based index can disambiguate repeated names in a RAW file.
-fn select_section(path: &Path, names: &[&str], selector: Option<&str>) -> Result<usize, CliError> {
+pub(super) fn select_section(
+    path: &Path,
+    names: &[&str],
+    selector: Option<&str>,
+) -> Result<usize, CliError> {
     if selector.is_none() && names.len() == 1 {
         return Ok(0);
     }
@@ -1250,7 +1270,7 @@ mod tests {
         ] {
             assert_eq!(
                 detect_format(Path::new(&format!("result.{extension}"))),
-                expected,
+                InputFormat::from(expected),
                 "unexpected format for .{extension}"
             );
         }

@@ -5403,6 +5403,7 @@ dependencies = [
  "mimalloc",
  "rayon",
  "rspice-core",
+ "rspice-formats",
  "rspice-output",
  "rspice-veriloga",
  "rustyhdf5",
