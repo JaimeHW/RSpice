@@ -81,3 +81,30 @@ fn stdout_summary_preserves_control_print_as_a_listed_json_artifact() {
     assert_eq!(print["command"], "print");
     assert_eq!(print["traces"][0]["y"]["samples"][0][0], 3.0);
 }
+
+#[test]
+fn operating_point_console_preserves_small_signal_magnitudes() {
+    let dir = common::test_dir("op_console_precision");
+    let deck = dir.join("deck.sp");
+    std::fs::write(&deck, "* small OP\nV1 in 0 1p\nR1 in 0 1meg\n.op\n.end\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .arg("run")
+        .arg(deck)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("1.000000000e-12 V"), "{text}");
+    let current = text.lines().find(|line| line.contains("I(V1) =")).unwrap();
+    let value: f64 = current
+        .split('=')
+        .nth(1)
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!((value + 1e-18).abs() < 1e-26, "{text}");
+    assert!(current.contains("e-18 A"), "{text}");
+}

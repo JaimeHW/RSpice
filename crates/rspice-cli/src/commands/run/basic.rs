@@ -118,13 +118,13 @@ pub(super) fn finish_dc_op_result(
             .collect::<Vec<_>>();
         println!("DC Operating Point:");
         for signal in voltage_signals.iter().take(10) {
-            println!("  {} = {:.6} V", signal.display_name, signal.values[0]);
+            println!("  {} = {:.9e} V", signal.display_name, signal.values[0]);
         }
         if voltage_signals.len() > 10 {
             println!("  ... ({} more node voltages)", voltage_signals.len() - 10);
         }
         for signal in current_signals.iter().take(5) {
-            println!("  {} = {:.6} A", signal.display_name, signal.values[0]);
+            println!("  {} = {:.9e} A", signal.display_name, signal.values[0]);
         }
         if current_signals.len() > 5 {
             println!("  ... ({} more branch currents)", current_signals.len() - 5);
