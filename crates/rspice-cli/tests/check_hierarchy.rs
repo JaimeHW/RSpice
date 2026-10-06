@@ -109,3 +109,76 @@ fn check_validates_alter_variants_and_each_step_coordinate() {
         );
     }
 }
+
+#[test]
+fn xspice_check_honors_the_selected_device_dialect() {
+    let dir = test_dir("check_dialect");
+    let deck = dir.join("deck.cir");
+    std::fs::write(&deck, "Check dialect\nV1 in 0 1\nA1 in out buf\n.model buf gain(gain=1)\nR1 out 0 1k\nC1 out 0 cm\n.model cm C(C=1p)\n.op\n.end\n").unwrap();
+    for (dialect, valid) in [("ngspice", true), ("xyce", false)] {
+        for command in ["check", "run"] {
+            let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+                .args(["--quiet", command])
+                .arg(&deck)
+                .args(["--spice-dialect", dialect])
+                .output()
+                .unwrap();
+            assert_eq!(
+                output.status.success(),
+                valid,
+                "{command}, {dialect}: {output:?}"
+            );
+            if !valid {
+                let diagnostic = format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(diagnostic.contains("requires L"), "{diagnostic}");
+            }
+        }
+    }
+}
+
+#[test]
+fn xspice_check_resolves_config_deck_and_swept_temperatures() {
+    let dir = test_dir("check_temperatures");
+    let config = dir.join("hot.toml");
+    std::fs::write(&config, "[simulation]\ntemperature=200\n").unwrap();
+    let body = "Check temperature\nV1 in 0 1\nA1 in out buf\n.model buf gain(gain=1)\nR1 out 0 1k\nC1 out 0 cm\n.model cm C(C=1p TC1=-0.01 TNOM=27)\n.op\n";
+    for (mode, options, configured, valid) in [
+        ("nominal", "", false, true),
+        ("config", "", true, false),
+        ("deck", ".options temp=200\n", false, false),
+        ("override", ".options temp=27\n", true, true),
+        ("sweep", ".temp 27 200\n", false, false),
+    ] {
+        let deck = dir.join(format!("{mode}.cir"));
+        std::fs::write(&deck, format!("{body}{options}.end\n")).unwrap();
+        for command in ["check", "run"] {
+            let mut process = Command::new(env!("CARGO_BIN_EXE_rspice"));
+            process.arg("--quiet");
+            if configured {
+                process.arg("--config").arg(&config);
+            }
+            process.arg(command).arg(&deck);
+            if command == "check" {
+                process.arg("--json");
+            }
+            let output = process.output().unwrap();
+            assert_eq!(
+                output.status.success(),
+                valid,
+                "{command}, {mode}: {output:?}"
+            );
+            if !valid {
+                let diagnostic = format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(diagnostic.contains("negative capacitance"), "{diagnostic}");
+            }
+        }
+    }
+}

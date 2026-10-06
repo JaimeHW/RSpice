@@ -516,7 +516,9 @@ from the netlist reader are reported as warnings; output symbols referenced by
 error and a node connected only to current sources warns about its undefined
 voltage; and a deck containing XSPICE devices is built into a circuit with
 external runtimes stubbed out, so a model that cannot be constructed fails here
-rather than at run time. `--strict` turns a warning-only deck
+rather than at run time. Construction uses the selected dialect, configured
+simulation settings, and each materialized coordinate's deck options and
+temperature. `--strict` turns a warning-only deck
 into a usage failure, which exits 2. The JSON document reports both verdicts
 separately: `valid` tracks the non-strict exit status, and `strict_valid` stays
 false whenever there are warnings.
