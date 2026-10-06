@@ -25,7 +25,7 @@
       "id": "C03",
       "status": "in_progress",
       "requirement": "GP transient excess phase",
-      "qualification_task": "Public phase execution, independent oracles, restart, fallible phase storage and fixed BJT/UIC initialization, typed allocation and per-site record-ceiling diagnostics, retained result accounting, and aggregate live/copy transport-record budgets are exercised. Accepted-work and continuation cancellation, native default/minimal test/release configurations, and repeated public-run/charged-transport measurements are exercised in core-gp-measurements-windows-20261005.json. Complete remaining parameter/topology and executed target/feature cases, whole-run memory/allocation, inner-solve cancellation and broader performance limits. Other state owners, VM transactions and full route coverage remain C01/C09/C12/C14 work."
+      "qualification_task": "Public phase execution, independent oracles, restart, fallible phase storage and fixed BJT/UIC initialization, typed allocation and per-site record-ceiling diagnostics, retained result accounting, and aggregate live/copy transport-record budgets are exercised. Accepted-work and continuation cancellation, native default/minimal test/release configurations, and repeated public-run/charged-transport measurements are exercised in core-gp-measurements-windows-20261005.json. Independent prescribed-terminal saturation/reverse-active/high-injection oracles and the rounding-sized event-remainder repair are exercised in core-gp-regimes-windows-20261005.json. Complete remaining feedback/private-node and parameter cases, executed target/feature cases, whole-run memory/allocation, inner-solve cancellation and broader performance limits. Other state owners, VM transactions and full route coverage remain C01/C09/C12/C14 work."
     },
     {
       "id": "C04",
@@ -456,6 +456,7 @@
     "tests/authored_card_runners.rs",
     "tests/capability_refusals.rs",
     "tests/bjt_excess_phase_transient.rs",
+    "tests/gp_phase_regimes.rs",
     "tests/transient_checkpoint.rs",
     "tests/transient_source_events.rs",
     "tests/resource_and_commit_faults.rs"
