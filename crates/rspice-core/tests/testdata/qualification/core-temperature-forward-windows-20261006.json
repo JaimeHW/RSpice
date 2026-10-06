@@ -1,0 +1,168 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C04",
+  "related_packages": [
+    "C00",
+    "C01",
+    "C12"
+  ],
+  "batch": "Forward scalar temperature options within completed lexical scopes",
+  "status": "partial_temperature_dependency_support_parser_and_control_work_remain",
+  "base_revision": "a00eef953863d7930fcab8089f892d486dba90dd",
+  "source_revision": "8eb0c3139619b9eedd1986dcee2a2f205f7c9189",
+  "implementation_commits": [
+    "8eb0c3139619b9eedd1986dcee2a2f205f7c9189"
+  ],
+  "captured_utc": "2026-10-06T17:51:42.814199+00:00",
+  "host": "x86_64-pc-windows-msvc",
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+    "cli_rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "cli_toolchain_reason": "Previously reproduced pinned Rust 1.94/faer compiler crash in CLI runtime builds; repository pin unchanged.",
+    "wasm_target": "wasm32-unknown-unknown",
+    "wasm_profile": "release",
+    "wasm_features": [
+      "wasm",
+      "veriloga-wasm-jit"
+    ],
+    "wasm_runtime": "headless Chrome dedicated worker",
+    "WASM_BINDGEN_TEST_TIMEOUT": "180",
+    "webdriver_config_sha256": "93458ed98943268e089c8c9a793bf2e899872e62941ac54795b0c27b7104785b"
+  },
+  "commands": [
+    {
+      "command": "cargo test --locked -p rspice-core --lib -- netlist:: engine::step",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1109
+      ],
+      "log": "target/core-qualification/temperature-forward-lib-final.log",
+      "log_sha256": "2290e06f63b7c781e64ea312d624a7333ad4237a62a5be44aa630ec2df17ed5b"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test temperature_options --test statistical_params --test netlist_conditionals --test frequency_data --test bsource_temper --test step_temp --test control_noise --test control_dc --test control_execution",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        4,
+        6,
+        8,
+        5,
+        7,
+        12,
+        31,
+        2,
+        18
+      ],
+      "log": "target/core-qualification/temperature-forward-integration-final.log",
+      "log_sha256": "5893999d6bf1020764ea7b4e64f4cdcf65a807336283e371ce8b794729378121"
+    },
+    {
+      "command": "cargo clippy --locked -p rspice-core -p rspice-cli -p rspice-wasm -p rspice-engine-adapter --lib --bins -- -D warnings",
+      "outcome": "passed",
+      "test_target_passed_counts": [],
+      "log": "target/core-qualification/temperature-forward-clippy.log",
+      "log_sha256": "dbc2a95e0b4e1b74f5af4ab29291015f47a42b2137e910625379a20d93931e10"
+    },
+    {
+      "command": "cargo +1.95.0 test --locked -p rspice-cli --test temperature_axis --test control_noise --test control_dc --target-dir target/core-cli-195",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1,
+        1,
+        6
+      ],
+      "log": "target/core-qualification/temperature-forward-cli-final.log",
+      "log_sha256": "fc515a0f93c0438b45114b04e4b95a6b76bcebaeb8f6058d94b40dd5fd7e183e"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test temperature_options --test frequency_data -- --nocapture",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        7,
+        16
+      ],
+      "log": "target/core-qualification/temperature-forward-wasm.log",
+      "log_sha256": "53df011d834ab4793e21e114396c733301c11613aca9b80b161cfb5a56a9ddc4"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --lib engine::requirements",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        3
+      ],
+      "log": "target/core-qualification/temperature-forward-ledger.log",
+      "log_sha256": "2f57f24cdc27586c2d547fbdea9c402885478837c3c2220b09d16bf31bfc2ec5"
+    }
+  ],
+  "unique_passed_tests": {
+    "native": 1213,
+    "optimized_wasm": 23
+  },
+  "source_files_sha256": {
+    "crates/rspice-core/README.md": "5904ab8c785ab6d1ed2ec4c722c1d6de863bcc9b9376a3becbdefb1a8ec5c021",
+    "crates/rspice-core/src/netlist/parser.rs": "0e03564a6d1c3a25e184c6ca29b37c8c91c839d45600d6e6da7913e2dc5ab464",
+    "crates/rspice-core/src/netlist/parser/commands.rs": "d5501a286c830f76ac35e90399803e37bcccb650048d27e845283ded05718883",
+    "crates/rspice-core/src/netlist/parser/line.rs": "75390ad0719b37d8f1fcce10c9daec77374d782bb00cd1e9d15ceff8d074fed9",
+    "crates/rspice-core/src/netlist/parser/state.rs": "267b91df392eb21817598a87ab7b71c26be2a628d38fd2aeeaddd4696a258a35",
+    "crates/rspice-core/src/netlist/parser/values.rs": "e0c659b7aec157a2c5fa51187f4bc99cfa20e32138e944a618c21895c1b8da41",
+    "crates/rspice-core/src/netlist/parser/temperature.rs": "c66ca1d7a69168b23c8443299113d6edac086ae3cf5e86d919518ed200b0a460",
+    "crates/rspice-core/src/netlist/parser/temperature/options.rs": "5ba33842179320b17a640e5bef490c32e967ab09580ddb1030d998703299a0de",
+    "crates/rspice-core/tests/temperature_options.rs": "b05d54437d3ff0537811a5a74d8be73bc055b3d44e4365f6391b416a64f8fd14",
+    "Cargo.lock": "ce8dc157a78d2268ff926067f15f08002b90185b9abd7320c4952d3a266fcf8a",
+    "rust-toolchain.toml": "d6dadd139dac178482d6cca3a8945b8a7e0f7df1f0733872657cbc420b2d82e6"
+  },
+  "publication_ledger_sha256": "d6f1e0c300956013ab87e66ad33d5dbb065991af97b37b6ec6729eaf3af167a3",
+  "implementation": {
+    "admission": "The existing option grammar owns TEMP/TNOM. Missing scalar names defer only under typed UndefinedParam; ordinary option overlays still require immediately available values. Conditional and source boundaries remain owned by the full parser.",
+    "scope": "Pending expressions resolve at root/subcircuit closure in authored order within that scope. Referenced existing complex values and compiled function bodies retain option-card meanings. Only missing values use completed-scope bindings; sibling scopes cannot supply them.",
+    "precedence": "A deck-wide ordinal preserves last-authored option precedence across nested scopes and immediate/deferred assignments. Superseded active expressions still evaluate and validate. Physical study TEMP and single .TEMP precedence are unchanged.",
+    "statistics": "The missing-reference probe uses an isolated random counter. Immediate expressions consume live draws only once. Deferred expressions draw after declarations when their scope closes, in authored order within that scope, including lazy and user-function evaluation. Bounded temperature replay restarts the same seeded input.",
+    "diagnostics": "Deferred errors carry their original physical file and logical-card opening line rather than the resolution boundary. Root/subcircuit pending lists poll cancellation between expressions and do not scan unrelated scopes.",
+    "storage": "Only referenced numeric values and compiled expression/function programs are retained. The common known-scalar path does not copy the full parameter context. A conservative isolated context copy remains for probing potentially missing bindings."
+  },
+  "independent_oracles": [
+    "Current-driven resistor: V=I*R, with R read from the selected TEMP scalar.",
+    "RC input-referred resistor noise: PSD=4*k*T*R, k=1.380649e-23 under BestAvailable. Both ngspice and Xyce expression dialects execute parameter-table rows through authored temperature options.",
+    "Reference seeded expression streams establish immediate versus scope-close random order and the next live draw; a separate ordinary deck checks lazy and user-function evaluation.",
+    "Complex dependency: 85 + img(sqrt(-1)) = 84 under the existing principal-value convention; later parameter redefinition must not change the captured value."
+  ],
+  "reproduced_remaining_cases": [
+    {
+      "id": "provisional_domain",
+      "source": "Provisional domain\n.param before={1/(TEMP-27)}\n.param ambient=85\n.options temp={ambient}\n.end\n",
+      "required": "Resolve authoritative temperature before dependent domains under the ngspice expression dialect; before must be 1/58. Xyce parses this deck successfully."
+    },
+    {
+      "id": "retained_forward_chain",
+      "source": "Forward chain\n.options temp={ambient}\n.param ambient={later}\n.param later=85\n.end\n",
+      "required": "Complete retained parameter dependency materialization without changing lexical or statistical ownership."
+    },
+    {
+      "id": "incomplete_enclosing_scope",
+      "source": "Enclosing scope\n.subckt local p n\n.options temp={ambient}\n.ends\n.param ambient=85\n.end\n",
+      "required": "Resolve dependencies owned by still-incomplete enclosing scopes without sibling leakage."
+    }
+  ],
+  "discovery_probe": {
+    "log": "target/core-qualification/temperature-forward-remaining-probe.log",
+    "log_sha256": "8dae0ebf95961f7a618d2bb01f836c191a6335599b3a049238b40f5821d410fa",
+    "observations": [
+      "provisional_domain Ngspice: Err(InvalidValue(\"line 2: Division by zero\"))",
+      "provisional_domain Xyce: Ok(Some(85.0))",
+      "retained_forward_chain Ngspice: Err(InvalidValue(\"line 3: Undefined parameter: LATER\"))",
+      "retained_forward_chain Xyce: Err(Syntax { line: 2, message: \"line 2: TEMP: Undefined parameter: AMBIENT\" })",
+      "incomplete_enclosing_scope Ngspice: Err(Syntax { line: 3, message: \"line 3: TEMP: Undefined parameter: AMBIENT\" })",
+      "incomplete_enclosing_scope Xyce: Err(Syntax { line: 3, message: \"line 3: TEMP: Undefined parameter: AMBIENT\" })"
+    ],
+    "scope": "Temporary parser probe; harness completion excluded from qualification test counts."
+  },
+  "limitations": [
+    "All 15 packages remain unfinished. Control dispatch remains 5/29; AcData/NoiseData control and document/adapter integration remain open.",
+    "This slice repairs forward scalar option references within completed lexical scopes, not the general parameter/setup dependency graph.",
+    "Scope-close statistical order is explicit RSpice behavior; no cross-simulator statistical-order certification is claimed.",
+    "Cancellation is checked between pending expressions. Inner evaluator latency, whole-run allocation limits, wall-clock/peak-memory gates and complete dialect qualification remain open.",
+    "Optimized WASM executes 16 target-independent temperature tests and 7 frequency-data tests; the two sealed-source temperature tests are native-only."
+  ]
+}
