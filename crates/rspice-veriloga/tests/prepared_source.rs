@@ -28,6 +28,92 @@ impl Drop for Sources {
 }
 
 #[test]
+fn filesystem_loader_errors_retain_paths_kinds_and_error_sources() {
+    use rspice_veriloga::preprocessor::{
+        BoundedFileSystemSourceProvider, FileSystemSourceProvider,
+    };
+    use rspice_veriloga::{Preprocessor, SourceProvider};
+    use std::error::Error as _;
+    use std::io::ErrorKind;
+
+    let mut files = Sources::new();
+    files.0 = files.0.canonicalize().unwrap();
+    let invalid = files.0.join("invalid.va");
+    std::fs::write(&invalid, [0xff, 0xfe]).unwrap();
+    let missing = files.0.join("missing.va");
+    let bounded = BoundedFileSystemSourceProvider::new(
+        SourceProviderLimits::UNBOUNDED,
+        usize::MAX,
+        usize::MAX,
+        &NoPipelineControl,
+    );
+    for provider in [&FileSystemSourceProvider as &dyn SourceProvider, &bounded] {
+        for (path, kind) in [
+            (&invalid, ErrorKind::InvalidData),
+            (&missing, ErrorKind::NotFound),
+        ] {
+            let error = provider.load_root(path).unwrap_err();
+            assert_eq!(error.file.as_ref(), Some(path));
+            assert_eq!(error.io_error.as_ref().unwrap().kind(), kind);
+            let cloned = error.clone();
+            assert_eq!(cloned.io_error.as_ref().unwrap().kind(), kind);
+            assert!(cloned.source().unwrap().is::<std::io::Error>());
+            assert!(!error.cancelled);
+            assert!(error.resource_limit.is_none());
+        }
+        let root = files.write("root.va", "`include \"invalid.va\"\n");
+        let error = Preprocessor::new()
+            .preprocess_provider_root(provider, &root)
+            .unwrap_err();
+        assert_eq!(error.file.as_ref(), Some(&invalid));
+        assert_eq!(
+            error.io_error.as_ref().unwrap().kind(),
+            ErrorKind::InvalidData
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn dangling_includes_cannot_fall_through_to_another_file_or_builtin() {
+    use rspice_veriloga::preprocessor::{
+        BoundedFileSystemSourceProvider, FileSystemSourceProvider,
+    };
+    use rspice_veriloga::{Preprocessor, SourceProvider};
+
+    let mut files = Sources::new();
+    files.0 = files.0.canonicalize().unwrap();
+    let root = files.write("root.va", "`include \"disciplines.vams\"\n");
+    let header = files.0.join("disciplines.vams");
+    std::os::unix::fs::symlink(files.0.join("absent.vams"), &header).unwrap();
+    let fallback = files.0.join("fallback");
+    std::fs::create_dir(&fallback).unwrap();
+    std::fs::write(fallback.join("disciplines.vams"), "// different model\n").unwrap();
+    let bounded = BoundedFileSystemSourceProvider::new(
+        SourceProviderLimits::UNBOUNDED,
+        usize::MAX,
+        usize::MAX,
+        &NoPipelineControl,
+    );
+    for provider in [&FileSystemSourceProvider as &dyn SourceProvider, &bounded] {
+        for paths in [vec![], vec![fallback.clone()]] {
+            let mut preprocessor = Preprocessor::new();
+            for path in paths {
+                preprocessor.add_include_path(path);
+            }
+            let error = preprocessor
+                .preprocess_provider_root(provider, &root)
+                .unwrap_err();
+            assert_eq!(error.file.as_ref(), Some(&header));
+            assert_eq!(
+                error.io_error.as_ref().unwrap().kind(),
+                std::io::ErrorKind::NotFound
+            );
+        }
+    }
+}
+
+#[test]
 fn multiple_modules_compile_from_one_frozen_source_and_dependency_identity() {
     let files = Sources::new();
     let header = files.write("gain.vh", "`define GAIN 2\n");

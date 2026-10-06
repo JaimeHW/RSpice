@@ -103,20 +103,9 @@ pub struct FileSystemSourceProvider;
 
 impl FileSystemSourceProvider {
     fn load_path(path: &Path) -> Result<SourceDocument, PreprocessorError> {
-        let canonical = path.canonicalize().map_err(|error| {
-            PreprocessorError::new(
-                format!("Cannot open file: {error}"),
-                Some(path.to_path_buf()),
-                0,
-            )
-        })?;
-        let source = std::fs::read_to_string(&canonical).map_err(|error| {
-            PreprocessorError::new(
-                format!("Cannot read file: {error}"),
-                Some(path.to_path_buf()),
-                0,
-            )
-        })?;
+        let io_error = |error| PreprocessorError::from_io(error, path);
+        let canonical = path.canonicalize().map_err(io_error)?;
+        let source = std::fs::read_to_string(&canonical).map_err(io_error)?;
         Ok(SourceDocument::provided(canonical, source))
     }
 }
@@ -134,19 +123,30 @@ impl SourceProvider for FileSystemSourceProvider {
     ) -> Result<Option<SourceDocument>, PreprocessorError> {
         if let Some(parent) = including_file.and_then(Path::parent) {
             let candidate = parent.join(requested);
-            if candidate.exists() {
+            if include_candidate_exists(&candidate)? {
                 return Self::load_path(&candidate).map(Some);
             }
         }
 
         for include_path in include_paths {
             let candidate = include_path.join(requested);
-            if candidate.exists() {
+            if include_candidate_exists(&candidate)? {
                 return Self::load_path(&candidate).map(Some);
             }
         }
 
         Ok(None)
+    }
+}
+
+// A broken link or an inaccessible entry occupies its place in the include
+// search order. Only absence permits falling through to a later directory or
+// a built-in header; replacing an unreadable model with another changes it.
+fn include_candidate_exists(path: &Path) -> Result<bool, PreprocessorError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(PreprocessorError::from_io(error, path)),
     }
 }
 
@@ -270,6 +270,9 @@ pub struct PreprocessorError {
     /// Structured admission failure, independent of human diagnostic text.
     pub resource_limit: Option<SourceResourceLimit>,
     pub cancelled: bool,
+    /// Original loader failure, retained across cloned diagnostics so hosts
+    /// can distinguish filesystem errors from invalid Verilog-A source.
+    pub io_error: Option<std::sync::Arc<std::io::Error>>,
 }
 
 impl std::fmt::Display for PreprocessorError {
@@ -281,7 +284,13 @@ impl std::fmt::Display for PreprocessorError {
     }
 }
 
-impl std::error::Error for PreprocessorError {}
+impl std::error::Error for PreprocessorError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.io_error
+            .as_deref()
+            .map(|error| error as &(dyn std::error::Error + 'static))
+    }
+}
 
 impl PreprocessorError {
     pub fn new(message: impl Into<String>, file: Option<PathBuf>, line: usize) -> Self {
@@ -291,7 +300,14 @@ impl PreprocessorError {
             line,
             resource_limit: None,
             cancelled: false,
+            io_error: None,
         }
+    }
+
+    pub fn from_io(source: std::io::Error, file: impl Into<PathBuf>) -> Self {
+        let mut error = Self::new(source.to_string(), Some(file.into()), 0);
+        error.io_error = Some(std::sync::Arc::new(source));
+        error
     }
 
     pub fn resource_limit(

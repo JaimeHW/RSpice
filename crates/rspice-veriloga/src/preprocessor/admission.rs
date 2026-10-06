@@ -63,9 +63,7 @@ impl<'a> BoundedFileSystemSourceProvider<'a> {
 
     fn load(&self, path: &Path, root: bool) -> Result<SourceDocument, PreprocessorError> {
         self.checkpoint()?;
-        let io_error = |error: std::io::Error| {
-            PreprocessorError::new(error.to_string(), Some(path.to_path_buf()), 0)
-        };
+        let io_error = |error| PreprocessorError::from_io(error, path);
         let path = path.canonicalize().map_err(io_error)?;
         let mut file = std::fs::File::open(&path).map_err(io_error)?;
         let metadata = file.metadata().map_err(io_error)?;
@@ -162,7 +160,7 @@ impl SourceProvider for BoundedFileSystemSourceProvider<'_> {
         {
             self.checkpoint()?;
             let path = directory.join(requested);
-            if path.exists() {
+            if include_candidate_exists(&path)? {
                 return self.load(&path, false).map(Some);
             }
         }
