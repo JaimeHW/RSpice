@@ -86,6 +86,7 @@ pub(super) fn load(
                 ));
             }
             columns.push(ExportColumn {
+                unit: None,
                 name: name.to_owned(),
                 var_type: "dimensionless".to_owned(),
                 data: ColumnData::Complex {
@@ -95,6 +96,7 @@ pub(super) fn load(
             });
         } else {
             columns.push(ExportColumn {
+                unit: None,
                 var_type: if signal.name == "Rn" {
                     "impedance"
                 } else {
@@ -110,6 +112,7 @@ pub(super) fn load(
     // and conversions, even when every coefficient happens to be identical.
     for (port, value) in references.into_iter().enumerate() {
         columns.push(ExportColumn {
+            unit: None,
             name: format!("Z0({})", port + 1),
             var_type: "impedance".to_owned(),
             data: ColumnData::Real(vec![value; scale.len()]),
@@ -125,12 +128,14 @@ pub(super) fn load(
             .parse::<f64>()
             .map_err(|error| conversion_error(path, error))?;
         columns.push(ExportColumn {
+            unit: None,
             name: "noise_reference_temperature".to_owned(),
             var_type: "temperature".to_owned(),
             data: ColumnData::Real(vec![temperature; scale.len()]),
         });
     }
     Ok(ExportTable {
+        scale_unit: None,
         analysis: names[index].to_owned(),
         plot_name: format!("Touchstone {}", names[index]),
         scale_name: "frequency".to_owned(),

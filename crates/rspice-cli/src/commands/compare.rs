@@ -291,27 +291,24 @@ fn compare_data(
 struct WaveformData {
     variables: Vec<String>,
     variable_types: Vec<String>,
+    units: Vec<Option<String>>,
     values: Vec<Vec<f64>>,
 }
 
 fn quantity_type(value: &str) -> Option<String> {
-    // SI symbols are case-sensitive: S (siemens) is not s (seconds).
-    if value.trim() == "S" {
-        return Some("conductance".into());
+    if matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "" | "value" | "unknown" | "parameter"
+    ) {
+        return None;
     }
-    let normalized = match value.trim().to_ascii_lowercase().as_str() {
-        "" | "value" | "unknown" | "parameter" => return None,
-        "v" | "volt" | "volts" | "voltage" => "voltage",
-        "a" | "amp" | "ampere" | "amperes" | "current" => "current",
-        "s" | "sec" | "second" | "seconds" | "time" => "time",
-        "hz" | "hertz" | "frequency" => "frequency",
-        "ohm" | "ohms" | "resistance" | "impedance" => "resistance",
-        "siemens" | "mho" | "conductance" => "conductance",
-        "1" | "scalar" | "ratio" | "dimensionless" => "dimensionless",
-        "logic" | "digital" => "digital",
-        other => return Some(other.to_owned()),
-    };
-    Some(normalized.to_owned())
+    // Known quantity aliases share one vocabulary with legacy unit inference.
+    // Unknown types may themselves be SI symbols, so preserve their case.
+    Some(
+        crate::commands::export_table::type_unit(value)
+            .unwrap_or(value.trim())
+            .to_owned(),
+    )
 }
 
 fn types_compatible(left: &str, right: &str) -> bool {
@@ -319,6 +316,21 @@ fn types_compatible(left: &str, right: &str) -> bool {
         (Some(left), Some(right)) => left == right,
         // Legacy table formats cannot declare every quantity. Unknown is
         // allowed, but two explicitly incompatible quantities never match.
+        _ => true,
+    }
+}
+
+fn units_compatible(left: &WaveformData, i: usize, right: &WaveformData, j: usize) -> bool {
+    use crate::commands::export_table::type_unit;
+    let unit = |data: &WaveformData, index: usize| {
+        data.units[index]
+            .clone()
+            .or_else(|| type_unit(&data.variable_types[index]).map(str::to_owned))
+    };
+    match (unit(left, i), unit(right, j)) {
+        // Unit symbols and SI prefixes are case-sensitive. Comparison does not
+        // silently scale values or coordinates expressed in different units.
+        (Some(left), Some(right)) => left == right,
         _ => true,
     }
 }
@@ -376,12 +388,14 @@ fn load_comparison_data(
     };
     let mut variables = vec![table.scale_name];
     let mut variable_types = vec![table.scale_type];
+    let mut units = vec![table.scale_unit];
     let mut values = vec![table.scale];
     for column in table.columns {
         match column.data {
             ColumnData::Real(series) => {
                 variables.push(column.name);
                 variable_types.push(column.var_type);
+                units.push(column.unit);
                 values.push(series);
             }
             ColumnData::Complex { real, imag } => {
@@ -390,6 +404,7 @@ fn load_comparison_data(
                     format!("Im({})", column.name),
                 ]);
                 variable_types.extend([column.var_type.clone(), column.var_type]);
+                units.extend([column.unit.clone(), column.unit]);
                 values.extend([real, imag]);
             }
         }
@@ -408,6 +423,7 @@ fn load_comparison_data(
     Ok(ComparisonData::Waveform(WaveformData {
         variables,
         variable_types,
+        units,
         values,
     }))
 }
@@ -435,6 +451,11 @@ fn resample_onto_golden(
             "independent coordinate types differ: '{}' versus '{}'",
             result.variable_types[0], golden.variable_types[0]
         )));
+    }
+    if !units_compatible(&result, 0, golden, 0) {
+        return Err(invalid(
+            "independent coordinate units differ; cannot interpolate".into(),
+        ));
     }
 
     let result_scale = result
@@ -515,7 +536,7 @@ fn resample_onto_golden(
         }
         // D/E are the event column contract shared by the rawfile, CSV and
         // VCD projections. Typed logic may also use an arbitrary display name.
-        let held = quantity_type(&result.variable_types[index]).as_deref() == Some("digital")
+        let held = quantity_type(&result.variable_types[index]).as_deref() == Some("logic")
             || strip_outer_call(&result.variables[index], "D").is_some()
             || strip_outer_call(&result.variables[index], "E").is_some();
         values.push(
@@ -529,6 +550,7 @@ fn resample_onto_golden(
     Ok(WaveformData {
         variables: result.variables,
         variable_types: result.variable_types,
+        units: result.units,
         values,
     })
 }
@@ -779,6 +801,13 @@ fn compare_waveforms(
 
     for (var_idx, golden_idx) in pairs {
         let var_name = &result.variables[var_idx];
+
+        if !units_compatible(result, var_idx, golden, golden_idx) {
+            cmp_result
+                .problems
+                .push(format!("'{var_name}': units differ"));
+            continue;
+        }
 
         if !types_compatible(
             &result.variable_types[var_idx],

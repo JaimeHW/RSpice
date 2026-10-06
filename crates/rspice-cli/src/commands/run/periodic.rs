@@ -448,6 +448,7 @@ fn pac_projected_sidebands(
 /// projected signal per sideband, named `<signal>:sb<index>`.
 fn pac_export_table(frequencies: &[f64], sidebands: &[PacSideband]) -> ExportTable {
     ExportTable {
+        scale_unit: None,
         analysis: "pac".to_string(),
         plot_name: "Periodic AC".to_string(),
         scale_name: "offset_frequency".to_string(),
@@ -457,6 +458,7 @@ fn pac_export_table(frequencies: &[f64], sidebands: &[PacSideband]) -> ExportTab
             .iter()
             .flat_map(|entry| {
                 entry.signals.iter().map(|signal| ExportColumn {
+                    unit: None,
                     name: format!("{}:sb{}", signal.display_name, entry.sideband),
                     var_type: signal.raw_variable_type().to_string(),
                     data: ColumnData::Complex {
@@ -494,6 +496,7 @@ fn export_pxf(
         result.input_sideband, result.output_sideband
     );
     let table = ExportTable {
+        scale_unit: None,
         analysis: "pxf".to_string(),
         plot_name: "Periodic Transfer Function".to_string(),
         scale_name: "offset_frequency".to_string(),
@@ -501,6 +504,7 @@ fn export_pxf(
         scale: offsets.clone(),
         columns: vec![
             ExportColumn {
+                unit: None,
                 name: transfer_name.clone(),
                 var_type: "voltage".to_string(),
                 data: ColumnData::Complex {
@@ -517,6 +521,7 @@ fn export_pxf(
                 },
             },
             ExportColumn {
+                unit: None,
                 name: "output_frequency".to_string(),
                 var_type: "frequency".to_string(),
                 data: ColumnData::Real(result.points.iter().map(|point| point.freq_out).collect()),
@@ -605,11 +610,13 @@ fn export_pstb(
     let analysis_id = artifact.analysis;
     let modes = &stability.result.multipliers;
     let column = |name: &str, values: Vec<f64>| ExportColumn {
+        unit: None,
         name: name.to_string(),
         var_type: "stability".to_string(),
         data: ColumnData::Real(values),
     };
     let table = ExportTable {
+        scale_unit: None,
         analysis: "pstb".to_string(),
         plot_name: "Periodic Stability".to_string(),
         scale_name: "mode".to_string(),
@@ -676,6 +683,7 @@ fn export_pnoise(
     let analysis_id = artifact.analysis;
     let offsets = result.offset_frequencies();
     let table = ExportTable {
+        scale_unit: None,
         analysis: "pnoise".to_string(),
         plot_name: "Periodic Noise".to_string(),
         scale_name: "offset_frequency".to_string(),
@@ -749,6 +757,7 @@ fn pnoise_columns(result: &rspice_core::engine::PeriodicNoiseResult) -> Vec<Expo
     use rspice_core::engine::PeriodicNoiseResult;
 
     let real = |name: &str, values: Vec<f64>| ExportColumn {
+        unit: None,
         name: name.to_string(),
         var_type: "noise".to_string(),
         data: ColumnData::Real(values),

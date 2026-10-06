@@ -161,14 +161,15 @@ fn fft_publication_rejects_count_identity_and_core_invariant_corruption_in_every
     let transient_path = directory.0.join("reordered.tran.json");
     let fft_path = directory.0.join("reordered.fft.json");
     let transient = TransientOutputDocument::Table {
-        table: crate::commands::export_table::ExportTable {
+        table: Box::new(crate::commands::export_table::ExportTable {
+            scale_unit: None,
             analysis: "transient".to_string(),
             plot_name: "Transient Analysis".to_string(),
             scale_name: "time".to_string(),
             scale_type: "time".to_string(),
             scale: vec![0.0],
             columns: Vec::new(),
-        },
+        }),
         events: Vec::new(),
         buses: Vec::new(),
     };
