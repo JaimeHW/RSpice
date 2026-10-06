@@ -6,6 +6,7 @@ use rspice_core::Netlist;
 use std::io::Write;
 use std::path::Path;
 
+mod elements;
 mod hierarchy;
 mod parameters;
 
@@ -117,7 +118,8 @@ fn print_summary(out: &mut impl Write, netlist: &Netlist, args: &InfoArgs) -> st
 
     if args.hierarchy {
         writeln!(out, "Subcircuit definitions and instance references:")?;
-        hierarchy::Hierarchy::new(&netlist.elements, &netlist.subcircuits).write(out, 2)?;
+        hierarchy::Hierarchy::new(&netlist.elements, &netlist.subcircuits, args.detailed)
+            .write(out, 2)?;
         writeln!(out)?;
     }
 
@@ -135,7 +137,7 @@ fn print_summary(out: &mut impl Write, netlist: &Netlist, args: &InfoArgs) -> st
 fn print_detailed_elements(out: &mut impl Write, netlist: &Netlist) -> std::io::Result<()> {
     writeln!(out, "Elements:")?;
     for elem in &netlist.elements {
-        writeln!(out, "  {}: {:?}", elem.name, elem.kind)?;
+        elements::ElementDetails::new(elem).write(out, 2)?;
     }
     writeln!(out)
 }
@@ -159,6 +161,7 @@ fn print_json(out: &mut impl Write, netlist: &Netlist, args: &InfoArgs) -> Resul
             "other": counts.other,
         },
         "analyses": netlist.analyses.len(),
+        "element_details": args.detailed.then(|| netlist.elements.iter().map(elements::ElementDetails::new).collect::<Vec<_>>()),
         "models": if args.models { Some(netlist.models.iter().map(|m| &m.name).collect::<Vec<_>>()) } else { None },
         "model_definitions": args.models.then(|| netlist.models.iter().map(|model| serde_json::json!({
             "name": model.name,
@@ -173,7 +176,7 @@ fn print_json(out: &mut impl Write, netlist: &Netlist, args: &InfoArgs) -> Resul
             }).collect::<Vec<_>>())
         } else { None },
         "subcircuits": if args.hierarchy { Some(netlist.subcircuits.iter().map(|s| &s.name).collect::<Vec<_>>()) } else { None },
-        "hierarchy": args.hierarchy.then(|| hierarchy::Hierarchy::new(&netlist.elements, &netlist.subcircuits)),
+        "hierarchy": args.hierarchy.then(|| hierarchy::Hierarchy::new(&netlist.elements, &netlist.subcircuits, args.detailed)),
         "measurements": netlist.measurements.len(),
         "diagnostics": netlist.diagnostics.iter().map(|diagnostic| serde_json::json!({
             "severity": match diagnostic.severity {
@@ -224,12 +227,21 @@ fn count_elements(netlist: &Netlist) -> ElementCounts {
         match &elem.kind {
             rspice_core::netlist::ElementKind::Resistor { .. } => counts.resistors += 1,
             rspice_core::netlist::ElementKind::Capacitor { .. } => counts.capacitors += 1,
-            rspice_core::netlist::ElementKind::Inductor { .. } => counts.inductors += 1,
+            rspice_core::netlist::ElementKind::Inductor { .. }
+            | rspice_core::netlist::ElementKind::JilesAthertonInductor { .. } => {
+                counts.inductors += 1
+            }
             rspice_core::netlist::ElementKind::Diode { .. } => counts.diodes += 1,
             rspice_core::netlist::ElementKind::Bjt { .. } => counts.bjts += 1,
             rspice_core::netlist::ElementKind::Mosfet { .. } => counts.mosfets += 1,
-            rspice_core::netlist::ElementKind::VoltageSource(_) => counts.voltage_sources += 1,
-            rspice_core::netlist::ElementKind::CurrentSource(_) => counts.current_sources += 1,
+            rspice_core::netlist::ElementKind::VoltageSource(_)
+            | rspice_core::netlist::ElementKind::VoltageSourceDeferred(_) => {
+                counts.voltage_sources += 1
+            }
+            rspice_core::netlist::ElementKind::CurrentSource(_)
+            | rspice_core::netlist::ElementKind::CurrentSourceDeferred(_) => {
+                counts.current_sources += 1
+            }
             rspice_core::netlist::ElementKind::Subcircuit { .. } => counts.subcircuits += 1,
             _ => counts.other += 1,
         }

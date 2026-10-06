@@ -1,5 +1,6 @@
 //! Lexical definitions and instance references, without expanding the circuit.
 
+use super::elements::ElementDetails;
 use super::parameters::{Parameter, instance_parameters, scalar_parameters};
 use rspice_core::netlist::{Element, ElementKind, SubcircuitDef};
 use serde::Serialize;
@@ -26,12 +27,17 @@ struct Definition<'a> {
     element_count: usize,
     parameters: Vec<Parameter<'a>>,
     body_parameters: Vec<Parameter<'a>>,
+    element_details: Option<Vec<ElementDetails<'a>>>,
     #[serde(flatten)]
     contents: Hierarchy<'a>,
 }
 
 impl<'a> Hierarchy<'a> {
-    pub(super) fn new(elements: &'a [Element], definitions: &'a [SubcircuitDef]) -> Self {
+    pub(super) fn new(
+        elements: &'a [Element],
+        definitions: &'a [SubcircuitDef],
+        detailed: bool,
+    ) -> Self {
         // The parser also puts qualified copies of nested definitions in the
         // root lookup table. Show their lexical owner once, not both copies.
         let mut nested_names = HashSet::new();
@@ -79,7 +85,18 @@ impl<'a> Hierarchy<'a> {
                         &definition.body_expr_params,
                         &definition.body_string_params,
                     ),
-                    contents: Self::new(&definition.elements, &definition.nested_subcircuits),
+                    element_details: detailed.then(|| {
+                        definition
+                            .elements
+                            .iter()
+                            .map(ElementDetails::new)
+                            .collect()
+                    }),
+                    contents: Self::new(
+                        &definition.elements,
+                        &definition.nested_subcircuits,
+                        detailed,
+                    ),
                 })
                 .collect(),
         }
@@ -117,6 +134,11 @@ impl<'a> Hierarchy<'a> {
             }
             for parameter in &definition.body_parameters {
                 writeln!(out, "{:indent$}  .param {parameter}", "")?;
+            }
+            if let Some(elements) = &definition.element_details {
+                for element in elements {
+                    element.write(out, indent + 2)?;
+                }
             }
             definition.contents.write(out, indent + 2)?;
         }

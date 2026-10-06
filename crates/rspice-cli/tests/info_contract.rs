@@ -19,6 +19,96 @@ fn inspect(deck: &str, flags: &[&str]) -> String {
 }
 
 #[test]
+fn detailed_json_reports_connections_sources_and_scoped_expressions() {
+    let deck = "Detailed inspection\nV1 in 0 DC 1 AC 2 45 PULSE(0 5 1n 2n 3n 4n 10n)\nR1 in out 1k\nC1 out 0 2n IC=0.3\nB1 sense 0 V={V(out)*2}\n.subckt amp p n params: r=2k\nRload p n {r}\nE1 drive n p n {r/1000}\nVlocal p n PULSE(0 {r} 0 1n 1n 2n 4n)\n.ends amp\nX1 out 0 amp r=3k\n.end\n";
+    let json: serde_json::Value =
+        serde_json::from_str(&inspect(deck, &["--detailed", "--hierarchy", "--json"])).unwrap();
+    let elements = json["element_details"].as_array().unwrap();
+    assert_eq!(elements.len(), 5);
+    assert_eq!(elements[0]["name"], "V1");
+    assert_eq!(elements[0]["nodes"], serde_json::json!(["IN", "0"]));
+    let source = &elements[0]["specification"]["source"];
+    assert_eq!(source["kind"], "dc_ac_transient");
+    assert_eq!(source["dc_value"], 1.0);
+    assert_eq!(source["ac_magnitude"], 2.0);
+    assert_eq!(source["transient"]["kind"], "pulse");
+    assert_eq!(source["transient"]["v2"], 5.0);
+    assert_eq!(source["transient"]["period"], 1e-8);
+    assert_eq!(elements[1]["specification"]["value"], 1000.0);
+    assert_eq!(elements[2]["specification"]["initial_voltage"], 0.3);
+    assert_eq!(elements[3]["specification"]["kind"], "behavioral_voltage");
+    assert!(
+        elements[3]["specification"]["expression"]
+            .as_str()
+            .unwrap()
+            .contains('*')
+    );
+    let local = &json["hierarchy"]["definitions"][0]["element_details"];
+    assert_eq!(local[0]["name"], "RLOAD");
+    assert!(local[0]["specification"]["value"].is_null());
+    assert_eq!(local[0]["specification"]["value_expr"], "r");
+    assert_eq!(
+        local[1]["specification"]["control_nodes"],
+        serde_json::json!(["P", "N"])
+    );
+    assert_eq!(local[1]["specification"]["gain_expr"], "r/1000");
+    assert_eq!(local[2]["specification"]["kind"], "voltage_source");
+    assert!(
+        local[2]["specification"]["source_expression"]
+            .as_str()
+            .unwrap()
+            .contains("{r}")
+    );
+    let text = inspect(deck, &["--detailed", "--hierarchy"]);
+    assert!(text.contains("R1 (resistor): IN OUT"), "{text}");
+    assert!(text.contains("value: 1000.0"), "{text}");
+    assert!(text.contains("RLOAD (resistor): P N"), "{text}");
+    assert!(!text.contains("Some("), "{text}");
+    let summary: serde_json::Value =
+        serde_json::from_str(&inspect(deck, &["--hierarchy", "--json"])).unwrap();
+    assert!(summary["element_details"].is_null());
+    assert!(summary["hierarchy"]["definitions"][0]["element_details"].is_null());
+}
+
+#[test]
+fn detailed_mixed_signal_ports_preserve_vector_inversion() {
+    let deck = "Digital inspection\n.model gate d_and(rise_delay=1n fall_delay=2n)\nA1 [din ~enable] dout gate\nA2 [din enable] out2 gate\n.end\n";
+    let json: serde_json::Value =
+        serde_json::from_str(&inspect(deck, &["--detailed", "--json"])).unwrap();
+    let elements = &json["element_details"];
+    assert_eq!(elements[0]["specification"]["kind"], "xspice");
+    assert_eq!(elements[0]["specification"]["model"], "GATE");
+    let port = &elements[0]["specification"]["ports"][0];
+    assert_eq!(port["kind"], "digital_vector");
+    assert_eq!(port["nodes"][0]["inverted"], false);
+    assert_eq!(port["nodes"][1]["inverted"], true);
+    assert_eq!(port["nodes"][1]["name"], "ENABLE");
+    let ordinary = &elements[1]["specification"]["ports"][0];
+    assert_eq!(ordinary["kind"], "digital_vector");
+    assert_eq!(ordinary["nodes"][1]["inverted"], false);
+    assert_eq!(ordinary["nodes"][1]["name"], "ENABLE");
+}
+
+#[test]
+fn detailed_waveform_defaults_are_distinct_from_zero_and_optional_fields() {
+    let deck = "Default waveform\nV1 in 0 PULSE(0 1)\nV2 out 0 SIN(0 1)\n.end\n";
+    let json: serde_json::Value =
+        serde_json::from_str(&inspect(deck, &["--detailed", "--json"])).unwrap();
+    let pulse = &json["element_details"][0]["specification"]["source"];
+    assert_eq!(pulse["delay"], 0.0);
+    assert_eq!(pulse["rise"], "default");
+    assert_eq!(pulse["width"], "default");
+    assert_eq!(pulse["period"], "default");
+    assert_eq!(
+        json["element_details"][1]["specification"]["source"]["frequency"],
+        "default"
+    );
+    let text = inspect(deck, &["--detailed"]);
+    assert!(text.contains("default"), "{text}");
+    assert!(!text.contains("NaN"), "{text}");
+}
+
+#[test]
 fn model_definitions_include_typed_parameters_and_preserve_summary_fields() {
     let deck = "Model inspection\n.model diode D(IS=2p N=1.2)\n.model curve pwl(x_array=[0 1] y_array=[0 2])\n.model event d_source(input_file=\"events.txt\")\nD1 in 0 diode\n.end\n";
     let json: serde_json::Value =
