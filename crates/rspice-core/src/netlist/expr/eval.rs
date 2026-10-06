@@ -639,6 +639,34 @@ impl PreparedExpression {
         }
     }
 
+    /// Inspect the compiled function graph so user functions, formal bindings
+    /// and overloaded LIMIT calls obey the same grammar as numeric evaluation.
+    pub(crate) fn captures_static_statistical_value(&self) -> bool {
+        let mut statistical = false;
+        for program in self.programs.iter() {
+            for node in &program.nodes {
+                match node {
+                    PreparedNode::Param {
+                        name,
+                        formal_index: None,
+                    } if runtime_special_quantity(name).is_some() => return false,
+                    PreparedNode::Function {
+                        name,
+                        args,
+                        user_program: None,
+                    } => {
+                        statistical |= matches!(
+                            name.as_str(),
+                            "GAUSS" | "AGAUSS" | "UNIF" | "AUNIF" | "RAND" | "RANDOM"
+                        ) || (name == "LIMIT" && args.len() == 2);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        statistical
+    }
+
     pub(crate) fn checkpoint_semantic_snapshot(&self) -> String {
         format!("{:?}", self.programs)
     }

@@ -581,6 +581,15 @@ impl ParamContext {
             .map(String::as_str)
     }
 
+    /// Read a global projection without selecting a same-name ordinary binding.
+    pub(crate) fn get_global_complex(&self, name: &str) -> Option<ComplexValue> {
+        let key = name.to_uppercase();
+        self.global_complex_params
+            .get(&key)
+            .copied()
+            .or_else(|| self.global_params.get(&key).copied().map(ComplexValue::from))
+    }
+
     /// Return all retained global expressions for deterministic inspection
     /// and propagation into derived parameter scopes.
     pub fn all_global_expressions(&self) -> Vec<(String, String)> {

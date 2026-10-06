@@ -7,7 +7,7 @@
 use super::{
     BinOpKind, Expr as NetExpr, ParamContext, ParameterResolutionError, ParameterResolver,
     ParseExpressionWithAbortError as NetExpressionParseWithAbortError, UnaryOpKind,
-    eval_expression_complex, parse_expression as parse_net_expr,
+    parse_expression as parse_net_expr,
     parse_expression_with_abort as parse_net_expr_with_abort,
 };
 use crate::{
@@ -690,6 +690,7 @@ pub fn validate_parameter_expressions(params: &ParamContext) -> Result<(), Strin
 
 /// Validate retained expressions, then collapse declaration-order-dependent
 /// ordinary expressions that become static once the complete scope is known.
+/// Static globals receive numeric projections while retaining their bodies.
 /// Xyce definitions that still reference `TIME` or `FREQ` remain symbolic
 /// for device binding at the active analysis point.
 pub fn finalize_parameter_expressions(params: &mut ParamContext) -> Result<(), String> {
@@ -737,6 +738,36 @@ pub(crate) fn finalize_parameter_expressions_with_abort(
             })?;
         params.set_complex(&name, value);
     }
+    let mut globals = params.all_global_expressions();
+    globals.sort_by(|left, right| left.0.cmp(&right.0));
+    for (name, expression) in globals {
+        if abort.is_aborted() {
+            return Err(ParameterResolutionError::Aborted);
+        }
+        let root = if params.has_parameter_binding(&name) {
+            expression.as_str()
+        } else {
+            name.as_str()
+        };
+        let resolved = (|| {
+            let prepared = prepare_behavioral_expression(root, params)
+                .map_err(ParameterResolutionError::Definition)?;
+            if !behavioral_expression_references_runtime_quantity(&prepared) {
+                resolver.resolve_global(&name, &expression, params, abort)?;
+            }
+            Ok(())
+        })();
+        resolved.map_err(|error| match error {
+            ParameterResolutionError::Aborted => ParameterResolutionError::Aborted,
+            error => ParameterResolutionError::Definition(parameter_error_with_origin(
+                params,
+                &name,
+                true,
+                format!("Unable to resolve global parameter {name}: {error}"),
+            )),
+        })?;
+    }
+    resolver.materialize_into(params);
     Ok(())
 }
 
@@ -749,17 +780,18 @@ pub(crate) fn finalize_parameter_expressions_with_abort(
 /// ordinary/global namespace so ordinary-parameter shadowing remains intact.
 pub fn materialize_available_parameter_expressions(params: &mut ParamContext) -> usize {
     let mut resolved = 0usize;
+    let mut resolver = ParameterResolver::default();
 
     let mut ordinary = params.all_parameter_expressions();
     ordinary.sort_by(|left, right| left.0.cmp(&right.0));
-    for (name, _) in ordinary {
+    for (name, expression) in ordinary {
         let Ok(prepared) = prepare_behavioral_expression(&name, params) else {
             continue;
         };
         if behavioral_expression_references_runtime_quantity(&prepared) {
             continue;
         }
-        let Ok(value) = eval_expression_complex(&prepared, params) else {
+        let Ok(value) = resolver.resolve(&name, &expression, params, &NoAbort) else {
             continue;
         };
         params.set_complex(&name, value);
@@ -780,7 +812,7 @@ pub fn materialize_available_parameter_expressions(params: &mut ParamContext) ->
         if behavioral_expression_references_runtime_quantity(&prepared) {
             continue;
         }
-        let Ok(value) = eval_expression_complex(&prepared, params) else {
+        let Ok(value) = resolver.resolve_global(&name, &expression, params, &NoAbort) else {
             continue;
         };
         params.set_global_complex(&name, value);
@@ -1031,36 +1063,45 @@ pub(super) fn contains_runtime_identifier(expression: &str) -> bool {
         .any(|token| runtime_special_quantity(token).is_some())
 }
 
-pub(super) fn contains_statistical_function_call(expression: &str) -> bool {
-    let bytes = expression.as_bytes();
-    let mut index = 0usize;
-    while index < bytes.len() {
-        if bytes[index].is_ascii_alphabetic() || bytes[index] == b'_' {
-            let start = index;
-            index += 1;
-            while index < bytes.len()
-                && (bytes[index].is_ascii_alphanumeric() || bytes[index] == b'_')
-            {
-                index += 1;
-            }
-            let name = &expression[start..index];
-            let mut call_index = index;
-            while call_index < bytes.len() && bytes[call_index].is_ascii_whitespace() {
-                call_index += 1;
-            }
-            if call_index < bytes.len()
-                && bytes[call_index] == b'('
-                && ["GAUSS", "AGAUSS", "UNIF", "AUNIF", "RAND"]
-                    .iter()
-                    .any(|candidate| name.eq_ignore_ascii_case(candidate))
-            {
-                return true;
-            }
+pub(super) fn captures_static_statistical_value(expression: &str, params: &ParamContext) -> bool {
+    if !expression.contains('(') {
+        return false;
+    }
+    let compile = |expression: &str| {
+        parse_net_expr(expression)
+            .and_then(|parsed| super::PreparedExpression::compile(&parsed, params))
+    };
+    let Ok(program) = compile(expression) else {
+        return false;
+    };
+    if !program.captures_static_statistical_value() {
+        return false;
+    }
+    // A later definition can make a previously scalar dependency live. A
+    // numeric projection must not hide TIME/FREQ inside that retained graph.
+    let mut pending = Vec::new();
+    program.visit_runtime_parameters(|name| pending.push(name.to_owned()));
+    let mut visited = HashSet::new();
+    while let Some(name) = pending.pop() {
+        if runtime_special_quantity(&name).is_some() {
+            return false;
+        }
+        if !visited.insert(name.clone()) {
+            continue;
+        }
+        let retained = if params.has_parameter_binding(&name) {
+            params.get_parameter_expression(&name)
         } else {
-            index += 1;
+            params.get_global_expression(&name)
+        };
+        if let Some(expression) = retained {
+            let Ok(program) = compile(expression) else {
+                return false;
+            };
+            program.visit_runtime_parameters(|name| pending.push(name.to_owned()));
         }
     }
-    false
+    true
 }
 
 struct FunctionExpander<'a, 'p> {
@@ -1191,9 +1232,8 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                                     .map(|expression| (expression, ParameterExpressionKind::Global))
                             };
                             if let Some((expression, expression_kind)) = parameter_expression {
-                                if contains_statistical_function_call(expression)
-                                    && !contains_runtime_identifier(expression)
-                                    && let Some(value) = self.params.get_complex(&name)
+                                if let Some(value) = self.params.get_complex(&name)
+                                    && captures_static_statistical_value(expression, self.params)
                                 {
                                     values.push(NetExpr::Number(value.re));
                                     continue;

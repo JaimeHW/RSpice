@@ -92,6 +92,19 @@ impl ParameterResolver {
         if let Some(value) = self.values[namespace].get(&name) {
             return Ok(*value);
         }
+        let captured = if namespace == 1 {
+            params.get_global_complex(&name)
+        } else if params.has_parameter_binding(&name) {
+            params.get_complex(&name)
+        } else {
+            None
+        };
+        if let Some(value) = captured
+            && super::behavioral::captures_static_statistical_value(expression, params)
+        {
+            self.values[namespace].insert(name, value);
+            return Ok(value);
+        }
         let mut stack = vec![Self::pending(namespace, name.clone(), expression, params)?];
         let mut active = HashSet::from([(namespace, name.clone())]);
         while let Some(current) = stack.last_mut() {
@@ -158,10 +171,8 @@ impl ParameterResolver {
                 params.get_global_expression(name)
             };
             if let Some(expression) = retained {
-                let captured_statistical_value =
-                    super::behavioral::contains_statistical_function_call(expression)
-                        && !super::behavioral::contains_runtime_identifier(expression)
-                        && params.get_complex(name).is_some();
+                let captured_statistical_value = params.get_complex(name).is_some()
+                    && super::behavioral::captures_static_statistical_value(expression, params);
                 if !captured_statistical_value {
                     authoritative.insert(name.to_owned());
                 }
@@ -297,6 +308,91 @@ mod tests {
                 .resolve("p0", "p1+1", &params, &NoAbort)
                 .unwrap(),
             ComplexValue::from(2085.0)
+        );
+    }
+
+    #[test]
+    fn global_sample_projection_is_not_read_from_the_ordinary_namespace() {
+        let mut params = ParamContext::new();
+        params.set("g", 2.0);
+        params.define_global_expression("g", "limit(0,1)", Some(7.0.into()));
+        let mut resolver = ParameterResolver::default();
+        assert_eq!(
+            resolver
+                .resolve_global("g", "limit(0,1)", &params, &NoAbort)
+                .unwrap(),
+            7.0.into()
+        );
+        resolver.materialize_into(&mut params);
+        assert_eq!(params.get("g"), Some(2.0));
+        assert_eq!(params.get_global_complex("g"), Some(7.0.into()));
+        let reference = ParamContext::new();
+        assert_eq!(
+            eval_expression("aunif(0,1)", &params).unwrap(),
+            eval_expression("aunif(0,1)", &reference).unwrap()
+        );
+    }
+
+    #[test]
+    fn sample_detection_observes_function_overloads_formals_and_runtime_bodies() {
+        let mut params = ParamContext::new();
+        params.define_function("static_sample", vec!["TIME".into()], "time+limit(0,1)");
+        params.define_function("live_sample", vec!["X".into()], "x+time+limit(0,1)");
+        for (expression, expected) in [
+            ("static_sample(2)", true),
+            ("live_sample(2)", false),
+            ("limit(2,0,1)", false),
+            ("limit(2,1)", true),
+        ] {
+            assert_eq!(
+                super::super::behavioral::captures_static_statistical_value(expression, &params),
+                expected,
+                "{expression}"
+            );
+        }
+        params.define_function("limit", vec!["X".into(), "Y".into()], "x+y");
+        assert!(
+            !super::super::behavioral::captures_static_statistical_value("limit(2,1)", &params)
+        );
+    }
+
+    #[test]
+    fn a_captured_sample_does_not_hide_a_new_runtime_parameter_dependency() {
+        let mut params = ParamContext::new();
+        params.define_function("sample", vec!["X".into()], "x+aunif(0,1)");
+        params.define_global_expression("sampled", "sample(base)", Some(2.0.into()));
+        params.define_global_expression("base", "live", Some(1.0.into()));
+        params.define_parameter_expression("live", "1+TIME", None);
+        assert!(
+            !super::super::behavioral::captures_static_statistical_value("sample(base)", &params)
+        );
+        let prepared = prepare_behavioral_expression("sampled", &params).unwrap();
+        assert!(
+            behavioral_expression_references_runtime_quantity(&prepared),
+            "{prepared}"
+        );
+        params.set("base", 3.0);
+        assert!(super::super::behavioral::captures_static_statistical_value(
+            "sample(base)",
+            &params
+        ));
+    }
+
+    #[test]
+    fn available_materialization_shares_complex_global_dependencies_once() {
+        let mut params = ParamContext::new();
+        params.define_global_expression("z", "aunif(0,1)+2j", None);
+        params.define_global_expression("a", "z+z", None);
+        params.define_global_expression("b", "img(z)", None);
+        let reference = ParamContext::new();
+        let z = ComplexValue::new(eval_expression("aunif(0,1)", &reference).unwrap(), 2.0);
+        assert_eq!(materialize_available_parameter_expressions(&mut params), 3);
+        assert_eq!(params.get_complex("z"), Some(z));
+        assert_eq!(params.get_complex("a"), Some(z + z));
+        assert_eq!(params.get("b"), Some(2.0));
+        assert_eq!(
+            eval_expression("aunif(0,1)", &params).unwrap(),
+            eval_expression("aunif(0,1)", &reference).unwrap()
         );
     }
 }
