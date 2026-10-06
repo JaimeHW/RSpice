@@ -22,7 +22,7 @@ mod touchstone_reader;
 mod types;
 mod writer;
 
-pub use touchstone_reader::read_touchstone_bytes;
+pub use touchstone_reader::{read_touchstone_bytes, read_touchstone_bytes_with_limit};
 pub use types::{
     SignalType, UnsupportedWaveformDomain, WaveformDataset, WaveformDomain, WaveformFormat,
     WaveformSignal,
@@ -32,6 +32,10 @@ pub use writer::{WaveformWriteError, WaveformWriter};
 /// A Touchstone validation or decoding failure, with parser causes retained.
 #[derive(Debug)]
 pub enum TouchstoneError {
+    ValueLimit {
+        requested: usize,
+        limit: usize,
+    },
     InvalidData(String),
     Encoding(std::str::Utf8Error),
     InvalidFloat {
@@ -47,6 +51,10 @@ pub enum TouchstoneError {
 impl std::fmt::Display for TouchstoneError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::ValueLimit { requested, limit } => write!(
+                f,
+                "Touchstone numeric value limit exceeded: requested {requested}, limit {limit}"
+            ),
             Self::InvalidData(detail)
             | Self::InvalidFloat { detail, .. }
             | Self::InvalidInteger { detail, .. } => f.write_str(detail),
@@ -61,7 +69,7 @@ impl std::error::Error for TouchstoneError {
             Self::Encoding(source) => Some(source),
             Self::InvalidFloat { source, .. } => Some(source),
             Self::InvalidInteger { source, .. } => Some(source),
-            Self::InvalidData(_) => None,
+            Self::InvalidData(_) | Self::ValueLimit { .. } => None,
         }
     }
 }
