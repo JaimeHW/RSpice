@@ -123,6 +123,7 @@ pub(super) fn project(
             },
         };
         columns.push(ExportColumn {
+            unit: None,
             name: signal.descriptor().display_name().to_owned(),
             var_type: variable_type(&descriptor).into(),
             data,
@@ -150,6 +151,7 @@ pub(super) fn project(
                 unreachable!("validated QPSS coordinates")
             };
             columns.push(ExportColumn {
+                unit: None,
                 name: descriptor.display_name().into(),
                 var_type: variable_type(descriptor).into(),
                 data: ColumnData::Real(
@@ -164,6 +166,7 @@ pub(super) fn project(
     }
     let schema = super::super::document::distinct_schema(descriptors)?;
     let table = (ctx.format != OutputFormat::Json).then(|| ExportTable {
+        scale_unit: None,
         analysis: document.result_kind().tag().into(),
         plot_name: format!("Quasiperiodic {}", document.result_kind().tag()),
         scale_name: axis.name().into(),

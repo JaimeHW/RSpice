@@ -479,6 +479,7 @@ pub struct Hdf5ResultIdentity {
 /// A general result projection with explicit coordinate and quantity types.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hdf5TableSection {
+    pub coordinate_unit: Option<String>,
     pub analysis: String,
     pub coordinate_type: String,
     pub waveform: Hdf5WaveformSection,
@@ -565,20 +566,20 @@ pub(crate) fn table_data(
             ColumnData::Real(values) => waveform.add_typed_signal(
                 column.name.clone(),
                 column.var_type.clone(),
-                None,
+                column.unit.clone(),
                 values.clone(),
             ),
             ColumnData::Complex { real, imag } => {
                 waveform.add_typed_signal(
                     format!("Re({})", column.name),
                     format!("complex_real:{}", column.var_type),
-                    None,
+                    column.unit.clone(),
                     real.clone(),
                 );
                 waveform.add_typed_signal(
                     format!("Im({})", column.name),
                     format!("complex_imag:{}", column.var_type),
-                    None,
+                    column.unit.clone(),
                     imag.clone(),
                 );
             }
@@ -588,6 +589,7 @@ pub(crate) fn table_data(
         title: table.plot_name.clone(),
         identity,
         table: Some(Hdf5TableSection {
+            coordinate_unit: table.scale_unit.clone(),
             analysis: table.analysis.clone(),
             coordinate_type: table.scale_type.clone(),
             waveform,
@@ -686,6 +688,9 @@ fn build_hdf5(data: &Hdf5SimulationData) -> Result<Hdf5Document> {
         let name = section_name("table");
         add_waveform_section(&mut document, &name, "table", &table.waveform)?;
         if let Some(group) = document.groups.last_mut() {
+            if let Some(unit) = &table.coordinate_unit {
+                group.set_attr("coordinate_unit", Hdf5Attribute::Text(unit.clone()));
+            }
             group.set_attr("analysis", Hdf5Attribute::Text(table.analysis.clone()));
             group.set_attr(
                 "coordinate_type",
@@ -827,6 +832,10 @@ pub fn read_hdf5_sections_with_limits(
             "fft" => section.fft = Some(read_fft_section(&file, group_name)?),
             "table" => {
                 section.table = Some(Hdf5TableSection {
+                    coordinate_unit: read_string_attr(
+                        &file.group(group_name)?.attrs()?,
+                        "coordinate_unit",
+                    )?,
                     analysis: read_required_string_attr(
                         &file.group(group_name)?.attrs()?,
                         "analysis",

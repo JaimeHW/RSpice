@@ -371,6 +371,9 @@ fn load_rawfile(
         .into_iter()
         .nth(index)
         .expect("selected existing plot");
+    let units = rspice_core::io::ltspice_raw::raw_table_units(&data.header)
+        .map_err(|error| conversion_error(path, error))?
+        .unwrap_or_else(|| vec![None; data.variables.len()]);
     if let Some(fft) = fft_plots.remove(&index) {
         return Ok(ImportedResult::Fft(fft));
     }
@@ -404,6 +407,7 @@ fn load_rawfile(
     let columns = waveforms
         .zip(data.variables.iter().skip(usize::from(!operating_point)))
         .map(|(waveform, variable)| ExportColumn {
+            unit: units[variable.index].clone(),
             name: waveform.name,
             var_type: variable.var_type.clone(),
             data: match waveform.y_imag {
@@ -417,6 +421,11 @@ fn load_rawfile(
         .collect();
 
     Ok(ExportTable {
+        scale_unit: if operating_point {
+            None
+        } else {
+            units[0].clone()
+        },
         analysis: "converted".to_string(),
         plot_name: if data.header.plotname.is_empty() {
             "Converted Data".to_string()
@@ -514,6 +523,7 @@ fn load_operating_point_report(
             ));
         }
         columns.push(ExportColumn {
+            unit: None,
             name: name.to_string(),
             var_type: signal_var_type(name),
             data: ColumnData::Real(vec![value]),
@@ -521,6 +531,7 @@ fn load_operating_point_report(
     }
 
     Ok(Some(ExportTable {
+        scale_unit: None,
         analysis: "dc_op".to_string(),
         plot_name: "DC Operating Point".to_string(),
         scale_name: "point".to_string(),
@@ -638,6 +649,7 @@ fn load_delimited(
         });
         if let Some((inner, imag)) = complex_pair {
             columns.push(ExportColumn {
+                unit: None,
                 var_type: signal_var_type(&inner),
                 name: inner,
                 data: ColumnData::Complex { real: values, imag },
@@ -645,6 +657,7 @@ fn load_delimited(
             continue;
         }
         columns.push(ExportColumn {
+            unit: None,
             name: name.clone(),
             var_type: signal_var_type(name),
             data: ColumnData::Real(values),
@@ -653,6 +666,7 @@ fn load_delimited(
 
     let scale_name = header[0].clone();
     Ok(ExportTable {
+        scale_unit: None,
         analysis: "converted".to_string(),
         plot_name: "Converted Data".to_string(),
         scale_type: scale_var_type(&scale_name),
@@ -720,6 +734,18 @@ fn load_json(
     let content = read_utf8_input_limited(path, resource_limits.max_external_data_bytes)?;
     let value: serde_json::Value =
         serde_json::from_str(&content).map_err(|e| conversion_error(path, e))?;
+    let read_unit = |object: &serde_json::Value| -> Result<Option<String>, CliError> {
+        match object.get("unit") {
+            None | Some(serde_json::Value::Null) => Ok(None),
+            Some(serde_json::Value::String(unit)) if !unit.trim().is_empty() => {
+                Ok(Some(unit.trim().to_owned()))
+            }
+            _ => Err(conversion_error(
+                path,
+                "unit must be a nonempty string or null",
+            )),
+        }
+    };
     if value.get("analysis").and_then(serde_json::Value::as_str) == Some("fft") {
         return crate::commands::run::FftBundle::from_json(path, value, resource_limits)
             .map(ImportedResult::Fft);
@@ -792,6 +818,7 @@ fn load_json(
                 }
             };
             columns.push(ExportColumn {
+                unit: read_unit(signal)?,
                 var_type: signal
                     .get("type")
                     .and_then(serde_json::Value::as_str)
@@ -803,6 +830,7 @@ fn load_json(
         }
 
         return Ok(ExportTable {
+            scale_unit: read_unit(scale_obj)?,
             analysis: value
                 .get("analysis")
                 .and_then(|v| v.as_str())
@@ -958,13 +986,11 @@ fn result_document_table(
             }
         };
         columns.push(ExportColumn {
-            var_type: match signal.descriptor().unit() {
-                rspice_core::execution::SignalUnit::Volt => "voltage",
-                rspice_core::execution::SignalUnit::Ampere => "current",
-                rspice_core::execution::SignalUnit::Hertz => "frequency",
-                rspice_core::execution::SignalUnit::Second => "time",
-                _ => rspice_core::execution::raw_variable_type(signal.descriptor().kind()),
-            }
+            unit: crate::commands::export_table::stated_unit(signal.descriptor().unit()),
+            var_type: crate::commands::export_table::unit_type(
+                signal.descriptor().unit(),
+                rspice_core::execution::raw_variable_type(signal.descriptor().kind()),
+            )
             .to_string(),
             name,
             data,
@@ -1012,8 +1038,16 @@ fn result_document_table(
             _ => scalar.name().to_string(),
         };
         columns.push(ExportColumn {
+            unit: scalar
+                .unit()
+                .and_then(crate::commands::export_table::stated_unit),
             name,
-            var_type: "scalar".to_string(),
+            var_type: scalar
+                .unit()
+                .map_or("value", |unit| {
+                    crate::commands::export_table::unit_type(unit, "value")
+                })
+                .to_string(),
             data,
         });
     }
@@ -1025,17 +1059,17 @@ fn result_document_table(
     }
 
     Ok(ExportTable {
+        scale_unit: document
+            .axes()
+            .first()
+            .and_then(|axis| crate::commands::export_table::stated_unit(axis.unit())),
         analysis: document.result_kind().tag().to_string(),
         plot_name: format!("{} ({})", document.result_kind().tag(), document.analysis()),
         scale_type: document
             .axes()
             .first()
-            .map_or("index", |axis| match axis.unit() {
-                rspice_core::execution::SignalUnit::Hertz => "frequency",
-                rspice_core::execution::SignalUnit::Second => "time",
-                rspice_core::execution::SignalUnit::Volt => "voltage",
-                rspice_core::execution::SignalUnit::Ampere => "current",
-                _ => "index",
+            .map_or("index", |axis| {
+                crate::commands::export_table::unit_type(axis.unit(), "parameter")
             })
             .to_string(),
         scale_name,
@@ -1091,6 +1125,7 @@ fn load_hdf5(
 
 fn hdf5_table(path: &Path, data: crate::hdf5::Hdf5SimulationData) -> Result<ExportTable, CliError> {
     let from_section = |section: crate::hdf5::Hdf5WaveformSection, analysis: &str| ExportTable {
+        scale_unit: None,
         analysis: analysis.to_string(),
         plot_name: if data.title.is_empty() {
             "Converted Data".to_string()
@@ -1105,6 +1140,7 @@ fn hdf5_table(path: &Path, data: crate::hdf5::Hdf5SimulationData) -> Result<Expo
 
     if let Some(table) = data.table {
         return Ok(ExportTable {
+            scale_unit: table.coordinate_unit,
             analysis: table.analysis,
             plot_name: data.title,
             scale_name: table.waveform.independent_name,
@@ -1136,6 +1172,7 @@ fn hdf5_table(path: &Path, data: crate::hdf5::Hdf5SimulationData) -> Result<Expo
         let mut columns = Vec::new();
         if let Some(ratio) = distortion.f2_over_f1 {
             columns.push(ExportColumn {
+                unit: None,
                 name: "f2_over_f1".to_string(),
                 var_type: "ratio".to_string(),
                 data: ColumnData::Real(vec![ratio; distortion.f1_frequency.len()]),
@@ -1144,6 +1181,7 @@ fn hdf5_table(path: &Path, data: crate::hdf5::Hdf5SimulationData) -> Result<Expo
         for series in distortion.series {
             if series.label != "f1" {
                 columns.push(ExportColumn {
+                    unit: None,
                     name: format!("frequency({})", series.label),
                     var_type: "frequency".to_string(),
                     data: ColumnData::Real(series.physical_frequency),
@@ -1151,6 +1189,7 @@ fn hdf5_table(path: &Path, data: crate::hdf5::Hdf5SimulationData) -> Result<Expo
             }
             for signal in series.signals {
                 columns.push(ExportColumn {
+                    unit: None,
                     name: format!("peak({}:{})", series.label, signal.name),
                     var_type: signal.var_type.clone(),
                     data: ColumnData::Complex {
@@ -1159,17 +1198,20 @@ fn hdf5_table(path: &Path, data: crate::hdf5::Hdf5SimulationData) -> Result<Expo
                     },
                 });
                 columns.push(ExportColumn {
+                    unit: None,
                     name: format!("magnitude({}:{})", series.label, signal.name),
                     var_type: signal.var_type,
                     data: ColumnData::Real(signal.magnitude),
                 });
                 columns.push(ExportColumn {
+                    unit: None,
                     name: format!("phase_deg({}:{})", series.label, signal.name),
                     var_type: "phase".to_string(),
                     data: ColumnData::Real(signal.phase_degrees),
                 });
                 if let Some(ratio) = signal.magnitude_ratio_to_f1 {
                     columns.push(ExportColumn {
+                        unit: None,
                         name: format!("magnitude_ratio_to_f1({}:{})", series.label, signal.name),
                         var_type: "ratio".to_string(),
                         data: ColumnData::Real(ratio),
@@ -1178,6 +1220,7 @@ fn hdf5_table(path: &Path, data: crate::hdf5::Hdf5SimulationData) -> Result<Expo
             }
         }
         return Ok(ExportTable {
+            scale_unit: None,
             analysis: "disto".to_string(),
             plot_name: if data.title.is_empty() {
                 "Volterra Distortion Analysis".to_string()
@@ -1192,6 +1235,7 @@ fn hdf5_table(path: &Path, data: crate::hdf5::Hdf5SimulationData) -> Result<Expo
     }
     if let Some(ac) = data.ac.clone() {
         return Ok(ExportTable {
+            scale_unit: None,
             analysis: "ac".to_string(),
             plot_name: if data.title.is_empty() {
                 "AC Analysis".to_string()
@@ -1205,6 +1249,7 @@ fn hdf5_table(path: &Path, data: crate::hdf5::Hdf5SimulationData) -> Result<Expo
                 .signals
                 .into_iter()
                 .map(|signal| ExportColumn {
+                    unit: signal.unit,
                     var_type: signal_var_type(&signal.name),
                     name: signal.name,
                     data: ColumnData::Complex {
@@ -1232,11 +1277,13 @@ fn decode_hdf5_columns(signals: Vec<crate::hdf5::Hdf5Signal>) -> Vec<ExportColum
             && let Some(name) = complex_part_name(&signal.name, "Re(")
             && signals.peek().is_some_and(|imag| {
                 imag.var_type == format!("complex_imag:{var_type}")
+                    && imag.unit == signal.unit
                     && complex_part_name(&imag.name, "Im(").as_deref() == Some(&name)
             })
         {
             let imag = signals.next().expect("matching imaginary column");
             columns.push(ExportColumn {
+                unit: signal.unit.clone(),
                 name,
                 var_type: var_type.to_string(),
                 data: ColumnData::Complex {
@@ -1246,6 +1293,7 @@ fn decode_hdf5_columns(signals: Vec<crate::hdf5::Hdf5Signal>) -> Vec<ExportColum
             });
         } else {
             columns.push(ExportColumn {
+                unit: signal.unit.clone(),
                 var_type: hdf5_signal_var_type(&signal),
                 name: signal.name,
                 data: ColumnData::Real(signal.values),
@@ -1468,5 +1516,31 @@ mod tests {
             error.to_string().contains("2 result sections"),
             "unexpected conversion error: {error}"
         );
+    }
+
+    #[test]
+    fn native_hdf5_signal_units_survive_tabular_import() {
+        for complex in [false, true] {
+            let input = TempInput::new("h5", "placeholder");
+            let mut data = crate::hdf5::Hdf5SimulationData::new();
+            data.title = "unit-preserving import".into();
+            if complex {
+                let mut section = crate::hdf5::Hdf5AcSection::new(vec![1.0, 2.0]);
+                section.add_signal("probe", Some("mV".into()), vec![3.0, 4.0], vec![1.0, 2.0]);
+                data.ac = Some(section);
+            } else {
+                let mut section = crate::hdf5::Hdf5WaveformSection::new("time", vec![0.0, 1.0]);
+                section.add_typed_signal("probe", "voltage", Some("mV".into()), vec![3.0, 4.0]);
+                data.transient = Some(section);
+            }
+            crate::hdf5::write_hdf5(&input.0, &data).unwrap();
+            let table = load_table(
+                &input.0,
+                OutputFormat::Hdf5,
+                rspice_core::ResourceLimits::default(),
+            )
+            .unwrap();
+            assert_eq!(table.columns[0].unit.as_deref(), Some("mV"));
+        }
     }
 }

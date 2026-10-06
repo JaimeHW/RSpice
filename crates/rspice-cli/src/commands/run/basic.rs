@@ -1095,14 +1095,14 @@ pub(super) fn finish_transient_result(
             }
             OutputFormat::Raw | OutputFormat::RawAscii | OutputFormat::Csv | OutputFormat::Tsv => {
                 TransientOutputDocument::Table {
-                    table: super::export::scalar_table(
+                    table: Box::new(super::export::scalar_table(
                         "transient",
                         "Transient Analysis",
                         "time",
                         "time",
                         output_time,
                         &signals,
-                    ),
+                    )),
                     events: rspice_core::execution::transient_event_plots(
                         &result.digital_traces,
                         &result.real_traces,
@@ -1177,7 +1177,7 @@ pub(super) enum TransientOutputDocument {
     /// them; the delimited ones carry the grid-sampled `D()` columns the
     /// table already holds and nothing more.
     Table {
-        table: super::export::ExportTable,
+        table: Box<super::export::ExportTable>,
         events: Vec<rspice_core::io::RawEventTimeline>,
         /// The declared buses, as their own plot family. The member plots are
         /// in `events` and stay the authoritative copy; these carry the

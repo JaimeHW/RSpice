@@ -632,6 +632,7 @@ pub(crate) fn load_vcd_table(
             values.push(held);
         }
         columns.push(ExportColumn {
+            unit: None,
             var_type: match signal.kind {
                 VcdSignalKind::Logic => DIGITAL_VARIABLE_TYPE.to_string(),
                 VcdSignalKind::Real => REAL_VARIABLE_TYPE.to_string(),
@@ -642,6 +643,7 @@ pub(crate) fn load_vcd_table(
     }
 
     Ok(ExportTable {
+        scale_unit: None,
         analysis: "converted".to_string(),
         plot_name: "Converted Data".to_string(),
         scale_name: "time".to_string(),
@@ -1141,12 +1143,14 @@ mod tests {
 
     fn grid_table(name: &str, times: &[f64], values: &[f64]) -> ExportTable {
         ExportTable {
+            scale_unit: None,
             analysis: "transient".to_string(),
             plot_name: "Transient Analysis".to_string(),
             scale_name: "time".to_string(),
             scale_type: "time".to_string(),
             scale: times.to_vec(),
             columns: vec![ExportColumn {
+                unit: None,
                 name: name.to_string(),
                 var_type: DIGITAL_VARIABLE_TYPE.to_string(),
                 data: ColumnData::Real(values.to_vec()),

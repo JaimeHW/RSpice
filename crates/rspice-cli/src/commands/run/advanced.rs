@@ -1271,6 +1271,7 @@ fn export_dc_match(
 
     let unit = dc_match_unit(result);
     let scalar = |name: String, var_type: &str, value: f64| ExportColumn {
+        unit: None,
         name,
         var_type: var_type.to_string(),
         data: ColumnData::Real(vec![value]),
@@ -1297,6 +1298,7 @@ fn export_dc_match(
         ));
     }
     let table = ExportTable {
+        scale_unit: None,
         analysis: "dcmatch".to_string(),
         plot_name: "DC Mismatch".to_string(),
         scale_name: "point".to_string(),

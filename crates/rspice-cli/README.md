@@ -520,6 +520,15 @@ fail, point-count mismatches fail (a result truncated by a crashed run cannot
 pass on the overlap it wrote), and NaN never matches anything. `--bless`
 accepts the result as the new reference.
 
+JSON, HDF5 and RSpice RAW table conversion preserve explicitly declared signal
+and coordinate units. Comparison requires matching units, including the case
+of SI prefixes (`mV` differs from `MV`); it does not perform unit conversion.
+Legacy files without unit metadata use their declared quantity types when
+available. CSV/TSV retain numbers and column names only.
+`--interpolate` resamples analog signals linearly and holds digital and real
+event signals until their next transition. It never extrapolates or resamples
+between differently declared coordinate units.
+
 RAW and HDF5 inputs are validated in full before any section is selected.
 When they contain multiple results, `compare` and tabular `convert` require
 `--section NAME_OR_INDEX`: an exact RAW plot name or HDF5 group name, or a

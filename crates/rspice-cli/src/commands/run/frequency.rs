@@ -83,11 +83,13 @@ pub(super) fn run_tf_from_command(
         use super::export::{ColumnData, ExportColumn, ExportTable};
 
         let scalar = |name: &str, var_type: &str, value: f64| ExportColumn {
+            unit: None,
             name: name.to_string(),
             var_type: var_type.to_string(),
             data: ColumnData::Real(vec![value]),
         };
         let table = ExportTable {
+            scale_unit: None,
             analysis: "tf".to_string(),
             plot_name: "DC Transfer Function".to_string(),
             scale_name: "point".to_string(),
@@ -391,6 +393,7 @@ fn distortion_export_table(
     let mut columns = Vec::new();
     if let Some(ratio) = projection.f2_over_f1 {
         columns.push(ExportColumn {
+            unit: None,
             name: "f2_over_f1".to_string(),
             var_type: "ratio".to_string(),
             data: ColumnData::Real(vec![ratio; projection.f1_frequencies.len()]),
@@ -400,6 +403,7 @@ fn distortion_export_table(
     for series in projection.series {
         if series.label != "f1" {
             columns.push(ExportColumn {
+                unit: None,
                 name: format!("frequency({})", series.label),
                 var_type: "frequency".to_string(),
                 data: ColumnData::Real(series.physical_frequencies),
@@ -432,6 +436,7 @@ fn distortion_export_table(
             };
             let var_type = signal.raw_variable_type().to_string();
             columns.push(ExportColumn {
+                unit: None,
                 name: phasor_name,
                 var_type: var_type.clone(),
                 data: ColumnData::Complex {
@@ -440,11 +445,13 @@ fn distortion_export_table(
                 },
             });
             columns.push(ExportColumn {
+                unit: None,
                 name: format!("magnitude({}:{})", series.label, signal.display_name),
                 var_type,
                 data: ColumnData::Real(magnitudes.clone()),
             });
             columns.push(ExportColumn {
+                unit: None,
                 name: format!("phase_deg({}:{})", series.label, signal.display_name),
                 var_type: "phase".to_string(),
                 data: ColumnData::Real(phases),
@@ -452,6 +459,7 @@ fn distortion_export_table(
 
             if let Some(ratios) = ratios {
                 columns.push(ExportColumn {
+                    unit: None,
                     name: format!(
                         "magnitude_ratio_to_f1({}:{})",
                         series.label, signal.display_name
@@ -464,6 +472,7 @@ fn distortion_export_table(
     }
 
     Ok(ExportTable {
+        scale_unit: None,
         analysis: "disto".to_string(),
         plot_name: "Volterra Distortion Analysis".to_string(),
         scale_name: "frequency(f1)".to_string(),
@@ -853,6 +862,7 @@ pub(super) fn run_stb(
         use super::export::{ColumnData, ExportColumn, ExportTable};
 
         let table = ExportTable {
+            scale_unit: None,
             analysis: "stb".to_string(),
             plot_name: "STB Loop Gain".to_string(),
             scale_name: "frequency".to_string(),
@@ -860,6 +870,7 @@ pub(super) fn run_stb(
             scale: stb.frequencies.clone(),
             columns: vec![
                 ExportColumn {
+                    unit: None,
                     name: "loopgain".to_string(),
                     var_type: "gain".to_string(),
                     data: ColumnData::Complex {
@@ -868,6 +879,7 @@ pub(super) fn run_stb(
                     },
                 },
                 ExportColumn {
+                    unit: None,
                     name: "loopgain_mag_db".to_string(),
                     var_type: "gain".to_string(),
                     data: ColumnData::Real(
@@ -878,6 +890,7 @@ pub(super) fn run_stb(
                     ),
                 },
                 ExportColumn {
+                    unit: None,
                     name: "loopgain_phase_deg".to_string(),
                     var_type: "phase".to_string(),
                     data: ColumnData::Real(
@@ -1143,6 +1156,7 @@ fn finish_noise(
                 use super::export::{ColumnData, ExportColumn, ExportTable};
 
                 let table = ExportTable {
+                    scale_unit: None,
                     analysis: "noise".to_string(),
                     plot_name: "Noise Spectral Density Curves".to_string(),
                     scale_name: "frequency".to_string(),
@@ -1150,11 +1164,13 @@ fn finish_noise(
                     scale: noise_frequencies.clone(),
                     columns: vec![
                         ExportColumn {
+                            unit: None,
                             name: "onoise_spectrum".to_string(),
                             var_type: "voltage".to_string(),
                             data: ColumnData::Real(onoise.clone()),
                         },
                         ExportColumn {
+                            unit: None,
                             name: "inoise_spectrum".to_string(),
                             var_type: "voltage".to_string(),
                             data: ColumnData::Real(inoise.clone()),
@@ -1327,6 +1343,7 @@ fn report_pz(
 
         let singularity =
             |label: &str, index: usize, value: &rspice_core::Complex64| ExportColumn {
+                unit: None,
                 name: format!("{label}({})", index + 1),
                 var_type: "frequency".to_string(),
                 data: ColumnData::Complex {
@@ -1347,6 +1364,7 @@ fn report_pz(
             .collect();
 
         let table = ExportTable {
+            scale_unit: None,
             analysis: "pz".to_string(),
             plot_name: "Pole-Zero Analysis".to_string(),
             scale_name: "point".to_string(),
@@ -1648,6 +1666,7 @@ pub(super) fn run_sensitivity_from_command(
             use super::export::{ColumnData, ExportColumn, ExportTable};
 
             let table = ExportTable {
+                scale_unit: None,
                 analysis: "sens_ac".to_string(),
                 plot_name: "AC Sensitivity".to_string(),
                 scale_name: "frequency".to_string(),
@@ -1657,6 +1676,7 @@ pub(super) fn run_sensitivity_from_command(
                     .sensitivities
                     .iter()
                     .map(|trace| ExportColumn {
+                        unit: None,
                         name: format!("d{}/d({})", output_label, trace.vector_name),
                         var_type: "sensitivity".to_string(),
                         data: ColumnData::Complex {
@@ -1792,6 +1812,7 @@ fn dc_sensitivity_table(output: &str, results: &[(String, f64)]) -> super::expor
     use super::export::{ColumnData, ExportColumn, ExportTable};
 
     ExportTable {
+        scale_unit: None,
         analysis: "sens".to_string(),
         plot_name: "DC Sensitivity".to_string(),
         scale_name: "point".to_string(),
@@ -1800,6 +1821,7 @@ fn dc_sensitivity_table(output: &str, results: &[(String, f64)]) -> super::expor
         columns: results
             .iter()
             .map(|(name, value)| ExportColumn {
+                unit: None,
                 name: format!("d{output}/d({name})"),
                 var_type: "sensitivity".to_string(),
                 data: ColumnData::Real(vec![*value]),
