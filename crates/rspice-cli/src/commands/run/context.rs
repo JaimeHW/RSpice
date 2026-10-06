@@ -834,37 +834,15 @@ impl<'a> RunContext<'a> {
             } => frequency::run_ac(self, *variation, *points, *start_freq, *stop_freq)?,
             AnalysisCommand::AcData { table_name } => frequency::run_ac_data(self, table_name)?,
             AnalysisCommand::Hb(card) => advanced::run_hb_from_command(self, card)?,
-            AnalysisCommand::Qpnoise(_) => {
-                return Err(CliError::InvalidArgument {
-                    message: "The CLI has no QPNOISE result-document projection yet".into(),
-                    suggestion: Some(
-                        "Use Engine::run_qpnoise_from_qpss with an authenticated QPSS point".into(),
-                    ),
-                });
-            }
-            AnalysisCommand::Qpxf(_) => {
-                return Err(CliError::InvalidArgument {
-                    message: "The CLI has no QPXF result-document projection yet".into(),
-                    suggestion: Some(
-                        "Use Engine::run_qpxf_from_qpss with an authenticated QPSS point".into(),
-                    ),
-                });
-            }
-            AnalysisCommand::Qpac(_) => {
-                return Err(CliError::InvalidArgument {
-                    message: "The CLI has no QPAC result-document projection yet".into(),
-                    suggestion: Some(
-                        "Use Engine::run_qpac_from_qpss with an authenticated QPSS point".into(),
-                    ),
-                });
-            }
-            AnalysisCommand::Qpss(_) => {
-                return Err(CliError::InvalidArgument {
-                    message: "The CLI has no QPSS result-document projection yet".into(),
-                    suggestion: Some(
-                        "Use Simulation Studio or Engine::run_qpss for driven QPSS".into(),
-                    ),
-                });
+            AnalysisCommand::Qpnoise(_)
+            | AnalysisCommand::Qpxf(_)
+            | AnalysisCommand::Qpac(_)
+            | AnalysisCommand::Qpss(_) => {
+                return Err(compatibility::projection_refusal(analysis).ok_or_else(|| {
+                    CliError::InternalError {
+                        message: "missing quasi-periodic frontend capability declaration".into(),
+                    }
+                })?);
             }
             AnalysisCommand::Sp { .. } => advanced::run_sparam_from_command(self, analysis)?,
             AnalysisCommand::Stb { .. } => frequency::run_stb(self, analysis)?,

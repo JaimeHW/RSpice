@@ -439,6 +439,7 @@ pub(super) fn load_netlist_from_source(
     rspice_core::netlist::validate_output_symbols_with_abort(&netlist, &crate::abort::ProcessAbort)
         .map_err(|error| map_cancellable_parse_error(error, args.timeout))?;
 
+    compatibility::validate(&netlist, args, config)?;
     if emit_diagnostics {
         crate::commands::emit_netlist_diagnostics(&netlist, false);
     }

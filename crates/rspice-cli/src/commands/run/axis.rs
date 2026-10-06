@@ -881,6 +881,7 @@ pub(super) fn run_deck(
     quiet: bool,
     run_label: Option<&str>,
 ) -> Result<DeckOutcome, CliError> {
+    compatibility::validate(netlist, args, config)?;
     validate_pss_flag_conflict(netlist, args)?;
     validate_step_frontend_compatibility(netlist, args)?;
 

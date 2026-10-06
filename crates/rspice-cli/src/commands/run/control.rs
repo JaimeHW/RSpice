@@ -26,29 +26,7 @@ pub(super) fn run(
         .ok_or_else(|| CliError::InternalError {
             message: "control execution requires retained script source".into(),
         })?;
-    if args.checkpoint.is_some()
-        || args.resume.is_some()
-        || args.tran_stop.is_some()
-        || args.compress
-        || config.simulation.compress_waveforms
-        || netlist.options.restart.is_some()
-    {
-        return Err(CliError::InvalidArgument {
-            message: "control-script checkpoint, segmented-restart and compression execution is not yet implemented".into(),
-            suggestion: None,
-        });
-    }
-    if !netlist.fft_analyses.is_empty()
-        || netlist
-            .analyses
-            .iter()
-            .any(|analysis| matches!(analysis, AnalysisCommand::Four { .. }))
-    {
-        return Err(CliError::InvalidArgument {
-            message: "declarative Fourier/FFT post-processing inside a control-script run is not yet implemented".into(),
-            suggestion: None,
-        });
-    }
+    compatibility::validate(netlist, args, config)?;
     let limits = config.resources.limits();
     let program = ControlProgram::parse_deck_with_abort(
         script.text(),

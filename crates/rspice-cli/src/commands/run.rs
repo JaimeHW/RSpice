@@ -21,6 +21,7 @@
 mod advanced;
 mod axis;
 mod basic;
+mod compatibility;
 mod context;
 mod control;
 mod corners;
