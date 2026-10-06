@@ -32,6 +32,7 @@ mod fourier_document;
 mod frequency;
 mod naming;
 mod periodic;
+mod planning;
 mod restart;
 mod shared;
 
@@ -195,43 +196,16 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     .map_err(|error| map_multi_run_error(error, args.timeout))?;
     naming::disambiguate_run_labels(&mut plan);
     let multi_run = plan.len() > 1;
-    if multi_run {
-        // One Xyce-compatible sibling name cannot safely represent several
-        // rewritten .ALTER/.DATA decks. Preflight every outer variant and its
-        // complete Cartesian child-run count before workers start, so a late
-        // materialization error or aggregate-budget failure cannot leave an
-        // earlier variant's artifact behind.
-        let mut concrete_runs = 0usize;
-        for deck in &plan {
-            let netlist = load_netlist_from_source(&deck.source, &args, config, false)?;
-            let deck_runs = preflight_deck_run_count(&netlist, &args, config)?;
-            concrete_runs =
-                concrete_runs
-                    .checked_add(deck_runs)
-                    .ok_or_else(|| CliError::ResourceLimit {
-                        path: args.input.clone(),
-                        source: rspice_core::ResourceLimitError {
-                            resource: rspice_core::ResourceKind::BatchRuns,
-                            requested: usize::MAX,
-                            limit: resource_limits.max_batch_runs,
-                        },
-                    })?;
-            if netlist
-                .options
-                .add_resistors
-                .as_ref()
-                .is_some_and(|policy| !policy.is_empty())
-            {
-                return Err(CliError::InvalidArgument {
-                    message: ".PREPROCESS ADDRESISTORS is ambiguous in a multi-run .ALTER/.DATA deck"
-                        .to_string(),
-                    suggestion: Some(
-                        "run each expanded deck separately so each has its own <input>_xyce.cir artifact"
-                            .to_string(),
-                    ),
-                });
-            }
-        }
+    let mut prepared = Vec::with_capacity(plan.len());
+    let mut concrete_runs = 0usize;
+    for deck in &plan {
+        let prepared_deck = planning::PreparedDeck::prepare(&deck.source, &args, config)?;
+        concrete_runs = concrete_runs.saturating_add(prepared_deck.preflight(
+            &args,
+            config,
+            multi_run || args.corners.is_some(),
+        )?);
+        prepared.push(prepared_deck);
         if concrete_runs > resource_limits.max_batch_runs {
             return Err(CliError::ResourceLimit {
                 path: args.input.clone(),
@@ -276,19 +250,12 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
         let outcomes: Vec<Result<DeckOutcome, CliError>> = pool.install(|| {
             use rayon::prelude::*;
             plan.par_iter()
-                .map(|deck| {
-                    let netlist = load_netlist_from_source(&deck.source, &args, config, false)?;
+                .zip(&prepared)
+                .map(|(deck, prepared)| {
                     // The outer pool owns the process worker budget.
                     let mut child_args = args.clone();
                     child_args.jobs = 1;
-                    run_deck(
-                        &netlist,
-                        &child_args,
-                        config,
-                        false,
-                        true,
-                        deck.label.as_deref(),
-                    )
+                    prepared.run(&child_args, config, false, true, deck.label.as_deref())
                 })
                 .collect()
         });
@@ -323,31 +290,16 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
             outputs.extend(outcome.outputs);
         }
     } else {
-        for deck in &plan {
+        for (deck, prepared) in plan.iter().zip(&prepared) {
             if multi_run && !quiet {
                 println!("\n=== run: {} ===", deck.label.as_deref().unwrap_or("base"));
             }
-            let netlist = load_netlist_from_source(&deck.source, &args, config, !quiet)?;
-            validate_pss_flag_conflict(&netlist, &args)?;
-            validate_step_frontend_compatibility(&netlist, &args)?;
-            let addresistors_artifact =
-                materialize_addresistors_artifact(&netlist, &args.input, from_stdin, args.timeout)?;
-            let outcome = run_deck(
-                &netlist,
-                &args,
-                config,
-                verbose,
-                quiet,
-                deck.label.as_deref(),
-            )?;
+            let outcome = prepared.run(&args, config, verbose, quiet, deck.label.as_deref())?;
             if first_error.is_none() {
                 first_error = first_reported_failure(&outcome.reports);
             }
             reports.extend(outcome.reports);
             outputs.extend(outcome.outputs);
-            if let Some(path) = addresistors_artifact {
-                outputs.push(path);
-            }
         }
     }
 
