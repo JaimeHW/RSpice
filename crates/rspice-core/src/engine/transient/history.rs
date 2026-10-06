@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::device::semiconductor::AcceptedBjtChargeSnapshotCheckpoint;
+mod storage;
 
 /// Maximum allowed per-iteration node update during Newton damping.
 ///
@@ -433,7 +434,7 @@ impl Engine {
     pub(in crate::engine) fn capture_accepted_junction_transient_history_checkpoint(
         circuit: &crate::circuit::CircuitData,
         histories: AcceptedJunctionHistories<'_>,
-    ) -> AcceptedJunctionTransientHistoryCheckpoint {
+    ) -> Result<AcceptedJunctionTransientHistoryCheckpoint, String> {
         let AcceptedJunctionHistories {
             bjt_history,
             diode_history,
@@ -539,7 +540,7 @@ impl Engine {
                     .to_string()
                 })
                 .collect(),
-            bjt_history: bjt_history.clone(),
+            bjt_history: bjt_history.try_clone()?,
             diode_names: circuit
                 .diodes
                 .devices
@@ -563,7 +564,7 @@ impl Engine {
         {
             checkpoint.resume_blockers.push(error);
         }
-        checkpoint
+        Ok(checkpoint)
     }
 
     /// Validate availability, capture blockers, identity, runtime family,
@@ -913,18 +914,18 @@ impl Engine {
         Ok(())
     }
 
-    /// Clone and normalize a validated physical-breakpoint image into a new
+    /// Normalize an owned, validated physical-breakpoint image into a new
     /// order-one integration epoch. The authoritative current accepted state
     /// remains exact; older generations/derivatives are flattened and the
     /// trial snapshot cache is deliberately invalidated.
     pub(in crate::engine) fn normalize_accepted_junction_transient_history_checkpoint_for_order_one(
         circuit: &crate::circuit::CircuitData,
-        checkpoint: &AcceptedJunctionTransientHistoryCheckpoint,
+        mut checkpoint: AcceptedJunctionTransientHistoryCheckpoint,
         accepted_dt_seed: Value,
     ) -> Result<AcceptedJunctionTransientHistoryCheckpoint, String> {
         validate_history_dt("accepted_dt_seed", accepted_dt_seed)?;
-        Self::validate_accepted_junction_transient_history_checkpoint(circuit, checkpoint)?;
-        let mut normalized = checkpoint.clone();
+        Self::validate_accepted_junction_transient_history_checkpoint(circuit, &checkpoint)?;
+        let normalized = &mut checkpoint;
         Self::flatten_bjt_and_diode_histories_for_order_one_restart(
             &mut normalized.bjt_history,
             &mut normalized.diode_history,
@@ -943,8 +944,8 @@ impl Engine {
         normalized
             .jfet_history
             .normalize_for_order_one(accepted_dt_seed);
-        Self::validate_accepted_junction_transient_history_checkpoint(circuit, &normalized)?;
-        Ok(normalized)
+        Self::validate_accepted_junction_transient_history_checkpoint(circuit, normalized)?;
+        Ok(checkpoint)
     }
 
     /// Validate the complete aggregate, then clone/decode its engine-owned
@@ -968,7 +969,7 @@ impl Engine {
             bsim3: checkpoint.bsim3_history.clone(),
             bsim4: checkpoint.bsim4_history.clone(),
             mosfet: checkpoint.mosfet_history.clone(),
-            bjt: checkpoint.bjt_history.clone(),
+            bjt: checkpoint.bjt_history.try_clone()?,
             diode: checkpoint.diode_history.clone(),
             jfet: checkpoint.jfet_history.clone(),
             vbic_snapshot_cache: snapshot_cache,
@@ -1663,7 +1664,8 @@ D1 b 0 DM
                 bsim4_history: &Default::default(),
                 mosfet_history: &Default::default(),
             },
-        );
+        )
+        .unwrap();
         assert!(checkpoint.available);
         assert!(checkpoint.resume_blockers.is_empty());
         assert_eq!(
@@ -1726,7 +1728,8 @@ D1 b 0 DM
                 bsim4_history: &Default::default(),
                 mosfet_history: &Default::default(),
             },
-        );
+        )
+        .unwrap();
         let mut expected_bjt = bjt_history.clone();
         let mut expected_diode = diode_history.clone();
         Engine::flatten_bjt_and_diode_histories_for_order_one_restart(
@@ -1738,7 +1741,7 @@ D1 b 0 DM
         let normalized =
             Engine::normalize_accepted_junction_transient_history_checkpoint_for_order_one(
                 &circuit,
-                &checkpoint,
+                checkpoint.clone(),
                 0.125,
             )
             .expect("physical-breakpoint history normalizes");
@@ -1767,7 +1770,8 @@ D1 b 0 DM
                 bsim4_history: &Default::default(),
                 mosfet_history: &Default::default(),
             },
-        );
+        )
+        .unwrap();
 
         let mut wrong_name = checkpoint.clone();
         wrong_name.bjt_names[0].push_str("-wrong");

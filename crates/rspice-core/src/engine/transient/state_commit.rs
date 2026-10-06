@@ -112,6 +112,30 @@ pub(super) struct PreparedBjtHistory {
 }
 
 impl PreparedBjtHistory {
+    /// Storage reservation belongs to preparation, before any accepted state
+    /// is advanced. A failure can change capacity but no physical values.
+    fn reserve_phase_storage(
+        &self,
+        circuit: &crate::CircuitData,
+        history: &mut BjtTransientHistory,
+    ) -> Result<(), SimulationError> {
+        for (index, value) in self.values.iter().enumerate() {
+            if let Some(sample) = value.phase_sample {
+                history.phase[index]
+                    .as_mut()
+                    .expect("prepared phase owner")
+                    .try_reserve_sample(sample.event.map(|event| event.order))
+                    .map_err(|error| {
+                        SimulationError::Circuit(format!(
+                            "BJT '{}' phase history allocation failed: {error}",
+                            circuit.bjts.devices[index].name
+                        ))
+                    })?;
+            }
+        }
+        Ok(())
+    }
+
     fn phase_step_control(
         &self,
         circuit: &crate::CircuitData,
@@ -365,6 +389,7 @@ impl Engine {
             vbic_snapshots,
             Default::default(),
         )?;
+        prepared.reserve_phase_storage(circuit, history)?;
         Self::commit_bjt_history(history, prepared);
         Ok(())
     }
@@ -381,7 +406,12 @@ impl Engine {
         phase_context: bjt::BjtPhaseContext<'_>,
     ) -> Result<PreparedBjtHistory, SimulationError> {
         let phase_view = phase_context.bind(history)?;
-        let mut values = Vec::with_capacity(circuit.bjts.devices.len());
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(circuit.bjts.devices.len())
+            .map_err(|error| {
+                SimulationError::Circuit(format!("BJT accepted-state allocation failed: {error}"))
+            })?;
         for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
             let vc = Self::node_voltage(solution, bjt.node_collector);
             let vb = Self::node_voltage(solution, bjt.node_base);
@@ -715,7 +745,7 @@ impl Engine {
         &'engine self,
         circuit: &mut crate::circuit::CircuitData,
         step: AcceptedReactiveStep<'_>,
-        histories: &TransientDeviceHistories<'_>,
+        histories: &mut TransientDeviceHistories<'_>,
         snapshots: AcceptedReactiveSnapshots<'_>,
     ) -> Result<PreparedReactiveHistory<'engine>, SimulationError> {
         if snapshots.bjt_phase.incoming_arrival {
@@ -816,6 +846,10 @@ impl Engine {
         )? {
             control.ensure_acceptable(circuit)?;
         }
+        // Reserve every growing transport buffer while failure can still
+        // reject the complete all-device transaction. The commit below must
+        // not allocate after another device has advanced its accepted state.
+        bjt.reserve_phase_storage(circuit, histories.bjt)?;
         Ok(PreparedReactiveHistory {
             bjt,
             behavioral,
@@ -832,12 +866,12 @@ impl Engine {
         &self,
         circuit: &mut crate::circuit::CircuitData,
         step: AcceptedReactiveStep<'_>,
-        histories: TransientDeviceHistories<'_>,
+        mut histories: TransientDeviceHistories<'_>,
         snapshots: AcceptedReactiveSnapshots<'_>,
         scheduling: ReactiveBreakpointScheduling<'_>,
         sink: DynamicBreakpointSink<'_>,
     ) -> Result<(), SimulationError> {
-        let prepared = self.prepare_reactive_history(circuit, step, &histories, snapshots)?;
+        let prepared = self.prepare_reactive_history(circuit, step, &mut histories, snapshots)?;
         self.commit_reactive_history(
             circuit, step, histories, snapshots, scheduling, sink, prepared,
         );

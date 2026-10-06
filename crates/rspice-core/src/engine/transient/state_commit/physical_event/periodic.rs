@@ -57,7 +57,12 @@ impl Engine {
         }
         // Append the event to the history preceding the incoming interval.
         // The ordinary PSS acceptance may already have sampled its left limit.
-        let mut outgoing_history = incoming_history.clone();
+        let mut outgoing_history = incoming_history
+            .try_clone()
+            .map_err(SimulationError::Circuit)?;
+        point
+            .bjt
+            .reserve_phase_storage(circuit, &mut outgoing_history)?;
         Self::commit_bjt_history(&mut outgoing_history, point.bjt);
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);

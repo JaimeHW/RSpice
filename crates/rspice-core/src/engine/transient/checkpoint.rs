@@ -6560,7 +6560,7 @@ impl TransientCheckpoint {
                     bsim4_history: &Default::default(),
                     mosfet_history: &Default::default(),
                 },
-            )
+            )?
         } else {
             AcceptedJunctionTransientHistoryCheckpoint::unavailable(
                 "checkpoint capture caller did not provide accepted junction transient histories",
@@ -13783,7 +13783,8 @@ mod tests {
                     bsim4_history: &Default::default(),
                     mosfet_history: &Default::default(),
                 },
-            );
+            )
+            .unwrap();
         (engine, netlist, checkpoint)
     }
 

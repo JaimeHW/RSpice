@@ -21,8 +21,23 @@ impl Engine {
         history: &mut BjtTransientHistory,
         model: crate::config::GpTransientPhaseModel,
     ) -> Result<(), SimulationError> {
-        let mut phase = Vec::with_capacity(circuit.bjts.devices.len());
-        let mut weil_phase = Vec::with_capacity(circuit.bjts.devices.len());
+        let count = circuit.bjts.devices.len();
+        let allocation_error = |error| {
+            SimulationError::Circuit(format!(
+                "BJT phase initialization allocation failed: {error}"
+            ))
+        };
+        let mut phase = Vec::new();
+        let mut weil_phase = Vec::new();
+        let mut outgoing_slopes = Vec::new();
+        phase.try_reserve_exact(count).map_err(allocation_error)?;
+        weil_phase
+            .try_reserve_exact(count)
+            .map_err(allocation_error)?;
+        outgoing_slopes
+            .try_reserve_exact(count)
+            .map_err(allocation_error)?;
+        outgoing_slopes.resize(count, None);
         for (index, bjt) in circuit.bjts.devices.iter().enumerate() {
             let delay = bjt.legacy_excess_phase_delay();
             if delay == 0.0 {
@@ -51,7 +66,8 @@ impl Engine {
                 continue;
             }
             weil_phase.push(None);
-            let mut buffer = rspice_veriloga_runtime::transport_delay::DelayBuffer::new(4);
+            let mut buffer = rspice_veriloga_runtime::transport_delay::DelayBuffer::try_new(4)
+                .map_err(allocation_error)?;
             buffer
                 .accept_sample(0.0, forward.current, delay, None)
                 .map_err(|error| {
@@ -62,7 +78,7 @@ impl Engine {
                 })?;
             phase.push(Some(buffer));
         }
-        history.phase_outgoing_slopes = vec![None; phase.len()];
+        history.phase_outgoing_slopes = outgoing_slopes;
         history.phase = phase;
         history.weil_phase = weil_phase;
         Ok(())

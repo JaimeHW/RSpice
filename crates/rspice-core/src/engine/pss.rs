@@ -2012,11 +2012,12 @@ impl Engine {
                 bsim4_history: &circuit.bsim4_history,
                 mosfet_history: &circuit.mosfet_history,
             },
-        );
+        )
+        .map_err(SimulationError::Circuit)?;
         let junction_history =
             Self::normalize_accepted_junction_transient_history_checkpoint_for_order_one(
                 &circuit,
-                &junction_history,
+                junction_history,
                 trace.times[trace.times.len() - 1] - trace.times[trace.times.len() - 2],
             )
             .map_err(SimulationError::Circuit)?;

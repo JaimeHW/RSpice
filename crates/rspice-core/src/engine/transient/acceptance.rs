@@ -155,7 +155,7 @@ impl Engine {
                     .prepare_thermal_step(solution, dt)
                     .map_err(SimulationError::Circuit)?;
                 let prepared_native = native
-                    .as_ref()
+                    .as_mut()
                     .map(|native| {
                         self.prepare_reactive_history(
                             circuit,
@@ -166,7 +166,7 @@ impl Engine {
                                 coeff: coefficients,
                                 bsim4_trnqs_coeff: native.bsim4_trnqs_coeff,
                             },
-                            &native.histories,
+                            &mut native.histories,
                             native.snapshots,
                         )
                     })

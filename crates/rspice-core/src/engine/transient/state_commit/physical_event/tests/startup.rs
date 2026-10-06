@@ -331,7 +331,8 @@ fn physical_startup_publishes_one_sided_gp_anchor_and_finite_currents() {
                     bsim4_history: &Default::default(),
                     mosfet_history: &Default::default(),
                 },
-            );
+            )
+            .unwrap();
             Engine::validate_accepted_junction_transient_history_checkpoint(&circuit, &checkpoint)
                 .unwrap();
         }

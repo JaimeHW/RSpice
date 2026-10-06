@@ -3799,7 +3799,8 @@ impl Engine {
                     bsim4_history,
                     mosfet_history,
                 },
-            );
+            )
+            .map_err(SimulationError::Circuit)?;
         let restart_normalized = at_integration_endpoint
             || integration_continuation
                 .is_some_and(|continuation| continuation.xyce_breakpoint_restart_pending);
@@ -3807,7 +3808,7 @@ impl Engine {
             if accepted_junction_history.resume_blockers.is_empty() {
                 Self::normalize_accepted_junction_transient_history_checkpoint_for_order_one(
                     circuit,
-                    &accepted_junction_history,
+                    accepted_junction_history,
                     0.0,
                 )
                 .map_err(SimulationError::Circuit)?
@@ -11543,12 +11544,13 @@ impl Engine {
                         bsim4_history: &bsim4_history,
                         mosfet_history: &mosfet_history,
                     },
-                );
+                )
+                .map_err(SimulationError::Circuit)?;
             let final_accepted_junction_history =
                 if final_accepted_junction_history.resume_blockers.is_empty() {
                     Self::normalize_accepted_junction_transient_history_checkpoint_for_order_one(
                         &circuit,
-                        &final_accepted_junction_history,
+                        final_accepted_junction_history,
                         0.0,
                     )
                     .map_err(SimulationError::Circuit)?

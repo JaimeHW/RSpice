@@ -519,7 +519,7 @@ impl Engine {
                 };
                 if startup {
                     sample
-                        .validate(&DelayBuffer::new(4), 0.0)
+                        .validate(&DelayBuffer::new(0), 0.0)
                         .map_err(failure)?;
                 } else {
                     sample.validate(phase.history, step.time).map_err(failure)?;
