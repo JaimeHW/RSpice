@@ -591,7 +591,12 @@ fail, point-count mismatches fail (a result truncated by a crashed run cannot
 pass on the overlap it wrote), and NaN never matches anything. `--bless`
 accepts the result as the new reference after verifying that it satisfies the
 requested variable selection and comparison options. An invalid selection
-cannot create or replace a baseline. Reports retain exact mismatch counts and
+cannot create or replace a baseline. Promotion writes the exact bounded snapshot
+that was validated, even if the source changes during comparison. The result and
+golden must use the same format. Touchstone destination names must also preserve
+the decoded network: changing a two-port `.s2p` file to `.s1p`, or to an ambiguous
+`.ts` name, is rejected before the golden is created or replaced.
+Reports retain exact mismatch counts and
 maximum errors; JSON shows the first ten differences, and text shows five.
 
 JSON, HDF5 and RSpice RAW table conversion preserve explicitly declared signal

@@ -197,7 +197,7 @@ pub fn execute(
             let snapshot = snapshot.as_ref().expect("bless captured a snapshot");
             let data = comparison_data(&args.result, snapshot.load(args.section.as_deref())?)?;
             let mut comparison = validate_bless_candidate(&data, &args)?;
-            bless_golden(snapshot, &args.golden, quiet, "no golden file yet")?;
+            bless_golden(snapshot, &data, &args.golden, quiet, "no golden file yet")?;
             if args.format == OutputFormat::Json {
                 comparison.passed = false;
                 comparison
@@ -255,6 +255,7 @@ pub fn execute(
         if blessed {
             bless_golden(
                 snapshot.as_ref().expect("bless captured a snapshot"),
+                &result_data,
                 &args.golden,
                 quiet,
                 "differences accepted",
@@ -266,6 +267,7 @@ pub fn execute(
         if blessed {
             bless_golden(
                 snapshot.as_ref().expect("bless captured a snapshot"),
+                &result_data,
                 &args.golden,
                 quiet,
                 "differences accepted",
@@ -307,6 +309,7 @@ fn validate_compare_tolerance(name: &str, value: f64) -> Result<(), CliError> {
 /// Promote the result file to the new golden reference.
 fn bless_golden(
     result: &ResultSnapshot,
+    candidate: &ComparisonData,
     golden: &std::path::Path,
     quiet: bool,
     why: &str,
@@ -319,6 +322,30 @@ fn bless_golden(
                 "convert the result to the golden's format before blessing it".to_string(),
             ),
         });
+    }
+    if detect_format(result.path()) == crate::cli::InputFormat::Touchstone {
+        let invalid_destination = |detail: String| {
+            CliError::InvalidArgument {
+            message: format!(
+                "--bless cannot preserve the Touchstone result at '{}': {detail}",
+                golden.display()
+            ),
+            suggestion: Some("use a destination name that preserves the original port count and network interpretation".into()),
+        }
+        };
+        let destination = result
+            .touchstone_at(golden)
+            .and_then(|data| comparison_data(golden, data))
+            .map_err(|error| invalid_destination(error.to_string()))?;
+        // This is an artifact-identity check, independent of probe selection,
+        // comparison tolerances, interpolation, and truncation allowances.
+        if !matches!((candidate, &destination),
+            (ComparisonData::Waveform(original), ComparisonData::Waveform(promoted)) if original == promoted
+        ) {
+            return Err(invalid_destination(
+                "the destination filename changes the decoded network".into(),
+            ));
+        }
     }
     publish::artifact(golden, |writer| {
         writer
@@ -390,6 +417,7 @@ fn validate_bless_candidate(
 }
 
 /// Waveform data structure for comparison
+#[derive(PartialEq)]
 struct WaveformData {
     variables: Vec<String>,
     variable_types: Vec<String>,
@@ -974,10 +1002,10 @@ mod tests {
         validate_bless_candidate(&data, &CompareArgs::default()).unwrap();
 
         std::fs::write(&source, b"invalid replacement").unwrap();
-        bless_golden(&snapshot, &golden, true, "source changed").unwrap();
+        bless_golden(&snapshot, &data, &golden, true, "source changed").unwrap();
         assert_eq!(std::fs::read(&golden).unwrap(), original);
         std::fs::remove_file(&source).unwrap();
-        bless_golden(&snapshot, &golden, true, "source removed").unwrap();
+        bless_golden(&snapshot, &data, &golden, true, "source removed").unwrap();
         assert_eq!(std::fs::read(&golden).unwrap(), original);
     }
 

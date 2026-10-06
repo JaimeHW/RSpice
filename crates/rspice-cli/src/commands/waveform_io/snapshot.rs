@@ -43,6 +43,13 @@ impl ResultSnapshot {
         }
     }
 
+    /// Touchstone filenames can supply the port count. Validate the same bytes
+    /// under the proposed destination name before copying them there.
+    pub(crate) fn touchstone_at(&self, path: &Path) -> Result<ImportedResult, CliError> {
+        let table = touchstone::parse(path, self.bytes(), self.limits, None)?;
+        validate_result(path, table.into(), self.limits)
+    }
+
     pub(crate) fn load(&self, section: Option<&str>) -> Result<ImportedResult, CliError> {
         let path = self.path();
         let limits = self.limits;
