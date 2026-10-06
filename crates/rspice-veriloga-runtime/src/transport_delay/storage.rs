@@ -284,7 +284,11 @@ mod tests {
                     None,
                 )
                 .unwrap_err();
-            assert!(error.contains("allocation"), "{error}");
+            assert!(
+                matches!(error, DelayAcceptanceError::Allocation(_)),
+                "{error}"
+            );
+            assert!(std::error::Error::source(&error).is_some());
             assert_eq!(attempt, buffer);
         }
     }

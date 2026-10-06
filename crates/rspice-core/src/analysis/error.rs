@@ -911,6 +911,14 @@ pub enum SimulationError {
     #[error(transparent)]
     ResourceLimit(#[from] crate::resource::ResourceLimitError),
 
+    /// A per-device resource limit, with the elaborated instance identity.
+    #[error("Device '{instance}': {source}")]
+    DeviceResourceLimit {
+        instance: String,
+        #[source]
+        source: crate::resource::ResourceLimitError,
+    },
+
     /// Storage could not be reserved. This is distinct from exceeding a
     /// configured policy: changing the circuit or convergence tolerances does
     /// not remedy an allocator refusal. Reporting it requires no allocation.
@@ -1161,7 +1169,8 @@ impl SimulationError {
                 false,
             ),
             Self::Configuration(crate::config::SimulationConfigError::ResourceLimit(_))
-            | Self::ResourceLimit(_) => (
+            | Self::ResourceLimit(_)
+            | Self::DeviceResourceLimit { .. } => (
                 SimulationErrorCode::ResourceLimit,
                 SimulationErrorCategory::ResourceLimit,
                 false,
@@ -1268,7 +1277,8 @@ impl SimulationError {
             },
             resource_limit: match self {
                 Self::Configuration(crate::config::SimulationConfigError::ResourceLimit(error))
-                | Self::ResourceLimit(error) => Some(*error),
+                | Self::ResourceLimit(error)
+                | Self::DeviceResourceLimit { source: error, .. } => Some(*error),
                 _ => None,
             },
             analysis: self.analysis_instance(),

@@ -3,6 +3,76 @@
 use super::*;
 use bjt::BjtPhaseContext;
 
+#[test]
+fn gp_record_ceiling_preserves_every_participant_when_the_second_device_fails() {
+    use rspice_veriloga_runtime::transport_delay::{
+        DelayCheckpoint, DelayConfiguration, MAX_DELAY_HISTORY_SAMPLES,
+    };
+    let (engine, mut circuit, mut history, solution) = fixture();
+    let delay = circuit.bjts.devices[1].legacy_excess_phase_delay();
+    let time = delay / 2.0;
+    let value = limits(&history)[1].unwrap();
+    let original = history.phase[1].take();
+    history.phase[1] = Some(
+        DelayBuffer::from_checkpoint(DelayCheckpoint {
+            configuration: Some(DelayConfiguration::Fixed { delay }),
+            samples: (0..MAX_DELAY_HISTORY_SAMPLES)
+                .map(|index| {
+                    (
+                        time * index as f64 / MAX_DELAY_HISTORY_SAMPLES as f64,
+                        value,
+                    )
+                })
+                .collect(),
+            left_limits: Vec::new(),
+            event_orders: Vec::new(),
+        })
+        .unwrap(),
+    );
+    let before = history.clone();
+    let passive_before = format!("{:?}{:?}", circuit.capacitors, circuit.inductors);
+    let behavior_before = format!("{:?}", circuit.behavioral_sources);
+    let left = limits(&history);
+    for sided in [false, true] {
+        let error = commit(
+            &engine,
+            &mut circuit,
+            &mut history,
+            &solution,
+            time,
+            BjtPhaseContext {
+                incoming_arrival: false,
+                input_left_limits: sided.then_some(&left),
+            },
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, SimulationError::DeviceResourceLimit { ref instance, source }
+            if instance == &circuit.bjts.devices[1].name
+            && source.resource == crate::ResourceKind::TransportHistoryRecords
+            && source.requested == MAX_DELAY_HISTORY_SAMPLES + if sided { 2 } else { 1 }
+            && source.limit == MAX_DELAY_HISTORY_SAMPLES),
+            "{error}"
+        );
+        assert_eq!(history, before);
+        assert_eq!(
+            format!("{:?}{:?}", circuit.capacitors, circuit.inductors),
+            passive_before
+        );
+        assert_eq!(format!("{:?}", circuit.behavioral_sources), behavior_before);
+    }
+    history.phase[1] = original;
+    commit(
+        &engine,
+        &mut circuit,
+        &mut history,
+        &solution,
+        time,
+        Default::default(),
+    )
+    .unwrap();
+}
+
 fn fixture() -> (Engine, crate::CircuitData, BjtTransientHistory, Vec<Value>) {
     let deck = Netlist::parse(
         "phase event acceptance\n\

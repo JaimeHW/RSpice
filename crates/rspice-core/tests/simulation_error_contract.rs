@@ -48,6 +48,10 @@ fn resource_failures_publish_stable_numeric_metadata() {
 
     for error in [
         SimulationError::ResourceLimit(limit),
+        SimulationError::DeviceResourceLimit {
+            instance: "X1:Q2".into(),
+            source: limit,
+        },
         SimulationError::Configuration(SimulationConfigError::ResourceLimit(limit)),
     ] {
         let descriptor = error.descriptor();
@@ -327,8 +331,12 @@ fn expected_descriptor(
         SimulationError::Configuration(_) => {
             (Code::InvalidConfiguration, Category::Configuration, false)
         }
-        SimulationError::ResourceLimit(_) => (Code::ResourceLimit, Category::ResourceLimit, false),
-        SimulationError::Allocation { .. } => (Code::AllocationFailed, Category::ResourceLimit, false),
+        SimulationError::ResourceLimit(_) | SimulationError::DeviceResourceLimit { .. } => {
+            (Code::ResourceLimit, Category::ResourceLimit, false)
+        }
+        SimulationError::Allocation { .. } => {
+            (Code::AllocationFailed, Category::ResourceLimit, false)
+        }
         SimulationError::Circuit(_) | SimulationError::NonFiniteTrial(_) => {
             (Code::CircuitError, Category::Simulation, false)
         }
@@ -399,6 +407,14 @@ fn one_of_every_variant() -> Vec<SimulationError> {
             requested: 2,
             limit: 1,
         }),
+        SimulationError::DeviceResourceLimit {
+            instance: "X1:Q2".into(),
+            source: rspice_core::ResourceLimitError {
+                resource: ResourceKind::TransportHistoryRecords,
+                requested: 11,
+                limit: 10,
+            },
+        },
         SimulationError::Allocation {
             object: "test history",
             source: Vec::<u8>::new().try_reserve(usize::MAX).unwrap_err(),

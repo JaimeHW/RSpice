@@ -1,5 +1,6 @@
 use rspice_veriloga_runtime::transport_delay::{
-    DelayBuffer, DelayCheckpoint, DelayConfiguration, MAX_DELAY_HISTORY_SAMPLES,
+    DelayAcceptanceError, DelayBuffer, DelayCheckpoint, DelayConfiguration,
+    MAX_DELAY_HISTORY_SAMPLES,
 };
 
 #[test]
@@ -196,12 +197,13 @@ fn coalesced_event_retention_obeys_the_combined_history_budget() {
     .unwrap();
     let before = history.clone();
     let arrival = (delay + 1.0).next_up();
-    assert!(
+    assert!(matches!(
         history
             .accept_discontinuity(arrival, 0.0, 0.0, delay, None)
-            .unwrap_err()
-            .contains("supported")
-    );
+            .unwrap_err(),
+        DelayAcceptanceError::RecordLimit { requested, limit }
+            if requested == MAX_DELAY_HISTORY_SAMPLES + 1 && limit == MAX_DELAY_HISTORY_SAMPLES
+    ));
     assert_eq!(history, before);
     history.accept_sample(arrival, 0.0, delay, None).unwrap();
     assert_eq!(

@@ -1,7 +1,9 @@
 //! Accepted-step reactive-history commit logic.
 
 use super::*;
-use rspice_veriloga_runtime::transport_delay::{DelayBuffer, DelayEvent, DelayEventOrder};
+use rspice_veriloga_runtime::transport_delay::{
+    DelayAcceptanceError, DelayBuffer, DelayEvent, DelayEventOrder,
+};
 
 // The main stepper still needs physical event classification and incoming-side
 // orchestration; this acceptance participant can already validate/commit a
@@ -91,7 +93,7 @@ impl AcceptedBjtPhaseSample {
         })
     }
 
-    fn validate(self, phase: &DelayBuffer, time: Value) -> Result<(), String> {
+    fn validate(self, phase: &DelayBuffer, time: Value) -> Result<(), DelayAcceptanceError> {
         if self.outgoing_slope.is_some_and(|slope| !slope.is_finite()) {
             return Err("nonfinite outgoing GP input slope".into());
         }
@@ -602,15 +604,10 @@ impl Engine {
                         }),
                     };
                     sample.validate(phase, accepted_time)?;
-                    Ok::<_, String>(sample)
+                    Ok::<_, DelayAcceptanceError>(sample)
                 })
                 .transpose()
-                .map_err(|error| {
-                    SimulationError::Circuit(format!(
-                        "BJT '{}' accepted phase history: {error}",
-                        bjt.name
-                    ))
-                })?;
+                .map_err(|error| bjt::phase_acceptance_error(&bjt.name, error))?;
             values.push(AcceptedBjtValues {
                 phase_sample,
                 weil_phase: history.weil_phase[idx]

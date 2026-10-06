@@ -14,7 +14,9 @@ mod slope;
 pub use slope::DelayTimeSide;
 mod event;
 pub use event::{DelayEvent, DelayEventArrival, DelayEventOrder};
+mod error;
 mod storage;
+pub use error::DelayAcceptanceError;
 
 /// A clamped delayed time, held exactly as two binary64
 /// words. Rounding the absolute target alone can lose a physical delay or
@@ -852,7 +854,7 @@ impl DelayBuffer {
     }
 
     /// Validate the candidate that would be committed without mutation.
-    pub fn validate_commit(&self, accepted_time: f64) -> Result<(), String> {
+    pub fn validate_commit(&self, accepted_time: f64) -> Result<(), DelayAcceptanceError> {
         let Some(candidate) = self.candidate else {
             return Ok(());
         };
@@ -863,25 +865,27 @@ impl DelayBuffer {
         &self,
         candidate: DelayCandidate,
         accepted_time: f64,
-    ) -> Result<(), String> {
+    ) -> Result<(), DelayAcceptanceError> {
         if candidate.time != accepted_time {
             return Err(format!(
                 "delay candidate time {} does not equal accepted time {accepted_time}",
                 candidate.time
-            ));
+            )
+            .into());
         }
         if let Some((latest_time, _)) = self.samples.back() {
             if candidate.time <= *latest_time {
                 return Err(format!(
                     "delay candidate time {} is not strictly after latest accepted time {latest_time}",
                     candidate.time
-                ));
+                ).into());
             }
         } else if candidate.time != 0.0 {
             return Err(format!(
                 "delay's first accepted sample must be the time-zero anchor, got {}",
                 candidate.time
-            ));
+            )
+            .into());
         }
         if self
             .configuration
@@ -900,17 +904,17 @@ impl DelayBuffer {
             self.left_limits.len() - self.left_limits.partition_point(|sample| sample.0 < first);
         let retained_orders =
             self.event_orders.len() - self.event_orders.partition_point(|sample| sample.0 < first);
-        if retained
-            + retained_left
-            + retained_orders
-            + 1
-            + usize::from(candidate.left_limit.is_some())
-            + usize::from(candidate.event_order.is_some())
-            > MAX_DELAY_HISTORY_SAMPLES
-        {
-            return Err(format!(
-                "delay history requires more than the supported {MAX_DELAY_HISTORY_SAMPLES} accepted samples inside its configured horizon"
-            ));
+        let requested = retained
+            .saturating_add(retained_left)
+            .saturating_add(retained_orders)
+            .saturating_add(1)
+            .saturating_add(usize::from(candidate.left_limit.is_some()))
+            .saturating_add(usize::from(candidate.event_order.is_some()));
+        if requested > MAX_DELAY_HISTORY_SAMPLES {
+            return Err(DelayAcceptanceError::RecordLimit {
+                requested,
+                limit: MAX_DELAY_HISTORY_SAMPLES,
+            });
         }
         Ok(())
     }
@@ -921,18 +925,16 @@ impl DelayBuffer {
         value: f64,
         delay: f64,
         max_delay: Option<f64>,
-    ) -> Result<DelayCandidate, String> {
+    ) -> Result<DelayCandidate, DelayAcceptanceError> {
         self.validate_runtime(time, value, delay, max_delay)?;
         let (configuration, _, _) = self.resolve_configuration(delay, max_delay)?;
-        let sample = DelayCandidate {
+        Ok(DelayCandidate {
             time,
             value,
             left_limit: None,
             event_order: None,
             configuration,
-        };
-        self.validate_candidate_commit(sample, time)?;
-        Ok(sample)
+        })
     }
 
     /// Validate a native solver's accepted sample without staging it or
@@ -943,9 +945,9 @@ impl DelayBuffer {
         value: f64,
         delay: f64,
         max_delay: Option<f64>,
-    ) -> Result<(), String> {
-        self.direct_sample(time, value, delay, max_delay)
-            .map(|_| ())
+    ) -> Result<(), DelayAcceptanceError> {
+        let sample = self.direct_sample(time, value, delay, max_delay)?;
+        self.validate_candidate_commit(sample, time)
     }
 
     /// Append a selected accepted sample after validation. Failure preserves
@@ -957,10 +959,10 @@ impl DelayBuffer {
         value: f64,
         delay: f64,
         max_delay: Option<f64>,
-    ) -> Result<(), String> {
+    ) -> Result<(), DelayAcceptanceError> {
         let sample = self.direct_sample(time, value, delay, max_delay)?;
-        self.try_reserve_sample(None)
-            .map_err(|error| format!("delay sample allocation failed: {error}"))?;
+        self.validate_candidate_commit(sample, time)?;
+        self.try_reserve_sample(None)?;
         self.candidate = Some(sample);
         self.apply_validated_commit();
         Ok(())
@@ -973,7 +975,7 @@ impl DelayBuffer {
         right: f64,
         delay: f64,
         max_delay: Option<f64>,
-    ) -> Result<DelayCandidate, String> {
+    ) -> Result<DelayCandidate, DelayAcceptanceError> {
         self.event_sample(
             time,
             DelayEvent {
@@ -996,7 +998,7 @@ impl DelayBuffer {
         right: f64,
         delay: f64,
         max_delay: Option<f64>,
-    ) -> Result<(), String> {
+    ) -> Result<(), DelayAcceptanceError> {
         self.discontinuity_sample(time, left, right, delay, max_delay)
             .map(|_| ())
     }
@@ -1013,10 +1015,9 @@ impl DelayBuffer {
         right: f64,
         delay: f64,
         max_delay: Option<f64>,
-    ) -> Result<(), String> {
+    ) -> Result<(), DelayAcceptanceError> {
         let sample = self.discontinuity_sample(time, left, right, delay, max_delay)?;
-        self.try_reserve_sample(Some(DelayEventOrder::Unknown))
-            .map_err(|error| format!("delay event allocation failed: {error}"))?;
+        self.try_reserve_sample(Some(DelayEventOrder::Unknown))?;
         self.candidate = Some(sample);
         self.apply_validated_commit();
         Ok(())
@@ -1090,7 +1091,7 @@ impl DelayBuffer {
 
     /// Commit a candidate for direct users that do not use the VM's two-phase
     /// accepted-state transaction.
-    pub fn commit(&mut self) -> Result<(), String> {
+    pub fn commit(&mut self) -> Result<(), DelayAcceptanceError> {
         let Some(candidate) = self.candidate else {
             return Ok(());
         };

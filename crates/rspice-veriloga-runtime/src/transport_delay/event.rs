@@ -41,7 +41,7 @@ impl DelayBuffer {
         event: DelayEvent,
         delay: f64,
         max_delay: Option<f64>,
-    ) -> Result<DelayCandidate, String> {
+    ) -> Result<DelayCandidate, DelayAcceptanceError> {
         if !event.left.is_finite() {
             return Err("delay left limit must be finite".into());
         }
@@ -70,7 +70,7 @@ impl DelayBuffer {
         event: DelayEvent,
         delay: f64,
         max_delay: Option<f64>,
-    ) -> Result<(), String> {
+    ) -> Result<(), DelayAcceptanceError> {
         self.event_sample(time, event, delay, max_delay).map(|_| ())
     }
 
@@ -83,10 +83,9 @@ impl DelayBuffer {
         event: DelayEvent,
         delay: f64,
         max_delay: Option<f64>,
-    ) -> Result<(), String> {
+    ) -> Result<(), DelayAcceptanceError> {
         let sample = self.event_sample(time, event, delay, max_delay)?;
-        self.try_reserve_sample(Some(event.order))
-            .map_err(|error| format!("delay event allocation failed: {error}"))?;
+        self.try_reserve_sample(Some(event.order))?;
         self.candidate = Some(sample);
         self.apply_validated_commit();
         Ok(())

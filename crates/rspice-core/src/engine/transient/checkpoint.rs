@@ -47,6 +47,8 @@ mod bsim4;
 mod capacitor_sdt;
 mod mosfet;
 mod solver_state;
+#[cfg(test)]
+mod record_limit_tests;
 use crate::device::behavioral::BehavioralAcceptedState;
 
 use crate::Value;

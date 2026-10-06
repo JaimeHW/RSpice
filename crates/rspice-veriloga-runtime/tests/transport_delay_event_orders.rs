@@ -1,6 +1,6 @@
 use rspice_veriloga_runtime::transport_delay::{
-    DelayBuffer, DelayCheckpoint, DelayConfiguration, DelayEvent, DelayEventOrder,
-    MAX_DELAY_HISTORY_SAMPLES,
+    DelayAcceptanceError, DelayBuffer, DelayCheckpoint, DelayConfiguration, DelayEvent,
+    DelayEventOrder, MAX_DELAY_HISTORY_SAMPLES,
 };
 
 fn corner(value: f64, order: u32) -> DelayEvent {
@@ -240,12 +240,13 @@ fn event_order_records_share_the_existing_hard_history_budget() {
     let time = count as f64 + 1.0;
     history.eval(time, 1.0, delay, None).unwrap();
     let before = history.clone();
-    assert!(
+    assert!(matches!(
         history
             .validate_event(time, corner(0.0, 2), delay, None)
-            .unwrap_err()
-            .contains("supported")
-    );
+            .unwrap_err(),
+        DelayAcceptanceError::RecordLimit { requested, limit }
+            if requested == MAX_DELAY_HISTORY_SAMPLES + 1 && limit == MAX_DELAY_HISTORY_SAMPLES
+    ));
     assert!(
         history
             .accept_event(time, corner(0.0, 2), delay, None)

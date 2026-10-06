@@ -1,5 +1,6 @@
 use rspice_veriloga_runtime::transport_delay::{
-    DelayBuffer, DelayCheckpoint, DelayConfiguration, MAX_DELAY_HISTORY_SAMPLES,
+    DelayAcceptanceError, DelayBuffer, DelayCheckpoint, DelayConfiguration, DelayEvent,
+    DelayEventOrder, MAX_DELAY_HISTORY_SAMPLES,
 };
 
 fn value(buffer: &DelayBuffer, time: f64, input: f64, delay: f64) -> f64 {
@@ -189,15 +190,95 @@ fn jump_sides_share_the_existing_history_resource_ceiling() {
     })
     .unwrap();
     let before = history.clone();
-    assert!(
+    assert!(matches!(
         history
             .accept_discontinuity(count as f64, 0.0, 1.0, 2.0 * count as f64, None)
-            .unwrap_err()
-            .contains("supported")
-    );
+            .unwrap_err(),
+        DelayAcceptanceError::RecordLimit { requested, limit }
+            if requested == MAX_DELAY_HISTORY_SAMPLES + 1 && limit == MAX_DELAY_HISTORY_SAMPLES
+    ));
     assert_eq!(history, before);
     history
         .accept_sample(count as f64, 0.0, 2.0 * count as f64, None)
         .unwrap();
     assert_eq!(history.accepted_sample_count(), MAX_DELAY_HISTORY_SAMPLES);
+    let time = count as f64 + 1.0;
+    let delay = 2.0 * count as f64;
+    history.eval(time, 0.0, delay, None).unwrap();
+    let full = history.clone();
+    // Count the complete candidate even when its ordinary sample alone would
+    // exceed the ceiling. Every refusal preserves the staged VM candidate.
+    for (records, error) in [
+        (
+            1,
+            history.validate_sample(time, 0.0, delay, None).unwrap_err(),
+        ),
+        (
+            1,
+            history.accept_sample(time, 0.0, delay, None).unwrap_err(),
+        ),
+        (1, history.validate_commit(time).unwrap_err()),
+        (1, history.commit().unwrap_err()),
+        (
+            2,
+            history
+                .validate_discontinuity(time, 0.0, 1.0, delay, None)
+                .unwrap_err(),
+        ),
+        (
+            2,
+            history
+                .accept_discontinuity(time, 0.0, 1.0, delay, None)
+                .unwrap_err(),
+        ),
+        (
+            3,
+            history
+                .validate_event(
+                    time,
+                    DelayEvent {
+                        left: 0.0,
+                        right: 0.0,
+                        order: DelayEventOrder::AtLeast(2),
+                    },
+                    delay,
+                    None,
+                )
+                .unwrap_err(),
+        ),
+        (
+            3,
+            history
+                .accept_event(
+                    time,
+                    DelayEvent {
+                        left: 0.0,
+                        right: 0.0,
+                        order: DelayEventOrder::AtLeast(2),
+                    },
+                    delay,
+                    None,
+                )
+                .unwrap_err(),
+        ),
+    ] {
+        assert!(
+            matches!(error, DelayAcceptanceError::RecordLimit { requested, limit }
+            if requested == MAX_DELAY_HISTORY_SAMPLES + records && limit == MAX_DELAY_HISTORY_SAMPLES)
+        );
+    }
+    assert_eq!(history, full);
+    assert!(matches!(
+        history.validate_sample(time, f64::NAN, delay, None),
+        Err(DelayAcceptanceError::Validation(_))
+    ));
+    assert!(matches!(
+        history.validate_commit(time + 1.0),
+        Err(DelayAcceptanceError::Validation(_))
+    ));
+    // Moving the retention window releases old records and permits reuse.
+    history
+        .accept_sample(delay + time, 0.0, delay, None)
+        .unwrap();
+    assert!(history.accepted_sample_count() < MAX_DELAY_HISTORY_SAMPLES);
 }

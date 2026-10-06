@@ -21,7 +21,7 @@ pub(crate) const MAX_EXPRESSION_TREE_DEPTH: usize = 128;
 /// parser. A short coefficient list can otherwise multiply large operands.
 pub(crate) const MAX_POLYNOMIAL_EXPANSION_BYTES: usize = 8 * 1024 * 1024;
 
-/// A resource whose configured production limit can be enforced.
+/// A resource whose configured or implementation limit can be enforced.
 ///
 /// This enum is non-exhaustive so new analysis and frontend resource classes
 /// can be added without forcing downstream callers to update exhaustive
@@ -59,6 +59,8 @@ pub enum ResourceKind {
     ResultValues,
     /// Backing storage for native GP transport histories and engine-owned copies.
     TransportHistoryBytes,
+    /// Accepted records retained by one transport-delay site after pruning.
+    TransportHistoryRecords,
     /// Concurrent worker threads used by one engine or frontend workload.
     ParallelWorkers,
     /// Independent runs requested from a batch analysis.
@@ -84,6 +86,7 @@ impl ResourceKind {
             Self::AnalysisPoints => "analysis_points",
             Self::ResultValues => "result_values",
             Self::TransportHistoryBytes => "transport_history_bytes",
+            Self::TransportHistoryRecords => "transport_history_records",
             Self::ParallelWorkers => "parallel_workers",
             Self::BatchRuns => "batch_runs",
         }
@@ -96,7 +99,7 @@ impl fmt::Display for ResourceKind {
     }
 }
 
-/// A workload exceeded one configured resource limit.
+/// A workload exceeded one configured or implementation resource limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error("{resource} limit exceeded: requested {requested}, limit {limit}")]
 pub struct ResourceLimitError {
@@ -104,7 +107,7 @@ pub struct ResourceLimitError {
     pub resource: ResourceKind,
     /// Requested or observed amount.
     pub requested: usize,
-    /// Configured maximum amount.
+    /// Configured maximum amount or fixed implementation ceiling.
     pub limit: usize,
 }
 

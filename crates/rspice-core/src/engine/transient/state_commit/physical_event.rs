@@ -163,7 +163,9 @@ impl PreparedPhysicalEvent {
                 if delay.to_bits() != sample.delay.to_bits() {
                     return Err(failure("prepared phase delay has changed"));
                 }
-                sample.validate(history, self.time).map_err(failure)?;
+                sample.validate(history, self.time).map_err(|error| {
+                    bjt::phase_acceptance_error(&circuit.bjts.devices[index].name, error)
+                })?;
             }
         }
         Ok(())
@@ -520,9 +522,11 @@ impl Engine {
                 if startup {
                     sample
                         .validate(&DelayBuffer::new(0), 0.0)
-                        .map_err(failure)?;
+                        .map_err(|error| bjt::phase_acceptance_error(&model.name, error))?;
                 } else {
-                    sample.validate(phase.history, step.time).map_err(failure)?;
+                    sample
+                        .validate(phase.history, step.time)
+                        .map_err(|error| bjt::phase_acceptance_error(&model.name, error))?;
                 }
                 left_limits.push(event.map(|event| event.left_limit));
                 Some(sample)

@@ -1,6 +1,7 @@
 use super::*;
 use crate::abort_signal::NoAbort;
 
+mod record_ceiling;
 mod transmission_line;
 
 fn options() -> charge_event::EventOptions {
@@ -619,9 +620,11 @@ fn physical_event_acceptance_preflights_order_storage_before_history_rotation() 
     };
     let error = prepare(DelayEventOrder::AtLeast(1)).err().unwrap();
     assert!(
-        error
-            .to_string()
-            .contains("delay history requires more than"),
+        matches!(error, SimulationError::DeviceResourceLimit { ref instance, source }
+        if instance == &circuit.bjts.devices[1].name
+        && source.resource == crate::ResourceKind::TransportHistoryRecords
+        && source.requested == MAX_DELAY_HISTORY_SAMPLES + 1
+        && source.limit == MAX_DELAY_HISTORY_SAMPLES),
         "{error}"
     );
     assert_eq!(history, before);

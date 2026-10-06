@@ -2,6 +2,32 @@
 
 use super::*;
 use crate::device::BjtType;
+use rspice_veriloga_runtime::transport_delay::DelayAcceptanceError;
+
+pub(super) fn phase_acceptance_error(
+    instance: &str,
+    error: DelayAcceptanceError,
+) -> SimulationError {
+    match error {
+        DelayAcceptanceError::Validation(detail) => {
+            SimulationError::Circuit(format!("BJT '{instance}' phase history: {detail}"))
+        }
+        DelayAcceptanceError::RecordLimit { requested, limit } => {
+            SimulationError::DeviceResourceLimit {
+                instance: instance.into(),
+                source: crate::ResourceLimitError {
+                    resource: crate::ResourceKind::TransportHistoryRecords,
+                    requested,
+                    limit,
+                },
+            }
+        }
+        DelayAcceptanceError::Allocation(source) => SimulationError::Allocation {
+            object: "BJT phase-history growth",
+            source,
+        },
+    }
+}
 
 impl Engine {
     #[cfg(test)]
@@ -88,12 +114,7 @@ impl Engine {
                 .map_err(allocation_error)?;
             buffer
                 .accept_sample(0.0, forward.current, delay, None)
-                .map_err(|error| {
-                    SimulationError::Circuit(format!(
-                        "BJT '{}' phase initialization: {error}",
-                        bjt.name
-                    ))
-                })?;
+                .map_err(|error| phase_acceptance_error(&bjt.name, error))?;
             phase.push(Some(buffer));
         }
         history.phase_outgoing_slopes = outgoing_slopes;
