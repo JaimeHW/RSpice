@@ -134,7 +134,7 @@ js-sys = "0.3"
 jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"] }
 mime = "0.3"
 miniz_oxide = "0.8"
-reqwest = { version = "0.13.1", default-features = false, features = ["default-tls", "json", "stream", "webpki-roots"] }
+reqwest = { version = "0.13.1", default-features = false, features = ["default-tls", "json", "webpki-roots"] }
 sha2 = "0.10"
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 tokio = { version = "1.0", features = ["fs", "io-util", "macros", "rt-multi-thread", "sync", "time"] }

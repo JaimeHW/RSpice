@@ -27,6 +27,10 @@ url.workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom.workspace = true
 jsonwebtoken.workspace = true
+# Browser streaming uses our Fetch adapter and the workspace wasm-streams.
+# Enabling reqwest's stream feature there links a second wasm-streams version
+# with the same exported JavaScript symbols.
+reqwest = { workspace = true, features = ["stream"] }
 tokio.workspace = true
 tokio-util.workspace = true
 
