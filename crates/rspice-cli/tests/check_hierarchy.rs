@@ -49,3 +49,24 @@ fn check_does_not_ignore_hierarchy_admission_failures() {
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(json["valid"], false);
 }
+
+#[test]
+fn validation_errors_take_precedence_over_strict_warnings() {
+    let dir = test_dir("strict_error_precedence");
+    let deck = dir.join("deck.sp");
+    std::fs::write(
+        &deck,
+        "* error and warning\n.option foobar=1\nV1 in 0 1\nV2 in 0 2\n.op\n.end\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "check"])
+        .arg(deck)
+        .args(["--strict", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(65), "{output:?}");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(!report["warnings"].as_array().unwrap().is_empty());
+    assert!(!report["errors"].as_array().unwrap().is_empty());
+}
