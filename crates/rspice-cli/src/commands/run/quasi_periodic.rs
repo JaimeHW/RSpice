@@ -26,22 +26,22 @@ pub(super) fn run_qpss(ctx: &RunContext<'_>, card: &QpssCard) -> Result<(), CliE
     let config =
         QpssConfig::from_qpss_card(card).map_err(|error| engine_error(ctx, "qpss", error))?;
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "Running {}: {} independent tones",
             artifact.analysis,
             config.grid.frequencies_hz.len()
-        );
+        ))?;
     }
     let point = ctx
         .engine
         .run_qpss_with_abort(ctx.netlist, config, &crate::abort::ProcessAbort)
         .map_err(|error| engine_error(ctx, "qpss", error))?;
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "✓ QPSS converged in {} iterations (normalized residual {:.3e})",
             point.iterations(),
             point.normalized_residual()
-        );
+        ))?;
     }
     if artifact.path.is_some() {
         publish(
@@ -72,7 +72,10 @@ fn dependent<R>(
     let artifact = ctx.resolve_periodic_analysis(tag)?;
     let upstream = ctx.planned_upstream(artifact.analysis, tag)?;
     if !ctx.quiet {
-        println!("Running {} around {upstream}", artifact.analysis);
+        crate::console::line(format_args!(
+            "Running {} around {upstream}",
+            artifact.analysis
+        ))?;
     }
     let result = {
         let periodic = ctx.periodic();
@@ -95,7 +98,7 @@ fn dependent<R>(
         )?;
     }
     if !ctx.quiet {
-        println!("✓ {} complete", tag.to_uppercase());
+        crate::console::line(format_args!("✓ {} complete", tag.to_uppercase()))?;
     }
     Ok(())
 }

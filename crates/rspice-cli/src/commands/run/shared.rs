@@ -294,9 +294,9 @@ pub(super) fn record_continuous_measurements(
     ctx: &super::RunContext<'_>,
     analysis: &str,
     results: Vec<rspice_core::analysis::ContinuousMeasureResult>,
-) {
+) -> Result<(), CliError> {
     if results.is_empty() {
-        return;
+        return Ok(());
     }
     ctx.evaluated_meas
         .borrow_mut()
@@ -307,13 +307,13 @@ pub(super) fn record_continuous_measurements(
             .iter()
             .map(|result| result.records.len())
             .sum::<usize>();
-        println!(
+        crate::console::line(format_args!(
             "  Continuous Measurement Results ({analysis}, {} streams, {row_count} records):",
             results.len()
-        );
+        ))?;
         for result in &results {
             if let Some(failure) = result.failure.as_deref() {
-                println!("    {} = FAILED ({failure})", result.name);
+                crate::console::line(format_args!("    {} = FAILED ({failure})", result.name))?;
                 continue;
             }
             for (index, record) in result.records.iter().enumerate() {
@@ -333,18 +333,18 @@ pub(super) fn record_continuous_measurements(
                             .unwrap_or_else(|| "missing".to_string())
                     )
                 };
-                println!(
+                crate::console::line(format_args!(
                     "    {}[record {index}] = {} {verdict} ({coordinate})",
                     result.name,
                     crate::report::format_spice_exponent(record.value)
-                );
+                ))?;
             }
-            println!(
+            crate::console::line(format_args!(
                 "    {} aggregate = {} ({})",
                 result.name,
                 if result.passed() { "PASS" } else { "FAILED" },
                 result.aggregate_policy()
-            );
+            ))?;
         }
     }
 
@@ -407,6 +407,7 @@ pub(super) fn record_continuous_measurements(
                 }),
         );
     }
+    Ok(())
 }
 
 #[cfg(test)]

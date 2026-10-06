@@ -280,10 +280,10 @@ fn execute_with_destinations(
         }
     }
     if multi_run && !quiet {
-        println!(
+        crate::console::line(format_args!(
             "Multi-run deck: {} runs (.alter/.data expansion)",
             plan.len()
-        );
+        ))?;
     }
 
     let start_time = Instant::now();
@@ -301,7 +301,10 @@ fn execute_with_destinations(
         // output is silenced — interleaved analysis chatter from N
         // workers is noise — and replaced by ordered status lines.
         if !quiet {
-            println!("Running {} runs on {workers} workers", plan.len());
+            crate::console::line(format_args!(
+                "Running {} runs on {workers} workers",
+                plan.len()
+            ))?;
         }
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(workers)
@@ -332,7 +335,7 @@ fn execute_with_destinations(
                         .iter()
                         .map(|report| report.duration_secs)
                         .sum();
-                    println!("  ✓ {label} ({duration:.3}s)");
+                    crate::console::line(format_args!("  ✓ {label} ({duration:.3}s)"))?;
                 } else {
                     let failure = outcome
                         .reports
@@ -343,7 +346,10 @@ fn execute_with_destinations(
                                 "multi-run aggregate for '{label}' reported failure without a failed child report"
                             ),
                         })?;
-                    println!("  ✗ {label}: {}", status_failure_summary(failure));
+                    crate::console::line(format_args!(
+                        "  ✗ {label}: {}",
+                        status_failure_summary(failure)
+                    ))?;
                 }
             }
             if first_error.is_none() {
@@ -355,7 +361,10 @@ fn execute_with_destinations(
     } else {
         for (deck, prepared) in plan.iter().zip(&prepared) {
             if multi_run && !quiet {
-                println!("\n=== run: {} ===", deck.label.as_deref().unwrap_or("base"));
+                crate::console::line(format_args!(
+                    "\n=== run: {} ===",
+                    deck.label.as_deref().unwrap_or("base")
+                ))?;
             }
             let outcome = prepared.run(&args, config, verbose, quiet, deck.label.as_deref())?;
             if first_error.is_none() {
@@ -423,7 +432,7 @@ fn execute_with_destinations(
     }
 
     if !quiet {
-        println!("\nSimulation complete in {:.3}s.", duration);
+        crate::console::line(format_args!("\nSimulation complete in {:.3}s.", duration))?;
     }
 
     if let Some((message, details)) = first_error {
@@ -604,11 +613,7 @@ fn write_run_summary(
     });
 
     if path.as_os_str() == "-" {
-        match serde_json::to_string_pretty(&json) {
-            Ok(text) => println!("{text}"),
-            Err(e) => eprintln!("Error: failed to serialize run summary: {e}"),
-        }
-        return Ok(());
+        return crate::console::json(&json, true);
     }
 
     let text =
@@ -689,9 +694,9 @@ fn run_concrete_deck(
         return control::run(netlist, args, config, verbose, quiet, run_label, identity);
     }
     if verbose {
-        println!("Title: {}", netlist.title);
-        println!("Elements: {}", netlist.elements.len());
-        println!("Analyses: {}", netlist.analyses.len());
+        crate::console::line(format_args!("Title: {}", netlist.title))?;
+        crate::console::line(format_args!("Elements: {}", netlist.elements.len()))?;
+        crate::console::line(format_args!("Analyses: {}", netlist.analyses.len()))?;
     }
 
     let engine = build_engine(args, config, netlist)?;
@@ -715,7 +720,7 @@ fn run_concrete_deck(
     let requested_mode = run_requested_mode(&ctx, config)?;
     if requested_mode.ran() {
         if requested_mode.needs_measurement_finalization() {
-            ctx.record_unevaluated_measurements();
+            ctx.record_unevaluated_measurements()?;
         }
         // A command-line analysis mode deliberately supersedes the deck's
         // authored cards, so their planned identities stay unconsumed. Only
@@ -746,12 +751,12 @@ fn run_concrete_deck(
 
     for (idx, analysis) in analyses_in_execution_order(netlist).enumerate() {
         if verbose {
-            println!(
+            crate::console::line(format_args!(
                 "\nRunning analysis {}/{}: {:?}",
                 idx + 1,
                 netlist.analyses.len(),
                 analysis
-            );
+            ))?;
         }
 
         ran_analysis = true;
@@ -767,7 +772,9 @@ fn run_concrete_deck(
 
     if !ran_analysis && simulation_error.is_none() {
         if !quiet {
-            println!("No analysis commands - running default DC OP...");
+            crate::console::line(format_args!(
+                "No analysis commands - running default DC OP..."
+            ))?;
         }
         if let Err(e) = basic::run_dc_op(&ctx) {
             if is_run_setup_or_output_error(&e) {
@@ -779,9 +786,9 @@ fn run_concrete_deck(
     }
 
     if args.meas && !quiet && netlist.measurements.is_empty() {
-        println!("  No .MEAS statements found in netlist");
+        crate::console::line(format_args!("  No .MEAS statements found in netlist"))?;
     }
-    ctx.record_unevaluated_measurements();
+    ctx.record_unevaluated_measurements()?;
     if simulation_error.is_none() {
         ctx.ensure_planned_namespaces_consumed()?;
     }
@@ -881,13 +888,19 @@ fn write_report_files(
             Some(crate::cli::ReportFormat::Junit) | None => {
                 JUnitReporter::write(reports, report_file)?;
                 if verbose {
-                    println!("JUnit report written to: {}", report_file.display());
+                    crate::console::line(format_args!(
+                        "JUnit report written to: {}",
+                        report_file.display()
+                    ))?;
                 }
             }
             Some(crate::cli::ReportFormat::Tap) => {
                 TapReporter::write(reports, report_file)?;
                 if verbose {
-                    println!("TAP report written to: {}", report_file.display());
+                    crate::console::line(format_args!(
+                        "TAP report written to: {}",
+                        report_file.display()
+                    ))?;
                 }
             }
         }
@@ -899,7 +912,10 @@ fn write_report_files(
             Some(MeasFormat::Json) | None => JsonMeasReporter::write(reports, meas_file)?,
         }
         if verbose {
-            println!("Measurement report written to: {}", meas_file.display());
+            crate::console::line(format_args!(
+                "Measurement report written to: {}",
+                meas_file.display()
+            ))?;
         }
     }
     Ok(())

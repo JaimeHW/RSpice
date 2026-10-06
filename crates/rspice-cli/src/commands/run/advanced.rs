@@ -133,7 +133,10 @@ pub(super) fn export_step_sweep(
     }
 
     if !ctx.quiet {
-        println!("  Step results exported to: {}", output_path.display());
+        crate::console::line(format_args!(
+            "  Step results exported to: {}",
+            output_path.display()
+        ))?;
     }
     Ok(())
 }
@@ -151,10 +154,10 @@ pub(super) fn run_monte_carlo(
     )>,
 ) -> Result<(), CliError> {
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "Running Monte Carlo analysis: {} iterations starting at trial {} (seed={})",
             num_runs, first_trial, seed
-        );
+        ))?;
     }
 
     let pb = if ctx.quiet {
@@ -227,20 +230,20 @@ pub(super) fn run_monte_carlo(
             variables.sort_by(|a, b| a.name.cmp(&b.name));
 
             if !ctx.quiet {
-                println!(
+                crate::console::line(format_args!(
                     "✓ Monte Carlo complete: {} runs (seed={})",
                     result.num_runs, seed
-                );
+                ))?;
                 if !variables.is_empty() {
-                    println!(
+                    crate::console::line(format_args!(
                         "  {:<24} {:>13} {:>13} {:>13} {:>13}",
                         "VARIABLE", "MEAN", "STD", "MIN", "MAX"
-                    );
+                    ))?;
                     for stats in &variables {
-                        println!(
+                        crate::console::line(format_args!(
                             "  {:<24} {:>13.6e} {:>13.6e} {:>13.6e} {:>13.6e}",
                             stats.name, stats.mean, stats.std_dev, stats.min, stats.max
-                        );
+                        ))?;
                     }
                 }
             }
@@ -346,10 +349,10 @@ fn export_monte_carlo(
     )?;
 
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "  Monte Carlo samples exported to: {}",
             output_path.display()
-        );
+        ))?;
     }
     Ok(())
 }
@@ -424,7 +427,7 @@ pub(super) fn run_pss(
     }
 
     let artifact = ctx.resolve_periodic_analysis("pss")?;
-    announce_pss(ctx, &config);
+    announce_pss(ctx, &config)?;
     let pss_result = ctx
         .engine
         .run_pss_with_abort(ctx.netlist, config, &crate::abort::ProcessAbort)
@@ -435,7 +438,7 @@ pub(super) fn run_pss(
         pss_result.iterations,
         pss_result.period,
         &pss_result.result,
-    );
+    )?;
     if let Some(path) = &artifact.path {
         export_pss(ctx, artifact.analysis, path, &pss_result.result)?;
     }
@@ -443,21 +446,25 @@ pub(super) fn run_pss(
 }
 
 /// Announce one periodic steady state before the shooting solve starts.
-pub(super) fn announce_pss(ctx: &RunContext<'_>, config: &rspice_core::analysis::PssConfig) {
+pub(super) fn announce_pss(
+    ctx: &RunContext<'_>,
+    config: &rspice_core::analysis::PssConfig,
+) -> Result<(), CliError> {
     if ctx.quiet {
-        return;
+        return Ok(());
     }
     if config.is_autonomous() {
-        println!(
+        crate::console::line(format_args!(
             "Running PSS analysis: autonomous, {} harmonics",
             config.num_harmonics
-        );
+        ))?;
     } else {
-        println!(
+        crate::console::line(format_args!(
             "Running PSS analysis: f₀ = {:.3e} Hz, {} harmonics",
             config.fundamental_freq, config.num_harmonics
-        );
+        ))?;
     }
+    Ok(())
 }
 
 /// Report one converged periodic steady state on the console.
@@ -466,23 +473,24 @@ pub(super) fn report_pss(
     iterations: usize,
     period: f64,
     result: &rspice_core::analysis::PssResult,
-) {
+) -> Result<(), CliError> {
     if ctx.quiet {
-        return;
+        return Ok(());
     }
-    println!("✓ PSS converged in {iterations} iterations");
-    println!("  Period: {period:.6e} s");
-    println!("  Nodes: {}", result.num_nodes());
+    crate::console::line(format_args!("✓ PSS converged in {iterations} iterations"))?;
+    crate::console::line(format_args!("  Period: {period:.6e} s"))?;
+    crate::console::line(format_args!("  Nodes: {}", result.num_nodes()))?;
 
     if ctx.verbose && result.num_nodes() > 0 {
-        println!("\n  Harmonic content (node 1):");
+        crate::console::line(format_args!("\n  Harmonic content (node 1):"))?;
         for harmonic in &result.harmonics(1, 5) {
-            println!(
+            crate::console::line(format_args!(
                 "    H{}: mag={:.6e}, phase={:.2}° (f={:.3e} Hz)",
                 harmonic.harmonic_number, harmonic.magnitude, harmonic.phase, harmonic.frequency
-            );
+            ))?;
         }
     }
+    Ok(())
 }
 
 /// Write one period of the converged steady-state waveforms (time domain),
@@ -570,7 +578,10 @@ pub(super) fn export_pss(
 
     ctx.record_output(output_path.to_path_buf());
     if !ctx.quiet {
-        println!("  PSS waveforms exported to: {}", output_path.display());
+        crate::console::line(format_args!(
+            "  PSS waveforms exported to: {}",
+            output_path.display()
+        ))?;
     }
     Ok(())
 }
@@ -595,10 +606,10 @@ fn solve_hb(
     config: rspice_core::analysis::HbConfig,
 ) -> Result<rspice_core::engine::HbAnalysisResult, CliError> {
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "Running HB analysis: f₀ = {:.3e} Hz, {} harmonics",
             config.fundamental_freq, config.num_harmonics
-        );
+        ))?;
     }
 
     let harmonics = config.num_harmonics;
@@ -608,20 +619,23 @@ fn solve_hb(
         .map_err(|error| map_advanced_simulation_error(ctx, "HB", error))?;
     ensure_not_cancelled(ctx)?;
     if !ctx.quiet {
-        println!("✓ HB converged");
-        println!("  Nodes: {}", hb_result.result.num_nodes());
-        println!("  Harmonics: {}", hb_result.result.num_harmonics);
+        crate::console::line(format_args!("✓ HB converged"))?;
+        crate::console::line(format_args!("  Nodes: {}", hb_result.result.num_nodes()))?;
+        crate::console::line(format_args!(
+            "  Harmonics: {}",
+            hb_result.result.num_harmonics
+        ))?;
 
         if ctx.verbose && !hb_result.result.spectral_voltages.is_empty() {
-            println!("\n  Spectral content (first node):");
+            crate::console::line(format_args!("\n  Spectral content (first node):"))?;
             let sv = &hb_result.result.spectral_voltages[0];
             for k in 0..=4.min(harmonics) {
-                println!(
+                crate::console::line(format_args!(
                     "    H{}: mag={:.6e}, phase={:.2}°",
                     k,
                     sv.magnitude(k),
                     sv.phase(k).to_degrees()
-                );
+                ))?;
             }
         }
     }
@@ -764,7 +778,10 @@ fn export_hb(
 
     ctx.record_output(output_path.to_path_buf());
     if !ctx.quiet {
-        println!("  HB spectrum exported to: {}", output_path.display());
+        crate::console::line(format_args!(
+            "  HB spectrum exported to: {}",
+            output_path.display()
+        ))?;
     }
     Ok(())
 }
@@ -803,21 +820,21 @@ fn publish_sparam_run(
         .collect::<Vec<_>>();
     let scattering = scattering_cube(&run.scattering);
     if !ctx.quiet {
-        println!(
+        crate::console::line(format_args!(
             "Running {}-port S-parameter analysis: {} frequency points",
             run.ports.len(),
             frequencies.len()
-        );
+        ))?;
         if let Some(first) = scattering
             .first()
             .and_then(|row| row.first())
             .and_then(|series| series.first())
         {
-            println!(
+            crate::console::line(format_args!(
                 "  @ {:e} Hz: |S_1_1|={:.4}",
                 frequencies.first().copied().unwrap_or(0.0),
                 first.norm()
-            );
+            ))?;
         }
     }
 
@@ -902,13 +919,19 @@ fn publish_sparam_run(
             let document = super::document::finish(ctx, analysis_id, builder)?;
             super::document::write_document(ctx, &noise_path, &document)?;
             if !ctx.quiet {
-                println!("  Port noise exported to: {}", noise_path.display());
+                crate::console::line(format_args!(
+                    "  Port noise exported to: {}",
+                    noise_path.display()
+                ))?;
             }
         }
     }
 
     if !ctx.quiet {
-        println!("  S-parameters exported to: {}", output_path.display());
+        crate::console::line(format_args!(
+            "  S-parameters exported to: {}",
+            output_path.display()
+        ))?;
     }
     Ok(())
 }
@@ -1171,14 +1194,14 @@ pub(super) fn run_dc_match_from_command(
     card: &rspice_core::netlist::DcMatchCard,
 ) -> Result<(), CliError> {
     if !ctx.quiet {
-        println!("Running DC mismatch analysis...");
+        crate::console::line(format_args!("Running DC mismatch analysis..."))?;
     }
     let result = ctx
         .engine
         .run_dc_match_with_abort(ctx.netlist, card, &crate::abort::ProcessAbort)
         .map_err(|error| map_advanced_simulation_error(ctx, "DC Mismatch", error))?;
     ensure_not_cancelled(ctx)?;
-    report_dc_match(ctx, &result);
+    report_dc_match(ctx, &result)?;
     export_dc_match(ctx, &result)
 }
 
@@ -1199,48 +1222,63 @@ fn dc_match_unit(result: &rspice_core::analysis::dcmatch::DcMatchResult) -> &'st
 /// Every quoted key is a scalar the typed document publishes under the same
 /// name, so a reader who moves from the terminal to the artifact does not
 /// have to translate.
-fn report_dc_match(ctx: &RunContext<'_>, result: &rspice_core::analysis::dcmatch::DcMatchResult) {
+fn report_dc_match(
+    ctx: &RunContext<'_>,
+    result: &rspice_core::analysis::dcmatch::DcMatchResult,
+) -> Result<(), CliError> {
     if ctx.quiet {
-        return;
+        return Ok(());
     }
     let unit = dc_match_unit(result);
-    println!("DC mismatch information:");
-    println!("output = {}", result.output);
-    println!("nominal_value = {:.6e} {unit}", result.nominal_value);
-    println!("sigma_total = {:.6e} {unit}", result.sigma_total);
-    println!("sigma_mismatch = {:.6e} {unit}", result.sigma_mismatch);
-    println!("sigma_process = {:.6e} {unit}", result.sigma_process);
-    println!(
+    crate::console::line(format_args!("DC mismatch information:"))?;
+    crate::console::line(format_args!("output = {}", result.output))?;
+    crate::console::line(format_args!(
+        "nominal_value = {:.6e} {unit}",
+        result.nominal_value
+    ))?;
+    crate::console::line(format_args!(
+        "sigma_total = {:.6e} {unit}",
+        result.sigma_total
+    ))?;
+    crate::console::line(format_args!(
+        "sigma_mismatch = {:.6e} {unit}",
+        result.sigma_mismatch
+    ))?;
+    crate::console::line(format_args!(
+        "sigma_process = {:.6e} {unit}",
+        result.sigma_process
+    ))?;
+    crate::console::line(format_args!(
         "quoted_sigma = {:.6e} {unit} ({:.6e} sigma)",
         result.quoted_sigma(),
         result.sigma_multiplier
-    );
+    ))?;
     // Printed only when the design declared one: a line reading "0, 0" on
     // every uncorrelated deck would say nothing and hide the case that matters.
     if result.applied_correlations_mismatch + result.applied_correlations_process > 0 {
-        println!(
+        crate::console::line(format_args!(
             "correlations applied: process {}, mismatch {}",
             result.applied_correlations_process, result.applied_correlations_mismatch
-        );
+        ))?;
     }
     if result.contributors.is_empty() {
-        println!(
+        crate::console::line(format_args!(
             "contributors: none of the {} evaluated pass the card's limits",
             result.evaluated_contributors
-        );
-        return;
+        ))?;
+        return Ok(());
     }
-    println!(
+    crate::console::line(format_args!(
         "contributors ({} listed of {} evaluated, largest variance share first, by magnitude):",
         result.contributors.len(),
         result.evaluated_contributors
-    );
-    println!(
+    ))?;
+    crate::console::line(format_args!(
         "  {:<24} {:<10} {:<10} {:>13} {:>13} {:>13}",
         "INSTANCE", "PARAMETER", "SCOPE", "SHARE", "SENSITIVITY", "CONTRIBUTION"
-    );
+    ))?;
     for contributor in &result.contributors {
-        println!(
+        crate::console::line(format_args!(
             "  {:<24} {:<10} {:<10} {:>13.6e} {:>13.6e} {:>13.6e}",
             truncate(&contributor.instance, 24),
             truncate(&contributor.parameter, 10),
@@ -1248,8 +1286,9 @@ fn report_dc_match(ctx: &RunContext<'_>, result: &rspice_core::analysis::dcmatch
             contributor.share,
             contributor.sensitivity,
             contributor.contribution
-        );
+        ))?;
     }
+    Ok(())
 }
 
 /// Write one mismatch result.
@@ -1319,7 +1358,10 @@ fn export_dc_match(
     )?;
 
     if !ctx.quiet {
-        println!("  DC mismatch exported to: {}", resolved.path.display());
+        crate::console::line(format_args!(
+            "  DC mismatch exported to: {}",
+            resolved.path.display()
+        ))?;
     }
     Ok(())
 }

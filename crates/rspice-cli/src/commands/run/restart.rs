@@ -111,11 +111,11 @@ pub(super) fn run_authored_restart(
                 let path = safe_restart_write_path(&parent, &name)?;
                 publish_checkpoint(ctx, &scheduled.checkpoint, &path, plan.encoding(), &abort)?;
                 if !ctx.quiet {
-                    println!(
+                    crate::console::line(format_args!(
                         "  Restart checkpoint saved (nominal t={nominal_time:.6e}s, accepted t={:.6e}s): {}",
                         scheduled.checkpoint.time,
                         path.display()
-                    );
+                    ))?;
                 }
             }
             Ok(result)

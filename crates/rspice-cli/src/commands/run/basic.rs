@@ -41,7 +41,7 @@ pub(super) fn map_output_projection_error(
 
 pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
     if !ctx.quiet {
-        println!("Running DC operating point...");
+        crate::console::line(format_args!("Running DC operating point..."))?;
     }
 
     match ctx
@@ -116,21 +116,33 @@ pub(super) fn finish_dc_op_result(
             .iter()
             .filter(|signal| signal.kind == SignalKind::Current)
             .collect::<Vec<_>>();
-        println!("DC Operating Point:");
+        crate::console::line(format_args!("DC Operating Point:"))?;
         for signal in voltage_signals.iter().take(10) {
-            println!("  {} = {:.9e} V", signal.display_name, signal.values[0]);
+            crate::console::line(format_args!(
+                "  {} = {:.9e} V",
+                signal.display_name, signal.values[0]
+            ))?;
         }
         if voltage_signals.len() > 10 {
-            println!("  ... ({} more node voltages)", voltage_signals.len() - 10);
+            crate::console::line(format_args!(
+                "  ... ({} more node voltages)",
+                voltage_signals.len() - 10
+            ))?;
         }
         for signal in current_signals.iter().take(5) {
-            println!("  {} = {:.9e} A", signal.display_name, signal.values[0]);
+            crate::console::line(format_args!(
+                "  {} = {:.9e} A",
+                signal.display_name, signal.values[0]
+            ))?;
         }
         if current_signals.len() > 5 {
-            println!("  ... ({} more branch currents)", current_signals.len() - 5);
+            crate::console::line(format_args!(
+                "  ... ({} more branch currents)",
+                current_signals.len() - 5
+            ))?;
         }
 
-        print_device_op_report(op_report, ctx.verbose);
+        print_device_op_report(op_report, ctx.verbose)?;
     }
 
     if let Some(output) = ctx.resolve_output("op") {
@@ -157,7 +169,10 @@ pub(super) fn finish_dc_op_result(
             },
         )?;
         if !ctx.quiet {
-            println!("Results exported to: {}", output.path.display());
+            crate::console::line(format_args!(
+                "Results exported to: {}",
+                output.path.display()
+            ))?;
         }
     }
 
@@ -199,15 +214,18 @@ fn format_engineering(value: f64) -> String {
 ///
 /// Compact by default; `verbose` lifts the row cap so large circuits can
 /// dump every device.
-fn print_device_op_report(report: &rspice_core::circuit::DeviceOpReport, verbose: bool) {
+fn print_device_op_report(
+    report: &rspice_core::circuit::DeviceOpReport,
+    verbose: bool,
+) -> Result<(), CliError> {
     if report.is_empty() {
-        return;
+        return Ok(());
     }
 
     const COMPACT_ROW_CAP: usize = 25;
     let cap = if verbose { usize::MAX } else { COMPACT_ROW_CAP };
 
-    println!("Device Operating Points:");
+    crate::console::line(format_args!("Device Operating Points:"))?;
     for entry in report.entries.iter().take(cap) {
         let region = entry
             .region
@@ -219,17 +237,18 @@ fn print_device_op_report(report: &rspice_core::circuit::DeviceOpReport, verbose
             .map(|(name, value)| format!("{}={}", name, format_engineering(*value)))
             .collect::<Vec<_>>()
             .join("  ");
-        println!(
+        crate::console::line(format_args!(
             "  {:<16} {:<7}{} {}",
             entry.name, entry.device_kind, region, params
-        );
+        ))?;
     }
     if report.entries.len() > cap {
-        println!(
+        crate::console::line(format_args!(
             "  ... ({} more devices; rerun with --verbose for the full table)",
             report.entries.len() - cap
-        );
+        ))?;
     }
+    Ok(())
 }
 
 pub(super) fn write_dc_op_output(
@@ -386,14 +405,14 @@ pub(super) fn run_dc_sweep(
 ) -> Result<(), CliError> {
     if !ctx.quiet {
         match sweep2 {
-            Some(outer) => println!(
+            Some(outer) => crate::console::line(format_args!(
                 "Running DC sweep on {} from {} to {} by {} for each {} from {} to {} by {}...",
                 source, start, stop, step, outer.source, outer.start, outer.stop, outer.step
-            ),
-            None => println!(
+            ))?,
+            None => crate::console::line(format_args!(
                 "Running DC sweep on {} from {} to {} by {}...",
                 source, start, stop, step
-            ),
+            ))?,
         }
     }
 
@@ -432,7 +451,7 @@ pub(super) fn run_dc_sweep(
             }
 
             if !ctx.quiet {
-                println!("DC Sweep: {} points computed", results.len());
+                crate::console::line(format_args!("DC Sweep: {} points computed", results.len()))?;
             }
 
             let measurements = rspice_core::analysis::evaluate_dc_measurements_with_abort(
@@ -444,10 +463,10 @@ pub(super) fn run_dc_sweep(
                 source,
                 analysis: Some("DC measurement projection".to_string()),
             })?;
-            ctx.record_measurements("DC", measurements);
+            ctx.record_measurements("DC", measurements)?;
             let continuous_measurements =
                 rspice_core::analysis::evaluate_dc_continuous_measurements(ctx.netlist, &results);
-            super::shared::record_continuous_measurements(ctx, "DC_CONT", continuous_measurements);
+            super::shared::record_continuous_measurements(ctx, "DC_CONT", continuous_measurements)?;
 
             // Resolve the authored output contract even when the caller did
             // not request a file. A valid `.SAVE @device[param]` is part of
@@ -515,7 +534,10 @@ pub(super) fn run_dc_sweep(
                 )?;
 
                 if !ctx.quiet {
-                    println!("Results exported to: {}", output.path.display());
+                    crate::console::line(format_args!(
+                        "Results exported to: {}",
+                        output.path.display()
+                    ))?;
                 }
             }
             Ok(())
@@ -567,20 +589,21 @@ fn report_compression(
     ctx: &RunContext<'_>,
     compressed: &rspice_core::engine::TransientResultCompressed,
     headline: &str,
-) {
+) -> Result<(), CliError> {
     if ctx.quiet {
-        return;
+        return Ok(());
     }
-    println!(
+    crate::console::line(format_args!(
         "{headline}: {} of {} accepted points (compression ratio: {:.1}x)",
         compressed.time.len(),
         compressed.input_points,
         compressed.compression_ratio
-    );
-    println!(
+    ))?;
+    crate::console::line(format_args!(
         "  {}",
         describe_compression_error(&compressed.compression_report)
-    );
+    ))?;
+    Ok(())
 }
 
 /// Expand one compressed container into the waveform the artifact writers
@@ -721,7 +744,7 @@ pub(super) fn run_transient(
                     &crate::abort::ProcessAbort,
                 )
                 .map_err(|error| map_restart_simulation_error(ctx, error))?;
-            report_compression(ctx, &compressed, "Transient complete (compressed)");
+            report_compression(ctx, &compressed, "Transient complete (compressed)")?;
             compression_report = Some(compressed.compression_report.clone());
             post_results = Some(compressed.post_results.clone());
             Ok(expand_compressed(compressed, "restart segment")?)
@@ -820,16 +843,16 @@ pub(super) fn run_transient(
                     SegmentResult::Full(result) => *result,
                     SegmentResult::Compressed(compressed) => {
                         if !ctx.quiet {
-                            println!(
+                            crate::console::line(format_args!(
                                 "  Compressed segment: {} of {} accepted points ({:.1}x)",
                                 compressed.time.len(),
                                 compressed.input_points,
                                 compressed.compression_ratio
-                            );
-                            println!(
+                            ))?;
+                            crate::console::line(format_args!(
                                 "  {}",
                                 describe_compression_error(&compressed.compression_report)
-                            );
+                            ))?;
                         }
                         compression_report = Some(compressed.compression_report.clone());
                         post_results = Some(compressed.post_results.clone());
@@ -845,11 +868,11 @@ pub(super) fn run_transient(
                         &progress_abort,
                     )?;
                     if !ctx.quiet {
-                        println!(
+                        crate::console::line(format_args!(
                             "  Checkpoint saved (t={:.6e}s): {}",
                             checkpoint.time,
                             checkpoint_path.display()
-                        );
+                        ))?;
                     }
                 }
                 Ok(result)
@@ -868,7 +891,7 @@ pub(super) fn run_transient(
         pb.finish_and_clear();
         match result {
             Ok(compressed) => {
-                report_compression(ctx, &compressed, "Transient complete (compressed)");
+                report_compression(ctx, &compressed, "Transient complete (compressed)")?;
                 compression_report = Some(compressed.compression_report.clone());
                 post_results = Some(compressed.post_results.clone());
                 Ok(expand_compressed(compressed, "transient result")?)
@@ -953,10 +976,10 @@ pub(super) fn finish_transient_result(
     )?;
 
     if !ctx.quiet && !ctx.compress {
-        println!(
+        crate::console::line(format_args!(
             "✓ Transient complete: {} time points computed",
             result.time.len()
-        );
+        ))?;
     }
 
     // A compressed run already carries the `.MEASURE` results the core
@@ -975,10 +998,10 @@ pub(super) fn finish_transient_result(
             analysis: Some("Transient measurement projection".to_string()),
         })?,
     };
-    ctx.record_measurements("TRAN", measurements);
+    ctx.record_measurements("TRAN", measurements)?;
     let continuous_measurements =
         rspice_core::analysis::evaluate_tran_continuous_measurements(ctx.netlist, result);
-    super::shared::record_continuous_measurements(ctx, "TRAN_CONT", continuous_measurements);
+    super::shared::record_continuous_measurements(ctx, "TRAN_CONT", continuous_measurements)?;
 
     // Perform checked SAVE/PRINT materialization independently of
     // file publication, matching OP and DC behavior.
@@ -1156,12 +1179,18 @@ pub(super) fn finish_transient_result(
                 super::document::json_byte_limit(ctx),
             )?;
             if !ctx.quiet {
-                println!("  FFT results exported to: {}", fft_output_path.display());
+                crate::console::line(format_args!(
+                    "  FFT results exported to: {}",
+                    fft_output_path.display()
+                ))?;
             }
         }
 
         if !ctx.quiet {
-            println!("  Results exported to: {}", output_path.display());
+            crate::console::line(format_args!(
+                "  Results exported to: {}",
+                output_path.display()
+            ))?;
         }
     }
     Ok(())

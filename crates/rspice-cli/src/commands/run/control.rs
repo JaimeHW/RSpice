@@ -119,7 +119,10 @@ pub(super) fn run(
                         )?;
                         ctx.qualify_control_outputs();
                         if !quiet {
-                            println!("Control dataset {} ({})", dataset.name, dataset.analysis_id);
+                            crate::console::line(format_args!(
+                                "Control dataset {} ({})",
+                                dataset.name, dataset.analysis_id
+                            ))?;
                         }
                         match &dataset.result {
                             ControlAnalysisResult::OperatingPoint(result) => {
@@ -202,7 +205,7 @@ pub(super) fn run(
             },
         )?;
         *ctx.evaluated_meas.borrow_mut() = evaluated;
-        ctx.record_unevaluated_measurements();
+        ctx.record_unevaluated_measurements()?;
         measurements.extend(ctx.measurements.into_inner());
         Ok(())
     })();

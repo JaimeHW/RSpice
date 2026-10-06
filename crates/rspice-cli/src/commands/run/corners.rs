@@ -114,12 +114,14 @@ pub(super) fn run(
         config.resources.max_parallel_workers,
     )?;
     if !quiet {
-        println!(
+        crate::console::line(format_args!(
             "Running process corner sweep: {} corners on {jobs} workers",
             prepared.len()
-        );
+        ))?;
         if args.corner_lib.is_none() {
-            println!("  No --corner-lib supplied; each corner uses the nominal models.");
+            crate::console::line(format_args!(
+                "  No --corner-lib supplied; each corner uses the nominal models."
+            ))?;
         }
     }
     let transaction = publish::current();
@@ -195,7 +197,7 @@ pub(super) fn run(
         .collect();
     if !quiet {
         for line in corner_summary_lines(&results) {
-            println!("{line}");
+            crate::console::line(format_args!("{line}"))?;
         }
     }
     let mut combined = DeckOutcome {

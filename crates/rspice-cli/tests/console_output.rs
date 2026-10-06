@@ -87,6 +87,72 @@ fn model_catalog_reports_propagate_broken_pipes() {
 }
 
 #[test]
+fn simulation_output_failures_preserve_existing_artifacts() {
+    let directory = common::test_dir("simulation_pipe");
+    std::fs::write(
+        directory.join("deck.cir"),
+        "Output test\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n",
+    )
+    .unwrap();
+    std::fs::write(directory.join("result.csv"), "Existing output").unwrap();
+    assert_io_error(&closed_stdout(
+        &directory,
+        &["run", "deck.cir", "-f", "csv", "-o", "result.csv"],
+    ));
+    assert_eq!(
+        std::fs::read_to_string(directory.join("result.csv")).unwrap(),
+        "Existing output"
+    );
+
+    // A summary is published after the completed simulation's artifacts. Its
+    // write failure is an I/O failure and must not erase those valid results.
+    assert_io_error(&closed_stdout(
+        &directory,
+        &[
+            "--quiet",
+            "run",
+            "deck.cir",
+            "-f",
+            "csv",
+            "-o",
+            "result.csv",
+            "--summary",
+            "-",
+        ],
+    ));
+    assert!(
+        std::fs::read_to_string(directory.join("result.csv"))
+            .unwrap()
+            .contains("V(IN),")
+    );
+}
+
+#[test]
+fn authored_control_print_propagates_broken_pipe_without_publishing_partial_results() {
+    let directory = common::test_dir("control_pipe");
+    std::fs::write(
+        directory.join("deck.cir"),
+        "Output test\nV1 in 0 1\nR1 in 0 1k\n.control\nop\nprint v(in)\n.endc\n.end\n",
+    )
+    .unwrap();
+    let output = closed_stdout(
+        &directory,
+        &[
+            "--quiet",
+            "run",
+            "deck.cir",
+            "-f",
+            "json",
+            "-o",
+            "result.json",
+        ],
+    );
+    assert_io_error(&output);
+    assert!(!directory.join("result.op-001.json").exists());
+    assert!(!directory.join("result.control-001.json").exists());
+}
+
+#[test]
 fn comparison_conversion_and_compilation_propagate_broken_pipes() {
     let directory = common::test_dir("artifact_pipe");
     std::fs::write(directory.join("result.csv"), "time,V(out)\n0,0\n1,1\n").unwrap();
