@@ -14,6 +14,8 @@ use crate::commands::waveform_io::{
 
 mod fft;
 mod interpolation;
+mod selection;
+use selection::{parse_variable_name, variable_name_matches};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -465,44 +467,6 @@ fn units_compatible(left: &WaveformData, i: usize, right: &WaveformData, j: usiz
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-enum ComplexPart {
-    Real,
-    Imag,
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct VariableKey {
-    part: Option<ComplexPart>,
-    base: String,
-}
-
-#[derive(Clone, Debug)]
-struct ParsedVariableName {
-    key: VariableKey,
-    aliases: Vec<String>,
-}
-
-fn parsed_variable_names_match(left: &ParsedVariableName, right: &ParsedVariableName) -> bool {
-    left.key == right.key
-}
-
-fn variable_name_matches(left: &str, right: &str) -> bool {
-    parsed_variable_names_match(&parse_variable_name(left), &parse_variable_name(right))
-}
-
-fn contains_variable(variables: &[String], requested: &str) -> bool {
-    variables
-        .iter()
-        .any(|candidate| variable_name_matches(candidate, requested))
-}
-
-fn find_variable_index(variables: &[String], requested: &str) -> Option<usize> {
-    variables
-        .iter()
-        .position(|candidate| variable_name_matches(candidate, requested))
-}
-
 /// Load waveform data from a result file in any supported format.
 ///
 /// The scale becomes the first compared series; complex signals expand to
@@ -571,26 +535,6 @@ fn comparison_data(
     }))
 }
 
-fn parse_variable_name(name: &str) -> ParsedVariableName {
-    let trimmed = name.trim();
-    let (part, base) = if let Some(inner) = strip_outer_call(trimmed, "Re") {
-        (Some(ComplexPart::Real), inner)
-    } else if let Some(inner) = strip_outer_call(trimmed, "Im") {
-        (Some(ComplexPart::Imag), inner)
-    } else {
-        (None, trimmed)
-    };
-    let base = normalize_variable_name(base);
-    let mut aliases = vec![base.clone()];
-    if let Some(inner) = signal_inner_name(base.as_str()) {
-        push_alias(&mut aliases, normalize_variable_name(inner));
-    }
-    ParsedVariableName {
-        key: VariableKey { part, base },
-        aliases,
-    }
-}
-
 fn strip_outer_call<'a>(name: &'a str, function: &str) -> Option<&'a str> {
     let rest = name.get(function.len()..)?;
     if !name
@@ -602,150 +546,6 @@ fn strip_outer_call<'a>(name: &'a str, function: &str) -> Option<&'a str> {
         return None;
     }
     rest.get(1..rest.len() - 1).map(str::trim)
-}
-
-fn normalize_variable_name(name: &str) -> String {
-    name.trim().to_ascii_lowercase()
-}
-
-fn signal_inner_name(name: &str) -> Option<&str> {
-    let (prefix, rest) = name.split_once('(')?;
-    if prefix.eq_ignore_ascii_case("v") || prefix.eq_ignore_ascii_case("i") {
-        return rest.strip_suffix(')').map(str::trim);
-    }
-    None
-}
-
-fn push_alias(aliases: &mut Vec<String>, alias: String) {
-    if !aliases.iter().any(|existing| existing == &alias) {
-        aliases.push(alias);
-    }
-}
-
-fn requested_variable_matches(
-    request: &ParsedVariableName,
-    candidate: &ParsedVariableName,
-) -> bool {
-    if request.key.part.is_some() && request.key.part != candidate.key.part {
-        return false;
-    }
-    // Quantity-qualified requests retain their meaning. A bare selector may
-    // use a signal's alias, subject to the ambiguity check below.
-    if signal_inner_name(&request.key.base).is_some() {
-        request.key.base == candidate.key.base
-    } else {
-        candidate.aliases.contains(&request.key.base)
-    }
-}
-
-fn explicit_variable_pairs(
-    result: &WaveformData,
-    golden: &WaveformData,
-    args: &CompareArgs,
-    cmp_result: &mut CompareResult,
-) -> Vec<(usize, usize)> {
-    let result_names: Vec<_> = result
-        .variables
-        .iter()
-        .map(|name| parse_variable_name(name))
-        .collect();
-    let golden_names: Vec<_> = golden
-        .variables
-        .iter()
-        .map(|name| parse_variable_name(name))
-        .collect();
-
-    let mut pairs = Vec::new();
-    let mut seen = HashSet::new();
-
-    for requested in &args.variables {
-        let request = parse_variable_name(requested);
-        let result_indices: Vec<_> = result_names
-            .iter()
-            .enumerate()
-            .filter_map(|(index, parsed)| {
-                requested_variable_matches(&request, parsed).then_some(index)
-            })
-            .collect();
-        let golden_indices: Vec<_> = golden_names
-            .iter()
-            .enumerate()
-            .filter_map(|(index, parsed)| {
-                requested_variable_matches(&request, parsed).then_some(index)
-            })
-            .collect();
-
-        if signal_inner_name(&request.key.base).is_none() {
-            let meanings: HashSet<_> = result_indices
-                .iter()
-                .map(|&index| &result_names[index].key.base)
-                .chain(
-                    golden_indices
-                        .iter()
-                        .map(|&index| &golden_names[index].key.base),
-                )
-                .collect();
-            if meanings.len() > 1 {
-                cmp_result.problems.push(format!(
-                    "variable selector '{requested}' is ambiguous; use a quantity-qualified name such as V({requested}) or I({requested})"
-                ));
-                continue;
-            }
-        }
-
-        if result_indices.is_empty() || golden_indices.is_empty() {
-            if !args.ignore_missing {
-                if result_indices.is_empty() {
-                    cmp_result
-                        .problems
-                        .push(format!("variable '{requested}' is missing from the result"));
-                }
-                if golden_indices.is_empty() {
-                    cmp_result.problems.push(format!(
-                        "variable '{requested}' is missing from the golden file"
-                    ));
-                }
-            }
-            continue;
-        }
-
-        let mut matched_golden = HashSet::new();
-
-        for result_index in result_indices {
-            let mut matched = false;
-            for &golden_index in &golden_indices {
-                if parsed_variable_names_match(
-                    &result_names[result_index],
-                    &golden_names[golden_index],
-                ) {
-                    matched = true;
-                    matched_golden.insert(golden_index);
-                    if seen.insert((result_index, golden_index)) {
-                        pairs.push((result_index, golden_index));
-                    }
-                }
-            }
-            if !matched && !args.ignore_missing {
-                cmp_result.problems.push(format!(
-                    "variable '{}' is missing from the golden file",
-                    result.variables[result_index]
-                ));
-            }
-        }
-
-        if !args.ignore_missing {
-            for golden_index in golden_indices {
-                if !matched_golden.contains(&golden_index) {
-                    cmp_result.problems.push(format!(
-                        "variable '{}' is missing from the result",
-                        golden.variables[golden_index]
-                    ));
-                }
-            }
-        }
-    }
-
-    pairs
 }
 
 /// Compare two waveform datasets.
@@ -778,50 +578,7 @@ fn compare_waveforms(
         problems: Vec::new(),
     };
 
-    let explicit_pairs = if args.variables.is_empty() {
-        if !args.ignore_missing {
-            for var in &golden.variables {
-                if !contains_variable(&result.variables, var) {
-                    cmp_result
-                        .problems
-                        .push(format!("variable '{var}' is missing from the result"));
-                }
-            }
-        }
-        None
-    } else {
-        Some(explicit_variable_pairs(
-            result,
-            golden,
-            args,
-            &mut cmp_result,
-        ))
-    };
-
-    // Find matching variables
-    let mut pairs: Vec<_> = if let Some(pairs) = explicit_pairs {
-        pairs
-    } else {
-        result
-            .variables
-            .iter()
-            .enumerate()
-            .filter_map(|(var_idx, var_name)| {
-                find_variable_index(&golden.variables, var_name)
-                    .map(|golden_idx| (var_idx, golden_idx))
-            })
-            .collect()
-    };
-
-    // Signal selection never discards the independent coordinate contract.
-    if !variable_name_matches(&result.variables[0], &golden.variables[0]) {
-        cmp_result.problems.push(format!(
-            "independent coordinates differ: '{}' versus '{}'",
-            result.variables[0], golden.variables[0]
-        ));
-    } else if !pairs.contains(&(0, 0)) {
-        pairs.insert(0, (0, 0));
-    }
+    let pairs = selection::pairs(result, golden, args, &mut cmp_result);
 
     for (var_idx, golden_idx) in pairs {
         let var_name = &result.variables[var_idx];
