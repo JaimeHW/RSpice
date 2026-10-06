@@ -414,17 +414,17 @@ pub(super) fn run_dc_sweep(
             source,
             analysis: Some("DC Sweep".to_string()),
         })?;
-    finish_dc_sweep_result(ctx, &result)
+    finish_dc_sweep_result(ctx, source, &result)
 }
 
 pub(super) fn finish_dc_sweep_result(
     ctx: &RunContext<'_>,
+    source: &str,
     result: &rspice_core::engine::DcSweepResult,
 ) -> Result<(), CliError> {
     let axis = result.axes.last().ok_or_else(|| CliError::InternalError {
         message: "DC sweep result has no axis".into(),
     })?;
-    let source = axis.name.as_str();
     let axis_type = match &axis.unit {
         rspice_core::execution::SignalUnit::Volt => "voltage",
         rspice_core::execution::SignalUnit::Ampere => "current",

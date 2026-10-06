@@ -136,7 +136,12 @@ pub(super) fn run(
                                 basic::finish_dc_op_result(&ctx, result, report)?;
                             }
                             ControlAnalysisResult::DcSweep(result) => {
-                                basic::finish_dc_sweep_result(&ctx, result)?;
+                                let AnalysisCommand::Dc { source, .. } = &dataset.command else {
+                                    return Err(CliError::InternalError {
+                                        message: "control DC dataset lost its authored command".into(),
+                                    });
+                                };
+                                basic::finish_dc_sweep_result(&ctx, source, result)?;
                             }
                             ControlAnalysisResult::Ac(result) => {
                                 frequency::finish_ac_results(&ctx, result)?
