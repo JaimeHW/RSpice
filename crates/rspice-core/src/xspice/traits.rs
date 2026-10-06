@@ -625,6 +625,18 @@ impl XspiceCheckpointSupport {
     }
 }
 
+/// A string parameter that names an input read by the XSPICE data-file loader.
+/// Defaults come from the model's [`ParamSpec`], after instance overrides.
+#[derive(Debug, Clone, Copy)]
+pub struct InputDataFileParameter {
+    /// Parameter name, matched without regard to ASCII case.
+    pub name: &'static str,
+    /// Whether the reader trims surrounding whitespace from the filename.
+    pub trim: bool,
+    /// Whether an empty or whitespace-only override selects the schema default.
+    pub empty_uses_default: bool,
+}
+
 /// The main trait for XSPICE code models
 ///
 /// All code models (built-in and external) implement this trait.
@@ -644,6 +656,13 @@ pub trait CodeModel: Send + Sync {
 
     /// Get parameter specifications
     fn parameters(&self) -> &[ParamSpec];
+
+    /// Data-file inputs owned by this model, excluding output files and external
+    /// process/library parameters. Hosts use these declarations to reserve input
+    /// paths before publishing results, without initializing or running a model.
+    fn input_data_file_parameters(&self) -> &[InputDataFileParameter] {
+        &[]
+    }
 
     /// Check if this model is analog-only (no event-driven ports)
     fn is_analog_only(&self) -> bool {

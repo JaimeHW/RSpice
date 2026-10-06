@@ -250,6 +250,21 @@ fn ngspice_input_dir_path(path: &Path) -> Option<PathBuf> {
     Some(PathBuf::from(input_dir).join(path))
 }
 
+/// Paths whose replacement or creation could change a native data-file read.
+/// Reserve both the search-directory candidate and the CWD fallback: publishing
+/// a previously absent preferred file must not shadow the input used by a run.
+/// This query performs no native I/O and never reads a registered virtual file.
+pub(crate) fn native_input_candidates(path: &str) -> Vec<PathBuf> {
+    if path.is_empty() || path.contains("://") || lock_virtual_files().files.contains_key(path) {
+        return Vec::new();
+    }
+    let path = Path::new(path);
+    ngspice_input_dir_path(path)
+        .into_iter()
+        .chain(std::iter::once(path.to_path_buf()))
+        .collect()
+}
+
 fn native_path_error(
     preferred: &Path,
     preferred_err: &str,

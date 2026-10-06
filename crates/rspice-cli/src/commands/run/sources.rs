@@ -64,6 +64,18 @@ pub(super) fn protect(
             protect_file(&source_base.join(path))?;
         }
     }
+    for path in engine
+        .xspice_data_file_candidates_with_abort(netlist, &crate::abort::ProcessAbort)
+        .map_err(|error| {
+            if matches!(error, rspice_core::SimulationError::Aborted) {
+                cancellation_cli_error(timeout)
+            } else {
+                error.into()
+            }
+        })?
+    {
+        protect_file(&path)?;
+    }
     // Deferred independent sources retain their waveform grammar inside
     // subcircuits. Inspect filenames without evaluating instance parameters or
     // advancing statistical streams. The engine consumes these path spellings.
