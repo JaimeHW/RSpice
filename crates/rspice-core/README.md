@@ -916,6 +916,13 @@ nonnegative; a negative delay is rejected before startup or checkpoint
 publication. Zero delay retains the ordinary GP equations. A physical arrival
 that cannot be represented within the timestep limits is diagnosed explicitly.
 
+Native GP acceptance reserves transport-record storage before advancing device
+histories. Capture and restore use fallible copies of BJT histories, and restart
+normalization consumes its owned checkpoint without duplicating it. Retained
+exact-delay samples, event sides, and derivative-order records count toward
+`ResourceLimits::max_result_values` along with the waveform and other checkpoint
+state.
+
 The GP exact-transport path tracks all unknown events and
 known discontinuities through derivative order two. Solver-certified C2
 inputs retain their delay-history knots and interpolation error control but

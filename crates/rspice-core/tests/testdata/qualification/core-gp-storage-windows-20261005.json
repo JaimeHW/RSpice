@@ -1,0 +1,158 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C03",
+  "status": "partial",
+  "source_revision": "0a41d35a6b9c1718b25a9e75983daa9c9235b445",
+  "source_state": "Storage tests ran before the referenced storage commits with the final implementation subsequently committed unchanged. Accounting validation is recorded separately. Documentation and ledger qualification prose may be uncommitted during these runs. No full-suite or final release qualification is claimed.",
+  "host": "x86_64-pc-windows-msvc",
+  "toolchain": {
+    "rustc": "1.94.0 (4a4ef493e 2026-03-02)",
+    "cargo": "1.94.0 (85eff7c80 2026-01-15)",
+    "llvm": "21.1.8",
+    "toolchain_file_sha256": "d6dadd139dac178482d6cca3a8945b8a7e0f7df1f0733872657cbc420b2d82e6",
+    "cargo_lock_sha256": "c1866fb24400c03e40833775e5003baa48c5147f0e9368b8749900a4251542d7"
+  },
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "reason": "Rust 1.94 incremental CacheEncoder::encode_span ICE during development; nonincremental compilation succeeds."
+  },
+  "implementation_commits": [
+    "a9c9e2d634d64847d1c1f69884a8566490a36e04",
+    "0a3e1eb3e36b57ae866698aeeb56ca902be06d5f",
+    "0a41d35a6b9c1718b25a9e75983daa9c9235b445"
+  ],
+  "runs": [
+    {
+      "command": "cargo test -p rspice-veriloga-runtime --locked --lib",
+      "source_revision": "a9c9e2d634d64847d1c1f69884a8566490a36e04",
+      "log": "target/core-qualification/gp-storage-runtime-final.log",
+      "log_sha256": "9795bdee3cb34d7b19e684355378cd76eb249e906db6fb3878945c6ce9a92d60",
+      "features": "default",
+      "evidence_kind": "Executed correctness tests",
+      "profile": "test",
+      "passed": 136,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "command": "cargo test -p rspice-core --locked --lib engine::transient::",
+      "source_revision": "0a3e1eb3e36b57ae866698aeeb56ca902be06d5f",
+      "log": "target/core-qualification/gp-storage-transient-final.log",
+      "log_sha256": "53bd52c3db104653e0c9fc1b97df4a13c27b0fd7088029b60d02b4bca15b9fcd",
+      "features": "default",
+      "evidence_kind": "Executed correctness tests",
+      "profile": "test",
+      "passed": 544,
+      "failed": 0,
+      "ignored": 1
+    },
+    {
+      "command": "target/debug/deps/rspice_core-<test-binary-hash>.exe engine::pss engine::hb",
+      "source_revision": "0a3e1eb3e36b57ae866698aeeb56ca902be06d5f",
+      "log": "target/core-qualification/gp-storage-periodic-final.log",
+      "log_sha256": "ef0aecf7ba888536d094a995cb58f15fc47ff35544605399e29d473ef43386bd",
+      "features": "default",
+      "evidence_kind": "Executed correctness tests",
+      "profile": "test",
+      "passed": 201,
+      "failed": 0,
+      "ignored": 0,
+      "reproduction_command": "cargo test -p rspice-core --locked --lib -- engine::pss engine::hb"
+    },
+    {
+      "command": "cargo test -p rspice-core --locked --test bjt_excess_phase_transient --test checkpoint_encoding --test transient_checkpoint",
+      "source_revision": "0a3e1eb3e36b57ae866698aeeb56ca902be06d5f",
+      "log": "target/core-qualification/gp-storage-integration-final.log",
+      "log_sha256": "d76bca708d4a71a5064c9faa41791d1d3b681445ecb1d54fb1eff79d0d7e92de",
+      "features": "default",
+      "evidence_kind": "Executed correctness tests",
+      "profile": "test",
+      "passed": 50,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "command": "cargo clippy -p rspice-veriloga-runtime --locked --lib --tests -- -D warnings",
+      "source_revision": "0a3e1eb3e36b57ae866698aeeb56ca902be06d5f",
+      "log": "target/core-qualification/gp-storage-runtime-clippy.log",
+      "log_sha256": "3259eb929c53b5416943133ce5ce9b00a1bdb0cc2681856e55651d910d7d16b0",
+      "features": "default",
+      "evidence_kind": "Strict static checks",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo clippy -p rspice-core --locked --lib --test bjt_excess_phase_transient -- -D warnings",
+      "source_revision": "0a3e1eb3e36b57ae866698aeeb56ca902be06d5f",
+      "log": "target/core-qualification/gp-storage-core-clippy.log",
+      "log_sha256": "50374287dcebca595a0127e97e999b04ca03cac35bd555d281211b877d350d88",
+      "features": "default",
+      "evidence_kind": "Strict static checks",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo check -p rspice-core --locked --lib --features veriloga",
+      "source_revision": "0a3e1eb3e36b57ae866698aeeb56ca902be06d5f",
+      "log": "target/core-qualification/gp-storage-veriloga-check.log",
+      "log_sha256": "31e31387a28ef4b27e57cee9c6c908682348af19400371080e57dfe7a72d0389",
+      "features": "default plus veriloga",
+      "evidence_kind": "Compile check only; no feature-specific tests executed by this command",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p rspice-core --locked --lib -- engine::transient::checkpoint::tests:: engine::transient::tests engine::sensitivity::tests",
+      "source_revision": "0a41d35a6b9c1718b25a9e75983daa9c9235b445",
+      "log": "target/core-qualification/gp-accounting-integrated-unit.log",
+      "log_sha256": "be553ee25988fb692cf444bf591c2472b92f9d9db8df47d81b058b93ca87cb62",
+      "features": "default",
+      "evidence_kind": "Validation after integration of remote revision 759e29e1d on the committed accounting implementation; qualification prose and evidence remained uncommitted.",
+      "profile": "test",
+      "passed": 245,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "command": "cargo test -p rspice-core --locked --test bjt_excess_phase_transient --test checkpoint_encoding --test transient_checkpoint --test resource_and_commit_faults --test qualification_baseline",
+      "source_revision": "0a41d35a6b9c1718b25a9e75983daa9c9235b445",
+      "log": "target/core-qualification/gp-accounting-integrated-integration.log",
+      "log_sha256": "a3e201728e8dc3b8dc240df9d4b7241a15acf4bc52e6050820cedb6e7d0ccd6e",
+      "features": "default",
+      "evidence_kind": "Validation after integration of remote revision 759e29e1d on the committed accounting implementation; qualification prose and evidence remained uncommitted.",
+      "profile": "test",
+      "passed": 59,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "command": "cargo clippy -p rspice-core --locked --lib --test bjt_excess_phase_transient -- -D warnings",
+      "source_revision": "0a41d35a6b9c1718b25a9e75983daa9c9235b445",
+      "log": "target/core-qualification/gp-accounting-integrated-clippy.log",
+      "log_sha256": "c336dff3a8eb78bdd96d7d6688b36a792decef56f1a089c4dd923f359a02700d",
+      "features": "default",
+      "evidence_kind": "Strict static checks on the committed accounting implementation after integration of remote revision 759e29e1d.",
+      "exit_code": 0
+    }
+  ],
+  "delivered_contracts": [
+    "Native delay-buffer construction, record growth, accepted-history copying, and restoration reserve fallibly before mutation.",
+    "Four injected allocation-failure tests cover creation/copying, pre-reserved acceptance, failed event append, and failed restoration.",
+    "Native GP step acceptance, physical startup, and periodic boundary preparation reserve transport storage before advancing accepted state.",
+    "BJT capture/restore copies propagate allocation failures; owned checkpoint normalization avoids a duplicate complete checkpoint copy.",
+    "Retained GP exact-delay samples, left event limits, and derivative-order provenance contribute to the public checkpoint result-value budget.",
+    "A public API regression distinguishes a waveform that fits from a retained checkpoint that exceeds the same budget; waveform-only reruns remain bit-identical."
+  ],
+  "open_evidence": [
+    "Aggregate live-history memory limits and peak checkpoint capture/restore preflight remain incomplete; output value accounting is not a working-memory bound.",
+    "Typed allocation diagnostics remain incomplete: native allocation failures currently map to circuit errors.",
+    "Other model histories and runtime VM acceptance still require their own fallible allocation/state-commit qualification.",
+    "Optimized-profile and remaining feature/target combinations, measured performance/cancellation bounds, and broader parameter/topology coverage remain open.",
+    "GP periodic/envelope implementation remains in C06; C01/C02 contracts and decomposition are not complete."
+  ],
+  "retention": "Raw logs are ignored local artifacts. Commands, committed source revisions, fixtures, log hashes and outcomes are retained for reproduction. Test duration is not a performance benchmark.",
+  "integrated_remote_revision": "759e29e1dd245e0b57f714b6a5ac5bb3e69f3d78",
+  "subsequent_integration": {
+    "commit": "db02f16d222e59bfae305c99c8ef1708c1bf7cdf",
+    "remote_revision": "fe13b75d2f9cec262514c4b6678eee5f6d6449aa",
+    "scope": "Concurrent CLI and core ASCII raw-reader changes merged after the recorded checks, without modifying the GP/history/checkpoint implementation. These runs do not qualify those later changes."
+  }
+}

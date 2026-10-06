@@ -39,7 +39,7 @@ The current [capability table](C:/Users/James/Desktop/RSpice/crates/rspice-core/
 
 | Family or restriction | Remaining implementation or qualification | Package |
 |---|---|---|
-| GP BJT excess phase | Public transient admission, exact-delay and ngspice Weil semantics, error control, restart, and applicable periodic continuation | C03, C06 |
+| GP BJT excess phase | Finish transient aggregate memory/failure and feature/profile qualification; implement applicable periodic continuation. Public transient phase execution and restart are delivered | C03, C06 |
 | GP thermal extensions | Actual thermal equations, accepted thermal state, periodic residual and continuation where the authored model requires them | C06, C07 |
 | B3SOI DD, FD, PD | Exact periodic residuals, periodic noise, PSS charge history, and envelope state | C06, C08 |
 | EKV 2.6, EKV3, VDMOS | Periodic device equations/stamps, noise, PSS state, and envelope continuation | C06, C08 |
@@ -295,11 +295,37 @@ Update this plan after each delivered package with implementation commits, perma
 - C03 qualification found and repaired two numerical defects in `85f7f0b8e`, pushed to `main`: exact-history runs could leave a rounding-sized final interval that failed to converge, and hybrid Gear2 intervals could leave a stale OneStep static residual that caused current ringing when trapezoidal integration resumed. Stop-step fitting preserves existing step bounds and event clocks; both acceptance paths refresh a retained static residual. Checkpoint configuration identity 96 prevents continuation with the former numerical policy.
 - C03 delivery `263f992d7`, pushed to `main`, replaces the public nonzero-PTF refusal with finite, nonnegative delay validation. Its independent physical-event/oracle cases now use public transient and resume APIs. Coverage includes both phase operators, all three dialects, OP/UIC startup, NPN/PNP, private resistances, temperature, area/multiplicity, interpolation refinement, cancellation, packed/unpacked checkpoints, compression, and continuation. Periodic GP capability remains owned by C06.
 - Development validation of that combined C03 tree passed 4,851 unit tests (three existing ignored tests), 85 selected integration tests, strict library/changed-test Clippy, and all 10 GP integration tests without default Cargo features. The exact source, commands, fixture coverage, log hashes, and remaining evidence are recorded in `core-gp-transient-windows-20261005.json`. These are executed correctness results, not final C14 qualification or solver benchmarks.
+- C03 storage work in `a9c9e2d63` and `0a3e1eb3e`, both pushed to `main`, makes native delay-buffer construction, record growth, copying, and restoration fallible. Ordinary steps, physical startup, and periodic boundaries reserve transport storage before accepted-state mutation. GP capture/restore copies propagate allocation failures; restart normalization consumes an owned checkpoint instead of copying its complete state again.
+- That storage delivery passed 136 runtime tests, including four allocation-failure regressions; 544 transient and 201 HB/PSS unit tests; 50 public phase/checkpoint integration tests; strict runtime/core Clippy; and the core build with `veriloga`. This does not close aggregate working-memory limits or qualification of every model/provider's allocation behavior.
+
+- C03 checkpoint accounting in `0a41d35a6`, pushed to `main`, charges retained exact-delay samples, event sides, and derivative-order records to the result-value budget. Its public regression refuses an oversized retained checkpoint while allowing the same waveform without checkpoint retention. That committed revision passed 245 checkpoint/driver/sensitivity unit tests, 59 selected integration tests, and strict core Clippy. Scoped storage and accounting evidence, including subsequent concurrent-main integration, is recorded in `core-gp-storage-windows-20261005.json`; aggregate live-history and peak capture-memory limits remain open.
 
 ## Next implementation batches
 
-1. Finish C03 history-memory accounting and failure qualification, then test its supported feature/profile combinations on a committed build. Keep the exact-delay and discrete Weil numerical oracles distinct.
+1. Finish C03 aggregate live-history and peak capture-memory accounting. Define the working-memory budget separately from retained result values; enforce it before history growth or checkpoint copies, including restoration under a stricter caller budget. Complete typed allocation diagnostics and failure-atomicity tests, then test supported feature/profile combinations on a committed build. Keep the exact-delay and discrete Weil numerical oracles distinct.
 2. Extend C04 in focused result families: DC/nested DC first; AC data and noise tables with row identity; scalar/complex analyses; periodic producer/consumer analyses; then bounded STEP/TEMP/Monte Carlo orchestration. Each batch includes public control execution, vector/scalar presentation, retained-value limits, and necessary CLI/binding result adapters.
 3. Implement C05's checked tone/product and power-reference contracts before adding intercept calculations. Add the missing upper third-order product and independent polynomial cases; expose results through the C04 contracts.
 4. Continue C01/C02 extractions at actual state boundaries as those batches need them. Deliver C06–C11 one model/operator family at a time with equations, state, applicable analyses, and independent evidence together.
 5. Maintain C12 route coverage with every delivery. Close C13 and C14 only after all required implementations and qualification rows have passed; no package is closed by this execution record.
+
+## Remaining-work status
+
+This table summarizes the work still required; the package definitions above supply dependencies, implementation requirements, and acceptance gates. A partial delivery does not close its package.
+
+| Package | Current status | Remaining completion work |
+|---|---|---|
+| C00 | In progress | Complete instance-predicate and auxiliary-route fixtures; record repeatable numerical, memory, performance, and cancellation baselines |
+| C01 | In progress | Complete shared residual/charge/derivative/noise contracts and trial/accepted/capture/restore conformance across providers |
+| C02 | In progress | Extract remaining transient phases and consolidate state boundaries after the delivered step-proposal extraction |
+| C03 | In progress | Aggregate live-history and peak capture-memory limits, typed allocation failures, broader model coverage, and feature/profile qualification |
+| C04 | Open | Implement the 26 remaining control-host command dispositions, result presentation, producer dependencies, and bounded sweep orchestration |
+| C05 | Open | Checked IMD constructors, upper third-order product, tone/power conventions, intercept evidence, and public/control exposure |
+| C06 | Open | Missing semiconductor periodic equations, derivatives, shooting histories, and envelope continuation, delivered per family |
+| C07 | Open | Thermal, memory, hysteresis, line, magnetic, and dynamic-operator equations with complete continuation state |
+| C08 | Open | Periodically modulated and correlated noise for each newly supported family, including folding and convergence evidence |
+| C09 | Open | Real external-model evaluator/state adapters and allocation/rollback contracts; native GP storage repairs do not qualify runtime VM acceptance |
+| C10 | Open | Complete mixed accepted state, deterministic rollback/restart, coupled equilibrium, and eligible linear analysis |
+| C11 | Open | Mixed periodic closure, moving-event derivatives, RF conversion/noise, and envelope continuation |
+| C12 | Open | Full parser/direct/control/result route equivalence and authenticated producer/consumer integration |
+| C13 | Open | Remaining responsibility-boundary refactors, duplicate numerical-contract removal, and measured performance/memory improvements |
+| C14 | Open | Exact committed-source qualification across intended configurations, independent references, boundary fuzzing, and every required ledger row |
