@@ -136,7 +136,10 @@ fn finalize(
             output: analysis_id.tag(),
             checkpoint: analysis_id.tag(),
         })
-        .build_with_abort(&crate::abort::ProcessAbort)
+        .build_with_limits_and_abort(
+            &ctx.engine.config().resource_limits,
+            &crate::abort::ProcessAbort,
+        )
         .map_err(|error| document_error(ctx, analysis_id, error))
 }
 
@@ -155,7 +158,11 @@ pub(super) fn write_document(
     document: &AnalysisResultDocument,
 ) -> Result<(), CliError> {
     let json = document
-        .to_json_with_abort(&crate::abort::ProcessAbort, json_byte_limit(ctx))
+        .to_json_with_limits_and_abort(
+            &ctx.engine.config().resource_limits,
+            &crate::abort::ProcessAbort,
+            json_byte_limit(ctx),
+        )
         .map_err(|error| document_error(ctx, document.analysis(), error))?;
     publish::artifact(path, |writer: &mut dyn std::io::Write| {
         writer
@@ -265,6 +272,12 @@ pub(super) fn document_error(
 ) -> CliError {
     if matches!(error, ResultDocumentError::Aborted) {
         return super::cancellation_cli_error(ctx.args.timeout);
+    }
+    if let ResultDocumentError::ResourceLimit(source) = error {
+        return CliError::CoreSimulationError {
+            source: rspice_core::SimulationError::ResourceLimit(source),
+            analysis: Some(analysis.tag()),
+        };
     }
     CliError::CoreSimulationError {
         source: rspice_core::SimulationError::Circuit(format!(

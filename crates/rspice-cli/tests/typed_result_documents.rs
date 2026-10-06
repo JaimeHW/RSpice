@@ -67,6 +67,50 @@ enum FamilyCoverage {
 
 fn coverage(kind: AnalysisResultKind) -> FamilyCoverage {
     match kind {
+        AnalysisResultKind::Qpss
+        | AnalysisResultKind::Qpac
+        | AnalysisResultKind::Qpxf
+        | AnalysisResultKind::Qpnoise => {
+            let (cards, artifact, analysis_tag, series) = match kind {
+                AnalysisResultKind::Qpss => (
+                    ".QPSS 1k 1.4142135623730951k HARMS=1\n",
+                    "",
+                    "qpss-001",
+                    ("v(out)", "volt"),
+                ),
+                AnalysisResultKind::Qpac => (
+                    ".QPSS 1k 1.4142135623730951k HARMS=1\n.QPAC LIN 2 10 100 SOURCE=V1 OUT=V(out) INLATTICE=(0,0) OUTLATTICE=(0,0)\n",
+                    "qpac-001",
+                    "qpac-001",
+                    ("output_transfer", "dimensionless"),
+                ),
+                AnalysisResultKind::Qpxf => (
+                    ".QPSS 1k 1.4142135623730951k HARMS=1\n.QPXF LIN 2 10 100 SOURCES=(V1) OUT=V(out) INLATTICES=((0,0)) OUTLATTICE=(0,0)\n",
+                    "qpxf-001",
+                    "qpxf-001",
+                    ("transfer(v1;0,0)", "dimensionless"),
+                ),
+                AnalysisResultKind::Qpnoise => (
+                    ".QPSS 1k 1.4142135623730951k HARMS=1\n.QPNOISE LIN 2 10 100 OUT=V(out) OUTLATTICE=(0,0)\n",
+                    "qpnoise-001",
+                    "qpnoise-001",
+                    ("output(1).noise_psd", "custom"),
+                ),
+                _ => unreachable!("quasiperiodic coverage family"),
+            };
+            FamilyCoverage::Document(FamilyRun {
+                circuit: Some(
+                    "* quasiperiodic result coverage\nV1 in 0 SIN(1 .1 1k)\nR1 in out 1k\nR2 out 0 1k\nC1 out 0 100n\n",
+                ),
+                library: None,
+                cards,
+                flags: &[],
+                artifact,
+                analysis_tag,
+                series: Some(series),
+                scalar: None,
+            })
+        }
         AnalysisResultKind::OperatingPoint => FamilyCoverage::Document(FamilyRun {
             circuit: None,
             library: None,

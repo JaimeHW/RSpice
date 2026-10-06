@@ -832,8 +832,22 @@ fn load_json(
     if value.get("schema").and_then(serde_json::Value::as_str)
         == Some(rspice_core::execution::ANALYSIS_RESULT_DOCUMENT_SCHEMA)
     {
-        let document = rspice_core::execution::AnalysisResultDocument::from_json(&content)
-            .map_err(|error| conversion_error(path, error))?;
+        let document =
+            rspice_core::execution::AnalysisResultDocument::from_json_with_limits_and_abort(
+                &content,
+                &resource_limits,
+                &crate::abort::ProcessAbort,
+                resource_limits.max_external_data_bytes as u64,
+            )
+            .map_err(|error| match error {
+                rspice_core::execution::ResultDocumentError::ResourceLimit(source) => {
+                    CliError::ResourceLimit {
+                        path: path.to_path_buf(),
+                        source,
+                    }
+                }
+                error => conversion_error(path, error),
+            })?;
         return result_document_table(path, &document, resource_limits).map(Into::into);
     }
 
@@ -944,8 +958,14 @@ fn result_document_table(
             }
         };
         columns.push(ExportColumn {
-            var_type: rspice_core::execution::raw_variable_type(signal.descriptor().kind())
-                .to_string(),
+            var_type: match signal.descriptor().unit() {
+                rspice_core::execution::SignalUnit::Volt => "voltage",
+                rspice_core::execution::SignalUnit::Ampere => "current",
+                rspice_core::execution::SignalUnit::Hertz => "frequency",
+                rspice_core::execution::SignalUnit::Second => "time",
+                _ => rspice_core::execution::raw_variable_type(signal.descriptor().kind()),
+            }
+            .to_string(),
             name,
             data,
         });
@@ -1007,7 +1027,17 @@ fn result_document_table(
     Ok(ExportTable {
         analysis: document.result_kind().tag().to_string(),
         plot_name: format!("{} ({})", document.result_kind().tag(), document.analysis()),
-        scale_type: scale_var_type(&scale_name),
+        scale_type: document
+            .axes()
+            .first()
+            .map_or("index", |axis| match axis.unit() {
+                rspice_core::execution::SignalUnit::Hertz => "frequency",
+                rspice_core::execution::SignalUnit::Second => "time",
+                rspice_core::execution::SignalUnit::Volt => "voltage",
+                rspice_core::execution::SignalUnit::Ampere => "current",
+                _ => "index",
+            })
+            .to_string(),
         scale_name,
         scale,
         columns,

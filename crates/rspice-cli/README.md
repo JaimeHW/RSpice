@@ -41,7 +41,6 @@ These combinations remain explicitly unsupported:
 
 | Feature | CLI boundary |
 | :--- | :--- |
-| QPSS, QPAC, QPXF, QPNOISE | No shared result-document projection; rejected before solving with a typed capability diagnostic |
 | Control scripts with checkpoint/resume, segmented restart, compression, declarative FFT/Fourier or STEP/TEMP axes | Rejected during frontend preflight |
 | FFT comparison and partial-spectrum conversion | Waveform comparison and `--variables`/`--start`/`--stop` selection cannot represent a complete typed transform and are rejected |
 
@@ -55,7 +54,8 @@ comparisons, performance and memory budgets, packaging, and application tests.
 Without a control script, `rspice run` executes every analysis card found in the netlist, in order:
 
 `.OP`, `.DC`, `.TRAN`, `.AC`, `.HB`, `.SP`, `.STB`, `.DISTO`, `.NOISE`, `.TF`,
-`.SENS`, `.PZ`, `.PSS`, `.PAC`, `.PXF`, `.PNOISE`, `.ENVELOPE`, `.STEP`,
+`.SENS`, `.PZ`, `.PSS`, `.PAC`, `.PXF`, `.PNOISE`, `.ENVELOPE`,
+`.QPSS`, `.QPAC`, `.QPXF`, `.QPNOISE`, `.STEP`,
 `.FOUR`, `.TEMP`, and Monte Carlo cards. `.AC` and `.NOISE` additionally accept
 the `DATA=<table>` form, sweeping the frequencies listed in a `.DATA` table
 instead of a generated sweep. If the netlist contains no analysis cards, a DC
@@ -105,6 +105,17 @@ Control scripts combined with declarative run axes, Fourier/FFT processing,
 checkpoint/resume, segmented restart, or waveform compression are currently
 refused. Other vector functions and general ngspice command compatibility are
 still under development.
+
+Quasiperiodic analyses bind each `.QPAC`, `.QPXF`, or `.QPNOISE` card to the
+exact preceding `.QPSS` instance. JSON retains the authenticated carrier,
+independent-tone indices, complete solves, noise covariance, unavailable
+measurements, and run-coordinate identity in the shared core result document.
+CSV, TSV, RAW, and HDF5 expose its primary result series. `.SAVE` selects
+supported probes; QPSS exports always retain frequency and independent-tone
+indices. A flat export that selects an unavailable sample fails explicitly;
+use JSON to retain its reason and the complete numerical evidence. The CLI
+adapter does not imply QP support in the Python, WebAssembly, or engine-adapter
+deck runners; their capability declarations remain explicit.
 
 Periodic large-signal notes (the card grammar is in the
 [core README](../rspice-core/README.md)):

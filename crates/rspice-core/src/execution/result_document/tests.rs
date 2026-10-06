@@ -614,6 +614,10 @@ fn envelope_deck() -> Netlist {
 
 fn document_for(kind: AnalysisResultKind) -> AnalysisResultDocument {
     let builder = match kind {
+        AnalysisResultKind::Qpss
+        | AnalysisResultKind::Qpac
+        | AnalysisResultKind::Qpxf
+        | AnalysisResultKind::Qpnoise => quasiperiodic_builder(kind),
         AnalysisResultKind::OperatingPoint => AnalysisResultDocument::from_operating_point(
             instance(AnalysisKind::Op),
             &operating_point_result(),
@@ -725,6 +729,103 @@ fn document_for(kind: AnalysisResultKind) -> AnalysisResultDocument {
         .unwrap_or_else(|error| panic!("{} projection failed: {error}", kind.tag()))
         .build()
         .unwrap_or_else(|error| panic!("{} document is invalid: {error}", kind.tag()))
+}
+
+fn quasiperiodic_builder(
+    kind: AnalysisResultKind,
+) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
+    let netlist = Netlist::parse("QP documents\nV1 in 0 SIN(1 .1 1k)\nR1 in out 1k\nR2 out 0 1k\nC1 out 0 100n\n.QPSS 1k 1.4142135623730951k HARMS=1\n.QPAC LIN 2 10 100 SOURCE=V1 OUT=V(out) INLATTICE=(0,0) OUTLATTICE=(0,0)\n.QPXF LIN 2 10 100 SOURCES=(V1) OUT=V(out) INLATTICES=((0,0)) OUTLATTICE=(0,0) GROUPDELAY=YES\n.QPNOISE LIN 2 10 100 OUT=V(out) OUTLATTICE=(0,0) SOURCE=V1 INLATTICE=(0,0)\n.end\n").unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let limits = crate::ResourceLimits::default();
+    let mut cards = netlist.analyses.iter();
+    let crate::netlist::AnalysisCommand::Qpss(card) = cards.next().unwrap() else {
+        panic!("QPSS fixture")
+    };
+    let point = engine
+        .run_qpss(
+            &netlist,
+            crate::engine::QpssConfig::from_qpss_card(card).unwrap(),
+        )
+        .unwrap();
+    let parent = instance(AnalysisKind::Qpss);
+    if kind == AnalysisResultKind::Qpss {
+        return AnalysisResultDocument::from_qpss(parent, &point, &limits, &NoAbort);
+    }
+    for card in cards {
+        match (kind, card) {
+            (AnalysisResultKind::Qpac, crate::netlist::AnalysisCommand::Qpac(card)) => {
+                let result = engine
+                    .run_qpac_card_from_qpss_with_abort(&netlist, card, &point, &NoAbort)
+                    .unwrap();
+                return AnalysisResultDocument::from_qpac(
+                    instance(AnalysisKind::Qpac),
+                    parent,
+                    &result,
+                    &limits,
+                    &NoAbort,
+                );
+            }
+            (AnalysisResultKind::Qpxf, crate::netlist::AnalysisCommand::Qpxf(card)) => {
+                let result = engine
+                    .run_qpxf_card_from_qpss_with_abort(&netlist, card, &point, &NoAbort)
+                    .unwrap();
+                return AnalysisResultDocument::from_qpxf(
+                    instance(AnalysisKind::Qpxf),
+                    parent,
+                    &result,
+                    &limits,
+                    &NoAbort,
+                );
+            }
+            (AnalysisResultKind::Qpnoise, crate::netlist::AnalysisCommand::Qpnoise(card)) => {
+                let result = engine
+                    .run_qpnoise_card_from_qpss_with_abort(&netlist, card, &point, &NoAbort)
+                    .unwrap();
+                return AnalysisResultDocument::from_qpnoise(
+                    instance(AnalysisKind::Qpnoise),
+                    parent,
+                    &result,
+                    &limits,
+                    &NoAbort,
+                );
+            }
+            _ => {}
+        }
+    }
+    panic!("missing quasiperiodic fixture for {kind:?}")
+}
+
+#[test]
+fn quasiperiodic_documents_validate_evidence_primary_series_and_budgets() {
+    for kind in [
+        AnalysisResultKind::Qpss,
+        AnalysisResultKind::Qpac,
+        AnalysisResultKind::Qpxf,
+        AnalysisResultKind::Qpnoise,
+    ] {
+        let document = document_for(kind);
+        let json = document.to_json().unwrap();
+        assert_eq!(AnalysisResultDocument::from_json(&json).unwrap(), document);
+        let mut changed = serde_json::from_str::<serde_json::Value>(&json).unwrap();
+        changed["axes"][0]["values"]["values"][0] = serde_json::json!(987654);
+        assert!(AnalysisResultDocument::from_json(&changed.to_string()).is_err());
+        let mut changed = serde_json::from_str::<serde_json::Value>(&json).unwrap();
+        let identity = if kind == AnalysisResultKind::Qpss {
+            &mut changed["payload"]["operatingPoint"]["retained_identity"]
+        } else {
+            &mut changed["payload"]["result"]["metadata"]["retained_identity"]
+        };
+        *identity = serde_json::json!("0".repeat(64));
+        assert!(AnalysisResultDocument::from_json(&changed.to_string()).is_err());
+        let limits = crate::ResourceLimits {
+            max_result_values: document.total_value_count() - 1,
+            ..Default::default()
+        };
+        assert!(matches!(
+            document.validate_with_limits_and_abort(&limits, &NoAbort),
+            Err(ResultDocumentError::ResourceLimit(_))
+        ));
+    }
 }
 
 fn transient_fft_result() -> crate::engine::TransientFftResult {

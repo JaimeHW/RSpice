@@ -75,6 +75,8 @@ use crate::execution::schema::{
 use crate::execution::topology::TopologyFingerprint;
 use crate::solver::SimulationResult;
 
+pub(super) mod quasi_periodic;
+
 //=============================================================================
 // Shared helpers
 //=============================================================================

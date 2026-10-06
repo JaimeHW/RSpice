@@ -126,6 +126,7 @@ type PlannedFourierOperand<'plan> = (AnalysisInstanceId, &'plan str);
 /// `.OPTIONS HBINT` change turn one carrier into two.
 #[derive(Default)]
 pub(super) struct PeriodicOperatingPoints {
+    qpss: Vec<(AnalysisInstanceId, rspice_core::engine::QpssOperatingPoint)>,
     pss: Vec<(AnalysisInstanceId, rspice_core::engine::PssOperatingPoint)>,
     hb: Vec<(
         AnalysisInstanceId,
@@ -135,6 +136,15 @@ pub(super) struct PeriodicOperatingPoints {
 }
 
 impl PeriodicOperatingPoints {
+    pub(super) fn qpss(
+        &self,
+        id: AnalysisInstanceId,
+    ) -> Option<&rspice_core::engine::QpssOperatingPoint> {
+        self.qpss
+            .iter()
+            .find(|(candidate, _)| *candidate == id)
+            .map(|(_, point)| point)
+    }
     /// The retained shooting-`.PSS` state of one instance.
     pub(super) fn pss(
         &self,
@@ -519,6 +529,14 @@ impl<'a> RunContext<'a> {
         self.periodic.borrow()
     }
 
+    pub(super) fn retain_qpss(
+        &self,
+        analysis: AnalysisInstanceId,
+        point: rspice_core::engine::QpssOperatingPoint,
+    ) {
+        self.periodic.borrow_mut().qpss.push((analysis, point));
+    }
+
     /// Retain one converged shooting-`.PSS` operating point under its identity.
     pub(super) fn retain_pss(
         &self,
@@ -834,16 +852,10 @@ impl<'a> RunContext<'a> {
             } => frequency::run_ac(self, *variation, *points, *start_freq, *stop_freq)?,
             AnalysisCommand::AcData { table_name } => frequency::run_ac_data(self, table_name)?,
             AnalysisCommand::Hb(card) => advanced::run_hb_from_command(self, card)?,
-            AnalysisCommand::Qpnoise(_)
-            | AnalysisCommand::Qpxf(_)
-            | AnalysisCommand::Qpac(_)
-            | AnalysisCommand::Qpss(_) => {
-                return Err(compatibility::projection_refusal(analysis).ok_or_else(|| {
-                    CliError::InternalError {
-                        message: "missing quasi-periodic frontend capability declaration".into(),
-                    }
-                })?);
-            }
+            AnalysisCommand::Qpss(card) => quasi_periodic::run_qpss(self, card)?,
+            AnalysisCommand::Qpac(card) => quasi_periodic::run_qpac(self, card)?,
+            AnalysisCommand::Qpxf(card) => quasi_periodic::run_qpxf(self, card)?,
+            AnalysisCommand::Qpnoise(card) => quasi_periodic::run_qpnoise(self, card)?,
             AnalysisCommand::Sp { .. } => advanced::run_sparam_from_command(self, analysis)?,
             AnalysisCommand::Stb { .. } => frequency::run_stb(self, analysis)?,
             AnalysisCommand::Disto {

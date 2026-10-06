@@ -703,6 +703,7 @@ impl DeckPlan {
         let mut authored_ordinals = std::collections::BTreeMap::<AnalysisKind, u32>::new();
         let mut last_pss: Option<AnalysisInstanceId> = None;
         let mut last_hb: Option<AnalysisInstanceId> = None;
+        let mut last_qpss: Option<AnalysisInstanceId> = None;
         let mut last_periodic: Option<AnalysisInstanceId> = None;
 
         for (command_index, command) in netlist.analyses.iter().enumerate() {
@@ -744,6 +745,18 @@ impl DeckPlan {
                             .ok_or(DeckPlanError::AnalysisCountOverflow(kind))?,
                     );
                     let request = match command {
+                        AnalysisCommand::Qpac(_)
+                        | AnalysisCommand::Qpxf(_)
+                        | AnalysisCommand::Qpnoise(_) => {
+                            let card = match command {
+                                AnalysisCommand::Qpac(_) => ".QPAC",
+                                AnalysisCommand::Qpxf(_) => ".QPXF",
+                                _ => ".QPNOISE",
+                            };
+                            AnalysisRequest::new(kind).with_upstream(last_qpss.ok_or(DeckPlanError::MissingUpstreamAnalysis {
+                                card, required: "a preceding .QPSS with its independent-tone operating point",
+                            })?)
+                        }
                         AnalysisCommand::Pac(card) => {
                             AnalysisRequest::new(kind).with_upstream(resolve_periodic_source(
                                 card.source,
@@ -792,6 +805,7 @@ impl DeckPlan {
                         _ => AnalysisRequest::new(kind),
                     };
                     match kind {
+                        AnalysisKind::Qpss => last_qpss = Some(id),
                         AnalysisKind::Pss => {
                             last_pss = Some(id);
                             last_periodic = Some(id);
@@ -2592,6 +2606,42 @@ mod tests {
                 ("env-001".to_string(), Some("hb-001".to_string())),
             ]
         );
+    }
+
+    #[test]
+    fn quasiperiodic_cards_bind_the_exact_preceding_qpss_instance() {
+        let plan = periodic_plan(
+            ".QPSS 1k 1.4142135623730951k HARMS=1\n.HB 1k\n.QPAC LIN 2 10 100 SOURCE=V1 OUT=V(out) INLATTICE=(0,0) OUTLATTICE=(0,0)\n.QPSS 2k 2.8284271247461903k HARMS=1\n.QPXF LIN 2 10 100 OUT=V(out) OUTLATTICE=(0,0)\n.QPNOISE LIN 2 10 100 OUT=V(out) OUTLATTICE=(0,0)\n",
+        );
+        let parents = plan
+            .analyses()
+            .iter()
+            .filter_map(|analysis| {
+                analysis
+                    .request()
+                    .upstream()
+                    .map(|parent| (analysis.id().tag(), parent.tag()))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            parents,
+            [
+                ("qpac-001".into(), "qpss-001".into()),
+                ("qpxf-001".into(), "qpss-002".into()),
+                ("qpnoise-001".into(), "qpss-002".into())
+            ]
+        );
+        for card in [
+            ".QPAC LIN 2 10 100 SOURCE=V1 OUT=V(out) INLATTICE=(0,0) OUTLATTICE=(0,0)",
+            ".QPXF LIN 2 10 100 OUT=V(out) OUTLATTICE=(0,0)",
+            ".QPNOISE LIN 2 10 100 OUT=V(out) OUTLATTICE=(0,0)",
+        ] {
+            let netlist = crate::Netlist::parse(&format!("Missing QPSS\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.HB 1k\n{card}\n.QPSS 1k 1.4142135623730951k HARMS=1\n.end\n")).unwrap();
+            assert!(matches!(
+                DeckPlan::from_netlist(&netlist, &ResourceLimits::default()),
+                Err(DeckPlanError::MissingUpstreamAnalysis { .. })
+            ));
+        }
     }
 
     #[test]

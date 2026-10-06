@@ -25,6 +25,43 @@ c1 out 0 1n
 .end
 ";
 
+#[test]
+fn mixed_real_and_complex_raw_columns_keep_their_original_representation() {
+    let dir = test_dir("mixed_raw_types");
+    let source = dir.join("source.json");
+    let original = serde_json::json!({
+        "analysis":"mixed", "plot_name":"Mixed typed columns",
+        "scale":{"name":"index", "type":"index", "values":[0.0,1.0]},
+        "signals":[
+            {"name":"frequency", "type":"frequency", "values":[1000.0,2000.0]},
+            {"name":"mode_index", "type":"index", "values":[-1.0,0.0]},
+            {"name":"V(out)", "type":"voltage", "real":[1.0,2.0], "imag":[0.0,0.0]}
+        ]
+    });
+    std::fs::write(&source, serde_json::to_vec(&original).unwrap()).unwrap();
+    for format in ["raw", "ascii"] {
+        let encoded = dir.join(format!("mixed.{format}"));
+        let decoded = dir.join(format!("decoded.{format}.json"));
+        rspice(&[
+            "convert",
+            source.to_str().unwrap(),
+            encoded.to_str().unwrap(),
+            "--to",
+            format,
+        ]);
+        rspice(&[
+            "convert",
+            encoded.to_str().unwrap(),
+            decoded.to_str().unwrap(),
+            "--to",
+            "json",
+        ]);
+        let recovered = common::read_json(&decoded);
+        assert_eq!(recovered["signals"], original["signals"]);
+        assert_eq!(recovered["scale"], original["scale"]);
+    }
+}
+
 /// A digital bridge and a real event node, so a conversion has both kinds of
 /// event timeline to carry.
 const XSPICE_EVENT_DECK: &str = "* xspice event convert test

@@ -15,18 +15,19 @@
 //! ```text
 //! {
 //!   "schema":        "rspice-analysis-result"   fixed identifier
-//!   "schemaVersion": 5                          this build's exact version
+//!   "schemaVersion": 9                          this build's exact version
 //!   "resultKind":    "op" | "dc" | "ac" | "tran" | "noise" | "sp" |
 //!                    "port-noise" | "distortion" | "tf" | "stb" |
 //!                    "sensitivity" | "pole-zero" | "fourier" | "fft" |
 //!                    "monte-carlo" | "pss" | "pac" | "pxf" | "pnoise" |
-//!                    "hb" | "pstb" | "envelope" | "dcmatch"
+//!                    "hb" | "pstb" | "envelope" | "dcmatch" |
+//!                    "qpss" | "qpac" | "qpxf" | "qpnoise"
 //!   "analysis":      { "kind": <analysis tag>, "ordinal": <u32, 0-based>,
 //!                      "tag": "<kind>-<ordinal+1, 3 digits>" }
 //!   "parentAnalysis": same shape or null. Required for "fft" and "fourier",
 //!                     which point at the transient they post-processed;
-//!                     optional for "pac"/"pnoise" (their PSS) and
-//!                     "envelope" (its HB carrier); null everywhere else.
+//!                     required for "qpac"/"qpxf"/"qpnoise" (their QPSS);
+//!                     periodic dependents identify their planned carrier.
 //!   "coordinate":    null, or
 //!                    { "id": { "semantic": <32 lower-case hex chars>,
 //!                              "occurrence": <u32, 0-based> },
@@ -147,7 +148,17 @@
 //!             continuationLimitations[]
 //! envelope    continuation, carrier, transient     transient is the tran payload
 //!                                                  of the continued run
+//! qpss        operatingPoint                      authenticated independent-tone state
+//! qpac        result                              complete unit-drive solves and response
+//! qpxf        result                              adjoints and source/lattice transfers
+//! qpnoise     result                              covariance, contributors and referral
 //! ```
+//!
+//! Quasiperiodic payloads reuse the core's versioned retained-state types.
+//! Their primary axes and signals are checked against that evidence on decode.
+//! Configurable-limit APIs admit both the payload and primary-series numbers
+//! before reconstructing grids or validating evidence, and preserve cancellation
+//! and resource failures as typed errors.
 //!
 //! # Missingness
 //!
@@ -158,7 +169,9 @@
 //! a placeholder meaning.
 
 mod builders;
+mod numeric_count;
 mod payload;
+mod quasi_periodic;
 #[cfg(test)]
 mod tests;
 mod wire;
@@ -166,6 +179,7 @@ mod wire;
 use std::collections::BTreeSet;
 use std::fmt;
 
+pub use quasi_periodic::{QpacPayload, QpnoisePayload, QpssPayload, QpxfPayload};
 use serde::{Deserialize, Serialize};
 
 pub use payload::{
@@ -522,7 +536,22 @@ impl AnalysisResultDocument {
 
     /// Cancellable form of [`Self::validate`].
     pub fn validate_with_abort(&self, abort: &dyn AbortSignal) -> Result<(), ResultDocumentError> {
+        self.validate_with_limits_and_abort(&crate::ResourceLimits::default(), abort)
+    }
+
+    /// Validate retained evidence with the caller's configured resource policy.
+    pub fn validate_with_limits_and_abort(
+        &self,
+        limits: &crate::ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ResultDocumentError> {
         check_abort(abort)?;
+        crate::ResourceLimitError::ensure(
+            crate::ResourceKind::ResultValues,
+            self.total_value_count(),
+            limits.max_result_values,
+        )
+        .map_err(ResultDocumentError::ResourceLimit)?;
         if self.schema != ANALYSIS_RESULT_DOCUMENT_SCHEMA {
             return Err(ResultDocumentError::WrongSchema {
                 found: self.schema.clone(),
@@ -617,7 +646,8 @@ impl AnalysisResultDocument {
             require_name("checkpoint namespace", &namespaces.checkpoint)?;
         }
         check_abort(abort)?;
-        self.payload.validate()?;
+        self.payload.validate(limits, abort)?;
+        quasi_periodic::validate_primary(self, limits, abort)?;
         self.validate_current_impulses()?;
         if let ResultPayload::Sensitivity(payload) = &self.payload {
             self.validate_sensitivity_availability(payload, abort)?;
@@ -740,6 +770,9 @@ impl AnalysisResultDocument {
             // spectrum can name no other parent.
             AnalysisResultKind::Pstb => Some((false, &[AnalysisKind::Pss])),
             AnalysisResultKind::Envelope => Some((false, &[AnalysisKind::HarmonicBalance])),
+            AnalysisResultKind::Qpac | AnalysisResultKind::Qpxf | AnalysisResultKind::Qpnoise => {
+                Some((true, &[AnalysisKind::Qpss]))
+            }
             _ => None,
         };
         match (required_parent, self.parent_analysis) {
@@ -862,7 +895,17 @@ impl AnalysisResultDocument {
         abort: &dyn AbortSignal,
         byte_limit: u64,
     ) -> Result<String, ResultDocumentError> {
-        self.validate_with_abort(abort)?;
+        self.to_json_with_limits_and_abort(&crate::ResourceLimits::default(), abort, byte_limit)
+    }
+
+    /// Serialize with explicit numerical and byte budgets.
+    pub fn to_json_with_limits_and_abort(
+        &self,
+        limits: &crate::ResourceLimits,
+        abort: &dyn AbortSignal,
+        byte_limit: u64,
+    ) -> Result<String, ResultDocumentError> {
+        self.validate_with_limits_and_abort(limits, abort)?;
         let mut writer = BoundedAbortWriter::new(abort, byte_limit);
         if let Err(error) = serde_json::to_writer(&mut writer, self) {
             return Err(match writer.failure() {
@@ -897,6 +940,21 @@ impl AnalysisResultDocument {
         abort: &dyn AbortSignal,
         byte_limit: u64,
     ) -> Result<Self, ResultDocumentError> {
+        Self::from_json_with_limits_and_abort(
+            json,
+            &crate::ResourceLimits::default(),
+            abort,
+            byte_limit,
+        )
+    }
+
+    /// Decode with explicit numerical and byte budgets before validating evidence.
+    pub fn from_json_with_limits_and_abort(
+        json: &str,
+        limits: &crate::ResourceLimits,
+        abort: &dyn AbortSignal,
+        byte_limit: u64,
+    ) -> Result<Self, ResultDocumentError> {
         check_abort(abort)?;
         if json.len() as u128 > u128::from(byte_limit) {
             return Err(ResultDocumentError::ArtifactTooLarge {
@@ -927,7 +985,7 @@ impl AnalysisResultDocument {
         check_abort(abort)?;
         let document: Self = serde_json::from_str(json)
             .map_err(|error| ResultDocumentError::Json(error.to_string()))?;
-        document.validate_with_abort(abort)?;
+        document.validate_with_limits_and_abort(limits, abort)?;
         Ok(document)
     }
 }
@@ -1045,6 +1103,15 @@ impl AnalysisResultDocumentBuilder {
         self,
         abort: &dyn AbortSignal,
     ) -> Result<AnalysisResultDocument, ResultDocumentError> {
+        self.build_with_limits_and_abort(&crate::ResourceLimits::default(), abort)
+    }
+
+    /// Finish with the same numerical budget used by the producer.
+    pub fn build_with_limits_and_abort(
+        self,
+        limits: &crate::ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<AnalysisResultDocument, ResultDocumentError> {
         let document = AnalysisResultDocument {
             schema: ANALYSIS_RESULT_DOCUMENT_SCHEMA.to_owned(),
             schema_version: ANALYSIS_RESULT_DOCUMENT_VERSION,
@@ -1061,7 +1128,7 @@ impl AnalysisResultDocumentBuilder {
             device_states: self.device_states,
             payload: self.payload,
         };
-        document.validate_with_abort(abort)?;
+        document.validate_with_limits_and_abort(limits, abort)?;
         Ok(document)
     }
 }
@@ -1999,6 +2066,8 @@ fn finite_slice(location: &'static str, values: &[f64]) -> Result<(), ResultDocu
 pub enum ResultDocumentError {
     /// The abort source fired before the operation completed.
     Aborted,
+    /// Numerical payloads or evidence reconstruction exceed the resource policy.
+    ResourceLimit(crate::ResourceLimitError),
     /// The JSON declared a different schema identifier.
     WrongSchema { found: String },
     /// The JSON declared a schema version this build does not implement.
@@ -2075,6 +2144,7 @@ impl fmt::Display for ResultDocumentError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Aborted => formatter.write_str("result document work was cancelled"),
+            Self::ResourceLimit(error) => error.fmt(formatter),
             Self::WrongSchema { found } => {
                 write!(formatter, "unexpected result document schema {found:?}")
             }

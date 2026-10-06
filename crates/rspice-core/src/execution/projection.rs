@@ -72,6 +72,10 @@ pub const fn projection_analysis_kind(kind: AnalysisResultKind) -> Option<Output
         | AnalysisResultKind::PNoise
         | AnalysisResultKind::Pstb
         | AnalysisResultKind::Envelope
+        | AnalysisResultKind::Qpss
+        | AnalysisResultKind::Qpac
+        | AnalysisResultKind::Qpxf
+        | AnalysisResultKind::Qpnoise
         | AnalysisResultKind::DcMatch => None,
     }
 }

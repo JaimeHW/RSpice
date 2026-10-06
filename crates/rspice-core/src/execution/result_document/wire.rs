@@ -125,6 +125,10 @@ tagged_enum_adapter!(
         HarmonicBalance => "hb",
         Envelope => "envelope",
         DcMatch => "dcmatch",
+        Qpss => "qpss",
+        Qpac => "qpac",
+        Qpxf => "qpxf",
+        Qpnoise => "qpnoise",
     }
 );
 

@@ -1,13 +1,13 @@
 mod common;
 use std::process::Command;
 #[test]
-fn unsupported_later_analysis_does_not_publish_an_earlier_op() {
+fn qpss_executes_after_an_earlier_op_with_distinct_artifacts() {
     let dir = common::test_dir("preflight");
     let (name, analysis, format, expected) = (
         "qpss",
         ".qpss 1meg 1.4142135623730951meg HARMS=(1,1)",
         "json",
-        69,
+        0,
     );
     let deck = dir.join(format!("{name}.sp"));
     std::fs::write(
@@ -23,6 +23,21 @@ fn unsupported_later_analysis_does_not_publish_an_earlier_op() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(expected), "{output:?}");
-    let _: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
-    assert!(!dir.join(format!("{name}.op.result")).exists());
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let files = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert!(
+        files
+            .iter()
+            .any(|path| path.to_string_lossy().contains("op-001")),
+        "{files:?}"
+    );
+    assert!(
+        files
+            .iter()
+            .any(|path| path.to_string_lossy().contains("qpss-001")),
+        "{files:?}"
+    );
 }
