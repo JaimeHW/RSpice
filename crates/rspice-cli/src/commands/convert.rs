@@ -22,6 +22,7 @@ pub fn execute(
     _verbose: bool,
     quiet: bool,
 ) -> Result<(), CliError> {
+    validate_range(args.start, args.stop)?;
     if !args.input.exists() {
         return Err(CliError::InputNotFound {
             path: args.input.clone(),
@@ -87,26 +88,47 @@ pub fn execute(
     };
 
     table.select_variables(&args.variables)?;
-    table.clip_scale_range(args.start, args.stop);
-    // The load refuses an empty coordinate by name, so reaching zero here is
-    // always the clip's doing and the message can say so without guessing.
-    if table.scale.len() < crate::commands::waveform_io::MIN_RESULT_SAMPLES {
-        return Err(CliError::ConversionError {
-            message: "no data points remain after applying --start/--stop".to_string(),
-        });
-    }
-
     match args.to {
         OutputFormat::Vcd => {
-            let document = vcd_io::table_document(&args.input, &table)?;
+            // Project before clipping so a selected container section retains
+            // the same held state as an ordinary event-document conversion.
+            let mut document = vcd_io::table_document(&args.input, &table)?;
+            let _notes = vcd_io::select_and_clip(&mut document, &[], args.start, args.stop)?;
             vcd_io::write_vcd_artifact(&args.output, &document)?;
         }
-        format => table.write(&args.output, format)?,
+        format => {
+            table.clip_scale_range(args.start, args.stop);
+            // Input admission already refused empty tables.
+            if table.scale.len() < crate::commands::waveform_io::MIN_RESULT_SAMPLES {
+                return Err(CliError::ConversionError {
+                    message: "no data points remain after applying --start/--stop".to_string(),
+                });
+            }
+            table.write(&args.output, format)?;
+        }
     }
 
     if !quiet {
         println!("✓ Conversion complete: {}", args.output.display());
     }
 
+    Ok(())
+}
+
+fn validate_range(start: Option<f64>, stop: Option<f64>) -> Result<(), CliError> {
+    for (name, value) in [("--start", start), ("--stop", stop)] {
+        if value.is_some_and(|value| !value.is_finite()) {
+            return Err(CliError::InvalidArgument {
+                message: format!("{name} must be finite"),
+                suggestion: None,
+            });
+        }
+    }
+    if start.zip(stop).is_some_and(|(start, stop)| start > stop) {
+        return Err(CliError::InvalidArgument {
+            message: "--start must not exceed --stop".into(),
+            suggestion: None,
+        });
+    }
     Ok(())
 }
