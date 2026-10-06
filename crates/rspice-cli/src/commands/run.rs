@@ -174,6 +174,18 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     .filter_map(|(role, path)| path.map(|path| (role, path)))
     .collect();
     let (destinations, destination_scope) = publish::destinations::begin(&declared, &report_paths)?;
+    if !from_stdin {
+        destinations.protect(&args.input)?;
+        // Also retain the target of a root source accessed through a file alias.
+        let canonical = args
+            .input
+            .canonicalize()
+            .map_err(|source| CliError::InputReadError {
+                path: args.input.clone(),
+                source,
+            })?;
+        destinations.protect(&canonical)?;
+    }
     // Held for the whole cancellable region. Dropping it on any exit path
     // closes the completion latch, so a deadline that expires after the run
     // is already over cannot announce a cancellation that never happened.

@@ -1,7 +1,7 @@
 //! Invocation-wide destination ownership, including reports written after results.
 use crate::cli::CliError;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -17,6 +17,8 @@ pub(crate) struct Destinations {
 #[derive(Default)]
 struct State {
     paths: HashMap<PathBuf, String>,
+    declared: HashMap<PathBuf, String>,
+    sources: HashSet<PathBuf>,
     collision: Option<String>,
 }
 
@@ -114,6 +116,10 @@ pub(crate) fn begin(
     for &(role, path) in reports {
         registry.claim(path, role)?;
     }
+    registry.lock()?.declared = known
+        .into_iter()
+        .map(|(path, role)| (path, role.into()))
+        .collect();
     let scope = enter(registry.clone());
     Ok((registry, scope))
 }
@@ -128,6 +134,26 @@ pub(crate) fn enter(registry: Arc<Destinations>) -> DestinationScope {
 }
 
 impl Destinations {
+    /// Reading a source more than once is valid; replacing it with output is not.
+    pub(crate) fn protect(&self, source: &Path) -> Result<(), CliError> {
+        let source_key = key(source).map_err(|error| CliError::InputReadError {
+            path: source.to_path_buf(),
+            source: error,
+        })?;
+        let mut state = self.lock()?;
+        if let Some(role) = state
+            .paths
+            .get(&source_key)
+            .or_else(|| state.declared.get(&source_key))
+        {
+            let message = format!("{role} would overwrite source '{}'", source.display());
+            state.collision = Some(message.clone());
+            return Err(conflict(message));
+        }
+        state.sources.insert(source_key);
+        Ok(())
+    }
+
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, State>, CliError> {
         self.state.lock().map_err(|_| CliError::InternalError {
             message: "output destination registry was poisoned".into(),
@@ -137,6 +163,11 @@ impl Destinations {
     fn claim(&self, path: &Path, role: &str) -> Result<(), CliError> {
         let key = key(path).map_err(|error| CliError::output_error(path, error))?;
         let mut state = self.lock()?;
+        if state.sources.contains(&key) {
+            let message = format!("{role} would overwrite source '{}'", path.display());
+            state.collision = Some(message.clone());
+            return Err(conflict(message));
+        }
         if let Some(previous) = state.paths.get(&key) {
             let message = format!("{role} collides with {previous} at '{}'", path.display());
             state.collision = Some(message.clone());
@@ -152,6 +183,10 @@ impl Destinations {
             None => Ok(()),
         }
     }
+}
+
+pub(crate) fn protect(source: &Path) -> Result<(), CliError> {
+    current().map_or(Ok(()), |registry| registry.protect(source))
 }
 
 pub(crate) fn claim(path: &Path) -> Result<(), CliError> {
