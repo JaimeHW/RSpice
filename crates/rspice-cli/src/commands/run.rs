@@ -33,6 +33,7 @@ mod frequency;
 mod naming;
 mod periodic;
 mod planning;
+mod quasi_periodic;
 mod restart;
 mod shared;
 

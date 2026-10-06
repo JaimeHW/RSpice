@@ -988,16 +988,16 @@ fn transient_builders(
 fn unroutable_reason(command: &AnalysisCommand) -> Option<&'static str> {
     match command {
         AnalysisCommand::Qpnoise(_) => Some(
-            "QPNOISE is available through Engine::run_qpnoise_from_qpss; this surface has no QPNOISE result-document projection yet",
+            "QPNOISE is available through Engine::run_qpnoise_from_qpss; this surface has no QPNOISE execution adapter yet",
         ),
         AnalysisCommand::Qpxf(_) => Some(
-            "QPXF is available through Engine::run_qpxf_from_qpss; this surface has no QPXF result-document projection yet",
+            "QPXF is available through Engine::run_qpxf_from_qpss; this surface has no QPXF execution adapter yet",
         ),
         AnalysisCommand::Qpac(_) => Some(
-            "QPAC is available through Engine::run_qpac_from_qpss; this surface has no QPAC result-document projection yet",
+            "QPAC is available through Engine::run_qpac_from_qpss; this surface has no QPAC execution adapter yet",
         ),
         AnalysisCommand::Qpss(_) => Some(
-            "QPSS is available through Simulation Studio and Engine::run_qpss; this surface has no QPSS result-document projection yet",
+            "QPSS is available through Simulation Studio and Engine::run_qpss; this surface has no QPSS execution adapter yet",
         ),
         // Every authored analog card this build recognizes now has a core
         // entry point that takes the card and a shared document projection for
@@ -1375,13 +1375,15 @@ R2 out 0 {r2v}\n";
 
     /// How the browser surface is expected to answer for one result family.
     ///
-    /// Every family this build knows now executes, so `Routed` is the only
-    /// variant. A family that cannot run must get a refusal path back — an
-    /// `Unsupported` registry cell and a named refusal — and the test below
-    /// fails until it does.
+    /// Runnable and unavailable adapters both have executable coverage.
     enum Expectation {
         /// The deck executes and publishes a document of this family.
-        Routed { deck: String },
+        Routed {
+            deck: String,
+        },
+        Unsupported {
+            deck: String,
+        },
     }
 
     fn deck(circuit: &str, cards: &str) -> String {
@@ -1414,6 +1416,12 @@ R2 out 0 {r2v}\n";
     /// family.
     fn expectation(kind: AnalysisResultKind) -> Expectation {
         match kind {
+            AnalysisResultKind::Qpss
+            | AnalysisResultKind::Qpac
+            | AnalysisResultKind::Qpxf
+            | AnalysisResultKind::Qpnoise => Expectation::Unsupported {
+                deck: deck(LINEAR, ".QPSS 1k 1.4142135623730951k HARMS=1\n"),
+            },
             AnalysisResultKind::OperatingPoint => Expectation::Routed {
                 deck: deck(LINEAR, ".OP\n"),
             },
@@ -1522,7 +1530,15 @@ R2 out 0 {r2v}\n";
     fn every_result_family_matches_its_wasm_capability_declaration() {
         for kind in AnalysisResultKind::ALL {
             let declared = analysis_result_capability(kind).surface(NonUiSurface::Wasm);
-            let Expectation::Routed { deck } = expectation(kind);
+            let deck = match expectation(kind) {
+                Expectation::Unsupported { deck } => {
+                    assert!(matches!(declared.scalar, MappingStatus::Unsupported(_)));
+                    let error = run_authored_deck_document_detailed(&deck).unwrap_err();
+                    assert!(error.message.contains("QPSS"), "{}", error.message);
+                    continue;
+                }
+                Expectation::Routed { deck } => deck,
+            };
             assert!(
                 !matches!(declared.scalar, MappingStatus::Unsupported(_)),
                 "{kind:?} executes on the browser API but the registry calls it unsupported"
@@ -1616,7 +1632,9 @@ R2 out 0 {r2v}\n";
     /// the closed form.
     #[test]
     fn a_dcmatch_deck_routes_to_a_typed_document() {
-        let Expectation::Routed { deck } = expectation(AnalysisResultKind::DcMatch);
+        let Expectation::Routed { deck } = expectation(AnalysisResultKind::DcMatch) else {
+            panic!("DC mismatch adapter is required");
+        };
         let execution = run_authored_deck_document_detailed(&deck)
             .unwrap_or_else(|error| panic!(".DCMATCH deck must run: {}", error.message));
         assert_eq!(execution.results.len(), 1);

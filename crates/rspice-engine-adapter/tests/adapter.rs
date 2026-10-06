@@ -287,6 +287,9 @@ fn declared_status(status: MappingStatus) -> DeclaredStatus {
 
 /// What this build declares for one core result family.
 enum FamilyExpectation {
+    Unsupported {
+        request_kind: &'static str,
+    },
     /// A deck that exercises the family, the wire kind that selects it, and
     /// the canonical analysis tag its result must carry.
     Runs {
@@ -349,6 +352,19 @@ statistics {
 /// result family cannot ship without an adapter decision recorded here.
 fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
     match kind {
+        AnalysisResultKind::Qpss => FamilyExpectation::Unsupported {
+            request_kind: "qpss",
+        },
+        AnalysisResultKind::Qpac => FamilyExpectation::Unsupported {
+            request_kind: "qpac",
+        },
+        AnalysisResultKind::Qpxf => FamilyExpectation::Unsupported {
+            request_kind: "qpxf",
+        },
+        AnalysisResultKind::Qpnoise => FamilyExpectation::Unsupported {
+            request_kind: "qpnoise",
+        },
+
         AnalysisResultKind::OperatingPoint => FamilyExpectation::Runs {
             request_kind: "operating_point",
             analysis_tag: "op-001",
@@ -560,6 +576,18 @@ fn every_result_family_matches_its_engine_adapter_capability_declaration() {
     for kind in AnalysisResultKind::ALL {
         let declared = analysis_result_capability(kind).engine_adapter;
         match family_expectation(kind) {
+            FamilyExpectation::Unsupported { request_kind } => {
+                assert_eq!(
+                    declared_status(declared.scalar),
+                    DeclaredStatus::Unsupported
+                );
+                let job = Job::new(&format!("unsupported-{}", kind.tag()));
+                let response = job.execute(&format!("{DIVIDER}.op\n.end\n"), request_kind);
+                assert_eq!(response["status"], "failed", "{response}");
+                assert_eq!(response["failure_code"], "analysis.unsupported_kind");
+                assert!(job.results_are_empty());
+            }
+
             FamilyExpectation::Runs {
                 request_kind,
                 analysis_tag,
@@ -678,6 +706,7 @@ fn every_runnable_family_executes_at_every_step_and_temperature_coordinate() {
         // A second result document rides its parent card's execution, so it is
         // checked under the parent's own request and analysis identity.
         let (request_kind, analysis_tag, deck, library) = match family_expectation(kind) {
+            FamilyExpectation::Unsupported { .. } => continue,
             FamilyExpectation::Runs {
                 request_kind,
                 analysis_tag,
@@ -1959,6 +1988,7 @@ fn the_solve_budget_is_a_launch_input_with_a_bounded_outcome() {
 fn every_family_reports_the_same_cancellation_label() {
     for kind in AnalysisResultKind::ALL {
         let (request_kind, deck, library) = match family_expectation(kind) {
+            FamilyExpectation::Unsupported { .. } => continue,
             FamilyExpectation::Runs {
                 request_kind,
                 deck,
@@ -2016,6 +2046,7 @@ fn every_family_reports_the_same_cancellation_label() {
 fn every_family_reports_a_caller_stop_as_a_cancellation() {
     for kind in AnalysisResultKind::ALL {
         let (request_kind, deck) = match family_expectation(kind) {
+            FamilyExpectation::Unsupported { .. } => continue,
             FamilyExpectation::Runs {
                 request_kind, deck, ..
             } => (request_kind, deck),

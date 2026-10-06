@@ -1,19 +1,6 @@
 //! Frontend compatibility is admitted before any solver or artifact work.
 use super::*;
 
-pub(super) fn projection_refusal(analysis: &AnalysisCommand) -> Option<CliError> {
-    let (name, capability) = match analysis {
-        AnalysisCommand::Qpss(_) => ("QPSS", "analysis.qpss.cli_result_document"),
-        AnalysisCommand::Qpac(_) => ("QPAC", "analysis.qpac.cli_result_document"),
-        AnalysisCommand::Qpxf(_) => ("QPXF", "analysis.qpxf.cli_result_document"),
-        AnalysisCommand::Qpnoise(_) => ("QPNOISE", "analysis.qpnoise.cli_result_document"),
-        _ => return None,
-    };
-    Some(rspice_core::SimulationError::unsupported_capability(capability,
-        format!("the CLI has no {name} result-document projection; see the CLI supported-feature matrix")
-    ).into())
-}
-
 pub(super) fn validate(netlist: &Netlist, args: &RunArgs, config: &Config) -> Result<(), CliError> {
     if netlist.control_script.is_some() {
         if args.checkpoint.is_some()
@@ -53,15 +40,6 @@ pub(super) fn validate(netlist: &Netlist, args: &RunArgs, config: &Config) -> Re
             });
         }
         return Ok(());
-    }
-    let mode = requested_mode_name(args);
-    let runs_cards = mode.is_none_or(|mode| mode == "--corners");
-    if runs_cards {
-        for analysis in &netlist.analyses {
-            if let Some(error) = projection_refusal(analysis) {
-                return Err(error);
-            }
-        }
     }
     Ok(())
 }

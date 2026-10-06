@@ -72,10 +72,16 @@ pub const REQUEST_KINDS: &[(&str, PlannedAnalysisKind)] = &[
 /// with the reason an operator needs to act on it.
 pub const REFUSED_REQUEST_KINDS: &[(&str, &str)] = &[
     ("mixed_signal", MIXED_SIGNAL_IS_TRANSIENT),
+    ("qpss", QUASIPERIODIC_ADAPTER_UNAVAILABLE),
+    ("qpac", QUASIPERIODIC_ADAPTER_UNAVAILABLE),
+    ("qpxf", QUASIPERIODIC_ADAPTER_UNAVAILABLE),
+    ("qpnoise", QUASIPERIODIC_ADAPTER_UNAVAILABLE),
     ("port_noise", PORT_NOISE_IS_AN_SP_RESULT),
     ("fourier", POST_PROCESS_IS_A_TRANSIENT_RESULT),
     ("fft", POST_PROCESS_IS_A_TRANSIENT_RESULT),
 ];
+
+const QUASIPERIODIC_ADAPTER_UNAVAILABLE: &str = "Quasiperiodic result documents are available in core, but this engine adapter has no quasiperiodic execution route.";
 
 const MIXED_SIGNAL_IS_TRANSIENT: &str = "A mixed-signal deck is a transient: request the transient kind. This engine build has no \
      separate mixed-signal analysis, and running one under its own name would report an \
@@ -137,12 +143,17 @@ pub fn matches_request(requested: PlannedAnalysisKind, planned: PlannedAnalysisK
 /// Dot-command spelling and refusal reason for an authored card this build has
 /// no lossless result mapping for.
 ///
-/// Empty for now: every card the planner accepts projects into shared result
-/// documents this executor publishes. The hook stays because refusing a card
-/// before any solver work is how a future family avoids being executed into a
-/// lossy artifact.
-pub fn unmapped_deck_card(_command: &AnalysisCommand) -> Option<(&'static str, &'static str)> {
-    None
+/// Quasiperiodic cards have shared documents but still need this surface's
+/// carrier execution adapter. Refuse the deck before any solver work.
+pub fn unmapped_deck_card(command: &AnalysisCommand) -> Option<(&'static str, &'static str)> {
+    let name = match command {
+        AnalysisCommand::Qpss(_) => ".QPSS",
+        AnalysisCommand::Qpac(_) => ".QPAC",
+        AnalysisCommand::Qpxf(_) => ".QPXF",
+        AnalysisCommand::Qpnoise(_) => ".QPNOISE",
+        _ => return None,
+    };
+    Some((name, QUASIPERIODIC_ADAPTER_UNAVAILABLE))
 }
 
 //=============================================================================
@@ -919,6 +930,11 @@ mod tests {
                 rspice_core::execution::analysis_result_kind(*planned) == Some(kind)
             });
             let refused = match kind {
+                AnalysisResultKind::Qpss => refusal_for_request("qpss").is_some(),
+                AnalysisResultKind::Qpac => refusal_for_request("qpac").is_some(),
+                AnalysisResultKind::Qpxf => refusal_for_request("qpxf").is_some(),
+                AnalysisResultKind::Qpnoise => refusal_for_request("qpnoise").is_some(),
+
                 AnalysisResultKind::SParameters => refusal_for_request("s_parameters").is_some(),
                 AnalysisResultKind::PortNoise => refusal_for_request("port_noise").is_some(),
                 AnalysisResultKind::PNoise => refusal_for_request("pnoise").is_some(),

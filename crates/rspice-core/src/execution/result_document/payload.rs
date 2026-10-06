@@ -13,6 +13,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{ComplexSample, ResultDocumentError, finite, finite_optional, finite_slice};
+use super::{QpacPayload, QpnoisePayload, QpssPayload, QpxfPayload};
 use crate::analysis::dcmatch::DcMatchScope;
 use crate::analysis::distortion::DistortionProduct;
 use crate::analysis::floquet::{FloquetOrbitKind, FloquetSpectrumEvidence};
@@ -74,6 +75,10 @@ pub enum ResultPayload {
     /// own tag, and `.DCMATCH` spells it as one word.
     #[serde(rename = "dcmatch")]
     DcMatch(DcMatchPayload),
+    Qpss(Box<QpssPayload>),
+    Qpac(Box<QpacPayload>),
+    Qpxf(Box<QpxfPayload>),
+    Qpnoise(Box<QpnoisePayload>),
 }
 
 impl ResultPayload {
@@ -103,12 +108,20 @@ impl ResultPayload {
             Self::Hb(_) => AnalysisResultKind::HarmonicBalance,
             Self::Envelope(_) => AnalysisResultKind::Envelope,
             Self::DcMatch(_) => AnalysisResultKind::DcMatch,
+            Self::Qpss(_) => AnalysisResultKind::Qpss,
+            Self::Qpac(_) => AnalysisResultKind::Qpac,
+            Self::Qpxf(_) => AnalysisResultKind::Qpxf,
+            Self::Qpnoise(_) => AnalysisResultKind::Qpnoise,
         }
     }
 
     /// Numerical values retained by this payload, for resource accounting.
     pub(crate) fn value_count(&self) -> usize {
         match self {
+            Self::Qpss(payload) => payload.value_count(),
+            Self::Qpac(payload) => payload.value_count(),
+            Self::Qpxf(payload) => payload.value_count(),
+            Self::Qpnoise(payload) => payload.value_count(),
             Self::Op(payload) => payload.observables.len(),
             Self::Dc(payload) => payload
                 .observables
@@ -192,8 +205,16 @@ impl ResultPayload {
         }
     }
 
-    pub(super) fn validate(&self) -> Result<(), ResultDocumentError> {
+    pub(super) fn validate(
+        &self,
+        limits: &crate::ResourceLimits,
+        abort: &dyn crate::AbortSignal,
+    ) -> Result<(), ResultDocumentError> {
         match self {
+            Self::Qpss(payload) => payload.validate(limits, abort),
+            Self::Qpac(payload) => payload.validate(limits, abort),
+            Self::Qpxf(payload) => payload.validate(limits, abort),
+            Self::Qpnoise(payload) => payload.validate(limits, abort),
             Self::Op(payload) => payload.validate(),
             Self::Dc(payload) => payload.validate(),
             Self::Ac(_) => Ok(()),
