@@ -831,6 +831,7 @@ fn clone_netlist_with_abort(
         source_text: None,
         monte_carlo_source_cards: Vec::new(),
         source_path,
+        included_source_paths: source.included_source_paths.clone(),
         replay_context: None,
         ast_overlay: Default::default(),
         parameter_direction: None,

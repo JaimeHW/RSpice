@@ -543,6 +543,8 @@ When they contain multiple results, `compare` and tabular `convert` require
 one-based index from the available-section list in the diagnostic. This
 selector applies to container inputs; a CSV or other single-table reference
 still supplies its sole result. Repeated RAW plot names require an index.
+`--section` is rejected when no input supports sections, including conversion
+of a single CSV, TSV, JSON or VCD document.
 Comparison JSON identifies the selected section. Section selection cannot
 be combined with `--bless`, which replaces an entire reference file.
 
@@ -575,6 +577,13 @@ converted from its grid `D(node)`/`E(node)` columns, which is lossy: `0`, `1`
 and `0.5` become `0`, `1` and `x`, one change per level held rather than one
 per grid point, and the drive strength those columns already dropped is not
 recovered. A source with neither event timelines nor such columns is refused.
+
+VCD clipping preserves the held value of every selected signal at `--start`,
+including signals that remain constant throughout the window. The timescale is
+refined when necessary to represent the boundary without changing existing event
+times; unrepresentable boundaries and tick overflow are refused. Changes after
+`--stop` are removed. Range bounds must be finite, and `--start` must not exceed
+`--stop` for every conversion format.
 
 Converting **from** `vcd` builds a table whose rows are the dump's distinct
 ticks: time is tick times `$timescale`, each signal holds its last value, and

@@ -55,6 +55,14 @@ pub(crate) fn detect_format(path: &Path) -> InputFormat {
     }
 }
 
+/// Formats whose readers can select one named or indexed result section.
+pub(crate) fn supports_sections(format: InputFormat) -> bool {
+    matches!(
+        format,
+        InputFormat::Raw | InputFormat::RawAscii | InputFormat::Hdf5 | InputFormat::Touchstone
+    )
+}
+
 /// Load a result file into a table.
 pub(crate) fn load_table(
     path: &Path,
@@ -86,7 +94,19 @@ pub(crate) fn load_result_selected(
     resource_limits: rspice_core::ResourceLimits,
     section: Option<&str>,
 ) -> Result<ImportedResult, CliError> {
-    let result = match format.into() {
+    let format = format.into();
+    if section.is_some() && !supports_sections(format) {
+        return Err(CliError::InvalidArgument {
+            message: format!(
+                "--section is not supported for {format:?} input '{}'",
+                path.display()
+            ),
+            suggestion: Some(
+                "omit --section for files without RAW, HDF5 or Touchstone sections".into(),
+            ),
+        });
+    }
+    let result = match format {
         InputFormat::Raw | InputFormat::RawAscii => load_rawfile(path, resource_limits, section),
         InputFormat::Csv => load_delimited(path, ',', resource_limits),
         InputFormat::Tsv => load_delimited(path, '\t', resource_limits),

@@ -61,6 +61,72 @@ fn utf16le_with_bom(text: &str) -> Vec<u8> {
 }
 
 #[test]
+fn parsed_include_inventory_retains_empty_nested_and_selected_library_sources() {
+    let dir = TempDeckDir::new("source_inventory");
+    let deck = dir.path().join("top.cir");
+    let library = dir.path().join("corners.lib");
+    let empty = dir.path().join("empty.inc");
+    let nested = dir.path().join("nested.inc");
+    write(&empty, "");
+    write(&nested, ".include empty.inc\n");
+    write(
+        &library,
+        ".lib tt\n.include nested.inc\n.param resistance=1000\n.endl tt\n",
+    );
+    write(
+        &deck,
+        "inventory\n.lib corners.lib tt\n.include empty.inc\nV1 1 0 1\nR1 1 0 {resistance}\n.end\n",
+    );
+    let mut expected = [
+        library.canonicalize().unwrap(),
+        empty.canonicalize().unwrap(),
+        nested.canonicalize().unwrap(),
+    ];
+    expected.sort();
+    for netlist in [
+        Netlist::parse_file(&deck).unwrap(),
+        Netlist::parse_file_with_search_paths(&deck, &[dir.path().to_path_buf()]).unwrap(),
+    ] {
+        assert_eq!(netlist.included_source_paths(), expected);
+        assert_eq!(netlist.clone().included_source_paths(), expected);
+    }
+    assert!(
+        Netlist::parse("memory\nR1 1 0 1k\n.end\n")
+            .unwrap()
+            .included_source_paths()
+            .is_empty()
+    );
+}
+
+#[test]
+fn sealed_include_inventory_does_not_require_filesystem_members() {
+    use rspice_core::netlist::{NetlistParseOptions, SealedSourceBundle, SealedSourceEdge};
+    let dir = TempDeckDir::new("sealed_inventory");
+    let deck = dir.path().join("missing.cir");
+    let include = dir.path().join("missing.inc");
+    let source = "sealed\n.include missing.inc\nR1 1 0 1k\n.end\n";
+    let bundle = SealedSourceBundle::try_new_with_edges(
+        [(deck.clone(), source.into()), (include.clone(), "".into())],
+        [SealedSourceEdge {
+            owner: deck.clone(),
+            requested_path: "missing.inc".into(),
+            target: include.clone(),
+        }],
+    )
+    .unwrap();
+    let netlist = Netlist::parse_with_path_and_sealed_sources_and_options_and_abort(
+        source,
+        &deck,
+        bundle,
+        NetlistParseOptions::default(),
+        &rspice_core::NoAbort,
+    )
+    .unwrap();
+    assert_eq!(netlist.included_source_paths(), [include]);
+    assert!(!deck.exists());
+}
+
+#[test]
 fn include_expansion_strips_utf8_bom_like_top_level_parse_file() {
     let dir = TempDeckDir::new("utf8_bom_include");
     let deck = dir.path().join("top.cir");

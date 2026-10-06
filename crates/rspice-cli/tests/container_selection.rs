@@ -19,6 +19,89 @@ fn raw_plot(name: &str, value: f64) -> String {
     )
 }
 
+#[test]
+fn a_selected_container_can_be_compared_against_an_extracted_table_in_either_order() {
+    let dir = test_dir("selected_against_flat");
+    let container = dir.join("plots.raw");
+    let flat = dir.join("golden.csv");
+    std::fs::write(
+        &container,
+        raw_plot("first", 1.0) + &raw_plot("second", 2.0),
+    )
+    .unwrap();
+    std::fs::write(&flat, "time,V(out)\n0,2\n1,2\n").unwrap();
+    for (left, right) in [(&container, &flat), (&flat, &container)] {
+        let selected = cli(&[
+            "compare",
+            left.to_str().unwrap(),
+            right.to_str().unwrap(),
+            "--section",
+            "second",
+        ]);
+        assert!(selected.status.success(), "{selected:?}");
+        let missing = cli(&[
+            "compare",
+            left.to_str().unwrap(),
+            right.to_str().unwrap(),
+            "--section",
+            "missing",
+        ]);
+        assert!(!missing.status.success(), "{missing:?}");
+    }
+}
+
+#[test]
+fn section_selection_cannot_be_silently_ignored_by_single_document_formats() {
+    let dir = test_dir("unsupported_selection");
+    for (extension, source) in [
+        ("csv", "time,V(out)\n0,1\n1,2\n"),
+        ("tsv", "time\tV(out)\n0\t1\n1\t2\n"),
+        (
+            "json",
+            r#"{"analysis":"transient","plot_name":"waveform","scale":{"name":"time","type":"time","values":[0,1]},"signals":[{"name":"V(out)","type":"voltage","values":[1,2]}]}"#,
+        ),
+        (
+            "vcd",
+            "$timescale 1 s $end\n$var wire 1 ! d $end\n$enddefinitions $end\n#0\n0!\n#1\n1!\n",
+        ),
+    ] {
+        let input = dir.join(format!("input.{extension}"));
+        let output = dir.join("output.csv");
+        std::fs::write(&input, source).unwrap();
+        std::fs::write(&output, "original bytes").unwrap();
+        for selector in ["1", "nonexistent"] {
+            let result = cli(&[
+                "convert",
+                input.to_str().unwrap(),
+                output.to_str().unwrap(),
+                "--to",
+                "csv",
+                "--section",
+                selector,
+            ]);
+            assert_eq!(
+                result.status.code(),
+                Some(2),
+                "{extension} {selector}: {result:?}"
+            );
+            assert!(String::from_utf8_lossy(&result.stderr).contains("--section"));
+            assert_eq!(std::fs::read_to_string(&output).unwrap(), "original bytes");
+            let result = cli(&[
+                "compare",
+                input.to_str().unwrap(),
+                input.to_str().unwrap(),
+                "--section",
+                selector,
+            ]);
+            assert_eq!(
+                result.status.code(),
+                Some(2),
+                "{extension} {selector}: {result:?}"
+            );
+        }
+    }
+}
+
 fn hdf5(path: &Path, second_family: &str, second: &[f64]) {
     use rustyhdf5::{AttrValue, FileBuilder};
     let mut file = FileBuilder::new();

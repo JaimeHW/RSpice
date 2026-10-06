@@ -41,6 +41,8 @@ use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
 use crate::commands::publish;
 use crate::commands::waveform_io::{conversion_error, enforce_resource_limit, load_table};
 
+mod clipping;
+
 /// The `$scope module` every dump RSpice writes declares its nodes under.
 ///
 /// One constant rather than the analysis identity, so that `run -f vcd` and
@@ -750,8 +752,8 @@ fn shared_scope_depth<'a>(variables: impl IntoIterator<Item = &'a VcdVariable>) 
 ///
 /// A variable is named the way any of the CLI's spellings of it reads: the
 /// column spelling `D(node)`, the scoped name a viewer shows, or the bare node
-/// name. The range keeps the changes inside it, exactly as clipping a table
-/// keeps the rows inside it.
+/// name. Clipping retains changes inside the range and carries each signal's
+/// held value to the start of the range, refining the timescale if necessary.
 ///
 /// # Buses
 ///
@@ -810,17 +812,7 @@ pub(crate) fn select_and_clip(
         document.signals.retain(|_| keep.next().unwrap_or(false));
     }
 
-    if start.is_some() || stop.is_some() {
-        let low = start.unwrap_or(f64::NEG_INFINITY);
-        let high = stop.unwrap_or(f64::INFINITY);
-        let period = document.timescale.seconds();
-        for signal in &mut document.signals {
-            signal.changes.retain(|change| {
-                let time = change.tick as f64 * period;
-                time >= low && time <= high
-            });
-        }
-    }
+    clipping::clip(document, start, stop)?;
 
     Ok(notes)
 }

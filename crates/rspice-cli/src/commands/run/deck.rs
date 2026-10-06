@@ -395,6 +395,9 @@ pub(super) fn load_netlist_from_source(
         parse_options,
         args.timeout,
     )?;
+    for path in netlist.included_source_paths() {
+        publish::destinations::protect(path)?;
+    }
 
     // --save replaces the deck's output selection outright: the caller is
     // asking for exactly these signals. Applied after any -D re-parse so the
