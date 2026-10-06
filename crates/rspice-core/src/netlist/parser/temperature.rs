@@ -280,6 +280,31 @@ mod tests {
     }
 
     #[test]
+    fn option_recovery_stops_at_every_cancellation_boundary() {
+        let source = "Option cancellation\n.options OUTPUT INITIAL_INTERVAL={1/(TEMP-27)} 10 2 SNAPSHOTS=1 DEVICE TEMP={ambient}\n.param ambient=85\n.end\n";
+        for limit in 0..512 {
+            let abort = crate::abort_signal::CountingAbort::new(limit);
+            let result = super::super::parse_netlist_with_options_and_abort(
+                source,
+                NetlistParseOptions::default(),
+                &abort,
+            );
+            assert_eq!(abort.polls_after_abort(), 0, "poll limit {limit}");
+            match result {
+                Err(ParseWithAbortError::Aborted) => {}
+                Ok(netlist) => {
+                    assert!(limit > 20);
+                    assert_eq!(netlist.options.temp, Some(85.0));
+                    assert_eq!(netlist.options.output_snapshots, Some(true));
+                    return;
+                }
+                error => panic!("unexpected result at poll limit {limit}: {error:?}"),
+            }
+        }
+        panic!("cancellation coverage never reached successful completion");
+    }
+
+    #[test]
     fn physical_temperature_override_survives_failed_analysis_completion() {
         let source = "Physical replay\n.ac lin 1 {1/(TNOM-27)} 100\n.temp 27\n.param nominal=55\n.options tnom={nominal}\n.end\n";
         let netlist = parse_netlist_with_parameter_overrides_and_abort(

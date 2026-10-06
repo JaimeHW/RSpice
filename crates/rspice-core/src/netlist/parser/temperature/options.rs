@@ -58,10 +58,10 @@ pub(in super::super) struct TemperatureOptionPlan {
     last: [usize; 2],
     scopes: Vec<Vec<PendingTemperatureOption>>,
     delayed: Vec<PendingScope>,
-    // An eager declaration can fail before a later card selects temperature.
+    // An eager declaration or option can fail before temperature is selected.
     // Keep its first error independently of subsequent redefinitions. A pass
     // containing one of these errors must never publish a netlist.
-    parameter_error: Option<ParseError>,
+    provisional_error: Option<ParseError>,
 }
 
 pub(in super::super) struct TemperatureOptionSink<'a> {
@@ -158,15 +158,29 @@ impl TemperatureOptionPlan {
         error: crate::netlist::expr::ExprError,
         origin: &NetlistSourceLocation,
     ) {
-        self.parameter_error
+        self.provisional_error
             .get_or_insert_with(|| ParseError::InvalidValue(format!("{origin}: {error}")));
     }
 
-    pub(in super::super) fn take_parameter_error(&mut self) -> Option<ParseError> {
-        self.parameter_error.take()
+    pub(in super::super) fn retain_option_error(
+        &mut self,
+        error: ParseError,
+        line: usize,
+        origin: &NetlistSourceLocation,
+    ) {
+        self.provisional_error.get_or_insert_with(|| match error {
+            ParseError::InvalidValue(message) => {
+                ParseError::InvalidValue(format!("{origin}: {message}"))
+            }
+            error => source_map_logical_line_error(error, line, origin, true),
+        });
     }
 
-    pub(in super::super) fn prefer_parameter_error(
+    pub(in super::super) fn take_error(&mut self) -> Option<ParseError> {
+        self.provisional_error.take()
+    }
+
+    pub(in super::super) fn prefer_error(
         &mut self,
         error: ParseWithAbortError,
     ) -> ParseWithAbortError {
@@ -174,7 +188,7 @@ impl TemperatureOptionPlan {
             error @ (ParseWithAbortError::Aborted
             | ParseWithAbortError::Parse(ParseError::ResourceLimit(_))) => error,
             error => self
-                .take_parameter_error()
+                .take_error()
                 .map(ParseWithAbortError::from)
                 .unwrap_or(error),
         }

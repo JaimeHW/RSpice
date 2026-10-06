@@ -860,7 +860,7 @@ fn parse_netlist_impl(
         &mut state,
         abort,
     )
-    .map_err(|error| state.temperature_options.prefer_parameter_error(error))?;
+    .map_err(|error| state.temperature_options.prefer_error(error))?;
 
     if let Some(seed) = options.statistical_seed {
         state.options.seed = Some(seed);
@@ -885,7 +885,7 @@ fn parse_netlist_impl(
         }
         normalize_pspice_u_timing_aliases_with_abort(&mut state, abort)?;
         validate_timeint_option_aggregate(&state.options, lines.len())?;
-        if let Some(error) = state.temperature_options.take_parameter_error() {
+        if let Some(error) = state.temperature_options.take_error() {
             return Err(error.into());
         }
         // Resolve ordinary declarations in their owning scope before sources and
@@ -914,7 +914,7 @@ fn parse_netlist_impl(
     })();
     let completion_error = completion
         .err()
-        .map(|error| state.temperature_options.prefer_parameter_error(error));
+        .map(|error| state.temperature_options.prefer_error(error));
     // Ready analysis cards retain their authored values. Pending root cards
     // bind after the existing declaration/source/model completion phases, then
     // merge their staged effects back into authored order.

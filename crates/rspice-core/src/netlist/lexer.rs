@@ -821,6 +821,22 @@ impl TokenStream {
         }
     }
 
+    /// Save a cursor within this immutable token sequence for grammar recovery.
+    #[inline]
+    pub(crate) fn checkpoint(&self) -> usize {
+        self.pos
+    }
+
+    /// Restore a cursor produced by this stream's `checkpoint`.
+    #[inline]
+    pub(crate) fn restore_checkpoint(&mut self, position: usize) {
+        assert!(
+            position < self.tokens.len(),
+            "token checkpoint belongs to this stream"
+        );
+        self.pos = position;
+    }
+
     /// Borrow the unconsumed tokens on the current logical line.
     ///
     /// Parsers that only need to inspect the remainder of a command can use
