@@ -813,8 +813,9 @@ pub(crate) struct NetlistAstOverlay {
     /// Root parameter values retained across nested studies and source replay.
     pub parameters: BTreeMap<String, Value>,
     pub(crate) device_parameters: BTreeMap<(String, String), crate::Value>,
-    /// Options evaluated at the most recent control command, retained across
-    /// later parameter/source replay just like resolved device alterations.
+    /// Only options explicitly changed by executed control commands. Replay
+    /// overlays these on freshly evaluated authored options, so unrelated
+    /// parameter-dependent bindings remain live.
     pub(crate) control_options: Option<SimulationOptions>,
     /// Frontend probe selection, retained when a study reparses the source.
     pub(crate) output_selection: Option<(SaveSet, Vec<OutputRequest>)>,

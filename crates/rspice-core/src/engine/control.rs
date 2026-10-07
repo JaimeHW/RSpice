@@ -17,6 +17,7 @@ mod options;
 mod presentation;
 mod transient;
 pub use options::ControlSettings;
+pub(super) use options::apply_runtime_options;
 pub use presentation::{
     ControlCurrentSource, ControlPlotOptions, ControlPresentation, ControlPresentationKind,
     ControlTrace, ControlVector, ControlVectorId,

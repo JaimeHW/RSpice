@@ -141,3 +141,40 @@ fn physical_temperature_survives_executed_control_options_and_legacy_replay() {
     }
     assert_eq!(circuit.netlist().options.temp, Some(77.0));
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn control_replay_overrides_only_options_changed_by_executed_commands() {
+    use rspice_core::engine::ControlCircuit;
+    use rspice_core::execution::control::ControlCommand;
+    let netlist = deck(
+        "FREQ ambient",
+        "100 27\n10 127",
+        ".param ambient=27\n.options temp={ambient}",
+    );
+    for (option, expected) in [
+        ("reltol=.002", [27.0, 127.0]),
+        ("temp=77 reltol=.002", [77.0, 77.0]),
+    ] {
+        let mut circuit = ControlCircuit::new(netlist.clone()).unwrap();
+        let engine = Engine::default();
+        circuit
+            .execute(
+                &engine,
+                &ControlCommand {
+                    name: "option".into(),
+                    arguments: option.into(),
+                    line: 1,
+                },
+                &netlist.params,
+                &rspice_core::NoAbort,
+            )
+            .unwrap();
+        check(&engine, circuit.netlist(), &expected, 999.0);
+        let (rows, _) = engine.run_ac_data(circuit.netlist(), "points").unwrap();
+        for (row, temperature) in rows.iter().zip(expected) {
+            assert_eq!(row.options.temp, Some(temperature));
+            assert_eq!(row.options.reltol, Some(0.002));
+        }
+    }
+}

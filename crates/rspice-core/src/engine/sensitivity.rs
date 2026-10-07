@@ -660,7 +660,7 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<(), SimulationError> {
         if let Some(options) = &overlay.control_options {
-            netlist.options = options.clone();
+            super::control::apply_runtime_options(&mut netlist.options, options);
         }
         if let Some((saves, requests)) = &overlay.output_selection {
             netlist.override_output_selection(saves.clone(), requests.clone());

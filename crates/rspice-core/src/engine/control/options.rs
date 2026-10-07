@@ -12,6 +12,39 @@ pub struct ControlSettings {
     pub maximum_parallel_workers: Option<usize>,
 }
 
+/// Overlay only the subset supported by the runtime grammar. Authored options
+/// outside this command retain their parameter-dependent source bindings.
+pub(in crate::engine) fn apply_runtime_options(
+    target: &mut crate::netlist::SimulationOptions,
+    overrides: &crate::netlist::SimulationOptions,
+) {
+    macro_rules! apply {
+        ($($field:ident),+ $(,)?) => { $(
+            if overrides.$field.is_some() {
+                target.$field = overrides.$field;
+            }
+        )+ };
+    }
+    apply!(
+        reltol,
+        abstol,
+        vntol,
+        gmin,
+        chgtol,
+        eventfluxtol,
+        trtol,
+        xmu,
+        itl1,
+        itl2,
+        itl4,
+        temp,
+        tnom
+    );
+    if overrides.method.is_some() {
+        target.method = overrides.method.clone();
+    }
+}
+
 impl ControlCircuit {
     pub(super) fn apply_options(
         &mut self,
@@ -54,34 +87,9 @@ impl ControlCircuit {
                 line: command.line,
                 source,
             })?;
-        // This list is exactly the runtime grammar's supported numeric subset.
-        macro_rules! apply {
-            ($($field:ident),+ $(,)?) => { $(
-                if candidate.$field.is_some() {
-                    self.netlist.options.$field = candidate.$field;
-                }
-            )+ };
-        }
-        apply!(
-            reltol,
-            abstol,
-            vntol,
-            gmin,
-            chgtol,
-            eventfluxtol,
-            trtol,
-            xmu,
-            itl1,
-            itl2,
-            itl4,
-            temp,
-            tnom
-        );
-        if candidate.method.is_some() {
-            self.netlist.options.method = candidate.method.clone();
-        }
+        apply_runtime_options(&mut self.netlist.options, &candidate);
         self.runtime_options = candidate;
-        self.netlist.ast_overlay.control_options = Some(self.netlist.options.clone());
+        self.netlist.ast_overlay.control_options = Some(self.runtime_options.clone());
         Ok(())
     }
 
