@@ -7836,3 +7836,99 @@ endmodule
         assert!(!error.contains("Internal error"), "{error}");
     }
 }
+
+#[test]
+fn mixed_parameter_defaults_share_typed_constant_semantics() {
+    let source = r#"
+module typed_defaults(p);
+ inout p; electrical p;
+ parameter K=8'd255+8'd2;
+ parameter real R=8'd255+8'd1;
+ parameter integer CARRY=8'd255+8'd1;
+ parameter SHIFT=8'd1<<8;
+ parameter integer SHIFT_CARRY=8'd1<<8;
+ parameter SIGNED=8'sh80+8'sd0;
+ parameter WIDE=64'h1_0000_0000+64'd1;
+ parameter real NEGATED=-(-2147483648);
+ parameter COMPARE=(9007199254740992+1)>9007199254740992;
+ parameter real DEP=CARRY+K;
+ localparam LOCAL=8'd255+8'd2;
+ reg [63:0] k_value,r_value,carry_value,shift_value,shift_carry_value,signed_value,wide_value,local_value,negated_value,compare_value;
+ real dependent;
+ initial begin
+   k_value=K; r_value=R; carry_value=CARRY; shift_value=SHIFT;
+   shift_carry_value=SHIFT_CARRY; signed_value=SIGNED; wide_value=WIDE;
+   local_value=LOCAL; dependent=DEP; negated_value=NEGATED; compare_value=COMPARE;
+ end
+ analog I(p)<+(K+R+CARRY+LOCAL)*V(p);
+endmodule
+"#;
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(source)
+        .unwrap();
+    let mut h = Harness::from_source(source);
+    expect_finished(h.start(0));
+    for (name, signal, expected) in [
+        ("K", "k_value", 1_i64),
+        ("R", "r_value", 0),
+        ("CARRY", "carry_value", 256),
+        ("SHIFT", "shift_value", 0),
+        ("SHIFT_CARRY", "shift_carry_value", 256),
+        ("SIGNED", "signed_value", -128),
+        ("WIDE", "wide_value", 4_294_967_297),
+        ("NEGATED", "negated_value", 2_147_483_648),
+        ("COMPARE", "compare_value", 1),
+    ] {
+        assert_eq!(
+            h.get(signal),
+            format!("{:064b}", expected as u64),
+            "{name}: digital value"
+        );
+        let parameter = artifact
+            .hir
+            .parameters
+            .iter()
+            .find(|p| p.name == name)
+            .unwrap();
+        assert_eq!(
+            parameter.default,
+            Some(expected as f64),
+            "{name}: analog value"
+        );
+    }
+    assert_eq!(h.get("local_value"), format!("{:064b}", 1));
+    assert_eq!(h.get_real("dependent"), 257.0);
+    let dependent = artifact
+        .hir
+        .parameters
+        .iter()
+        .find(|p| p.name == "DEP")
+        .unwrap();
+    assert!(
+        dependent.default.is_none(),
+        "dependent default must not freeze"
+    );
+    assert!(
+        dependent.default_expr.is_some(),
+        "retain its executable dependency"
+    );
+    // Long scalar chains keep the existing iterative normalization path.
+    // Packed chains cannot silently take a path that loses their widths.
+    let scalar = vec!["1"; 160].join("+");
+    let source = format!(
+        "module long_default(p); inout p; electrical p; parameter real N={scalar}; analog I(p)<+N; endmodule"
+    );
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&source)
+        .unwrap();
+    assert_eq!(artifact.hir.parameters[0].default, Some(160.0));
+    let packed = source.replace(&scalar, &vec!["8'd1"; 160].join("+"));
+    let error = VerilogACompiler::default()
+        .compile_canonical_ir(&packed)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("typed constant lowering limit of 256 expression nodes"),
+        "{error}"
+    );
+}

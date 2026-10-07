@@ -2643,3 +2643,54 @@ endmodule
         );
     }
 }
+
+#[test]
+fn typed_parameter_defaults_match_across_domains_and_spice_overrides() {
+    let model = ModelFile::new(
+        "typed_parameter_defaults",
+        r#"
+`timescale 1ns/1ps
+module typed_parameter_defaults(p,q);
+ inout p; electrical p; output reg q=0;
+ parameter K=8'd255+8'd2;
+ parameter real R=8'd255+8'd1;
+ parameter integer CARRY=8'd255+8'd1;
+ parameter real TARGET=CARRY+K+R;
+ parameter integer MODE=0;
+ localparam LOCAL=8'd255+8'd2;
+ analog I(p)<+(V(p)-(TARGET+LOCAL))/1000;
+ initial #1 begin
+   if(MODE==0) q=(K==1)&&(R==0)&&(CARRY==256)&&(TARGET==257)&&(LOCAL==1);
+   else q=(K==7)&&(R==2.5)&&(CARRY==3)&&(TARGET==12.5)&&(LOCAL==1);
+ end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* shared typed parameter defaults\n.param vcc=1\nXa pa qa typed_parameter_defaults\nXb pb qb typed_parameter_defaults K=7 R=2.5 CARRY=3 MODE=1\nRa pa 0 1k\nRb pb 0 2k\nRqa qa 0 1k\nRqb qb 0 1k\nCqa qa 0 1p\nCqb qb 0 1p\n.va \"{}\" typed_parameter_defaults module=typed_parameter_defaults\n.end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 2e-9, 0.1e-9);
+    for (node, expected) in [("pa", 129.0), ("pb", 9.0)] {
+        assert!(
+            waveform(&result, node)
+                .iter()
+                .all(|value| (value - expected).abs() < 1e-8),
+            "{node}"
+        );
+    }
+    for node in ["qa", "qb"] {
+        let events = result.digital_trace_named(node).unwrap();
+        assert_eq!(events.len(), 2, "{node}: {events:?}");
+        assert_eq!(events[0].time, 0.0);
+        assert_eq!(
+            events[0].value.state,
+            rspice_core::xspice::DigitalState::Zero
+        );
+        assert_eq!(
+            events[1].value.state,
+            rspice_core::xspice::DigitalState::One
+        );
+        assert!((events[1].time - 1e-9).abs() < 1e-22, "{node}: {events:?}");
+    }
+}

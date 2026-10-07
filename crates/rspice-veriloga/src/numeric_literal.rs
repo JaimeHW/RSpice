@@ -64,6 +64,18 @@ pub(crate) fn parse_integer_literal(raw: &str) -> Result<Option<i64>, String> {
     }
 }
 
+/// RSpice sizes an unsized signed decimal to at least 32 bits, retaining its
+/// full mathematical value and a sign bit. Both expression domains use this
+/// policy before applying a wider assignment/expression context.
+pub(crate) fn unsized_integer_width(value: i64) -> u32 {
+    let magnitude = if value < 0 {
+        !value as u64
+    } else {
+        value as u64
+    };
+    (65 - magnitude.leading_zeros()).max(32)
+}
+
 /// Convert only integers exactly representable by the current `f64` IR.
 pub(crate) fn exact_integer_as_f64(value: i64) -> Option<f64> {
     let converted = value as f64;

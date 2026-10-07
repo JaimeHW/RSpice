@@ -494,6 +494,27 @@ design is cyclic. Recursive analog or mixed child modules remain unsupported.
 This uses the existing schema 87 flat plan and Wasm helper ABI 20.
 Source: [VAMS-2023, 6.3 and 6.6](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
 
+Schema 88 evaluates supported closed scalar parameter and localparam defaults
+with the same typed constant evaluator as digital execution and child overrides.
+Packed expression width and signedness are retained, and an explicit integer
+declaration supplies its 32-bit assignment context before arithmetic. Known
+packed results enter the analog scalar ABI only when exactly representable.
+Unsized signed decimal literals retain at least 32 bits and enough bits for their
+mathematical value and sign in both domains. Analog folding preserves that
+width across intermediate results; digital lowering parses their exact source
+spelling instead of the rounded f64 lexer cache.
+Dependent defaults retain their executable expressions so later overrides
+still take effect. Runtime queries and constant functions outside the shared
+evaluator retain their existing scalar path.
+The recursive typed evaluator currently accepts at most 256 expression nodes
+for this closed-default path. Longer scalar chains retain iterative scalar
+normalization; longer packed chains receive an explicit resource diagnostic.
+Iterative typed evaluation, packed dependent-default semantics, implicit
+parameter type inference in analog expressions, arrays, and the full typed
+external ABI remain open. This increment does not close general cross-domain
+parameter semantics. Wasm helper ABI stays at 20.
+Source: [VAMS-2023, 3.4.1 and 4.2](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
+
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
 initializer patterns, multidimensional shapes, full parameter-dependent
 shape/override support beyond the scalar digital path, and remaining mixed-host/platform qualification

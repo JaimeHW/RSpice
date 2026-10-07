@@ -146,7 +146,9 @@ fn integer_constants_and_defaults_agree_with_runtime_arithmetic() {
         ("2**31", -2147483648.0),
         ("2**-1", 0.0),
         ("(-1)**-3", -1.0),
-        ("-(-2147483648)", -2147483648.0),
+        // RSpice retains the unsized positive literal in 33 signed bits.
+        // Folding its first negation must not narrow the outer operation.
+        ("-(-2147483648)", 2147483648.0),
         ("8.0+(1/2)", 8.0),
         ("1/2.0", 0.5),
         ("(64'sd1+1)+2147483647", 2147483649.0),

@@ -4084,19 +4084,24 @@ impl ProcessLowerer<'_> {
                 }
                 // A plain decimal with no base marker. Section 3.5.1 sizes one
                 // as an unsized literal, so it too takes a wider context.
-                let bits = if number.value < 0.0 || number.value.fract() != 0.0 {
-                    self.error(
-                        "only a non-negative whole number is a discrete-domain \
-                         literal in this wave",
-                        number.span,
-                    );
-                    0
-                } else {
-                    number.value as u64
+                // Recover the exact decimal integer from its spelling. The
+                // scalar lexer cache is f64 and can lose low bits above 2^53.
+                let value = match crate::numeric_literal::parse_integer_literal(&number.raw) {
+                    Ok(Some(value)) => value,
+                    _ => {
+                        self.error(
+                            "a discrete integer literal must have exact integer syntax",
+                            number.span,
+                        );
+                        0
+                    }
                 };
                 self.builder.push_leaf(
                     CfgValueType::FourState { width },
-                    CfgValueKind::FourStateConstant(FourStateValue::from_u64(width, bits)),
+                    CfgValueKind::FourStateConstant(FourStateValue::from_integer(
+                        width,
+                        i128::from(value),
+                    )),
                 )
             }
             Expression::Identifier(identifier) => {
@@ -4385,7 +4390,7 @@ impl ProcessLowerer<'_> {
                 Err(_) => crate::numeric_literal::parse_integer_literal(&number.raw)
                     .ok()
                     .flatten()
-                    .map(|value| (65 - (value as u64).leading_zeros()).max(32))
+                    .map(crate::numeric_literal::unsized_integer_width)
                     .unwrap_or(crate::four_state::UNSIZED_FOUR_STATE_WIDTH),
             },
             Expression::Identifier(identifier) => match self.lookup_local(&identifier.name) {

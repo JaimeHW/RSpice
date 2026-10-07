@@ -293,9 +293,16 @@ fn folded_integer_expression(
 fn explicit_integer_shape(expression: &Expression) -> Option<(u32, bool)> {
     match expression {
         Expression::Number(number) => {
-            let (width, digits) = number.raw.split_once('\'')?;
-            let width = width.replace('_', "").parse().ok()?;
-            Some((width, digits.starts_with(['s', 'S'])))
+            if let Some((width, digits)) = number.raw.split_once('\'') {
+                let width = width.replace('_', "").parse().ok()?;
+                Some((width, digits.starts_with(['s', 'S'])))
+            } else {
+                let value = SemanticAnalyzer::integer_literal_value(number)?;
+                let width = crate::numeric_literal::unsized_integer_width(value);
+                // Preserve a wider unsized operand after folding, even if an
+                // intermediate result happens to fit in a 32-bit integer.
+                (width > 32).then_some((width, true))
+            }
         }
         Expression::Unary(unary) if matches!(unary.op, UnaryOp::Neg | UnaryOp::Pos) => {
             explicit_integer_shape(&unary.operand)
@@ -1367,15 +1374,7 @@ impl SemanticAnalyzer {
                 .default
                 .as_ref()
                 .filter(|_| !is_parameter_array)
-                .map(|expression| {
-                    // Retain exact packed parameter defaults for digital elaboration.
-                    // Continuous lowering still rejects a value its scalar ABI cannot carry.
-                    if matches!(expression, Expression::Digital(DigitalExpr::FourState(_))) {
-                        Ok(expression.clone())
-                    } else {
-                        self.normalize_integer_expression(expression)
-                    }
-                })
+                .map(|expression| self.normalize_scalar_parameter_default(param, expression))
                 .transpose()?;
             let declared_default_value = normalized_default
                 .as_ref()
@@ -1600,7 +1599,7 @@ impl SemanticAnalyzer {
             let default = localparam
                 .default
                 .as_ref()
-                .map(|e| self.normalize_integer_expression(e))
+                .map(|expression| self.normalize_scalar_parameter_default(localparam, expression))
                 .transpose()?;
             if let Some(default) = &default {
                 if let Some(value) = self.eval_const_value(default).and_then(|value| {
@@ -6138,6 +6137,80 @@ impl SemanticAnalyzer {
             let value_type = self.infer_type(&expression)?;
             Ok((expression, value_type))
         })
+    }
+
+    /// Fold a closed numeric scalar default in its declared assignment context,
+    /// using exactly the evaluator used for digital constants and child overrides.
+    /// Identifiers stay symbolic: a dependent default must still respond to
+    /// instance/model overrides at setup time.
+    fn normalize_scalar_parameter_default(
+        &self,
+        parameter: &ParameterDecl,
+        expression: &Expression,
+    ) -> CompileResult<Expression> {
+        let mut closed = parameter.param_type != ParamType::String;
+        let mut expression_nodes = 0usize;
+        let mut packed = false;
+        flow_probes::visit_expression(expression, &mut |expression| {
+            expression_nodes = expression_nodes.saturating_add(1);
+            packed |= matches!(expression, Expression::Digital(_))
+                || matches!(expression, Expression::Number(number) if number.raw.contains('\''));
+
+            if matches!(
+                expression,
+                Expression::Identifier(_) | Expression::ArrayAccess(_)
+            ) {
+                closed = false;
+            }
+        });
+        const MAX_CLOSED_PARAMETER_NODES: usize = 256;
+        if closed && packed && expression_nodes > MAX_CLOSED_PARAMETER_NODES {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "closed packed default of parameter '{}' exceeds the typed constant lowering limit of {MAX_CLOSED_PARAMETER_NODES} expression nodes",
+                    parameter.name
+                )),
+                expression.span(),
+            )));
+        }
+        // Preserve the existing iterative scalar normalizer for long operator
+        // chains. Packed chains cannot take that fallback because it loses
+        // their widths; those require iterative typed lowering before expansion.
+        if closed
+            && expression_nodes <= MAX_CLOSED_PARAMETER_NODES
+            && let Ok(value) = crate::canonical_ir::digital_lower::parameter_override_literal(
+                parameter,
+                &DigitalConstants::default(),
+                self.current_time_scale,
+            )
+        {
+            return match value {
+                Expression::Digital(DigitalExpr::FourState(literal)) => {
+                    // Preserve the packed spelling while entering the scalar
+                    // ABI only when its numeric value is exactly representable.
+                    // Digital-only constants can retain wider and X/Z values.
+                    match crate::numeric_literal::parse_numeric_literal(&literal.value.raw)
+                        .and_then(|value| value.as_exact_f64(&literal.value.raw))
+                    {
+                        Ok(value) => Ok(Expression::Number(NumberLit {
+                            value,
+                            raw: literal.value.raw.clone(),
+                            span: expression.span(),
+                        })),
+                        Err(_) => Ok(Expression::Digital(DigitalExpr::FourState(literal))),
+                    }
+                }
+                value => Ok(value),
+            };
+        }
+        // Runtime queries, unsupported constant functions and parameter
+        // dependencies keep their existing executable expression. They must
+        // never be replaced by a declaration-time approximation.
+        if matches!(expression, Expression::Digital(DigitalExpr::FourState(_))) {
+            Ok(expression.clone())
+        } else {
+            self.normalize_integer_expression(expression)
+        }
     }
 
     /// Parameter/default coercion does not perform executable lowering, but
