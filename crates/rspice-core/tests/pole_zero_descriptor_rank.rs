@@ -6,6 +6,55 @@ use rspice_core::{Engine, Netlist, NoAbort};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn schur_cancellation_does_not_erase_or_shift_a_natural_pole() {
+    // Exact binary64-rational oracle for -(g11*g22-g12*g21)/(g22*C),
+    // with g12=0.1, g21=0.2, g22=0.3, C=1e-20. Floating subtraction
+    // after the algebraic solve instead gives 0, +1387.779, -1387.779.
+    for (g11, expected) in [
+        (0.06666666666666668, -308.395284618099),
+        (0.06666666666666667, 1079.3834961633468),
+        (0.0666666666666667, -1696.1740653995448),
+    ] {
+        for exponent in [-100, 0, 100] {
+            let scale = 2.0_f64.powi(exponent);
+            for algebraic_first in [false, true] {
+                let capacitor = format!("C1 n1 0 {:.17e}\n", 1e-20 * scale);
+                let algebraic = format!("G22 n2 0 n2 0 {:.17e}\n", 0.3 * scale);
+                let source = format!(
+                    "Schur cancellation\n{}{}G11 n1 0 n1 0 {:.17e}\nG12 n1 0 n2 0 {:.17e}\nG21 n2 0 n1 0 {:.17e}\n.pz n1 0 n1 0 cur pol\n.end\n",
+                    if algebraic_first {
+                        &algebraic
+                    } else {
+                        &capacitor
+                    },
+                    if algebraic_first {
+                        &capacitor
+                    } else {
+                        &algebraic
+                    },
+                    g11 * scale,
+                    0.1 * scale,
+                    0.2 * scale,
+                );
+                let netlist = Netlist::parse(&source).unwrap();
+                let result = Engine::default()
+                    .run_pz_from_card_with_abort(&netlist, &netlist.analyses[0], &NoAbort)
+                    .unwrap();
+                assert_eq!(result.poles.len(), 1, "{result:?}");
+                let pole = result.poles[0];
+                assert!(
+                    (pole.re / expected - 1.0).abs() < 1e-12 && pole.im == 0.0,
+                    "G11={g11}, scale=2^{exponent}, algebraic_first={algebraic_first}: expected {expected}, got {result:?}"
+                );
+                assert_eq!(result.is_stable(), expected < 0.0);
+                assert!(result.pole_evidence.is_qualified());
+            }
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn differential_rc_has_one_stable_pole_and_no_finite_zero() {
     let netlist = Netlist::parse(
         "Hierarchy\n.subckt filter p n\nR1 p mid 1k\nC1 mid n 1u\n.ends\nX1 in ref filter\nV1 in ref 1\nRref ref 0 1k\n.pz in ref x1.mid ref vol pz\n.end\n",

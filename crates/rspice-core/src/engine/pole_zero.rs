@@ -197,14 +197,38 @@ impl Engine {
         let mut c_eff = l_d;
         let mut d_eff = 0.0;
         if algebraic_count > 0 {
+            let cancellation_tolerance = 128.0 * (n.max(1) as Value) * Value::EPSILON;
             for row in 0..dynamic_count {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
                 for &(algebraic_index, conductance) in &g_da[row] {
                     b_eff[row] -= conductance * g_aa_inv_b_a[algebraic_index];
-                    for col in 0..dynamic_count {
+                }
+                for col in 0..dynamic_count {
+                    if col.is_multiple_of(256) && abort.is_aborted() {
+                        return Err(SimulationError::Aborted);
+                    }
+                    let mut value = g_eff.get(row, col);
+                    let mut scale = value.abs();
+                    for &(algebraic_index, conductance) in &g_da[row] {
                         let correction =
                             conductance * g_aa_inv_g_ad[col * algebraic_count + algebraic_index];
-                        g_eff.add(row, col, -correction);
+                        value -= correction;
+                        scale += correction.abs();
                     }
+                    // A small reduced coefficient can be the difference of
+                    // large terms. Certifying the eigenproblem after rounding
+                    // that difference to zero would certify the wrong poles.
+                    // Let exact descriptor closure resolve ambiguous entries,
+                    // including genuine zeros, from the original coefficients.
+                    if !value.is_finite()
+                        || !scale.is_finite()
+                        || (scale > 0.0 && value.abs() / scale <= cancellation_tolerance)
+                    {
+                        return Ok(None);
+                    }
+                    g_eff.set(row, col, value);
                 }
             }
             for (algebraic_index, &weight) in l_a.iter().enumerate() {
