@@ -1,0 +1,293 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C04",
+  "related_packages": [
+    "C00",
+    "C12",
+    "C14"
+  ],
+  "batch": "Transfer-function control execution, physical gain units and scalar expression binding",
+  "status": "TF_control_slice_delivered_all_packages_remain_open",
+  "source_revision": "9a262e3a312d7dc9c477c4a1f85b4e6c8182050a",
+  "implementation_commits": [
+    "a6eeb0ccd55a646a529c723cf5567bd78372faca",
+    "73092ff2e2ac65bf3cb278989474f610771ec3f2",
+    "ce1cb45780a415d7b46b5bf6f476b49b26e36f15",
+    "9a262e3a312d7dc9c477c4a1f85b4e6c8182050a"
+  ],
+  "integrated_preflight_regression_commit": "8da8d7ed000f76eb077e489ad9328bf63a5f7b07",
+  "captured_utc": "2026-10-07T05:22:40.555088+00:00",
+  "host": "x86_64-pc-windows-msvc",
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+    "cli_rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "cli_toolchain_reason": "Prior pinned Rust 1.94/faer compiler crash remains unresolved; repository pin unchanged.",
+    "wasm_target": "wasm32-unknown-unknown",
+    "wasm_profile": "release",
+    "wasm_features": [
+      "wasm",
+      "veriloga-wasm-jit"
+    ],
+    "wasm_runtime": "headless Chrome dedicated worker",
+    "WASM_BINDGEN_TEST_TIMEOUT": "180",
+    "webdriver_config_sha256": "93458ed98943268e089c8c9a793bf2e899872e62941ac54795b0c27b7104785b",
+    "wasm_runner_version": "wasm-bindgen-test-runner 0.2.126",
+    "wasm_runner_executable_sha256": "e451b278c106269fa9a2731a4f8e77f888ccd2694b2b3a1760319198f6c2a68e",
+    "cargo_build_jobs": 1,
+    "chrome_version": "154.0.8037.98",
+    "chromedriver_version": "154.0.8037.92",
+    "wasm_adapter_features": [
+      "rspice-core/veriloga-wasm-jit"
+    ]
+  },
+  "source_state": "Final optimized WASM, integration, lint and formatting commands ran with clean tracked source at the recorded revision. Earlier development checks are labeled individually. Logs are local qualification artifacts; hashes identify their exact bytes.",
+  "commands": [
+    {
+      "log": "target/core-qualification/control-tf-core.log",
+      "log_sha256": "ef49366ac044ad9fe31974142c88a9e5b7c0ef45a58d8d4055599d7de5b43fc3",
+      "command": "cargo test --locked -p rspice-core -j 1 --test control_transfer_function --test transfer_function_units --test transfer_function --test control_dc --test control_noise --test control_frequency_data --test control_execution --test public_surface --test qualification_baseline",
+      "source_state": "development_source_before_scalar_binding",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        6,
+        8,
+        8,
+        5,
+        8,
+        4,
+        2,
+        9,
+        2
+      ],
+      "delivery_revision": "9a262e3a312d7dc9c477c4a1f85b4e6c8182050a"
+    },
+    {
+      "log": "target/core-qualification/control-tf-unit-documents.log",
+      "log_sha256": "5ddb00563f02103f8e97b887c06ebd375bb2b9274c54a0403cfdf89a19773d03",
+      "command": "cargo test --locked -p rspice-core -j 1 --lib execution::result_document",
+      "source_state": "development_source_for_gain_unit_repair",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        65
+      ],
+      "delivery_revision": "9a262e3a312d7dc9c477c4a1f85b4e6c8182050a"
+    },
+    {
+      "log": "target/core-qualification/control-tf-scalars-core.log",
+      "log_sha256": "8b29c6ec4bf2e401a08b4ec5654d1a811267f773dae93d4c3476d32237f88ffd",
+      "command": "cargo test --locked -p rspice-core -j 1 --test control_transfer_scalars --test control_transfer_function --test control_execution --test transfer_function_units --test transfer_function --test public_surface --test qualification_baseline",
+      "source_state": "development_source: core/control changes subsequently committed unchanged; the final integration additionally contains inert RAW metadata work and the behavior-preserving dependency lint cleanup; final commands below identify the checks executed on that exact committed source",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        8,
+        8,
+        3,
+        4,
+        2,
+        9,
+        2
+      ],
+      "delivery_revision": "9a262e3a312d7dc9c477c4a1f85b4e6c8182050a"
+    },
+    {
+      "log": "target/core-qualification/control-tf-expressions.log",
+      "log_sha256": "897193782b37199afb10d6e42fa9a6da9cacdeab6e141a46298fee398cb64b25",
+      "command": "cargo test --locked -p rspice-core -j 1 --lib netlist::expr",
+      "source_state": "development_source: core/control changes subsequently committed unchanged; the final integration additionally contains inert RAW metadata work and the behavior-preserving dependency lint cleanup; final commands below identify the checks executed on that exact committed source",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        103
+      ],
+      "delivery_revision": "9a262e3a312d7dc9c477c4a1f85b4e6c8182050a"
+    },
+    {
+      "log": "target/core-qualification/control-tf-scalars-wasm-native.log",
+      "log_sha256": "0c97de363a11c60dc473f8bdc4436d94e6a793e4aed28147bb5b6ff792e03aab",
+      "command": "cargo test --locked -p rspice-wasm -j 1 --lib control",
+      "source_state": "development_source: core/control changes subsequently committed unchanged; the final integration additionally contains inert RAW metadata work and the behavior-preserving dependency lint cleanup; final commands below identify the checks executed on that exact committed source",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        12
+      ],
+      "delivery_revision": "9a262e3a312d7dc9c477c4a1f85b4e6c8182050a"
+    },
+    {
+      "log": "target/core-qualification/control-tf-scalars-cli.log",
+      "log_sha256": "d967ad5c20e90246b7acb7ebe201b0fd3a80c847ce67eae284657c8f767f1c74",
+      "command": "cargo +1.95.0 test --locked -p rspice-cli -j 1 --target-dir target/core-cli-195 --test control_transfer_function --test control_scripts --test control_composition --test control_dc --test control_noise --test frequency_tables --test typed_result_documents --test frequency_cancellation",
+      "source_state": "development_source: core/control changes subsequently committed unchanged; the final integration additionally contains inert RAW metadata work and the behavior-preserving dependency lint cleanup; final commands below identify the checks executed on that exact committed source",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        9,
+        1,
+        1,
+        5,
+        5,
+        2,
+        7,
+        9
+      ],
+      "delivery_revision": "9a262e3a312d7dc9c477c4a1f85b4e6c8182050a"
+    },
+    {
+      "log": "target/core-qualification/control-tf-wasm-core-final.log",
+      "log_sha256": "f59ad3030168d85ba9cfe43a4829bb2c6cd42c47540369a8ee1b3d635a76aa40",
+      "command": "cargo test --locked -p rspice-core -j 1 --release --target wasm32-unknown-unknown --no-default-features --features wasm,veriloga-wasm-jit --test control_transfer_function --test control_transfer_scalars --test transfer_function_units",
+      "source_state": "committed_source",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        8,
+        3,
+        2
+      ],
+      "source_revision": "9a262e3a312d7dc9c477c4a1f85b4e6c8182050a"
+    },
+    {
+      "log": "target/core-qualification/control-tf-wasm-adapter-final.log",
+      "log_sha256": "63a6251627b8f815db4ce729736864797cc2cb31e8dd08d020b0743fe204fe83",
+      "command": "cargo test --locked -p rspice-wasm -j 1 --release --target wasm32-unknown-unknown --features rspice-core/veriloga-wasm-jit --lib control",
+      "source_state": "committed_source",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        12
+      ],
+      "source_revision": "9a262e3a312d7dc9c477c4a1f85b4e6c8182050a"
+    },
+    {
+      "log": "target/core-qualification/control-tf-integration-core-final.log",
+      "log_sha256": "6346dc750b9b7001f4535cf905e82ee39d5dd59cf261f2142ed0156540d3341e",
+      "command": "cargo test --locked -p rspice-core -j 1 --test public_surface --test qualification_baseline",
+      "source_state": "committed_source",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        4,
+        2
+      ],
+      "source_revision": "9a262e3a312d7dc9c477c4a1f85b4e6c8182050a"
+    },
+    {
+      "log": "target/core-qualification/control-tf-integration-cli-final.log",
+      "log_sha256": "217d00a1f3100298fad1d2d527f3f8a1c62f559094225f32e524a45d14fd9566",
+      "command": "cargo +1.95.0 test --locked -p rspice-cli -j 1 --target-dir target/core-cli-195 --test control_transfer_function --test request_preflight --test frequency_tables --test typed_result_documents --test frequency_cancellation",
+      "source_state": "committed_source",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        5,
+        2,
+        7,
+        3,
+        9
+      ],
+      "source_revision": "9a262e3a312d7dc9c477c4a1f85b4e6c8182050a"
+    },
+    {
+      "log": "target/core-qualification/control-tf-integration-clippy-final.log",
+      "log_sha256": "1a185ffdf897df9804f69b193553694d2efcd3fea125d209d13f393a02d5f809",
+      "command": "cargo clippy --locked -j 1 -p rspice-core -p rspice-cli -p rspice-wasm -p rspice-engine-adapter --lib --bins --test control_transfer_function --test control_transfer_scalars --test transfer_function_units -- -D warnings",
+      "source_state": "committed_source",
+      "outcome": "passed",
+      "test_target_passed_counts": [],
+      "source_revision": "9a262e3a312d7dc9c477c4a1f85b4e6c8182050a"
+    },
+    {
+      "log": "target/core-qualification/control-tf-format-final.log",
+      "log_sha256": "fb2cfbdfe907f6f411aa311f51fd1f6fdf36f182b4e841f2ff11cc598c5f611f",
+      "command": "python target/core-qualification/check-workspace-format.py",
+      "source_state": "committed_source",
+      "outcome": "passed",
+      "test_target_passed_counts": [],
+      "source_revision": "9a262e3a312d7dc9c477c4a1f85b4e6c8182050a"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core -j 1 --lib engine::requirements",
+      "core_source_revision": "9a262e3a312d7dc9c477c4a1f85b4e6c8182050a",
+      "source_state": "committed implementation with pending ledger/evidence and transfer-probe rustdoc updates",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        3
+      ],
+      "log": "target/core-qualification/control-tf-ledger-final.log",
+      "log_sha256": "69ab2518d42ac9480c1e9e8f27a3b8c42f1d74abf7cdcb87f651b421ba5196f1"
+    }
+  ],
+  "reproduced_defects": [
+    {
+      "log": "target/core-qualification/control-tf-units-before.log",
+      "log_sha256": "94fe17d8840666810f14362e68c576006ab35f24c38cdef6ee28e73b3ac63f96",
+      "reproduced_failed_tests": 2,
+      "explanation": "Dimensional transfer gains were incorrectly documented as dimensionless."
+    },
+    {
+      "log": "target/core-qualification/control-tf-before.log",
+      "log_sha256": "709cd0a1026721bef4dc7d224c48fabecb5dc634c9b4d5f28e5d6ffac17a447b",
+      "reproduced_failed_tests": 2,
+      "explanation": "Explicit tf and declarative TF through run had no control-host route."
+    },
+    {
+      "log": "target/core-qualification/control-tf-final-abort-before.log",
+      "log_sha256": "5036f9ca48ffee309d0570620bbcb74cd0f25a11733fd036736b71602929dc8d",
+      "reproduced_failed_tests": 1,
+      "explanation": "A final progress callback could cancel while direct TF still returned success."
+    },
+    {
+      "log": "target/core-qualification/control-tf-scalars-before.log",
+      "log_sha256": "62177360471b645c5dbfd57531edbcb0e420fa472854a6c6fa02a5d0026897b7",
+      "reproduced_failed_tests": 3,
+      "explanation": "Retained TF scalars were unavailable to control assignments, conditions and user functions."
+    }
+  ],
+  "independent_evidence": [
+    {
+      "kind": "analytical",
+      "fixture": "tests/transfer_function_units.rs",
+      "scope": "All four input/output quantity combinations, hierarchical current-source identity, resistance and current-divider gain equations; typed document round trips are consistency checks."
+    },
+    {
+      "kind": "analytical",
+      "fixture": "tests/control_transfer_function.rs",
+      "scope": "Divider gain 2/3, input resistance 3000 ohm, output resistance 2000/3 ohm; altered divider, differential voltage, temperature coefficient and open-input determinations."
+    },
+    {
+      "kind": "existing_simulator_oracle_regressions",
+      "fixture": "tests/transfer_function.rs",
+      "scope": "Nine existing tests, including ngspice voltage/current transfer oracles, hierarchical sources and branch impedance conventions; no external simulator was newly executed for this batch."
+    },
+    {
+      "kind": "local_reference_source",
+      "path": "C:/Users/James/Desktop/ngspice-46-release/ngspice-46/src/spicelib/analysis/tfanal.c",
+      "sha256": "3cccd7ffaceade73e401a2ae1f936d40994fc4b76677419f9b220860e41dec77",
+      "scope": "ngspice 46 source classification uses the actual device type; its three-scalar result and output labels informed interoperability. No source implementation was imported."
+    }
+  ],
+  "delivery_contract": [
+    "Explicit tf and declarative run use the existing engine solver and retain stable dataset identity, physical units and probe/source names.",
+    "All three retained values count against the cumulative core result budget before solving. Failed or cancelled execution publishes no dataset and consumes no ordinal, including final-progress cancellation.",
+    "CLI direct/control results, flat conversion units, failed-run rollback and ordered unbounded print output are covered. WASM documents, scalar metadata, finite windows and presentation limits are covered.",
+    "Finite parameter-style TF references resolve lazily in let/if/while expressions and user functions. Formal arguments take precedence; retained scalar names precede ordinary parameter fallback. Active unbounded reads remain errors in both expression dialects.",
+    "The existing expression evaluator handles host reads without eagerly copying datasets into parameter scopes. Dead IF branches, lazily parsed user functions and random draw order are retained."
+  ],
+  "sdk_migration": [
+    "TransferFunctionResult::new takes an explicit gain_unit after gain; engine-produced units derive from actual V/I source and probe types.",
+    "Match ControlAnalysisResult::TransferFunction and publish ControlPresentation::scalars as well as kind; zero-based scalar positions refer to authored print order among scalars and traces.",
+    "CLI control-presentation JSON is version 2 when scalar determinations are present; finite-only presentations retain version 1. WASM presentation metadata adds scalar determinations with resultIndex and position."
+  ],
+  "development_corrections": [
+    "Early core fixture assertions assumed lowercase parsed node labels; parser canonical uppercase labels were retained.",
+    "Two initial CLI fixture failures used a lowercase error assertion and a .data extension without an explicit conversion input format. Corrected assertions and --from now test the intended behavior; these were not product fixes.",
+    "Strict Clippy initially found collapsible_match in newly integrated analog-array operand mapping. ce1cb4578 applies a behavior-preserving pattern simplification; no lint was suppressed."
+  ],
+  "remaining_work": [
+    "Eight of 29 control-host dispositions are implemented; 21 require execution or producer/orchestration semantics. C04c still includes PoleZero, Sensitivity, Stb, Sp, Disto and DcMatch.",
+    "Broader C04 option/binding/configuration, producer dependencies, resource/complexity and performance qualification remain. Direct dataset binding in other host-command argument evaluators and general reduction of multi-point datasets are not established by the scalar-control tests; let plus variable substitution is exercised.",
+    "Native default and selected optimized WASM configurations are covered; this record is not exhaustive transfer accuracy, whole-program or every-feature qualification. Numerical tolerances and existing performance gates were not relaxed.",
+    "CLI runtime qualification still uses Rust 1.95 because the earlier Rust 1.94/faer failure is unresolved. Previously recorded Rust compiler and wasm-bindgen runner incidents remain C14 work; later passing runs do not establish a root-cause fix.",
+    "All 15 packages retain their previous open/in-progress status."
+  ],
+  "documentation_follow_up": "Corrected the TransferFunctionConfig transconductance example to use a zero-volt measurement source with a branch current; a resistor alone has no such branch unknown. No executable code changed in this documentation follow-up.",
+  "later_remote_integration": {
+    "revision": "a9dacf43334b7af905dc308881a765f2c8646841",
+    "scope": "The documentation publication also integrates this separate Verilog-A discrete-array commit. The recorded tests qualify source_revision above and do not claim qualification of this later implementation."
+  }
+}

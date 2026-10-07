@@ -63,7 +63,9 @@ pub struct TransferFunctionConfig {
 impl TransferFunctionConfig {
     /// Create config for voltage-to-current transfer function
     ///
-    /// Example: `.TF I(Rload) Vin`
+    /// The output element must provide a branch current, such as a voltage
+    /// source or inductor. Example: `.TF I(Vsense) Vin`, using a zero-volt
+    /// source in series with the load to measure its current.
     pub fn transconductance(output_element: &str, input_source: &str) -> Self {
         Self {
             output_node: String::new(),

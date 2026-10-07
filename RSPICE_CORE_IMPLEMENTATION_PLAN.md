@@ -11,7 +11,7 @@ The previous repair batch fixed the reproduced transient, transfer-function, sta
 ## Current planning baseline
 
 - The executable ledger has 15 packages: C00–C04 are in progress and C05–C14 are open. The execution record below identifies delivered portions; none establishes completion of its whole package.
-- Of 29 analysis-command variants, the core control host currently executes OP, DC (including nested sweeps), AC, NOISE, AC DATA, NOISE DATA, and transient. The remaining 22 need control execution or producer/orchestration semantics. Their direct solver routes already exist; this is not a claim that 22 solvers are absent. Table documents and CLI/WASM publication are implemented, including bounded projection and cancellation. Broader C04 binding, configuration and performance qualification remains open.
+- Of 29 analysis-command variants, the core control host currently executes OP, DC (including nested sweeps), AC, NOISE, AC DATA, NOISE DATA, TF, and transient. The remaining 21 need control execution or producer/orchestration semantics. Their direct solver routes already exist; this is not a claim that 21 solvers are absent. Table and TF documents and CLI/WASM publication are implemented, including bounded projection and cancellation. Broader C04 binding, configuration and performance qualification remains open.
 - The periodic declaration snapshot contains 228 rows: 38 families across six contracts. There are 77 complete, 27 restricted, 64 absent, and 60 inapplicable declarations. The 91 restricted/absent rows identify work to resolve against actual instance predicates. They are not 91 independent missing solvers, and the 77 complete declarations still require numerical qualification.
 - `ImdResult` remains a measurement container without checked estimators. The existing `.DISTO` product contract includes `2*f1-f2` but not `2*f2-f1`; preserve the existing solver while completing the product and measurement contracts.
 - Bias-dependent GP forward/reverse charge oracles are delivered in `da18bfa88`. The following private-node probes exposed a small-charge event-row defect, repaired in `50523d8fb`, and two further convergence failures repaired by the subsequent work below. Startup repair `4ec035c19` makes the constant-bias regression active at unchanged accuracy limits. Continuous-event repair `87ff9cbf9` and event-approach repair `0d6ceb788` make the driven private-node regression active too. Both named failures are repaired; the remaining feedback/Weil, parameter, continuation, resource and configuration evidence still leaves C03c open.
@@ -25,7 +25,7 @@ Use `core-requirements-v1.json` and `core-periodic-requirements-v1.json` under `
 |---|---|---|
 | 1 — incomplete event integration | Implement remaining physical-event equations for devices accompanying exact-delay GP (C03d), continuing with CCVS and remaining behavioral operators | Preserve the delivered prescribed-source analytical event/continuation tests; each additional family has real equations and complete state before admission |
 | 2 — remaining numerical qualification | Complete private-node/feedback and parameter cases (C03c.2), preserving the two repaired regressions | Independent Weil feedback evidence, remaining charge/parameter boundaries and rejection/restart/OP/UIC cases; existing accuracy, conservation and refinement gates remain active |
-| 3 — existing solver accessibility and measurements | Complete the 22 remaining control-host dispositions (C04) and checked IMD/intercept measurements (C05) | Direct/control equivalence, correct result units and identities, producer dependencies, independent two-tone evidence, and bounded orchestration |
+| 3 — existing solver accessibility and measurements | Complete the 21 remaining control-host dispositions (C04) and checked IMD/intercept measurements (C05) | Direct/control equivalence, correct result units and identities, producer dependencies, independent two-tone evidence, and bounded orchestration |
 | 4 — model and analysis completeness | Deliver native, dynamic, and external providers (C06/C07/C09), then each provider's noise and mixed-analysis contracts (C08/C10/C11) | A per-family matrix of public numerical and continuation tests; declarations alone cannot close a row |
 | Throughout — architecture and integration | Finish the ledger, shared equation/state ownership, transient decomposition, and public-route integration (C00/C01/C02/C12) | One authoritative physical implementation per contract, atomic acceptance/restore, and matching parser/direct/control behavior |
 | Final — measured performance and core qualification | Finish C03 resource/configuration gates and C13/C14 | Reproducible performance and memory limits, cancellation during expensive work, all required regressions active, and qualification on the exact committed source |
@@ -596,7 +596,7 @@ This table summarizes the work still required; the package definitions above sup
 | C01 | In progress | Complete shared residual/charge/derivative/noise contracts and trial/accepted/capture/restore conformance across providers |
 | C02 | In progress | Extract remaining transient phases and consolidate state boundaries after the delivered step-proposal and checkpoint-identity preparation boundaries |
 | C03 | In progress | Preserve the repaired constant-bias and driven private-node regressions; complete independent Weil feedback and remaining continuation cases, C03d physical-event provider integration, remaining parameter cases, configuration coverage, whole-run memory/allocation, inner-solve cancellation, and broader performance evidence. Native initialization, typed errors, quotas, accepted-work cancellation, initial measurements, prescribed-terminal nonlinear/charge oracles and selected executed WASM configurations are delivered |
-| C04 | In progress | DC/nested DC, ordinary NOISE and AC/noise tables have execution, presentation and CLI/WASM publication. Table documents retain coordinates, bindings and completion with bounded, cancellable projection. Implement the 22 remaining dispositions, producer dependencies and bounded orchestration; finish broader binding/configuration/performance qualification |
+| C04 | In progress | DC/nested DC, ordinary NOISE, AC/noise tables and TF have execution, presentation and CLI/WASM publication. Table documents retain coordinates, bindings and completion with bounded, cancellable projection. TF retains physical units and unbounded scalar determinations and supports finite control scalar reads. Implement the 21 remaining dispositions, producer dependencies and bounded orchestration; finish broader binding/configuration/performance qualification |
 | C05 | Open | Checked IMD constructors, upper third-order product, tone/power conventions, intercept evidence, and public/control exposure |
 | C06 | Open | Missing semiconductor periodic equations, derivatives, shooting histories, and envelope continuation, delivered per family |
 | C07 | Open | Thermal, memory, hysteresis, line, magnetic, and dynamic-operator equations with complete continuation state |
@@ -607,3 +607,33 @@ This table summarizes the work still required; the package definitions above sup
 | C12 | Open | Full parser/direct/control/result route equivalence and authenticated producer/consumer integration |
 | C13 | Open | Remaining responsibility-boundary refactors, duplicate numerical-contract removal, and measured performance/memory improvements |
 | C14 | Open | Exact committed-source qualification across intended configurations, independent references, boundary fuzzing, and every required ledger row |
+
+## C04c transfer-function control delivery — October 7, 2026
+
+The TF portion of C04c now uses the existing transfer solver for explicit `tf`
+and declarative `run`, including executed temperature settings, differential
+voltage probes and source identity. Retained runs have stable `tf1`, `tf2`, ...
+names. Finite TF scalars support print/vector expressions, scalar assignments,
+conditions and loops. Scalar reads preserve lazy `if` evaluation, function
+argument scope, random evaluation order and expression dialect behavior.
+
+Two reproduced correctness defects are repaired: transfer gain units now follow
+the actual source/output quantities, and cancellation from the final progress
+callback prevents successful publication. The public result constructor takes
+an explicit gain unit. Exact unbounded impedance determinations remain typed
+through core documents, ordered CLI print output and WASM metadata. A scalar
+expression that actually reads one reports an error without manufacturing a
+finite value. Flat exports retain the gain and impedance units.
+
+The scoped record is
+`crates/rspice-core/tests/testdata/qualification/core-control-transfer-function-windows-20261007.json`.
+It distinguishes independent circuit equations, existing ngspice oracle
+regressions, route equivalence, native development checks and optimized WASM
+execution on committed source. No numerical tolerance or performance gate is
+relaxed. Cancellation, cumulative limits, failed-publication rollback and SDK
+migrations are included in this delivery's regressions.
+
+There are now eight implemented control dispositions and 21 remaining. C04c
+still requires PoleZero, Sensitivity, Stb, Sp, Disto and DcMatch; C04d–C04g and
+the broader C04 binding, configuration, resource and performance qualification
+remain open. All 15 packages retain their existing open/in-progress status.
