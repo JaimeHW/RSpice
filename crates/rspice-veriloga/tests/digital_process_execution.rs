@@ -6010,7 +6010,12 @@ fn computed_event_expressions_track_result_edges_and_dynamic_indices() {
         .compile_canonical_ir_module(source, None)
         .unwrap();
     assert_eq!(
-        artifact.digital.signals.iter().filter(|signal| signal.local.is_some()).count(),
+        artifact
+            .digital
+            .signals
+            .iter()
+            .filter(|signal| signal.local.is_some())
+            .count(),
         1
     );
 }
