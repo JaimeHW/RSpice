@@ -116,7 +116,10 @@ pub fn parse_xspice(
                         netlist_params,
                         defer_simple_param_refs,
                     )? {
-                        XspiceParamValue::Resolved(value) => params.push((id_str, value)),
+                        XspiceParamValue::Resolved(value) => {
+                            let value = real_instance_value(value, line_num, &id_str)?;
+                            params.push((id_str, value));
+                        }
                         XspiceParamValue::Deferred(expr) => expr_params.push((id_str, expr)),
                         XspiceParamValue::String(value) => string_params.push((id_str, value)),
                         XspiceParamValue::StringDeferred(expr) => {
@@ -944,7 +947,7 @@ fn node_name_piece_from_token(token: &Token) -> Option<String> {
 }
 
 enum XspiceParamValue {
-    Resolved(Value),
+    Resolved(crate::ComplexValue),
     Deferred(String),
     String(String),
     StringDeferred(String),
@@ -977,6 +980,30 @@ pub(crate) enum DeferredXspiceStringVectorEntry {
 
 const DEFERRED_XSPICE_COMPLEX_PREFIX: &str = "__rspice_xspice_complex__:";
 const DEFERRED_XSPICE_COMPLEX_VECTOR_PREFIX: &str = "__rspice_xspice_complex_vector__:";
+
+fn real_instance_value(
+    value: crate::ComplexValue,
+    line: usize,
+    name: &str,
+) -> Result<Value, ParseError> {
+    expr::require_real(value).map_err(|error| {
+        ParseError::InvalidValue(format!(
+            "line {line}: XSPICE instance parameter '{name}': {error}"
+        ))
+    })
+}
+
+fn numeric_instance_literal(
+    spelling: &str,
+    value: Value,
+    params: &ParamContext,
+) -> Result<crate::ComplexValue, expr::ExprError> {
+    if spelling.contains(['j', 'J']) {
+        expr::eval_expression_complex(spelling, params)
+    } else {
+        Ok(value.into())
+    }
+}
 
 /// Parse a scalar XSPICE instance parameter value.
 fn parse_param_value(
@@ -1091,9 +1118,14 @@ fn parse_scalar_param_token_value(
             parse_bare_string_param_value(stream, line_num, param_name)
         }
         TokenKind::Number(n) => {
-            let v = *n;
+            let value = numeric_instance_literal(&stream.peek().lexeme, *n, netlist_params)
+                .map_err(|error| {
+                    ParseError::InvalidValue(format!(
+                        "line {line_num}: XSPICE parameter '{param_name}': {error}"
+                    ))
+                })?;
             stream.advance();
-            Ok(XspiceParamValue::Resolved(v))
+            Ok(XspiceParamValue::Resolved(value))
         }
         TokenKind::Expression(expr_text) => {
             let expr_text = expr_text.clone();
@@ -1107,7 +1139,7 @@ fn parse_scalar_param_token_value(
                     Ok(XspiceParamValue::Deferred(expr_text))
                 }
             } else {
-                match expr::eval_expression(&expr_text, netlist_params) {
+                match expr::eval_expression_complex(&expr_text, netlist_params) {
                     Ok(value) => Ok(XspiceParamValue::Resolved(value)),
                     Err(_) => {
                         if let Some(value) = netlist_params.get_string(&expr_text) {
@@ -1163,7 +1195,7 @@ fn parse_scalar_param_token_value(
             let raw = raw.clone();
             if param_name.eq_ignore_ascii_case("model") {
                 stream.advance();
-                if let Some(value) = netlist_params.get(&raw) {
+                if let Some(value) = netlist_params.get_complex(&raw) {
                     if defer_simple_param_refs {
                         Ok(XspiceParamValue::Deferred(raw))
                     } else {
@@ -1178,8 +1210,14 @@ fn parse_scalar_param_token_value(
                         Ok(parsed)
                     }
                 } else if let Some(value) = parse_boolean_literal(&raw) {
-                    Ok(XspiceParamValue::Resolved(value))
+                    Ok(XspiceParamValue::Resolved(value.into()))
                 } else if let Ok(value) = parse_spice_value(&raw) {
+                    let value =
+                        numeric_instance_literal(&raw, value, netlist_params).map_err(|error| {
+                            ParseError::InvalidValue(format!(
+                                "line {line_num}: XSPICE parameter '{param_name}': {error}"
+                            ))
+                        })?;
                     Ok(XspiceParamValue::Resolved(value))
                 } else {
                     Ok(XspiceParamValue::String(raw))
@@ -1208,15 +1246,21 @@ fn parse_scalar_param_token_value(
                 }
             } else {
                 stream.advance();
-                if let Some(value) = netlist_params.get(&raw) {
+                if let Some(value) = netlist_params.get_complex(&raw) {
                     if defer_simple_param_refs {
                         Ok(XspiceParamValue::Deferred(raw))
                     } else {
                         Ok(XspiceParamValue::Resolved(value))
                     }
                 } else if let Some(value) = parse_boolean_literal(&raw) {
-                    Ok(XspiceParamValue::Resolved(value))
+                    Ok(XspiceParamValue::Resolved(value.into()))
                 } else if let Ok(value) = parse_spice_value(&raw) {
+                    let value =
+                        numeric_instance_literal(&raw, value, netlist_params).map_err(|error| {
+                            ParseError::InvalidValue(format!(
+                                "line {line_num}: XSPICE parameter '{param_name}': {error}"
+                            ))
+                        })?;
                     Ok(XspiceParamValue::Resolved(value))
                 } else {
                     Ok(XspiceParamValue::Deferred(raw))
@@ -1243,13 +1287,17 @@ fn try_scalar_expression_param(
     }
 
     let expr = collect_contiguous_expression(stream)?;
-    if let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&expr) {
-        return Some(XspiceParamValue::Resolved(value));
+    if !expr.contains(['j', 'J'])
+        && let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&expr)
+    {
+        return Some(XspiceParamValue::Resolved(value.into()));
     }
     if let Some(value) = parse_boolean_literal(&expr) {
-        return Some(XspiceParamValue::Resolved(value));
+        return Some(XspiceParamValue::Resolved(value.into()));
     }
-    if !defer_simple_param_refs && let Ok(value) = expr::eval_expression(&expr, netlist_params) {
+    if !defer_simple_param_refs
+        && let Ok(value) = expr::eval_expression_complex(&expr, netlist_params)
+    {
         return Some(XspiceParamValue::Resolved(value));
     }
     Some(XspiceParamValue::Deferred(expr))
@@ -1411,7 +1459,13 @@ fn parse_vector_param_value(
             defer_simple_param_refs,
         )
     } else {
-        parse_real_vector_param(stream, line_num, netlist_params, defer_simple_param_refs)
+        parse_real_vector_param(
+            stream,
+            line_num,
+            param_name,
+            netlist_params,
+            defer_simple_param_refs,
+        )
     }
 }
 
@@ -1517,6 +1571,7 @@ pub(crate) fn parse_xspice_string_vector_literal(
 fn parse_real_vector_param(
     stream: &mut TokenStream,
     line_num: usize,
+    param_name: &str,
     netlist_params: &ParamContext,
     defer_simple_param_refs: bool,
 ) -> Result<XspiceParamValue, ParseError> {
@@ -1545,6 +1600,7 @@ fn parse_real_vector_param(
             _ => entries.push(parse_real_vector_entry(
                 stream,
                 line_num,
+                param_name,
                 netlist_params,
                 defer_simple_param_refs,
             )?),
@@ -1578,6 +1634,7 @@ fn parse_real_vector_param(
 fn parse_real_vector_entry(
     stream: &mut TokenStream,
     line_num: usize,
+    param_name: &str,
     netlist_params: &ParamContext,
     defer_simple_param_refs: bool,
 ) -> Result<XspiceVectorEntry, ParseError> {
@@ -1609,15 +1666,20 @@ fn parse_real_vector_entry(
         ),
     })?;
 
-    if let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&expr_text) {
+    if !expr_text.contains(['j', 'J'])
+        && let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&expr_text)
+    {
         return Ok(XspiceVectorEntry::Resolved(sign * value));
     }
     if let Some(value) = parse_boolean_literal(&expr_text) {
         return Ok(XspiceVectorEntry::Resolved(sign * value));
     }
-    if !defer_simple_param_refs && let Ok(value) = expr::eval_expression(&expr_text, netlist_params)
+    if !defer_simple_param_refs
+        && let Ok(value) = expr::eval_expression_complex(&expr_text, netlist_params)
     {
-        return Ok(XspiceVectorEntry::Resolved(sign * value));
+        return Ok(XspiceVectorEntry::Resolved(
+            sign * real_instance_value(value, line_num, param_name)?,
+        ));
     }
     Ok(XspiceVectorEntry::Deferred(signed_expr(expr_text)))
 }
@@ -1697,6 +1759,7 @@ fn parse_string_vector_param(
                         *stream = probe;
                         entries.push(XspiceStringVectorEntry::DeferredComplex { real, imag });
                     }
+                    Err(error @ ParseError::InvalidValue(_)) => return Err(error),
                     Err(_) => entries.push(XspiceStringVectorEntry::Resolved(
                         parse_string_vector_bare_value(stream, line_num)?,
                     )),
@@ -1846,15 +1909,20 @@ fn parse_xspice_complex_component(
             ),
         })?;
 
-    if let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&expr_text) {
+    if !expr_text.contains(['j', 'J'])
+        && let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&expr_text)
+    {
         return Ok(XspiceComplexComponent::Resolved(sign * value));
     }
     if let Some(value) = parse_boolean_literal(&expr_text) {
         return Ok(XspiceComplexComponent::Resolved(sign * value));
     }
-    if !defer_simple_param_refs && let Ok(value) = expr::eval_expression(&expr_text, netlist_params)
+    if !defer_simple_param_refs
+        && let Ok(value) = expr::eval_expression_complex(&expr_text, netlist_params)
     {
-        return Ok(XspiceComplexComponent::Resolved(sign * value));
+        return Ok(XspiceComplexComponent::Resolved(
+            sign * real_instance_value(value, line_num, param_name)?,
+        ));
     }
     if defer_simple_param_refs {
         return Ok(XspiceComplexComponent::Deferred(signed_xspice_expr(

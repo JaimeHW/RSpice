@@ -2765,7 +2765,8 @@ impl<'a> Flattener<'a> {
                 None
             };
         }
-        Ok(binding.value.re)
+        super::expr::require_real(binding.value)
+            .map_err(|error| ParseError::InvalidValue(error.to_string()).into())
     }
 
     /// Resolve a deferred value expression, or keep the parse-time value.
@@ -2892,7 +2893,13 @@ impl<'a> Flattener<'a> {
                     name
                 )).into());
             }
-            let value = self.resolve_prepared_scalar_value(expr, prepared, scope, None, abort)?;
+            let value = self
+                .resolve_prepared_scalar_value(expr, prepared, scope, None, abort)
+                .map_err(|error| {
+                    map_resolution_error(error, |error| {
+                        ParseError::InvalidValue(format!("instance parameter '{name}': {error}"))
+                    })
+                })?;
             match merged
                 .iter_mut()
                 .find(|(existing, _)| existing.eq_ignore_ascii_case(name))
@@ -3294,16 +3301,12 @@ impl<'a> Flattener<'a> {
         component: &str,
         abort: &dyn AbortSignal,
     ) -> Result<Value, ParseWithAbortError> {
-        resolve_numeric_parameter_binding(
+        resolve_parametric_value(
             &ParametricValue::Expression(expr.to_string()),
             scope,
             &self.random,
             abort,
         )
-        .and_then(|binding| {
-            super::expr::require_real(binding.value)
-                .map_err(|error| ParseError::InvalidValue(error.to_string()).into())
-        })
         .map_err(|err| {
             map_resolution_error(err, |err| {
                 ParseError::InvalidValue(format!(
@@ -3880,7 +3883,9 @@ fn resolve_parametric_value(
     random: &RandomState,
     abort: &dyn AbortSignal,
 ) -> Result<Value, ParseWithAbortError> {
-    resolve_numeric_parameter_binding(value, scope, random, abort).map(|binding| binding.value.re)
+    let binding = resolve_numeric_parameter_binding(value, scope, random, abort)?;
+    super::expr::require_real(binding.value)
+        .map_err(|error| ParseError::InvalidValue(error.to_string()).into())
 }
 
 fn resolve_numeric_parameter_binding(
