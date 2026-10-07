@@ -699,7 +699,10 @@ times; unrepresentable boundaries and tick overflow are refused. Changes after
 Converting **from** `vcd` builds a table whose rows are the dump's distinct
 ticks: time is tick times `$timescale`, each signal holds its last value, and
 `x` and `z` become `0.5` in a `digital` column. A vector variable becomes one
-column per bit, named `D(bus[k])` down the declared range, the same shape the
+column per bit. A tick that cannot survive conversion to binary64 seconds is
+refused before table publication or comparison; VCD-to-VCD conversion keeps
+the original integer timeline. Bit columns are named `D(bus[k])` down the
+declared range, the same shape the
 members of a run's bus reach a table in, because a table has no place for a
 declaration saying that N of its columns are one word. Columns are named
 `D(node)` and `E(node)`, dropping the scope levels every signal shares. Before
