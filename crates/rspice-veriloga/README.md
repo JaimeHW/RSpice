@@ -412,6 +412,14 @@ events; edge events require integral values. Artifact validation rejects
 invalid local ownership, duplicate declaration identities, module-array aliases
 and real edge subscriptions. Dynamic continuous-driver targets, local arrays
 and hierarchical local references remain open; Wasm helper ABI remains 20.
+Schema 84 prepares every declaration in a block with its typed default before
+lowering any local initializer. Self references and forward references bind to
+the local declaration, with the same types and lexical shadowing as ordinary
+reads. RSpice's local declaration-initializer extension evaluates initializers
+in source order across interleaved reg, integer and real declarations. Both SSA
+locals and addressable locals retain the resulting values across suspension and
+process re-entry. This ordering is an RSpice contract; VAMS-2023 section A.2.8
+does not specify local declaration initializers. Wasm helper ABI remains 20.
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
 initializer patterns, multidimensional shapes, full parameter-dependent
 shape/child-override support, and remaining mixed-host/platform qualification

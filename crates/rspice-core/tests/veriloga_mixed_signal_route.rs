@@ -2447,8 +2447,9 @@ module variable_sampler(p,q);
      +selected[selection_word][selection_bit]-1)/1000;
  end
  initial begin : sample
-   integer local_gain;
-   local_gain=-16; local_gain[3:2]<=#1 2'b10;
+   reg signed [4:0] initial_gain=-16;
+   integer local_gain=initial_gain;
+   local_gain[3:2]<=#1 2'b10;
    period[4]=1.537e-9; enabled=1; index=-2;
    startup_ok=(measured[index]-4*LOAD/(1000+LOAD)<1e-8)
      && (measured[index]-4*LOAD/(1000+LOAD)>-1e-8);

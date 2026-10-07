@@ -1716,7 +1716,7 @@ fn a_process_local_carries_a_value_between_statements() {
     assert_eq!(harness.get("q"), "0100");
 }
 
-/// A declaration initializer runs where it is written, and a local with none
+/// A static local initializer runs at process startup, and a local with none
 /// starts at `x` (IEEE 1364-2005 section 4.2.2).
 #[test]
 fn a_process_local_starts_at_its_initializer_or_at_unknown() {
@@ -3528,6 +3528,132 @@ fn named_block_locals_retain_values_when_control_reenters_the_block() {
             if expected < 3.0 {
                 state = expect_suspended(outcome).resume_state().clone();
             }
+        }
+    }
+}
+
+#[test]
+fn static_local_initializer_bindings_include_self_forward_and_interleaved_types() {
+    for stored in [false, true] {
+        let finish = if stored {
+            "q<=#1 8'h5a; n<=#1 3; r<=#1 2.5; @(q); out_q=q; out_n=n; out_r=r;"
+        } else {
+            ""
+        };
+        let source = format!(
+            r#"
+module init_scope;
+ reg [7:0] q,later,out_q,out_forward,out_chain,out_comma;
+ integer n,out_n,signed_result,rounded_result;
+ real r,out_r,real_forward,converted_result;
+ reg [15:0] word_result;
+ initial begin n=77; r=9.5; end
+ initial begin : work
+   reg [7:0] q=q,forward=later;
+   integer n=n,seed=3;
+   real r=r,copy_real=tail;
+   reg signed [3:0] small=-3;
+   integer extended=small;
+   real converted=(small<0) ? extended : 1.0/(seed-seed);
+   reg [7:0] chain=seed+4;
+   integer rounded=converted-0.5;
+   reg [15:0] word=extended;
+   reg [7:0] first=2,second=first+1;
+   real tail; reg [7:0] later;
+   out_q=q; out_forward=forward; out_n=n; out_r=r;
+   real_forward=copy_real; signed_result=extended; converted_result=converted;
+   out_chain=chain; rounded_result=rounded; word_result=word; out_comma=second;
+   {finish}
+ end
+endmodule"#
+        );
+        let mut h = Harness::from_source(&source);
+        h.plan = serde_json::from_slice(&serde_json::to_vec(&h.plan).unwrap()).unwrap();
+        h.plan.validate().unwrap();
+        h.set("q", "10100101");
+        h.set("later", "11111111");
+        expect_finished(h.start(0));
+        let outcome = h.start(1);
+        assert_eq!(h.get("out_q"), "xxxxxxxx", "self reference binds the local");
+        assert_eq!(h.get("out_n"), "x".repeat(32), "integer self reference");
+        assert_eq!(h.get_real("out_r"), 0.0, "real self reference");
+        assert_eq!(
+            h.get("out_forward"),
+            "xxxxxxxx",
+            "forward local hides the module"
+        );
+        assert_eq!(h.get_real("real_forward"), 0.0, "forward real default");
+        assert_eq!(h.get("signed_result"), format!("{:032b}", -3i32));
+        assert_eq!(h.get_real("converted_result"), -3.0);
+        assert_eq!(h.get("out_chain"), "00000111");
+        assert_eq!(h.get("rounded_result"), format!("{:032b}", -4i32));
+        assert_eq!(h.get("word_result"), "1111111111111101");
+        assert_eq!(h.get("out_comma"), "00000011");
+        assert_eq!(h.get("q"), "10100101", "module shadow left intact");
+        assert_eq!(h.get("n"), format!("{:032b}", 77));
+        assert_eq!(h.get_real("r"), 9.5);
+        if stored {
+            let wait = expect_suspended(outcome);
+            let updates = std::mem::take(&mut h.store.deferred);
+            assert_eq!(updates.len(), 3);
+            for update in updates {
+                apply_deferred(&h.plan, &mut h.store, &update).unwrap();
+            }
+            expect_finished(h.resume(1, wait.resume_state()));
+            assert_eq!(h.get("out_q"), "01011010");
+            assert_eq!(h.get("out_n"), format!("{:032b}", 3));
+            assert_eq!(h.get_real("out_r"), 2.5);
+        } else {
+            expect_finished(outcome);
+            assert!(h.plan.signals.iter().all(|signal| signal.local.is_none()));
+        }
+    }
+}
+
+#[test]
+fn static_local_initializer_shadows_survive_nested_reentry_and_instances() {
+    let mut h = Harness::from_module(
+        r#"
+module nested(output real inner_result, output reg [31:0] outer_result, output reg [3:0] rounded);
+ parameter integer START=5;
+ always begin : outer
+   integer value=START;
+   #1;
+   begin : inner
+     real value=value+1.0;
+     reg [3:0] bits=value+0.5;
+     inner_result=value; rounded=bits; value=value+1.0;
+   end
+   outer_result=value; value=value+1;
+ end
+endmodule
+module top; nested a(); nested b(); endmodule
+"#,
+        Some("top"),
+    );
+    h.plan = serde_json::from_slice(&serde_json::to_vec(&h.plan).unwrap()).unwrap();
+    h.plan.validate().unwrap();
+    let mut states: Vec<_> = (0..2)
+        .map(|process| expect_suspended(h.start(process)).resume_state().clone())
+        .collect();
+    for cycle in 0..3 {
+        for (process, (name, base)) in [("a", 5), ("b", 5)].into_iter().enumerate() {
+            states[process] = expect_suspended(h.resume(process, &states[process]))
+                .resume_state()
+                .clone();
+            assert_eq!(
+                h.get_real(&format!("{name}.inner_result")),
+                f64::from(cycle + 1)
+            );
+            assert_eq!(
+                h.get(&format!("{name}.outer_result")),
+                format!("{:032b}", base + cycle)
+            );
+            assert_eq!(
+                h.get(&format!("{name}.rounded")),
+                "0010",
+                "initializer ran only at startup"
+            );
         }
     }
 }

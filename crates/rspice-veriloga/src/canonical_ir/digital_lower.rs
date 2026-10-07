@@ -1606,8 +1606,14 @@ impl ProcessLowerer<'_> {
         }
     }
 
-    /// Lower the declarations of one `begin`/`end` block.
+    /// Allocate a complete block scope before evaluating its initializers.
+    ///
+    /// Name binding is lexical (VAMS-2023 6.8), including a declaration's own
+    /// name and forward references. All locals first have their type's default
+    /// value. RSpice's local-initializer extension then evaluates declaration
+    /// assignments in source order, interleaving numeric and packed declarations.
     fn declare_block_locals(&mut self, block: BlockId, inner: &crate::ast::DigitalBlock) {
+        let mut initializers = Vec::new();
         for declaration in &inner.variables {
             // A `real` is not a narrow four-state value and does not go through
             // the width machinery at all: it is declared, initialized and read
@@ -1626,20 +1632,20 @@ impl ProcessLowerer<'_> {
                         );
                         continue;
                     }
-                    let initial = item
-                        .init
-                        .as_ref()
-                        .map(|init| self.real_expression(block, init));
-                    self.declare_real_local(block, Some(item.name.clone()), item.span, initial);
+                    let local =
+                        self.declare_real_local(block, Some(item.name.clone()), item.span, None);
+                    if let Some(init) = &item.init {
+                        initializers.push((item.span.start, local, init));
+                    }
                 }
                 continue;
             }
-            let width = match declaration.var_type {
+            match declaration.var_type {
                 // IEEE 1364-2005 section 3.9: an `integer` is a 32-bit
                 // variable. It is four-state here rather than the IR's own
                 // `Integer`, which has no `x` — and section 4.2.2 gives an
                 // unwritten `integer` exactly that.
-                crate::ast::VarType::Integer => 32,
+                crate::ast::VarType::Integer => {}
                 crate::ast::VarType::Real | crate::ast::VarType::String => {
                     self.error(
                         "a process-local `string` has no lowered form yet: a process \
@@ -1660,12 +1666,6 @@ impl ProcessLowerer<'_> {
                     );
                     continue;
                 }
-                // The declared variable is the assignment's target, so it seeds
-                // the context exactly as an ordinary assignment's does.
-                let initial = item
-                    .init
-                    .as_ref()
-                    .map(|init| self.assigned_value(block, init, width));
                 // IEEE 1364-2005 table 5-21 makes an `integer` signed, and
                 // gives it no qualifier with which to say otherwise. So a loop
                 // counter compares signed, and `i < 0` can be true.
@@ -1678,9 +1678,12 @@ impl ProcessLowerer<'_> {
                     INTEGER_BOUNDS,
                     true,
                     item.span,
-                    initial,
+                    None,
                 );
                 self.locals[usize::from(local)].integer = true;
+                if let Some(init) = &item.init {
+                    initializers.push((item.span.start, local, init));
+                }
             }
         }
 
@@ -1700,7 +1703,6 @@ impl ProcessLowerer<'_> {
                 },
             };
             let Some(bounds) = bounds else { continue };
-            let width = bounds.width();
             for item in &declaration.items {
                 if !item.dimensions.is_empty() {
                     self.error(
@@ -1712,20 +1714,30 @@ impl ProcessLowerer<'_> {
                     );
                     continue;
                 }
-                let initial = item
-                    .init
-                    .as_ref()
-                    .map(|init| self.assigned_value(block, init, width));
                 let local = self.declare_local(
                     block,
                     Some(item.name.clone()),
                     bounds,
                     signed,
                     item.span,
-                    initial,
+                    None,
                 );
                 self.locals[usize::from(local)].packed = declaration.range.is_some();
+                if let Some(init) = &item.init {
+                    initializers.push((item.span.start, local, init));
+                }
             }
+        }
+        // These offsets belong to the same preprocessed source stream. Keep
+        // the authored order even though the AST separates declaration kinds.
+        initializers.sort_by_key(|(offset, _, _)| *offset);
+        for (_, local, init) in initializers {
+            let value = if self.local_is_real(local) {
+                self.real_expression(block, init)
+            } else {
+                self.assigned_value(block, init, self.local_width(local))
+            };
+            self.write_local(block, local, value);
         }
     }
 
