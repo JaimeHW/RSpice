@@ -67,26 +67,35 @@ fn summary_includes_special_format_and_companion_artifacts_exactly_once() {
 #[test]
 fn rejected_json_publication_does_not_claim_a_new_or_existing_destination() {
     for existing in [false, true] {
-        for flags in [
-            vec![],
-            vec!["--pz-input", "in", "--pz-output", "out"],
-            vec!["--monte-carlo", "3"],
+        for (cards, flags) in [
+            (".OP", vec![]),
+            (".OP", vec!["--pz-input", "in", "--pz-output", "out"]),
+            (".OP", vec!["--monte-carlo", "3"]),
+            (".TRAN 0.1 1", vec![]),
+            (
+                ".TRAN 0.1 1\n.FFT V(out) NP=8 WINDOW=RECT FORMAT=UNORM",
+                vec![],
+            ),
         ] {
             let dir = test_dir("unpublished_summary");
             let deck = dir.join("input.sp");
             let config = dir.join("config.toml");
             let artifact = dir.join("result.json");
+            let fft_artifact = dir.join("result.fft.json");
             std::fs::write(
                 &deck,
-                "* bounded JSON result\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.OP\n.END\n",
+                format!(
+                    "* bounded JSON result\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n{cards}\n.END\n"
+                ),
             )
             .unwrap();
             std::fs::write(&config, "[resources]\nmax_external_data_bytes = 200\n").unwrap();
             if existing {
                 std::fs::write(&artifact, b"previous result").unwrap();
+                std::fs::write(&fft_artifact, b"previous FFT result").unwrap();
             }
             let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
-                .args(["--quiet", "--config"])
+                .args(["--quiet", "--error-format", "json", "--config"])
                 .arg(&config)
                 .arg("run")
                 .arg(&deck)
@@ -96,16 +105,30 @@ fn rejected_json_publication_does_not_claim_a_new_or_existing_destination() {
                 .args(["--summary", "-"])
                 .output()
                 .unwrap();
-            assert!(!output.status.success(), "{output:?}");
-            assert!(String::from_utf8_lossy(&output.stderr).contains("200-byte limit"));
+            assert_eq!(output.status.code(), Some(75), "{output:?}");
+            let fatal: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+            assert_eq!(fatal["error"]["category"], "resource_limit");
+            assert_eq!(fatal["error"]["resource"], "external_data_bytes");
+            assert_eq!(fatal["error"]["limit"], 200);
+            assert_eq!(fatal["error"]["requested"], 201);
             let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
             assert_eq!(summary["passed"], false);
             assert_eq!(summary["counts"]["outputs"], 0);
             assert_eq!(summary["outputs"], serde_json::json!([]));
+            assert_eq!(
+                summary["runs"][0]["error_details"]["category"],
+                "resource_limit"
+            );
+            assert_eq!(summary["runs"][0]["error_details"]["limit"], 200);
             if existing {
                 assert_eq!(std::fs::read(&artifact).unwrap(), b"previous result");
+                assert_eq!(
+                    std::fs::read(&fft_artifact).unwrap(),
+                    b"previous FFT result"
+                );
             } else {
                 assert!(!artifact.exists());
+                assert!(!fft_artifact.exists());
             }
         }
     }

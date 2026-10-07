@@ -55,7 +55,7 @@ pub(super) fn write_transient_fft_output_pair(
     // spectrum is missing. They are staged together and published together.
     publish::artifact_pair(
         transient_path,
-        |writer| transient.write_to(writer, transient_path, format, byte_limit),
+        |writer| transient.write_to(writer, transient_path, format, byte_limit, timeout_seconds),
         fft_path,
         |writer| {
             write_fft_to_writer(

@@ -270,20 +270,40 @@ pub(super) fn document_error(
     analysis: AnalysisInstanceId,
     error: ResultDocumentError,
 ) -> CliError {
+    document_error_with_timeout(analysis, error, ctx.args.timeout)
+}
+
+/// The same mapping for serializers that run inside an atomic writer without
+/// borrowing the run context, including transient/FFT pairs.
+pub(super) fn document_error_with_timeout(
+    analysis: AnalysisInstanceId,
+    error: ResultDocumentError,
+    timeout_seconds: Option<f64>,
+) -> CliError {
     if matches!(error, ResultDocumentError::Aborted) {
-        return super::cancellation_cli_error(ctx.args.timeout);
+        return super::cancellation_cli_error(timeout_seconds);
     }
-    if let ResultDocumentError::ResourceLimit(source) = error {
-        return CliError::CoreSimulationError {
-            source: rspice_core::SimulationError::ResourceLimit(source),
-            analysis: Some(analysis.tag()),
-        };
-    }
-    CliError::CoreSimulationError {
-        source: rspice_core::SimulationError::Circuit(format!(
+    let source = match error {
+        ResultDocumentError::ResourceLimit(source) => {
+            rspice_core::SimulationError::ResourceLimit(source)
+        }
+        ResultDocumentError::ArtifactTooLarge { limit_bytes } => {
+            let limit = usize::try_from(limit_bytes).unwrap_or(usize::MAX);
+            rspice_core::SimulationError::ResourceLimit(rspice_core::ResourceLimitError {
+                resource: rspice_core::ResourceKind::ExternalDataBytes,
+                // Serialization stops at the boundary; the full encoded size
+                // is intentionally unknown. Report the first refused byte.
+                requested: limit.saturating_add(1),
+                limit,
+            })
+        }
+        error => rspice_core::SimulationError::Circuit(format!(
             "{} cannot publish a typed result document: {error}",
             analysis.tag()
         )),
+    };
+    CliError::CoreSimulationError {
+        source,
         analysis: Some(analysis.tag()),
     }
 }

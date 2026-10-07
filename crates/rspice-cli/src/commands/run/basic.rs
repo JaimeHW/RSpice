@@ -1143,6 +1143,7 @@ pub(super) fn finish_transient_result(
                     &output_path,
                     ctx.format,
                     super::document::json_byte_limit(ctx),
+                    ctx.args.timeout,
                 )
             })
             .map_err(|error| map_atomic_output_error(&output_path, error))?;
@@ -1226,6 +1227,7 @@ impl TransientOutputDocument {
         path: &Path,
         format: OutputFormat,
         byte_limit: u64,
+        timeout_seconds: Option<f64>,
     ) -> Result<(), CliError> {
         match self {
             Self::Hdf5(data) => write_hdf5_to_writer(writer, data)
@@ -1256,12 +1258,12 @@ impl TransientOutputDocument {
             Self::Typed(document) => {
                 let json = document
                     .to_json_with_abort(&crate::abort::ProcessAbort, byte_limit)
-                    .map_err(|error| CliError::CoreSimulationError {
-                        source: rspice_core::SimulationError::Circuit(format!(
-                            "{} cannot publish a typed result document: {error}",
-                            document.analysis().tag()
-                        )),
-                        analysis: Some(document.analysis().tag()),
+                    .map_err(|error| {
+                        super::document::document_error_with_timeout(
+                            document.analysis(),
+                            error,
+                            timeout_seconds,
+                        )
                     })?;
                 writer
                     .write_all(json.as_bytes())
