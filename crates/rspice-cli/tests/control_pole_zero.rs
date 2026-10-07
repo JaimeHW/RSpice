@@ -34,6 +34,15 @@ fn direct_and_control_pz_publish_identical_typed_roots_and_complex_prints() {
     ] {
         let deck = dir.join(format!("{route}.cir"));
         std::fs::write(&deck, format!("{RLC}{cards}\n.end\n")).unwrap();
+        let checked = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "check"])
+            .arg(&deck)
+            .arg("--json")
+            .output()
+            .unwrap();
+        assert!(checked.status.success(), "{route}: {checked:?}");
+        let report: serde_json::Value = serde_json::from_slice(&checked.stdout).unwrap();
+        assert_eq!(report["valid"], true, "{route}: {report}");
         let result = run(&deck, &dir.join(format!("{route}.json")), "json");
         assert!(
             result.status.success(),

@@ -31,6 +31,11 @@ fn check_and_run_reject_invalid_requests_before_publication() {
         ),
         ("control-run", ".tran 1u -1m\n.control\nrun\n.endc", "TSTOP"),
         (
+            "control-pz-invalid",
+            ".control\npz in 0 in 0 invalid pz\n.endc",
+            "expected VOL or CUR",
+        ),
+        (
             "control-no-analysis",
             ".control\nrun\n.endc",
             "no declarative analysis",
@@ -42,12 +47,12 @@ fn check_and_run_reject_invalid_requests_before_publication() {
         ),
         (
             "control-unsupported",
-            ".control\npz in 0 in 0 vol pz\n.endc",
+            ".control\nsens V(in)\n.endc",
             "no electrical or presentation handler",
         ),
         (
             "control-unsupported-run",
-            ".pz in 0 in 0 vol pz\n.control\nrun\n.endc",
+            ".sens V(in)\n.control\nrun\n.endc",
             "no control-host execution handler",
         ),
         (
@@ -114,6 +119,12 @@ fn static_control_checks_report_deferred_values_without_executing_the_script() {
             ".control\nif 0\ntran 1u -1m\nend\nop\n.endc",
             false,
             false,
+        ),
+        (
+            "dynamic-pz",
+            ".control\npz in 0 in 0 vol $mode\n.endc",
+            true,
+            true,
         ),
     ] {
         let dir = common::test_dir(name);
