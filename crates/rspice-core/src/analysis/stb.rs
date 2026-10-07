@@ -27,6 +27,9 @@
 //! Closed-loop stability additionally requires qualified pole or Nyquist
 //! evidence; positive margins alone do not establish it.
 
+mod circuit_poles;
+pub use circuit_poles::{CircuitPoleEvidence, CircuitPoleFailure};
+
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::frequency_grid::{
@@ -419,6 +422,10 @@ impl NyquistPoint {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StbResult {
+    /// Complete circuit modes, distinct from the observed loop margins.
+    #[serde(default, skip_serializing_if = "CircuitPoleEvidence::is_not_computed")]
+    pub circuit_poles: CircuitPoleEvidence,
+
     /// Bode plot data points
     pub bode_points: Vec<BodePoint>,
 
@@ -436,6 +443,24 @@ pub struct StbResult {
 }
 
 impl StbResult {
+    pub fn retained_value_count(&self) -> usize {
+        self.bode_points
+            .len()
+            .saturating_mul(6)
+            .saturating_add(self.nyquist_points.len().saturating_mul(3))
+            .saturating_add(6)
+            .saturating_add(self.circuit_poles.retained_value_count())
+    }
+
+    /// Circuit stability requires complete qualified modes, regardless of margins.
+    pub fn stability_verdict(&self) -> super::pole_zero::StabilityVerdict {
+        if self.success {
+            self.circuit_poles.stability_verdict()
+        } else {
+            super::pole_zero::StabilityVerdict::Indeterminate
+        }
+    }
+
     /// Validate retained samples and derived quantities before consuming a decoded result.
     /// Deserialization alone does not establish numerical consistency.
     pub fn validate_with_abort(
@@ -453,14 +478,15 @@ impl StbResult {
             ));
         }
         if n > limits.max_analysis_points
-            || n.saturating_mul(9) > limits.max_result_values
+            || self.retained_value_count() > limits.max_result_values
             || self.warnings.len() > limits.max_result_values
         {
             return Err(StbAnalysisError::CapacityOverflow {
                 object: "retained STB result",
             });
         }
-        let mut warning_bytes = 0usize;
+        self.circuit_poles.validate_with_abort(limits, abort)?;
+        let mut warning_bytes = self.circuit_poles.diagnostic_bytes();
         for (index, warning) in self.warnings.iter().enumerate() {
             poll_abort(abort, index)?;
             warning_bytes = warning_bytes
@@ -555,6 +581,7 @@ impl StbResult {
     /// Create new empty result
     pub fn new() -> Self {
         Self {
+            circuit_poles: CircuitPoleEvidence::NotComputed,
             bode_points: Vec::new(),
             nyquist_points: Vec::new(),
             margins: StabilityMargins::default(),

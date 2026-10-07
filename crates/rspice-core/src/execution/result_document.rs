@@ -15,7 +15,7 @@
 //! ```text
 //! {
 //!   "schema":        "rspice-analysis-result"   fixed identifier
-//!   "schemaVersion": 15                          this build's exact version
+//!   "schemaVersion": 16                          this build's exact version
 //!   "resultKind":    "op" | "dc" | "ac" | "tran" | "noise" | "sp" |
 //!                    "port-noise" | "distortion" | "tf" | "stb" |
 //!                    "sensitivity" | "pole-zero" | "fourier" | "fft" |
@@ -114,7 +114,8 @@
 //! port-noise  portCount
 //! distortion  f2OverF1|null, products[]           product tag, order, frequencies[]
 //! tf          output, input
-//! stb         success, warnings[], nyquist[]      frequency, real, imaginary
+//! stb         success, warnings[], nyquist[],     frequency, real, imaginary
+//!             circuitPoles (optional)            modes in rad/s and qualification
 //! sensitivity output, entries[]                   vectorName, element, elementKind,
 //!                                                 parameter, nominalValue,
 //!                                                 absolute, normalized
@@ -226,7 +227,7 @@ use crate::execution::topology::TopologyFingerprint;
 pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 
 /// Schema version this build produces.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 15;
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 16;
 
 /// Version 9 adds the sampling request and resolved crossing geometry to PNoise.
 ///
@@ -275,14 +276,18 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 15;
 /// consistent measured margin/frequency pairs. Multiple crossings are an
 /// observation, not a conditional-stability verdict.
 ///
+/// Version 16 adds STB natural circuit modes and typed extraction failures.
+/// Earlier STB documents have no circuit-pole evidence; absence never denotes
+/// a qualified empty spectrum or establishes circuit stability.
+///
 /// A new result *family* costs no version. No document of an existing family
 /// changes shape, and no reader of an earlier version has a document of the
 /// new family to misread: it refuses the unknown `resultKind` tag outright.
 /// Bumping for one would instead make every family's freshly produced
 /// document undecodable by every current reader, which is the compatibility
 /// break this constant exists to avoid.
-const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 15] =
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 16] =
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
 
 /// First version whose transient payload may declare a digital bus.
 const FIRST_DIGITAL_BUS_DOCUMENT_VERSION: u32 = 2;

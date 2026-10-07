@@ -74,8 +74,13 @@ pub(super) fn validate(
     document: &AnalysisResultDocument,
     abort: &dyn AbortSignal,
 ) -> Result<(), ResultDocumentError> {
-    if !matches!(document.payload, ResultPayload::Stb(_)) {
+    let ResultPayload::Stb(payload) = &document.payload else {
         return Ok(());
+    };
+    if document.schema_version < 16 && !payload.circuit_poles.is_not_computed() {
+        return Err(invalid(
+            "circuit-pole evidence requires document version 16",
+        ));
     }
     validate_margins(document, abort)?;
     let mut raw = None;

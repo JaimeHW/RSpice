@@ -2,7 +2,7 @@
 use super::*;
 use crate::analysis::pole_zero::PoleSpectrum;
 use crate::engine::progress::StudyProgress;
-use crate::resource::ResourceLimits;
+use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 use crate::solver::{ComplexMatrix, StaticMatrix};
 
 pub(super) struct LinearizedDescriptor<'a> {
@@ -26,6 +26,17 @@ impl LinearizedDescriptor<'_> {
         self,
         limits: ResourceLimits,
     ) -> Result<PoleZeroAnalyzer, SimulationError> {
+        // Admit dense workspace only when the caller actually chooses this
+        // path. Sparse transfer extraction must retain its own admission policy.
+        let order = self
+            .g
+            .nrows
+            .saturating_add(Engine::pz_ac_nqs_state_count(self.circuit));
+        ResourceLimitError::ensure(
+            ResourceKind::ResultValues,
+            order.saturating_mul(order.saturating_mul(8).saturating_add(1)),
+            limits.max_result_values,
+        )?;
         let mut g = Matrix::from_dense(self.g.to_dense_real());
         let mut c = Matrix::from_dense(self.c.to_dense_imag());
         Engine::stamp_vbic_pz_descriptor_states(self.circuit, self.operating_point, &mut g, &mut c);
@@ -59,10 +70,10 @@ impl Engine {
     /// The caller has prepared device caches at this accepted operating point.
     /// No circuit construction, bias solve or excitation selection occurs here.
     pub(super) fn linearized_pz_descriptor<'a>(
-        &self,
         circuit: &'a CircuitData,
         matrix: &StaticMatrix,
         operating_point: &'a [Value],
+        limits: ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<LinearizedDescriptor<'a>, SimulationError> {
         if abort.is_aborted() {
@@ -71,7 +82,11 @@ impl Engine {
         let order = circuit
             .matrix_size()
             .saturating_add(Self::pz_ac_nqs_state_count(circuit));
-        self.ensure_result_shape(order, order.saturating_mul(8).saturating_add(1))?;
+        ResourceLimitError::ensure(
+            ResourceKind::MatrixUnknowns,
+            order,
+            limits.max_matrix_unknowns,
+        )?;
         let g = Self::try_build_small_signal_pz_matrix(circuit, matrix, operating_point, 0.0)?;
         let c = Self::try_build_small_signal_pz_matrix(circuit, matrix, operating_point, 1.0)?;
         if abort.is_aborted() {
@@ -89,10 +104,10 @@ impl Engine {
     /// STB can reuse its circuit and operating point without inventing a port
     /// or running another operating-point solve.
     pub(in crate::engine) fn pole_spectrum_at_bias(
-        &self,
         circuit: &mut CircuitData,
         matrix: &StaticMatrix,
         operating_point: &[Value],
+        limits: ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<PoleSpectrum, SimulationError> {
         if abort.is_aborted() {
@@ -101,12 +116,16 @@ impl Engine {
         Self::ensure_pz_circuit(circuit)?;
         circuit.refresh_jiles_atherton_inductances(operating_point);
         Self::prepare_small_signal_state(circuit, operating_point)?;
-        let spectrum = self
-            .linearized_pz_descriptor(circuit, matrix, operating_point, abort)?
-            .into_analyzer(self.config.resource_limits)?
-            .pole_spectrum_with_abort(abort)
-            .map_err(extraction_error)?;
-        self.ensure_result_values(spectrum.poles.len().saturating_mul(2).saturating_add(4))?;
+        let spectrum =
+            Self::linearized_pz_descriptor(circuit, matrix, operating_point, limits, abort)?
+                .into_analyzer(limits)?
+                .pole_spectrum_with_abort(abort)
+                .map_err(extraction_error)?;
+        ResourceLimitError::ensure(
+            ResourceKind::ResultValues,
+            spectrum.poles.len().saturating_mul(2).saturating_add(4),
+            limits.max_result_values,
+        )?;
         Ok(spectrum)
     }
 
@@ -140,8 +159,13 @@ impl Engine {
         )?;
         progress.report(0.6)?;
         let extraction = progress.stage(0.6, 0.99);
-        let spectrum =
-            engine.pole_spectrum_at_bias(&mut circuit, &matrix, &operating_point, &extraction)?;
+        let spectrum = Self::pole_spectrum_at_bias(
+            &mut circuit,
+            &matrix,
+            &operating_point,
+            engine.config.resource_limits,
+            &extraction,
+        )?;
         progress.complete(spectrum)
     }
 }

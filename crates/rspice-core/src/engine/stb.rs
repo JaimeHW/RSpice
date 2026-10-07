@@ -30,7 +30,9 @@
 use super::progress::StudyProgress;
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::analysis::stb::{StbAnalysisError, StbAnalyzer, StbConfig, StbResult};
+use crate::analysis::stb::{
+    CircuitPoleEvidence, CircuitPoleFailure, StbAnalysisError, StbAnalyzer, StbConfig, StbResult,
+};
 use crate::{Complex64, Netlist, Value};
 use std::f64::consts::PI;
 
@@ -45,6 +47,8 @@ const STB_BODE_VALUES_PER_POINT: usize = 6;
 const STB_NYQUIST_VALUES_PER_POINT: usize = 3;
 // Two value/frequency pairs and the complex DC return ratio, including absent slots.
 const STB_MARGIN_VALUES: usize = 6;
+// Reserve the certificate/diagnostic slots even when the spectrum is unavailable.
+const STB_CIRCUIT_POLE_VALUES: usize = 4;
 
 fn stb_retained_result_value_count(
     point_count: usize,
@@ -59,7 +63,7 @@ fn stb_retained_result_value_count(
         };
     point_count
         .checked_mul(values_per_point)
-        .and_then(|values| values.checked_add(STB_MARGIN_VALUES))
+        .and_then(|values| values.checked_add(STB_MARGIN_VALUES + STB_CIRCUIT_POLE_VALUES))
         .ok_or(StbAnalysisError::CapacityOverflow {
             object: "STB retained-result value count",
         })
@@ -343,8 +347,60 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
 
+        let pole_stage = progress.stage(0.95, 0.975);
+        let mut pole_limits = engine.config.resource_limits;
+        // The sweep and its reserved Bode/Nyquist copies remain live throughout
+        // extraction. Give the optional descriptor only the remaining budget.
+        pole_limits.max_result_values = pole_limits
+            .max_result_values
+            .saturating_sub(retained_result_values);
+        let circuit_poles = match Self::pole_spectrum_at_bias(
+            &mut circuit,
+            &matrix,
+            &dc_solution,
+            pole_limits,
+            &pole_stage,
+        ) {
+            Ok(spectrum) => CircuitPoleEvidence::Available { spectrum },
+            Err(SimulationError::UnsupportedCapability(error)) => {
+                CircuitPoleEvidence::Unavailable {
+                    cause: CircuitPoleFailure::Unsupported {
+                        capability: error.capability.into(),
+                        detail: error.detail,
+                    },
+                }
+            }
+            Err(SimulationError::ResourceLimit(mut error)) => {
+                if error.resource == crate::ResourceKind::ResultValues {
+                    error.requested = error.requested.saturating_add(retained_result_values);
+                    error.limit = engine.config.resource_limits.max_result_values;
+                }
+                CircuitPoleEvidence::Unavailable {
+                    cause: CircuitPoleFailure::ResourceLimit {
+                        resource: error.resource.as_str().into(),
+                        requested: error.requested,
+                        limit: error.limit,
+                    },
+                }
+            }
+            Err(error @ SimulationError::Solver(rspice_matrix::SolverError::OutOfMemory)) => {
+                return Err(error);
+            }
+            Err(SimulationError::Solver(error)) => CircuitPoleEvidence::Unavailable {
+                cause: CircuitPoleFailure::Numerical {
+                    detail: error.to_string(),
+                },
+            },
+            Err(SimulationError::Circuit(detail)) => CircuitPoleEvidence::Unavailable {
+                cause: CircuitPoleFailure::Numerical { detail },
+            },
+            // Cancellation and allocation failures remain terminal; they are
+            // not missing mathematical evidence from an otherwise valid run.
+            Err(error) => return Err(error),
+        };
+        progress.report(0.975)?;
         let analyzer = StbAnalyzer::new(config);
-        let projection = progress.stage(0.95, 0.99);
+        let projection = progress.stage(0.975, 0.99);
         let mut result = analyzer
             .analyze_preallocated_with_abort(
                 &frequencies,
@@ -353,11 +409,34 @@ impl Engine {
                 &projection,
             )
             .map_err(map_stb_analysis_error)?;
+        result.circuit_poles = circuit_poles;
         result.margins.dc_loop_gain = dc_loop_gain;
         if let Some(warning) = dc_warning {
             result.warnings.push(warning);
         }
 
+        engine.ensure_result_values(
+            retained_result_values.saturating_add(
+                result
+                    .circuit_poles
+                    .retained_value_count()
+                    .saturating_sub(STB_CIRCUIT_POLE_VALUES),
+            ),
+        )?;
+        let diagnostic_bytes = result
+            .warnings
+            .iter()
+            .fold(result.circuit_poles.diagnostic_bytes(), |total, warning| {
+                total.saturating_add(warning.len())
+            });
+        crate::ResourceLimitError::ensure(
+            crate::ResourceKind::ExternalDataBytes,
+            diagnostic_bytes,
+            engine.config.resource_limits.max_external_data_bytes,
+        )?;
+        result
+            .validate_with_abort(&engine.config.resource_limits, &projection)
+            .map_err(map_stb_analysis_error)?;
         progress.complete(StbAnalysisResult {
             frequencies,
             loop_gains,
@@ -473,7 +552,9 @@ mod tests {
                         .expect("Nyquist shape"),
                 )
             })
-            .and_then(|count| count.checked_add(6))
+            .and_then(|count| {
+                count.checked_add(6 + result.result.circuit_poles.retained_value_count())
+            })
             .expect("retained STB result shape")
     }
 
@@ -540,10 +621,11 @@ mod tests {
     fn stb_retained_result_count_is_exact_at_boundary_and_rejects_overflow() {
         for compute_nyquist in [false, true] {
             let values_per_point = if compute_nyquist { 12 } else { 9 };
-            let largest = (usize::MAX - STB_MARGIN_VALUES) / values_per_point;
+            let fixed_values = STB_MARGIN_VALUES + STB_CIRCUIT_POLE_VALUES;
+            let largest = (usize::MAX - fixed_values) / values_per_point;
             assert_eq!(
                 stb_retained_result_value_count(largest, compute_nyquist),
-                Ok(largest * values_per_point + STB_MARGIN_VALUES)
+                Ok(largest * values_per_point + fixed_values)
             );
             assert!(matches!(
                 stb_retained_result_value_count(largest + 1, compute_nyquist),

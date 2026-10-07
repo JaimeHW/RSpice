@@ -2099,6 +2099,7 @@ impl AnalysisResultDocument {
         }
 
         let payload = StabilityPayload {
+            circuit_poles: result.circuit_poles.clone(),
             success: result.success,
             warnings: result.warnings.clone(),
             nyquist,

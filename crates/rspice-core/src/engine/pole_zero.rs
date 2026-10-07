@@ -787,7 +787,13 @@ impl Engine {
         abort.observe_progress(0.25);
         circuit.refresh_jiles_atherton_inductances(&dc_solution);
         Self::prepare_small_signal_state(&mut circuit, &dc_solution)?;
-        let descriptor = self.linearized_pz_descriptor(&circuit, &matrix, &dc_solution, abort)?;
+        let descriptor = Self::linearized_pz_descriptor(
+            &circuit,
+            &matrix,
+            &dc_solution,
+            self.config.resource_limits,
+            abort,
+        )?;
         abort.observe_progress(0.5);
         let input_neg_node = input_neg.unwrap_or(0);
         let matches_requested_input_port = |np: usize, nn: usize| {

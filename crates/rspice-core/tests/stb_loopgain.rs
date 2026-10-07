@@ -403,7 +403,7 @@ fn stb_progress_is_monotonic_and_completes_only_a_successful_study() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn stb_observes_cancellation_from_work_and_completion_callbacks() {
     let netlist = Netlist::parse(SINGLE_POLE).unwrap();
-    for stop_at in [0.25, 0.5, 1.0] {
+    for stop_at in [0.25, 0.5, 0.95, 0.975, 1.0] {
         let observer = Progress {
             stop_at: Some(stop_at),
             ..Default::default()

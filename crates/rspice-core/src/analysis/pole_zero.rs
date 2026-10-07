@@ -110,7 +110,8 @@ pub enum PoleZeroAnalysisError {
 /// reported finite-state eigenpair residuals and the finite-subspace projection
 /// residual against the original descriptor. Analytic scalar and polynomial
 /// paths report their exact finite/infinite degree accounting.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SpectrumCertificate {
     /// Order of the ordinary eigenproblem or generalized matrix pencil.
     pub problem_order: usize,
@@ -174,7 +175,8 @@ impl SpectrumCertificate {
 
 /// Evidence describing why a pole or zero vector may be interpreted as a
 /// complete root set.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 #[non_exhaustive]
 pub enum RootSetEvidence {
     /// This root quantity was not requested by the analysis configuration.
@@ -258,7 +260,8 @@ pub enum StabilityVerdict {
 /// Complete natural modes of a descriptor, independent of transfer-function ports.
 /// Poles are in rad/s. The evidence distinguishes a proven empty spectrum from
 /// missing or approximate numerical evidence.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PoleSpectrum {
     /// Every finite natural pole, in canonical magnitude/conjugate-pair order.
     pub poles: Vec<Complex64>,

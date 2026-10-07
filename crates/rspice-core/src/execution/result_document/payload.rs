@@ -143,7 +143,11 @@ impl ResultPayload {
                 .map(|product| product.frequencies.len())
                 .fold(0, usize::saturating_add),
             Self::Tf(_) => 0,
-            Self::Stb(payload) => payload.nyquist.len().saturating_mul(3),
+            Self::Stb(payload) => payload
+                .nyquist
+                .len()
+                .saturating_mul(3)
+                .saturating_add(payload.circuit_poles.retained_value_count()),
             Self::Sensitivity(payload) => payload.ac_entries.iter().fold(
                 payload.entries.len().saturating_mul(3),
                 |count, entry| {
@@ -224,7 +228,7 @@ impl ResultPayload {
             Self::Sp(payload) => payload.validate(),
             Self::Distortion(payload) => payload.validate(),
             Self::Tf(payload) => payload.validate(),
-            Self::Stb(payload) => payload.validate(),
+            Self::Stb(payload) => payload.validate(limits, abort),
             Self::Sensitivity(payload) => payload.validate(),
             Self::PoleZero(payload) => payload.validate(),
             Self::Fourier(payload) => payload.validate(),
@@ -1561,6 +1565,12 @@ impl DcMatchPayload {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StabilityPayload {
+    /// Same-bias natural modes in rad/s; missing legacy evidence stays explicit.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::analysis::stb::CircuitPoleEvidence::is_not_computed"
+    )]
+    pub circuit_poles: crate::analysis::stb::CircuitPoleEvidence,
     /// Whether the loop-gain projection completed.
     pub success: bool,
     pub warnings: Vec<String>,
@@ -1570,8 +1580,47 @@ pub struct StabilityPayload {
 }
 
 impl StabilityPayload {
-    fn validate(&self) -> Result<(), ResultDocumentError> {
+    fn validate(
+        &self,
+        limits: &crate::ResourceLimits,
+        abort: &dyn crate::AbortSignal,
+    ) -> Result<(), ResultDocumentError> {
+        super::check_abort(abort)?;
+        if let Some(certificate) = self
+            .circuit_poles
+            .spectrum()
+            .and_then(|spectrum| spectrum.evidence.certificate())
+        {
+            crate::ResourceLimitError::ensure(
+                crate::ResourceKind::MatrixUnknowns,
+                certificate.problem_order,
+                limits.max_matrix_unknowns,
+            )
+            .map_err(ResultDocumentError::ResourceLimit)?;
+        }
+        let diagnostic_bytes = self
+            .warnings
+            .iter()
+            .fold(self.circuit_poles.diagnostic_bytes(), |total, warning| {
+                total.saturating_add(warning.len())
+            });
+        crate::ResourceLimitError::ensure(
+            crate::ResourceKind::ExternalDataBytes,
+            diagnostic_bytes,
+            limits.max_external_data_bytes,
+        )
+        .map_err(ResultDocumentError::ResourceLimit)?;
+        self.circuit_poles
+            .validate_with_abort(limits, abort)
+            .map_err(|error| match error {
+                crate::analysis::stb::StbAnalysisError::Aborted => ResultDocumentError::Aborted,
+                error => ResultDocumentError::Malformed {
+                    location: "stability circuit poles",
+                    detail: error.to_string(),
+                },
+            })?;
         for sample in &self.nyquist {
+            super::check_abort(abort)?;
             finite("Nyquist frequency", sample.frequency)?;
             finite("Nyquist real part", sample.real)?;
             finite("Nyquist imaginary part", sample.imaginary)?;

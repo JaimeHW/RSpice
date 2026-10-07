@@ -467,6 +467,7 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
             ResultAxisKind::Frequency,
             axis_values.clone(),
             ResultPayload::Stb(StabilityPayload {
+                circuit_poles: Default::default(),
                 success: true,
                 warnings: vec!["probe orientation assumed".to_owned()],
                 nyquist: shape
@@ -765,6 +766,23 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
     };
 
     let mut retained_scalars = scalars(shape);
+    if analysis == AnalysisKind::Stb {
+        // Generate the required DC/margin availability from these same samples.
+        // Generic metadata alone is no longer a valid STB document.
+        let gains: Vec<_> = shape
+            .magnitudes
+            .iter()
+            .map(|&v| rspice_core::Complex64::new(v, -v))
+            .collect();
+        let response = rspice_core::analysis::stb::StbAnalyzer::new(Default::default())
+            .analyze(&shape.axis_values(), &gains)
+            .unwrap();
+        let measured = AnalysisResultDocument::from_stability(analysis_id(analysis), &response)
+            .unwrap()
+            .build()
+            .unwrap();
+        retained_scalars.extend_from_slice(measured.scalars());
+    }
     if analysis == AnalysisKind::Sensitivity {
         retained_scalars.push(
             ResultScalar::new(
