@@ -2,7 +2,7 @@
 //! cards bind in their authored scope after declarations are complete.
 use super::*;
 
-mod scoped;
+use crate::netlist::parser::card_binding::{CardBinding, located_error};
 use crate::netlist::parser::scopes::LexicalScopes;
 
 #[derive(Debug, Default)]
@@ -27,14 +27,10 @@ enum Card {
 
 #[derive(Debug)]
 struct PendingCard {
-    scope: usize,
+    binding: CardBinding,
     command: String,
-    stream: TokenStream,
     logical_line: String,
     max_analysis_points: usize,
-    values: Vec<(String, crate::ComplexValue)>,
-    strings: Vec<(String, String)>,
-    functions: Vec<crate::netlist::expr::FunctionDef>,
 }
 
 impl PendingCard {
@@ -44,45 +40,12 @@ impl PendingCard {
         stream: TokenStream,
         context: AnalysisCardContext<'_>,
     ) -> Self {
-        let mut values = context
-            .params
-            .all_params()
-            .into_iter()
-            .filter_map(|(name, _)| context.params.get_complex(&name).map(|value| (name, value)))
-            .collect::<Vec<_>>();
-        // Builtins need not have stored bindings, but were already readable at
-        // this card. Temperature reconciliation may replay the whole parser.
-        for name in ["TEMP", "TEMPER", "TNOM", "VT"] {
-            if let Some(value) = context.params.get_complex(name) {
-                values.push((name.to_owned(), value));
-            }
-        }
         Self {
-            scope,
+            binding: CardBinding::capture(scope, stream, context.params),
             command: command.to_owned(),
-            stream,
             logical_line: context.logical_line.to_owned(),
             max_analysis_points: context.max_analysis_points,
-            values,
-            strings: context.params.all_string_params(),
-            functions: context.params.all_functions(),
         }
-    }
-
-    fn context(&self, completed: &ParamContext) -> ParamContext {
-        // Copy only resolved authored bindings over the completed scope. An
-        // old unresolved definition must not overwrite its selected final value.
-        let mut params = completed.clone();
-        for (name, value) in &self.values {
-            params.set_complex(name, *value);
-        }
-        for (name, value) in &self.strings {
-            params.set_string(name, value.clone());
-        }
-        for function in &self.functions {
-            params.import_function(function.clone());
-        }
-        params
     }
 }
 
@@ -180,27 +143,39 @@ impl AnalysisCardPlan {
                             .map_err(|error| located_error(error, entry.line, &entry.origin))?;
                         *card
                     }
-                    Card::Pending(pending) if pending.scope != 0 || incomplete_parameters => {
-                        scoped::bind(
+                    Card::Pending(pending)
+                        if pending.binding.scope != 0 || incomplete_parameters =>
+                    {
+                        pending.binding.bind(
                             scopes,
-                            &pending,
-                            AnalysisCardContext {
-                                line_num: entry.line,
-                                logical_line: &pending.logical_line,
-                                params,
-                                max_analysis_points: pending.max_analysis_points,
-                                origin: &entry.origin,
-                                lin_exists,
-                                current_noise,
-                            },
+                            params,
+                            entry.line,
+                            &entry.origin,
                             abort,
+                            |stream, bound| {
+                                ParsedAnalysisCard::stage(
+                                    AnalysisHead::parse(&pending.command)
+                                        .expect("saved analysis head"),
+                                    &pending.command,
+                                    stream,
+                                    AnalysisCardContext {
+                                        line_num: entry.line,
+                                        logical_line: &pending.logical_line,
+                                        params: bound,
+                                        max_analysis_points: pending.max_analysis_points,
+                                        origin: &entry.origin,
+                                        lin_exists,
+                                        current_noise,
+                                    },
+                                )
+                            },
                         )?
                     }
                     Card::Pending(pending) => {
-                        let bound = pending.context(params);
+                        let bound = pending.binding.context(params);
                         ParsedAnalysisCard::parse(
                             &pending.command,
-                            &mut pending.stream.clone(),
+                            &mut pending.binding.stream.clone(),
                             AnalysisCardContext {
                                 line_num: entry.line,
                                 logical_line: &pending.logical_line,
@@ -279,15 +254,6 @@ impl AnalysisCardPlan {
         sink.output_requests.extend(outputs);
         sink.diagnostics.extend(diagnostics);
         Ok(())
-    }
-}
-
-fn located_error(error: ParseError, line: usize, origin: &NetlistSourceLocation) -> ParseError {
-    match error {
-        ParseError::InvalidValue(message) => {
-            ParseError::InvalidValue(format!("{origin}: {message}"))
-        }
-        error => source_map_logical_line_error(error, line, origin, true),
     }
 }
 

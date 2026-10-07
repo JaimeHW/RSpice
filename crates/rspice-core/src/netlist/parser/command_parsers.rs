@@ -2271,7 +2271,7 @@ mod startup_cursor_tests {
                 .unwrap_err();
             assert_eq!(stream.missing_numeric_parameter(), Some("LATER"));
             stream.resume_numeric_binding(
-                &original,
+                original.checkpoint(),
                 "LATER".into(),
                 crate::ComplexValue::new(7.0, 0.0),
             );

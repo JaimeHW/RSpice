@@ -47,14 +47,14 @@ impl TokenStream {
 
     pub(super) fn resume_numeric_binding(
         &mut self,
-        original: &Self,
+        checkpoint: usize,
         name: String,
         value: crate::ComplexValue,
     ) {
         let bindings = self.bindings.as_mut().expect("binding mode");
         bindings.values.insert(name, value);
         bindings.missing = None;
-        self.tokens = original.tokens.clone();
+        self.tokens.restore_checkpoint(checkpoint);
     }
 
     /// Read before advancing the token: its authored byte position identifies

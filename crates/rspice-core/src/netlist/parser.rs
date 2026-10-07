@@ -53,6 +53,7 @@ use std::collections::{HashMap, HashSet};
 
 mod analysis_card_scan;
 mod body;
+mod card_binding;
 mod chebyshev_synthesis;
 mod command_parsers;
 mod commands;
