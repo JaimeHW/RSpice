@@ -13,7 +13,8 @@ use super::super::{
 use crate::Netlist;
 use crate::abort_signal::AbortSignal;
 use crate::analysis::{
-    FourierAnalysis, FourierConfig, FourierError, evaluate_tran_continuous_measurements,
+    FourierAnalysis, FourierConfig, FourierError,
+    evaluate_tran_continuous_measurements_with_limits_and_abort,
     evaluate_tran_four_output_requests_with_abort, evaluate_tran_measurements_with_abort,
 };
 use crate::netlist::AnalysisCommand;
@@ -41,7 +42,9 @@ pub fn evaluate_transient_post_results(
     }
     let fourier = evaluate_transient_fourier_results(netlist, result, limits, abort)?;
     let measurements = evaluate_tran_measurements_with_abort(netlist, result, abort)?;
-    let continuous_measurements = evaluate_tran_continuous_measurements(netlist, result);
+    let continuous_measurements = evaluate_tran_continuous_measurements_with_limits_and_abort(
+        netlist, result, &limits, abort,
+    )?;
     if abort.is_aborted() {
         return Err(SimulationError::Aborted);
     }

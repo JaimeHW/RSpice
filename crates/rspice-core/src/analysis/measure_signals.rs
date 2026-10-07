@@ -26,6 +26,9 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+mod continuous;
+pub use continuous::*;
+
 mod current_measure;
 pub(crate) mod current_observation;
 
@@ -415,27 +418,47 @@ pub(crate) struct CanonicalMeasureSignalIndex<'a> {
 
 impl<'a> CanonicalMeasureSignalIndex<'a> {
     pub(crate) fn new(signals: &HashMap<String, &'a [Value]>) -> Self {
-        let mut index = HashMap::<String, IndexedMeasureSignal<'a>>::with_capacity(signals.len());
+        let mut index = Self {
+            signals: HashMap::with_capacity(signals.len()),
+        };
         for (name, waveform) in signals {
-            let canonical = canonical_measure_signal_name(name);
-            index
-                .entry(canonical)
-                .and_modify(|existing| {
-                    if existing.waveform.len() != waveform.len()
-                        || !std::ptr::eq(existing.waveform.as_ptr(), waveform.as_ptr())
-                    {
-                        existing
-                            .conflicting_name
-                            .get_or_insert_with(|| name.to_string());
-                    }
-                })
-                .or_insert_with(|| IndexedMeasureSignal {
-                    waveform,
-                    first_name: name.to_string(),
-                    conflicting_name: None,
-                });
+            index.insert(name, waveform);
         }
-        Self { signals: index }
+        index
+    }
+
+    fn new_with_abort(
+        signals: &HashMap<String, &'a [Value]>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, SimulationError> {
+        let mut index = Self {
+            signals: HashMap::new(),
+        };
+        for (work, (name, waveform)) in signals.iter().enumerate() {
+            super::measure::continuous::poll(abort, work)?;
+            index.insert(name, waveform);
+        }
+        Ok(index)
+    }
+
+    fn insert(&mut self, name: &str, waveform: &'a [Value]) {
+        let canonical = canonical_measure_signal_name(name);
+        self.signals
+            .entry(canonical)
+            .and_modify(|existing| {
+                if existing.waveform.len() != waveform.len()
+                    || !std::ptr::eq(existing.waveform.as_ptr(), waveform.as_ptr())
+                {
+                    existing
+                        .conflicting_name
+                        .get_or_insert_with(|| name.to_string());
+                }
+            })
+            .or_insert_with(|| IndexedMeasureSignal {
+                waveform,
+                first_name: name.to_string(),
+                conflicting_name: None,
+            });
     }
 
     fn get(&self, requested: &str) -> Result<Option<&'a [Value]>, String> {
@@ -5009,8 +5032,10 @@ fn validate_ac_sweep_schema(
 fn validate_noise_sweep_schema(
     sweep: &[crate::analysis::NoiseResult],
     first: &crate::analysis::NoiseResult,
+    abort: &dyn AbortSignal,
 ) -> Result<(), SimulationError> {
     for (row, point) in sweep.iter().enumerate() {
+        super::measure::continuous::poll(abort, row)?;
         let coordinate = frequency_sweep_coordinate(row, point.frequency);
         validate_named_result_schema(
             "NOISE",
@@ -5244,13 +5269,6 @@ struct ComplexProjectionSeries {
 }
 
 impl ComplexProjectionSeries {
-    fn push(&mut self, prefix: char, raw: &str, values: Vec<crate::Complex64>) {
-        // `push_with_abort` only allocates and copies; a failure would mean a
-        // projection column was dropped, which the caller sees as a missing
-        // signal rather than as a crash here.
-        let _ = self.push_with_abort(prefix, raw, &values, &NoAbort);
-    }
-
     fn push_with_abort(
         &mut self,
         prefix: char,
@@ -5469,10 +5487,18 @@ impl NoiseSweepSeries {
     pub fn from_sweep(
         sweep: &[crate::analysis::NoiseResult],
     ) -> Result<Option<Self>, SimulationError> {
+        Self::from_sweep_with_abort(sweep, &NoAbort)
+    }
+
+    fn from_sweep_with_abort(
+        sweep: &[crate::analysis::NoiseResult],
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Self>, SimulationError> {
+        super::measure::continuous::poll(abort, 0)?;
         let Some(first) = sweep.first() else {
             return Ok(None);
         };
-        validate_noise_sweep_schema(sweep, first)?;
+        validate_noise_sweep_schema(sweep, first, abort)?;
         let catalog_key = |identity: &crate::analysis::NoiseSourceIdentity| {
             (
                 identity.device.to_ascii_uppercase(),
@@ -5493,6 +5519,7 @@ impl NoiseSweepSeries {
         };
         let expected_catalog = sorted_catalog(first);
         for (row, point) in sweep.iter().enumerate().skip(1) {
+            super::measure::continuous::poll(abort, row)?;
             let actual_catalog = sorted_catalog(point);
             if actual_catalog != expected_catalog {
                 let expected_names = noise_catalog_names(first);
@@ -5511,18 +5538,20 @@ impl NoiseSweepSeries {
 
         let mut projections = ComplexProjectionSeries::default();
         for (index, name) in first.node_names.iter().enumerate() {
+            super::measure::continuous::poll(abort, index)?;
             let raw = if name.is_empty() {
                 (index + 1).to_string()
             } else {
                 name.clone()
             };
-            projections.push(
+            projections.push_with_abort(
                 'V',
                 &raw,
-                sweep
+                &sweep
                     .iter()
                     .enumerate()
                     .map(|(row, point)| {
+                        super::measure::continuous::poll(abort, row)?;
                         point.voltages.get(index).copied().ok_or_else(|| {
                             result_schema_mismatch(
                                 "NOISE",
@@ -5536,19 +5565,22 @@ impl NoiseSweepSeries {
                         })
                     })
                     .collect::<Result<Vec<_>, _>>()?,
-            );
+                abort,
+            )?;
         }
         for (index, name) in first.branch_names.iter().enumerate() {
+            super::measure::continuous::poll(abort, index)?;
             if name.is_empty() {
                 continue;
             }
-            projections.push(
+            projections.push_with_abort(
                 'I',
                 name,
-                sweep
+                &sweep
                     .iter()
                     .enumerate()
                     .map(|(row, point)| {
+                        super::measure::continuous::poll(abort, row)?;
                         point.currents.get(index).copied().ok_or_else(|| {
                             result_schema_mismatch(
                                 "NOISE",
@@ -5562,12 +5594,14 @@ impl NoiseSweepSeries {
                         })
                     })
                     .collect::<Result<Vec<_>, _>>()?,
-            );
+                abort,
+            )?;
         }
         let mut contribution_probes = Vec::new();
         let mut seen_devices = HashSet::new();
         let mut seen_mechanisms = HashSet::new();
-        for identity in &first.contribution_catalog {
+        for (index, identity) in first.contribution_catalog.iter().enumerate() {
+            super::measure::continuous::poll(abort, index)?;
             let device_key = identity.device.to_ascii_uppercase();
             if seen_devices.insert(device_key) {
                 contribution_probes.push((identity.device.clone(), None));
@@ -5584,6 +5618,7 @@ impl NoiseSweepSeries {
         }
         let mut contributions = Vec::with_capacity(contribution_probes.len() * 2);
         for (device, mechanism) in contribution_probes {
+            super::measure::continuous::poll(abort, 0)?;
             for (prefix, kind) in [
                 ("DNO", NoiseContributionKind::Output),
                 ("DNI", NoiseContributionKind::Input),
@@ -5601,6 +5636,7 @@ impl NoiseSweepSeries {
                     .iter()
                     .enumerate()
                     .map(|(row, point)| {
+                        super::measure::continuous::poll(abort, row)?;
                         point.contribution(&probe).map_err(|_| {
                             let actual_names = point
                                 .contributions
@@ -5623,22 +5659,20 @@ impl NoiseSweepSeries {
             }
         }
 
+        let mut axis = Vec::with_capacity(sweep.len());
+        let mut onoise = Vec::with_capacity(sweep.len());
+        let mut inoise = Vec::with_capacity(sweep.len());
+        for (row, point) in sweep.iter().enumerate() {
+            super::measure::continuous::poll(abort, row)?;
+            axis.push(point.frequency);
+            // Preserve power spectral density; RMS conversion is opt-in.
+            onoise.push(point.output_noise_density);
+            inoise.push(point.input_referred_density);
+        }
         Ok(Some(Self {
-            axis: sweep.iter().map(|point| point.frequency).collect(),
-            // Xyce passes the total one-sided power spectral densities directly
-            // to the ONOISE and INOISE operators.  The exported
-            // `*_SPECTRUM` columns therefore have units of V^2/Hz (or the
-            // corresponding input-referred units), not amplitude-density
-            // units.  Keep square-root conversion confined to the explicit
-            // `NoiseResult::*_rms` convenience methods.
-            onoise: sweep
-                .iter()
-                .map(|point| point.output_noise_density)
-                .collect(),
-            inoise: sweep
-                .iter()
-                .map(|point| point.input_referred_density)
-                .collect(),
+            axis,
+            onoise,
+            inoise,
             projections,
             contributions,
         }))
@@ -5789,69 +5823,6 @@ pub fn evaluate_noise_measurements_with_abort(
     } else {
         Ok(results)
     }
-}
-
-/// Evaluate vector-valued `.MEASURE NOISE_CONT` point-event statements.
-///
-/// The returned records retain all qualifying event rows; they are not
-/// collapsed to the first scalar result as ordinary NOISE measurements are.
-pub fn evaluate_noise_continuous_measurements(
-    netlist: &Netlist,
-    sweep: &[crate::analysis::NoiseResult],
-) -> Vec<ContinuousMeasureResult> {
-    let statements = measurements_for_analysis(netlist, "NOISE_CONT");
-    if statements.is_empty() {
-        return Vec::new();
-    }
-    let series = match NoiseSweepSeries::from_sweep(sweep) {
-        Ok(Some(series)) => series,
-        Ok(None) => {
-            return statements
-                .iter()
-                .map(|statement| ContinuousMeasureResult {
-                    name: statement.name.clone(),
-                    records: Vec::new(),
-                    failure: Some("noise sweep produced no points".to_string()),
-                    failure_metadata: None,
-                })
-                .collect();
-        }
-        Err(error) => {
-            return failed_continuous_measurements(&statements, &error.to_string());
-        }
-    };
-    let alias_projection = match InterfaceNodeAliasProjection::new(
-        netlist,
-        OutputAnalysisKind::Noise,
-        series.axis().len(),
-    ) {
-        Ok(projection) => projection,
-        Err(error) => return failed_continuous_measurements(&statements, &error),
-    };
-    let mut signals = series.equation_signal_map();
-    if let Err(error) = alias_projection.augment(&mut signals) {
-        return failed_continuous_measurements(&statements, &error);
-    }
-    evaluate_continuous_statements(&statements, series.axis(), signals, &netlist.params, &[])
-}
-
-fn evaluate_continuous_statements(
-    statements: &[&MeasureStatement],
-    axis: &[Value],
-    signals: HashMap<String, &[Value]>,
-    params: &crate::netlist::ParamContext,
-    segment_starts: &[usize],
-) -> Vec<ContinuousMeasureResult> {
-    let derived = materialize_measure_expression_signals(statements, axis, &signals, params);
-    let mut augmented_signals = signals;
-    for (name, waveform) in &derived {
-        augmented_signals.insert(name.clone(), waveform.as_slice());
-    }
-    let mut engine = MeasureEngine::new();
-    for statement in statements {
-        engine.add((*statement).clone());
-    }
-    engine.evaluate_continuous(axis, &augmented_signals, segment_starts)
 }
 
 /// The netlist's measurement statements for one analysis kind
@@ -6200,7 +6171,26 @@ fn materialize_measure_expression_signals(
     signals: &HashMap<String, &[Value]>,
     params: &crate::netlist::ParamContext,
 ) -> Vec<(String, Vec<Value>)> {
-    let signal_index = CanonicalMeasureSignalIndex::new(signals);
+    materialize_measure_expression_signals_with_limits_and_abort(
+        statements,
+        axis,
+        signals,
+        params,
+        &ResourceLimits::unlimited(),
+        &NoAbort,
+    )
+    .unwrap_or_default()
+}
+
+fn materialize_measure_expression_signals_with_limits_and_abort(
+    statements: &[&MeasureStatement],
+    axis: &[Value],
+    signals: &HashMap<String, &[Value]>,
+    params: &crate::netlist::ParamContext,
+    limits: &ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<(String, Vec<Value>)>, SimulationError> {
+    let signal_index = CanonicalMeasureSignalIndex::new_with_abort(signals, abort)?;
     let mut names = Vec::new();
     let mut add = |name: &str| {
         let expression = name.starts_with('{') && name.ends_with('}');
@@ -6211,7 +6201,8 @@ fn materialize_measure_expression_signals(
             names.push(name.to_string());
         }
     };
-    for statement in statements {
+    for (index, statement) in statements.iter().enumerate() {
+        super::measure::continuous::poll(abort, index)?;
         match &statement.measure_type {
             MeasureType::Delay { trig, targ, .. } => {
                 for clause in [trig, targ] {
@@ -6260,37 +6251,73 @@ fn materialize_measure_expression_signals(
         }
     }
 
-    names
-        .into_iter()
-        .filter_map(|name| {
-            if !(name.starts_with('{') && name.ends_with('}')) {
-                let kind = OutputOperandKind::Probe(crate::netlist::parse_save_probe(&name)?);
-                let column =
-                    evaluate_output_operand(&name, &kind, axis, &signal_index, params, &NoAbort)
-                        .ok()?;
-                return Some((name, column.values));
+    let mut derived = Vec::new();
+    let mut values = 0usize;
+    for name in names {
+        super::measure::continuous::poll(abort, 0)?;
+        let requested = values.saturating_add(axis.len());
+        ResourceLimitError::ensure(
+            ResourceKind::ResultValues,
+            requested,
+            limits.max_result_values,
+        )?;
+        if !(name.starts_with('{') && name.ends_with('}')) {
+            let Some(probe) = crate::netlist::parse_save_probe(&name) else {
+                continue;
+            };
+            match evaluate_output_operand(
+                &name,
+                &OutputOperandKind::Probe(probe),
+                axis,
+                &signal_index,
+                params,
+                abort,
+            ) {
+                Ok(column) => {
+                    derived.push((name, column.values));
+                    values = requested;
+                }
+                Err(OutputOperandEvaluationError::Aborted) => return Err(SimulationError::Aborted),
+                Err(OutputOperandEvaluationError::Detail { .. }) => {}
             }
-            let expression = name.strip_prefix('{')?.strip_suffix('}')?;
-            let expression = crate::netlist::expr::parse_expression(expression).ok()?;
-            let mut waveform = Vec::with_capacity(axis.len());
-            let measures = HashMap::new();
-            for row in 0..axis.len() {
-                waveform.push(
-                    evaluate_measure_expression(
-                        &expression,
-                        row,
-                        &signal_index,
-                        &measures,
-                        params,
-                        true,
-                        &format!("expression '{name}'"),
-                    )
-                    .ok()?,
-                );
+            continue;
+        }
+        let Some(expression) = name.strip_prefix('{').and_then(|s| s.strip_suffix('}')) else {
+            continue;
+        };
+        let Ok(expression) = crate::netlist::expr::parse_expression(expression) else {
+            continue;
+        };
+        let mut waveform = Vec::new();
+        waveform
+            .try_reserve_exact(axis.len())
+            .map_err(|source| SimulationError::Allocation {
+                object: "measurement expression waveform",
+                source,
+            })?;
+        let measures = HashMap::new();
+        let context = format!("expression '{name}'");
+        for row in 0..axis.len() {
+            super::measure::continuous::poll(abort, row)?;
+            match evaluate_measure_expression(
+                &expression,
+                row,
+                &signal_index,
+                &measures,
+                params,
+                true,
+                &context,
+            ) {
+                Ok(value) => waveform.push(value),
+                Err(_) => break,
             }
-            Some((name, waveform))
-        })
-        .collect()
+        }
+        if waveform.len() == axis.len() {
+            derived.push((name, waveform));
+            values = requested;
+        }
+    }
+    Ok(derived)
 }
 
 fn materialize_differential_voltage_signals(
@@ -6813,203 +6840,6 @@ fn evaluate_tran_measurements_with_signals_and_abort(
     }
 }
 
-/// Evaluate vector-valued `.MEASURE TRAN_CONT` point-event statements.
-///
-/// Every qualifying WHEN, FIND, DERIV, or TRIG/TARG event is retained with
-/// its interpolated event metadata. A single transient run has one continuous
-/// axis segment; stepped runs invoke this adapter independently per step.
-pub fn evaluate_tran_continuous_measurements(
-    netlist: &Netlist,
-    result: &TransientResult,
-) -> Vec<ContinuousMeasureResult> {
-    let statements = measurements_for_analysis(netlist, "TRAN_CONT");
-    if statements.is_empty() {
-        return Vec::new();
-    }
-    if result.time.is_empty() {
-        return statements
-            .iter()
-            .map(|statement| ContinuousMeasureResult {
-                name: statement.name.clone(),
-                records: Vec::new(),
-                failure: Some("transient analysis produced no accepted points".to_string()),
-                failure_metadata: None,
-            })
-            .collect();
-    }
-    let alias_projection = match InterfaceNodeAliasProjection::new(
-        netlist,
-        OutputAnalysisKind::Tran,
-        result.time.len(),
-    ) {
-        Ok(projection) => projection,
-        Err(error) => return failed_continuous_measurements(&statements, &error),
-    };
-    let mut signals = transient_signal_map(result);
-    if let Err(error) = alias_projection.augment(&mut signals) {
-        return failed_continuous_measurements(&statements, &error);
-    }
-    let differential_signals =
-        match materialize_differential_voltage_signals(&statements, result.time.len(), &signals) {
-            Ok(signals) => signals,
-            Err(error) => return failed_continuous_measurements(&statements, &error),
-        };
-    for (name, waveform) in &differential_signals {
-        insert_case_variants(&mut signals, name, waveform);
-    }
-    let failures = statements
-        .iter()
-        .map(|statement| {
-            result.current_impulses.as_ref()?;
-            compile_live_measure_state(
-                statement,
-                "TRAN",
-                &result.time,
-                None,
-                netlist.options.measure_use_lttm(),
-                &netlist.params,
-            )
-            .and_then(|state| {
-                current_measure::compile(netlist, result, statement, &state, &NoAbort)
-                    .map(|_| ())
-                    .map_err(|error| error.to_string())
-            })
-            .err()
-        })
-        .collect::<Vec<_>>();
-    let supported = statements
-        .iter()
-        .zip(&failures)
-        .filter_map(|(statement, failure)| failure.is_none().then_some(*statement))
-        .collect::<Vec<_>>();
-    let mut evaluated =
-        evaluate_continuous_statements(&supported, &result.time, signals, &netlist.params, &[])
-            .into_iter();
-    statements
-        .iter()
-        .zip(failures)
-        .map(|(statement, failure)| {
-            if let Some(failure) = failure {
-                ContinuousMeasureResult {
-                    name: statement.name.clone(),
-                    records: Vec::new(),
-                    failure: Some(failure),
-                    failure_metadata: None,
-                }
-            } else {
-                evaluated.next().unwrap_or_else(|| ContinuousMeasureResult {
-                    name: statement.name.clone(),
-                    records: Vec::new(),
-                    failure: Some("continuous current measurement result was not produced".into()),
-                    failure_metadata: None,
-                })
-            }
-        })
-        .collect()
-}
-
-/// Evaluate vector-valued `.MEASURE DC_CONT` point-event statements.
-///
-/// The sweep value is the event abscissa. Nested DC sweeps are divided at
-/// primary-sweep restarts so no event is interpolated across the synthetic
-/// jump between secondary-sweep cycles.
-pub fn evaluate_dc_continuous_measurements(
-    netlist: &Netlist,
-    sweep: &[(Value, SimulationResult)],
-) -> Vec<ContinuousMeasureResult> {
-    evaluate_dc_continuous_measurements_with_parameter_contexts(netlist, sweep, &[])
-}
-
-/// Evaluate vector-valued `.MEASURE DC_CONT` statements with an optional
-/// parameter context for every accepted sweep point.
-///
-/// Point-local contexts preserve `.DC DATA` semantics for expressions that
-/// reference table-driven parameters or their dependent parameters.
-pub fn evaluate_dc_continuous_measurements_with_parameter_contexts(
-    netlist: &Netlist,
-    sweep: &[(Value, SimulationResult)],
-    point_params: &[crate::netlist::ParamContext],
-) -> Vec<ContinuousMeasureResult> {
-    let statements = measurements_for_analysis(netlist, "DC_CONT");
-    if statements.is_empty() {
-        return Vec::new();
-    }
-    let normalized_statements = statements
-        .into_iter()
-        .cloned()
-        .map(normalize_dc_measurement_window)
-        .collect::<Vec<_>>();
-    let statements = normalized_statements.iter().collect::<Vec<_>>();
-    let series = match DcSweepSeries::from_sweep(sweep) {
-        Ok(Some(series)) => series,
-        Err(error) => {
-            return failed_continuous_measurements(&statements, &error.to_string());
-        }
-        Ok(None) => {
-            return statements
-                .iter()
-                .map(|statement| ContinuousMeasureResult {
-                    name: statement.name.clone(),
-                    records: Vec::new(),
-                    failure: Some("DC sweep produced no points".to_string()),
-                    failure_metadata: None,
-                })
-                .collect();
-        }
-    };
-    let alias_projection = match InterfaceNodeAliasProjection::new(
-        netlist,
-        OutputAnalysisKind::Dc,
-        series.axis().len(),
-    ) {
-        Ok(projection) => projection,
-        Err(error) => return failed_continuous_measurements(&statements, &error),
-    };
-    let mut signals = series.signal_map();
-    if let Err(error) = alias_projection.augment(&mut signals) {
-        return failed_continuous_measurements(&statements, &error);
-    }
-    let parameter_series = if point_params.is_empty() {
-        Vec::new()
-    } else if point_params.len() != series.axis().len() {
-        return statements
-            .iter()
-            .map(|statement| ContinuousMeasureResult {
-                name: statement.name.clone(),
-                records: Vec::new(),
-                failure: Some(
-                    "DC point-parameter context count does not match sweep length".to_string(),
-                ),
-                failure_metadata: None,
-            })
-            .collect();
-    } else {
-        dc_parameter_context_series(point_params)
-    };
-    for (name, waveform) in &parameter_series {
-        insert_case_variants(&mut signals, name, waveform);
-    }
-    let differential_signals = match materialize_differential_voltage_signals(
-        &statements,
-        series.axis().len(),
-        &signals,
-    ) {
-        Ok(signals) => signals,
-        Err(error) => return failed_continuous_measurements(&statements, &error),
-    };
-    for (name, waveform) in &differential_signals {
-        insert_case_variants(&mut signals, name, waveform);
-    }
-    let segment_starts = dc_primary_segment_starts(netlist, series.axis().len());
-    evaluate_continuous_statements(
-        &statements,
-        series.axis(),
-        signals,
-        &netlist.params,
-        &segment_starts,
-    )
-}
-
 /// Evaluate the netlist's DC .MEAS statements against a sweep.
 ///
 /// Returns an empty vector when the netlist has no DC measurements; an empty
@@ -7281,52 +7111,6 @@ fn normalize_dc_measurement_window(mut statement: MeasureStatement) -> MeasureSt
     statement
 }
 
-/// Evaluate vector-valued `.MEASURE AC_CONT` point-event statements.
-///
-/// Complex probes use the same canonical projections as scalar AC measures:
-/// bare `V()`/`I()` select the real component, with the explicit `VM`/`IM`,
-/// `VR`/`IR`, `VI`/`II`, `VP`/`IP`, and `VDB`/`IDB` accessors available for
-/// magnitude, real, imaginary, phase, and decibel projections.
-pub fn evaluate_ac_continuous_measurements(
-    netlist: &Netlist,
-    sweep: &[AcResult],
-) -> Vec<ContinuousMeasureResult> {
-    let statements = measurements_for_analysis(netlist, "AC_CONT");
-    if statements.is_empty() {
-        return Vec::new();
-    }
-    let series = match AcSweepSeries::from_sweep(sweep) {
-        Ok(Some(series)) => series,
-        Err(error) => {
-            return failed_continuous_measurements(&statements, &error.to_string());
-        }
-        Ok(None) => {
-            return statements
-                .iter()
-                .map(|statement| ContinuousMeasureResult {
-                    name: statement.name.clone(),
-                    records: Vec::new(),
-                    failure: Some("AC sweep produced no points".to_string()),
-                    failure_metadata: None,
-                })
-                .collect();
-        }
-    };
-    let alias_projection = match InterfaceNodeAliasProjection::new(
-        netlist,
-        OutputAnalysisKind::Ac,
-        series.axis().len(),
-    ) {
-        Ok(projection) => projection,
-        Err(error) => return failed_continuous_measurements(&statements, &error),
-    };
-    let mut signals = series.equation_signal_map();
-    if let Err(error) = alias_projection.augment(&mut signals) {
-        return failed_continuous_measurements(&statements, &error);
-    }
-    evaluate_continuous_statements(&statements, series.axis(), signals, &netlist.params, &[])
-}
-
 /// Evaluate the netlist's AC .MEAS statements against a sweep.
 ///
 /// Returns an empty vector when the netlist has no AC measurements; an
@@ -7458,6 +7242,140 @@ mod tests {
             },
         )
         .expect("Xyce test netlist parses")
+    }
+
+    #[test]
+    fn continuous_adapters_preserve_preexisting_cancellation() {
+        use crate::abort_signal::CountingAbort;
+        let netlist = Netlist::parse("* cancellation\n.MEAS TRAN_CONT a FIND TIME AT=1\n.MEAS DC_CONT b FIND TIME AT=1\n.MEAS AC_CONT c FIND TIME AT=1\n.MEAS NOISE_CONT d FIND TIME AT=1\n.END\n").unwrap();
+        let limits = ResourceLimits::default();
+        assert!(matches!(
+            evaluate_tran_continuous_measurements_with_limits_and_abort(
+                &netlist,
+                &tran_result(),
+                &limits,
+                &CountingAbort::new(0)
+            ),
+            Err(SimulationError::Aborted)
+        ));
+        assert!(matches!(
+            evaluate_dc_continuous_measurements_with_limits_and_abort(
+                &netlist,
+                &[],
+                &limits,
+                &CountingAbort::new(0)
+            ),
+            Err(SimulationError::Aborted)
+        ));
+        assert!(matches!(
+            evaluate_ac_continuous_measurements_with_limits_and_abort(
+                &netlist,
+                &[],
+                &limits,
+                &CountingAbort::new(0)
+            ),
+            Err(SimulationError::Aborted)
+        ));
+        assert!(matches!(
+            evaluate_noise_continuous_measurements_with_limits_and_abort(
+                &netlist,
+                &[],
+                &limits,
+                &CountingAbort::new(0)
+            ),
+            Err(SimulationError::Aborted)
+        ));
+    }
+
+    #[test]
+    fn continuous_expression_preparation_is_bounded_and_cancellable() {
+        use crate::abort_signal::CountingAbort;
+        let netlist = Netlist::parse(
+            "* derived waveform\n.MEAS TRAN_CONT doubled FIND {V(out)*2} AT=5000\n.END\n",
+        )
+        .unwrap();
+        let axis: Vec<_> = (0..10_001).map(|row| row as Value).collect();
+        let result = tran_waveform(axis.clone(), axis);
+        let mut limits = ResourceLimits::default();
+        limits.max_result_values = 10_000;
+        assert!(
+            matches!(evaluate_tran_continuous_measurements_with_limits_and_abort(&netlist, &result, &limits, &NoAbort), Err(SimulationError::ResourceLimit(error)) if error.resource == ResourceKind::ResultValues && error.requested == 10_001)
+        );
+        limits.max_result_values = 10_001;
+        let evaluated = evaluate_tran_continuous_measurements_with_limits_and_abort(
+            &netlist, &result, &limits, &NoAbort,
+        )
+        .unwrap();
+        assert_eq!(evaluated[0].records[0].value, 10_000.0);
+
+        let signals = transient_signal_map(&result);
+        let statements = measurements_for_analysis(&netlist, "TRAN_CONT");
+        let abort = CountingAbort::new(8);
+        assert!(matches!(
+            materialize_measure_expression_signals_with_limits_and_abort(
+                &statements,
+                &result.time,
+                &signals,
+                &netlist.params,
+                &limits,
+                &abort
+            ),
+            Err(SimulationError::Aborted)
+        ));
+        assert_eq!(abort.count(), 9);
+        assert_eq!(abort.polls_after_abort(), 0);
+    }
+
+    #[test]
+    fn continuous_ac_and_noise_projection_limits_precede_series_allocation() {
+        use crate::abort_signal::CountingAbort;
+        let netlist = Netlist::parse("* sweep projection\n.MEAS AC_CONT a FIND TIME AT=1.5\n.MEAS NOISE_CONT n FIND TIME AT=1.5\n.END\n").unwrap();
+        let mut limits = ResourceLimits::default();
+        limits.max_result_values = 13;
+        let point = |frequency| AcResult {
+            frequency,
+            node_names: vec!["out".into()],
+            branch_names: Vec::new(),
+            voltages: vec![crate::Complex64::new(1.0, 0.0)],
+            currents: Vec::new(),
+        };
+        let sweep = [point(1.0), point(2.0)];
+        assert!(
+            matches!(evaluate_ac_continuous_measurements_with_limits_and_abort(&netlist, &sweep, &limits, &NoAbort), Err(SimulationError::ResourceLimit(error)) if error.requested == 14)
+        );
+        limits.max_result_values = 14;
+        assert_eq!(
+            evaluate_ac_continuous_measurements_with_limits_and_abort(
+                &netlist, &sweep, &limits, &NoAbort
+            )
+            .unwrap()[0]
+                .records[0]
+                .value,
+            1.5
+        );
+
+        let noise = noise_point(
+            1.0,
+            crate::Complex64::new(1.0, 0.0),
+            crate::Complex64::new(0.0, 0.0),
+        );
+        assert!(matches!(
+            evaluate_noise_continuous_measurements_with_limits_and_abort(
+                &netlist,
+                &[noise.clone(), noise.clone()],
+                &limits,
+                &NoAbort
+            ),
+            Err(SimulationError::ResourceLimit(_))
+        ));
+        let sweep = vec![noise; 10_001];
+        let abort = CountingAbort::new(2);
+        assert!(matches!(
+            NoiseSweepSeries::from_sweep_with_abort(&sweep, &abort),
+            Err(SimulationError::Aborted)
+        ));
+        assert_eq!(abort.count(), 3);
+        assert_eq!(abort.polls_after_abort(), 0);
     }
 
     #[test]
