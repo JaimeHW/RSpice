@@ -2016,6 +2016,7 @@ fn parse_voltage_hint_value(
     params: &ParamContext,
     defer_values: bool,
 ) -> Result<(Value, Option<String>), ParseError> {
+    let start = stream.checkpoint();
     if defer_values {
         // A subcircuit-scoped .IC/.NODESET expression must be evaluated in
         // each instance's effective parameter scope. Evaluating a formal
@@ -2023,25 +2024,37 @@ fn parse_voltage_hint_value(
         // an X-line override before flattening. Preserve every scoped value
         // expression, while still validating it and retaining the definition
         // scope's value for parser diagnostics and introspection.
-        let mut expression_stream = stream.clone();
-        let expression = collect_voltage_hint_expression(&mut expression_stream, line_num)?;
-        let mut value_stream = stream.clone();
-        let voltage = match expect_value(&mut value_stream, line_num, params) {
-            Ok(value) => value,
-            Err(err) if parameter_error_can_defer(&err) => Value::NAN,
-            Err(err) => return Err(err),
+        let expression = match collect_voltage_hint_expression(stream, line_num) {
+            Ok(expression) => expression,
+            Err(error) => {
+                stream.restore_checkpoint(start);
+                return Err(error);
+            }
         };
-        *stream = expression_stream;
+        let end = stream.checkpoint();
+        stream.restore_checkpoint(start);
+        let voltage = match expect_value(stream, line_num, params) {
+            Ok(value) => value,
+            Err(err) if !stream.binding_numeric_values() && parameter_error_can_defer(&err) => {
+                Value::NAN
+            }
+            Err(err) => {
+                stream.restore_checkpoint(start);
+                return Err(err);
+            }
+        };
+        stream.restore_checkpoint(end);
         return Ok((voltage, Some(expression)));
     }
 
-    let mut value_stream = stream.clone();
-    match expect_value(&mut value_stream, line_num, params) {
-        Ok(value) => {
-            *stream = value_stream;
-            Ok((value, None))
+    match expect_value(stream, line_num, params) {
+        Ok(value) => Ok((value, None)),
+        Err(err) => {
+            // Rewind only the cursor. Deferred numeric reads retain their
+            // missing dependency and any already-consumed statistical draws.
+            stream.restore_checkpoint(start);
+            Err(err)
         }
-        Err(err) => Err(err),
     }
 }
 
@@ -2219,16 +2232,90 @@ pub(super) fn expect_node_with_authored_spelling(
     stream: &mut TokenStream,
     line_num: usize,
 ) -> Result<(String, String), ParseError> {
-    let mut authored_stream = stream.clone();
+    let start = stream.checkpoint();
     let node = expect_node(stream, line_num)?;
-    let end = stream.peek().span.start;
+    let end = stream.checkpoint();
+    stream.restore_checkpoint(start);
     let mut authored = String::new();
-    while authored_stream.peek().span.start < end {
-        authored.push_str(&authored_stream.peek().lexeme);
-        authored_stream.advance();
+    while stream.checkpoint() < end {
+        authored.push_str(&stream.peek().lexeme);
+        stream.advance();
     }
     if authored.is_empty() {
         authored = node.clone();
     }
     Ok((node, authored))
+}
+
+#[cfg(test)]
+mod startup_cursor_tests {
+    use super::*;
+
+    #[test]
+    fn numeric_binding_preserves_missing_dependency_and_exact_draw_sequence() {
+        for scoped in [false, true] {
+            let params = ParamContext::default();
+            let mut expected = ParamContext::default();
+            expected.set("later", 7.0);
+            let expressions = ["aunif(2,1)", "aunif(3,1)+later+aunif(4,1)", "aunif(5,1)"];
+            let voltages: Vec<_> = expressions
+                .iter()
+                .map(|expression| eval_expression(expression, &expected).unwrap())
+                .collect();
+            let original = TokenStream::new(
+                tokenize("V(1a:sub)={aunif(2,1)} V(other)={aunif(3,1)+later+aunif(4,1)} V(last)={aunif(5,1)}").unwrap(),
+            );
+            let mut stream = original.clone();
+            stream.begin_numeric_binding();
+            parse_voltage_hint_command(&mut stream, 1, &params, StartupDirectiveKind::Ic, scoped)
+                .unwrap_err();
+            assert_eq!(stream.missing_numeric_parameter(), Some("LATER"));
+            stream.resume_numeric_binding(
+                &original,
+                "LATER".into(),
+                crate::ComplexValue::new(7.0, 0.0),
+            );
+            let entries = parse_voltage_hint_command(
+                &mut stream,
+                1,
+                &params,
+                StartupDirectiveKind::Ic,
+                scoped,
+            )
+            .unwrap();
+            assert_eq!(
+                entries
+                    .iter()
+                    .map(|entry| entry.voltage)
+                    .collect::<Vec<_>>(),
+                voltages
+            );
+            assert_eq!(entries[0].authored_node, "1a:sub");
+            for (entry, expression) in entries.iter().zip(expressions) {
+                assert_eq!(entry.voltage_expr.as_deref(), scoped.then_some(expression));
+            }
+            assert_eq!(
+                params.random().next_uniform(),
+                expected.random().next_uniform()
+            );
+            assert!(stream.is_eof());
+        }
+    }
+
+    #[test]
+    fn ordinary_scoped_missing_values_retain_the_instance_expression() {
+        let mut stream = TokenStream::new(tokenize("V(out)={later} V(other)=2").unwrap());
+        let entries = parse_voltage_hint_command(
+            &mut stream,
+            1,
+            &ParamContext::default(),
+            StartupDirectiveKind::Ic,
+            true,
+        )
+        .unwrap();
+        assert!(entries[0].voltage.is_nan());
+        assert_eq!(entries[0].voltage_expr.as_deref(), Some("later"));
+        assert_eq!(entries[1].voltage, 2.0);
+        assert!(stream.is_eof());
+    }
 }

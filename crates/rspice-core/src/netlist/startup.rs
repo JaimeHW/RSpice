@@ -929,6 +929,12 @@ fn constraint_path(
     if start == target {
         return Some((0.0, None));
     }
+    // A fresh terminal cannot close a constraint cycle. In particular, a
+    // long single-ended startup card adds one new target per entry; walking
+    // every previously connected node here would allocate quadratically.
+    if !graph.contains_key(start) || !graph.contains_key(target) {
+        return None;
+    }
     let mut pending = std::collections::VecDeque::from([(start.to_string(), 0.0, None)]);
     let mut visited = HashSet::from([start.to_string()]);
     while let Some((node, potential, established)) = pending.pop_front() {
