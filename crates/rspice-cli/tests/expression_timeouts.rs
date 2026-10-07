@@ -197,6 +197,20 @@ fn timeout_interrupts_runtime_model_expressions_during_construction() {
     }
 }
 
+#[test]
+fn timeout_interrupts_thermal_material_updates_after_heating() {
+    let functions = work_functions();
+    let dir = common::test_dir("thermal-update-expression-timeout");
+    let deck = dir.join("thermal.cir");
+    let body = ".MODEL rm R(LEVEL=2 RESISTIVITY=100 HEATCAPACITY={IF(TEMP>27,work(26),1u)})\nR1 out 0 rm L=1 A=1";
+    std::fs::write(
+        &deck,
+        format!("* thermal update deadline\n{functions}V1 out 0 1\n{body}\n.TRAN 1m 3m\n.END\n"),
+    )
+    .unwrap();
+    assert_times_out(&deck, body, true);
+}
+
 fn assert_times_out(deck: &std::path::Path, source: &str, execution_started: bool) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_rspice"))
         .args(["--quiet", "--error-format", "json", "run"])
