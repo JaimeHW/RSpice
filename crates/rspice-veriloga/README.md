@@ -515,6 +515,14 @@ Comparisons supply their common operand width and sign before arithmetic is
 evaluated, so `(8'd255+8'd1)==16'd256` is true. Conditional evaluation still
 skips inactive arms and preserves analog sample barriers.
 
+Schema 90 short-circuits discrete logical expressions: a false left operand
+of `&&` or a true left operand of `||` skips the right operand, including its
+analog reads and runtime conversion errors. Unknown left truth values still
+evaluate the right operand and use the four-state logical tables. The shared
+lowerer applies this behavior to constants, processes, drivers and computed
+events, preserving captured operands across analog sample barriers.
+Stateful analog operators remain invalid in digital expressions.
+
 Concatenation and packed-selection helpers remain recursive. Closed defaults
 containing those forms retain the temporary 256-expression-node bound; large
 packed defaults receive an explicit diagnostic. Their iterative migration,

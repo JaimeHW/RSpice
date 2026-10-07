@@ -185,6 +185,8 @@ enum Operation {
 enum Work<'a> {
     Expression(BlockId, &'a Expression, Mode),
     Apply(BlockId, Operation),
+    LogicalLeft(BlockId, LogicalOp, &'a Expression),
+    LogicalRight(LogicalFrame),
     Conditional(BlockId, &'a crate::ast::ConditionalExpr, ConditionalDomain),
     Then(ConditionalFrame, &'a Expression),
     Else(ConditionalFrame, ValueId, Option<ValueId>),
@@ -216,6 +218,19 @@ pub(super) fn lower(
             Work::Apply(block, operation) => {
                 let value = apply(lowerer, block, operation, &mut values);
                 values.push(value);
+                continue;
+            }
+            Work::LogicalLeft(block, op, right) => {
+                let left = values.pop().expect("logical left operand");
+                let frame = LogicalFrame::start(lowerer, block, op, left);
+                let right_block = frame.right_block;
+                pending.push(Work::LogicalRight(frame));
+                pending.push(Work::Expression(right_block, right, Mode::Condition));
+                continue;
+            }
+            Work::LogicalRight(frame) => {
+                let right = values.pop().expect("logical right operand");
+                values.push(frame.finish(lowerer, right));
                 continue;
             }
             Work::Conditional(block, conditional, domain) => {
@@ -396,6 +411,19 @@ pub(super) fn lower(
                     child_mode,
                 );
             }
+            Expression::Binary(value) if matches!(value.op, BinaryOp::And | BinaryOp::Or) => {
+                // VAMS-2023 4.2.3: only a definite controlling left operand
+                // skips the right side. An X/Z truth value still needs it.
+                // Stateful analog operators are rejected by digital analysis;
+                // continuous probes are reads and can be skipped.
+                let op = if value.op == BinaryOp::And {
+                    LogicalOp::And
+                } else {
+                    LogicalOp::Or
+                };
+                pending.push(Work::LogicalLeft(block, op, &value.right));
+                pending.push(Work::Expression(block, &value.left, Mode::Condition));
+            }
             Expression::Binary(value) => {
                 if matches!(
                     value.op,
@@ -422,7 +450,9 @@ pub(super) fn lower(
                     (Mode::Real, Mode::Real, context)
                 } else {
                     match value.op {
-                        BinaryOp::And | BinaryOp::Or => (Mode::Condition, Mode::Condition, context),
+                        BinaryOp::And | BinaryOp::Or => {
+                            unreachable!("logical control-flow lowering")
+                        }
                         BinaryOp::Eq
                         | BinaryOp::Ne
                         | BinaryOp::Lt
@@ -637,21 +667,7 @@ fn apply(
                             right,
                         }
                     }
-                    BinaryOp::And | BinaryOp::Or => {
-                        return lowerer.builder.push(
-                            block,
-                            bits(1),
-                            CfgValueKind::DigitalLogical {
-                                op: if op == BinaryOp::And {
-                                    LogicalOp::And
-                                } else {
-                                    LogicalOp::Or
-                                },
-                                left,
-                                right,
-                            },
-                        );
-                    }
+                    BinaryOp::And | BinaryOp::Or => unreachable!("logical control-flow lowering"),
                     BinaryOp::Eq | BinaryOp::Ne => {
                         return lowerer.builder.push(
                             block,
@@ -918,6 +934,96 @@ impl ConditionalFrame {
             &[
                 (self.then_block, then_value),
                 (self.else_block, else_result),
+            ],
+        );
+        lowerer.builder.seal_block(self.join);
+        lowerer.builder.continue_at(self.block, self.join);
+        result
+    }
+}
+
+// A logical RHS is evaluated only if the left truth value is not the known
+// controlling value. Its own nested CFG and sample barriers may redirect
+// right_block; ProcessBuilder resolves that continuation for the join.
+struct LogicalFrame {
+    block: BlockId,
+    op: LogicalOp,
+    left: ValueId,
+    controlling: ValueId,
+    right_block: BlockId,
+    join: BlockId,
+}
+
+impl LogicalFrame {
+    fn start(
+        lowerer: &mut ProcessLowerer<'_>,
+        block: BlockId,
+        op: LogicalOp,
+        left: ValueId,
+    ) -> Self {
+        let bits = CfgValueType::FourState { width: 1 };
+        let controlling = lowerer.builder.push_leaf(
+            bits,
+            CfgValueKind::FourStateConstant(FourStateValue::from_u64(
+                1,
+                u64::from(op == LogicalOp::Or),
+            )),
+        );
+        let skip = lowerer.builder.push(
+            block,
+            bits,
+            CfgValueKind::DigitalCaseMatch {
+                selector: left,
+                label: controlling,
+                kind: DigitalCaseMatch::Exact,
+                signed: false,
+            },
+        );
+        let right_block = lowerer.builder.create_block();
+        let join = lowerer.builder.create_block();
+        lowerer.builder.set_terminator(
+            block,
+            CfgTerminator::Branch {
+                condition: skip,
+                then_target: join,
+                then_args: Vec::new(),
+                else_target: right_block,
+                else_args: Vec::new(),
+            },
+        );
+        lowerer.builder.seal_block(right_block);
+        Self {
+            block,
+            op,
+            left,
+            controlling,
+            right_block,
+            join,
+        }
+    }
+
+    fn finish(self, lowerer: &mut ProcessLowerer<'_>, right: ValueId) -> ValueId {
+        let evaluated = lowerer.builder.push(
+            self.right_block,
+            CfgValueType::FourState { width: 1 },
+            CfgValueKind::DigitalLogical {
+                op: self.op,
+                left: self.left,
+                right,
+            },
+        );
+        lowerer.builder.set_terminator(
+            self.right_block,
+            CfgTerminator::Jump {
+                target: self.join,
+                args: Vec::new(),
+            },
+        );
+        let result = lowerer.builder.merge_values(
+            self.join,
+            &[
+                (self.block, self.controlling),
+                (self.right_block, evaluated),
             ],
         );
         lowerer.builder.seal_block(self.join);

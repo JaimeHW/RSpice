@@ -2338,6 +2338,12 @@ fn linked_four_state_conditional_events_skip_unknown_inputs_and_drive_spice_load
     conditional_event_circuit("select ? $realtobits(level) : $realtobits(data + 0.0)");
 }
 
+#[test]
+fn linked_logical_events_skip_unknown_inputs_and_drive_spice_loads() {
+    conditional_event_circuit("!select && (data + 0.0)");
+    conditional_event_circuit("select || !(data + 0.0)");
+}
+
 fn conditional_event_circuit(event: &str) {
     let source = ModelFile::new(
         "conditional_source",

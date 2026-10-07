@@ -8019,3 +8019,159 @@ fn comparisons_contextualize_arithmetic_before_evaluation() {
     expect_finished(h.start(0));
     assert_eq!(h.get("results"), "11011011");
 }
+#[test]
+fn logical_short_circuit_skips_invalid_real_operands() {
+    for (operator, controlling, expected) in [("&&", "0", "0"), ("||", "1", "1")] {
+        let source = format!(
+            "module lazy_logical; reg gate,q; reg [95:0] poison;\n\
+             initial q=gate {operator} (poison+0.0); endmodule"
+        );
+        let mut h = Harness::from_source(&source);
+        h.set("gate", controlling);
+        expect_finished(h.start(0));
+        assert_eq!(
+            h.get("q"),
+            expected,
+            "{operator}: unused unknown-to-real conversion"
+        );
+        for required in ["0", "1", "x", "z"]
+            .into_iter()
+            .filter(|value| *value != controlling)
+        {
+            h.set("gate", required);
+            assert!(
+                matches!(
+                    start(&h.plan, &h.plan.processes[0], &mut h.store),
+                    Err(DigitalEvalError::InvalidNumericConversion { .. })
+                ),
+                "{required} {operator}: required operand still reports its error"
+            );
+        }
+    }
+}
+
+#[test]
+fn logical_short_circuit_preserves_four_state_truth_tables() {
+    let mut h = Harness::from_source(
+        "module truth; reg a,b; reg both,either,constant_and,constant_or; reg [63:0] wide;\n\
+         parameter A=1'b0 && (8'bx+0.0); parameter O=1'b1 || $bitstoreal(64'bx);\n\
+         initial begin both=a&&b; either=a||b; wide=a||b; constant_and=A; constant_or=O; end endmodule",
+    );
+    // Rows/columns are 0,1,X,Z. Unknown left operands must evaluate the right
+    // operand because its controlling value can still determine the result.
+    let and_table = ["0000", "01xx", "0xxx", "0xxx"];
+    let or_table = ["01xx", "1111", "x1xx", "x1xx"];
+    for (row, a) in ["0", "1", "x", "z"].into_iter().enumerate() {
+        for (col, b) in ["0", "1", "x", "z"].into_iter().enumerate() {
+            h.set("a", a);
+            h.set("b", b);
+            expect_finished(h.start(0));
+            assert_eq!(h.get("constant_and"), "0");
+            assert_eq!(h.get("constant_or"), "1");
+            let both = &and_table[row][col..col + 1];
+            let either = &or_table[row][col..col + 1];
+            assert_eq!(h.get("both"), both, "{a} && {b}");
+            assert_eq!(h.get("either"), either, "{a} || {b}");
+            assert_eq!(h.get("wide"), format!("{}{either}", "0".repeat(63)));
+        }
+    }
+}
+
+#[test]
+fn logical_short_circuit_preserves_analog_barriers_and_prefix_effects() {
+    let mut h = Harness::from_source(
+        r#"
+module logical_barrier(p); inout p; electrical p;
+real a,b; reg choose,skipped,captured,after; reg [7:0] prefix,deferred;
+analog begin a=V(p); b=2*V(p); I(p)<+V(p)/1000; end
+initial begin
+  prefix=prefix+1; deferred<=19;
+  skipped=(0 && a) || (1 || b);
+  captured=choose && ((a>0.0) || (b>0.0));
+  after=1;
+end
+endmodule
+"#,
+    );
+    h.set("choose", "1");
+    h.set("prefix", "00000000");
+    let first = expect_suspended(h.start(0));
+    assert_eq!(
+        first.wait(),
+        &DigitalWaitRequest::AnalogSample(h.probe("a"))
+    );
+    assert_eq!(h.get("skipped"), "1");
+    assert_eq!(h.get("prefix"), "00000001");
+    assert_eq!(h.deferred_count(), 1);
+    // A suspended operator has already captured the left operand.
+    h.set("choose", "0");
+    h.set_analog("a", 0.0);
+    let second = expect_suspended(h.resume(0, first.resume_state()));
+    assert_eq!(
+        second.wait(),
+        &DigitalWaitRequest::AnalogSample(h.probe("b"))
+    );
+    h.set_analog("a", 100.0);
+    h.set_analog("b", 2.0);
+    expect_finished(h.resume(0, second.resume_state()));
+    assert_eq!(h.get("captured"), "1");
+    assert_eq!(h.get("after"), "1");
+    assert_eq!(h.get("prefix"), "00000001");
+    assert_eq!(h.deferred_count(), 1);
+    h.flush_nonblocking();
+    assert_eq!(h.get("deferred"), "00010011");
+    h.store.analog.fill(None);
+    expect_finished(h.start(0));
+    assert_eq!(
+        h.get("captured"),
+        "0",
+        "false left operand must bypass all analog reads"
+    );
+}
+
+#[test]
+fn logical_short_circuit_lowers_long_chains_iteratively() {
+    let chain = vec!["gate"; 600].join("&&");
+    let source = format!(
+        "module logical_chain; reg gate,q; reg [95:0] poison; initial q=({chain}) && (poison+0.0); endmodule"
+    );
+    let mut h = Harness::from_source(&source);
+    h.set("gate", "0");
+    expect_finished(h.start(0));
+    assert_eq!(h.get("q"), "0");
+    h.set("gate", "1");
+    assert!(matches!(
+        start(&h.plan, &h.plan.processes[0], &mut h.store),
+        Err(DigitalEvalError::InvalidNumericConversion { .. })
+    ));
+}
+#[test]
+fn logical_short_circuit_drivers_reenter_the_guard_after_wakeup() {
+    let mut h = Harness::from_source(
+        "module logical_drivers; reg gate; reg [95:0] poison; wire both,either;\n\
+         assign both=gate && (poison+0.0); assign either=!gate || (poison+0.0); endmodule",
+    );
+    h.plan = serde_json::from_slice(&serde_json::to_vec(&h.plan).unwrap()).unwrap();
+    h.plan.validate().unwrap();
+    h.set("gate", "0");
+    let mut waits = (0..2)
+        .map(|i| expect_suspended(h.start(i)))
+        .collect::<Vec<_>>();
+    h.resolve_drivers();
+    assert_eq!(h.get("both"), "0");
+    assert_eq!(h.get("either"), "1");
+    for (gate, poison, both, either) in [
+        ("1", format!("{:096b}", 1), "1", "1"),
+        ("1", format!("{:096b}", 0), "0", "0"),
+        ("0", "z".repeat(96), "0", "1"),
+    ] {
+        h.set("gate", gate);
+        h.set("poison", &poison);
+        for (i, wait) in waits.iter_mut().enumerate() {
+            *wait = expect_suspended(h.resume(i, wait.resume_state()));
+        }
+        h.resolve_drivers();
+        assert_eq!(h.get("both"), both);
+        assert_eq!(h.get("either"), either);
+    }
+}
