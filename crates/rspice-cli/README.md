@@ -652,8 +652,10 @@ coordinate. This layout takes precedence over display titles such as
 not invent an extra coordinate or reinterpret a table as another result format.
 Legacy RAW operating points and event/FFT carriers retain their existing layouts;
 unsupported RSpice table-metadata versions are rejected.
-Metadata is stored in numbered, hex-encoded `Option:` chunks so RAW readers do
-not execute it as a `Command:`. Older RSpice `Command:` metadata remains readable.
+Table and FFT metadata are stored in numbered, hex-encoded `Option:` chunks so
+RAW readers do not execute them as a `Command:`. Older RSpice `Command:` metadata
+remains readable. Incomplete, reordered, conflicting or malformed chunks are
+rejected before conversion or comparison can replace an existing artifact.
 
 Quoted CSV/TSV fields preserve delimiters, escaped quotes, surrounding whitespace
 and embedded line endings. Waveform tables, operating-point reports and FFT

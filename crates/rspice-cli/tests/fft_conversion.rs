@@ -50,6 +50,53 @@ fn source(directory: &Path) -> PathBuf {
     paths.remove(0)
 }
 
+/// Replace only FFT provenance, preserving the exact ASCII or binary payload.
+fn rewrite_raw_metadata(
+    bytes: &[u8],
+    legacy: bool,
+    change: impl FnOnce(&mut serde_json::Value),
+) -> Vec<u8> {
+    let parsed = rspice_core::io::parse_raw_reader(&mut std::io::Cursor::new(bytes)).unwrap();
+    let mut metadata: serde_json::Value = serde_json::from_str(&parsed.header.command).unwrap();
+    change(&mut metadata);
+    let metadata = serde_json::to_string(&metadata).unwrap();
+    let marker = if parsed.header.is_binary {
+        b"\nBinary:\n".as_slice()
+    } else {
+        b"\nValues:\n".as_slice()
+    };
+    let offset = bytes
+        .windows(marker.len())
+        .position(|part| part == marker)
+        .unwrap()
+        + 1;
+    let header = std::str::from_utf8(&bytes[..offset]).unwrap();
+    let mut output = Vec::new();
+    let mut replaced = false;
+    for line in header.lines() {
+        if line.starts_with("Option: rspice_metadata_v") || line.starts_with("Command:") {
+            if !replaced {
+                if legacy {
+                    output.extend_from_slice(format!("Command: {metadata}\n").as_bytes());
+                } else {
+                    rspice_core::io::ltspice_raw::write_raw_metadata_options(
+                        &mut output,
+                        &metadata,
+                    )
+                    .unwrap();
+                }
+                replaced = true;
+            }
+        } else {
+            output.extend_from_slice(line.as_bytes());
+            output.push(b'\n');
+        }
+    }
+    assert!(replaced);
+    output.extend_from_slice(&bytes[offset..]);
+    output
+}
+
 fn roundtrip_all_formats(directory: &Path, source: &Path, expected: &serde_json::Value, tag: &str) {
     for format in ["json", "csv", "tsv", "raw", "ascii", "hdf5"] {
         let intermediate = directory.join(format!("{tag}.{format}"));
@@ -119,6 +166,134 @@ fn quoted_multiline_fft_coordinate_text_survives_delimited_conversion() {
         let output = convert(&intermediate, &recovered, format, "json", &[]);
         assert!(output.status.success(), "{output:?}");
         assert_eq!(read_json(&recovered), expected);
+    }
+}
+
+#[test]
+fn fft_raw_metadata_is_inert_and_legacy_command_files_remain_readable() {
+    let directory = test_dir("inert_raw_metadata");
+    let source = source(&directory);
+    let mut expected = read_json(&source);
+    expected["coordinate"]["assignment"] =
+        "α \"; $literal `text`\r\n annotation ".repeat(100).into();
+    std::fs::write(&source, serde_json::to_vec(&expected).unwrap()).unwrap();
+    for format in ["raw", "ascii"] {
+        let encoded = directory.join(format!("fft.{format}"));
+        let recovered = directory.join("recovered.json");
+        let output = convert(&source, &encoded, "json", format, &[]);
+        assert!(output.status.success(), "{format}: {output:?}");
+        let bytes = std::fs::read(&encoded).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        let header: Vec<_> = text
+            .lines()
+            .take_while(|line| *line != "Binary:" && *line != "Values:")
+            .collect();
+        assert!(!header.iter().any(|line| line.starts_with("Command:")));
+        let options: Vec<_> = header
+            .iter()
+            .filter(|line| line.starts_with("Option:"))
+            .collect();
+        assert!(options.len() > 1);
+        for line in options {
+            assert!(line.starts_with("Option: rspice_metadata_v1_"));
+            assert!(line.len() < 320);
+            assert!(
+                line.split_once(" = x")
+                    .unwrap()
+                    .1
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit())
+            );
+        }
+        for legacy in [false, true] {
+            std::fs::write(
+                &encoded,
+                if legacy {
+                    rewrite_raw_metadata(&bytes, true, |_| {})
+                } else {
+                    bytes.clone()
+                },
+            )
+            .unwrap();
+            let output = convert(&encoded, &recovered, format, "json", &[]);
+            assert!(
+                output.status.success(),
+                "{format} legacy={legacy}: {output:?}"
+            );
+            assert_eq!(read_json(&recovered), expected);
+            let compared = cli(&[
+                "compare",
+                encoded.to_str().unwrap(),
+                source.to_str().unwrap(),
+            ]);
+            assert!(
+                compared.status.success(),
+                "{format} legacy={legacy}: {compared:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn damaged_fft_metadata_options_preserve_conversion_and_bless_destinations() {
+    let directory = test_dir("damaged_raw_metadata");
+    let source = source(&directory);
+    let encoded = directory.join("valid.raw");
+    assert!(
+        convert(&source, &encoded, "json", "ascii", &[])
+            .status
+            .success()
+    );
+    let original = std::fs::read_to_string(&encoded).unwrap();
+    let lines: Vec<_> = original.lines().collect();
+    let chunk_indices: Vec<_> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            line.starts_with("Option: rspice_metadata_v1_")
+                .then_some(index)
+        })
+        .collect();
+    assert!(chunk_indices.len() > 1);
+    let input = directory.join("invalid.raw");
+    let output = directory.join("protected.json");
+    let golden = directory.join("golden.raw");
+    for mutation in 0..5 {
+        let mut changed = lines.clone();
+        match mutation {
+            0 => {
+                changed.remove(*chunk_indices.last().unwrap());
+            }
+            1 => changed.swap(chunk_indices[0], chunk_indices[1]),
+            2 => changed.insert(chunk_indices[0], lines[chunk_indices[0]]),
+            3 | 4 => {}
+            _ => unreachable!(),
+        }
+        let changed = changed.join("\n") + "\n";
+        let changed = match mutation {
+            3 => changed.replacen("rspice_metadata_v1_", "rspice_metadata_v2_", 1),
+            4 => changed.replacen(" = x", " = xz", 1),
+            _ => changed,
+        };
+        std::fs::write(&input, changed).unwrap();
+        std::fs::write(&output, "predecessor").unwrap();
+        std::fs::write(&golden, &original).unwrap();
+        let converted = convert(&input, &output, "ascii", "json", &[]);
+        assert_eq!(
+            converted.status.code(),
+            Some(1),
+            "{mutation}: {converted:?}"
+        );
+        assert!(String::from_utf8_lossy(&converted.stderr).contains("metadata"));
+        assert_eq!(std::fs::read_to_string(&output).unwrap(), "predecessor");
+        let compared = cli(&[
+            "compare",
+            input.to_str().unwrap(),
+            golden.to_str().unwrap(),
+            "--bless",
+        ]);
+        assert_eq!(compared.status.code(), Some(1), "{mutation}: {compared:?}");
+        assert_eq!(std::fs::read_to_string(&golden).unwrap(), original);
     }
 }
 
@@ -242,11 +417,10 @@ fn selecting_a_raw_plot_still_validates_other_fft_plot_metadata() {
             .status
             .success()
     );
-    let text = std::fs::read_to_string(fft).unwrap().replacen(
-        "\"analysis_id\":\"fft-004\"",
-        "\"analysis_id\":\"fft-999\"",
-        1,
-    );
+    let bytes = rewrite_raw_metadata(&std::fs::read(fft).unwrap(), false, |metadata| {
+        metadata["results"][3]["analysis_id"] = "fft-999".into();
+    });
+    let text = String::from_utf8(bytes).unwrap();
     let multi = directory.join("container.raw");
     std::fs::write(&multi, format!("Title: Simple\nPlotname: Transient Analysis\nFlags: real double\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\n1 V(out) voltage\nValues:\n0 0 1\n{text}")).unwrap();
     let output = convert(
@@ -271,19 +445,19 @@ fn raw_event_exports_validate_companion_fft_metadata() {
         let fft = directory.join("spectrum.raw");
         assert!(convert(&source, &fft, "json", format, &[]).status.success());
         let mut bytes = b"Title: Events\nPlotname: Real Events (rspice-real-events/1)\nFlags: real double\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\n1 E(ctrl) real\nValues:\n0 0 1\n".to_vec();
-        bytes.extend(std::fs::read(fft).unwrap());
+        let fft_bytes = std::fs::read(fft).unwrap();
+        let header_length = bytes.len();
+        bytes.extend(&fft_bytes);
         let input = directory.join("events.raw");
         let output = directory.join("events.vcd");
         std::fs::write(&input, &bytes).unwrap();
         let valid = convert(&input, &output, format, "vcd", &[]);
         assert!(valid.status.success(), "{format}: {valid:?}");
         let original = std::fs::read(&output).unwrap();
-        let needle = b"\"analysis_id\":\"fft-004\"";
-        let offset = bytes
-            .windows(needle.len())
-            .position(|part| part == needle)
-            .unwrap();
-        bytes[offset..offset + needle.len()].copy_from_slice(b"\"analysis_id\":\"fft-999\"");
+        bytes.truncate(header_length);
+        bytes.extend(rewrite_raw_metadata(&fft_bytes, false, |metadata| {
+            metadata["results"][3]["analysis_id"] = "fft-999".into();
+        }));
         std::fs::write(&input, bytes).unwrap();
         for extra in [&[][..], &["--section", "1"][..]] {
             let invalid = convert(&input, &output, format, "vcd", extra);
