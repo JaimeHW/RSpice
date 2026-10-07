@@ -38,7 +38,7 @@ pub(super) fn card_values_may_sample(stream: &TokenStream) -> bool {
 /// Temperature- and thermal-voltage-dependent model expressions must remain
 /// symbolic.  Evaluating them against the parser's default 27 C context
 /// would freeze the device parameter before an analysis starts.
-fn model_expression_references_temperature(expression: &str) -> bool {
+pub(super) fn model_expression_references_temperature(expression: &str) -> bool {
     let bytes = expression.as_bytes();
     let mut index = 0;
     while index < bytes.len() {
@@ -51,7 +51,7 @@ fn model_expression_references_temperature(expression: &str) -> bool {
                 index += 1;
             }
             let identifier = expression[start..index].to_ascii_uppercase();
-            if matches!(identifier.as_str(), "TEMP" | "TEMPER" | "VT") {
+            if matches!(identifier.as_str(), "TEMP" | "TEMPER" | "TNOM" | "VT") {
                 return true;
             }
         } else {
@@ -1577,7 +1577,7 @@ fn parse_model_real_vector_entry(
         ParsedModelRealVectorEntry::Resolved(sign * value)
     } else if let Some(value) = parse_boolean_literal(&expr) {
         ParsedModelRealVectorEntry::Resolved(sign * value)
-    } else if defer_expression_params {
+    } else if defer_expression_params || model_expression_references_temperature(&expr) {
         ParsedModelRealVectorEntry::Deferred(signed_expr(expr))
     } else {
         let value = stream.evaluate_expression(&expr, params).map_err(|err| {
