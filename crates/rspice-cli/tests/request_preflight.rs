@@ -42,12 +42,12 @@ fn check_and_run_reject_invalid_requests_before_publication() {
         ),
         (
             "control-unsupported",
-            ".control\ntf V(in) V1\n.endc",
+            ".control\npz in 0 in 0 vol pz\n.endc",
             "no electrical or presentation handler",
         ),
         (
             "control-unsupported-run",
-            ".tf V(in) V1\n.control\nrun\n.endc",
+            ".pz in 0 in 0 vol pz\n.control\nrun\n.endc",
             "no control-host execution handler",
         ),
         (
