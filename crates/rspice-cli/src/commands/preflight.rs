@@ -288,7 +288,9 @@ pub(crate) fn check_requests(
                     AnalysisCommand::Op
                         | AnalysisCommand::Dc { .. }
                         | AnalysisCommand::Noise { .. }
+                        | AnalysisCommand::NoiseData { .. }
                         | AnalysisCommand::Ac { .. }
+                        | AnalysisCommand::AcData { .. }
                         | AnalysisCommand::Tran { .. }
                 ) {
                     return Err(located(invalid(

@@ -169,12 +169,29 @@ pub(super) fn run(
                             ControlAnalysisResult::Ac(result) => {
                                 frequency::finish_ac_results(&ctx, result)?
                             }
-                            ControlAnalysisResult::AcTable(_)
-                            | ControlAnalysisResult::NoiseTable(_) => {
-                                return Err(CliError::InvalidArgument {
-                                    message: "control frequency-table publication requires typed row-coordinate support".into(),
-                                    suggestion: Some("use the core ControlCircuit API to retain table coordinates until the CLI document adapter is implemented".into()),
-                                });
+                            ControlAnalysisResult::AcTable(table) => {
+                                frequency::finish_ac_table(&ctx, table)?;
+                            }
+                            ControlAnalysisResult::NoiseTable(table) => {
+                                let AnalysisCommand::NoiseData {
+                                    output_node,
+                                    reference_node,
+                                    input_source,
+                                    ..
+                                } = &dataset.command
+                                else {
+                                    return Err(CliError::InternalError {
+                                        message: "control noise table lost its authored command"
+                                            .into(),
+                                    });
+                                };
+                                frequency::finish_noise_table(
+                                    &ctx,
+                                    output_node,
+                                    reference_node.as_deref(),
+                                    input_source,
+                                    table,
+                                )?;
                             }
                             ControlAnalysisResult::Transient(_) => {
                                 unreachable!("published by the transient host")

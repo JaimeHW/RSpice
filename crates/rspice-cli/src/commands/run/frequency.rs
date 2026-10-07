@@ -18,6 +18,8 @@ use crate::hdf5::{
 };
 use crate::report::format_spice_exponent;
 
+mod table;
+
 fn map_frequency_error(
     ctx: &RunContext<'_>,
     analysis: &str,
@@ -601,31 +603,24 @@ fn distortion_magnitude_ratio(
 }
 
 pub(super) fn run_ac_data(ctx: &RunContext<'_>, table_name: &str) -> Result<(), CliError> {
-    let points = ctx
-        .netlist
-        .frequency_data_table_points(table_name)
-        .map_err(|error| invalid_ac_data(format!(".AC DATA {error}")))?;
-
     if !ctx.quiet {
         crate::console::line(format_args!(
-            "Running AC DATA analysis from table {} ({} points)...",
-            table_name,
-            points.len()
+            "Running AC DATA analysis from table {table_name}..."
         ))?;
     }
 
-    let (_row_netlists, results) = ctx
+    let result = ctx
         .engine
-        .run_ac_data_with_abort(ctx.netlist, table_name, &crate::abort::ProcessAbort)
+        .run_ac_table_with_abort(ctx.netlist, table_name, &crate::abort::ProcessAbort)
         .map_err(|source| map_frequency_error(ctx, "AC DATA", source))?;
-    finish_ac_results(ctx, &results)
+    finish_ac_table(ctx, &result)
 }
 
-fn invalid_ac_data(message: String) -> CliError {
-    CliError::InvalidArgument {
-        message,
-        suggestion: Some("fix the .DATA table referenced by .AC DATA=<name>".to_string()),
-    }
+pub(super) fn finish_ac_table(
+    ctx: &RunContext<'_>,
+    table: &rspice_core::engine::FrequencyDataResult<rspice_core::analysis::AcResult>,
+) -> Result<(), CliError> {
+    finish_ac(ctx, &table.points, Some(table))
 }
 
 pub(super) fn run_ac(
@@ -657,6 +652,14 @@ fn run_ac_frequencies(ctx: &RunContext<'_>, frequencies: Vec<f64>) -> Result<(),
 pub(super) fn finish_ac_results(
     ctx: &RunContext<'_>,
     results: &[rspice_core::analysis::AcResult],
+) -> Result<(), CliError> {
+    finish_ac(ctx, results, None)
+}
+
+fn finish_ac(
+    ctx: &RunContext<'_>,
+    results: &[rspice_core::analysis::AcResult],
+    coordinates: Option<&rspice_core::engine::FrequencyDataResult<rspice_core::analysis::AcResult>>,
 ) -> Result<(), CliError> {
     if !ctx.args.allow_nonfinite {
         for result in results {
@@ -747,9 +750,31 @@ pub(super) fn finish_ac_results(
             &output.path,
             analysis_id,
             super::document::complex_schema(&signals)?,
-            || rspice_core::execution::AnalysisResultDocument::from_ac(analysis_id, results),
+            || match coordinates {
+                Some(table) => rspice_core::execution::AnalysisResultDocument::from_ac_table(
+                    analysis_id,
+                    table,
+                ),
+                None => {
+                    rspice_core::execution::AnalysisResultDocument::from_ac(analysis_id, results)
+                }
+            },
             |path, format| {
-                if matches!(format, OutputFormat::Hdf5) {
+                if let Some(coordinates) = coordinates {
+                    table::write(
+                        ctx,
+                        path,
+                        analysis_id,
+                        format,
+                        super::export::complex_table(
+                            "ac",
+                            "AC DATA Analysis",
+                            frequencies.clone(),
+                            &signals,
+                        ),
+                        &coordinates.columns,
+                    )
+                } else if matches!(format, OutputFormat::Hdf5) {
                     let mut data = Hdf5SimulationData::new();
                     data.title = "AC Analysis".to_string();
                     data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
@@ -1048,9 +1073,9 @@ pub(super) fn run_noise_data(
             "Running Noise DATA analysis from table {table_name}..."
         ))?;
     }
-    let execution = ctx
+    let result = ctx
         .engine
-        .run_noise_data_named_with_input_source_and_abort(
+        .run_noise_table_named_with_input_source_and_abort(
             ctx.netlist,
             output_node,
             reference_node,
@@ -1059,19 +1084,34 @@ pub(super) fn run_noise_data(
             ctx.engine.config().temperature,
             &crate::abort::ProcessAbort,
         )
-        .map(|(_, results)| results);
-    let integrate = execution.as_ref().is_ok_and(|results| {
-        results
+        .map_err(|source| map_frequency_error(ctx, "Noise DATA", source))?;
+    finish_noise_table(ctx, output_node, reference_node, input_source, &result)
+}
+
+pub(super) fn finish_noise_table(
+    ctx: &RunContext<'_>,
+    output_node: &str,
+    reference_node: Option<&str>,
+    input_source: &str,
+    table: &rspice_core::engine::FrequencyDataResult<rspice_core::analysis::NoiseResult>,
+) -> Result<(), CliError> {
+    let integrate = table.points.len() >= 2
+        && table
+            .points
             .windows(2)
             .all(|pair| pair[1].frequency > pair[0].frequency)
-    });
-    finish_noise(
+        && table.columns.iter().all(|column| {
+            column.target == rspice_core::engine::FrequencyDataTarget::Frequency
+                || column.values.windows(2).all(|pair| pair[0] == pair[1])
+        });
+    finish_noise_projected(
         ctx,
         output_node,
         reference_node,
         input_source,
-        execution,
+        &table.points,
         integrate,
+        Some(table),
     )
 }
 
@@ -1101,6 +1141,28 @@ pub(super) fn finish_noise_results(
     input_source: &str,
     results: &[rspice_core::analysis::NoiseResult],
     integrate: bool,
+) -> Result<(), CliError> {
+    finish_noise_projected(
+        ctx,
+        output_node,
+        reference_node,
+        input_source,
+        results,
+        integrate,
+        None,
+    )
+}
+
+fn finish_noise_projected(
+    ctx: &RunContext<'_>,
+    output_node: &str,
+    reference_node: Option<&str>,
+    input_source: &str,
+    results: &[rspice_core::analysis::NoiseResult],
+    integrate: bool,
+    coordinates: Option<
+        &rspice_core::engine::FrequencyDataResult<rspice_core::analysis::NoiseResult>,
+    >,
 ) -> Result<(), CliError> {
     use rspice_core::analysis::noise::NoiseInputQuantity;
     if !ctx.args.allow_nonfinite {
@@ -1177,7 +1239,7 @@ pub(super) fn finish_noise_results(
             print_noise_contribution_summary(results, ctx.verbose)?;
         } else {
             crate::console::line(format_args!(
-                "  Total-noise integration disabled: DATA frequencies are not strictly increasing"
+                "  Total-noise integration unavailable: DATA requires at least two strictly increasing frequencies with every other coordinate constant"
             ))?;
         }
     }
@@ -1239,9 +1301,19 @@ pub(super) fn finish_noise_results(
             &output.path,
             analysis_id,
             schema,
-            || rspice_core::execution::AnalysisResultDocument::from_noise(analysis_id, results),
+            || match coordinates {
+                Some(table) => rspice_core::execution::AnalysisResultDocument::from_noise_table(
+                    analysis_id,
+                    table,
+                ),
+                None => {
+                    rspice_core::execution::AnalysisResultDocument::from_noise(analysis_id, results)
+                }
+            },
             |path, format| {
-                if matches!(format, OutputFormat::Hdf5) {
+                if let Some(coordinates) = coordinates {
+                    table::write(ctx, path, analysis_id, format, table, &coordinates.columns)
+                } else if matches!(format, OutputFormat::Hdf5) {
                     let mut data = Hdf5SimulationData::new();
                     data.title = "Noise Analysis".to_string();
                     data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);

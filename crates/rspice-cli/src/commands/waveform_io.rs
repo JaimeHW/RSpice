@@ -996,7 +996,7 @@ pub(super) fn result_document_table(
         AxisValues, ResultPayload, ScalarValue, SeriesValues,
     };
 
-    if document.axes().len() > 1 {
+    if document.axes().len() > 1 && document.frequency_table().is_none() {
         return Err(conversion_error(
             path,
             "a multi-axis result cannot be represented by a single flat table",
@@ -1028,12 +1028,28 @@ pub(super) fn result_document_table(
                 .signals()
                 .len()
                 .saturating_add(document.scalars().len())
-                .saturating_add(1),
+                .saturating_add(document.axes().len().max(1)),
         ),
         resource_limits.max_external_data_values,
     )?;
 
     let mut columns = Vec::new();
+    if document.frequency_table().is_some() {
+        for axis in document.axes().iter().skip(1) {
+            let AxisValues::Real { values } = axis.values() else {
+                return Err(conversion_error(
+                    path,
+                    "table bindings require real coordinates",
+                ));
+            };
+            columns.push(ExportColumn {
+                name: axis.name().into(),
+                var_type: "parameter".into(),
+                unit: crate::commands::export_table::stated_unit(axis.unit()),
+                data: ColumnData::Real(values.clone()),
+            });
+        }
+    }
     for signal in document.signals() {
         let name = signal.descriptor().display_name().to_string();
         let present = |samples: &[Option<f64>]| -> Result<Vec<f64>, CliError> {

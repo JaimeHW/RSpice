@@ -98,10 +98,23 @@ operating point is run by default.
 With `.control` regions, `run` executes their commands in order, including
 regions loaded through `.include` and `-I` search paths. The current control
 host supports scalar assignments and nested loops/conditionals, `alter`,
-`op`, `ac`, `tran`, `run`, `print`, `plot`, and `settype`. A control `run`
-executes the deck's declarative analyses; the host currently handles OP, AC,
-and transient analyses. Unsupported commands fail with their source location.
+`op`, `dc`, `ac`, `noise`, `tran`, `run`, `print`, `plot`, and `settype`. A control
+`run` executes the deck's declarative OP, DC, AC, noise and transient analyses,
+including AC/noise `DATA=<table>` forms. Unsupported commands fail with their source location.
 An explicit command-line analysis mode continues to supersede authored cards.
+
+Frequency tables retain authored row order, including repeated or decreasing
+frequencies. Typed JSON documents carry each column's parameter/device binding,
+physical coordinate axis, requested row count and any model-requested early finish.
+CSV, TSV, RAW and HDF5 tables include non-frequency coordinates as `data(column)`
+columns. `TEMP` states degrees Celsius, other bindings have unstated units, and
+the frequency scale is in hertz. HDF5 uses its general
+`table` section for these studies. Conversion, clipping and comparison retain the
+coordinate columns alongside the computed signals. Flat formats preserve numeric
+rows; typed JSON also preserves the binding and completion metadata.
+Noise band totals require at least two strictly increasing frequencies with all
+other table coordinates constant. Other tables publish spectra with an explicit
+notice that band integration is unavailable.
 
 Control `option`/`options` commands change `reltol`, `abstol`, `vntol`,
 `gmin`, `chgtol`, `eventfluxtol`, `trtol`, `xmu`, `method`, `itl1`, `itl2`, `itl4`, `temp`
