@@ -1,0 +1,258 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C04",
+  "related_packages": [
+    "C00",
+    "C13",
+    "C14"
+  ],
+  "batch": "Startup-card temperature recovery and atomic voltage-hint parsing",
+  "status": "startup_temperature_recovery_delivered_forward_startup_bindings_and_general_planning_remain",
+  "base_revision": "6cd95856e31f68ec48f80c4ded072b8ba354650d",
+  "source_revision": "19ff4bfa4907421a7b0711ed26e8d0da3c2320a1",
+  "implementation_commits": [
+    "19ff4bfa4907421a7b0711ed26e8d0da3c2320a1"
+  ],
+  "integrated_remote_commits": [
+    "71e7a7aec2e0bbba5039a3e7c082409523e1c20f",
+    "94a17cab66e8163f9f12e7f4a72b3bd275d01660",
+    "b769ca16580a1484e673735eac5c0edda9623554"
+  ],
+  "captured_utc": "2026-10-07T01:32:13.607266+00:00",
+  "host": "x86_64-pc-windows-msvc",
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+    "cli_rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "cli_toolchain_reason": "Prior pinned Rust 1.94/faer compiler crash remains unresolved; repository pin unchanged.",
+    "wasm_target": "wasm32-unknown-unknown",
+    "wasm_profile": "release",
+    "wasm_features": [
+      "wasm",
+      "veriloga-wasm-jit"
+    ],
+    "wasm_runtime": "headless Chrome dedicated worker",
+    "WASM_BINDGEN_TEST_TIMEOUT": "180",
+    "webdriver_config_sha256": "93458ed98943268e089c8c9a793bf2e899872e62941ac54795b0c27b7104785b",
+    "wasm_runner_version": "wasm-bindgen-test-runner 0.2.126",
+    "wasm_runner_executable_sha256": "e451b278c106269fa9a2731a4f8e77f888ccd2694b2b3a1760319198f6c2a68e",
+    "cargo_build_jobs": 1
+  },
+  "commands": [
+    {
+      "command": "cargo test --locked -p rspice-core -j 1 --lib netlist:: -- --test-threads=8",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1114
+      ],
+      "log": "target/core-qualification/startup-temperature-netlist-final.log",
+      "log_sha256": "83860d2456db0ab59ff9464a6b5669de8939a17a4e1b4cceeddf19c45ce8d402"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core -j 1 --test provisional_startup_temperature --test differential_startup --test provisional_subckt_temperature --test parent_temperature_options --test pending_temperature_recovery --test temperature_replay_budget --test provisional_parameter_temperature --test provisional_conditional_temperature --test provisional_option_temperature --test provisional_temperature --test forward_analyses --test analysis_error_origins --test analysis_card_transactions --test forward_parameters --test forward_sources --test temperature_options --test transient_checkpoint --test resource_limits -- --test-threads=8",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        4,
+        4,
+        12,
+        17,
+        11,
+        11,
+        9,
+        13,
+        14,
+        15,
+        13,
+        12,
+        10,
+        9,
+        25,
+        21,
+        3,
+        36
+      ],
+      "log": "target/core-qualification/startup-temperature-core-final.log",
+      "log_sha256": "9cfa53a180763f8eddd81a5b1d8d98fb046edd4fef32286adb51da2fafc82e54"
+    },
+    {
+      "command": "cargo +1.95.0 test --locked -p rspice-cli -j 1 --test temperature_axis --test analysis_error_origins --test check_hierarchy --test run_flags --test resolved_run_policy --test corner_checkpoints --target-dir target/core-cli-195",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1,
+        6,
+        3,
+        2,
+        7,
+        6
+      ],
+      "log": "target/core-qualification/startup-temperature-cli-final.log",
+      "log_sha256": "dc9917e20b945ece95ceb65659e8dad6f8ee0e09bd1ba27cfe4a0d479e02f6fd"
+    },
+    {
+      "command": "cargo clippy --locked -j 1 -p rspice-core -p rspice-cli -p rspice-wasm -p rspice-engine-adapter --lib --bins --test provisional_startup_temperature -- -D warnings",
+      "outcome": "passed",
+      "test_target_passed_counts": [],
+      "log": "target/core-qualification/startup-temperature-clippy-final.log",
+      "log_sha256": "c995b17e613353ebc6ab410364bfdc49d76a83feb687339e905bc38104380865"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core -j 1 --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test provisional_startup_temperature --test provisional_subckt_temperature --test parent_temperature_options --test pending_temperature_recovery --test temperature_replay_budget --test provisional_conditional_temperature --test temperature_options --test forward_parameters -- --nocapture",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        10,
+        9,
+        13,
+        14,
+        12,
+        10,
+        19,
+        3
+      ],
+      "log": "target/core-qualification/startup-temperature-wasm-final.log",
+      "log_sha256": "48b67921408ea84a23adca2c427a6573a689c71ed1c5442cc43b566d7f546fb6"
+    }
+  ],
+  "formatting": {
+    "targets": 590,
+    "batches": 11,
+    "failed_batches": 0,
+    "command": "python target/core-qualification/check-workspace-format.py",
+    "outcome": "passed",
+    "log": "target/core-qualification/startup-temperature-format-final.log",
+    "log_sha256": "28b405b5bb39acb4ec54ea7819630d953aa09ebb54acbefe4e05ea8a8b1e27a7"
+  },
+  "executed_tests": {
+    "native": 1378,
+    "optimized_wasm": 90
+  },
+  "test_accounting": "All qualification commands ran on the clean committed revision, with one Cargo build job. Counts are taken from each runner log; native-only cases are absent from the WASM configuration, not ignored. Development repeats and publication-ledger tests are excluded.",
+  "source_hash_format": "SHA-256 of committed Git blob bytes",
+  "source_files_sha256": {
+    "crates/rspice-core/src/netlist/parser/commands.rs": "7fd4763f05a5c15775feaa1267f1f9991bea40109f53df648bb926b6e9ed53f1",
+    "crates/rspice-core/src/netlist/parser/command_parsers.rs": "9a2b6f21403dfdbbc80cd3df0f3b94e7665cf237e1e598d466f9d8b2826073dd",
+    "crates/rspice-core/src/netlist/parser/line.rs": "e4d7fc625aba2fedad7987a858acfbe1b3367fbb33b3f082e939e960b54b51b8",
+    "crates/rspice-core/src/netlist/parser/temperature.rs": "8891cc2dc0c399dbf79b2069e888ee0ccdc10c90e3c3abdeb61f32fa067421fe",
+    "crates/rspice-core/tests/provisional_startup_temperature.rs": "a57b908df7bd0c81257275071c8429317194e03b25a5b36c9348b94b50f4feb9",
+    "Cargo.lock": "d95121ce0366b929ed8dffb0ff37b17fc330071d35e226af3d0d8ff889cdf1db",
+    "rust-toolchain.toml": "0a73f8e6f0e60b4a2bba97a16fdc0c66517abad4410e72582981b9578bc1aa62"
+  },
+  "implementation": [
+    "IC and NODESET share one parser and stage complete StartupDirectiveEntry vectors. No partial execution values or provenance records publish when a card fails; the existing entry representation avoids a second staging data model.",
+    "IC, NODESET and inline INITCOND retain their first ordinary card failure through the existing TEMP/TNOM retry contract. The rest of a failed startup card owns no temperature declarations and is skipped. A fresh source pass must validate every active card; no fallback value or empty successful record replaces an error.",
+    "Successful source-order evaluation, scoped expressions, canonical/authored/qualified node identities, duplicate validation, typed INITCOND failures, terminal resource/cancellation behavior and finite replay budgets remain authoritative."
+  ],
+  "acceptance_evidence": [
+    "Twelve portable regressions cover scalar TEMP and forward TNOM, IC/device-IC transient starts, NODESET release, bare/wrapped/continued multi-entry syntax, source-order parameter values, scoped differential overrides in ngspice/Xyce dialects, malformed/nonfinite/redefined/unused values, device duplicates and value lists, exact random phases, inactive/cyclic hints, included physical origins and terminal resource priority.",
+    "Independent circuit checks require a 1 V UIC start, a 7 V NODESET released to the 1 V resistor-divider solution within 1e-9 V, and scoped 2/3 V overrides at transient startup. Existing differential-startup and checkpoint suites qualify related solver integration.",
+    "Private tests prove failed cards leave neither partial values nor provenance, previous successful records survive, every observed cancellation boundary stops without later polls, and physical TEMP overrides precede authored temperature cards."
+  ],
+  "baseline_reproduction": {
+    "core_revision": "6cd95856e31f68ec48f80c4ded072b8ba354650d",
+    "outcome": "three_expected_regression_failures",
+    "log": "target/core-qualification/startup-temperature-before.log",
+    "log_sha256": "4e34b0318a7a984d3c8bcfa0645a4d5c4357f57a605fd55f2f34ca14208d85b5"
+  },
+  "reproductions": [
+    {
+      "source_revision": "19ff4bfa4907421a7b0711ed26e8d0da3c2320a1",
+      "command": "target/core-cli-195/debug/rspice.exe --error-format json check --json target/core-qualification/subckt-temperature-ic.cir",
+      "outcome": "valid",
+      "exit_code": 0,
+      "log": "target/core-qualification/startup-temperature-ic-resolved.log",
+      "log_sha256": "bc98e20136d073b728e6c963aede6bc6c389945e650ce9f4635b1dc3219c914a",
+      "deck": "Provisional initial condition\nR1 out 0 1k\nC1 out 0 1u\n.ic V(out)={58/(TEMP-27)}\n.temp 85\n.tran 1n 10n uic\n.end\n"
+    },
+    {
+      "source_revision": "19ff4bfa4907421a7b0711ed26e8d0da3c2320a1",
+      "command": "target/core-cli-195/debug/rspice.exe --error-format json check --json target/core-qualification/subckt-temperature-nodeset.cir",
+      "outcome": "valid",
+      "exit_code": 0,
+      "log": "target/core-qualification/startup-temperature-nodeset-resolved.log",
+      "log_sha256": "08a903763ac4e1eb13c41a1555839196f115cd6dc83bccd4bf8cdac9b2761a03",
+      "deck": "Provisional node set\nR1 out 0 1k\n.nodeset V(out)={58/(TEMP-27)}\n.temp 85\n.end\n"
+    },
+    {
+      "source_revision": "19ff4bfa4907421a7b0711ed26e8d0da3c2320a1",
+      "command": "target/core-cli-195/debug/rspice.exe --error-format json check --json target/core-qualification/startup-temperature-device.cir",
+      "outcome": "valid",
+      "exit_code": 0,
+      "log": "target/core-qualification/startup-temperature-device-resolved.log",
+      "log_sha256": "ff5b777db2358bdbf466cb9377c5aebf41db17dbc30ede82ff0bb647e120e28b",
+      "deck": "Provisional device initial condition\nR1 out 0 1k\nC1 out 0 1u\n.initcond C1 IC={58/(TEMP-27)}\n.temp 85\n.tran 1u 2u uic\n.end\n"
+    },
+    {
+      "source_revision": "19ff4bfa4907421a7b0711ed26e8d0da3c2320a1",
+      "command": "target/core-cli-195/debug/rspice.exe --error-format json check --json target/core-qualification/startup-forward-ic.cir",
+      "outcome": "unresolved_forward_startup_parameter",
+      "exit_code": 65,
+      "log": "target/core-qualification/startup-temperature-forward-ic-remaining.log",
+      "log_sha256": "2b429f85e7b6263f39f9f55d01bd56f309b8f28d1aa9b04c69cd208dfd46d798",
+      "deck": "Forward initial condition\nR1 out 0 1k\nC1 out 0 1u\n.ic V(out)={level}\n.param level=1\n.tran 1u 2u uic\n.end\n"
+    },
+    {
+      "source_revision": "19ff4bfa4907421a7b0711ed26e8d0da3c2320a1",
+      "command": "target/core-cli-195/debug/rspice.exe --error-format json check --json target/core-qualification/startup-forward-nodeset.cir",
+      "outcome": "unresolved_forward_startup_parameter",
+      "exit_code": 65,
+      "log": "target/core-qualification/startup-temperature-forward-nodeset-remaining.log",
+      "log_sha256": "613c46fae00f5f378da03841f084f115211446c40d9be101580930b01c5bfacf",
+      "deck": "Forward node set\nR1 out 0 1k\n.nodeset V(out)={level}\n.param level=1\n.end\n"
+    },
+    {
+      "source_revision": "19ff4bfa4907421a7b0711ed26e8d0da3c2320a1",
+      "command": "target/core-cli-195/debug/rspice.exe --error-format json check --json target/core-qualification/startup-forward-device.cir",
+      "outcome": "unresolved_forward_startup_parameter",
+      "exit_code": 65,
+      "log": "target/core-qualification/startup-temperature-forward-device-remaining.log",
+      "log_sha256": "87b01a1e65bdf4de4c652ce0f6e525ee7f12fd618ebc38d127786c3fa0f8c95e",
+      "deck": "Forward device initial condition\nR1 out 0 1k\nC1 out 0 1u\n.initcond C1 IC={level}\n.param level=1\n.tran 1u 2u uic\n.end\n"
+    }
+  ],
+  "limits": [
+    "Root IC/NODESET/INITCOND forward parameter references still need owner-aware dependency completion. Other earlier card failures, eager parameter error classes and general statistical/runtime binding remain open.",
+    "Inner-loop cancellation, allocation/performance bounds, remaining control execution and broader production qualification remain open. No C00-C14 package closes.",
+    "The Rust 1.94 development compiler access violation recurred; an unchanged-source one-job retry passed. Serial qualification and later successful builds do not resolve this reliability issue or the previously recorded Rust 1.95/WASM-runner incidents."
+  ],
+  "compiler_incident": {
+    "stage": "Uncommitted development version, before final staging-representation cleanup; tests did not execute.",
+    "exception": "0xc0000005 STATUS_ACCESS_VIOLATION",
+    "module": "rustc_driver-eab2645d391441c2.dll",
+    "fault_offset": "0x000000000482eb6e",
+    "log": "target/core-qualification/startup-temperature-development.log",
+    "log_sha256": "7f83d2d90a0b4af1ead4e381016ae31cb4f566330f3bec2708ef7847e9acd03f",
+    "windows_event_log": "target/core-qualification/startup-temperature-compiler-event.log",
+    "windows_event_log_sha256": "ecc01d0361e0f672368e070d604feb6e64e133f023fc27c0ff4e21c7a71a85dd",
+    "unchanged_source_retry": {
+      "command": "cargo test --locked -p rspice-core -j 1 --test provisional_startup_temperature --test differential_startup",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        12,
+        3
+      ],
+      "log": "target/core-qualification/startup-temperature-serial-retry.log",
+      "log_sha256": "a89416d552fb12979a93d8e958b873f3f1b8e92f094021aec8af2f1dc3ffd9a7"
+    },
+    "status": "Cause unresolved; C14 remains open. Retry counts are development evidence only, excluded from qualification totals."
+  },
+  "publication_ledger_sha256": "6143c01c78b569faa53b9ee7712f4b7ee25e2c47caa88b78430eab578f7ed462",
+  "publication_validation": {
+    "command": "cargo test --locked -p rspice-core -j 1 --lib engine::requirements",
+    "outcome": "passed",
+    "test_target_passed_counts": [
+      3
+    ],
+    "log": "target/core-qualification/startup-temperature-ledger.log",
+    "log_sha256": "4ce8d63b0f4f3e4408d30951f130fe7e94e6f58170817e7596d8174a0c174b06",
+    "scope": "Evidence-path and requirements checks after documentation changes; excluded from implementation totals. Package statuses and non-C04 package records unchanged."
+  },
+  "post_qualification_integration": {
+    "remote_revision": "f4a60979f2d6ce1c82270ac7003ec586af428db0",
+    "commits": [
+      "c650eb5614a964c8f9c959b2f2bcc94e6de6022e",
+      "05ddbc089c3d8542d48000cffa4352e12abb8b95",
+      "f4a60979f2d6ce1c82270ac7003ec586af428db0"
+    ],
+    "scope": "Remote main advanced with CLI conversion changes after the implementation push. The entire committed core tree, lockfile and toolchain are byte-identical to source_revision. Documentation is rebased onto that revision; this evidence does not claim runtime qualification of later CLI conversion changes."
+  }
+}

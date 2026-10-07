@@ -485,10 +485,19 @@ instance. Formal ownership, per-instance expressions, duplicate-selection
 policy and isolated default sampling remain intact. A dependent undefined name
 does not hide another default's concrete domain error.
 
-General dependency planning remains incomplete. Root `.IC`/`.NODESET` voltage
-hints, other earlier card failures and eager parameter error classes can still
-prevent temperature discovery. These cases and broader statistical/runtime
-binding qualification remain in the implementation plan.
+`.IC` and `.NODESET` use one parser that stages a complete card in the existing
+startup-entry representation. Failed cards publish neither partial execution
+values nor provenance records. These cards and inline `.INITCOND` retain their
+ordinary failures while later declarations select temperatures; a fresh pass
+must validate every active card. Scoped expressions, startup identities,
+duplicate rules, statistical phases and typed device-condition errors remain
+intact. Terminal resource failures and cancellation still stop immediately.
+
+General dependency planning remains incomplete. Root `.IC`, `.NODESET` and
+`.INITCOND` forward parameter references still need dependency completion.
+Other earlier card failures and eager parameter error classes can still prevent
+temperature discovery. These cases and broader statistical/runtime binding
+qualification remain in the implementation plan.
 
 The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and
 the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.

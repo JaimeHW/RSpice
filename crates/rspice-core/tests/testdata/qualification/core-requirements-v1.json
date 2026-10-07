@@ -31,7 +31,7 @@
       "id": "C04",
       "status": "in_progress",
       "requirement": "Control execution",
-      "qualification_task": "Complete the remaining 24 control dispositions, table control/document/adapter integration, resolved row-option precedence, producer dependencies, scalar/complex presentation and bounded orchestration. Delivered parser/control contracts and their qualification are indexed by the implementation plan and existing_evidence. Latest: b221a9742 retains provisional subcircuit-header default failures until fresh-source TEMP/TNOM validation, preserving formal ownership, per-instance expressions, authoritative duplicate selection and isolated statistical sampling. core-subckt-temperature-recovery-windows-20261006.json records native/CLI/optimized-WASM checks and cancellation/resource/origin coverage. Root IC/NODESET voltage hints still prevent later temperature discovery, as recorded in that evidence. Other earlier card failures, eager parameter error classes, general statistical/runtime binding, inner-loop cancellation, allocation/performance bounds and broader qualification remain open. Prior compiler/runner reliability incidents remain C14 work; CLI runtime qualification uses Rust 1.95."
+      "qualification_task": "Complete the remaining 24 control dispositions, table control/document/adapter integration, resolved row-option precedence, producer dependencies, scalar/complex presentation and bounded orchestration. Delivered parser/control contracts and qualification are indexed by the implementation plan and existing_evidence. Latest: 19ff4bfa4 stages IC/NODESET cards atomically with shared parsing and recovers IC/NODESET/INITCOND failures only after fresh-source TEMP/TNOM validation. core-startup-temperature-recovery-windows-20261006.json records native/CLI/optimized-WASM tests, exact sampling, startup behavior, source origins, terminal resources and cancellation. Root IC/NODESET/INITCOND forward parameter references remain unresolved, as reproduced in that evidence. Other earlier card failures, eager parameter error classes, general statistical/runtime binding, inner-loop cancellation, allocation/performance bounds and broader qualification remain open. The pinned Rust 1.94 compiler access violation recurred in development; a serial unchanged-source retry passed but the C14 cause remains open. CLI runtime qualification uses Rust 1.95."
     },
     {
       "id": "C05",
@@ -498,7 +498,8 @@
     "tests/testdata/qualification/core-provisional-option-temperature-windows-20261006.json",
     "tests/testdata/qualification/core-pending-temperature-recovery-windows-20261006.json",
     "tests/testdata/qualification/core-conditional-temperature-recovery-windows-20261006.json",
-    "tests/testdata/qualification/core-subckt-temperature-recovery-windows-20261006.json"
+    "tests/testdata/qualification/core-subckt-temperature-recovery-windows-20261006.json",
+    "tests/testdata/qualification/core-startup-temperature-recovery-windows-20261006.json"
   ],
   "open_inventory_tasks": [
     "Enumerate every per-instance predicate and pair it with supported/unsupported numerical fixtures; family declarations alone are insufficient.",
