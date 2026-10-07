@@ -137,6 +137,142 @@ fn clipping_compares_integer_ticks_without_rounding_distinct_events_together() {
 }
 
 #[test]
+fn decimal_clip_bounds_retain_all_authored_digits() {
+    let dir = common::test_dir("exact_decimal_clip_bounds");
+    let input = dir.join("input.vcd");
+    let output = dir.join("output.vcd");
+    for (scale, ticks, boundary, expected) in [
+        (
+            "1 s",
+            [
+                9_007_199_254_740_992,
+                9_007_199_254_740_993,
+                9_007_199_254_740_994,
+            ],
+            "9007199254740993",
+            9_007_199_254_740_993,
+        ),
+        (
+            "1 fs",
+            [
+                20_000_000_000_000_013,
+                20_000_000_000_000_014,
+                20_000_000_000_000_015,
+            ],
+            "20.000000000000014",
+            20_000_000_000_000_014,
+        ),
+        (
+            "1 fs",
+            [
+                20_000_000_000_000_013,
+                20_000_000_000_000_014,
+                20_000_000_000_000_015,
+            ],
+            "20000000000000014f",
+            20_000_000_000_000_014,
+        ),
+        (
+            "1 s",
+            [u64::MAX - 2, u64::MAX - 1, u64::MAX],
+            "18446744073709551615",
+            u64::MAX,
+        ),
+    ] {
+        std::fs::write(&input, format!(
+            "$timescale {scale} $end\n$var wire 1 ! d $end\n$enddefinitions $end\n#{}\n0!\n#{}\n1!\n#{}\n0!\n",
+            ticks[0], ticks[1], ticks[2]
+        )).unwrap();
+        let result = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "convert"])
+            .arg(&input)
+            .arg(&output)
+            .args(["--to", "vcd", "--start", boundary, "--stop", boundary])
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "{boundary}: {result:?}");
+        let document = parse_vcd_file(&output).unwrap();
+        assert_eq!(document.timescale.to_string(), scale);
+        assert_eq!(document.signals[0].changes.len(), 1);
+        assert_eq!(document.signals[0].changes[0].tick, expected);
+        assert_eq!(
+            document.signals[0].changes[0].value,
+            VcdValue::Logic(vec![if expected == ticks[2] {
+                VcdBit::Zero
+            } else {
+                VcdBit::One
+            }])
+        );
+    }
+}
+
+#[test]
+fn range_validation_uses_exact_bounds_and_refuses_positive_underflow() {
+    let dir = common::test_dir("exact_decimal_invalid_bounds");
+    let input = dir.join("input.vcd");
+    let output = dir.join("output.vcd");
+    std::fs::write(&input, VCD).unwrap();
+    for (flags, expected_code) in [
+        (
+            vec!["--start", "9007199254740993", "--stop", "9007199254740992"],
+            2,
+        ),
+        (vec!["--start", "1e-999"], 1),
+        (vec!["--start", "0.000000000000000000000000000001"], 1),
+    ] {
+        std::fs::write(&output, "predecessor").unwrap();
+        let result = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "convert"])
+            .arg(&input)
+            .arg(&output)
+            .args(["--to", "vcd"])
+            .args(&flags)
+            .output()
+            .unwrap();
+        assert_eq!(
+            result.status.code(),
+            Some(expected_code),
+            "{flags:?}: {result:?}"
+        );
+        assert_eq!(std::fs::read_to_string(&output).unwrap(), "predecessor");
+    }
+}
+
+#[test]
+fn fractional_stop_bounds_never_include_the_next_tick() {
+    let dir = common::test_dir("exact_fractional_stop");
+    let input = dir.join("input.vcd");
+    let output = dir.join("output.vcd");
+    std::fs::write(
+        &input,
+        "$timescale 1 s $end\n$var wire 1 ! d $end\n$enddefinitions $end\n#0\n0!\n#1\n1!\n#2\n0!\n",
+    )
+    .unwrap();
+    for stop in [
+        "1.9999999999999999999999999999999999999999",
+        "1999.9999999999999999999999999999999999999m",
+    ] {
+        let result = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "convert"])
+            .arg(&input)
+            .arg(&output)
+            .args(["--to", "vcd", "--stop", stop])
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "{stop}: {result:?}");
+        let document = parse_vcd_file(&output).unwrap();
+        assert_eq!(
+            document.signals[0]
+                .changes
+                .iter()
+                .map(|change| change.tick)
+                .collect::<Vec<_>>(),
+            [0, 1]
+        );
+    }
+}
+
+#[test]
 fn invalid_conversion_ranges_leave_destinations_unchanged() {
     let dir = common::test_dir("invalid_range");
     let input = dir.join("input.vcd");

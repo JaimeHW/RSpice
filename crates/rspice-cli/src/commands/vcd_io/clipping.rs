@@ -1,5 +1,5 @@
 //! Clip event timelines on an exact integer grid, retaining held state.
-use crate::cli::CliError;
+use crate::cli::{CliError, NumericBound};
 use rspice_core::io::{VcdDocument, VcdTimescale};
 
 fn empty_range() -> CliError {
@@ -8,32 +8,27 @@ fn empty_range() -> CliError {
     }
 }
 
-/// Convert a seconds boundary once, without rounding each event's integer tick
-/// to binary64. Recover grid points within arithmetic roundoff, capped well
-/// below a tick so a real fractional boundary cannot be snapped at large times.
-fn grid_position(time: f64, period: f64) -> f64 {
-    let ratio = time / period;
-    let nearest = ratio.round();
-    let roundoff = (ratio.abs() * 8.0 * f64::EPSILON).min(1e-7);
-    if nearest * period == time || (ratio - nearest).abs() <= roundoff {
-        nearest
-    } else {
-        ratio
-    }
+/// Every VCD period is an exact power of ten seconds.
+fn period_power(scale: VcdTimescale) -> i64 {
+    i64::from(scale.femtoseconds().ilog10()) - 15
 }
 
-fn clipped_grid(original: VcdTimescale, start: f64) -> Result<(VcdTimescale, u64, u64), CliError> {
+fn clipped_grid(
+    original: VcdTimescale,
+    start: &NumericBound,
+) -> Result<(VcdTimescale, u64, u64), CliError> {
+    if start.is_negative() {
+        return Ok((original, 1, 0));
+    }
     for scale in VcdTimescale::ALL {
         if scale.femtoseconds() > original.femtoseconds() {
             continue;
         }
-        let position = grid_position(start, scale.seconds());
-        // u64::MAX rounds up to 2^64 in binary64, which is outside the grid.
-        if position < u64::MAX as f64 && position.fract() == 0.0 {
+        if let Some((position, true)) = start.grid_position(period_power(scale)) {
             return Ok((
                 scale,
                 original.femtoseconds() / scale.femtoseconds(),
-                position as u64,
+                position,
             ));
         }
     }
@@ -45,19 +40,23 @@ fn clipped_grid(original: VcdTimescale, start: f64) -> Result<(VcdTimescale, u64
 
 pub(super) fn clip(
     document: &mut VcdDocument,
-    start: Option<f64>,
-    stop: Option<f64>,
+    start: Option<&NumericBound>,
+    stop: Option<&NumericBound>,
 ) -> Result<(), CliError> {
     if start.is_none() && stop.is_none() {
         return Ok(());
     }
-    let (timescale, factor, lower) =
-        clipped_grid(document.timescale, start.unwrap_or(0.0).max(0.0))?;
+    let (timescale, factor, lower) = match start {
+        Some(start) => clipped_grid(document.timescale, start)?,
+        None => (document.timescale, 1, 0),
+    };
     // The upper bound needs no new event; select original ticks before scaling
     // so discarded late events cannot cause a false rescaling overflow.
     let upper = match stop {
-        Some(stop) if stop < 0.0 => return Err(empty_range()),
-        Some(stop) => grid_position(stop, document.timescale.seconds()).floor() as u64,
+        Some(stop) if stop.is_negative() => return Err(empty_range()),
+        Some(stop) => stop
+            .grid_position(period_power(document.timescale))
+            .map_or(u64::MAX, |(position, _)| position),
         None => u64::MAX,
     };
     for signal in &mut document.signals {

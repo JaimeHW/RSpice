@@ -11,7 +11,7 @@
 //! when it does not. [`crate::commands::vcd_io`] holds both directions and
 //! states what each one keeps.
 
-use crate::cli::{CliError, Config, ConvertArgs, OutputFormat};
+use crate::cli::{CliError, Config, ConvertArgs, NumericBound, OutputFormat};
 use crate::commands::vcd_io;
 use crate::commands::waveform_io::{ImportedResult, detect_format, load_result_selected};
 
@@ -22,7 +22,7 @@ pub fn execute(
     _verbose: bool,
     quiet: bool,
 ) -> Result<(), CliError> {
-    validate_range(args.start, args.stop)?;
+    validate_range(args.start.as_ref(), args.stop.as_ref())?;
     crate::commands::publish::destinations::protect_sources(&args.output, config.source_paths())?;
     if !args.input.exists() {
         return Err(CliError::InputNotFound {
@@ -54,7 +54,8 @@ pub fn execute(
             args.expand_buses,
             args.section.as_deref(),
         )?;
-        let (document, notes) = loaded.select_and_clip(&args.variables, args.start, args.stop)?;
+        let (document, notes) =
+            loaded.select_and_clip(&args.variables, args.start.as_ref(), args.stop.as_ref())?;
         // Not gated on `--quiet`: the selection is wider than what was asked
         // for, and silently writing more than a caller requested is the thing
         // the note exists to prevent.
@@ -96,7 +97,10 @@ pub fn execute(
     };
 
     table.select_variables(&args.variables)?;
-    table.clip_scale_range(args.start, args.stop);
+    table.clip_scale_range(
+        args.start.as_ref().map(NumericBound::value),
+        args.stop.as_ref().map(NumericBound::value),
+    );
     // Input admission already refused empty tables.
     if table.scale.len() < crate::commands::waveform_io::MIN_RESULT_SAMPLES {
         return Err(CliError::ConversionError {
@@ -115,16 +119,14 @@ pub fn execute(
     Ok(())
 }
 
-fn validate_range(start: Option<f64>, stop: Option<f64>) -> Result<(), CliError> {
-    for (name, value) in [("--start", start), ("--stop", stop)] {
-        if value.is_some_and(|value| !value.is_finite()) {
-            return Err(CliError::InvalidArgument {
-                message: format!("{name} must be finite"),
-                suggestion: None,
-            });
-        }
-    }
-    if start.zip(stop).is_some_and(|(start, stop)| start > stop) {
+fn validate_range(
+    start: Option<&NumericBound>,
+    stop: Option<&NumericBound>,
+) -> Result<(), CliError> {
+    if start
+        .zip(stop)
+        .is_some_and(|(start, stop)| start.cmp(stop).is_gt())
+    {
         return Err(CliError::InvalidArgument {
             message: "--start must not exceed --stop".into(),
             suggestion: None,

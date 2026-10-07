@@ -201,8 +201,8 @@ impl LoadedVcdDocument {
     pub(crate) fn select_and_clip(
         mut self,
         requested: &[String],
-        start: Option<f64>,
-        stop: Option<f64>,
+        start: Option<&crate::cli::NumericBound>,
+        stop: Option<&crate::cli::NumericBound>,
     ) -> Result<(VcdDocument, Vec<String>), CliError> {
         let notes = selection::select_with_buses(
             &mut self.document,

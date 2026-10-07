@@ -2,6 +2,7 @@
 //!
 //! Comprehensive argument structures for all subcommands using clap derive.
 
+use super::NumericBound;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
@@ -736,12 +737,12 @@ pub struct ConvertArgs {
     pub variables: Vec<String>,
 
     /// Time/frequency range start
-    #[arg(long, value_name = "VALUE", value_parser = spice_value)]
-    pub start: Option<f64>,
+    #[arg(long, value_name = "VALUE")]
+    pub start: Option<NumericBound>,
 
     /// Time/frequency range end
-    #[arg(long, value_name = "VALUE", value_parser = spice_value)]
-    pub stop: Option<f64>,
+    #[arg(long, value_name = "VALUE")]
+    pub stop: Option<NumericBound>,
 
     /// Write each digital bus member as its own one-bit $var instead of one
     /// vector (--to vcd only), for readers that cannot take vectors. Each

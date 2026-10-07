@@ -1,5 +1,6 @@
 //! VCD signal and bus selection, preserving scopes, aliases and quantity.
 use super::*;
+use crate::cli::NumericBound;
 
 // -------------------------------------------------------------------------
 // Selection
@@ -26,8 +27,8 @@ use super::*;
 pub(super) fn select_and_clip(
     document: &mut VcdDocument,
     requested: &[String],
-    start: Option<f64>,
-    stop: Option<f64>,
+    start: Option<&NumericBound>,
+    stop: Option<&NumericBound>,
 ) -> Result<Vec<String>, CliError> {
     select_with_buses(document, &[], requested, start, stop)
 }
@@ -94,8 +95,8 @@ pub(super) fn select_with_buses(
     document: &mut VcdDocument,
     buses: &[ExpandedBus],
     requested: &[String],
-    start: Option<f64>,
-    stop: Option<f64>,
+    start: Option<&NumericBound>,
+    stop: Option<&NumericBound>,
 ) -> Result<Vec<String>, CliError> {
     let mut notes = Vec::new();
     if !requested.is_empty() {

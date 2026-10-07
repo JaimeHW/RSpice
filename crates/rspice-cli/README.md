@@ -455,6 +455,10 @@ an export that would merge event times is refused, even across separate signals.
 Long runs use the full 64-bit tick range at the chosen period. A combination of
 duration and event spacing that cannot share an exact timescale is refused;
 the converter does not wrap the timeline or silently coarsen its resolution.
+VCD clipping keeps `--start` and `--stop` as exact decimal values, including
+SPICE suffixes. Integer ticks above 2^53 remain selectable without losing digits.
+The start must lie on a supported tick grid; a fractional stop includes only
+ticks at or before that boundary.
 
 A **declared digital bus**, today a vector discrete boundary port of a mixed
 Verilog-AMS module, is written as one `$var wire N` named `bus [msb:lsb]`, with
