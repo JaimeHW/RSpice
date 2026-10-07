@@ -17,7 +17,7 @@
 //! was armed for and no sleeper is left running through process teardown.
 
 use rspice_core::abort_signal::AbortSignal;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -29,6 +29,9 @@ const TIMEOUT: u8 = 2;
 const COMPLETE: u8 = 3;
 
 static STATE: AtomicU8 = AtomicU8::new(NONE);
+// The completion latch must not make repeated Ctrl-C ineffective during
+// final diagnostics or other blocking work after the cancellable region.
+static INTERRUPT_SEEN: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AbortReason {
@@ -47,14 +50,15 @@ fn claim(state: &AtomicU8, value: u8) -> bool {
         .is_ok()
 }
 
-/// Record an abort request. The first reason wins; later requests are
-/// ignored so a timeout firing after Ctrl-C cannot change the exit code.
-pub fn request(reason: AbortReason) {
-    let value = match reason {
-        AbortReason::Interrupt => INTERRUPT,
-        AbortReason::Timeout => TIMEOUT,
-    };
-    claim(&STATE, value);
+/// Request a cooperative stop, returning whether the handler must force exit.
+/// Keep interrupt history separate from the run's immutable outcome: a first
+/// interrupt after completion leaves the outcome intact, but a second must
+/// still let the user terminate a process stuck in final bookkeeping.
+fn should_force_exit_on_interrupt(state: &AtomicU8, interrupt_seen: &AtomicBool) -> bool {
+    if interrupt_seen.swap(true, Ordering::SeqCst) {
+        return true;
+    }
+    !claim(state, INTERRUPT) && state.load(Ordering::SeqCst) != COMPLETE
 }
 
 /// The recorded abort reason, if any.
@@ -136,11 +140,10 @@ impl AbortSignal for ProgressAbort<'_> {
 #[cfg(not(windows))]
 pub fn install_interrupt_handler() {
     let _ = ctrlc::set_handler(|| {
-        if reason().is_some() {
+        if should_force_exit_on_interrupt(&STATE, &INTERRUPT_SEEN) {
             // Second interrupt: the user wants out now.
             std::process::exit(130);
         }
-        request(AbortReason::Interrupt);
     });
 }
 
@@ -166,10 +169,9 @@ unsafe extern "system" fn windows_console_control_handler(control_type: u32) -> 
     if !matches!(control_type, CTRL_C_EVENT | CTRL_BREAK_EVENT) {
         return 0;
     }
-    if reason().is_some() {
+    if should_force_exit_on_interrupt(&STATE, &INTERRUPT_SEEN) {
         std::process::exit(130);
     }
-    request(AbortReason::Interrupt);
     1
 }
 
@@ -263,6 +265,29 @@ pub fn arm_timeout(seconds: f64) -> Result<TimeoutGuard, crate::cli::CliError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_interrupts_force_exit_even_after_completion() {
+        for initial in [NONE, COMPLETE] {
+            let state = AtomicU8::new(initial);
+            let seen = AtomicBool::new(false);
+            assert!(!should_force_exit_on_interrupt(&state, &seen));
+            let expected = if initial == NONE { INTERRUPT } else { COMPLETE };
+            assert_eq!(state.load(Ordering::SeqCst), expected);
+            assert!(should_force_exit_on_interrupt(&state, &seen));
+            assert_eq!(state.load(Ordering::SeqCst), expected);
+        }
+    }
+
+    #[test]
+    fn interrupt_force_exits_a_run_already_stopping_for_another_reason() {
+        for initial in [TIMEOUT, INTERRUPT] {
+            let state = AtomicU8::new(initial);
+            let seen = AtomicBool::new(false);
+            assert!(should_force_exit_on_interrupt(&state, &seen));
+            assert_eq!(state.load(Ordering::SeqCst), initial);
+        }
+    }
 
     #[test]
     fn a_completed_run_refuses_a_later_timeout_claim() {
