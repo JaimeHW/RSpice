@@ -31,6 +31,16 @@ fn check_and_run_reject_invalid_requests_before_publication() {
         ),
         ("control-run", ".tran 1u -1m\n.control\nrun\n.endc", "TSTOP"),
         (
+            "control-sensitivity",
+            ".control\nsens V(in) R1 AC LIN 2 100 1\n.endc",
+            "stop frequency",
+        ),
+        (
+            "control-sensitivity-run",
+            ".sens V(in) R1 AC LIN 2 100 1\n.control\nrun\n.endc",
+            "stop frequency",
+        ),
+        (
             "control-pz-invalid",
             ".control\npz in 0 in 0 invalid pz\n.endc",
             "expected VOL or CUR",
@@ -46,13 +56,13 @@ fn check_and_run_reject_invalid_requests_before_publication() {
             "does not accept arguments",
         ),
         (
-            "control-unsupported",
-            ".control\nsens V(in)\n.endc",
+            "control-hb-unsupported",
+            ".control\nhb 1k\n.endc",
             "no electrical or presentation handler",
         ),
         (
-            "control-unsupported-run",
-            ".sens V(in)\n.control\nrun\n.endc",
+            "control-hb-unsupported-run",
+            ".hb 1k\n.control\nrun\n.endc",
             "no control-host execution handler",
         ),
         (
@@ -108,6 +118,13 @@ fn check_and_run_reject_invalid_requests_before_publication() {
 fn static_control_checks_report_deferred_values_without_executing_the_script() {
     for (name, cards, valid, deferred) in [
         ("replaced", ".tran 1u -1m\n.control\nop\n.endc", true, false),
+        ("sensitivity", ".control\nsens V(in) R1\n.endc", true, false),
+        (
+            "sensitivity-run",
+            ".sens V(in) R1\n.control\nrun\n.endc",
+            true,
+            false,
+        ),
         (
             "dynamic",
             ".control\nlet stop=1m\ntran 1u $&stop\n.endc",
@@ -119,6 +136,12 @@ fn static_control_checks_report_deferred_values_without_executing_the_script() {
             ".control\nif 0\ntran 1u -1m\nend\nop\n.endc",
             false,
             false,
+        ),
+        (
+            "dynamic-sensitivity",
+            ".control\nsens V(in) R1 AC LIN 2 1 $last\n.endc",
+            true,
+            true,
         ),
         (
             "dynamic-pz",

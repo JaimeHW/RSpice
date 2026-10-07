@@ -302,6 +302,7 @@ pub(crate) fn check_requests(
                         | AnalysisCommand::AcData { .. }
                         | AnalysisCommand::Tf { .. }
                         | AnalysisCommand::PoleZero { .. }
+                        | AnalysisCommand::Sensitivity { .. }
                         | AnalysisCommand::Tran { .. }
                 ) {
                     return Err(located(invalid(
@@ -318,7 +319,7 @@ pub(crate) fn check_requests(
             }
         } else if matches!(
             command.name.as_str(),
-            "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz"
+            "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" | "sens"
         ) {
             if command.arguments.contains('$') {
                 deferred.push(command.line);
