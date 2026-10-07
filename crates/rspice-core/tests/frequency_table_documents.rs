@@ -57,7 +57,10 @@ fn physical_coordinates_complex_signals_and_noise_round_trip_with_windows() {
         .build()
         .unwrap();
     for document in [&ac_doc, &noise_doc] {
-        assert_eq!(document.schema_version(), 11);
+        assert_eq!(
+            document.schema_version(),
+            rspice_core::execution::ANALYSIS_RESULT_DOCUMENT_VERSION
+        );
         let table = metadata(document);
         assert_eq!(table.table_name, "Mixed");
         assert_eq!(table.requested_rows, 3);
