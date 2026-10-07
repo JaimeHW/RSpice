@@ -89,6 +89,7 @@
 //! twice.
 
 mod constants;
+mod expressions;
 mod local_arrays;
 mod local_storage;
 use constants::ResolvedConstants;
@@ -2925,6 +2926,10 @@ impl ProcessLowerer<'_> {
     /// section 5.4.2 rule (g) makes every comparison one unsigned bit — and
     /// neither is a logical operator or a reduction.
     fn is_real_expression(&self, expression: &Expression) -> bool {
+        expressions::shape(self, expression).real
+    }
+
+    fn is_real_expression_leaf(&self, expression: &Expression) -> bool {
         match expression {
             Expression::Identifier(identifier)
                 if self.constant_expression && identifier.name == "inf" =>
@@ -2958,31 +2963,6 @@ impl ProcessLowerer<'_> {
                     }
                 },
             },
-            // Section 5.1 permits real operands for `+ - * /`; the result is
-            // real when either operand is; the other operand converts numerically.
-            Expression::Binary(binary) => {
-                matches!(
-                    binary.op,
-                    BinaryOp::Add
-                        | BinaryOp::Sub
-                        | BinaryOp::Mul
-                        | BinaryOp::Div
-                        | BinaryOp::Mod
-                        | BinaryOp::Pow
-                ) && (self.is_real_expression(&binary.left)
-                    || self.is_real_expression(&binary.right))
-            }
-            Expression::Unary(unary) => {
-                matches!(unary.op, UnaryOp::Neg | UnaryOp::Pos)
-                    && self.is_real_expression(&unary.operand)
-            }
-            // Table 4-2 makes `?:` legal in a real expression, and it is the
-            // operator a real-number model is built out of. It is real when
-            // either arm is; integral arms convert numerically.
-            Expression::Conditional(conditional) => {
-                self.is_real_expression(&conditional.then_expr)
-                    || self.is_real_expression(&conditional.else_expr)
-            }
             // `$bitstoreal` produces a real whatever its operand is, which is
             // the whole point of it: it is the standard's own crossing, and
             // classifying it by its operand would send it down the four-state
@@ -3454,15 +3434,14 @@ impl ProcessLowerer<'_> {
 
     /// Lower an expression that must produce a real.
     fn real_expression(&mut self, block: BlockId, expression: &Expression) -> ValueId {
+        expressions::lower(self, block, expression, expressions::Mode::Real)
+    }
+
+    fn real_expression_leaf(&mut self, block: BlockId, expression: &Expression) -> ValueId {
         if self.constant_expression
             && matches!(expression, Expression::Identifier(identifier) if identifier.name == "inf")
         {
             return self.real_constant(f64::INFINITY);
-        }
-        if self.constant_expression
-            && let Expression::Call(call) = expression
-        {
-            return constants::lower_math_call(self, block, call);
         }
         if !self.is_real_expression(expression) {
             let signed = self.self_signed(expression);
@@ -3580,54 +3559,10 @@ impl ProcessLowerer<'_> {
                     },
                 }
             }
-            Expression::Binary(binary) => {
-                let op = match binary.op {
-                    BinaryOp::Add => RealArithmeticOp::Add,
-                    BinaryOp::Sub => RealArithmeticOp::Sub,
-                    BinaryOp::Mul => RealArithmeticOp::Mul,
-                    BinaryOp::Div => RealArithmeticOp::Div,
-                    BinaryOp::Mod => RealArithmeticOp::Mod,
-                    BinaryOp::Pow => RealArithmeticOp::Pow,
-                    _ => {
-                        self.error(
-                            "this operator has no real-valued form: Verilog-AMS LRM 2.4 section \
-                             4.2.1 makes every operator outside table 4-2 illegal on a real, \
-                             which is every operator that reads a bit pattern",
-                            binary.span,
-                        );
-                        return self.real_constant(0.0);
-                    }
-                };
-                let left = self.real_operand(block, &binary.left);
-                let right = self.real_operand(block, &binary.right);
-                self.builder.push(
-                    block,
-                    CfgValueType::Real,
-                    CfgValueKind::DigitalRealArithmetic { op, left, right },
-                )
+            Expression::Binary(_) | Expression::Unary(_) => {
+                unreachable!("operators use the iterative expression lowerer")
             }
-            Expression::Unary(unary) if matches!(unary.op, UnaryOp::Pos) => {
-                self.real_operand(block, &unary.operand)
-            }
-            Expression::Unary(unary) if matches!(unary.op, UnaryOp::Neg) => {
-                // `0.0 - x` rather than a negation node: the IR has an operator
-                // that means exactly this, and a second one that also meant it
-                // would be a second place to get `-0.0` wrong.
-                let zero = self.real_constant(0.0);
-                let operand = self.real_operand(block, &unary.operand);
-                self.builder.push(
-                    block,
-                    CfgValueType::Real,
-                    CfgValueKind::DigitalRealArithmetic {
-                        op: RealArithmeticOp::Sub,
-                        left: zero,
-                        right: operand,
-                    },
-                )
-            }
-            Expression::Conditional(conditional) => {
-                self.conditional_expression(block, conditional, ConditionalDomain::Real)
-            }
+            Expression::Conditional(_) => unreachable!("iterative conditional lowering"),
             // `$bitstoreal(b)`: the crossing in the other direction. The
             // operand is sized to 64 bits here rather than taken as written,
             // because the pattern the standard names is a 64-bit one and a
@@ -3660,134 +3595,6 @@ impl ProcessLowerer<'_> {
                 self.real_constant(0.0)
             }
         }
-    }
-
-    /// Preserve source conditional evaluation without losing value-domain
-    /// rules or the integral expression's already-resolved sizing context.
-    fn conditional_expression(
-        &mut self,
-        block: BlockId,
-        conditional: &crate::ast::ConditionalExpr,
-        domain: ConditionalDomain,
-    ) -> ValueId {
-        // IEEE 1364-2005 5.1.13: known conditions evaluate one arm.
-        // An ambiguous condition evaluates both, merging bits or returning
-        // real zero. Each source arm is emitted once, even when nested.
-        let condition = self.condition(block, &conditional.condition);
-        let zero_bit = self.builder.push_leaf(
-            CfgValueType::FourState { width: 1 },
-            CfgValueKind::FourStateConstant(FourStateValue::from_u64(1, 0)),
-        );
-        let one_bit = self.builder.push_leaf(
-            CfgValueType::FourState { width: 1 },
-            CfgValueKind::FourStateConstant(FourStateValue::from_u64(1, 1)),
-        );
-        let is_false = self.builder.push(
-            block,
-            CfgValueType::FourState { width: 1 },
-            CfgValueKind::DigitalCaseMatch {
-                selector: condition,
-                label: zero_bit,
-                kind: DigitalCaseMatch::Exact,
-                signed: false,
-            },
-        );
-        let is_true = self.builder.push(
-            block,
-            CfgValueType::FourState { width: 1 },
-            CfgValueKind::DigitalCaseMatch {
-                selector: condition,
-                label: one_bit,
-                kind: DigitalCaseMatch::Exact,
-                signed: false,
-            },
-        );
-        let then_block = self.builder.create_block();
-        let else_block = self.builder.create_block();
-        let join = self.builder.create_block();
-        self.builder.set_terminator(
-            block,
-            CfgTerminator::Branch {
-                condition: is_false,
-                then_target: else_block,
-                then_args: Vec::new(),
-                else_target: then_block,
-                else_args: Vec::new(),
-            },
-        );
-        self.builder.seal_block(then_block);
-        let then_value = match domain {
-            ConditionalDomain::Real => self.real_operand(then_block, &conditional.then_expr),
-            ConditionalDomain::FourState(context) => {
-                self.operand(then_block, &conditional.then_expr, context)
-            }
-        };
-        self.builder.set_terminator(
-            then_block,
-            CfgTerminator::Branch {
-                condition: is_true,
-                then_target: join,
-                then_args: Vec::new(),
-                else_target: else_block,
-                else_args: Vec::new(),
-            },
-        );
-        // The false path never computed the first arm. Its placeholder is
-        // ignored by a known-false select; the ambiguous path carries the
-        // actual first arm so the bitwise merge has both results available.
-        let then_at_else = match domain {
-            ConditionalDomain::Real => None,
-            ConditionalDomain::FourState(context) => {
-                let placeholder = self.unknown(context.width);
-                Some(self.builder.merge_values(
-                    else_block,
-                    &[(block, placeholder), (then_block, then_value)],
-                ))
-            }
-        };
-        self.builder.seal_block(else_block);
-        let else_result = match domain {
-            ConditionalDomain::Real => {
-                let else_value = self.real_operand(else_block, &conditional.else_expr);
-                let zero = self.real_constant(0.0);
-                self.builder.push(
-                    else_block,
-                    CfgValueType::Real,
-                    CfgValueKind::DigitalRealSelect {
-                        condition: is_false,
-                        then_value: else_value,
-                        else_value: zero,
-                    },
-                )
-            }
-            ConditionalDomain::FourState(context) => {
-                let else_value = self.operand(else_block, &conditional.else_expr, context);
-                self.builder.push(
-                    else_block,
-                    CfgValueType::FourState {
-                        width: context.width,
-                    },
-                    CfgValueKind::DigitalSelect {
-                        condition,
-                        then_value: then_at_else.expect("four-state merge"),
-                        else_value,
-                    },
-                )
-            }
-        };
-        self.builder.set_terminator(
-            else_block,
-            CfgTerminator::Jump {
-                target: join,
-                args: Vec::new(),
-            },
-        );
-        let result = self
-            .builder
-            .merge_values(join, &[(then_block, then_value), (else_block, else_result)]);
-        self.builder.seal_block(join);
-        self.builder.continue_at(block, join);
-        result
     }
 
     /// Apply the same numeric conversion at assignments and real operators.
@@ -3943,7 +3750,7 @@ impl ProcessLowerer<'_> {
     /// when it is not. A self-determined expression is *not* padded here:
     /// whether its value needs extending depends on what consumes it, and the
     /// consumer that needs it — a context-determined operator — does it through
-    /// [`Self::operand`], which is also the only place that knows whether to
+    /// [`expressions::Mode::Operand`], which is also the only place that knows whether to
     /// pad with zeros or with the sign bit.
     ///
     /// # The classification (table 5-22 and section 5.4.2)
@@ -3966,13 +3773,14 @@ impl ProcessLowerer<'_> {
     /// replication. Those three are why a signed context can be lost inside an
     /// expression that reads nothing but signed declarations.
     ///
-    /// A comparison's operands are lowered self-determined and are *not*
-    /// resized to each other here, because they need no node to be: section
-    /// 5.1.7's equality, section 9.5's identity comparison and section 5.1.6's
-    /// relational operators each extend the narrower operand themselves, under
-    /// the signedness the comparison node carries. Emitting the resize would
-    /// state the rule twice and mean it once.
+    /// Comparison operands receive their common width and signedness before
+    /// either is evaluated. Extending only their final results would lose a
+    /// carry from a narrower arithmetic operand.
     fn sized(&mut self, block: BlockId, expression: &Expression, context: Context) -> ValueId {
+        expressions::lower(self, block, expression, expressions::Mode::Bits(context))
+    }
+
+    fn sized_leaf(&mut self, block: BlockId, expression: &Expression, context: Context) -> ValueId {
         // A real that reached a position wanting bits. Everything below sizes
         // and extends in bits, and a real has none — so it stops here by name
         // rather than being sized to zero and silently disappearing.
@@ -3986,10 +3794,6 @@ impl ProcessLowerer<'_> {
             return self.unknown(context.width.max(1));
         }
         let width = self.self_width(expression).max(context.width);
-        let inner = Context {
-            width,
-            signed: context.signed && self.self_signed(expression),
-        };
         match expression {
             Expression::Digital(crate::ast::DigitalExpr::FourState(literal)) => {
                 // A sized literal keeps the width its author wrote and is
@@ -4016,45 +3820,12 @@ impl ProcessLowerer<'_> {
                 let range = self.declared_range_of(&select.name);
                 self.packed_part_read(block, input, range, &select.msb, &select.lsb, select.span)
             }
-            Expression::Digital(crate::ast::DigitalExpr::Xnor(xnor)) => {
-                let left = self.operand(block, &xnor.left, inner);
-                let right = self.operand(block, &xnor.right, inner);
-                self.builder.push(
-                    block,
-                    CfgValueType::FourState { width },
-                    CfgValueKind::DigitalBitwise {
-                        op: BitwiseOp::Xnor,
-                        left,
-                        right,
-                    },
-                )
-            }
-            // Section 4.1.12. The left operand is context-determined and
-            // carries the result size, exactly as `>>`'s does; the count is
-            // self-determined. What is decided here is the fill: `>>>` shifts
-            // in the sign bit only when the shift's own expression is signed,
-            // and is `>>` when it is not — so the lowering answers the question
-            // once and the IR node means what it says.
-            Expression::Digital(crate::ast::DigitalExpr::ArithmeticShiftRight(shift)) => {
-                let value = self.operand(block, &shift.left, inner);
-                let count = self.expression(block, &shift.right);
-                let op = if inner.signed {
-                    ShiftOp::ArithmeticRight
-                } else {
-                    ShiftOp::Right
-                };
-                self.builder.push(
-                    block,
-                    CfgValueType::FourState { width },
-                    CfgValueKind::DigitalShift { op, value, count },
-                )
-            }
-            Expression::Digital(crate::ast::DigitalExpr::CaseEquality(equality)) => {
-                self.case_equality(block, equality)
-            }
-            Expression::Digital(crate::ast::DigitalExpr::Reduction(reduction)) => {
-                self.reduction(block, reduction)
-            }
+            Expression::Digital(
+                crate::ast::DigitalExpr::Xnor(_)
+                | crate::ast::DigitalExpr::ArithmeticShiftRight(_)
+                | crate::ast::DigitalExpr::CaseEquality(_)
+                | crate::ast::DigitalExpr::Reduction(_),
+            ) => unreachable!("iterative operator lowering"),
             Expression::Number(number) => {
                 // IEEE 1364-2005 section 3.5.1: a *sized* literal is exactly as
                 // wide as its author wrote it, and an unsized one is at least
@@ -4140,11 +3911,10 @@ impl ProcessLowerer<'_> {
             }
             // Both arms retain the common width and sign; the condition is
             // self-determined. Evaluation skips the unselected source arm.
-            Expression::Conditional(conditional) => {
-                self.conditional_expression(block, conditional, ConditionalDomain::FourState(inner))
+            Expression::Conditional(_) => unreachable!("iterative conditional lowering"),
+            Expression::Unary(_) | Expression::Binary(_) => {
+                unreachable!("operators use the iterative expression lowerer")
             }
-            Expression::Unary(unary) => self.unary(block, unary, inner),
-            Expression::Binary(binary) => self.binary(block, binary, inner),
             Expression::SystemFunction(function)
                 if super::digital::DigitalTimeQuery::from_name(&function.name).is_some() =>
             {
@@ -4189,27 +3959,6 @@ impl ProcessLowerer<'_> {
         }
     }
 
-    /// Lower a context-determined operand and extend it to the context.
-    ///
-    /// The extension is section 5.4.1's, which happens *before* the operator
-    /// runs — the whole point of the pass — and section 5.4.2 decides what it
-    /// fills with. Note which signedness that is: the **enclosing
-    /// expression's**, carried in `context`, not the operand's own. Rule (j)
-    /// makes the two agree whenever the expression is signed, because an
-    /// expression is signed only when all of its context-determined operands
-    /// are; the case the distinction covers is the other one, where a single
-    /// unsigned operand has made the whole context unsigned and a signed
-    /// sibling must therefore be zero-extended into it.
-    ///
-    /// [`Self::sized`] already returns `context.width` bits for a
-    /// context-determined operand, so the resize is a no-op for one and a real
-    /// extension only for a self-determined operand — a comparison, a
-    /// reduction, a concatenation, a register narrower than the context.
-    fn operand(&mut self, block: BlockId, expression: &Expression, context: Context) -> ValueId {
-        let value = self.sized(block, expression, context);
-        self.resize(block, value, context.width, context.signed)
-    }
-
     /// The self-determined signedness of an expression, IEEE 1364-2005 section
     /// 5.4.2.
     ///
@@ -4243,6 +3992,10 @@ impl ProcessLowerer<'_> {
     /// A form this cannot classify does not lower either, and answers unsigned
     /// — the classification of the all-`x` placeholder left after the refusal.
     fn self_signed(&self, expression: &Expression) -> bool {
+        expressions::shape(self, expression).signed
+    }
+
+    fn self_signed_leaf(&self, expression: &Expression) -> bool {
         match expression {
             // Rule (c), from the source spelling: the marker survives decoding
             // into `FourStateLiteral::signed`.
@@ -4293,56 +4046,6 @@ impl ProcessLowerer<'_> {
             // Rules (g) and (h).
             Expression::Digital(crate::ast::DigitalExpr::CaseEquality(_))
             | Expression::Digital(crate::ast::DigitalExpr::Reduction(_)) => false,
-            // Rule (j) over the operands each operator makes
-            // context-determined. Both arms of `?:`, both sides of `~^`, and
-            // the operand of `~ + -`; the condition of `?:` and the operand of
-            // `!` are self-determined and take no part, and `!` yields an
-            // unsigned bit in any case.
-            Expression::Digital(crate::ast::DigitalExpr::Xnor(xnor)) => {
-                self.self_signed(&xnor.left) && self.self_signed(&xnor.right)
-            }
-            Expression::Digital(crate::ast::DigitalExpr::ArithmeticShiftRight(shift)) => {
-                self.self_signed(&shift.left)
-            }
-            Expression::Conditional(conditional) => {
-                self.self_signed(&conditional.then_expr) && self.self_signed(&conditional.else_expr)
-            }
-            Expression::Unary(unary) => match unary.op {
-                UnaryOp::ToInteger => true,
-                UnaryOp::Not => false,
-                UnaryOp::BitNot | UnaryOp::Pos | UnaryOp::Neg => self.self_signed(&unary.operand),
-            },
-            Expression::Binary(binary) => match binary.op {
-                BinaryOp::CheckedValue
-                | BinaryOp::DiscreteValue
-                | BinaryOp::IntAdd
-                | BinaryOp::IntSub
-                | BinaryOp::IntMul
-                | BinaryOp::IntDiv
-                | BinaryOp::IntMod
-                | BinaryOp::IntPow => true,
-                BinaryOp::BitAnd
-                | BinaryOp::BitOr
-                | BinaryOp::BitXor
-                | BinaryOp::Add
-                | BinaryOp::Sub
-                | BinaryOp::Mul
-                | BinaryOp::Div
-                | BinaryOp::Mod => {
-                    self.self_signed(&binary.left) && self.self_signed(&binary.right)
-                }
-                BinaryOp::And
-                | BinaryOp::Or
-                | BinaryOp::Eq
-                | BinaryOp::Ne
-                | BinaryOp::Lt
-                | BinaryOp::Le
-                | BinaryOp::Gt
-                | BinaryOp::Ge => false,
-                // Shifts and powers take their type from the left operand.
-                // The count/exponent keeps its own type (5.5.1, table 5-22).
-                BinaryOp::Shl | BinaryOp::Shr | BinaryOp::Pow => self.self_signed(&binary.left),
-            },
             _ => false,
         }
     }
@@ -4360,6 +4063,10 @@ impl ProcessLowerer<'_> {
     /// arm answers 1, which is the width of the all-`x` placeholder
     /// [`Self::unknown`] leaves behind after the refusal.
     fn self_width(&self, expression: &Expression) -> u32 {
+        expressions::shape(self, expression).width
+    }
+
+    fn self_width_leaf(&self, expression: &Expression) -> u32 {
         match expression {
             // Unsized literals have a 32-bit floor and must also retain all
             // their significant bits before any enclosing context is applied.
@@ -4371,15 +4078,6 @@ impl ProcessLowerer<'_> {
             }
             Expression::Digital(crate::ast::DigitalExpr::PartSelect(select)) => {
                 self.part_select_width(&select.msb, &select.lsb)
-            }
-            Expression::Digital(crate::ast::DigitalExpr::Xnor(xnor)) => self
-                .self_width(&xnor.left)
-                .max(self.self_width(&xnor.right)),
-            // Section 4.1.12 and table 5-22, the same row `<<` and `>>` are on:
-            // a shift is as wide as the value being shifted, and the count does
-            // not enter.
-            Expression::Digital(crate::ast::DigitalExpr::ArithmeticShiftRight(shift)) => {
-                self.self_width(&shift.left)
             }
             // Section 4.1.8: an identity comparison is one bit, and so is a
             // reduction of section 5.1.10.
@@ -4422,48 +4120,6 @@ impl ProcessLowerer<'_> {
                 .iter()
                 .map(|element| self.element_width(element))
                 .sum(),
-            Expression::Conditional(conditional) => self
-                .self_width(&conditional.then_expr)
-                .max(self.self_width(&conditional.else_expr)),
-            Expression::Unary(unary) => match unary.op {
-                // Section 4.1.8: logical negation is one bit.
-                UnaryOp::ToInteger => 32,
-                UnaryOp::Not => 1,
-                UnaryOp::BitNot | UnaryOp::Pos | UnaryOp::Neg => self.self_width(&unary.operand),
-            },
-            Expression::Binary(binary) => match binary.op {
-                BinaryOp::CheckedValue
-                | BinaryOp::DiscreteValue
-                | BinaryOp::IntAdd
-                | BinaryOp::IntSub
-                | BinaryOp::IntMul
-                | BinaryOp::IntDiv
-                | BinaryOp::IntMod
-                | BinaryOp::IntPow => 32,
-                BinaryOp::BitAnd
-                | BinaryOp::BitOr
-                | BinaryOp::BitXor
-                | BinaryOp::Add
-                | BinaryOp::Sub
-                | BinaryOp::Mul
-                | BinaryOp::Div
-                | BinaryOp::Mod => self
-                    .self_width(&binary.left)
-                    .max(self.self_width(&binary.right)),
-                // Sections 4.1.6, 4.1.7 and 4.1.8: one bit, and the operands'
-                // widths take no part in it.
-                BinaryOp::And
-                | BinaryOp::Or
-                | BinaryOp::Eq
-                | BinaryOp::Ne
-                | BinaryOp::Lt
-                | BinaryOp::Le
-                | BinaryOp::Gt
-                | BinaryOp::Ge => 1,
-                // Table 5-22: shifts and powers take the left operand's
-                // width; the count/exponent is self-determined.
-                BinaryOp::Shl | BinaryOp::Shr | BinaryOp::Pow => self.self_width(&binary.left),
-            },
             // `$realtobits` is 64 bits by the format it names, not by the
             // context it sits in: it is double-precision's own pattern, and a
             // narrower one would be a different pattern rather than a shorter
@@ -4539,47 +4195,6 @@ impl ProcessLowerer<'_> {
         }
     }
 
-    /// Lower `a === b` / `a !== b`, IEEE 1364-2005 section 5.1.8.
-    ///
-    /// Onto the node `case` already uses, because they are the same operator:
-    /// section 9.5's case comparison is an identity comparison over all four
-    /// states, which is exactly what `===` is, and
-    /// [`DigitalCaseMatch::Exact`](super::digital_value::DigitalCaseMatch::Exact)
-    /// is that comparison. Giving `===` a node of its own would put a second
-    /// transcription of one rule into the interpreter, with the usual two
-    /// chances to disagree about `4'b10xz === 4'b10xz`.
-    ///
-    /// `!==` is the complement, and can be one safely: `===` yields a definite
-    /// bit for every pair of operands, so negating it cannot manufacture the
-    /// `x` that `!=` would have produced.
-    fn case_equality(
-        &mut self,
-        block: BlockId,
-        equality: &crate::ast::CaseEqualityExpr,
-    ) -> ValueId {
-        let signed = self.comparison_is_signed(&equality.left, &equality.right);
-        let selector = self.expression(block, &equality.left);
-        let label = self.expression(block, &equality.right);
-        let matched = self.builder.push(
-            block,
-            CfgValueType::FourState { width: 1 },
-            CfgValueKind::DigitalCaseMatch {
-                selector,
-                label,
-                kind: DigitalCaseMatch::Exact,
-                signed,
-            },
-        );
-        if !equality.negate {
-            return matched;
-        }
-        self.builder.push(
-            block,
-            CfgValueType::FourState { width: 1 },
-            CfgValueKind::DigitalLogicalNot { input: matched },
-        )
-    }
-
     /// Lower a reduction operator, IEEE 1364-2005 section 5.1.10.
     ///
     /// # Why this is a desugaring rather than a node
@@ -4607,10 +4222,9 @@ impl ProcessLowerer<'_> {
     ///
     /// A one-bit operand reduces to itself (with the inversion, for the
     /// complemented forms), which is what a fold with no second element is.
-    fn reduction(&mut self, block: BlockId, reduction: &crate::ast::ReductionExpr) -> ValueId {
-        let input = self.expression(block, &reduction.operand);
+    fn reduce_value(&mut self, block: BlockId, reduction: ReductionOp, input: ValueId) -> ValueId {
         let width = self.value_width(input);
-        let op = match reduction.op {
+        let op = match reduction {
             ReductionOp::And | ReductionOp::Nand => BitwiseOp::And,
             ReductionOp::Or | ReductionOp::Nor => BitwiseOp::Or,
             ReductionOp::Xor | ReductionOp::Xnor => BitwiseOp::Xor,
@@ -4645,7 +4259,7 @@ impl ProcessLowerer<'_> {
             );
         }
 
-        if !reduction.op.inverts() {
+        if !reduction.inverts() {
             return folded;
         }
         self.builder.push(
@@ -4653,250 +4267,6 @@ impl ProcessLowerer<'_> {
             CfgValueType::FourState { width: 1 },
             CfgValueKind::DigitalBitwiseNot { input: folded },
         )
-    }
-
-    /// Lower a unary operator under `context`.
-    ///
-    /// Table 5-22 splits the four: `!` is one bit and its operand is
-    /// self-determined, while `~`, `+` and `-` take the context size and pass
-    /// it to their operand. The difference is observable — `~(a == b)` in an
-    /// eight-bit context inverts a zero-extended one bit and yields
-    /// `8'b11111110`, not the `8'b00000000` that inverting first would give.
-    fn unary(
-        &mut self,
-        block: BlockId,
-        unary: &crate::ast::UnaryExpr,
-        context: Context,
-    ) -> ValueId {
-        let width = context.width;
-        match unary.op {
-            UnaryOp::ToInteger => {
-                self.invariant(
-                    "analog integer conversion reached four-state lowering",
-                    unary.span,
-                );
-                self.unknown(width)
-            }
-            UnaryOp::Not => {
-                // `!x` *is* the reduction. `DigitalLogicalNot` takes an operand
-                // of any width to one bit — that is what [`Self::truth_value`]
-                // builds `!!x` out of — so reducing the operand to a truth
-                // value first and negating that emits three negations where
-                // section 4.1.8 has one, and the extra pair computes nothing
-                // the single one does not.
-                //
-                // A real operand still goes through [`Self::condition`], whose
-                // `!= 0.0` is the section 9.4 conversion rather than a width
-                // reduction: there is no four-state value to negate without it.
-                let input = if self.is_real_expression(&unary.operand) {
-                    self.condition(block, &unary.operand)
-                } else {
-                    self.expression(block, &unary.operand)
-                };
-                self.builder.push(
-                    block,
-                    CfgValueType::FourState { width: 1 },
-                    CfgValueKind::DigitalLogicalNot { input },
-                )
-            }
-            UnaryOp::BitNot => {
-                let input = self.operand(block, &unary.operand, context);
-                self.builder.push(
-                    block,
-                    CfgValueType::FourState { width },
-                    CfgValueKind::DigitalBitwiseNot { input },
-                )
-            }
-            // Unary `+` is the identity on its operand however that operand is
-            // signed, so the operand already extended to the context *is* the
-            // result. The extension is where `+a` differs from `a`, and
-            // [`Self::operand`] has already done it.
-            UnaryOp::Pos => self.operand(block, &unary.operand, context),
-            UnaryOp::Neg => {
-                // `-x` is `0 - x` at the context width. Two's complement makes
-                // that the same subtraction for a signed and an unsigned
-                // operand; what differs is the extension that produced `x`,
-                // which is why the negation of a narrow signed value is right
-                // only when the operand reached the context signed.
-                let input = self.operand(block, &unary.operand, context);
-                let zero = self.builder.push_leaf(
-                    CfgValueType::FourState { width },
-                    CfgValueKind::FourStateConstant(FourStateValue::zero(width)),
-                );
-                self.builder.push(
-                    block,
-                    CfgValueType::FourState { width },
-                    CfgValueKind::DigitalArithmetic {
-                        op: ArithmeticOp::Sub,
-                        left: zero,
-                        right: input,
-                        signed: context.signed,
-                    },
-                )
-            }
-        }
-    }
-
-    /// Lower a binary operator under `context`.
-    ///
-    /// Three groups, and which group an operator is in is the whole of table
-    /// 5-22 for the binary forms:
-    ///
-    /// * **arithmetic and bitwise** — both operands context-determined, result
-    ///   `context.width` and signed by `context.signed`. This is where the
-    ///   context has to reach or the operation runs narrow and the answer is
-    ///   wrong rather than merely narrow.
-    /// * **logical and comparison** — one bit of result, operands
-    ///   self-determined. A comparison's two operands size to each other, which
-    ///   the operators themselves do (see [`Self::sized`]); the outer context
-    ///   reaches neither, and neither does the outer signedness. What the node
-    ///   does carry is the comparison's *own* signedness, from its two operands
-    ///   alone, because section 5.4.2 makes the comparison signed only when
-    ///   both of them are.
-    /// * **shift** — the left operand is context-determined and carries the
-    ///   result size; the right is self-determined, being a number of positions
-    ///   rather than a value combined with anything.
-    fn binary(
-        &mut self,
-        block: BlockId,
-        binary: &crate::ast::BinaryExpr,
-        context: Context,
-    ) -> ValueId {
-        let width = context.width;
-        // A comparison between reals. It is not itself a real expression —
-        // section 5.4.2 rule (g) makes its result one unsigned bit — so it
-        // reaches here through the ordinary four-state path and its *operands*
-        // are what decide which comparison node is emitted.
-        if let Some(op) = real_compare_op(binary.op)
-            && (self.is_real_expression(&binary.left) || self.is_real_expression(&binary.right))
-        {
-            let left = self.real_operand(block, &binary.left);
-            let right = self.real_operand(block, &binary.right);
-            return self.builder.push(
-                block,
-                CfgValueType::FourState { width: 1 },
-                CfgValueKind::DigitalRealCompare { op, left, right },
-            );
-        }
-        let kind = match binary.op {
-            BinaryOp::CheckedValue
-            | BinaryOp::DiscreteValue
-            | BinaryOp::IntAdd
-            | BinaryOp::IntSub
-            | BinaryOp::IntMul
-            | BinaryOp::IntDiv
-            | BinaryOp::IntMod
-            | BinaryOp::IntPow => {
-                self.invariant(
-                    "an internal analog integer operator cannot appear in a digital process",
-                    binary.span,
-                );
-                return self.unknown(width);
-            }
-            BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor => {
-                let op = match binary.op {
-                    BinaryOp::BitAnd => BitwiseOp::And,
-                    BinaryOp::BitOr => BitwiseOp::Or,
-                    _ => BitwiseOp::Xor,
-                };
-                let left = self.operand(block, &binary.left, context);
-                let right = self.operand(block, &binary.right, context);
-                CfgValueKind::DigitalBitwise { op, left, right }
-            }
-            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
-                let op = match binary.op {
-                    BinaryOp::Add => ArithmeticOp::Add,
-                    BinaryOp::Sub => ArithmeticOp::Sub,
-                    BinaryOp::Mul => ArithmeticOp::Mul,
-                    BinaryOp::Div => ArithmeticOp::Div,
-                    _ => ArithmeticOp::Mod,
-                };
-                let left = self.operand(block, &binary.left, context);
-                let right = self.operand(block, &binary.right, context);
-                CfgValueKind::DigitalArithmetic {
-                    op,
-                    left,
-                    right,
-                    signed: context.signed,
-                }
-            }
-            BinaryOp::And | BinaryOp::Or => {
-                let op = if matches!(binary.op, BinaryOp::And) {
-                    LogicalOp::And
-                } else {
-                    LogicalOp::Or
-                };
-                let left = self.condition(block, &binary.left);
-                let right = self.condition(block, &binary.right);
-                return self.builder.push(
-                    block,
-                    CfgValueType::FourState { width: 1 },
-                    CfgValueKind::DigitalLogical { op, left, right },
-                );
-            }
-            BinaryOp::Eq | BinaryOp::Ne => {
-                let negate = matches!(binary.op, BinaryOp::Ne);
-                let signed = self.comparison_is_signed(&binary.left, &binary.right);
-                let left = self.expression(block, &binary.left);
-                let right = self.expression(block, &binary.right);
-                return self.builder.push(
-                    block,
-                    CfgValueType::FourState { width: 1 },
-                    CfgValueKind::DigitalEquality {
-                        left,
-                        right,
-                        negate,
-                        signed,
-                    },
-                );
-            }
-            BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
-                let op = match binary.op {
-                    BinaryOp::Lt => RelationalOp::Lt,
-                    BinaryOp::Le => RelationalOp::Le,
-                    BinaryOp::Gt => RelationalOp::Gt,
-                    _ => RelationalOp::Ge,
-                };
-                let signed = self.comparison_is_signed(&binary.left, &binary.right);
-                let left = self.expression(block, &binary.left);
-                let right = self.expression(block, &binary.right);
-                return self.builder.push(
-                    block,
-                    CfgValueType::FourState { width: 1 },
-                    CfgValueKind::DigitalRelational {
-                        op,
-                        left,
-                        right,
-                        signed,
-                    },
-                );
-            }
-            BinaryOp::Shl | BinaryOp::Shr => {
-                // Section 4.1.12: `<<` and `>>` fill with zero whatever the
-                // expression's sign, so neither needs one. `<<<` arrives here
-                // as `<<`, which the standard says it is.
-                let op = if matches!(binary.op, BinaryOp::Shl) {
-                    ShiftOp::Left
-                } else {
-                    ShiftOp::Right
-                };
-                let value = self.operand(block, &binary.left, context);
-                let count = self.expression(block, &binary.right);
-                CfgValueKind::DigitalShift { op, value, count }
-            }
-            BinaryOp::Pow => {
-                let base = self.operand(block, &binary.left, context);
-                let exponent = self.expression(block, &binary.right);
-                CfgValueKind::DigitalPower {
-                    base,
-                    exponent,
-                    base_signed: context.signed,
-                    exponent_signed: self.self_signed(&binary.right),
-                }
-            }
-        };
-        self.builder
-            .push(block, CfgValueType::FourState { width }, kind)
     }
 
     /// Whether a comparison is made on signed numbers, IEEE 1364-2005 sections
@@ -5074,63 +4444,49 @@ fn collect_lvalue_index_reads(target: &DigitalLValue, reads: &mut BTreeSet<Strin
 }
 
 fn collect_expression_reads(expression: &Expression, reads: &mut BTreeSet<String>) {
-    match expression {
-        Expression::Identifier(identifier) => {
-            reads.insert(identifier.name.to_string());
-        }
-        Expression::SystemFunction(function) => {
-            for argument in &function.args {
-                collect_expression_reads(argument, reads);
+    let mut pending = vec![expression];
+    while let Some(expression) = pending.pop() {
+        match expression {
+            Expression::Identifier(identifier) => {
+                reads.insert(identifier.name.to_string());
             }
-        }
-        Expression::Call(call) => {
-            for argument in &call.args {
-                collect_expression_reads(argument, reads);
+            Expression::SystemFunction(function) => pending.extend(&function.args),
+            Expression::Call(call) => pending.extend(&call.args),
+            Expression::ArrayAccess(access) => {
+                reads.insert(access.array.to_string());
+                pending.extend(access.children());
             }
-        }
-        Expression::ArrayAccess(access) => {
-            reads.insert(access.array.to_string());
-            collect_expression_reads(&access.index, reads);
-        }
-        // Every discrete-domain form at once, through the two accessors on
-        // `DigitalExpr`, rather than one arm per variant. The catch-all below
-        // is what makes that matter: a form this function forgot would
-        // contribute no reads, and a continuous assignment with an empty read
-        // set gets no sensitivity list at all — it would evaluate once at time
-        // zero and never again, which is a wrong waveform rather than a
-        // refusal.
-        Expression::Digital(digital) => {
-            if let Some(name) = digital.base_name() {
-                reads.insert(name.to_string());
+            Expression::Digital(digital) => {
+                if let Some(name) = digital.base_name() {
+                    reads.insert(name.to_string());
+                }
+                pending.extend(digital.children());
             }
-            for child in digital.children() {
-                collect_expression_reads(child, reads);
+            Expression::Binary(binary) => {
+                pending.push(&binary.right);
+                pending.push(&binary.left);
             }
-        }
-        Expression::Binary(binary) => {
-            collect_expression_reads(&binary.left, reads);
-            collect_expression_reads(&binary.right, reads);
-        }
-        Expression::Unary(unary) => collect_expression_reads(&unary.operand, reads),
-        Expression::Conditional(conditional) => {
-            collect_expression_reads(&conditional.condition, reads);
-            collect_expression_reads(&conditional.then_expr, reads);
-            collect_expression_reads(&conditional.else_expr, reads);
-        }
-        Expression::ArrayLiteral(literal) => {
-            let mut pending: Vec<_> = literal.elements.iter().collect();
-            while let Some(element) = pending.pop() {
-                match element {
-                    ArrayLiteralElement::Value(expression) => {
-                        collect_expression_reads(expression, reads);
-                    }
-                    ArrayLiteralElement::Replication(replication) => {
-                        collect_expression_reads(&replication.count, reads);
-                        pending.extend(&replication.elements);
+            Expression::Unary(unary) => pending.push(&unary.operand),
+            Expression::Conditional(conditional) => {
+                pending.extend([
+                    &*conditional.condition,
+                    &*conditional.then_expr,
+                    &*conditional.else_expr,
+                ]);
+            }
+            Expression::ArrayLiteral(literal) => {
+                let mut elements: Vec<_> = literal.elements.iter().collect();
+                while let Some(element) = elements.pop() {
+                    match element {
+                        ArrayLiteralElement::Value(expression) => pending.push(expression),
+                        ArrayLiteralElement::Replication(replication) => {
+                            pending.push(&replication.count);
+                            elements.extend(&replication.elements);
+                        }
                     }
                 }
             }
+            _ => {}
         }
-        _ => {}
     }
 }

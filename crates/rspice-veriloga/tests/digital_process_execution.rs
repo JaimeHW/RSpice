@@ -7912,23 +7912,110 @@ endmodule
         dependent.default_expr.is_some(),
         "retain its executable dependency"
     );
-    // Long scalar chains keep the existing iterative normalization path.
-    // Packed chains cannot silently take a path that loses their widths.
-    let scalar = vec!["1"; 160].join("+");
+    // Long scalar and packed operator chains share the iterative typed path.
+    for literal in ["1", "8'd1"] {
+        let expression = vec![literal; 160].join("+");
+        let source = format!(
+            "module long_default(p); inout p; electrical p; parameter real N={expression}; analog I(p)<+N; endmodule"
+        );
+        let artifact = VerilogACompiler::default()
+            .compile_canonical_ir(&source)
+            .unwrap();
+        assert_eq!(artifact.hir.parameters[0].default, Some(160.0));
+    }
+}
+#[test]
+fn iterative_typed_operator_chains_preserve_contexts() {
+    // 1,199 AST nodes exceeds the former 256-node closed-default limit.
+    let packed = vec!["8'd1"; 600].join("+");
+    let runtime = vec!["one"; 600].join("+");
     let source = format!(
-        "module long_default(p); inout p; electrical p; parameter real N={scalar}; analog I(p)<+N; endmodule"
+        r#"module long_typed(p);
+        inout p; electrical p;
+        parameter N={packed};
+        parameter integer CARRY={packed};
+        parameter real R={packed};
+        parameter real CALLED=max({packed},100.0);
+        parameter CHOSEN=1'b1 ? ({packed}) : 8'bx;
+        reg [7:0] one;
+        reg [31:0] runtime_value, n_value, carry_value, chosen_value;
+        real runtime_real, default_real;
+        initial begin
+          runtime_value={runtime};
+          runtime_real={runtime};
+          n_value=N; carry_value=CARRY; chosen_value=CHOSEN; default_real=R;
+        end
+        analog I(p)<+(N+CARRY+R+CALLED+CHOSEN)*V(p);
+        endmodule"#
     );
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(&source)
         .unwrap();
-    assert_eq!(artifact.hir.parameters[0].default, Some(160.0));
-    let packed = source.replace(&scalar, &vec!["8'd1"; 160].join("+"));
-    let error = VerilogACompiler::default()
-        .compile_canonical_ir(&packed)
-        .unwrap_err()
-        .to_string();
-    assert!(
-        error.contains("typed constant lowering limit of 256 expression nodes"),
-        "{error}"
+    for (name, expected) in [
+        ("N", 88.0),
+        ("CARRY", 600.0),
+        ("R", 88.0),
+        ("CALLED", 100.0),
+        ("CHOSEN", 88.0),
+    ] {
+        assert_eq!(
+            artifact
+                .hir
+                .parameters
+                .iter()
+                .find(|p| p.name == name)
+                .unwrap()
+                .default,
+            Some(expected),
+            "{name}"
+        );
+    }
+    let mut h = Harness::from_source(&source);
+    h.set("one", "00000001");
+    expect_finished(h.start(0));
+    for (name, expected) in [
+        ("runtime_value", 600),
+        ("n_value", 88),
+        ("carry_value", 600),
+        ("chosen_value", 88),
+    ] {
+        assert_eq!(h.get(name), format!("{expected:032b}"), "{name}");
+    }
+    assert_eq!(h.get_real("runtime_real"), 88.0);
+    assert_eq!(h.get_real("default_real"), 88.0);
+}
+
+#[test]
+fn comparisons_contextualize_arithmetic_before_evaluation() {
+    let mut h = Harness::from_source(
+        r#"
+        module compare_context;
+          reg [7:0] a,b;
+          reg signed [7:0] negative, signed_zero;
+          reg [15:0] wide;
+          reg [7:0] unknown_bits;
+          reg [7:0] results;
+          parameter CONSTANT=(8'd255+8'd1)==16'd256;
+          parameter CASE_CONSTANT=(8'd255+8'd1)===16'd256;
+          initial begin
+            results[0]=(a+b)==wide;
+            results[1]=(a+b)>=wide;
+            results[2]=(a+b)!==wide;
+            results[3]=(a+b)===wide;
+            results[4]=(negative+signed_zero)<16'sd0;
+            results[5]=(negative+signed_zero)<16'd0;
+            results[6]=(unknown_bits|8'b0)===16'b0000000010xx0101;
+            results[7]=CONSTANT && CASE_CONSTANT;
+          end
+        endmodule
+    "#,
     );
+    h.set("a", "11111111");
+    h.set("b", "00000001");
+    h.set("wide", "0000000100000000");
+    h.set("negative", "10000000");
+    h.set("signed_zero", "00000000");
+    h.set("unknown_bits", "10xz0101");
+    expect_finished(h.start(0));
+    assert_eq!(h.get("results"), "11011011");
 }

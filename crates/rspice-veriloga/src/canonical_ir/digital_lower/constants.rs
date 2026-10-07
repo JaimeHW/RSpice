@@ -113,32 +113,6 @@ pub(super) fn math_call(name: &str) -> Option<MathCall> {
     })
 }
 
-pub(super) fn lower_math_call(
-    lowerer: &mut ProcessLowerer<'_>,
-    block: BlockId,
-    call: &crate::ast::CallExpr,
-) -> ValueId {
-    let kind = match (math_call(&call.name), call.args.as_slice()) {
-        (Some(MathCall::Unary(op)), [input]) => CfgValueKind::Unary {
-            op,
-            input: lowerer.real_expression(block, input),
-        },
-        (Some(MathCall::Binary(op)), [left, right]) => CfgValueKind::Binary {
-            op,
-            left: lowerer.real_expression(block, left),
-            right: lowerer.real_expression(block, right),
-        },
-        _ => {
-            lowerer.error(
-                format!("`{}` has no supported constant math signature", call.name),
-                call.span,
-            );
-            return lowerer.real_constant(0.0);
-        }
-    };
-    lowerer.builder.push(block, CfgValueType::Real, kind)
-}
-
 pub(super) fn resolve<'a>(
     source: &DigitalConstants,
     time_scale: crate::time_scale::ModuleTimeScale,

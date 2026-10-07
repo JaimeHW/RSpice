@@ -506,13 +506,20 @@ spelling instead of the rounded f64 lexer cache.
 Dependent defaults retain their executable expressions so later overrides
 still take effect. Runtime queries and constant functions outside the shared
 evaluator retain their existing scalar path.
-The recursive typed evaluator currently accepts at most 256 expression nodes
-for this closed-default path. Longer scalar chains retain iterative scalar
-normalization; longer packed chains receive an explicit resource diagnostic.
-Iterative typed evaluation, packed dependent-default semantics, implicit
-parameter type inference in analog expressions, arrays, and the full typed
-external ABI remain open. This increment does not close general cross-domain
-parameter semantics. Wasm helper ABI stays at 20.
+
+Schema 89 evaluates typed operator trees with explicit work stacks for width
+and sign inference, operator emission, conditionals and supported numeric
+calls. Long packed arithmetic defaults now preserve narrow wrapping and
+declared assignment context; runtime digital expressions use the same walker.
+Comparisons supply their common operand width and sign before arithmetic is
+evaluated, so `(8'd255+8'd1)==16'd256` is true. Conditional evaluation still
+skips inactive arms and preserves analog sample barriers.
+
+Concatenation and packed-selection helpers remain recursive. Closed defaults
+containing those forms retain the temporary 256-expression-node bound; large
+packed defaults receive an explicit diagnostic. Their iterative migration,
+dependent packed-default semantics, general parameter typing and the full
+typed external parameter ABI remain open. Wasm helper ABI remains 20.
 Source: [VAMS-2023, 3.4.1 and 4.2](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
 
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated

@@ -6151,11 +6151,21 @@ impl SemanticAnalyzer {
         let mut closed = parameter.param_type != ParamType::String;
         let mut expression_nodes = 0usize;
         let mut packed = false;
+        let mut recursive_form = false;
         flow_probes::visit_expression(expression, &mut |expression| {
             expression_nodes = expression_nodes.saturating_add(1);
             packed |= matches!(expression, Expression::Digital(_))
                 || matches!(expression, Expression::Number(number) if number.raw.contains('\''));
 
+            // Operators, conditionals and supported numeric calls use an
+            // explicit lowering stack. Concatenations and packed selections
+            // still delegate to recursive helpers and keep the temporary bound.
+            recursive_form |= matches!(
+                expression,
+                Expression::ArrayLiteral(_)
+                    | Expression::ArrayAccess(_)
+                    | Expression::Digital(DigitalExpr::PartSelect(_) | DigitalExpr::ArraySelect(_))
+            );
             if matches!(
                 expression,
                 Expression::Identifier(_) | Expression::ArrayAccess(_)
@@ -6164,20 +6174,19 @@ impl SemanticAnalyzer {
             }
         });
         const MAX_CLOSED_PARAMETER_NODES: usize = 256;
-        if closed && packed && expression_nodes > MAX_CLOSED_PARAMETER_NODES {
+        if closed && packed && recursive_form && expression_nodes > MAX_CLOSED_PARAMETER_NODES {
             return Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::UnsupportedFeature(format!(
-                    "closed packed default of parameter '{}' exceeds the typed constant lowering limit of {MAX_CLOSED_PARAMETER_NODES} expression nodes",
+                    "closed packed default of parameter '{}' uses a recursive expression form beyond the typed constant lowering limit of {MAX_CLOSED_PARAMETER_NODES} expression nodes",
                     parameter.name
                 )),
                 expression.span(),
             )));
         }
-        // Preserve the existing iterative scalar normalizer for long operator
-        // chains. Packed chains cannot take that fallback because it loses
-        // their widths; those require iterative typed lowering before expansion.
+        // Long operator trees are safe in the shared typed walker. Preserve
+        // the scalar fallback only for large forms not migrated to that walker.
         if closed
-            && expression_nodes <= MAX_CLOSED_PARAMETER_NODES
+            && (!recursive_form || expression_nodes <= MAX_CLOSED_PARAMETER_NODES)
             && let Ok(value) = crate::canonical_ir::digital_lower::parameter_override_literal(
                 parameter,
                 &DigitalConstants::default(),
