@@ -159,6 +159,13 @@ pub(super) fn parse(
             termination = Some((MissingSubcircuitEndsBoundary::AlterCard, origin));
             break;
         }
+        // DATA cards are consumed here rather than by process_line_gated.
+        // Inactive branches must neither evaluate rows nor publish a table.
+        if (head.eq_ignore_ascii_case(".data") || head.eq_ignore_ascii_case(".enddata"))
+            && state.conditionals_suppress()
+        {
+            continue;
+        }
         if head.eq_ignore_ascii_case(".data") {
             data_table = Some(DataTableBuilder::new(
                 line_num,
