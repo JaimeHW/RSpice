@@ -171,3 +171,65 @@ fn repeated_assignments_and_scalar_dependencies_agree_in_check_and_run() {
         }
     }
 }
+
+#[test]
+fn model_defaults_and_quoted_vectors_preserve_published_values() {
+    let mut cases = Vec::new();
+    for fields in [
+        "gain={in_offset+1} in_offset={later}",
+        "in_offset={later} gain={in_offset+1}",
+    ] {
+        for scoped in [false, true] {
+            let mut body = format!("A1 in out alias {fields}");
+            if scoped {
+                body = format!(".SUBCKT cell in out\n{body}\n.ENDS\nX1 in out cell");
+            }
+            cases.push((
+                format!(".MODEL alias gain(in_offset=1)\n{body}\n.PARAM later=3"),
+                16.0,
+            ));
+        }
+    }
+    let mut reference = rspice_core::netlist::ParamContext::new();
+    reference.set_random_seed(37);
+    rspice_core::netlist::expr::eval_expression("aunif(100,1)", &reference).unwrap();
+    let expected = rspice_core::netlist::expr::eval_expression("aunif(100,1)", &reference).unwrap();
+    for body in [
+        "A1 [in] print_param_types real_array=\"[{aunif(100,1)}]\"",
+        "A1 [in] print_param_types complex_array=\"[<aunif(100,1) 0>]\"",
+        ".PARAM payload=\"[{aunif(100,1)}]\"\nA1 [in] print_param_types real_array={payload}",
+    ] {
+        cases.push((
+            format!("{body}\n.PARAM marker={{aunif(100,1)}}\nA2 in out gain gain={{marker}}"),
+            expected,
+        ));
+    }
+    for (body, expected) in cases {
+        let directory = common::test_dir("instance_context_parity");
+        let deck = directory.join("deck.cir");
+        let result = directory.join("result.csv");
+        std::fs::write(
+            &deck,
+            format!("* context parity\n.OPTIONS SEED=37\nV1 in 0 1\n{body}\n.OP\n.END\n"),
+        )
+        .unwrap();
+        for command in ["check", "run"] {
+            let mut process = Command::new(env!("CARGO_BIN_EXE_rspice"));
+            process.args(["--quiet", command]).arg(&deck);
+            if command == "run" {
+                process.args(["--format", "csv", "--output"]).arg(&result);
+            }
+            let output = process.output().unwrap();
+            assert!(
+                output.status.success(),
+                "{command}: {body}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let actual = csv_voltage(&result, "out");
+        assert!(
+            (actual - expected).abs() < 1e-10,
+            "{body}: {actual} != {expected}"
+        );
+    }
+}

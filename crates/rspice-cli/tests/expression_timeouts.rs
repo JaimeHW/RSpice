@@ -205,6 +205,8 @@ fn timeout_interrupts_eager_xspice_instance_expressions() {
         "A1 out aux gain gain={work(26)}",
         "A1 out aux gain gain=work(26)+0",
         "A1 [out] print_param_types real_array=[0 {work(26)}]",
+        "A1 [out] print_param_types real_array=\"[0 {work(26)}]\"",
+        "A1 [out] print_param_types complex_array=\"[<1 work(26)>]\"",
         "A1 [out] print_param_types complex=<work(26) 1>",
         "A1 [out] print_param_types complex=<1 work(26)>",
         "A1 [out] print_param_types complex_array=[<1 work(26)>]",
