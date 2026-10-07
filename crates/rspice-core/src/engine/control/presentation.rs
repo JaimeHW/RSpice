@@ -81,6 +81,7 @@ enum Column {
     Branch(usize),
     Scale,
     DcAxis(usize),
+    TableCoordinate(usize),
     Noise(noise::NoiseColumn),
     NoiseContribution,
 }
@@ -94,11 +95,23 @@ struct Selected<'a> {
 }
 
 impl ControlNamedDataset {
+    fn table_columns(&self) -> Option<&[super::super::FrequencyDataColumn]> {
+        match &self.result {
+            ControlAnalysisResult::AcTable(FrequencyDataResult { columns, .. })
+            | ControlAnalysisResult::NoiseTable(FrequencyDataResult { columns, .. }) => {
+                Some(columns)
+            }
+            _ => None,
+        }
+    }
+
     fn length(&self) -> usize {
         match &self.result {
             ControlAnalysisResult::OperatingPoint(_) => 1,
-            ControlAnalysisResult::Ac(points) => points.len(),
-            ControlAnalysisResult::Noise(points) => points.len(),
+            ControlAnalysisResult::Ac(points)
+            | ControlAnalysisResult::AcTable(FrequencyDataResult { points, .. }) => points.len(),
+            ControlAnalysisResult::Noise(points)
+            | ControlAnalysisResult::NoiseTable(FrequencyDataResult { points, .. }) => points.len(),
             ControlAnalysisResult::DcSweep(result) => result.points.len(),
             ControlAnalysisResult::Transient(result) => result.time.len(),
         }
@@ -107,7 +120,10 @@ impl ControlNamedDataset {
     fn scale_unit(&self) -> SignalUnit {
         match &self.result {
             ControlAnalysisResult::OperatingPoint(_) => SignalUnit::Dimensionless,
-            ControlAnalysisResult::Ac(_) | ControlAnalysisResult::Noise(_) => SignalUnit::Hertz,
+            ControlAnalysisResult::Ac(_)
+            | ControlAnalysisResult::AcTable(_)
+            | ControlAnalysisResult::Noise(_)
+            | ControlAnalysisResult::NoiseTable(_) => SignalUnit::Hertz,
             ControlAnalysisResult::DcSweep(result) => result
                 .axes
                 .last()
@@ -119,7 +135,10 @@ impl ControlNamedDataset {
     fn scale_name(&self) -> &str {
         match &self.result {
             ControlAnalysisResult::OperatingPoint(_) => "index",
-            ControlAnalysisResult::Ac(_) | ControlAnalysisResult::Noise(_) => "frequency",
+            ControlAnalysisResult::Ac(_)
+            | ControlAnalysisResult::AcTable(_)
+            | ControlAnalysisResult::Noise(_)
+            | ControlAnalysisResult::NoiseTable(_) => "frequency",
             ControlAnalysisResult::DcSweep(result) => {
                 result.axes.last().map_or("sweep", |a| a.name.as_str())
             }
@@ -130,8 +149,14 @@ impl ControlNamedDataset {
     fn scale_value(&self, row: usize) -> Option<Value> {
         match &self.result {
             ControlAnalysisResult::OperatingPoint(_) => (row == 0).then_some(0.0),
-            ControlAnalysisResult::Ac(points) => points.get(row).map(|point| point.frequency),
-            ControlAnalysisResult::Noise(points) => points.get(row).map(|point| point.frequency),
+            ControlAnalysisResult::Ac(points)
+            | ControlAnalysisResult::AcTable(FrequencyDataResult { points, .. }) => {
+                points.get(row).map(|point| point.frequency)
+            }
+            ControlAnalysisResult::Noise(points)
+            | ControlAnalysisResult::NoiseTable(FrequencyDataResult { points, .. }) => {
+                points.get(row).map(|point| point.frequency)
+            }
             ControlAnalysisResult::DcSweep(result) => result.points.get(row).map(|p| p.sweep_value),
             ControlAnalysisResult::Transient(result) => result.time.get(row).copied(),
         }
@@ -140,8 +165,14 @@ impl ControlNamedDataset {
     fn branch_names(&self) -> &[String] {
         match &self.result {
             ControlAnalysisResult::OperatingPoint(result) => &result.branch_names,
-            ControlAnalysisResult::Ac(points) => points.first().map_or(&[], |p| &p.branch_names),
-            ControlAnalysisResult::Noise(points) => points.first().map_or(&[], |p| &p.branch_names),
+            ControlAnalysisResult::Ac(points)
+            | ControlAnalysisResult::AcTable(FrequencyDataResult { points, .. }) => {
+                points.first().map_or(&[], |p| &p.branch_names)
+            }
+            ControlAnalysisResult::Noise(points)
+            | ControlAnalysisResult::NoiseTable(FrequencyDataResult { points, .. }) => {
+                points.first().map_or(&[], |p| &p.branch_names)
+            }
             ControlAnalysisResult::DcSweep(result) => result
                 .points
                 .first()
@@ -157,24 +188,48 @@ impl Selected<'_> {
             return None;
         }
         match (self.column, &self.dataset.result) {
-            (Column::Noise(column), ControlAnalysisResult::Noise(points)) => {
+            (Column::TableCoordinate(index), _) => self
+                .dataset
+                .table_columns()?
+                .get(index)?
+                .values
+                .get(row)
+                .copied()
+                .map(Into::into),
+            (
+                Column::Noise(column),
+                ControlAnalysisResult::Noise(points)
+                | ControlAnalysisResult::NoiseTable(FrequencyDataResult { points, .. }),
+            ) => {
                 let point = points.get(row)?;
                 (point.input_quantity == points.first()?.input_quantity)
                     .then(|| column.sample(point).into())
             }
-            (Column::NoiseContribution, ControlAnalysisResult::Noise(points)) => points
+            (
+                Column::NoiseContribution,
+                ControlAnalysisResult::Noise(points)
+                | ControlAnalysisResult::NoiseTable(FrequencyDataResult { points, .. }),
+            ) => points
                 .get(row)?
                 .contribution(self.noise_probe.as_ref()?)
                 .ok()
                 .map(Into::into),
             (Column::Noise(_) | Column::NoiseContribution, _) => None,
-            (Column::Node(index), ControlAnalysisResult::Noise(points)) => {
+            (
+                Column::Node(index),
+                ControlAnalysisResult::Noise(points)
+                | ControlAnalysisResult::NoiseTable(FrequencyDataResult { points, .. }),
+            ) => {
                 let point = points.get(row)?;
                 (point.node_names == points.first()?.node_names)
                     .then(|| point.voltages.get(index).copied())
                     .flatten()
             }
-            (Column::Branch(index), ControlAnalysisResult::Noise(points)) => {
+            (
+                Column::Branch(index),
+                ControlAnalysisResult::Noise(points)
+                | ControlAnalysisResult::NoiseTable(FrequencyDataResult { points, .. }),
+            ) => {
                 let point = points.get(row)?;
                 (point.branch_names == points.first()?.branch_names)
                     .then(|| point.currents.get(index).copied())
@@ -204,13 +259,21 @@ impl Selected<'_> {
             (Column::Branch(index), ControlAnalysisResult::OperatingPoint(result)) => {
                 result.branch_current(index).map(Into::into)
             }
-            (Column::Node(index), ControlAnalysisResult::Ac(points)) => {
+            (
+                Column::Node(index),
+                ControlAnalysisResult::Ac(points)
+                | ControlAnalysisResult::AcTable(FrequencyDataResult { points, .. }),
+            ) => {
                 let point = points.get(row)?;
                 (point.node_names == points.first()?.node_names)
                     .then(|| point.voltages.get(index).copied())
                     .flatten()
             }
-            (Column::Branch(index), ControlAnalysisResult::Ac(points)) => {
+            (
+                Column::Branch(index),
+                ControlAnalysisResult::Ac(points)
+                | ControlAnalysisResult::AcTable(FrequencyDataResult { points, .. }),
+            ) => {
                 let point = points.get(row)?;
                 (point.branch_names == points.first()?.branch_names)
                     .then(|| point.currents.get(index).copied())
@@ -299,6 +362,22 @@ impl ControlCircuit {
                 .find(|(_, a)| a.name == lower)
         {
             (Column::DcAxis(index), lower, axis.unit.clone())
+        } else if probe.is_none()
+            && let Some(columns) = dataset.table_columns()
+            && let Some((index, column)) = columns
+                .iter()
+                .enumerate()
+                .find(|(_, c)| c.name.eq_ignore_ascii_case(name))
+        {
+            use super::super::FrequencyDataTarget;
+            let unit = match &column.target {
+                FrequencyDataTarget::Frequency => SignalUnit::Hertz,
+                FrequencyDataTarget::Parameter(name) if name == "TEMP" => {
+                    SignalUnit::Custom("degC".into())
+                }
+                _ => SignalUnit::Unspecified,
+            };
+            (Column::TableCoordinate(index), lower, unit)
         } else if matches!(lower.as_str(), "0" | "gnd" | "gnd!") {
             (Column::Ground, "v(0)".into(), SignalUnit::Volt)
         } else {
@@ -311,14 +390,16 @@ impl ControlCircuit {
                         .result
                         .node_names
                 }
-                ControlAnalysisResult::Noise(points) => {
+                ControlAnalysisResult::Noise(points)
+                | ControlAnalysisResult::NoiseTable(FrequencyDataResult { points, .. }) => {
                     &points
                         .first()
                         .ok_or_else(|| unavailable(line, dataset, name))?
                         .node_names
                 }
                 ControlAnalysisResult::OperatingPoint(result) => &result.node_names,
-                ControlAnalysisResult::Ac(points) => {
+                ControlAnalysisResult::Ac(points)
+                | ControlAnalysisResult::AcTable(FrequencyDataResult { points, .. }) => {
                     &points
                         .first()
                         .ok_or_else(|| unavailable(line, dataset, name))?
@@ -577,6 +658,40 @@ impl<'a> Resolver<'a> {
         if std::ptr::eq(a, b) {
             return Ok(());
         }
+        let same_table = match (a.table_columns(), b.table_columns()) {
+            (None, None) => true,
+            (Some(a), Some(b)) if a.len() == b.len() => {
+                let mut columns = BTreeMap::new();
+                for column in b {
+                    check_abort(self.abort, self.line)?;
+                    columns.insert(&column.target, column);
+                }
+                let mut same = true;
+                for a in a {
+                    check_abort(self.abort, self.line)?;
+                    let Some(b) = columns.get(&a.target) else {
+                        same = false;
+                        break;
+                    };
+                    if a.values.len() != b.values.len() {
+                        same = false;
+                        break;
+                    }
+                    for (a, b) in a.values.iter().zip(&b.values) {
+                        check_abort(self.abort, self.line)?;
+                        if a != b {
+                            same = false;
+                            break;
+                        }
+                    }
+                    if !same {
+                        break;
+                    }
+                }
+                same
+            }
+            _ => false,
+        };
         let same_axes = match (&a.result, &b.result) {
             (ControlAnalysisResult::DcSweep(a), ControlAnalysisResult::DcSweep(b)) => {
                 a.axes == b.axes
@@ -586,7 +701,8 @@ impl<'a> Resolver<'a> {
             }
             _ => true,
         };
-        if !same_axes || a.scale_unit() != b.scale_unit() || a.length() != b.length() {
+        if !same_table || !same_axes || a.scale_unit() != b.scale_unit() || a.length() != b.length()
+        {
             return Err(command_error(
                 self.line,
                 format!("{} and {} have different sample grids", a.name, b.name),

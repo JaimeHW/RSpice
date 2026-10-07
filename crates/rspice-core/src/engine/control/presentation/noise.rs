@@ -51,7 +51,9 @@ pub(super) fn select<'a>(
     name: &str,
     line: usize,
 ) -> Result<Option<Selected<'a>>, ControlError> {
-    let ControlAnalysisResult::Noise(points) = &dataset.result else {
+    let (ControlAnalysisResult::Noise(points)
+    | ControlAnalysisResult::NoiseTable(FrequencyDataResult { points, .. })) = &dataset.result
+    else {
         return Ok(None);
     };
     let (column, signal) = match name.to_ascii_lowercase().as_str() {
@@ -85,7 +87,9 @@ pub(super) fn contribution<'a>(
     args: &[Expr],
     line: usize,
 ) -> Result<Selected<'a>, ControlError> {
-    let ControlAnalysisResult::Noise(points) = &dataset.result else {
+    let (ControlAnalysisResult::Noise(points)
+    | ControlAnalysisResult::NoiseTable(FrequencyDataResult { points, .. })) = &dataset.result
+    else {
         return Err(unavailable(line, dataset, name));
     };
     if !(1..=2).contains(&args.len()) {

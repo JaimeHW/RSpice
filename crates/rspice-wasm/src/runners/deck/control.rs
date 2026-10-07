@@ -164,6 +164,12 @@ pub(super) fn run(
             ControlAnalysisResult::Ac(points) => {
                 AnalysisResultDocument::from_ac(dataset.analysis_id, points)
             }
+            ControlAnalysisResult::AcTable(_) | ControlAnalysisResult::NoiseTable(_) => {
+                return Err(unsupported_deck_analysis(
+                    "control frequency-table publication requires typed row-coordinate support"
+                        .into(),
+                ));
+            }
             ControlAnalysisResult::Transient(result) => AnalysisResultDocument::from_transient(
                 dataset.analysis_id,
                 result,

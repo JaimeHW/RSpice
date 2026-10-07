@@ -155,6 +155,45 @@ pub(super) fn frequency(
     }
 }
 
+pub(super) fn frequency_table(
+    engine: &Engine,
+    netlist: &Netlist,
+    command: &AnalysisCommand,
+    line: usize,
+    abort: &dyn AbortSignal,
+) -> Result<(ControlAnalysisResult, usize), ControlExecutionError> {
+    match command {
+        AnalysisCommand::AcData { table_name } => {
+            let result = engine
+                .run_ac_table_with_abort(netlist, table_name, abort)
+                .map_err(|error| simulation_error(line, error))?;
+            let count = result.retained_value_count();
+            Ok((ControlAnalysisResult::AcTable(result), count))
+        }
+        AnalysisCommand::NoiseData {
+            output_node,
+            reference_node,
+            input_source,
+            table_name,
+        } => {
+            let result = engine
+                .run_noise_table_named_with_input_source_and_abort(
+                    netlist,
+                    output_node,
+                    reference_node.as_deref(),
+                    input_source,
+                    table_name,
+                    engine.config().temperature,
+                    abort,
+                )
+                .map_err(|error| simulation_error(line, error))?;
+            let count = result.retained_value_count();
+            Ok((ControlAnalysisResult::NoiseTable(result), count))
+        }
+        _ => Err(command_error(line, "expected an AC or NOISE table").into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

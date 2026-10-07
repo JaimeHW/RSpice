@@ -4,7 +4,7 @@ use crate::{ModelFinish, Value};
 
 /// Resolved meaning of a frequency-table column. Declared parameters take
 /// precedence over identically named devices; names here are canonical uppercase.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FrequencyDataTarget {
     Frequency,
     Parameter(String),

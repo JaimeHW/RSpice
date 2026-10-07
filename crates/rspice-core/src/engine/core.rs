@@ -592,6 +592,24 @@ impl Engine {
         config
     }
 
+    /// Bound a control table without prematurely resolving parameter-dependent
+    /// row options. Explicit runtime options also survive for resolved callers.
+    pub(super) fn control_frequency_table_engine(
+        &self,
+        options: &crate::netlist::SimulationOptions,
+        limits: crate::ResourceLimits,
+    ) -> Result<Self, SimulationConfigError> {
+        let mut config = resolve_simulation_config(
+            &self.config,
+            Some(options),
+            &SimulationConfigOverrides::default(),
+        );
+        config.resource_limits = limits;
+        let mut engine = self.try_resolved_with_config(config)?;
+        engine.config_is_resolved = self.config_is_resolved;
+        Ok(engine)
+    }
+
     /// Per-deck engine from a configuration the caller has already resolved.
     ///
     /// Same metric-sharing contract as [`Self::resolved_for_netlist`]: the

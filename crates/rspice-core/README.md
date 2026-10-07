@@ -514,6 +514,22 @@ eager parameter error classes can still prevent temperature discovery. Further
 physical-override combinations, statistical/runtime binding, general graph and
 binding complexity, and broader resource qualification remain in the plan.
 
+`ControlCircuit` executes `ac DATA=<table>` and `noise ... DATA=<table>` through
+the shared compact table runners. `ControlAnalysisResult::AcTable` and
+`NoiseTable` retain authored columns, canonical targets, accepted row coordinates,
+requested row count and model-finish metadata. Presentation exposes column names
+and preserves complex samples and noise units. Cross-dataset arithmetic requires
+matching canonical targets and every coordinate, independent of column order.
+Repeated or decreasing frequencies remain in their authored order.
+
+Physical `TEMP` columns override the caller's resolved run temperature. Otherwise
+resolved callers retain their policies; unresolved callers resolve each row's
+authored options and executed control overrides. Only options explicitly changed
+by control commands survive as overrides during source replay. Circuit equations
+and noise densities use the same temperature; the noise fallback applies to
+unresolved rows without a temperature option. Table control publication through
+the CLI/WASM typed-document adapters remains an open implementation-plan slice.
+
 The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and
 the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.
 Semiconductor temperature behavior belongs to each device model;

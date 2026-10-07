@@ -169,6 +169,13 @@ pub(super) fn run(
                             ControlAnalysisResult::Ac(result) => {
                                 frequency::finish_ac_results(&ctx, result)?
                             }
+                            ControlAnalysisResult::AcTable(_)
+                            | ControlAnalysisResult::NoiseTable(_) => {
+                                return Err(CliError::InvalidArgument {
+                                    message: "control frequency-table publication requires typed row-coordinate support".into(),
+                                    suggestion: Some("use the core ControlCircuit API to retain table coordinates until the CLI document adapter is implemented".into()),
+                                });
+                            }
                             ControlAnalysisResult::Transient(_) => {
                                 unreachable!("published by the transient host")
                             }

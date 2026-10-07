@@ -378,6 +378,8 @@ impl ExecutionRunner {
                                     runner.compare_ac_reference(path, circuit.netlist(), points)
                                 }
                                 ControlAnalysisResult::Noise(_)
+                                | ControlAnalysisResult::AcTable(_)
+                                | ControlAnalysisResult::NoiseTable(_)
                                 | ControlAnalysisResult::DcSweep(_) => {
                                     // Version 1 contracts admit OP, AC and TRAN
                                     // only. New engine analyses need their own

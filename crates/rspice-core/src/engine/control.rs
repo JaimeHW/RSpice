@@ -1,6 +1,8 @@
 //! Electrical host for the shared resumable control-command machine.
 
-use super::{Engine, SimulationConfigError, SimulationError, TransientStartupMode};
+use super::{
+    Engine, FrequencyDataResult, SimulationConfigError, SimulationError, TransientStartupMode,
+};
 use crate::analysis::AcResult;
 use crate::analysis::transient::TransientResult;
 use crate::control_protocol::{
@@ -45,7 +47,9 @@ pub enum ControlExecutionError {
 pub enum ControlAnalysisResult {
     OperatingPoint(Box<crate::solver::SimulationResult>),
     Ac(Vec<AcResult>),
+    AcTable(FrequencyDataResult<AcResult>),
     Noise(Vec<crate::analysis::NoiseResult>),
+    NoiseTable(FrequencyDataResult<crate::analysis::NoiseResult>),
     DcSweep(Box<super::DcSweepResult>),
     Transient(Box<TransientResult>),
 }
@@ -275,14 +279,24 @@ impl ControlCircuit {
             .resource_limits
             .max_result_values
             .saturating_sub(self.retained_values);
-        let bounded = engine
-            .try_resolved_with_config(configured)
-            .map_err(|source| ControlExecutionError::Configuration { line, source })?;
+        let bounded = if matches!(
+            analysis,
+            AnalysisCommand::AcData { .. } | AnalysisCommand::NoiseData { .. }
+        ) {
+            engine.control_frequency_table_engine(&self.runtime_options, configured.resource_limits)
+        } else {
+            engine.try_resolved_with_config(configured)
+        }
+        .map_err(|source| ControlExecutionError::Configuration { line, source })?;
         let (kind, identity_kind) = match &analysis {
             AnalysisCommand::Op => ("op", crate::identity::AnalysisKind::Op),
             AnalysisCommand::Dc { .. } => ("dc", crate::identity::AnalysisKind::Dc),
-            AnalysisCommand::Ac { .. } => ("ac", crate::identity::AnalysisKind::Ac),
-            AnalysisCommand::Noise { .. } => ("noise", crate::identity::AnalysisKind::Noise),
+            AnalysisCommand::Ac { .. } | AnalysisCommand::AcData { .. } => {
+                ("ac", crate::identity::AnalysisKind::Ac)
+            }
+            AnalysisCommand::Noise { .. } | AnalysisCommand::NoiseData { .. } => {
+                ("noise", crate::identity::AnalysisKind::Noise)
+            }
             AnalysisCommand::Tran { .. } => ("tran", crate::identity::AnalysisKind::Tran),
             _ => {
                 return Err(command_error(
@@ -355,6 +369,11 @@ impl ControlCircuit {
             AnalysisCommand::Ac { .. } | AnalysisCommand::Noise { .. } => {
                 let (result, count) =
                     analysis::frequency(&bounded, &netlist, &analysis, line, abort)?;
+                (kind, result, count)
+            }
+            AnalysisCommand::AcData { .. } | AnalysisCommand::NoiseData { .. } => {
+                let (result, count) =
+                    analysis::frequency_table(&bounded, &netlist, &analysis, line, abort)?;
                 (kind, result, count)
             }
             AnalysisCommand::Tran { .. } => {
