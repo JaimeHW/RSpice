@@ -307,3 +307,98 @@ fn global_defaults_cannot_turn_cyclic_instance_bindings_into_success() {
         }
     }
 }
+
+#[test]
+fn scoped_model_defaults_and_vector_aliases_reach_published_results() {
+    for (definitions, device, following, expected) in [
+        (
+            ".MODEL alias gain(gain=3)",
+            "A1 in out alias gain={gain*2}",
+            "",
+            6.0,
+        ),
+        (
+            ".MODEL alias gain(in_offset=3)",
+            "A1 in out alias gain={in_offset+1}",
+            "",
+            16.0,
+        ),
+        (
+            ".MODEL lookup pwl(x_array=[0 1] input_domain=.01 fraction=false)",
+            "A1 in out lookup y_array={payload}",
+            ".PARAM payload=\"[0 {scale}]\"",
+            4.0,
+        ),
+    ] {
+        for scoped in [false, true] {
+            let directory = common::test_dir("instance_defaults_and_aliases");
+            let deck = directory.join("deck.cir");
+            let result = directory.join("result.csv");
+            let body = if scoped {
+                format!(".SUBCKT cell in out\n{device}\n.ENDS\nX1 in out cell")
+            } else {
+                device.to_string()
+            };
+            std::fs::write(&deck, format!("* resolved instance bindings\n.PARAM scale=4\n{definitions}\nV1 in 0 1\n{body}\n{following}\n.OP\n.END\n")).unwrap();
+            for command in ["check", "run"] {
+                let mut process = Command::new(env!("CARGO_BIN_EXE_rspice"));
+                process.args(["--quiet", command]).arg(&deck);
+                if command == "run" {
+                    process.args(["--format", "csv", "--output"]).arg(&result);
+                }
+                let output = process.output().unwrap();
+                assert!(
+                    output.status.success(),
+                    "{command}, {body}: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            let actual = csv_voltage(&result, "out");
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "{body}: {actual} != {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn invalid_late_vector_aliases_never_replace_existing_results() {
+    for (payload, syntax_error) in [("[1 2] trailing", true), ("[1 {missing}]", false)] {
+        for scoped in [false, true] {
+            let directory = common::test_dir("invalid_late_vector_alias");
+            let deck = directory.join("deck.cir");
+            let result = directory.join("result.csv");
+            let mut body = String::from("A1 [in] print_param_types real_array={payload}");
+            if scoped {
+                body = format!(".SUBCKT cell in\n{body}\n.ENDS\nX1 in cell");
+            }
+            std::fs::write(
+                &deck,
+                format!(
+                    "* bad alias\nV1 in 0 1\n{body}\n.PARAM payload=\"{payload}\"\n.OP\n.END\n"
+                ),
+            )
+            .unwrap();
+            for command in ["check", "run"] {
+                std::fs::write(&result, "existing result").unwrap();
+                let mut process = Command::new(env!("CARGO_BIN_EXE_rspice"));
+                process.args(["--quiet", command]).arg(&deck);
+                if command == "run" {
+                    process.args(["--format", "csv", "--output"]).arg(&result);
+                }
+                let output = process.output().unwrap();
+                assert!(!output.status.success(), "{command}, {body}");
+                if syntax_error {
+                    assert_eq!(
+                        output.status.code(),
+                        Some(65),
+                        "{command}, {body}: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+                assert_eq!(std::fs::read_to_string(&result).unwrap(), "existing result");
+            }
+        }
+    }
+}

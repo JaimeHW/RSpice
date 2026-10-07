@@ -465,6 +465,11 @@ evaluation begins only after a complete complex-literal grammar is recognized.
 Quoted vector literals reject trailing tokens instead of discarding them.
 Quoted numeric entries use the deck's expression dialect, functions and seeded
 stream; scoped entries resolve and sample separately for each instance.
+Deferred string aliases are classified in their final lexical scope, including
+forward-defined real, integer, string and complex vectors. Numeric entries then
+use the same cancellable instance binding as inline vectors. Scoped scalar and
+vector expressions can read model defaults, with enclosing parameters retaining
+precedence and run temperature options applied consistently.
 Quote individual string-vector entries that resemble `<real imag>` pairs to
 preserve them as literal text.
 

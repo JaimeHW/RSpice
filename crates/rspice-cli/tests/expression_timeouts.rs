@@ -227,6 +227,26 @@ fn timeout_interrupts_eager_xspice_instance_expressions() {
 }
 
 #[test]
+fn timeout_interrupts_late_vector_alias_evaluation() {
+    let functions = work_functions();
+    let dir = common::test_dir("vector-alias-expression-timeout");
+    for (field, payload) in [
+        ("real_array", "[0 {work(26)}]"),
+        ("complex_array", "[<1 work(26)>]"),
+    ] {
+        for scoped in [false, true] {
+            let mut body = format!("A1 [in] print_param_types {field}={{payload}}");
+            if scoped {
+                body = format!(".SUBCKT cell in\n{body}\n.ENDS\nX1 in cell");
+            }
+            let deck = dir.join(format!("{field}-{scoped}.cir"));
+            std::fs::write(&deck, format!("* alias deadline\n{functions}V1 in 0 1\n{body}\n.PARAM payload=\"{payload}\"\n.OP\n.END\n")).unwrap();
+            assert_times_out(&deck, &body, !scoped);
+        }
+    }
+}
+
+#[test]
 fn timeout_interrupts_forward_complex_instance_evaluation() {
     let functions = work_functions();
     let dir = common::test_dir("forward-complex-expression-timeout");
