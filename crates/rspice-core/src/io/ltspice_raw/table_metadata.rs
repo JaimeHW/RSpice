@@ -5,9 +5,6 @@
 //! still read, but never emitted: ngspice executes Command headers when loading.
 use super::*;
 
-mod options;
-pub(super) use options::MetadataOptions;
-
 const PREFIX: &str = "RSpiceTableV1 ";
 const UNITS_PREFIX: &str = "RSpiceTableV2 ";
 const TEXT_PREFIX: &str = "RSpiceTableV3 ";
@@ -61,7 +58,7 @@ pub fn write_raw_table_layout_metadata<W: std::io::Write + ?Sized>(
         #[serde(skip_serializing_if = "Option::is_none")]
         text: Option<TextRef<'a>>,
     }
-    options::write(
+    super::metadata_options::write_table(
         writer,
         4,
         &MetadataRef {
@@ -94,7 +91,7 @@ pub fn write_raw_table_metadata_with_text<W: std::io::Write + ?Sized>(
     plot_name: &str,
     variables: &[(&str, &str)],
 ) -> std::io::Result<()> {
-    options::write(
+    super::metadata_options::write_table(
         writer,
         3,
         &serde_json::json!({
@@ -112,7 +109,7 @@ pub fn write_raw_table_metadata_with_units<W: std::io::Write + ?Sized>(
     real_variables: &[usize],
     units: &[Option<String>],
 ) -> std::io::Result<()> {
-    options::write(
+    super::metadata_options::write_table(
         writer,
         2,
         &serde_json::json!({
@@ -179,7 +176,7 @@ pub fn write_raw_table_metadata<W: std::io::Write + ?Sized>(
     struct MetadataRef<'a> {
         real_variables: &'a [usize],
     }
-    options::write(writer, 1, &MetadataRef { real_variables })
+    super::metadata_options::write_table(writer, 1, &MetadataRef { real_variables })
 }
 
 pub(super) fn restore_table_metadata(

@@ -1,23 +1,59 @@
-//! Carry table provenance in inert RAW options, never executable commands.
+//! Carry result provenance in inert RAW options, never executable commands.
 //!
 //! Hex chunks use only an identifier and an inert string value, and keep each
 //! header line short for foreign readers with fixed-size line buffers.
 
 use super::*;
 
-const PREFIX: &str = "rspice_table_v";
+const TABLE_PREFIX: &str = "rspice_table_v";
+const METADATA_PREFIX: &str = "rspice_metadata_v";
 const CHUNK_BYTES: usize = 128;
 
-pub(super) fn write<W: std::io::Write + ?Sized, T: serde::Serialize>(
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MetadataKind {
+    Table(u8),
+    Opaque,
+}
+
+/// Store opaque UTF-8 result metadata in bounded, inert RAW Option chunks.
+/// The reader restores it verbatim to `RawFileHeader::command`, preserving
+/// existing result-specific decoders without emitting executable Command lines.
+/// The metadata must be nonempty; schema validation belongs to its consumer.
+pub fn write_raw_metadata_options<W: std::io::Write + ?Sized>(
+    writer: &mut W,
+    metadata: &str,
+) -> std::io::Result<()> {
+    write_chunks(writer, MetadataKind::Opaque, metadata.as_bytes())
+}
+
+pub(super) fn write_table<W: std::io::Write + ?Sized, T: serde::Serialize>(
     writer: &mut W,
     version: u8,
     metadata: &T,
 ) -> std::io::Result<()> {
     let bytes = serde_json::to_vec(metadata).map_err(std::io::Error::other)?;
+    write_chunks(writer, MetadataKind::Table(version), &bytes)
+}
+
+fn write_chunks<W: std::io::Write + ?Sized>(
+    writer: &mut W,
+    kind: MetadataKind,
+    bytes: &[u8],
+) -> std::io::Result<()> {
+    if bytes.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "RAW metadata must not be empty",
+        ));
+    }
+    let (prefix, version) = match kind {
+        MetadataKind::Table(version) => (TABLE_PREFIX, version),
+        MetadataKind::Opaque => (METADATA_PREFIX, 1),
+    };
     let count = bytes.len().div_ceil(CHUNK_BYTES);
     const HEX: &[u8; 16] = b"0123456789abcdef";
     for (index, chunk) in bytes.chunks(CHUNK_BYTES).enumerate() {
-        write!(writer, "Option: {PREFIX}{version}_{index}_{count} = x")?;
+        write!(writer, "Option: {prefix}{version}_{index}_{count} = x")?;
         let mut encoded = [0; CHUNK_BYTES * 2];
         for (byte, encoded) in chunk.iter().zip(encoded.chunks_exact_mut(2)) {
             encoded[0] = HEX[(byte >> 4) as usize];
@@ -30,35 +66,39 @@ pub(super) fn write<W: std::io::Write + ?Sized, T: serde::Serialize>(
 }
 
 #[derive(Default)]
-pub(in super::super) struct MetadataOptions {
-    version: Option<u8>,
+pub(super) struct MetadataOptions {
+    kind: Option<MetadataKind>,
     count: usize,
     next: usize,
     bytes: Vec<u8>,
 }
 
 impl MetadataOptions {
-    pub(in super::super) fn read(&mut self, value: &str) -> Result<(), RawParseError> {
-        if !value.starts_with(PREFIX) {
+    pub(super) fn read(&mut self, value: &str) -> Result<(), RawParseError> {
+        let (suffix, table) = if let Some(suffix) = value.strip_prefix(TABLE_PREFIX) {
+            (suffix, true)
+        } else if let Some(suffix) = value.strip_prefix(METADATA_PREFIX) {
+            (suffix, false)
+        } else {
             return Ok(());
-        }
-        let invalid =
-            || RawParseError::InvalidHeader("invalid RAW table metadata option chunks".into());
-        let (name, encoded) = value.split_once('=').ok_or_else(invalid)?;
-        let mut parts = name
-            .trim()
-            .strip_prefix(PREFIX)
-            .ok_or_else(invalid)?
-            .split('_');
+        };
+        let invalid = || RawParseError::InvalidHeader("invalid RAW metadata option chunks".into());
+        let (name, encoded) = suffix.split_once('=').ok_or_else(invalid)?;
+        let mut parts = name.trim().split('_');
         let version: u8 = parts
             .next()
             .and_then(|part| part.parse().ok())
             .ok_or_else(invalid)?;
-        if !(1..=4).contains(&version) {
+        if (table && !(1..=4).contains(&version)) || (!table && version != 1) {
             return Err(RawParseError::UnsupportedFormat(
-                "unsupported RAW table metadata version".into(),
+                "unsupported RAW metadata option version".into(),
             ));
         }
+        let kind = if table {
+            MetadataKind::Table(version)
+        } else {
+            MetadataKind::Opaque
+        };
         let index: usize = parts
             .next()
             .and_then(|part| part.parse().ok())
@@ -72,8 +112,8 @@ impl MetadataOptions {
             || index != self.next
             || index >= count
             || self
-                .version
-                .is_some_and(|previous| previous != version || self.count != count)
+                .kind
+                .is_some_and(|previous| previous != kind || self.count != count)
         {
             return Err(invalid());
         }
@@ -83,34 +123,37 @@ impl MetadataOptions {
             return Err(invalid());
         }
         self.bytes.try_reserve(encoded.len() / 2).map_err(|error| {
-            RawParseError::DataError(format!("unable to retain RAW table metadata: {error}"))
+            RawParseError::DataError(format!("unable to retain RAW metadata: {error}"))
         })?;
         for pair in encoded.as_bytes().chunks_exact(2) {
             let high = (pair[0] as char).to_digit(16).ok_or_else(invalid)?;
             let low = (pair[1] as char).to_digit(16).ok_or_else(invalid)?;
             self.bytes.push((high * 16 + low) as u8);
         }
-        self.version = Some(version);
+        self.kind = Some(kind);
         self.count = count;
         self.next += 1;
         Ok(())
     }
 
-    pub(in super::super) fn finish(self, header: &mut RawFileHeader) -> Result<(), RawParseError> {
-        let Some(version) = self.version else {
+    pub(super) fn finish(self, header: &mut RawFileHeader) -> Result<(), RawParseError> {
+        let Some(kind) = self.kind else {
             return Ok(());
         };
         if self.next != self.count || !header.command.is_empty() {
             return Err(RawParseError::InvalidHeader(
-                "incomplete or conflicting RAW table metadata".into(),
+                "incomplete or conflicting RAW metadata".into(),
             ));
         }
         let metadata = String::from_utf8(self.bytes).map_err(|error| {
-            RawParseError::InvalidHeader(format!("RAW table metadata is not UTF-8: {error}"))
+            RawParseError::InvalidHeader(format!("RAW metadata is not UTF-8: {error}"))
         })?;
         // Retain the established in-memory representation for all consumers.
         // Reading this field never executes it; newly written files use Options.
-        header.command = format!("RSpiceTableV{version} {metadata}");
+        header.command = match kind {
+            MetadataKind::Table(version) => format!("RSpiceTableV{version} {metadata}"),
+            MetadataKind::Opaque => metadata,
+        };
         Ok(())
     }
 }
@@ -120,6 +163,54 @@ mod tests {
     use super::*;
 
     const DATA: &str = "Flags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\n1 value voltage\nValues:\n0 0 1\n";
+
+    #[test]
+    fn opaque_metadata_preserves_utf8_and_control_characters_in_both_encodings() {
+        let metadata = "α \"; $literal `text`\r\n\0 ".repeat(50);
+        for binary in [false, true] {
+            let mut bytes = b"Title: metadata\nPlotname: metadata\n".to_vec();
+            write_raw_metadata_options(&mut bytes, &metadata).unwrap();
+            let header = std::str::from_utf8(&bytes).unwrap();
+            assert!(!header.contains("Command:"));
+            for line in header.lines().filter(|line| line.starts_with("Option:")) {
+                assert!(line.starts_with("Option: rspice_metadata_v1_"));
+                assert!(line.len() < 320);
+                let (_, encoded) = line.split_once(" = x").unwrap();
+                assert!(encoded.bytes().all(|byte| byte.is_ascii_hexdigit()));
+            }
+            if binary {
+                bytes.extend_from_slice(b"Flags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\n1 value voltage\nBinary:\n");
+                bytes.extend_from_slice(&0.0_f64.to_le_bytes());
+                bytes.extend_from_slice(&1.0_f64.to_le_bytes());
+            } else {
+                bytes.extend_from_slice(DATA.as_bytes());
+            }
+            let parsed = parse_raw_reader(&mut std::io::Cursor::new(bytes)).unwrap();
+            assert_eq!(parsed.header.command, metadata);
+            assert_eq!(parsed.waveforms[1].y, vec![1.0]);
+            assert!(!raw_table_has_coordinate(&parsed.header).unwrap());
+        }
+        let mut output = Vec::new();
+        assert!(write_raw_metadata_options(&mut output, "").is_err());
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn opaque_metadata_rejects_mixed_families_and_unsupported_versions() {
+        let mut output = Vec::new();
+        write_raw_metadata_options(&mut output, &"metadata".repeat(100)).unwrap();
+        let metadata = String::from_utf8(output).unwrap();
+        let mixed = metadata.replacen("rspice_metadata_v1_", "rspice_table_v1_", 1);
+        let future = metadata.replacen("rspice_metadata_v1_", "rspice_metadata_v2_", 1);
+        for metadata in [
+            mixed,
+            future,
+            "Option: rspice_metadata_v1_0_1 = xff\n".into(),
+        ] {
+            let source = format!("Title: invalid\nPlotname: invalid\n{metadata}{DATA}");
+            assert!(parse_raw_reader(&mut std::io::Cursor::new(source)).is_err());
+        }
+    }
 
     fn metadata() -> (String, String) {
         let name = "α \"; $name `echo literal` ".repeat(40);
