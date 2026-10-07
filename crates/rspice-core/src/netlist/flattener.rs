@@ -345,12 +345,11 @@ pub struct Flattener<'a> {
     /// Unselected Verilog-A imports may supply additional names at binding.
     defer_external_module_binding: bool,
     /// The run temperature and nominal temperature the deck stated, in
-    /// Celsius. An external master's instance parameters are the only
-    /// expressions this pass resolves for a module it cannot see, and they
-    /// have to see the deck's temperature rather than the 27 C the expression
-    /// built-ins fall back to when nothing binds `TEMP`.
+    /// Celsius, for external-master arguments and XSPICE model fallback
+    /// bindings. These contexts must use the same run options as construction.
     options_temperature_celsius: Option<f64>,
     options_nominal_temperature_celsius: Option<f64>,
+    options_gmin: Option<Value>,
     /// Global nodes that must not be renamed while flattening hierarchy.
     global_nodes: HashSet<String>,
     /// Xyce's explicit ground-synonym preprocessing policy.
@@ -437,6 +436,7 @@ impl<'a> Flattener<'a> {
             defer_external_module_binding: false,
             options_temperature_celsius: None,
             options_nominal_temperature_celsius: None,
+            options_gmin: None,
             global_nodes: HashSet::new(),
             ground_policy: super::GroundPolicy::OnlyZero,
             expansion_stack: Vec::new(),
@@ -551,6 +551,7 @@ impl<'a> Flattener<'a> {
         self.defer_external_module_binding = netlist.needs_veriloga_module_discovery();
         self.options_temperature_celsius = netlist.options.temp;
         self.options_nominal_temperature_celsius = netlist.options.tnom;
+        self.options_gmin = netlist.options.gmin;
         self.global_nodes = netlist
             .global_nodes
             .iter()
@@ -2181,7 +2182,20 @@ impl<'a> Flattener<'a> {
                     model_scope_path,
                     abort,
                 )?;
-                let params = self.merge_xspice_scalar_params(params, expr_params, scope, abort)?;
+                let needs_numeric_scope = !expr_params.is_empty()
+                    || !real_vector_expr_params.is_empty()
+                    || string_expr_params.iter().any(|(_, expression)| {
+                        super::parse_deferred_xspice_complex(expression).is_some()
+                    })
+                    || string_vector_expr_params.iter().any(|(_, expression)| {
+                        super::parse_deferred_xspice_complex_vector(expression).is_some()
+                    });
+                let model_scope = needs_numeric_scope
+                    .then(|| self.xspice_numeric_scope(&model, scope, abort))
+                    .transpose()?;
+                let evaluation_scope = model_scope.as_ref().unwrap_or(scope);
+                let params =
+                    self.merge_xspice_scalar_params(params, expr_params, evaluation_scope, abort)?;
                 // Numeric fields can use resolved instance overrides. String
                 // aliases retain their enclosing lexical parameter scope.
                 let numeric_scope = (!params.is_empty()
@@ -2189,13 +2203,13 @@ impl<'a> Flattener<'a> {
                         || !string_expr_params.is_empty()
                         || !string_vector_expr_params.is_empty()))
                 .then(|| {
-                    let mut numeric_scope = scope.clone();
+                    let mut numeric_scope = evaluation_scope.clone();
                     for (name, value) in &params {
                         numeric_scope.set(name, *value);
                     }
                     numeric_scope
                 });
-                let numeric_scope = numeric_scope.as_ref().unwrap_or(scope);
+                let numeric_scope = numeric_scope.as_ref().unwrap_or(evaluation_scope);
                 ElementKind::Xspice {
                     model,
                     pspice_u_timing: pspice_u_timing.clone(),
@@ -2892,6 +2906,50 @@ impl<'a> Flattener<'a> {
                 }
             }
             None => Ok((value, None)),
+        }
+    }
+
+    /// Instance fields see enclosing bindings first, then their model's scalar
+    /// defaults. Reuse the construction resolver, including nominal-temperature
+    /// dependencies, instead of inventing a second model precedence policy.
+    fn xspice_numeric_scope(
+        &self,
+        model_name: &str,
+        scope: &ParamContext,
+        abort: &dyn AbortSignal,
+    ) -> Result<ParamContext, ParseWithAbortError> {
+        let mut context = scope.clone();
+        context.adopt_random(&self.random);
+        context.set("GMIN", self.options_gmin.unwrap_or(crate::constants::GMIN));
+        let temp = self.options_temperature_celsius.unwrap_or(27.0);
+        let tnom = self.options_nominal_temperature_celsius.unwrap_or(27.0);
+        let model = self
+            .scoped_models
+            .iter()
+            .chain(self.models)
+            .find(|model| model.name.eq_ignore_ascii_case(model_name));
+        if let Some(model) = model {
+            let resolved = super::expr::ModelEvaluationContext::resolve(
+                scope,
+                context,
+                &model.params,
+                &model.expr_params,
+                temp,
+                super::expr::ModelNominalTemperature::Default(tnom),
+                abort,
+            )
+            .map_err(|error| match error {
+                super::expr::ParameterResolutionError::Aborted => ParseWithAbortError::Aborted,
+                error => {
+                    ParseError::InvalidValue(format!("XSPICE model '{model_name}': {error}")).into()
+                }
+            })?;
+            Ok((*resolved).clone())
+        } else {
+            context.set("TEMP", temp);
+            context.set("TEMPER", temp);
+            context.set("TNOM", tnom);
+            Ok(context)
         }
     }
 
