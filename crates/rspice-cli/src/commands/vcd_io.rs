@@ -508,8 +508,8 @@ fn typed_transient_traces(
     {
         return Ok(None);
     }
-    let document = rspice_core::execution::AnalysisResultDocument::from_json(&content)
-        .map_err(|error| conversion_error(path, error))?;
+    let document =
+        crate::commands::waveform_io::parse_typed_document(path, &content, resource_limits)?;
     let ResultPayload::Tran(payload) = document.payload() else {
         return Ok(None);
     };

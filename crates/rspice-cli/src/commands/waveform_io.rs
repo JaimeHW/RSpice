@@ -887,22 +887,7 @@ fn parse_json(
     if value.get("schema").and_then(serde_json::Value::as_str)
         == Some(rspice_core::execution::ANALYSIS_RESULT_DOCUMENT_SCHEMA)
     {
-        let document =
-            rspice_core::execution::AnalysisResultDocument::from_json_with_limits_and_abort(
-                content,
-                &resource_limits,
-                &crate::abort::ProcessAbort,
-                resource_limits.max_external_data_bytes as u64,
-            )
-            .map_err(|error| match error {
-                rspice_core::execution::ResultDocumentError::ResourceLimit(source) => {
-                    CliError::ResourceLimit {
-                        path: path.to_path_buf(),
-                        source,
-                    }
-                }
-                error => conversion_error(path, error),
-            })?;
+        let document = parse_typed_document(path, content, resource_limits)?;
         return result_document_table(path, &document, resource_limits).map(Into::into);
     }
 
@@ -910,6 +895,37 @@ fn parse_json(
         path,
         "unrecognized JSON schema: expected a typed result document, or 'scale' and 'signals'",
     ))
+}
+
+/// Decode all retained evidence under the caller's policy before projecting it.
+pub(crate) fn parse_typed_document(
+    path: &Path,
+    content: &str,
+    resource_limits: rspice_core::ResourceLimits,
+) -> Result<rspice_core::execution::AnalysisResultDocument, CliError> {
+    let document = rspice_core::execution::AnalysisResultDocument::from_json_with_limits_and_abort(
+        content,
+        &resource_limits,
+        &crate::abort::ProcessAbort,
+        resource_limits.max_external_data_bytes as u64,
+    )
+    .map_err(|error| match error {
+        rspice_core::execution::ResultDocumentError::ResourceLimit(source) => {
+            CliError::ResourceLimit {
+                path: path.to_owned(),
+                source,
+            }
+        }
+        rspice_core::execution::ResultDocumentError::Aborted => CliError::Interrupted,
+        error => conversion_error(path, error),
+    })?;
+    enforce_resource_limit(
+        path,
+        rspice_core::ResourceKind::ExternalDataValues,
+        document.total_value_count(),
+        resource_limits.max_external_data_values,
+    )?;
+    Ok(document)
 }
 
 /// Project signed or unsigned 64-bit integers only when binary64 is exact.

@@ -1350,3 +1350,71 @@ fn complex_conversion_preserves_current_quantity_and_time_coordinate() {
     convert(&raw, &restored, "csv", &[]);
     assert_eq!(read_csv(&csv), read_csv(&restored));
 }
+
+#[test]
+fn typed_event_json_honors_value_limits_before_selection_or_publication() {
+    let dir = test_dir("typed_event_limits");
+    let source = simulate(&dir, XSPICE_EVENT_DECK, "json", "source.json");
+    let bytes = std::fs::read(&source).unwrap();
+    let document = rspice_core::execution::AnalysisResultDocument::from_json(
+        std::str::from_utf8(&bytes).unwrap(),
+    )
+    .unwrap();
+    let count = document.total_value_count();
+    assert!(count > 1);
+    for resource in ["max_result_values", "max_external_data_values"] {
+        let config = dir.join("limit.toml");
+        std::fs::write(&config, format!("[resources]\n{resource}={}\n", count - 1)).unwrap();
+        for operation in ["vcd", "csv", "compare", "bless"] {
+            let destination = dir.join("destination.json");
+            std::fs::write(&destination, "preserve output").unwrap();
+            let mut command = Command::new(env!("CARGO_BIN_EXE_rspice"));
+            command
+                .arg("--config")
+                .arg(&config)
+                .args(["--quiet", "--error-format", "json"]);
+            if matches!(operation, "compare" | "bless") {
+                command.arg("compare").arg(&source).arg(&destination);
+                if operation == "bless" {
+                    command.arg("--bless");
+                }
+            } else {
+                command
+                    .arg("convert")
+                    .arg(&source)
+                    .arg(&destination)
+                    .args(["--to", operation]);
+            }
+            let output = command.output().unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(75),
+                "{resource}, {operation}: {output:?}"
+            );
+            let report: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+            assert_eq!(report["error"]["code"], "resource_limit");
+            assert_eq!(
+                report["error"]["resource"],
+                resource.strip_prefix("max_").unwrap()
+            );
+            assert_eq!(report["error"]["limit"], count - 1);
+            assert_eq!(report["error"]["requested"], count);
+            assert_eq!(report["error"]["path"], source.to_str().unwrap());
+            assert_eq!(
+                std::fs::read_to_string(&destination).unwrap(),
+                "preserve output"
+            );
+        }
+        std::fs::write(&config, format!("[resources]\n{resource}={count}\n")).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .arg("--config")
+            .arg(&config)
+            .args(["--quiet", "convert"])
+            .arg(&source)
+            .arg(dir.join("accepted.vcd"))
+            .args(["--to", "vcd"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{resource}: {output:?}");
+    }
+}
