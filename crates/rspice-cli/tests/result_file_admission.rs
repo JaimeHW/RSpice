@@ -185,3 +185,49 @@ fn table_result_limits_count_both_complex_components_and_allow_exact_bounds() {
         }
     }
 }
+
+#[test]
+fn vcd_table_expansion_counts_held_values_before_allocation() {
+    let dir = test_dir("vcd_expanded_table_limits");
+    let source = dir.join("source.vcd");
+    let bytes = b"$timescale 1 ns $end\n$var wire 1 ! a $end\n$var wire 1 @ b $end\n$enddefinitions $end\n#0\n0!\n0@\n#1\n1!\n#2\n1@\n";
+    std::fs::write(&source, bytes).unwrap();
+    let config = dir.join("limits.toml");
+    // Four retained event values produce three rows of time plus two held signals.
+    for limit in [8, 9] {
+        std::fs::write(&config, format!("[resources]\nmax_result_values={limit}\n")).unwrap();
+        for operation in ["json", "compare", "bless"] {
+            let destination = dir.join(if operation == "json" {
+                "out.json"
+            } else {
+                "golden.vcd"
+            });
+            std::fs::write(&destination, bytes).unwrap();
+            let output = reader(&source, &destination, operation)
+                .arg("--config")
+                .arg(&config)
+                .output()
+                .unwrap();
+            if limit == 8 {
+                assert_eq!(output.status.code(), Some(75), "{operation}: {output:?}");
+                let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+                assert_eq!(error["error"]["resource"], "result_values");
+                assert_eq!(error["error"]["requested"], 9);
+                assert_eq!(std::fs::read(&destination).unwrap(), bytes);
+            } else {
+                assert!(output.status.success(), "{operation}: {output:?}");
+                if operation == "json" {
+                    let table = common::read_json(&destination);
+                    assert_eq!(
+                        table["signals"][0]["values"],
+                        serde_json::json!([0.0, 1.0, 1.0])
+                    );
+                    assert_eq!(
+                        table["signals"][1]["values"],
+                        serde_json::json!([0.0, 0.0, 1.0])
+                    );
+                }
+            }
+        }
+    }
+}

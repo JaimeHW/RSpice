@@ -216,7 +216,7 @@ pub(crate) fn read_input_bytes_limited(path: &Path, limit: usize) -> Result<Vec<
 /// stated on both sides of the boundary a file crosses.
 pub(crate) const MIN_RESULT_SAMPLES: usize = 1;
 
-fn enforce_table_value_limits(
+pub(super) fn enforce_table_value_limits(
     path: &Path,
     requested: usize,
     limits: rspice_core::ResourceLimits,

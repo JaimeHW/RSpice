@@ -39,9 +39,7 @@ use rspice_core::xspice::{DigitalState, DigitalStrength, DigitalValue};
 use crate::cli::{CliError, InputFormat, OutputFormat};
 use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
 use crate::commands::publish;
-use crate::commands::waveform_io::{
-    self, conversion_error, enforce_resource_limit, load_table_selected,
-};
+use crate::commands::waveform_io::{self, conversion_error, load_table_selected};
 
 mod clipping;
 mod selection;
@@ -732,11 +730,12 @@ pub(crate) fn vcd_table(
             "the VCD declares no value change, so it carries no table row",
         ));
     }
-    enforce_resource_limit(
+    waveform_io::enforce_table_value_limits(
         path,
-        rspice_core::ResourceKind::ExternalDataValues,
-        ticks.len().saturating_mul(document.signals.len() + 1),
-        resource_limits.max_external_data_values,
+        ticks
+            .len()
+            .saturating_mul(document.signals.len().saturating_add(1)),
+        resource_limits,
     )?;
     let ticks: Vec<u64> = ticks.into_iter().collect();
 
