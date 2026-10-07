@@ -35,6 +35,27 @@ pub struct AcBodeShape {
     pub phase_index: Option<usize>,
 }
 
+fn stb_trace_suffix<'a>(name: &'a str, prefix: &str) -> Option<&'a str> {
+    let suffix = name.strip_prefix(prefix)?;
+    if suffix.is_empty()
+        || suffix
+            .strip_prefix(" [segment ")
+            .and_then(|s| s.strip_suffix(']'))
+            .and_then(|s| s.parse::<usize>().ok())
+            .is_some_and(|n| n > 0)
+    {
+        Some(suffix)
+    } else {
+        None
+    }
+}
+
+/// Identify the core's complete Bode traces and its separately retained defined segments.
+pub fn is_stb_bode_trace(name: &str) -> bool {
+    stb_trace_suffix(name, "Loop Gain (dB)").is_some()
+        || stb_trace_suffix(name, "Loop Phase (deg)").is_some()
+}
+
 /// Resolve named magnitude/phase traces without scanning their samples.
 /// The caller supplies preference; the last matching trace wins equal preference.
 pub fn ac_bode_shape_for_analysis<W: AsRef<RetainedWaveform>>(
@@ -49,11 +70,16 @@ pub fn ac_bode_shape_for_analysis<W: AsRef<RetainedWaveform>>(
     let (signal, mag_index, phase_index) = if analysis_type == AnalysisType::Stb {
         let mag_index = waveforms
             .iter()
-            .position(|waveform| waveform.as_ref().name == "Loop Gain (dB)")?;
+            .enumerate()
+            .filter(|(_, w)| stb_trace_suffix(&w.as_ref().name, "Loop Gain (dB)").is_some())
+            .max_by_key(|(_, w)| prefer_magnitude(w))?
+            .0;
+        let suffix = stb_trace_suffix(&waveforms[mag_index].as_ref().name, "Loop Gain (dB)")?;
+        let phase_name = format!("Loop Phase (deg){suffix}");
         let phase_index = waveforms
             .iter()
-            .position(|waveform| waveform.as_ref().name == "Loop Phase (deg)");
-        ("Loop Gain".to_owned(), mag_index, phase_index)
+            .position(|waveform| waveform.as_ref().name == phase_name);
+        (format!("Loop Gain{suffix}"), mag_index, phase_index)
     } else {
         let (mag_index, mag) = select_magnitude_trace(waveforms, prefer_magnitude)?;
         let signal = mag

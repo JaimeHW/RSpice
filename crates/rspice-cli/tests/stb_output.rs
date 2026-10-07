@@ -7,6 +7,92 @@ use common::test_dir;
 
 use std::process::Command;
 
+#[test]
+fn zero_loop_gain_exports_raw_zero_and_undefined_bode_values() {
+    let dir = test_dir("stb_zero_gain");
+    let deck = dir.join("zero.sp");
+    std::fs::write(
+        &deck,
+        SINGLE_POLE_STB
+            .replace("-1000", "0")
+            .replace("dec 20 10 10meg", "lin 3 10 1000"),
+    )
+    .unwrap();
+    for format in ["json", "csv", "tsv", "raw", "ascii", "hdf5"] {
+        let exported = dir.join(format!("zero.{format}"));
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args([
+                "run",
+                deck.to_str().unwrap(),
+                "-o",
+                exported.to_str().unwrap(),
+                "-f",
+                format,
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{format}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if format == "json" {
+            let document = common::read_json(&exported);
+            for name in ["loop_gain_db", "loop_gain_phase"] {
+                let signal = document["signals"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|s| s["descriptor"]["canonicalName"] == name)
+                    .unwrap();
+                assert_eq!(
+                    signal["values"]["samples"],
+                    serde_json::json!([null, null, null])
+                );
+            }
+        } else {
+            let decoded = dir.join(format!("decoded.{format}.json"));
+            let conversion = Command::new(env!("CARGO_BIN_EXE_rspice"))
+                .args([
+                    "convert",
+                    exported.to_str().unwrap(),
+                    decoded.to_str().unwrap(),
+                    "--to",
+                    "json",
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                conversion.status.success(),
+                "{format}: {}",
+                String::from_utf8_lossy(&conversion.stderr)
+            );
+            let result = common::read_json(&decoded);
+            for name in ["loopgain_mag_db", "loopgain_phase_deg"] {
+                let signal = result["signals"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|s| s["name"] == name)
+                    .unwrap();
+                assert_eq!(
+                    signal["values"],
+                    serde_json::json!([null, null, null]),
+                    "{format}: {name}"
+                );
+            }
+            let raw = result["signals"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["name"] == "loopgain")
+                .unwrap();
+            assert_eq!(raw["real"], serde_json::json!([0.0, 0.0, 0.0]));
+            assert_eq!(raw["imag"], serde_json::json!([0.0, 0.0, 0.0]));
+        }
+    }
+}
+
 /// Single-pole inverting loop: T(f) = 1000/(1 + j f/1kHz). DC gain 60 dB,
 /// unity crossover at ~1 MHz, phase margin ~90.06 degrees.
 const SINGLE_POLE_STB: &str = "* single-pole loop with .stb card

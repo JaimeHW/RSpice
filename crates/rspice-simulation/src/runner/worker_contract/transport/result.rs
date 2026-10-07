@@ -133,6 +133,9 @@ impl WorkerSimulationResultTransport {
                 mode_indices: WorkerF64Series::from_vec(mode_indices, buffers),
                 waveforms: transport_waveforms(waveforms, buffers),
             },
+            WorkerSimulationResult::Stb { response, measurements } => Self::Stb {
+                response: WorkerStbResultTransport::from_response(response, buffers)?, measurements,
+            },
             WorkerSimulationResult::Qpnoise {
                 frequencies,
                 waveforms,
@@ -317,6 +320,7 @@ impl WorkerSimulationResultTransport {
                 if matches!(
                     result,
                     WorkerSimulationResult::Pstb { .. }
+                        | WorkerSimulationResult::Stb { .. }
                         | WorkerSimulationResult::Qpnoise { .. }
                         | WorkerSimulationResult::Transient { .. }
                         | WorkerSimulationResult::Ac { .. }
@@ -483,6 +487,13 @@ impl WorkerSimulationResultTransport {
                 validate_worker_pstb_result(&result)?;
                 Ok(result)
             }
+            Self::Stb {
+                response,
+                measurements,
+            } => Ok(WorkerSimulationResult::Stb {
+                response: response.into_response(buffers)?,
+                measurements,
+            }),
             Self::Qpnoise {
                 frequencies,
                 waveforms,

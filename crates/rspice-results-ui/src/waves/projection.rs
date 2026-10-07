@@ -466,10 +466,7 @@ pub fn build_models<A: AsRef<AnalysisResult<WaveformData>>, R: AsRef<SimulationR
             // presenting the contour's linear magnitude beside an already-dB
             // loop gain would mix two different projections and units.
             if analysis.analysis_type == AnalysisType::Stb
-                && !matches!(
-                    waveform.name.as_str(),
-                    "Loop Gain (dB)" | "Loop Phase (deg)"
-                )
+                && !rspice_results::bode::retained::is_stb_bode_trace(&waveform.name)
             {
                 continue;
             }

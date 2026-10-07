@@ -17,6 +17,9 @@ impl SimulationResult {
         &self,
         request: &str,
     ) -> Option<rspice_results::family_measurements::FamilyMeasurementEvidence> {
+        if let Some(projection) = self.stb_measurement_projection() {
+            return projection.study_measurement(request);
+        }
         let (mode, key) = request.split_once(':').unwrap_or(("meas", request));
         if mode.eq_ignore_ascii_case("meas") {
             let measurements = match self {
@@ -142,15 +145,19 @@ impl SimulationResult {
             if quantity.eq_ignore_ascii_case("phase") {
                 measured_unit = unit("deg");
             }
-            parts.map(
-                |(real, imaginary)| match quantity.to_ascii_lowercase().as_str() {
-                    "real" => real,
-                    "imag" => imaginary,
-                    "magnitude" => real.hypot(imaginary),
-                    "phase" => imaginary.atan2(real).to_degrees(),
-                    _ => unreachable!(),
-                },
-            )
+            parts
+                .filter(|(real, imaginary)| {
+                    !quantity.eq_ignore_ascii_case("phase") || *real != 0.0 || *imaginary != 0.0
+                })
+                .map(
+                    |(real, imaginary)| match quantity.to_ascii_lowercase().as_str() {
+                        "real" => real,
+                        "imag" => imaginary,
+                        "magnitude" => real.hypot(imaginary),
+                        "phase" => imaginary.atan2(real).to_degrees(),
+                        _ => unreachable!(),
+                    },
+                )
         } else if mode.eq_ignore_ascii_case("scalar") {
             measured_unit = self.study_scalar_unit(key);
             match self {
@@ -264,6 +271,14 @@ impl SimulationResult {
 
         match self {
             SimulationResult::DcOp(op) => measurement_from_dc_op(op, key),
+            SimulationResult::Stb {
+                measurements,
+                response,
+            } => measurement_result_by_name(measurements, key).or_else(|| {
+                Self::stb_waveforms(response)
+                    .ok()
+                    .and_then(|waveforms| waveform_last_value_by_name(&waveforms, key))
+            }),
             SimulationResult::DcSweep {
                 waveforms,
                 measurements,

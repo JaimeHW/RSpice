@@ -96,6 +96,25 @@ impl SimulationController {
                 echo_measurements(state, measurements);
             }
 
+            SimulationResult::Stb {
+                response,
+                measurements,
+            } => {
+                let frequencies: Vec<_> =
+                    response.bode_points.iter().map(|p| p.frequency).collect();
+                match SimulationResult::stb_waveforms(response) {
+                    Ok(waveforms) => self.populate_ac_post_views(state, &frequencies, &waveforms),
+                    Err(error) => {
+                        state.push_sim_message(crate::diagnostics::ConsoleMessage::error(error))
+                    }
+                }
+                for warning in &response.warnings {
+                    state.push_sim_message(crate::diagnostics::ConsoleMessage::warning(
+                        warning.clone(),
+                    ));
+                }
+                echo_measurements(state, measurements);
+            }
             SimulationResult::Ac {
                 frequencies,
                 waveforms,

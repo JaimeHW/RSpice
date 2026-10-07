@@ -387,6 +387,28 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
                 self.attach_validated_payload(result, analysis_type, label, payload)
             }
 
+            SimulationResult::Stb {
+                response,
+                measurements,
+            } => {
+                let waveforms = match AnalysisResultPayload::stb_waveforms(&response) {
+                    Ok(waveforms) => waveforms,
+                    Err(error) => {
+                        return AnalysisResult::failed(
+                            1,
+                            analysis_type,
+                            label.to_string(),
+                            error,
+                            (self.now)(),
+                        );
+                    }
+                };
+                let payload = AnalysisResultPayload::Stb { response };
+                let result = AnalysisResult::new(1, analysis_type, label.to_string(), (self.now)())
+                    .with_waveforms(waveforms)
+                    .with_measurements(measurements);
+                self.attach_validated_payload(result, analysis_type, label, payload)
+            }
             SimulationResult::Qpnoise {
                 frequencies,
                 waveforms,

@@ -1086,11 +1086,41 @@ fn encode_result_payload(
             writer.u8(12);
             encode_fft_spectrum_evidence(writer, spectrum);
         }
-        // Tag 13: the recorded FFT spectrum holds 12. Written unconditionally
-        // of `encoding_version` for the same reason the DC mismatch arm above
-        // is: no build before this one could write a sensitivity study, so
-        // there is no older encoding of one to replay. The frozen
-        // `Sensitivity` arm keeps tag 1 and is untouched.
+        AnalysisResultPayload::Stb { response } => {
+            // New payload tag; never reuse a previously published tag.
+            writer.u8(18);
+            writer.bool(response.success);
+            writer.sequence(response.bode_points.len());
+            for p in &response.bode_points {
+                writer.f64(p.frequency);
+                writer.f64(p.loop_gain.re);
+                writer.f64(p.loop_gain.im);
+                for value in [p.magnitude, p.magnitude_db, p.phase_deg] {
+                    writer.option(value.as_ref(), |w, v| w.f64(*v));
+                }
+            }
+            writer.sequence(response.nyquist_points.len());
+            for p in &response.nyquist_points {
+                writer.f64(p.frequency);
+                writer.f64(p.real);
+                writer.f64(p.imag);
+            }
+            for margin in [response.margins.gain_margin, response.margins.phase_margin] {
+                writer.option(margin.as_ref(), |w, m| {
+                    w.f64(m.value);
+                    w.f64(m.frequency);
+                });
+            }
+            writer.option(response.margins.dc_loop_gain.as_ref(), |w, v| {
+                w.f64(v.re);
+                w.f64(v.im);
+            });
+            writer.usize(response.margins.num_crossovers);
+            writer.sequence(response.warnings.len());
+            for warning in &response.warnings {
+                writer.string(warning);
+            }
+        }
         AnalysisResultPayload::Qpnoise { response } => {
             writer.u8(17);
             writer.string(&response.metadata.retained_identity);
@@ -1138,6 +1168,11 @@ fn encode_result_payload(
                     .sum::<u64>(),
             );
         }
+        // Tag 13: the recorded FFT spectrum holds 12. Written unconditionally
+        // of `encoding_version` for the same reason the DC mismatch arm above
+        // is: no build before this one could write a sensitivity study, so
+        // there is no older encoding of one to replay. The frozen
+        // `Sensitivity` arm keeps tag 1 and is untouched.
         AnalysisResultPayload::SensitivityStudy { evidence } => {
             writer.u8(13);
             encode_sensitivity_study_evidence(writer, evidence);

@@ -618,6 +618,10 @@ pub(crate) enum WorkerSimulationResult {
         waveforms: Vec<WorkerWaveform>,
         response: rspice_core::engine::QpacAnalysisResult,
     },
+    Stb {
+        response: rspice_core::analysis::stb::StbResult,
+        measurements: Vec<WorkerMeasurement>,
+    },
     Qpnoise {
         frequencies: Vec<f64>,
         waveforms: Vec<WorkerWaveform>,
@@ -1129,6 +1133,16 @@ impl WorkerSimulationResult {
                 waveforms_payload_bytes(waveforms),
                 f64_payload_bytes(5),
             ]),
+            WorkerSimulationResult::Stb {
+                response,
+                measurements,
+            } => sum_payload_bytes([
+                f64_payload_bytes(response.bode_points.len().saturating_mul(9)),
+                f64_payload_bytes(response.nyquist_points.len().saturating_mul(3)),
+                f64_payload_bytes(7),
+                measurements_payload_bytes(measurements),
+                response.warnings.iter().map(String::len).sum(),
+            ]),
             WorkerSimulationResult::Qpnoise {
                 frequencies,
                 waveforms,
@@ -1509,6 +1523,21 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 validate_worker_qpxf_result(&result).map_err(SimulationError::InvalidConfig)?;
                 Ok(result)
             }
+            SimulationResult::Stb {
+                response,
+                measurements,
+            } => {
+                response
+                    .validate_with_abort(
+                        &rspice_core::ResourceLimits::default(),
+                        &rspice_core::NoAbort,
+                    )
+                    .map_err(|e| SimulationError::InvalidConfig(e.to_string()))?;
+                Ok(Self::Stb {
+                    response: Arc::unwrap_or_clone(response),
+                    measurements: worker_measurements(measurements),
+                })
+            }
             SimulationResult::Qpnoise {
                 frequencies,
                 waveforms,
@@ -1872,6 +1901,13 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 iterations,
                 mode_indices,
                 waveforms: waveform_map(waveforms),
+            },
+            WorkerSimulationResult::Stb {
+                response,
+                measurements,
+            } => Self::Stb {
+                response: Arc::new(response),
+                measurements: measure_results(measurements),
             },
             WorkerSimulationResult::Qpnoise {
                 frequencies,

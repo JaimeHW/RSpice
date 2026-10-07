@@ -6,6 +6,9 @@ use std::sync::Arc;
 
 impl AnalysisResultPayload {
     pub fn retained_waveform_basis(&self) -> Result<Option<Vec<RetainedWaveform>>, String> {
+        if let Self::Stb { response } = self {
+            return Self::stb_waveforms(response).map(Some);
+        }
         let mut traces = match self {
             AnalysisResultPayload::Qpss { operating_point } => {
                 AnalysisResultPayload::qpss_display_traces(operating_point)?

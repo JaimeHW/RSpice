@@ -20,6 +20,8 @@
 use super::*;
 mod dc_sweep;
 mod monte_carlo;
+mod stb;
+use stb::WorkerStbResultTransport;
 mod qpac;
 mod qpnoise;
 mod qpxf;
@@ -64,6 +66,14 @@ pub(super) fn validate_worker_response_before_transport(
         validate_worker_qpac_result(result)?;
         validate_worker_qpxf_result(result)?;
         validate_worker_qpnoise_result(result)?;
+        if let WorkerSimulationResult::Stb { response, .. } = result.as_ref() {
+            response
+                .validate_with_abort(
+                    &rspice_core::ResourceLimits::default(),
+                    &rspice_core::NoAbort,
+                )
+                .map_err(|e| e.to_string())?;
+        }
         validate_transient_source_payload_size(result)?;
         if let WorkerSimulationResult::Transient { events, .. } = result.as_ref()
             && let Some(history) = &events.current_impulses
@@ -381,6 +391,7 @@ fn validate_worker_measurements(result: &WorkerSimulationResult) -> Result<(), S
         | WorkerSimulationResult::Transient { measurements, .. }
         | WorkerSimulationResult::Pss { measurements, .. }
         | WorkerSimulationResult::Hb { measurements, .. }
+        | WorkerSimulationResult::Stb { measurements, .. }
         | WorkerSimulationResult::Ac { measurements, .. }
         | WorkerSimulationResult::Noise { measurements, .. } => measurements,
         _ => return Ok(()),
@@ -1218,6 +1229,10 @@ pub(crate) enum WorkerSimulationResultTransport {
         frequencies: WorkerF64Series,
         waveforms: Vec<WorkerWaveformTransport>,
         response: WorkerQpacResultTransport,
+    },
+    Stb {
+        response: WorkerStbResultTransport,
+        measurements: Vec<WorkerMeasurement>,
     },
     Qpnoise {
         frequencies: WorkerF64Series,

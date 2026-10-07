@@ -38,6 +38,7 @@ mod qpac;
 mod qpnoise;
 mod qpss;
 mod qpxf;
+mod stb;
 pub use qpxf::QpxfDisplayTrace;
 
 /// Retained scalar value, unit, and outcome for specification evaluation.
@@ -150,6 +151,9 @@ pub enum AnalysisResultPayload {
     /// reconstructed exactly from the retained lattice.
     Qpac {
         response: std::sync::Arc<rspice_core::engine::QpacAnalysisResult>,
+    },
+    Stb {
+        response: std::sync::Arc<rspice_core::analysis::stb::StbResult>,
     },
     Qpnoise {
         response: std::sync::Arc<rspice_core::engine::QpnoiseAnalysisResult>,
@@ -567,6 +571,17 @@ impl AnalysisResultPayload {
     /// Validate exact retained evidence against the analysis that owns it.
     pub fn validate_for(&self, analysis_type: AnalysisType) -> Result<(), String> {
         match self {
+            Self::Stb { response } => {
+                if analysis_type != AnalysisType::Stb {
+                    return Err("STB payload belongs to a different analysis type".into());
+                }
+                response
+                    .validate_with_abort(
+                        &rspice_core::ResourceLimits::default(),
+                        &rspice_core::NoAbort,
+                    )
+                    .map_err(|e| e.to_string())?;
+            }
             Self::Qpnoise { response } => {
                 if analysis_type != AnalysisType::Qpnoise {
                     return Err("QPNOISE payload belongs to a different analysis type".into());
@@ -1148,7 +1163,7 @@ impl AnalysisResultPayload {
     #[must_use]
     pub fn has_data(&self) -> bool {
         match self {
-            Self::Qpac { .. } | Self::Qpxf { .. } | Self::Qpnoise { .. } | Self::Qpss { .. } | Self::DcSweep { .. } | Self::OperatingPoint { .. } | Self::PoleZero { .. } | Self::PssFloquet { .. } | Self::Pstb { .. } | Self::Sensitivity { .. }
+            Self::Stb { .. } | Self::Qpac { .. } | Self::Qpxf { .. } | Self::Qpnoise { .. } | Self::Qpss { .. } | Self::DcSweep { .. } | Self::OperatingPoint { .. } | Self::PoleZero { .. } | Self::PssFloquet { .. } | Self::Pstb { .. } | Self::Sensitivity { .. }
             // A study is an answer even when its filter selected nothing the
             // engine could differentiate: the refusal is the run's, and what
             // it retained states the filter that produced it.

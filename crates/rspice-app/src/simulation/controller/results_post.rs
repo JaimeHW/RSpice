@@ -120,10 +120,9 @@ impl SimulationController {
     /// The waveform a stability run retains its loop-gain contour under, when
     /// the analysis that just finished is one.
     ///
-    /// A stability result reaches this seam spelled as an AC result — that is
-    /// how its swept response is retained — so the analysis kind has to come
-    /// from the prepared task, resolved exactly the way the retention site
-    /// resolves it. Anything else has no loop gain to hand the sheet.
+    /// The shared frequency-view population receives a projection of the typed
+    /// stability result. Resolve its analysis kind from the prepared task so
+    /// other frequency responses are not interpreted as loop gain.
     fn loop_gain_contour_name(&self) -> Option<&'static str> {
         let analysis_type = self
             .current_spec

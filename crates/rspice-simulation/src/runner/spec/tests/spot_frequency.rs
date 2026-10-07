@@ -70,14 +70,11 @@ fn single_frequency_noise_stb_and_disto_execute_and_publish_one_point() {
             },
             "spot stability\nE1 EO 0 CTRL 0 -1000\nVPROBE EO X 0\nR1 X CTRL 1k\nC1 CTRL 0 159.154943091895n\n.end\n",
         );
-        let SimulationResult::Ac {
-            frequencies,
-            waveforms,
-            ..
-        } = stability
-        else {
+        let SimulationResult::Stb { response, .. } = stability else {
             panic!("expected stability result");
         };
+        let frequencies: Vec<_> = response.bode_points.iter().map(|p| p.frequency).collect();
+        let waveforms = SimulationResult::stb_waveforms(&response).unwrap();
         assert_eq!(frequencies, [1000.0]);
         let expected_gain = 20.0 * (1000.0_f64 / 2.0_f64.sqrt()).log10();
         assert!((waveforms["Loop Gain (dB)"].y_values[0] - expected_gain).abs() < 1e-6);

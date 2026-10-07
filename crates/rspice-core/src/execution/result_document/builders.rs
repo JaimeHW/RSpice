@@ -1977,9 +1977,7 @@ impl AnalysisResultDocument {
                 )?,
                 None,
                 SeriesAvailability::Available,
-                SeriesValues::Real {
-                    samples: finite_samples(LOCATION, "loop_gain_magnitude", &magnitude)?,
-                },
+                SeriesValues::Real { samples: magnitude },
             )?,
             ResultSignal::new(
                 analysis_descriptor(
@@ -1993,7 +1991,7 @@ impl AnalysisResultDocument {
                 None,
                 SeriesAvailability::Available,
                 SeriesValues::Real {
-                    samples: finite_samples(LOCATION, "loop_gain_db", &magnitude_db)?,
+                    samples: magnitude_db,
                 },
             )?,
             ResultSignal::new(
@@ -2007,9 +2005,7 @@ impl AnalysisResultDocument {
                 )?,
                 None,
                 SeriesAvailability::Available,
-                SeriesValues::Real {
-                    samples: finite_samples(LOCATION, "loop_gain_phase", &phase)?,
-                },
+                SeriesValues::Real { samples: phase },
             )?,
         ];
 

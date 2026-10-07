@@ -627,6 +627,43 @@ fn stb_summary_preserves_retained_decibels_without_double_conversion() {
     assert_close(summary.metrics.gm_db, 20.0);
 }
 
+#[cfg(feature = "engine-evidence")]
+#[test]
+fn stb_segment_selection_never_pairs_across_an_undefined_sample() {
+    let response = rspice_core::analysis::stb::StbAnalyzer::new(Default::default())
+        .analyze(
+            &[1.0, 10.0, 100.0],
+            &[
+                rspice_core::Complex64::new(2.0, 0.0),
+                rspice_core::Complex64::new(0.0, 0.0),
+                rspice_core::Complex64::new(0.0, -2.0),
+            ],
+        )
+        .unwrap();
+    let waveforms =
+        crate::analysis_payload::AnalysisResultPayload::stb_waveforms(&response).unwrap();
+    for segment in [1, 2] {
+        let suffix = format!("[segment {segment}]");
+        let summary = ac_bode_summary_for_analysis(AnalysisType::Stb, &waveforms, 0, |w| {
+            w.name.ends_with(&suffix)
+        })
+        .unwrap();
+        assert!(summary.signal.ends_with(&suffix));
+        assert_eq!(summary.frequency.len(), 1);
+        assert_eq!(
+            summary.phase_deg.unwrap().as_slice(),
+            if segment == 1 { &[0.0] } else { &[-90.0] }
+        );
+    }
+    assert_eq!(
+        waveforms
+            .iter()
+            .filter(|w| is_stb_bode_trace(&w.name))
+            .count(),
+        4
+    );
+}
+
 #[test]
 fn pstb_mode_samples_never_impersonate_a_frequency_response() {
     let analysis = response_analysis(

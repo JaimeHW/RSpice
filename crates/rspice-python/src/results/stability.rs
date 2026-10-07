@@ -529,7 +529,7 @@ pub struct PyStbResult {
     loop_gains: Vec<rspice_core::Complex64>,
     /// Pickle restoration retains the core's phase projection without
     /// inventing authored document evidence. Direct results use `evidence`.
-    restored_phase_degrees: Vec<f64>,
+    restored_bode_points: Vec<rspice_core::analysis::stb::BodePoint>,
     #[pyo3(get)]
     pub probe_name: String,
     #[pyo3(get)]
@@ -571,6 +571,38 @@ impl CarriesDocumentEvidence for PyStbResult {
 }
 
 impl PyStbResult {
+    fn bode_points(&self) -> &[rspice_core::analysis::stb::BodePoint] {
+        self.evidence
+            .as_ref()
+            .map_or(&self.restored_bode_points, |e| &e.core.bode_points)
+    }
+
+    fn bode_values<'py>(
+        &self,
+        py: Python<'py>,
+        field: impl Fn(&rspice_core::analysis::stb::BodePoint) -> Option<f64>,
+    ) -> Bound<'py, PyArray1<f64>> {
+        // NumPy uses NaN at the boundary; the paired validity array and the
+        // retained core Option preserve the actual availability contract.
+        self.bode_points()
+            .iter()
+            .map(|point| field(point).unwrap_or(f64::NAN))
+            .collect::<Vec<_>>()
+            .to_pyarray(py)
+    }
+
+    fn bode_validity<'py>(
+        &self,
+        py: Python<'py>,
+        field: impl Fn(&rspice_core::analysis::stb::BodePoint) -> Option<f64>,
+    ) -> Bound<'py, PyArray1<bool>> {
+        self.bode_points()
+            .iter()
+            .map(|point| field(point).is_some())
+            .collect::<Vec<_>>()
+            .to_pyarray(py)
+    }
+
     /// The shared result document, projected from the retained loop gain.
     fn shared_document(&self, py: Python<'_>) -> PyResult<AnalysisResultDocument> {
         let evidence = document::evidence(&self.evidence, "stability")?;
@@ -591,7 +623,7 @@ impl PyStbResult {
             )),
             frequencies: result.frequencies.clone(),
             loop_gains: result.loop_gains.clone(),
-            restored_phase_degrees: Vec::new(),
+            restored_bode_points: Vec::new(),
             probe_name: result.probe_name.clone(),
             gain_margin_db: margins.gain_margin.map(|m| m.value),
             gain_margin_frequency: margins.gain_margin.map(|m| m.frequency),
@@ -665,36 +697,33 @@ impl PyStbResult {
 
     #[getter]
     fn magnitude<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
-        self.loop_gains
-            .iter()
-            .map(|value| value.norm())
-            .collect::<Vec<_>>()
-            .to_pyarray(py)
+        self.bode_values(py, |point| point.magnitude)
     }
 
     #[getter]
     fn magnitude_db<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
-        self.loop_gains
-            .iter()
-            .map(|value| 20.0 * value.norm().log10())
-            .collect::<Vec<_>>()
-            .to_pyarray(py)
+        self.bode_values(py, |point| point.magnitude_db)
     }
 
     /// Continuous Bode phase in degrees, using the core's unwrap convention.
     #[getter]
     fn phase_degrees<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
-        if let Some(evidence) = &self.evidence {
-            evidence
-                .core
-                .bode_points
-                .iter()
-                .map(|point| point.phase_deg)
-                .collect::<Vec<_>>()
-                .to_pyarray(py)
-        } else {
-            self.restored_phase_degrees.to_pyarray(py)
-        }
+        self.bode_values(py, |point| point.phase_deg)
+    }
+
+    #[getter]
+    fn magnitude_validity<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<bool>> {
+        self.bode_validity(py, |point| point.magnitude)
+    }
+
+    #[getter]
+    fn magnitude_db_validity<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<bool>> {
+        self.bode_validity(py, |point| point.magnitude_db)
+    }
+
+    #[getter]
+    fn phase_validity<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<bool>> {
+        self.bode_validity(py, |point| point.phase_deg)
     }
 
     #[getter]
@@ -814,11 +843,7 @@ impl PyStbResult {
         Ok(Self {
             frequencies,
             loop_gains: gains,
-            restored_phase_degrees: projected
-                .bode_points
-                .iter()
-                .map(|point| point.phase_deg)
-                .collect(),
+            restored_bode_points: projected.bode_points,
             probe_name,
             gain_margin_db: restored.gain_margin.map(|m| m.value),
             gain_margin_frequency: restored.gain_margin.map(|m| m.frequency),

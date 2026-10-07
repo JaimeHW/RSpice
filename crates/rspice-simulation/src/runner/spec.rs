@@ -753,7 +753,7 @@ C1 CTRL 0 159.154943091895n\n",
             compute_nyquist: false,
         });
         assert!(
-            matches!(stability, Ok(SimulationResult::Ac { .. })),
+            matches!(stability, Ok(SimulationResult::Stb { .. })),
             "STB relative include should resolve: {stability:?}"
         );
     }

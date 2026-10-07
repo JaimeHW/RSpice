@@ -301,7 +301,8 @@ pub(super) fn retained_pole_zero_payload(
         | AnalysisResultPayload::Qpac { .. }
         | AnalysisResultPayload::Qpxf { .. }
         | AnalysisResultPayload::Qpnoise { .. }
-        | AnalysisResultPayload::Qpss { .. } => None,
+        | AnalysisResultPayload::Qpss { .. }
+        | AnalysisResultPayload::Stb { .. } => None,
     }
 }
 
@@ -402,7 +403,8 @@ pub(super) fn retained_sensitivity_payload(
         | AnalysisResultPayload::Qpac { .. }
         | AnalysisResultPayload::Qpxf { .. }
         | AnalysisResultPayload::Qpnoise { .. }
-        | AnalysisResultPayload::Qpss { .. } => None,
+        | AnalysisResultPayload::Qpss { .. }
+        | AnalysisResultPayload::Stb { .. } => None,
     }
 }
 

@@ -868,45 +868,10 @@ fn run_stb(
         )
     })?;
 
-    let mut waveforms = HashMap::new();
     super::ensure_not_aborted(abort)?;
-    insert_scalar_waveform(
-        &mut waveforms,
-        "Loop Gain (dB)".to_string(),
-        data.frequencies.clone(),
-        data.loop_gain_db,
-        "dB",
-        "Hz",
-    );
-    insert_scalar_waveform(
-        &mut waveforms,
-        "Loop Phase (deg)".to_string(),
-        data.frequencies.clone(),
-        data.loop_phase_deg,
-        "deg",
-        "Hz",
-    );
-    if let Some(contour) = data.nyquist {
-        super::ensure_not_aborted(abort)?;
-        waveforms.insert(
-            crate::results::STB_NYQUIST_CONTOUR_WAVEFORM.to_string(),
-            WaveformData::new_complex_in_unit(
-                crate::results::STB_NYQUIST_CONTOUR_WAVEFORM.to_string(),
-                contour.frequencies,
-                contour.real,
-                contour.imaginary,
-                "1",
-            ),
-        );
-    }
-
-    Ok(SimulationResult::Ac {
-        convergence: None,
-        noise_reference_temperature_kelvin: None,
-        reference_impedances_ohm: None,
-        frequencies: data.frequencies,
+    Ok(SimulationResult::Stb {
         measurements: stb_margin_measurements(&data.margins),
-        waveforms,
+        response: std::sync::Arc::new(data),
     })
 }
 
@@ -1566,9 +1531,9 @@ fn stability_margin_units_survive_execution_and_retention() {
         &rspice_core::NoAbort,
     )
     .unwrap();
-    let SimulationResult::Ac {
+    let SimulationResult::Stb {
         measurements,
-        waveforms,
+        response,
         ..
     } = &result
     else {
@@ -1610,7 +1575,9 @@ fn stability_margin_units_survive_execution_and_retention() {
         Some("dB")
     );
     assert_eq!(
-        waveforms[crate::results::STB_NYQUIST_CONTOUR_WAVEFORM].y_unit,
+        SimulationResult::stb_waveforms(response).unwrap()
+            [crate::results::STB_NYQUIST_CONTOUR_WAVEFORM]
+            .y_unit,
         "1"
     );
     let worker = WorkerSimulationResult::try_from(result).unwrap();

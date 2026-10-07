@@ -232,6 +232,11 @@ claims; a legacy first AC sample is not restored as a DC measurement.
 pickle round trip. Use `numpy.angle(result.loop_gain, deg=True)` when principal
 phase values in [-180, 180] degrees are needed instead.
 
+At zero loop gain, `magnitude` is zero while dB magnitude and phase are undefined.
+The NumPy accessors encode undefined quantities as `NaN`; `magnitude_validity`,
+`magnitude_db_validity`, and `phase_validity` identify defined samples explicitly.
+The result document uses `null`, and phase unwrapping restarts after a zero sample.
+
 A result restored from `pickle` carries this binding's own projection rather
 than the core result these are built from, and says so with
 `RSpiceNotImplementedError`. Pickle `result.document()` when the document

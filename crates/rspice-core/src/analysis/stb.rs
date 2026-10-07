@@ -276,7 +276,8 @@ impl StbConfig {
 
 /// One measured margin and the positive frequency of its resolved crossover.
 /// Values are degrees for phase margins and dB for gain margins.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CrossoverMargin {
     /// Signed margin in the unit stated by the owning field.
     pub value: Value,
@@ -286,7 +287,8 @@ pub struct CrossoverMargin {
 
 /// Margins observed in the authored sweep. Absence of a resolved crossover
 /// does not establish an infinite margin or closed-loop stability.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StabilityMargins {
     /// Signed gain margin nearest zero among measured negative-real crossings.
     pub gain_margin: Option<CrossoverMargin>,
@@ -336,19 +338,20 @@ fn loop_gain_db(gain: Complex64) -> Value {
 //=============================================================================
 
 /// A single point on the Bode plot
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BodePoint {
     /// Frequency (Hz)
     pub frequency: Value,
 
-    /// Loop gain magnitude (linear)
-    pub magnitude: Value,
+    /// Linear magnitude; None if finite components exceed its representable range.
+    pub magnitude: Option<Value>,
 
-    /// Loop gain magnitude (dB)
-    pub magnitude_db: Value,
+    /// Finite magnitude in dB; None at zero loop gain.
+    pub magnitude_db: Option<Value>,
 
-    /// Phase (degrees)
-    pub phase_deg: Value,
+    /// Phase in degrees; None at zero loop gain. Each defined run is unwrapped.
+    pub phase_deg: Option<Value>,
 
     /// Complex loop gain
     pub loop_gain: Complex64,
@@ -358,13 +361,14 @@ impl BodePoint {
     /// Create from complex loop gain
     pub fn from_loop_gain(frequency: Value, loop_gain: Complex64) -> Self {
         let magnitude = loop_gain.norm();
-        let magnitude_db = 20.0 * magnitude.log10();
-        let phase_deg = loop_gain.arg() * 180.0 / PI;
+        let magnitude_db = loop_gain_db(loop_gain);
+        let phase_deg =
+            (loop_gain.re != 0.0 || loop_gain.im != 0.0).then(|| loop_gain.arg() * 180.0 / PI);
 
         Self {
             frequency,
-            magnitude,
-            magnitude_db,
+            magnitude: magnitude.is_finite().then_some(magnitude),
+            magnitude_db: magnitude_db.is_finite().then_some(magnitude_db),
             phase_deg,
             loop_gain,
         }
@@ -376,7 +380,8 @@ impl BodePoint {
 //=============================================================================
 
 /// A point on the Nyquist contour
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NyquistPoint {
     /// Real part of L(jω)
     pub real: Value,
@@ -411,7 +416,8 @@ impl NyquistPoint {
 //=============================================================================
 
 /// Result of Stability (STB) analysis
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StbResult {
     /// Bode plot data points
     pub bode_points: Vec<BodePoint>,
@@ -430,6 +436,122 @@ pub struct StbResult {
 }
 
 impl StbResult {
+    /// Validate retained samples and derived quantities before consuming a decoded result.
+    /// Deserialization alone does not establish numerical consistency.
+    pub fn validate_with_abort(
+        &self,
+        limits: &crate::ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), StbAnalysisError> {
+        ensure_not_aborted(abort)?;
+        let invalid = |index, reason| StbAnalysisError::InvalidSample { index, reason };
+        let n = self.bode_points.len();
+        if !self.success || n == 0 {
+            return Err(invalid(
+                0,
+                "retained STB result must be successful and nonempty",
+            ));
+        }
+        if n > limits.max_analysis_points
+            || n.saturating_mul(9) > limits.max_result_values
+            || self.warnings.len() > limits.max_result_values
+        {
+            return Err(StbAnalysisError::CapacityOverflow {
+                object: "retained STB result",
+            });
+        }
+        let mut warning_bytes = 0usize;
+        for (index, warning) in self.warnings.iter().enumerate() {
+            poll_abort(abort, index)?;
+            warning_bytes = warning_bytes
+                .checked_add(warning.len())
+                .filter(|n| *n <= limits.max_external_data_bytes)
+                .ok_or(StbAnalysisError::CapacityOverflow {
+                    object: "retained STB warnings",
+                })?;
+        }
+        if !self.nyquist_points.is_empty() && self.nyquist_points.len() != n {
+            return Err(invalid(0, "Nyquist and Bode sample counts disagree"));
+        }
+        let close = |a: Option<f64>, b: Option<f64>, absolute_scale: f64| match (a, b) {
+            (None, None) => true,
+            (Some(a), Some(b)) => {
+                a.is_finite()
+                    && b.is_finite()
+                    && (a - b).abs()
+                        <= 64.0 * f64::EPSILON * a.abs().max(b.abs()).max(absolute_scale)
+            }
+            _ => false,
+        };
+        let mut previous_phase = None;
+        for (index, point) in self.bode_points.iter().enumerate() {
+            poll_abort(abort, index)?;
+            if !point.frequency.is_finite()
+                || point.frequency <= 0.0
+                || (index > 0 && point.frequency <= self.bode_points[index - 1].frequency)
+                || !point.loop_gain.re.is_finite()
+                || !point.loop_gain.im.is_finite()
+            {
+                return Err(invalid(index, "invalid frequency or complex loop gain"));
+            }
+            let mut expected = BodePoint::from_loop_gain(point.frequency, point.loop_gain);
+            if let (Some(previous), Some(phase)) = (previous_phase, expected.phase_deg) {
+                expected.phase_deg = Some(
+                    previous
+                        + super::phase::difference(previous, phase, 360.0).expect("finite phases"),
+                );
+            }
+            previous_phase = expected.phase_deg;
+            if !close(point.magnitude, expected.magnitude, 0.0)
+                || !close(point.magnitude_db, expected.magnitude_db, 1.0)
+                || !close(point.phase_deg, expected.phase_deg, 1.0)
+            {
+                return Err(invalid(
+                    index,
+                    "Bode quantities disagree with the complex loop gain",
+                ));
+            }
+            if let Some(nyquist) = self.nyquist_points.get(index)
+                && (nyquist.frequency != point.frequency
+                    || nyquist.real != point.loop_gain.re
+                    || nyquist.imag != point.loop_gain.im)
+            {
+                return Err(invalid(
+                    index,
+                    "Nyquist sample disagrees with the complex loop gain",
+                ));
+            }
+        }
+        let expected =
+            StbAnalyzer::new(StbConfig::new()).extract_margins(&self.bode_points, abort)?;
+        for (actual, expected) in [
+            (self.margins.gain_margin, expected.gain_margin),
+            (self.margins.phase_margin, expected.phase_margin),
+        ] {
+            if !close(actual.map(|m| m.value), expected.map(|m| m.value), 1.0)
+                || !close(
+                    actual.map(|m| m.frequency),
+                    expected.map(|m| m.frequency),
+                    0.0,
+                )
+            {
+                return Err(invalid(
+                    0,
+                    "margin disagrees with the measured Bode crossings",
+                ));
+            }
+        }
+        if self.margins.num_crossovers != expected.num_crossovers
+            || self
+                .margins
+                .dc_loop_gain
+                .is_some_and(|v| !v.re.is_finite() || !v.im.is_finite())
+        {
+            return Err(invalid(0, "invalid crossover count or DC loop gain"));
+        }
+        ensure_not_aborted(abort)
+    }
+
     /// Create new empty result
     pub fn new() -> Self {
         Self {
@@ -463,7 +585,7 @@ impl StbResult {
     }
 
     /// Get magnitude vs frequency data for a Bode plot.
-    pub fn magnitude_curve(&self) -> Result<Vec<(Value, Value)>, StbAnalysisError> {
+    pub fn magnitude_curve(&self) -> Result<Vec<(Value, Option<Value>)>, StbAnalysisError> {
         self.magnitude_curve_with_abort(&NoAbort)
     }
 
@@ -471,12 +593,12 @@ impl StbResult {
     pub(crate) fn magnitude_curve_with_abort(
         &self,
         abort: &dyn AbortSignal,
-    ) -> Result<Vec<(Value, Value)>, StbAnalysisError> {
+    ) -> Result<Vec<(Value, Option<Value>)>, StbAnalysisError> {
         self.project_bode_curve_with_abort(|point| point.magnitude_db, abort)
     }
 
     /// Get phase vs frequency data for a Bode plot.
-    pub fn phase_curve(&self) -> Result<Vec<(Value, Value)>, StbAnalysisError> {
+    pub fn phase_curve(&self) -> Result<Vec<(Value, Option<Value>)>, StbAnalysisError> {
         self.phase_curve_with_abort(&NoAbort)
     }
 
@@ -484,15 +606,15 @@ impl StbResult {
     pub(crate) fn phase_curve_with_abort(
         &self,
         abort: &dyn AbortSignal,
-    ) -> Result<Vec<(Value, Value)>, StbAnalysisError> {
+    ) -> Result<Vec<(Value, Option<Value>)>, StbAnalysisError> {
         self.project_bode_curve_with_abort(|point| point.phase_deg, abort)
     }
 
     fn project_bode_curve_with_abort(
         &self,
-        ordinate: impl Fn(&BodePoint) -> Value,
+        ordinate: impl Fn(&BodePoint) -> Option<Value>,
         abort: &dyn AbortSignal,
-    ) -> Result<Vec<(Value, Value)>, StbAnalysisError> {
+    ) -> Result<Vec<(Value, Option<Value>)>, StbAnalysisError> {
         ensure_not_aborted(abort)?;
         let mut curve = Vec::new();
         try_reserve_exact(&mut curve, self.bode_points.len(), "STB Bode curve")?;
@@ -699,21 +821,20 @@ impl StbAnalyzer {
                 });
             }
             let mut point = BodePoint::from_loop_gain(frequency, loop_gain);
-            if !loop_gain.re.is_finite()
-                || !loop_gain.im.is_finite()
-                || !point.magnitude_db.is_finite()
-            {
+            if !loop_gain.re.is_finite() || !loop_gain.im.is_finite() {
                 return Err(StbAnalysisError::InvalidSample {
                     index,
-                    reason: "loop gain must have finite components and finite nonzero magnitude",
+                    reason: "loop gain must have finite components",
                 });
             }
-            if let Some(previous) = previous_phase {
-                point.phase_deg = previous
-                    + super::phase::difference(previous, point.phase_deg, 360.0)
-                        .expect("validated finite phases");
+            if let (Some(previous), Some(phase)) = (previous_phase, point.phase_deg) {
+                point.phase_deg = Some(
+                    previous
+                        + super::phase::difference(previous, phase, 360.0)
+                            .expect("validated finite phases"),
+                );
             }
-            previous_phase = Some(point.phase_deg);
+            previous_phase = point.phase_deg;
             result.bode_points.push(point);
         }
 
@@ -755,24 +876,62 @@ impl StbAnalyzer {
         let mut count = 0;
         for (index, point) in points.iter().enumerate() {
             poll_abort(abort, index)?;
-            let m1 = point.magnitude_db;
-            let p1 = point.phase_deg;
-            if m1 == 0.0 {
-                // A sampled unity plateau is one connected crossing, but
-                // its least phase margin may occur anywhere along it.
-                if index == 0 || points[index - 1].magnitude_db != 0.0 {
-                    count += 1;
+            if let (Some(m1), Some(p1)) = (point.magnitude_db, point.phase_deg) {
+                if m1 == 0.0 {
+                    // A sampled unity plateau is one connected crossing, but
+                    // its least phase margin may occur anywhere along it.
+                    if index == 0 || points[index - 1].magnitude_db != Some(0.0) {
+                        count += 1;
+                    }
+                    retain_binding_margin(
+                        &mut phase_margin,
+                        phase_margin_degrees(p1),
+                        point.frequency,
+                    );
                 }
-                retain_binding_margin(&mut phase_margin, phase_margin_degrees(p1), point.frequency);
-            }
-            if p1.rem_euclid(360.0) == 180.0 {
-                retain_binding_margin(&mut gain_margin, -m1, point.frequency);
+                if p1.rem_euclid(360.0) == 180.0 {
+                    retain_binding_margin(&mut gain_margin, -m1, point.frequency);
+                }
             }
             let Some(previous) = index.checked_sub(1).map(|i| &points[i]) else {
                 continue;
             };
-            let m0 = previous.magnitude_db;
-            let p0 = previous.phase_deg;
+            let (Some(m0), Some(p0), Some(m1), Some(p1)) = (
+                previous.magnitude_db,
+                previous.phase_deg,
+                point.magnitude_db,
+                point.phase_deg,
+            ) else {
+                // At a measured zero, log magnitude and phase are undefined.
+                // Interpolate this segment in complex gain instead: a straight
+                // segment to zero has the nonzero endpoint's phase throughout.
+                let (nonzero, zero_at_end) = if previous.magnitude_db.is_some() {
+                    (previous, true)
+                } else {
+                    (point, false)
+                };
+                if let (Some(db), Some(phase)) = (nonzero.magnitude_db, nonzero.phase_deg)
+                    && db > 0.0
+                {
+                    count += 1;
+                    let inverse_magnitude = 10.0_f64.powf(-db / 20.0);
+                    let alpha = if zero_at_end {
+                        1.0 - inverse_magnitude
+                    } else {
+                        inverse_magnitude
+                    };
+                    let frequency = segment_frequency(previous.frequency, point.frequency, alpha);
+                    retain_binding_margin(
+                        &mut phase_margin,
+                        phase_margin_degrees(phase),
+                        frequency,
+                    );
+                    if phase.rem_euclid(360.0) == 180.0 {
+                        retain_binding_margin(&mut gain_margin, 0.0, frequency);
+                    }
+                }
+                continue;
+            };
             if (m0 < 0.0 && m1 > 0.0) || (m0 > 0.0 && m1 < 0.0) {
                 count += 1;
                 let alpha = -m0 / (m1 - m0);
@@ -1073,7 +1232,7 @@ mod tests {
             .magnitude_curve()
             .expect("small magnitude projection");
         assert_eq!(magnitude.len(), count);
-        assert_eq!(magnitude[0], (1.0, 20.0 * 2.0_f64.log10()));
+        assert_eq!(magnitude[0], (1.0, Some(20.0 * 2.0_f64.log10())));
 
         let abort = CountingAbort::new(2);
         assert_eq!(

@@ -8,6 +8,7 @@ mod qpac;
 mod qpnoise;
 pub mod qpss;
 mod qpxf;
+mod stb;
 #[cfg(test)]
 pub(crate) mod test_fixtures;
 #[cfg(test)]
@@ -163,6 +164,11 @@ pub enum SimulationResult {
     },
 
     /// Complete physical noise evidence and all requested measurement outputs.
+    /// Complete loop-gain evidence. Nullable Bode ordinates are retained with their raw samples.
+    Stb {
+        response: std::sync::Arc<rspice_core::analysis::stb::StbResult>,
+        measurements: Vec<rspice_core::MeasureResult>,
+    },
     Qpnoise {
         /// Physical output frequencies, including negative values and zero.
         frequencies: Vec<f64>,

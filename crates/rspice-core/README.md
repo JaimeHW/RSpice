@@ -358,6 +358,14 @@ reports multiple crossings as `multiple_unity_gain_crossovers`. Versions 1–14
 decode missing-crossover infinity placeholders as `NoCrossover` while preserving
 historical finite margin values.
 
+`BodePoint` retains finite complex samples even when a derived ordinate is
+undefined: at zero gain, linear magnitude is `Some(0.0)` and dB magnitude and
+phase are `None`. An overflowing linear norm is also `None`, while its scaled
+dB magnitude remains available. Phase unwrap restarts after an undefined sample.
+`magnitude_curve()` and `phase_curve()` preserve this optional-ordinate contract.
+`StbResult::validate_with_abort` checks retained Bode, Nyquist and margin values
+against the raw samples, with resource limits and cancellation.
+
 STB measures its DC return ratio independently at zero frequency, using the
 same linearized circuit and reusable two-experiment workspace. The requested
 positive-frequency grid is unchanged. A measured zero remains zero; an undefined

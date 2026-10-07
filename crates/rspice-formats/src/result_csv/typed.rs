@@ -4,6 +4,7 @@ use crate::table::escape_csv_field as csv_text;
 mod qpac;
 mod qpnoise;
 mod qpxf;
+mod stb;
 
 /// Encoded table and its factual summary; filenames and messages belong to the caller.
 #[derive(Debug)]
@@ -15,6 +16,9 @@ pub struct EncodedTypedCsv {
 /// Table facts for callers to describe the encoded evidence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypedCsvSummary {
+    Stb {
+        frequency_count: usize,
+    },
     Qpss {
         coordinate_count: usize,
         tuple_count: usize,
@@ -90,6 +94,7 @@ pub fn encode_typed_result_csv<W: AsRef<rspice_results::waveform::RetainedWavefo
     use rspice_results::analysis_payload::AnalysisResultPayload;
     use rspice_results::sensitivity::SensitivityResultMode;
     match payload {
+        AnalysisResultPayload::Stb { response } => Some(stb::prepare(response)),
         AnalysisResultPayload::Qpac { response } => qpac::prepare(response),
         AnalysisResultPayload::Qpxf { response } => qpxf::prepare(response),
         AnalysisResultPayload::Qpnoise { response } => qpnoise::prepare(response),

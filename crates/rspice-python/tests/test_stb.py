@@ -18,6 +18,23 @@ C1 ctrl 0 159.154943091895n
 
 
 class TestStb:
+    @pytest.mark.parametrize("points", [1, 3])
+    def test_zero_gain_has_explicit_bode_validity_and_survives_pickle(self, engine, points):
+        result = engine.run_stb(
+            rspice.Netlist.parse(SINGLE_POLE_STB.replace("-1000", "0")),
+            "VPROBE", variation="lin", points=points, start_freq=10.0, stop_freq=1000.0,
+        )
+        for value in [result, pickle.loads(pickle.dumps(result))]:
+            np.testing.assert_array_equal(value.loop_gain, np.zeros(points, dtype=complex))
+            np.testing.assert_array_equal(value.magnitude, np.zeros(points))
+            assert value.magnitude_validity.all()
+            assert not value.magnitude_db_validity.any()
+            assert not value.phase_validity.any()
+            assert np.isnan(value.magnitude_db).all()
+            assert np.isnan(value.phase_degrees).all()
+            assert value.gain_margin_db is None
+            assert value.phase_margin_degrees is None
+
     def test_direct_stb_exposes_loop_gain_and_margins(self, engine):
         netlist = rspice.Netlist.parse(SINGLE_POLE_STB)
         result = engine.run_stb(

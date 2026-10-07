@@ -1005,7 +1005,7 @@ fn periodic_result_tables(payload: &AnalysisResultPayload) -> Option<Vec<Semanti
         // A recorded spectrum exports through the ordinary complex waveform
         // path; its payload states the transform, not a table of its own.
         | AnalysisResultPayload::FftSpectrum { .. } | AnalysisResultPayload::Qpac { .. } | AnalysisResultPayload::Qpxf { .. } | AnalysisResultPayload::Qpnoise { .. }
-            | AnalysisResultPayload::Qpss { .. } => None,
+            | AnalysisResultPayload::Qpss { .. } | AnalysisResultPayload::Stb { .. } => None,
     }
 }
 

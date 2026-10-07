@@ -8,6 +8,10 @@ pub(super) fn prepare_typed_result_csv(
 ) -> Option<PreparedTypedResultCsv> {
     let encoded = encode_typed_result_csv(analysis)?;
     let (default_name, detail) = match encoded.summary {
+        TypedCsvSummary::Stb { frequency_count } => (
+            "stb-results.csv",
+            format!("{frequency_count} loop-gain samples, measured margins and diagnostics"),
+        ),
         TypedCsvSummary::Qpss {
             coordinate_count,
             tuple_count,

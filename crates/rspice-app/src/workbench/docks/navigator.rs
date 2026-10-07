@@ -3333,6 +3333,14 @@ fn retained_result_artifacts(
     }
     if let Some(payload) = &analysis.result_payload {
         let (canonical, name, kind, count, value, viewer) = match payload {
+            AnalysisResultPayload::Stb { response } => (
+                "payload/stb",
+                "Loop-gain samples, margins and diagnostics",
+                ResultArtifactKind::Array,
+                response.bode_points.len(),
+                Some(response.margin_assessment().to_owned()),
+                ResultViewer::Bode,
+            ),
             AnalysisResultPayload::Qpnoise { response } => (
                 "payload/qpnoise",
                 "QPNOISE spectra, covariance and measurements",

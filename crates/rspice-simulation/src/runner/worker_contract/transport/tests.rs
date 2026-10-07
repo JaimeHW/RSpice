@@ -3,6 +3,74 @@
 use super::*;
 
 #[test]
+fn stb_worker_retains_zero_samples_and_rejects_invalid_availability() {
+    use rspice_core::analysis::stb::{StbAnalyzer, StbConfig};
+    let mut evidence = StbAnalyzer::new(StbConfig::new())
+        .analyze(
+            &[1.0, 100.0, 10000.0],
+            &[
+                rspice_core::Complex64::new(0.0, 2.0),
+                rspice_core::Complex64::new(0.0, 0.0),
+                rspice_core::Complex64::new(0.0, -2.0),
+            ],
+        )
+        .unwrap();
+    evidence
+        .warnings
+        .push("DC loop gain was not measured".into());
+    let response = WorkerResponse {
+        id: 42,
+        outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Stb {
+            response: evidence.clone(),
+            measurements: Vec::new(),
+        })),
+    };
+    let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
+    assert_eq!(transport.buffers.len(), 1);
+    assert_eq!(transport.buffers[0].len(), 27);
+    assert_eq!(transport.clone().into_response().unwrap(), response);
+    let WorkerOutcome::Success(result) = response.outcome else {
+        panic!()
+    };
+    let retained = crate::result_conversion::convert(
+        (*result).into(),
+        rspice_results::analysis_type::AnalysisType::Stb,
+        "STB gaps",
+        || 0.0,
+    );
+    assert_eq!(retained.validate_retained_evidence(), Ok(()));
+    let json = serde_json::to_string(&retained.result_payload).unwrap();
+    assert!(json.contains("DC loop gain was not measured"));
+    assert!(
+        !retained
+            .waveforms
+            .iter()
+            .any(|w| w.name == "Loop Phase (deg)")
+    );
+    assert_eq!(
+        retained
+            .waveforms
+            .iter()
+            .filter(|w| w.name.starts_with("Loop Phase (deg) [segment"))
+            .count(),
+        2
+    );
+    for field in [12, 14, 16] {
+        let mut bad = transport.clone();
+        bad.buffers[0][field] = 0.5;
+        assert!(bad.into_response().is_err());
+    }
+    let mut bad = transport;
+    bad.buffers[0][16] = 1.0; // Invent phase zero at the zero loop-gain sample.
+    assert!(bad.into_response().is_err());
+    let inline = WorkerSimulationResultTransport::Inline(WorkerSimulationResult::Stb {
+        response: evidence,
+        measurements: Vec::new(),
+    });
+    assert!(inline.into_result(&[]).is_err());
+}
+
+#[test]
 fn worker_transport_extracts_every_retained_pss_numeric_array_from_metadata() {
     let response = WorkerResponse {
         id: 78,

@@ -957,7 +957,7 @@ pub(super) fn run_stb(
         use super::export::{ColumnData, ExportColumn, ExportTable};
 
         let table = ExportTable {
-            scale_unit: None,
+            scale_unit: Some("Hz".into()),
             analysis: "stb".to_string(),
             plot_name: "STB Loop Gain".to_string(),
             scale_name: "frequency".to_string(),
@@ -965,7 +965,7 @@ pub(super) fn run_stb(
             scale: stb.frequencies.clone(),
             columns: vec![
                 ExportColumn {
-                    unit: None,
+                    unit: Some("1".into()),
                     name: "loopgain".to_string(),
                     var_type: "gain".to_string(),
                     data: ColumnData::Complex {
@@ -974,10 +974,10 @@ pub(super) fn run_stb(
                     },
                 },
                 ExportColumn {
-                    unit: None,
+                    unit: Some("dB".into()),
                     name: "loopgain_mag_db".to_string(),
                     var_type: "gain".to_string(),
-                    data: ColumnData::Real(
+                    data: ColumnData::optional_real(
                         stb.result
                             .bode_points
                             .iter()
@@ -986,10 +986,10 @@ pub(super) fn run_stb(
                     ),
                 },
                 ExportColumn {
-                    unit: None,
+                    unit: Some("deg".into()),
                     name: "loopgain_phase_deg".to_string(),
                     var_type: "phase".to_string(),
-                    data: ColumnData::Real(
+                    data: ColumnData::optional_real(
                         stb.result
                             .bode_points
                             .iter()
@@ -1013,24 +1013,11 @@ pub(super) fn run_stb(
             },
             |path, format| {
                 if matches!(format, OutputFormat::Hdf5) {
-                    let mut data = Hdf5SimulationData::new();
-                    data.title = "STB Loop Gain".to_string();
-                    data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
-
-                    let mut ac = Hdf5AcSection::new(stb.frequencies.clone());
-                    ac.add_signal(
-                        "loopgain".to_string(),
-                        // A loop gain is a ratio of two voltages. The
-                        // dimensionless symbol would be `1`, which reads as a
-                        // value rather than a unit; the column is published
-                        // with no unit stated instead.
-                        None,
-                        stb.loop_gains.iter().map(|g| g.re).collect(),
-                        stb.loop_gains.iter().map(|g| g.im).collect(),
-                    );
-                    data.ac = Some(ac);
-
-                    write_hdf5(path, &data).map_err(|err| map_hdf5_output_error(path, err))
+                    crate::hdf5::write_table(
+                        path,
+                        &table,
+                        Some(super::document::hdf5_identity(ctx, analysis_id)?),
+                    )
                 } else {
                     table.write(path, format)
                 }

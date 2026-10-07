@@ -32,7 +32,6 @@ fn stability_does_not_invent_a_negative_real_crossing_near_zero_phase() {
 fn stability_rejects_invalid_samples_instead_of_certifying_them() {
     let analyzer = StbAnalyzer::new(StbConfig::default());
     for bad in [
-        Complex64::new(0.0, 0.0),
         Complex64::new(f64::NAN, 0.0),
         Complex64::new(f64::INFINITY, 0.0),
     ] {
@@ -193,7 +192,7 @@ fn margins_use_each_odd_half_turn_without_losing_phase_winding() {
     assert!((result.margins.phase_margin.unwrap().value + 30.0).abs() < 1e-10);
     assert!((result.margins.gain_margin.unwrap().value + 4.0).abs() < 1e-10);
     assert!((result.margins.gain_margin.unwrap().frequency / 1e4 - 1.0).abs() < 1e-12);
-    assert!((result.bode_points.last().unwrap().phase_deg + 600.0).abs() < 1e-10);
+    assert!((result.bode_points.last().unwrap().phase_deg.unwrap() + 600.0).abs() < 1e-10);
 
     // A sweep starting on the positive branch must find the same critical
     // negative-real axis as one starting on the negative branch.

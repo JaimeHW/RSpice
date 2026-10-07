@@ -11,40 +11,15 @@
 use super::{
     ServiceRunError, ServiceRunResult, build_engine_config, parse_runner_netlist_with_abort,
 };
-use crate::error::{ensure_not_aborted, poll_periodically};
+use crate::error::ensure_not_aborted;
+#[cfg(test)]
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::Engine;
 use std::path::Path;
 
-/// STB analysis data for feedback loop stability
-#[derive(Debug, Clone)]
-pub struct StbData {
-    /// Frequency points (Hz)
-    pub frequencies: Vec<Value>,
-    /// Loop gain magnitude (dB)
-    pub loop_gain_db: Vec<Value>,
-    /// Continuous loop gain phase from the core Bode projection (degrees).
-    pub loop_phase_deg: Vec<Value>,
-    /// Margins extracted from the loop gain. Always present: the extraction
-    /// is what stability analysis is for, so it is a result, not an option.
-    pub margins: rspice_core::analysis::stb::StabilityMargins,
-    /// Nyquist contour, retained only when the configuration asked for it.
-    ///
-    /// The extraction's own warnings are deliberately not carried here: the
-    /// only two it raises — empty input, and multiple unity-gain crossovers —
-    /// are already reported exactly by the margins themselves.
-    pub nyquist: Option<StbNyquistContour>,
-}
-
-/// The Nyquist contour of the loop gain, split into the three parallel
-/// vectors a plot consumes.
-#[derive(Debug, Clone)]
-pub struct StbNyquistContour {
-    pub frequencies: Vec<Value>,
-    pub real: Vec<Value>,
-    pub imaginary: Vec<Value>,
-}
+/// Complete core stability evidence, including missing quantities and diagnostics.
+pub type StbData = rspice_core::analysis::stb::StbResult;
 
 /// Run STB analysis over a decade sweep with cooperative cancellation.
 ///
@@ -113,90 +88,13 @@ pub fn run_stb_analysis_with_sweep_and_source_path_and_abort(
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
     ensure_not_aborted(abort)?;
     let engine = Engine::new(build_engine_config(&netlist, None));
-    let compute_nyquist = stb_config.compute_nyquist;
 
     let analysis = engine
         .run_stb_with_abort(&netlist, stb_config, abort)
         .map_err(|error| ServiceRunError::from_core("STB analysis error", error))?;
 
-    let result_frequencies = analysis.frequencies;
-    let stb_result = analysis.result;
-    if !stb_result.success
-        || result_frequencies.is_empty()
-        || result_frequencies.len() != stb_result.bode_points.len()
-        || result_frequencies
-            .iter()
-            .any(|frequency| !frequency.is_finite() || *frequency <= 0.0)
-        || result_frequencies.windows(2).any(|pair| pair[1] <= pair[0])
-    {
-        return Err(ServiceRunError::Failure(
-            "STB engine returned an unsuccessful or inconsistent Bode result".to_owned(),
-        ));
-    }
-
-    let mut loop_gain_db = Vec::with_capacity(stb_result.bode_points.len());
-    let mut loop_phase_deg = Vec::with_capacity(stb_result.bode_points.len());
-    for (index, point) in stb_result.bode_points.iter().enumerate() {
-        poll_periodically(abort, index)?;
-        if point.frequency.to_bits() != result_frequencies[index].to_bits()
-            || !point.loop_gain.re.is_finite()
-            || !point.loop_gain.im.is_finite()
-            || !point.magnitude_db.is_finite()
-            || !point.phase_deg.is_finite()
-        {
-            return Err(ServiceRunError::Failure(format!(
-                "STB Bode point {} has an invalid frequency or loop gain",
-                index + 1
-            )));
-        }
-        loop_gain_db.push(point.magnitude_db);
-        loop_phase_deg.push(point.phase_deg);
-    }
     ensure_not_aborted(abort)?;
-
-    let nyquist = if compute_nyquist {
-        if stb_result.nyquist_points.len() != result_frequencies.len() {
-            return Err(ServiceRunError::Failure(format!(
-                "STB requested a Nyquist contour but received {} points for {} frequencies",
-                stb_result.nyquist_points.len(),
-                result_frequencies.len()
-            )));
-        }
-        let mut frequencies = Vec::with_capacity(stb_result.nyquist_points.len());
-        let mut real = Vec::with_capacity(stb_result.nyquist_points.len());
-        let mut imaginary = Vec::with_capacity(stb_result.nyquist_points.len());
-        for (index, point) in stb_result.nyquist_points.iter().enumerate() {
-            poll_periodically(abort, index)?;
-            if point.frequency.to_bits() != result_frequencies[index].to_bits()
-                || !point.real.is_finite()
-                || !point.imag.is_finite()
-            {
-                return Err(ServiceRunError::Failure(format!(
-                    "STB Nyquist point {} has an invalid frequency or value",
-                    index + 1
-                )));
-            }
-            frequencies.push(point.frequency);
-            real.push(point.real);
-            imaginary.push(point.imag);
-        }
-        Some(StbNyquistContour {
-            frequencies,
-            real,
-            imaginary,
-        })
-    } else {
-        None
-    };
-    ensure_not_aborted(abort)?;
-
-    Ok(StbData {
-        frequencies: result_frequencies,
-        loop_gain_db,
-        loop_phase_deg,
-        margins: stb_result.margins,
-        nyquist,
-    })
+    Ok(analysis.result)
 }
 
 #[cfg(test)]
@@ -226,16 +124,14 @@ E3 b2 0 n2 0 1\nR3 b2 n3 1k\nC3 n3 0 159.154943091895n\n.end\n",
             &rspice_core::NoAbort,
         )
         .unwrap();
-        assert_eq!(result.frequencies.len(), 61);
-        for ((&frequency, &phase), &magnitude) in result
-            .frequencies
-            .iter()
-            .zip(&result.loop_phase_deg)
-            .zip(&result.loop_gain_db)
-        {
-            let ratio = frequency / 1000.0;
-            assert!((phase + 3.0 * ratio.atan().to_degrees()).abs() < 1e-8);
-            assert!((magnitude - (60.0 - 30.0 * (1.0 + ratio * ratio).log10())).abs() < 1e-8);
+        assert_eq!(result.bode_points.len(), 61);
+        for point in &result.bode_points {
+            let ratio = point.frequency / 1000.0;
+            assert!((point.phase_deg.unwrap() + 3.0 * ratio.atan().to_degrees()).abs() < 1e-8);
+            assert!(
+                (point.magnitude_db.unwrap() - (60.0 - 30.0 * (1.0 + ratio * ratio).log10())).abs()
+                    < 1e-8
+            );
         }
     }
 }
