@@ -214,7 +214,7 @@
       },
       "control_host": "missing",
       "owner": "C04",
-      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, cancellation and retained-value limits remain required. tests/stb_precision.rs qualifies small/large single-pole gains and loaded high-gain return ratios in both probe orientations; tests/stb_loopgain.rs remains the ordinary loop-gain oracle. Complete progress, margin availability and control publication contracts."
     },
     {
       "variant": "Disto",
@@ -490,7 +490,8 @@
     "tests/transfer_function_units.rs",
     "tests/pole_zero_public_contract.rs",
     "tests/pole_zero_descriptor_rank.rs",
-    "tests/pole_zero_high_frequency.rs"
+    "tests/pole_zero_high_frequency.rs",
+    "tests/stb_precision.rs"
   ],
   "open_inventory_tasks": [
     "Enumerate every per-instance predicate and pair it with supported/unsupported numerical fixtures; family declarations alone are insufficient.",

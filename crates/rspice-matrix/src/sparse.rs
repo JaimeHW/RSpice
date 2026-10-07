@@ -4575,6 +4575,8 @@ pub struct ComplexMatrix {
     pub ncols: usize,
     /// Frozen CSC sparsity pattern (cloned from the real matrix once)
     csc: Arc<SymbolicSparseColMat<usize>>,
+    /// Shared row traversal of the same immutable pattern.
+    residual_layout: Arc<ResidualLayout>,
     /// Complex values (updated for each frequency)
     values: Vec<Complex64>,
     /// Identity of the real sparsity pattern from which this matrix was made.
@@ -4598,6 +4600,7 @@ impl ComplexMatrix {
             nrows: real_matrix.nrows,
             ncols: real_matrix.ncols,
             csc: real_matrix.csc.clone(),
+            residual_layout: real_matrix.residual_layout.clone(),
             values: vec![Complex64::new(0.0, 0.0); nnz],
             pattern_id: real_matrix.pattern_id,
             lu: None,
@@ -4862,6 +4865,31 @@ impl ComplexMatrix {
                 visitor(row, col, value);
             }
         }
+    }
+
+    /// Iterate a row's original coefficients in column order, including
+    /// structural zeros. Factorization does not replace these coefficients.
+    /// The shared row layout makes traversal proportional to the row's stored
+    /// entries, without allocating or scanning unrelated matrix columns.
+    pub fn row_entries(
+        &self,
+        row: usize,
+    ) -> Result<impl ExactSizeIterator<Item = (usize, Complex64)> + Clone + '_, SolverError> {
+        self.check_stamping_error()?;
+        if row >= self.nrows {
+            return Err(SolverError::InvalidCircuit(
+                "Complex row index is out of bounds".into(),
+            ));
+        }
+        let layout = &self.residual_layout;
+        Ok(
+            (layout.row_ptr[row]..layout.row_ptr[row + 1]).map(|position| {
+                (
+                    layout.col_idx[position],
+                    self.values[layout.csc_idx[position]],
+                )
+            }),
+        )
     }
 
     /// Rows whose entries are all exactly zero (or absent), the complex twin
@@ -8503,6 +8531,23 @@ mod tests {
                 (1, 1, Complex64::new(0.0, 0.0)),
                 (0, 2, Complex64::new(-3.0, 0.5)),
             ]
+        );
+        assert_eq!(
+            matrix.row_entries(0).unwrap().collect::<Vec<_>>(),
+            [
+                (0, Complex64::new(0.0, 0.0)),
+                (2, Complex64::new(-3.0, 0.5))
+            ]
+        );
+        assert!(matrix.row_entries(3).is_err());
+        matrix.add_real(1, 1, 3.0);
+        let before = matrix.row_entries(0).unwrap().collect::<Vec<_>>();
+        matrix.solve(&[Complex64::new(1.0, 0.0); 3]).unwrap();
+        assert_eq!(matrix.row_entries(0).unwrap().collect::<Vec<_>>(), before);
+        matrix.add_real(0, 2, 1.0);
+        assert_eq!(
+            matrix.row_entries(0).unwrap().nth(1).unwrap().1,
+            Complex64::new(-2.0, 0.5)
         );
     }
 

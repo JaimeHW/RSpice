@@ -326,6 +326,14 @@ exposes that cause, including through STB and PXF wrappers. Conversion into
 configured point limits and cancellation remain distinct. Malformed sweep
 diagnostics retain their analysis or input context.
 
+STB loop-gain extraction recovers the small return difference from the probe's
+voltage constraint and the injection node's other KCL terms. It avoids subtracting
+rounded responses from unity and does not replace a small denominator with an
+infinity sentinel. Scaled arithmetic preserves intermediate exponents and
+cancellation; an exactly singular or unrepresentable return ratio is an error.
+Both probe orientations and loaded breaks use the same calculation and the
+original two batched solves. Sparse row traversal shares the matrix pattern.
+
 STB result and workspace reservations also retain their allocator cause in
 `StbAnalysisError::Allocation { object, requested, source }` or
 `SimulationError::Allocation { object, source }`. Callers can inspect the

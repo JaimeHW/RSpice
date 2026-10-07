@@ -685,6 +685,7 @@ jobs:
           --test control_complex_scalars --test control_transfer_scalars
           --test control_pole_zero
           --test control_sensitivity
+          --test stb_precision
           --test sensitivity_probe_contract --test sensitivity_linear_devices
           --test analysis_numeric_fields --test forward_analyses
           --test frequency_grid_errors

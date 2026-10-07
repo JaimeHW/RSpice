@@ -33,6 +33,8 @@ use crate::analysis::stb::{StbAnalysisError, StbAnalyzer, StbConfig, StbResult};
 use crate::{Complex64, Netlist, Value};
 use std::f64::consts::PI;
 
+mod loop_gain;
+
 // A completed STB result deliberately retains both its primary sweep and the
 // derived Bode/Nyquist records.  Resource accounting must charge the copies
 // that remain reachable from `StbAnalysisResult`, not just the three primary
@@ -298,22 +300,16 @@ impl Engine {
                 .solve_many_into(&batched_rhs, 2, &mut batched_solution)
                 .map_err(SimulationError::Solver)?;
             let sol_v = &batched_solution[..size];
-            let v1 = sol_v[sense_node - 1];
-            let i1 = sol_v[br - 1];
-
             let sol_i = &batched_solution[size..];
-            let v2 = sol_i[sense_node - 1];
-            let i2 = sol_i[br - 1];
-
-            // Tian: T = -1/(1 - 1/D) = D/(1 - D); D -> 0 (no loop) gives
-            // T -> 0 without the intermediate division blowing up.
-            let d = 2.0 * (i1 * v2 - v1 * i2) + v1 + i2;
-            let denom = Complex64::new(1.0, 0.0) - d;
-            let t = if denom.norm() < 1e-30 {
-                Complex64::new(f64::INFINITY, 0.0)
-            } else {
-                d / denom
-            };
+            let t = loop_gain::extract(
+                &ac_matrix,
+                sol_v,
+                sol_i,
+                sense_node - 1,
+                node_neg - 1,
+                br - 1,
+                abort,
+            )?;
             loop_gains.push(t);
             abort.observe_progress((frequency_index + 1) as f64 / frequencies.len() as f64);
         }
