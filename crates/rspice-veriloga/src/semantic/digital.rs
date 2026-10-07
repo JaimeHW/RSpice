@@ -2098,11 +2098,10 @@ impl SemanticAnalyzer {
                 }
                 // IEEE 1364-2005 section 3.9 numbers an `integer`'s bits
                 // [31:0]; a `reg` uses the range it was declared with.
-                let range = local.range.or(match local.kind {
+                local.range.or(match local.kind {
                     ProcessLocalKind::Integer => Some(INTEGER_BOUNDS),
                     _ => None,
-                });
-                range
+                })
             }
             Resolution::Analog(SymbolKind::Variable) => {
                 if !self
