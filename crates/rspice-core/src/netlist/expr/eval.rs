@@ -8,7 +8,7 @@
 use crate::config::ExpressionDialect;
 
 use super::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 const MAX_EVAL_FUNCTION_CALL_DEPTH: usize = 4096;
 const XYCE_ATANH_EPSILON: Value = 1.0e-12;
@@ -168,6 +168,7 @@ struct PreparedExpressionBuilder<'a> {
     external_bindings: &'a mut dyn FnMut(&Expr) -> Result<Option<String>, ExprError>,
     programs: Vec<PreparedProgram>,
     function_programs: HashMap<String, usize>,
+    pending_functions: VecDeque<(usize, String)>,
     maximum_builtin_args: usize,
     maximum_user_args: usize,
 }
@@ -257,10 +258,12 @@ impl PreparedExpression {
             external_bindings,
             programs: Vec::new(),
             function_programs: HashMap::new(),
+            pending_functions: VecDeque::new(),
             maximum_builtin_args: 0,
             maximum_user_args: 0,
         };
         let root_program = builder.add_program(expr, Vec::new())?;
+        builder.compile_function_bodies()?;
         let root = PreparedNodeRef {
             program: root_program,
             node: builder.programs[root_program].root,
@@ -742,10 +745,19 @@ impl<'a> PreparedExpressionBuilder<'a> {
             root: 0,
             formal_args: function.args.clone(),
         });
-        let body = parse_expression(&function.body)?;
-        let root = self.compile_node(program, &body)?;
-        self.programs[program].root = root;
+        // Register the program before visiting its body, so recursion and
+        // shared callees keep one identity without recursing on the host stack.
+        self.pending_functions.push_back((program, function.body));
         Ok(program)
+    }
+
+    fn compile_function_bodies(&mut self) -> Result<(), ExprError> {
+        while let Some((program, source)) = self.pending_functions.pop_front() {
+            let body = parse_expression(&source)?;
+            let root = self.compile_node(program, &body)?;
+            self.programs[program].root = root;
+        }
+        Ok(())
     }
 
     fn compile_node(&mut self, program: usize, expression: &Expr) -> Result<usize, ExprError> {

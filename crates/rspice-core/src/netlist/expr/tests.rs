@@ -2725,3 +2725,41 @@ fn host_binding_errors_inside_user_functions_propagate_from_compilation() {
         ExprError::InvalidArgument("host compilation cancelled".to_owned())
     );
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn prepared_deep_function_graph_uses_bounded_native_stack() {
+    std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(|| {
+            let mut ctx = ParamContext::new();
+            ctx.define_function("F0", vec!["X".to_owned()], "X");
+            for index in 1..2048 {
+                ctx.define_function(
+                    &format!("F{index}"),
+                    vec!["X".to_owned()],
+                    &format!("F{}(X)+1", index - 1),
+                );
+            }
+            let mut prepared =
+                PreparedExpression::compile(&parse_expression("F2047(1)").unwrap(), &ctx).unwrap();
+            let value = prepared.evaluate_with(&ctx, &mut |_| Ok(None)).unwrap();
+            assert_eq!(value, 2048.0.into());
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
+fn prepared_recursive_function_graph_keeps_distinct_call_scopes() {
+    let mut ctx = ParamContext::new();
+    ctx.define_function("F", vec!["X".to_owned()], "IF(X<=0,0,G(X-1)+1)");
+    ctx.define_function("G", vec!["X".to_owned()], "F(X)");
+    let mut prepared =
+        PreparedExpression::compile(&parse_expression("F(5)+G(3)").unwrap(), &ctx).unwrap();
+    assert_eq!(
+        prepared.evaluate_with(&ctx, &mut |_| Ok(None)).unwrap(),
+        8.0.into()
+    );
+}
