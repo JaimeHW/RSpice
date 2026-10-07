@@ -431,6 +431,10 @@ bodies and two-argument `LIMIT`; three-argument clipping remains deterministic.
 Ordinary bindings still shadow globals without replacing their namespace.
 Available-parameter materialization uses the same complex numeric resolver, so
 model expressions such as `IMG(global_value)` retain their imaginary input.
+Model fields do not replace enclosing `.PARAM` or `.GLOBAL_PARAM` bindings while
+resolving expressions, including forward references and runtime expressions.
+Model fields supply otherwise unbound names within their own card. Temperature
+quantities retain the separate instance and model override rules below.
 
 Native diode, BJT, MOS, JFET, and MESFET scalar model expressions resolve at
 construction using the instance's `TEMP`/`DTEMP` and the model's `TNOM`.

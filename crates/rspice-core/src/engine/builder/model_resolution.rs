@@ -345,9 +345,20 @@ fn build_model_eval_context<'a>(
     set_temperature_scalars(&mut params, current_temp_c, tnom_c);
     materialize_model_parameters(&mut params, netlist.abort)?;
     let mut ctx = ModelEvaluationContext::new(params, netlist.abort);
+    let enclosing_binding = |name: &str| {
+        netlist.params.has_any_parameter_binding(name)
+            && !crate::netlist::expr::MODEL_TEMPERATURE_PARAMETERS
+                .iter()
+                .any(|temperature| name.eq_ignore_ascii_case(temperature))
+    };
     for (name, value) in &model_def.params {
         check_build_abort(netlist.abort)?;
-        ctx.set(name, *value);
+        // A model field is a fallback expression binding, not a replacement
+        // for an enclosing .PARAM/.GLOBAL_PARAM. Card temperature quantities
+        // retain their separate construction-time override rules.
+        if !enclosing_binding(name) {
+            ctx.set(name, *value);
+        }
     }
     let mut pending = model_def.expr_params.clone();
     while !pending.is_empty() {
@@ -360,7 +371,9 @@ fn build_model_eval_context<'a>(
                 netlist.abort,
             ) {
                 Ok(value) => {
-                    ctx.set_complex(&name, value);
+                    if !enclosing_binding(&name) {
+                        ctx.set_complex(&name, value);
+                    }
                     ctx.resolved_expressions
                         .insert(name.to_ascii_uppercase(), value);
                     progress = true;

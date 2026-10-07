@@ -4132,7 +4132,11 @@ fn resolve_static_model_expression_params_with_abort(
                 .map(|value| value.re)
                 {
                     Ok(value) if value.is_finite() => {
-                        context.set(&name, value);
+                        // Keep the enclosing parameter namespace authoritative,
+                        // just as when this expression resolves on its card.
+                        if !context.has_any_parameter_binding(&name) {
+                            context.set(&name, value);
+                        }
                         model.params.push((name, value));
                         progressed = true;
                     }
