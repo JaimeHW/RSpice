@@ -83,10 +83,11 @@ pub(super) struct RunContext<'a> {
     /// .MEAS results collected while analyses run, for CI/CD reporting
     /// (`--report-file` / `--meas-file`) and the process exit status.
     pub(super) measurements: std::cell::RefCell<Vec<MeasurementReport>>,
+    measurement_budget: crate::report::ReportValueBudget,
     /// Analysis tags (upper-case) whose .MEAS statements were evaluated,
     /// so leftover measurements can fail loudly instead of being skipped.
     pub(super) evaluated_meas: std::cell::RefCell<std::collections::HashSet<String>>,
-    /// Result files this run resolved for export, for the `--summary`
+    /// Result files this run successfully published, for the `--summary`
     /// manifest.
     pub(super) outputs: std::cell::RefCell<Vec<std::path::PathBuf>>,
     /// Completed authored transients a planned `.FOUR` card post-processes,
@@ -318,6 +319,9 @@ impl<'a> RunContext<'a> {
             verbose,
             quiet,
             measurements: std::cell::RefCell::new(Vec::new()),
+            measurement_budget: crate::report::ReportValueBudget::for_report(
+                engine.config().resource_limits.max_result_values,
+            )?,
             evaluated_meas: std::cell::RefCell::new(std::collections::HashSet::new()),
             outputs: std::cell::RefCell::new(Vec::new()),
             retained_transients: std::cell::RefCell::new(Vec::new()),
@@ -372,9 +376,8 @@ impl<'a> RunContext<'a> {
             }
         }
 
-        self.measurements
-            .borrow_mut()
-            .extend(results.into_iter().map(|mr| MeasurementReport {
+        for mr in results {
+            self.record_measurement(MeasurementReport {
                 name: mr.name,
                 value: mr.value,
                 raw_value: mr.raw_value,
@@ -389,7 +392,15 @@ impl<'a> RunContext<'a> {
                 trigger_axis: None,
                 target_axis: None,
                 aggregate_policy: None,
-            }));
+            })?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn record_measurement(&self, row: MeasurementReport) -> Result<(), CliError> {
+        self.measurement_budget
+            .admit_measurements(std::slice::from_ref(&row))?;
+        self.measurements.borrow_mut().push(row);
         Ok(())
     }
 

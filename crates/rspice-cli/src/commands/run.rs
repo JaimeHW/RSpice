@@ -60,8 +60,8 @@ use naming::{
 };
 
 use crate::report::{
-    CsvMeasReporter, JUnitReporter, JsonMeasReporter, MeasurementReport, SimulationReport,
-    TapReporter,
+    CsvMeasReporter, JUnitReporter, JsonMeasReporter, MeasurementReport, ReportValueBudget,
+    SimulationReport, TapReporter,
 };
 
 use crate::cli::{
@@ -288,6 +288,7 @@ fn execute_with_destinations(
 
     let start_time = Instant::now();
     let mut reports = Vec::with_capacity(plan.len());
+    let report_budget = ReportValueBudget::new(resource_limits.max_result_values);
     let mut outputs: Vec<PathBuf> = Vec::new();
     // Both the message and the typed details a failing report published, so
     // the plan-level exit status keeps the category a single-deck run would
@@ -321,7 +322,10 @@ fn execute_with_destinations(
                     // The outer pool owns the process worker budget.
                     let mut child_args = args.clone();
                     child_args.jobs = 1;
-                    prepared.run(&child_args, config, false, true, deck.label.as_deref())
+                    let outcome =
+                        prepared.run(&child_args, config, false, true, deck.label.as_deref())?;
+                    report_budget.admit_reports(&outcome.reports)?;
+                    Ok(outcome)
                 })
                 .collect()
         });
@@ -367,6 +371,7 @@ fn execute_with_destinations(
                 ))?;
             }
             let outcome = prepared.run(&args, config, verbose, quiet, deck.label.as_deref())?;
+            report_budget.admit_reports(&outcome.reports)?;
             if first_error.is_none() {
                 first_error = first_reported_failure(&outcome.reports);
             }

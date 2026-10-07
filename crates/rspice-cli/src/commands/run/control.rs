@@ -47,6 +47,7 @@ pub(super) fn run(
     let mut outputs = Vec::new();
     let mut published = Vec::new();
     let mut measurements = Vec::new();
+    let report_budget = ReportValueBudget::for_report(limits.max_result_values)?;
     let mut evaluated = std::collections::HashSet::new();
     let mut presentation_ordinal = 0usize;
     let mut post_ordinals = std::collections::BTreeMap::new();
@@ -77,6 +78,9 @@ pub(super) fn run(
                             run_label,
                             &identity,
                         )?;
+                        report_budget
+                            .admit_measurements(&completed.measurements)
+                            .map_err(HostError::Output)?;
                         outputs.extend(completed.outputs);
                         published.extend(completed.published);
                         measurements.extend(completed.measurements);
@@ -200,6 +204,7 @@ pub(super) fn run(
                                 unreachable!("published by the transient host")
                             }
                         }
+                        report_budget.admit_measurements(&ctx.measurements.borrow())?;
                         measurements.extend(ctx.measurements.into_inner());
                         evaluated.extend(ctx.evaluated_meas.into_inner());
                         outputs.extend(ctx.outputs.into_inner());
@@ -264,6 +269,7 @@ pub(super) fn run(
         )?;
         *ctx.evaluated_meas.borrow_mut() = evaluated;
         ctx.record_unevaluated_measurements()?;
+        report_budget.admit_measurements(&ctx.measurements.borrow())?;
         measurements.extend(ctx.measurements.into_inner());
         Ok(())
     })();

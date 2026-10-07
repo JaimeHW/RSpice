@@ -205,13 +205,11 @@ pub(super) fn preflight_step_coordinates(
             topology: materialized.topology_fingerprint(),
         });
 
-        // Each report retains one duration plus up to value/goal/tolerance
-        // for every measurement. Bound the numeric reporting payload before
-        // any solver or output file starts.
+        // A duration is known before execution. Measurement payloads depend
+        // on solved events and are admitted against the budget as retained;
+        // a declaration alone cannot predict the number of continuous rows.
         if aggregate_report_values.is_none() {
-            retained_report_values = retained_report_values
-                .saturating_add(1)
-                .saturating_add(materialized.netlist().measurements.len().saturating_mul(3));
+            retained_report_values = retained_report_values.saturating_add(1);
             if retained_report_values > retained_limit {
                 return Err(map_step_core_error(
                     rspice_core::SimulationError::ResourceLimit(rspice_core::ResourceLimitError {
@@ -951,8 +949,8 @@ pub(super) fn run_deck(
             &crate::abort::ProcessAbort,
         )
         .map_err(|error| map_materialized_run_error(error, args, "Step planning"))?;
-    let aggregate_report_values = (base_signature.is_empty() && netlist.control_script.is_none())
-        .then(|| 1usize.saturating_add(netlist.measurements.len().saturating_mul(3)));
+    let aggregate_report_values =
+        (base_signature.is_empty() && netlist.control_script.is_none()).then_some(1);
     let coordinate_contracts = preflight_step_coordinates(
         &engine,
         &materializer,
@@ -989,6 +987,7 @@ pub(super) fn run_deck(
     // nothing at all instead of a directory that looks like a shorter sweep.
     let transaction = publish::begin()?;
     let mut reports = Vec::with_capacity(materializer.len());
+    let report_budget = ReportValueBudget::new(resource_limits.max_result_values);
     let mut outputs = Vec::new();
     let mut coordinates = Vec::new();
     let mut published = Vec::new();
@@ -1070,6 +1069,7 @@ pub(super) fn run_deck(
             Err(_) if crate::abort::reason().is_some() => break,
             Err(error) => return Err(error),
         };
+        report_budget.admit_reports(std::slice::from_ref(&outcome.report))?;
         reports.push(outcome.report);
         published.push(CoordinatePublication {
             coordinate: canonical_coordinate.clone(),

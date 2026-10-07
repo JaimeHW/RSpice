@@ -13,6 +13,8 @@ use std::path::Path;
 
 mod encoding;
 use encoding::{tap_description, tap_yaml_scalar, xml_escape};
+mod budget;
+pub(crate) use budget::ReportValueBudget;
 
 #[cfg(test)]
 mod encoding_tests;
@@ -86,6 +88,27 @@ pub struct MeasurementReport {
     pub target_axis: Option<f64>,
     /// Declared aggregate policy for a continuous measurement stream.
     pub aggregate_policy: Option<String>,
+}
+
+impl MeasurementReport {
+    /// Numerical payload retained by this row. Charge at least one value for
+    /// a failed/empty row so diagnostics cannot create an unbounded collection.
+    fn retained_value_count(&self) -> usize {
+        [
+            self.value,
+            self.raw_value,
+            self.expected,
+            self.tolerance,
+            self.failure_limit,
+            self.event_axis,
+            self.trigger_axis,
+            self.target_axis,
+        ]
+        .iter()
+        .filter(|value| value.is_some())
+        .count()
+        .max(1)
+    }
 }
 
 fn measurement_display_name(measurement: &MeasurementReport) -> String {

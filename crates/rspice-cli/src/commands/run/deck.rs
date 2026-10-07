@@ -381,8 +381,8 @@ pub(super) fn preflight_deck_run_count(
             &crate::abort::ProcessAbort,
         )
         .map_err(|error| map_materialized_run_error(error, args, "Step planning preflight"))?;
-    let aggregate_report_values = (base_signature.is_empty() && netlist.control_script.is_none())
-        .then(|| 1usize.saturating_add(netlist.measurements.len().saturating_mul(3)));
+    let aggregate_report_values =
+        (base_signature.is_empty() && netlist.control_script.is_none()).then_some(1);
     preflight_step_coordinates(
         &engine,
         &materializer,

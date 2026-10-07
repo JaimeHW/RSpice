@@ -126,7 +126,8 @@ pub(super) fn run(
     }
     let transaction = publish::current();
     let destinations = publish::destinations::current();
-    let job = |prepared: &PreparedCorner| {
+    let report_budget = ReportValueBudget::new(config.resources.limits().max_result_values);
+    let job = |prepared: &PreparedCorner| -> Result<DeckOutcome, CliError> {
         let corner = &prepared.name;
         let started = Instant::now();
         let _joined = transaction.clone().map(publish::enter);
@@ -165,7 +166,8 @@ pub(super) fn run(
                 measurement.name = format!("{corner}:{}", measurement.name);
             }
         }
-        outcome
+        report_budget.admit_reports(&outcome.reports)?;
+        Ok(outcome)
     };
     let outcomes: Vec<_> = if jobs > 1 {
         use rayon::prelude::*;
@@ -175,9 +177,17 @@ pub(super) fn run(
             .map_err(|error| CliError::InternalError {
                 message: format!("failed to create corner workers: {error}"),
             })?
-            .install(|| prepared.par_iter().map(job).collect())
+            .install(|| {
+                prepared
+                    .par_iter()
+                    .map(job)
+                    .collect::<Result<Vec<_>, CliError>>()
+            })?
     } else {
-        prepared.iter().map(job).collect()
+        prepared
+            .iter()
+            .map(job)
+            .collect::<Result<Vec<_>, CliError>>()?
     };
     let results: Vec<_> = prepared
         .iter()

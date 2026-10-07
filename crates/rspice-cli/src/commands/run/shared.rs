@@ -352,7 +352,6 @@ pub(super) fn record_continuous_measurements(
         }
     }
 
-    let mut reports = ctx.measurements.borrow_mut();
     for result in results {
         let policy = result.aggregate_policy();
         let authored_failure_limit = ctx
@@ -374,7 +373,7 @@ pub(super) fn record_continuous_measurements(
             row.target_axis = result
                 .failure_metadata
                 .and_then(|metadata| metadata.target_axis);
-            reports.push(row);
+            ctx.record_measurement(row)?;
             continue;
         }
 
@@ -383,33 +382,24 @@ pub(super) fn record_continuous_measurements(
             row.error = Some(
                 "continuous measurement returned no records and no failure reason".to_string(),
             );
-            reports.push(row);
+            ctx.record_measurement(row)?;
             continue;
         }
 
-        reports.extend(
-            result
-                .records
-                .into_iter()
-                .enumerate()
-                .map(|(index, record)| {
-                    let mut row = continuous_measurement_row(
-                        result.name.clone(),
-                        policy,
-                        record.failure_limit,
-                    );
-                    row.value = Some(record.value);
-                    row.raw_value = Some(record.raw_value);
-                    row.failure_limit_exceeded = record.failure_limit_exceeded;
-                    row.passed = record.passed;
-                    row.error = record.verification_failure_message();
-                    row.record_index = Some(index);
-                    row.event_axis = record.event_axis;
-                    row.trigger_axis = record.trigger_axis;
-                    row.target_axis = record.target_axis;
-                    row
-                }),
-        );
+        for (index, record) in result.records.into_iter().enumerate() {
+            let mut row =
+                continuous_measurement_row(result.name.clone(), policy, record.failure_limit);
+            row.value = Some(record.value);
+            row.raw_value = Some(record.raw_value);
+            row.failure_limit_exceeded = record.failure_limit_exceeded;
+            row.passed = record.passed;
+            row.error = record.verification_failure_message();
+            row.record_index = Some(index);
+            row.event_axis = record.event_axis;
+            row.trigger_axis = record.trigger_axis;
+            row.target_axis = record.target_axis;
+            ctx.record_measurement(row)?;
+        }
     }
     Ok(())
 }

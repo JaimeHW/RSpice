@@ -945,6 +945,13 @@ that base in `run` and `check`. An explicit `run --convergence MODE` takes
 precedence over the deck's stepping and damping controls; numeric tolerances
 retain their own configuration, deck, and command-line precedence.
 
+Retained measurement/report collections also obey `max_result_values`, including
+the aggregate across steps, variants, corners, and control datasets. Each stored
+floating-point field counts, including raw values, goals, thresholds, coordinates,
+and run durations. An empty failure row costs at least one value. Parallel batch
+workers share admission before their reports enter the aggregate collection;
+exceeding the budget exits 75 even with `--allow-failed-meas`.
+
 The same resource policy is applied consistently to `run`, `check`, and `info`,
 including stdin, include expansion, `.ALTER`/`.DATA` materialization, derived
 corner and S-parameter decks, circuit construction, and result retention. The
