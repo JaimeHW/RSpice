@@ -32,7 +32,19 @@ pub(crate) fn evaluate_complex_with(
     ctx: &ParamContext,
     resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
 ) -> Result<ComplexValue, ExprError> {
-    let value = ExpressionEvaluator::new(ctx).evaluate_with(expr, resolver)?;
+    evaluate_complex_with_functions(expr, ctx, resolver, &mut |_, _| Ok(None))
+}
+
+/// Resolve host functions after their arguments are evaluated, exactly once
+/// and in authored order. User definitions retain precedence; unused branches
+/// never call the host. Bound results are runtime values, not Xyce constants.
+pub(crate) fn evaluate_complex_with_functions(
+    expr: &Expr,
+    ctx: &ParamContext,
+    resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
+    functions: &mut impl FnMut(&str, &[ComplexValue]) -> Result<Option<ComplexValue>, ExprError>,
+) -> Result<ComplexValue, ExprError> {
+    let value = ExpressionEvaluator::new(ctx).evaluate_with(expr, resolver, functions)?;
     Ok(if ctx.expression_dialect() == ExpressionDialect::Xyce {
         normalize_xyce_expression_result(value)
     } else {
@@ -933,13 +945,14 @@ impl<'a> ExpressionEvaluator<'a> {
     }
 
     fn evaluate(&mut self, expr: &Expr) -> Result<ComplexValue, ExprError> {
-        self.evaluate_with(expr, &mut |_| Ok(None))
+        self.evaluate_with(expr, &mut |_| Ok(None), &mut |_, _| Ok(None))
     }
 
     fn evaluate_with(
         &mut self,
         expr: &Expr,
         resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
+        functions: &mut impl FnMut(&str, &[ComplexValue]) -> Result<Option<ComplexValue>, ExprError>,
     ) -> Result<ComplexValue, ExprError> {
         let mut frames = vec![EvalFrame::Eval(expr.clone(), EvalScope::global())];
         let mut values = Vec::<EvaluatedValue>::new();
@@ -1024,12 +1037,15 @@ impl<'a> ExpressionEvaluator<'a> {
                         ));
                     };
                     let args = &values[start..];
-                    let numval = self.ctx.expression_dialect() == ExpressionDialect::Xyce
+                    let mut numval = self.ctx.expression_dialect() == ExpressionDialect::Xyce
                         && args.iter().all(|arg| arg.numval)
                         && xyce_numeric_function_is_constant_foldable(&name);
                     self.numeric_args.clear();
                     self.numeric_args.extend(args.iter().map(|arg| arg.numeric));
-                    let value = if numval {
+                    let value = if let Some(value) = functions(&name, &self.numeric_args)? {
+                        numval = false;
+                        value
+                    } else if numval {
                         xyce_constant_fold_builtin(&name, &self.numeric_args)?
                     } else {
                         eval_builtin_function_values(&name, &self.numeric_args, self.ctx)?

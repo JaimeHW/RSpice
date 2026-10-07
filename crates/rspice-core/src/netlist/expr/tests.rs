@@ -4,9 +4,88 @@
 //! (moments, bounds) and the determinism contract: a given seed must
 //! reproduce the identical draw sequence on every platform and run.
 
+use super::eval::evaluate_complex_with_functions;
 use super::*;
 use crate::abort_signal::CountingAbort;
 use crate::config::ExpressionDialect;
+
+#[test]
+fn host_functions_preserve_lazy_branches_scopes_complex_values_and_random_order() {
+    for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+        let mut ctx = ParamContext::new();
+        ctx.set_expression_dialect(dialect);
+        ctx.set_random_seed(43);
+        ctx.define_function("nested", vec!["x".into()], "root(x)+2j");
+        ctx.define_function("broken", vec![], "(");
+        let mut reference = ParamContext::new();
+        reference.set_expression_dialect(dialect);
+        reference.set_random_seed(43);
+        let expected = eval_expression_complex("aunif(0,1)+2*aunif(0,1)+4j", &reference).unwrap();
+        let mut calls = Vec::new();
+        let expression =
+            parse_expression("if(1,nested(aunif(0,1)+2*aunif(0,1)),broken())").unwrap();
+        let result = evaluate_complex_with_functions(
+            &expression,
+            &ctx,
+            &mut |_| Ok(None),
+            &mut |name, args| {
+                if name != "ROOT" {
+                    return Ok(None);
+                }
+                calls.push(args.to_vec());
+                Ok(Some(args[0] + ComplexValue::new(0.0, 2.0)))
+            },
+        )
+        .unwrap();
+        assert_eq!(result, expected);
+        assert_eq!(calls, [vec![ComplexValue::from(expected.re)]]);
+        assert_eq!(
+            eval_expression_complex("aunif(0,1)", &ctx).unwrap(),
+            eval_expression_complex("aunif(0,1)", &reference).unwrap()
+        );
+        ctx.define_function("root", vec!["x".into()], "x+5j");
+        assert_eq!(
+            evaluate_complex_with_functions(
+                &parse_expression("root(3)").unwrap(),
+                &ctx,
+                &mut |_| Ok(None),
+                &mut |_, _| panic!("user definition wins")
+            )
+            .unwrap(),
+            ComplexValue::new(3.0, 5.0)
+        );
+        assert_eq!(
+            evaluate_complex_with_functions(
+                &parse_expression("if(0,absent(9),2)").unwrap(),
+                &ctx,
+                &mut |_| Ok(None),
+                &mut |_, _| panic!("dead branch called host")
+            )
+            .unwrap(),
+            ComplexValue::from(2.0)
+        );
+    }
+}
+
+#[test]
+fn host_function_failures_propagate_without_fallback_or_dialect_normalization() {
+    let mut ctx = ParamContext::new();
+    ctx.set_expression_dialect(ExpressionDialect::Xyce);
+    let expression = parse_expression("root(1)").unwrap();
+    let result =
+        evaluate_complex_with_functions(&expression, &ctx, &mut |_| Ok(None), &mut |name, args| {
+            assert_eq!(name, "ROOT");
+            assert_eq!(args, [ComplexValue::from(1.0)]);
+            Err(ExprError::InvalidArgument("root unavailable".into()))
+        });
+    assert!(
+        matches!(result, Err(ExprError::InvalidArgument(message)) if message == "root unavailable")
+    );
+    assert!(matches!(
+        evaluate_complex_with_functions(&expression, &ctx, &mut |_| Ok(None), &mut |_, _| Ok(None)),
+        Err(ExprError::UnknownFunction(_))
+    ));
+}
 
 #[test]
 fn nested_curly_grouping_is_canonical_and_reports_its_delimiter() {
