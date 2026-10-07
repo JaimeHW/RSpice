@@ -3173,7 +3173,7 @@ fn first_measure_condition_event(
     let candidates =
         measurement_condition_candidates(left, right, axis.len(), segment_starts, minval);
     Ok(select_measure_condition_occurrence(
-        candidates.into_iter().filter_map(|(segment, crossing)| {
+        candidates.filter_map(|(segment, crossing)| {
             let event_axis =
                 axis[segment] + crossing.fraction * (axis[segment + 1] - axis[segment]);
             point_event_axis_in_window(event_axis, lower, upper, minval).then_some((
@@ -3206,7 +3206,7 @@ fn continuous_condition_events(
     let candidates =
         measurement_condition_candidates(left, right, axis.len(), segment_starts, minval);
     Ok(select_continuous_measure_condition_occurrences(
-        candidates.into_iter().filter_map(|(segment, crossing)| {
+        candidates.filter_map(|(segment, crossing)| {
             let event_axis =
                 axis[segment] + crossing.fraction * (axis[segment + 1] - axis[segment]);
             point_event_axis_in_window(event_axis, lower, upper, minval).then_some((
@@ -3508,34 +3508,22 @@ fn continuous_delay(
     }
 }
 
-fn select_measure_occurrence<T>(events: impl Iterator<Item = T>, number: isize) -> Option<T> {
-    if number > 0 {
-        events.into_iter().nth(number as usize - 1)
-    } else if number < 0 {
-        let events = events.collect::<Vec<_>>();
-        number
-            .checked_abs()
-            .and_then(|distance| events.len().checked_sub(distance as usize))
-            .and_then(|index| events.into_iter().nth(index))
-    } else {
-        None
-    }
-}
-
 type MeasureConditionCandidate = (usize, Value, Value, bool, MeasureConditionDirection);
 
 fn select_measure_condition_occurrence(
-    events: impl Iterator<Item = MeasureConditionCandidate>,
+    events: impl DoubleEndedIterator<Item = MeasureConditionCandidate>,
     edge: EdgeType,
     number: isize,
 ) -> Option<MeasureEvent> {
     if number < 0 {
-        return select_measure_occurrence(
-            events
-                .filter(|event| edge_matches_measure_condition(edge, event.4))
-                .map(|event| (event.0, event.1, event.2, event.3)),
-            number,
-        );
+        // A negative occurrence selects exactly one event from the end. Walk
+        // backward instead of retaining all prior candidates to index them.
+        let offset = number.checked_abs()? as usize - 1;
+        return events
+            .rev()
+            .filter(|event| edge_matches_measure_condition(edge, event.4))
+            .nth(offset)
+            .map(|event| (event.0, event.1, event.2, event.3));
     }
     let requested = number.max(1) as usize;
     let mut count = 0usize;
@@ -3557,7 +3545,7 @@ fn select_measure_condition_occurrence(
 }
 
 fn select_continuous_measure_condition_occurrences(
-    events: impl Iterator<Item = MeasureConditionCandidate>,
+    events: impl DoubleEndedIterator<Item = MeasureConditionCandidate>,
     edge: EdgeType,
     number: isize,
 ) -> Vec<MeasureEvent> {
@@ -3599,41 +3587,42 @@ pub(crate) struct MeasureConditionCrossing {
     pub(crate) direction: MeasureConditionDirection,
 }
 
-fn measurement_condition_candidates(
-    left: &[Value],
-    right: ResolvedMeasureOperand<'_>,
+fn measurement_condition_candidates<'a>(
+    left: &'a [Value],
+    right: ResolvedMeasureOperand<'a>,
     point_count: usize,
-    segment_starts: &[usize],
+    segment_starts: &'a [usize],
     minval: Value,
-) -> Vec<(usize, MeasureConditionCrossing)> {
-    if left.len() != point_count || point_count < 2 || !minval.is_finite() || minval < 0.0 {
-        return Vec::new();
-    }
-
-    let mut crossings = Vec::new();
-    for segment in 0..point_count - 1 {
+) -> impl DoubleEndedIterator<Item = (usize, MeasureConditionCrossing)> + 'a {
+    let right_aligned = match right {
+        ResolvedMeasureOperand::Constant(_) => true,
+        ResolvedMeasureOperand::Waveform(values) => values.len() >= point_count,
+    };
+    let segment_count =
+        if left.len() == point_count && right_aligned && minval.is_finite() && minval >= 0.0 {
+            point_count.saturating_sub(1)
+        } else {
+            0
+        };
+    // Candidate discovery must remain lazy: scalar and reverse-indexed
+    // requests can finish without allocating or visiting the other crossings.
+    (0..segment_count).filter_map(move |segment| {
         if segment_starts.binary_search(&(segment + 1)).is_ok() {
-            continue;
+            return None;
         }
         let left_previous = left[segment];
         let left_current = left[segment + 1];
-        let Some(right_previous) = right.value_at(segment) else {
-            return Vec::new();
-        };
-        let Some(right_current) = right.value_at(segment + 1) else {
-            return Vec::new();
-        };
-        if let Some(crossing) = measure_condition_crossing(
+        let right_previous = right.value_at(segment)?;
+        let right_current = right.value_at(segment + 1)?;
+        measure_condition_crossing(
             left_previous,
             left_current,
             right_previous,
             right_current,
             minval,
-        ) {
-            crossings.push((segment, crossing));
-        }
-    }
-    crossings
+        )
+        .map(|crossing| (segment, crossing))
+    })
 }
 
 #[cfg(test)]
@@ -3646,7 +3635,6 @@ fn measurement_condition_crossings(
     minval: Value,
 ) -> Vec<(usize, Value)> {
     measurement_condition_candidates(left, right, point_count, segment_starts, minval)
-        .into_iter()
         .filter(|(_, crossing)| edge_matches_measure_condition(edge, crossing.direction))
         .map(|(segment, crossing)| (segment, crossing.fraction))
         .collect()

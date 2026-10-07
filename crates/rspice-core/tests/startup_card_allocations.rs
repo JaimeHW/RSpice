@@ -1,49 +1,10 @@
 //! Bound allocation growth for long startup cards, without timing assumptions.
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::cell::Cell;
 use std::fmt::Write;
 
-thread_local! {
-    static ALLOCATION_BYTES: Cell<Option<usize>> = const { Cell::new(None) };
-}
-
-struct CountingAllocator;
-
-fn count(bytes: usize) {
-    let _ = ALLOCATION_BYTES.try_with(|counter| {
-        if let Some(total) = counter.get() {
-            counter.set(Some(total + bytes));
-        }
-    });
-}
-
-// SAFETY: Every allocation operation is forwarded unchanged to System; the
-// thread-local counter uses only nonallocating Cell operations.
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        count(layout.size());
-        unsafe { System.alloc(layout) }
-    }
-
-    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        count(layout.size());
-        unsafe { System.alloc_zeroed(layout) }
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        unsafe { System.dealloc(ptr, layout) }
-    }
-
-    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
-        count(size);
-        unsafe { System.realloc(ptr, layout, size) }
-    }
-}
-
-#[global_allocator]
-static ALLOCATOR: CountingAllocator = CountingAllocator;
+#[path = "common/allocations.rs"]
+mod allocations;
 
 fn source(count: usize, directive: &str, scoped: bool) -> String {
     let mut source = String::from("Long startup card\n");
@@ -68,9 +29,7 @@ fn source(count: usize, directive: &str, scoped: bool) -> String {
 }
 
 fn allocated(source: &str, count: usize) -> usize {
-    ALLOCATION_BYTES.with(|counter| counter.set(Some(0)));
-    let parsed = rspice_core::Netlist::parse(source);
-    let bytes = ALLOCATION_BYTES.with(|counter| counter.replace(None).unwrap());
+    let (parsed, bytes) = allocations::measured(|| rspice_core::Netlist::parse(source));
     let parsed = parsed.unwrap();
     assert_eq!(parsed.startup_directives()[0].entries().len(), count);
     for entry in parsed.startup_directives()[0].entries() {
