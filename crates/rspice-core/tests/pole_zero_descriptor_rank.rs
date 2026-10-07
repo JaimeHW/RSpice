@@ -176,6 +176,10 @@ fn schur_cancellation_does_not_erase_or_shift_a_natural_pole() {
                 );
                 assert_eq!(result.is_stable(), expected < 0.0);
                 assert!(result.pole_evidence.is_qualified());
+                let natural = Engine::default().run_pole_spectrum(&netlist).unwrap();
+                assert_eq!(natural.poles.len(), 1);
+                assert!((natural.poles[0].re / expected - 1.0).abs() < 1e-12);
+                assert!(natural.evidence.is_qualified());
             }
         }
     }

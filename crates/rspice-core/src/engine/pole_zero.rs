@@ -9,6 +9,7 @@ use crate::device::semiconductor::{
 use crate::{CircuitData, Netlist, Value};
 
 mod ac_nqs;
+mod descriptor;
 mod reduction;
 
 impl Engine {
@@ -734,9 +735,7 @@ impl Engine {
             "Pole-zero",
             "using the AC linearization path because ngspice MIF code models do not provide DEVpzLoad hooks",
         );
-        Self::ensure_no_mixed_signal_analysis(&circuit, "pole-zero analysis")?;
-        Self::ensure_supported_dynamic_charges(&circuit, "Pole-zero")?;
-        Self::ensure_supported_pz_dynamic_state_descriptors(&circuit)?;
+        Self::ensure_pz_circuit(&circuit)?;
         let num_nodes = circuit.num_nodes();
 
         let validate_node = |node: usize, label: &str| -> Result<(), SimulationError> {
@@ -788,20 +787,7 @@ impl Engine {
         abort.observe_progress(0.25);
         circuit.refresh_jiles_atherton_inductances(&dc_solution);
         Self::prepare_small_signal_state(&mut circuit, &dc_solution)?;
-        let matrix_size = circuit
-            .matrix_size()
-            .saturating_add(Self::pz_ac_nqs_state_count(&circuit));
-        self.ensure_result_shape(matrix_size, matrix_size.saturating_mul(8).saturating_add(1))?;
-
-        // Reuse the AC linearization path so pole-zero analysis sees the same
-        // nonlinear small-signal conductances and capacitances as AC analysis.
-        let g_descriptor =
-            Self::try_build_small_signal_pz_matrix(&circuit, &matrix, &dc_solution, 0.0)?;
-        let c_descriptor =
-            Self::try_build_small_signal_pz_matrix(&circuit, &matrix, &dc_solution, 1.0)?;
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
+        let descriptor = self.linearized_pz_descriptor(&circuit, &matrix, &dc_solution, abort)?;
         abort.observe_progress(0.5);
         let input_neg_node = input_neg.unwrap_or(0);
         let matches_requested_input_port = |np: usize, nn: usize| {
@@ -855,54 +841,24 @@ impl Engine {
         config.compute_poles = compute_poles;
         config.compute_zeros = compute_zeros;
 
-        // VBIC and AC-only BSIM3/BSIM4 introduce descriptor states outside the
-        // frozen AC matrix. Their expansion precedes eigenvalue extraction.
-        let has_external_vbic_descriptor_states = circuit
-            .bjts
-            .devices
-            .iter()
-            .any(|bjt| bjt.uses_vbic_dynamic_charges());
-        let reduced =
-            if !has_external_vbic_descriptor_states && Self::pz_ac_nqs_state_count(&circuit) == 0 {
-                Self::try_sparse_pz_state_space(
-                    &g_descriptor,
-                    &c_descriptor,
-                    &config,
-                    self.config.resource_limits,
-                    abort,
-                )?
-            } else {
-                None
-            };
+        let reduced = if !descriptor.has_external_states() {
+            Self::try_sparse_pz_state_space(
+                &descriptor.g,
+                &descriptor.c,
+                &config,
+                self.config.resource_limits,
+                abort,
+            )?
+        } else {
+            None
+        };
         let mut result = if let Some(result) = reduced {
             result
         } else {
-            let mut g_matrix = Matrix::from_dense(g_descriptor.to_dense_real());
-            let mut c_matrix = Matrix::from_dense(c_descriptor.to_dense_imag());
-            Self::stamp_vbic_pz_descriptor_states(
-                &circuit,
-                &dc_solution,
-                &mut g_matrix,
-                &mut c_matrix,
-            );
-            Self::stamp_ac_nqs_pz_descriptor_states(
-                &circuit,
-                &dc_solution,
-                &mut g_matrix,
-                &mut c_matrix,
-            )?;
-            PoleZeroAnalyzer::new(g_matrix, c_matrix)
-                .with_resource_limits(self.config.resource_limits)
+            descriptor
+                .into_analyzer(self.config.resource_limits)?
                 .analyze_with_abort(&config, abort)
-                .map_err(|error| match error {
-                    PoleZeroAnalysisError::Aborted => SimulationError::Aborted,
-                    PoleZeroAnalysisError::ResourceLimit(error) => {
-                        SimulationError::ResourceLimit(error)
-                    }
-                    error => SimulationError::Solver(crate::solver::SolverError::InvalidCircuit(
-                        format!("pole-zero extraction failed: {error}"),
-                    )),
-                })?
+                .map_err(descriptor::extraction_error)?
         };
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
