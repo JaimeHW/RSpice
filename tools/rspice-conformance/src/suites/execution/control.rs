@@ -377,6 +377,15 @@ impl ExecutionRunner {
                                     }
                                     runner.compare_ac_reference(path, circuit.netlist(), points)
                                 }
+                                ControlAnalysisResult::Noise(_)
+                                | ControlAnalysisResult::DcSweep(_) => {
+                                    // Version 1 contracts admit OP, AC and TRAN
+                                    // only. New engine analyses need their own
+                                    // oracle contract before they can qualify.
+                                    return Err(mismatch(format!(
+                                        "{label}: version 1 control oracles support OP, AC and TRAN results only"
+                                    )));
+                                }
                                 ControlAnalysisResult::Transient(result) => {
                                     if result.time.is_empty()
                                         || result.time.iter().any(|v| !v.is_finite())
