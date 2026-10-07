@@ -14,6 +14,7 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 76 folds digital select bounds with typed exact expression semantics.
 /// Version 75 retains dynamic packed selectors and encoded known-bit chunks.
 /// Version 74 binds packed discrete selections before analog numeric conversion.
 /// Version 73 adds packed array-element selects and captures partial write targets.
@@ -77,7 +78,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 75;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 76;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

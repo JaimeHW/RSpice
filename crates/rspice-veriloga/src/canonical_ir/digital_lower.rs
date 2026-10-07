@@ -131,6 +131,17 @@ use crate::source::Span;
 use smol_str::SmolStr;
 use std::collections::{BTreeSet, HashMap};
 
+/// Front-end select validation uses the same typed constant rules as lowering.
+/// Only the scalar index crosses this boundary; executable values remain here.
+pub(crate) fn selector_constant(
+    expression: &Expression,
+    source: &DigitalConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
+) -> Option<crate::numeric_literal::NumericLiteralValue> {
+    let resolved = constants::resolve(source, time_scale, &[], &[], [expression]).ok()?;
+    constants::scalar(expression, &resolved, time_scale)
+}
+
 /// Whether a diagnostic is the author's to fix or the compiler's.
 ///
 /// The distinction decides what the author is told. A *refusal* is a construct
@@ -2987,6 +2998,13 @@ impl ProcessLowerer<'_> {
     /// of voltage-source currents retain their physical branch identity.
     fn analog_probe(&mut self, block: BlockId, access: &BranchAccess) -> ValueId {
         use super::digital::DigitalAnalogProbeTarget;
+        if self.constant_expression {
+            self.error(
+                "an analog probe is not a constant expression",
+                access.span(),
+            );
+            return self.real_constant(0.0);
+        }
         let Some(quantity) = access.kind() else {
             self.invariant(
                 "analog probe has no resolved physical quantity",
@@ -3184,6 +3202,13 @@ impl ProcessLowerer<'_> {
             && let Some(query) = super::digital::DigitalTimeQuery::from_name(&function.name)
             && query.bit_width().is_none()
         {
+            if self.constant_expression {
+                self.error(
+                    "a runtime clock query is not a constant expression",
+                    function.span,
+                );
+                return self.real_constant(0.0);
+            }
             return self.builder.push(
                 block,
                 query.value_type(),
@@ -3865,6 +3890,13 @@ impl ProcessLowerer<'_> {
             Expression::SystemFunction(function)
                 if super::digital::DigitalTimeQuery::from_name(&function.name).is_some() =>
             {
+                if self.constant_expression {
+                    self.error(
+                        "a runtime clock query is not a constant expression",
+                        function.span,
+                    );
+                    return self.unknown(width);
+                }
                 let query = super::digital::DigitalTimeQuery::from_name(&function.name).unwrap();
                 self.builder.push(
                     block,
@@ -4700,37 +4732,19 @@ impl ProcessLowerer<'_> {
     /// value, and reading one as a constant would replace a whole design's
     /// behaviour with one number.
     fn constant(&self, expression: &Expression) -> Option<i64> {
-        if let Expression::Identifier(identifier) = expression {
-            if self.lookup_local(&identifier.name).is_some()
-                || self.index.contains_key(identifier.name.as_str())
-            {
-                return None;
+        let mut reads = BTreeSet::new();
+        collect_expression_reads(expression, &mut reads);
+        if reads
+            .iter()
+            .any(|name| self.lookup_local(name).is_some() || self.index.contains_key(name.as_str()))
+        {
+            return None;
+        }
+        match constants::scalar(expression, self.constants, self.time_scale)? {
+            crate::numeric_literal::NumericLiteralValue::Integer(value) => Some(value),
+            crate::numeric_literal::NumericLiteralValue::Real(value) => {
+                crate::semantic::SemanticAnalyzer::exact_const_i64(value)
             }
-            return self.constants.integer(&identifier.name);
-        }
-        if let Expression::Unary(unary) = expression {
-            return match unary.op {
-                UnaryOp::Neg => self.constant(&unary.operand).and_then(i64::checked_neg),
-                UnaryOp::Pos => self.constant(&unary.operand),
-                _ => None,
-            };
-        }
-        if let Expression::Binary(binary) = expression {
-            let left = self.constant(&binary.left)?;
-            let right = self.constant(&binary.right)?;
-            return match binary.op {
-                BinaryOp::Add => left.checked_add(right),
-                BinaryOp::Sub => left.checked_sub(right),
-                BinaryOp::Mul => left.checked_mul(right),
-                BinaryOp::Div => left.checked_div(right),
-                _ => None,
-            };
-        }
-        match expression {
-            Expression::Number(number) => {
-                crate::semantic::SemanticAnalyzer::exact_const_i64(number.value)
-            }
-            _ => None,
         }
     }
 
@@ -4932,21 +4946,15 @@ fn collect_expression_reads(expression: &Expression, reads: &mut BTreeSet<String
             collect_expression_reads(&conditional.else_expr, reads);
         }
         Expression::ArrayLiteral(literal) => {
-            for element in &literal.elements {
+            let mut pending: Vec<_> = literal.elements.iter().collect();
+            while let Some(element) = pending.pop() {
                 match element {
                     ArrayLiteralElement::Value(expression) => {
                         collect_expression_reads(expression, reads);
                     }
                     ArrayLiteralElement::Replication(replication) => {
                         collect_expression_reads(&replication.count, reads);
-                        for element in &replication.elements {
-                            match element {
-                                ArrayLiteralElement::Value(expression) => {
-                                    collect_expression_reads(expression, reads);
-                                }
-                                ArrayLiteralElement::Replication(_) => {}
-                            }
-                        }
+                        pending.extend(&replication.elements);
                     }
                 }
             }

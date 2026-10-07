@@ -28,6 +28,67 @@ impl ResolvedConstants {
     }
 }
 
+/// Evaluate a closed index expression with the same sizing, signedness and
+/// four-state operations as an executable digital expression. Runtime names
+/// must be excluded before constructing this isolated constant-only lowerer.
+pub(super) fn scalar(
+    expression: &Expression,
+    resolved: &ResolvedConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
+) -> Option<crate::numeric_literal::NumericLiteralValue> {
+    let mut reads = BTreeSet::new();
+    collect_expression_reads(expression, &mut reads);
+    if reads.iter().any(|name| {
+        name != "inf"
+            && !resolved.bits.contains_key(name.as_str())
+            && resolved.integer(name).is_none()
+            && resolved.real(name).is_none()
+            && resolved.non_finite_real(name).is_none()
+    }) {
+        return None;
+    }
+    let empty_index = HashMap::new();
+    let empty_analog = HashMap::new();
+    let empty_arrays = HashMap::new();
+    let mut probes = Vec::new();
+    let mut lowerer = ProcessLowerer {
+        constant_expression: true,
+        time_scale,
+        signals: &[],
+        arrays: &empty_arrays,
+        index: &empty_index,
+        constants: resolved,
+        analog_variables: &empty_analog,
+        probes: &mut probes,
+        builder: ProcessBuilder::new(),
+        diagnostics: Vec::new(),
+        locals: Vec::new(),
+        scopes: Vec::new(),
+        static_scopes: HashMap::new(),
+        static_local_count: 0,
+    };
+    let entry = lowerer.builder.create_block();
+    lowerer.builder.seal_block(entry);
+    let signed = lowerer.self_signed(expression);
+    let value = if lowerer.is_real_expression(expression) {
+        lowerer.real_expression(entry, expression)
+    } else {
+        lowerer.expression(entry, expression)
+    };
+    lowerer.builder.set_terminator(entry, CfgTerminator::Return);
+    if !lowerer.diagnostics.is_empty() {
+        return None;
+    }
+    let (function, outputs) = lowerer.builder.finish_with_outputs(entry, &[value]).ok()?;
+    use crate::numeric_literal::NumericLiteralValue::{Integer, Real};
+    match evaluate_constant_expression(function, outputs[0], expression.span().into()).ok()? {
+        DigitalScalar::FourState(value) => value.bit_index(signed).map(Integer),
+        DigitalScalar::Integer(value) => Some(Integer(i64::from(value))),
+        DigitalScalar::Real(value) => Some(Real(value)),
+        DigitalScalar::Effect => None,
+    }
+}
+
 pub(super) enum MathCall {
     Unary(CfgUnaryOp),
     Binary(CfgBinaryOp),

@@ -340,6 +340,18 @@ The portable real/small-signal evaluators and native/Wasm paths reject invalid
 indices, unknown selected bits and malformed chunk encodings. Native and Wasm
 lowering use existing checked arithmetic operations; the Wasm helper ABI remains
 20. Projected storage is bounded and scales by words and 15-bit chunks.
+Schema 76 resolves digital select-bound constants through the existing typed
+digital expression engine. Supported arithmetic, bitwise/shift, comparison,
+conditional, reduction and concatenation expressions retain their digital widths,
+signedness and known bits; semantic validation and executable lowering agree.
+Based integers do not narrow through floating point before becoming index
+metadata. Local shadows, signal/probe reads and runtime clock queries cannot become
+constant bounds, including inside unselected conditional arms. Analog packed
+selectors accept exact known based literals with encodings up to 64 bits and
+values in the signed-64 range, while keeping analog arithmetic and runtime
+parameter overrides. Wider analog literal encodings and digital integer
+exponentiation remain unsupported; this does not complete constant grammar or
+parameter-dependent shape support.
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
 initializer patterns, multidimensional shapes, full parameter-dependent
 shape/child-override support, and remaining mixed-host/platform qualification

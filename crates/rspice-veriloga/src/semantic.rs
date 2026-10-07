@@ -434,6 +434,8 @@ pub struct SemanticAnalyzer {
     /// Values that cannot vary per instance (localparams derived purely
     /// from literals). Safe for loop unrolling and code folding.
     invariant_consts: HashMap<SmolStr, ConstantValue>,
+    /// Authored constants for typed digital select validation in this module.
+    digital_selector_constants: digital::DigitalConstants,
     /// Current function inlining depth (recursion guard)
     inline_depth: usize,
     /// Nesting depth of runtime-bounded loops (contributions inside them
@@ -511,6 +513,7 @@ impl SemanticAnalyzer {
             in_analog_initial: false,
             param_consts: HashMap::new(),
             invariant_consts: HashMap::new(),
+            digital_selector_constants: Default::default(),
             inline_depth: 0,
             runtime_loop_depth: 0,
             dynamic_analog_operator_guard_depth: 0,
@@ -610,6 +613,7 @@ impl SemanticAnalyzer {
                 self.next_analog_site = 0;
                 self.param_consts.clear();
                 self.invariant_consts.clear();
+                self.digital_selector_constants = Default::default();
                 self.inline_depth = 0;
                 self.runtime_loop_depth = 0;
                 self.dynamic_analog_operator_guard_depth = 0;

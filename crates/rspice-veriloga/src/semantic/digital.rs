@@ -595,6 +595,7 @@ impl SemanticAnalyzer {
         if !module.has_digital_content() {
             return;
         }
+        self.digital_selector_constants = self.digital_constants(module);
 
         let signals = self.collect_digital_signals(module);
         let index: HashMap<SmolStr, usize> = signals
@@ -661,7 +662,7 @@ impl SemanticAnalyzer {
             // what it instantiates; hierarchy elaboration fills this in on the
             // module it selects.
             instances: Vec::new(),
-            constants: self.digital_constants(module),
+            constants: self.digital_selector_constants.clone(),
         };
         self.discrete_projection
             .register_signals(&analyzed.digital.signals);
@@ -1845,6 +1846,45 @@ impl SemanticAnalyzer {
         }
     }
 
+    fn digital_selector_value(
+        &self,
+        expression: &Expression,
+        index: &HashMap<SmolStr, usize>,
+    ) -> Option<ConstantValue> {
+        let mut runtime_name = false;
+        super::flow_probes::visit_expression(expression, &mut |expression| {
+            let name = match expression {
+                Expression::Identifier(identifier) => Some(&identifier.name),
+                Expression::ArrayAccess(access) => Some(&access.array),
+                Expression::Digital(digital) => digital.base_name(),
+                _ => None,
+            };
+            if let Some(name) = name
+                && matches!(
+                    self.resolve_digital_name(name, index),
+                    Resolution::ProcessLocal(_)
+                        | Resolution::Digital(_)
+                        | Resolution::Analog(SymbolKind::Variable)
+                )
+            {
+                runtime_name = true;
+            }
+        });
+        if runtime_name {
+            return None;
+        }
+        use crate::numeric_literal::NumericLiteralValue::{Integer, Real};
+        crate::canonical_ir::digital_lower::selector_constant(
+            expression,
+            &self.digital_selector_constants,
+            self.current_time_scale,
+        )
+        .map(|value| match value {
+            Integer(value) => ConstantValue::Integer(value),
+            Real(value) => ConstantValue::Real(value),
+        })
+    }
+
     fn check_array_packed_select(
         &mut self,
         select: &ArraySelectExpr,
@@ -1874,10 +1914,10 @@ impl SemanticAnalyzer {
         }
         if let PackedSelect::Part { msb, lsb } = &select.select {
             let high = self
-                .eval_const_invariant_value(msb)
+                .digital_selector_value(msb, index)
                 .and_then(|v| v.as_exact_i64());
             let low = self
-                .eval_const_invariant_value(lsb)
+                .digital_selector_value(lsb, index)
                 .and_then(|v| v.as_exact_i64());
             let (Some(high), Some(low)) = (high, low) else {
                 self.record_error_at(
@@ -2063,7 +2103,7 @@ impl SemanticAnalyzer {
         // the position is part of the instruction the lowering builds, and a
         // run-time one has to be refused — here, where the construct and the
         // offset it was written at are still in hand.
-        let Some(value) = self.eval_const_invariant_value(expression) else {
+        let Some(value) = self.digital_selector_value(expression, index) else {
             self.refuse_run_time_select_bound(name, expression, bound);
             return None;
         };

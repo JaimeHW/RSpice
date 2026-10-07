@@ -75,18 +75,20 @@ impl SemanticAnalyzer {
                 "packed analog read of `{name}` requires a four-state scalar or a selected unpacked element"
             )));
         }
-        let word = word.map(|word| self.lower_expression(word)).transpose()?;
+        let word = word
+            .map(|word| self.lower_packed_selector(word))
+            .transpose()?;
         let (high, low) = match select {
             PackedSelect::Bit(bit) => {
-                let bit = self.lower_expression(bit)?;
+                let bit = self.lower_packed_selector(bit)?;
                 let Some(bit) = self.constant_array_index(&bit, &name)? else {
                     return self.lower_dynamic_packed_read(&name, shape, word, bit, span);
                 };
                 (bit, bit)
             }
             PackedSelect::Part { msb, lsb } => {
-                let msb = self.lower_expression(msb)?;
-                let lsb = self.lower_expression(lsb)?;
+                let msb = self.lower_packed_selector(msb)?;
+                let lsb = self.lower_packed_selector(lsb)?;
                 let high = self
                     .eval_const_invariant_value(&msb)
                     .and_then(ConstantValue::as_exact_i64);
@@ -144,6 +146,35 @@ impl SemanticAnalyzer {
                 identifier(projection.value.clone()),
             ))
         }
+    }
+
+    /// Keep exact known based literals until the analog integer folder consumes
+    /// them. Only literals change representation: parameter defaults must never
+    /// become invariant indices, and analog operators keep analog typing.
+    fn lower_packed_selector(&mut self, expression: &Expression) -> CompileResult<Expression> {
+        let mut expression = expression.clone();
+        let mut pending = vec![&mut expression];
+        while let Some(expression) = pending.pop() {
+            if let Expression::Digital(DigitalExpr::FourState(literal)) = expression {
+                let Some(value) = parse_integer_literal(&literal.value.raw).ok().flatten() else {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::UnsupportedFeature(
+                            "packed analog selector literals must be known signed 64-bit integers"
+                                .into(),
+                        ),
+                        literal.span,
+                    )));
+                };
+                *expression = Expression::Number(NumberLit {
+                    value: value as f64,
+                    raw: literal.value.raw.clone(),
+                    span: literal.span,
+                });
+            } else {
+                flow_probes::for_child_mut(expression, &mut |child| pending.push(child));
+            }
+        }
+        self.lower_expression(&expression)
     }
 
     fn lower_dynamic_packed_read(

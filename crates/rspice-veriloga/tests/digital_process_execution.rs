@@ -4854,6 +4854,58 @@ fn runtime_delays_convert_unknown_signed_and_wide_values_without_clamping() {
 }
 
 #[test]
+fn packed_selector_constants_use_digital_widths_and_exact_known_bits() {
+    let mut h = Harness::from_source(
+        r#"
+module selectors;
+ parameter HIGH = 4'd15;
+ localparam LOW = 4'd2;
+ reg [7:0] data, memory[-1:0];
+ reg [3:0] wrapped, arithmetic, conditional, concat, array_read, exact;
+ reg signed [-1:-4] negative; reg [1:0] signed_read;
+ initial begin
+   data=8'ha6; memory[-1]=8'hc9; memory[0]=0; negative=4'b1011;
+   wrapped=data[(HIGH+4'd4):(LOW-4'd2)];
+   arithmetic=data[(9%8)+2:((7&3)^3)];
+   conditional=data[(1'bx ? 4'd3 : 4'd3):(2>1 ? 4'd0 : 4'd7)];
+   concat=data[{2'b00,2'b11}:{4{1'b0}}];
+   array_read=memory[-1][(HIGH+4'd4):(LOW-4'd2)];
+   exact=data[(64'h20000000000003-64'h20000000000000):
+              (64'h20000000000001-64'h20000000000001)];
+   signed_read=negative[64'shffffffffffffffff:(64'shfffffffffffffffd+64'sd1)];
+   memory[0][(HIGH+4'd4):0]=4'hb;
+ end
+endmodule
+"#,
+    );
+    expect_finished(h.run());
+    for name in ["wrapped", "arithmetic", "conditional", "concat", "exact"] {
+        assert_eq!(h.get(name), "0110", "{name}");
+    }
+    assert_eq!(h.get("array_read"), "1001");
+    assert_eq!(h.get("signed_read"), "10");
+    assert_eq!(h.get("memory[0]"), "00001011");
+
+    // No parameter default may disguise a process-local runtime bound.
+    for source in [
+        "parameter HI=3; reg [7:0] data; reg [3:0] q; initial begin integer HI; HI=3; q=data[HI:0]; end",
+        "reg [7:0] data; reg [3:0] q; initial q=data[4'bx:0];",
+        "reg [7:0] data; reg [3:0] q; initial q=data[3.5:0];",
+        "reg [7:0] data; reg [3:0] q; initial q=data[64'h8000000000000000:0];",
+        "reg [7:0] data; reg [3:0] q; initial q=data[$time:0];",
+        "reg [7:0] data; reg [3:0] q; initial q=data[(1 ? 3 : $time):0];",
+        "reg [7:0] data; reg [3:0] q; initial q=data[(1 ? 3 : $realtime):0];",
+        "reg [7:0] data; reg [3:0] q; initial q=data[(1 ? 3 : V(p)):0];",
+        "parameter HI=4'd3; reg [7:0] data; reg [3:0] q; initial begin reg [3:0] HI; HI=3; q=data[HI[3:0]:0]; end",
+        "parameter HI=2'd3; reg [7:0] data; reg [3:0] q; initial begin integer HI; HI=3; q=data[{1{{1{HI}}}}:0]; end",
+    ] {
+        let result =
+            VerilogACompiler::default().compile_canonical_ir_module(&digital_module(source), None);
+        assert!(result.is_err(), "invalid bound accepted: {source}");
+    }
+}
+
+#[test]
 fn large_integer_index_expressions_select_the_exact_declared_bit() {
     let mut harness = Harness::new(
         "reg [9007199254740992+1:9007199254740992+1] q;

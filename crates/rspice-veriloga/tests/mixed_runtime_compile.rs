@@ -463,6 +463,105 @@ endmodule
 }
 
 #[test]
+fn packed_selector_constants_preserve_analog_indices_and_parameter_overrides() {
+    use rspice_veriloga::vm::{Vm, VmContext};
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let source = r#"
+module exact_selectors(p); inout p; electrical p;
+ parameter integer BIT=0;
+ reg [7:0] data[-1:0];
+ initial begin data[-1]=8'ha6; data[0]=8'hc9; end
+ analog I(p)<+data[64'shffffffffffffffff]
+                 [(64'h20000000000003-64'h20000000000000):
+                  (64'h20000000000001-64'h20000000000001)]
+              +data[0][BIT];
+endmodule
+"#;
+    let runtime = compiler.compile_runtime(source, None).unwrap();
+    let hir = &runtime.canonical_ir.hir;
+    assert!(hir.discrete_selections.iter().any(|selection| {
+        !selection.encoded
+            && selection.signal == "data[-1]"
+            && selection.lsb == 0
+            && selection.width == 4
+    }));
+    assert!(
+        hir.discrete_selections
+            .iter()
+            .any(|selection| selection.encoded)
+    );
+    let mut context = VmContext::new(runtime.model.num_terminals);
+    context.variables.resize(runtime.model.num_variables, 0.0);
+    for [_, valid] in &hir.discrete_inputs {
+        context.variables[usize::from(*valid)] = 1.0;
+    }
+    for selection in &hir.discrete_selections {
+        let word = if selection.signal == "data[-1]" {
+            0xa6u32
+        } else {
+            0xc9
+        };
+        context.variables[usize::from(selection.value)] = f64::from(if selection.encoded {
+            word | (0xff << 15)
+        } else {
+            (word >> selection.lsb) & ((1 << selection.width) - 1)
+        });
+    }
+    #[cfg(feature = "native")]
+    let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+        "x",
+        runtime.model.clone(),
+        &runtime.canonical_ir,
+        &[1],
+    )
+    .unwrap();
+    for (bit, expected) in [(0.0, 7.0), (1.0, 6.0), (3.0, 7.0)] {
+        context.set_param(0, bit);
+        let actual = Vm::new(&mut context)
+            .execute(&runtime.model.stamp_programs[0].value_program)
+            .unwrap();
+        assert_eq!(actual, expected);
+        #[cfg(feature = "native")]
+        {
+            assert!(device.set_parameter("BIT", bit));
+            for pair in &hir.discrete_inputs {
+                for slot in pair {
+                    device
+                        .sample_discrete_state(
+                            usize::from(*slot),
+                            context.variables[usize::from(*slot)],
+                        )
+                        .unwrap();
+                }
+            }
+            let mut rhs = 0.0;
+            device
+                .try_stamp(&[0.0], |_, _, _| {}, |_, value| rhs += value)
+                .unwrap();
+            assert_eq!(rhs, -expected);
+        }
+    }
+    for (bound, diagnostic) in [
+        ("64'h2000000000000x", "known signed 64-bit"),
+        ("64'h8000000000000000", "known signed 64-bit"),
+        ("3.5", "must be constant"),
+        ("BIT", "must be constant"),
+    ] {
+        let invalid = format!(
+            "module invalid(p); inout p; electrical p; parameter integer BIT=3; reg [7:0] data; initial data=0; analog I(p)<+data[{bound}:0]; endmodule"
+        );
+        let error = compiler
+            .compile_runtime(&invalid, None)
+            .err()
+            .expect("invalid bound");
+        assert!(error.to_string().contains(diagnostic), "{bound}: {error}");
+    }
+}
+
+#[test]
 fn packed_analog_selection_validates_grouping_and_keeps_one_word_selector() {
     use rspice_veriloga::canonical_ir::state::{CanonicalStateFamily, CanonicalStateLayout};
     let compiler = VerilogACompiler::new(CompilerOptions {
