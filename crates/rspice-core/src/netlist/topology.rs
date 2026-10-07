@@ -138,6 +138,7 @@ fn all_element_terminal_nodes(element: &Element) -> Vec<&str> {
             for port in ports {
                 match port {
                     XspicePort::Analog(name)
+                    | XspicePort::ExplicitVoltage(name)
                     | XspicePort::Digital(name)
                     | XspicePort::ExplicitDigital(name)
                     | XspicePort::DigitalInverted(name)
@@ -1091,6 +1092,9 @@ impl NodeUnion {
     fn remap_xspice_port(&self, port: XspicePort) -> XspicePort {
         match port {
             XspicePort::Analog(name) => XspicePort::Analog(self.remap_node(&name)),
+            XspicePort::ExplicitVoltage(name) => {
+                XspicePort::ExplicitVoltage(self.remap_node(&name))
+            }
             XspicePort::Digital(name) => XspicePort::Digital(self.remap_node(&name)),
             XspicePort::ExplicitDigital(name) => {
                 XspicePort::ExplicitDigital(self.remap_node(&name))

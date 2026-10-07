@@ -417,6 +417,7 @@ fn describe_port(port: &XspicePort) -> Value {
     use XspicePort::*;
     match port {
         Analog(node) => record!("analog", node),
+        ExplicitVoltage(node) => record!("explicit_voltage", node),
         Digital(node) => record!("digital", node),
         ExplicitDigital(node) => record!("explicit_digital", node),
         DigitalInverted(node) => record!("digital_inverted", node),

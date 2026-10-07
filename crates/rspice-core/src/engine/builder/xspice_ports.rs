@@ -168,6 +168,7 @@ fn coerce_xspice_connection_named(
         ))),
         XspicePort::DigitalInverted(name) => convert_digital_inverted(circuit, name),
         XspicePort::Analog(name)
+        | XspicePort::ExplicitVoltage(name)
         | XspicePort::Digital(name)
         | XspicePort::ExplicitDigital(name)
         | XspicePort::Conductance(name) => Ok(convert_scalar(circuit, name)),
@@ -496,7 +497,7 @@ fn explicit_xspice_port_type(
     use crate::xspice::PortType;
 
     match parsed_port {
-        XspicePort::AnalogVector(_) => Some(PortType::Voltage),
+        XspicePort::ExplicitVoltage(_) | XspicePort::AnalogVector(_) => Some(PortType::Voltage),
         XspicePort::Conductance(_) => Some(PortType::Conductance),
         XspicePort::ExplicitDigital(_) => Some(PortType::Digital),
         XspicePort::Current(_) => Some(PortType::Current),
@@ -554,6 +555,7 @@ fn pack_scalar_vector_port(
 
         match port {
             XspicePort::Analog(name)
+            | XspicePort::ExplicitVoltage(name)
             | XspicePort::Digital(name)
             | XspicePort::ExplicitDigital(name)
             | XspicePort::Conductance(name)
@@ -652,6 +654,7 @@ fn coerce_xspice_vector_connection(
                 )));
             }
             XspicePort::Analog(name)
+            | XspicePort::ExplicitVoltage(name)
             | XspicePort::Digital(name)
             | XspicePort::ExplicitDigital(name)
             | XspicePort::Conductance(name) => {

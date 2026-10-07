@@ -1777,6 +1777,7 @@ impl<'a> Flattener<'a> {
         let remap = |name: &str| self.remap_node(name, prefix, node_map);
         match port {
             XspicePort::Analog(name) => XspicePort::Analog(remap(name)),
+            XspicePort::ExplicitVoltage(name) => XspicePort::ExplicitVoltage(remap(name)),
             XspicePort::Digital(name) => XspicePort::Digital(remap(name)),
             XspicePort::ExplicitDigital(name) => XspicePort::ExplicitDigital(remap(name)),
             XspicePort::DigitalInverted(name) => XspicePort::DigitalInverted(remap(name)),

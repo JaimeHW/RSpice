@@ -1023,6 +1023,10 @@ pub enum XspicePort {
     /// Syntax: `nodename`
     Analog(String),
 
+    /// Explicit single-ended voltage node.
+    /// Syntax: `%v node` or `%v(node)`
+    ExplicitVoltage(String),
+
     /// Single digital node (12-state logic)
     /// Syntax: `[nodename]`
     Digital(String),
@@ -1109,6 +1113,7 @@ impl XspicePort {
         matches!(
             self,
             XspicePort::Analog(_)
+                | XspicePort::ExplicitVoltage(_)
                 | XspicePort::AnalogVector(_)
                 | XspicePort::Conductance(_)
                 | XspicePort::Current(_)
@@ -1142,6 +1147,7 @@ impl XspicePort {
     pub fn node_names(&self) -> Vec<&str> {
         match self {
             XspicePort::Analog(n)
+            | XspicePort::ExplicitVoltage(n)
             | XspicePort::Digital(n)
             | XspicePort::ExplicitDigital(n)
             | XspicePort::DigitalInverted(n)

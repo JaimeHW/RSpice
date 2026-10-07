@@ -255,6 +255,7 @@ fn element_terminal_names(element: &Element) -> Vec<String> {
 fn append_xspice_port_nodes(port: &XspicePort, terminals: &mut Vec<String>) {
     match port {
         XspicePort::Analog(node)
+        | XspicePort::ExplicitVoltage(node)
         | XspicePort::Digital(node)
         | XspicePort::ExplicitDigital(node)
         | XspicePort::DigitalInverted(node)

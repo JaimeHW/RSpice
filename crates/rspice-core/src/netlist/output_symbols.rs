@@ -1756,6 +1756,7 @@ fn collect_embedded_element_nodes(kind: &ElementKind, nodes: &mut HashSet<String
                 use super::XspicePort;
                 match port {
                     XspicePort::Analog(node)
+                    | XspicePort::ExplicitVoltage(node)
                     | XspicePort::Digital(node)
                     | XspicePort::ExplicitDigital(node)
                     | XspicePort::DigitalInverted(node)

@@ -7318,7 +7318,7 @@ mod tests {
                     &vec![
                         XspicePort::Analog("IN".to_string()),
                         XspicePort::DigitalVector(vec!["DIN".to_string(), "DOUT".to_string()]),
-                        XspicePort::Analog("OUT".to_string()),
+                        XspicePort::ExplicitVoltage("OUT".to_string()),
                     ]
                 );
             }
@@ -7704,7 +7704,7 @@ mod tests {
                     XspicePort::DifferentialVoltage { pos, neg }
                         if pos == "SIG!P" && neg == "SIG^N"
                 ));
-                assert_eq!(ports[4], XspicePort::Analog("NET|OUT".to_string()));
+                assert_eq!(ports[4], XspicePort::ExplicitVoltage("NET|OUT".to_string()));
                 assert_eq!(ports[5], XspicePort::Analog("OUT".to_string()));
             }
             other => panic!("expected XSPICE element, got {other:?}"),
@@ -8556,7 +8556,7 @@ mod tests {
         match &netlist.elements[0].kind {
             ElementKind::Xspice { model, ports, .. } => {
                 assert_eq!(model, "MODEL");
-                assert_eq!(ports[0], XspicePort::Analog("IN".to_string()));
+                assert_eq!(ports[0], XspicePort::ExplicitVoltage("IN".to_string()));
                 assert!(matches!(
                     &ports[1],
                     XspicePort::DifferentialVoltage { pos, neg }
@@ -8573,7 +8573,7 @@ mod tests {
                     XspicePort::DifferentialCurrent { pos, neg }
                         if pos == "SRC" && neg == "0"
                 ));
-                assert_eq!(ports[5], XspicePort::Analog("OUT".to_string()));
+                assert_eq!(ports[5], XspicePort::ExplicitVoltage("OUT".to_string()));
             }
             other => panic!("expected XSPICE element, got {other:?}"),
         }
@@ -8591,7 +8591,7 @@ mod tests {
         match &netlist.elements[0].kind {
             ElementKind::Xspice { ports, .. } => {
                 assert_eq!(ports.len(), 3);
-                assert_eq!(ports[0], XspicePort::Analog("IN".to_string()));
+                assert_eq!(ports[0], XspicePort::ExplicitVoltage("IN".to_string()));
                 assert_eq!(ports[1], XspicePort::Current("VSEN".to_string()));
                 assert_eq!(ports[2], XspicePort::Analog("OUT".to_string()));
             }
@@ -8642,8 +8642,8 @@ mod tests {
                 assert_eq!(
                     ports,
                     &vec![
-                        XspicePort::Analog("OUT6".to_string()),
-                        XspicePort::Analog("OUT7".to_string())
+                        XspicePort::ExplicitVoltage("OUT6".to_string()),
+                        XspicePort::ExplicitVoltage("OUT7".to_string())
                     ]
                 );
             }
@@ -9126,7 +9126,7 @@ mod tests {
                     pos: "TOP_P".to_string(),
                     neg: "TOP_N".to_string()
                 },
-                XspicePort::Analog("TOP_OUT".to_string()),
+                XspicePort::ExplicitVoltage("TOP_OUT".to_string()),
                 XspicePort::Current("X1.VSEN".to_string()),
                 XspicePort::VoltageName("X1.VSEN".to_string()),
                 XspicePort::Analog("X1.OUT2".to_string())

@@ -538,7 +538,7 @@ fn parse_typed_ports(
     }
     if is_single_voltage {
         return parse_single_typed_node(stream, line_num, &prefix)
-            .map(XspicePort::Analog)
+            .map(XspicePort::ExplicitVoltage)
             .map(|port| vec![port]);
     }
     if is_single_current {
@@ -797,7 +797,7 @@ fn nodes_to_typed_ports(
         return Ok(nodes.into_iter().map(XspicePort::ExplicitDigital).collect());
     }
     if kind.is_single_voltage {
-        return Ok(nodes.into_iter().map(XspicePort::Analog).collect());
+        return Ok(nodes.into_iter().map(XspicePort::ExplicitVoltage).collect());
     }
     if kind.is_single_current {
         return Ok(nodes.into_iter().map(XspicePort::Current).collect());
