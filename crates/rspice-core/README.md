@@ -450,7 +450,7 @@ real. XSPICE instance overrides and scoped physical scalar fields use the same
 validation. Eager XSPICE instance expressions observe parser cancellation;
 forward-reference probes do not advance the live statistical stream.
 Complex instance components resolve forward parameter and function references.
-Root instance vectors and complex values use resolved scalar overrides; numeric
+Instance vectors and complex values use resolved scalar overrides; numeric
 evaluation begins only after a complete complex-literal grammar is recognized.
 Quoted vector literals reject trailing tokens instead of discarding them.
 Quote individual string-vector entries that resemble `<real imag>` pairs to

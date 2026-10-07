@@ -53,6 +53,34 @@ fn deferred_complex_components_still_require_real_results() {
 }
 
 #[test]
+fn scoped_vectors_and_complex_fields_use_resolved_instance_overrides() {
+    for model in ["print_param_types", "alias"] {
+        let netlist = Netlist::parse(&format!(
+            "* scoped field dependencies\n.SUBCKT cell in PARAMS: base=0\n\
+             .MODEL alias print_param_types(real=1 integer=1)\n\
+             A1 [in] {model} real={{base+1}} integer={{base+2}} \
+             real_array=[{{real}} {{integer}}] complex=<{{real}} {{integer}}> \
+             complex_array=[<{{real}} {{integer}}>]\n.ENDS\nX1 in cell base=3\n.END\n"
+        ))
+        .unwrap();
+        let flattened = flatten_netlist_with_models(&netlist).unwrap();
+        let ElementKind::Xspice {
+            real_vector_params,
+            string_params,
+            string_vector_params,
+            ..
+        } = &flattened.elements[0].kind
+        else {
+            panic!("expected XSPICE instance");
+        };
+        assert_eq!(real_vector_params[0].1, [4.0, 5.0]);
+        assert_eq!(string_params[0].1, "<4 5>");
+        assert_eq!(string_vector_params[0].1, ["<4 5>"]);
+        Engine::default().build_circuit(&netlist).unwrap();
+    }
+}
+
+#[test]
 fn deferred_complex_evaluation_observes_build_cancellation() {
     let mut functions = String::from(".FUNC f0() {1}\n");
     for index in 1..=18 {

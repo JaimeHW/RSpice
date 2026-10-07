@@ -60,7 +60,10 @@ fn complex_forward_bindings_work_in_check_and_run() {
         "* forward complex fields\nV1 in 0 1\n\
          A1 [in] print_param_types complex=<{RE(z)} later(2)> complex_array=[<-r+4 {IMG(z)}>]\n\
          A2 [in] alias real={r} real_array=[{real}] complex=<{real} later(2)> complex_array=[<{real} later(2)>]\n\
-         .PARAM z={2+3j} r=2\n.FUNC later(x) {x+1}\n.MODEL alias print_param_types(real=1)\n.OP\n.END\n",
+         .PARAM z={2+3j} r=2\n.FUNC later(x) {x+1}\n.MODEL alias print_param_types(real=1)\n\
+         .SUBCKT cell p PARAMS: x=0\n\
+         A3 [p] alias real={x} real_array=[{real}] complex=<{real} 3> complex_array=[<{real} 3>]\n\
+         .ENDS\nX1 in cell x={r}\n.OP\n.END\n",
     )
     .unwrap();
     for command in ["check", "run"] {

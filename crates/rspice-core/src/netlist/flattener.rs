@@ -2154,42 +2154,62 @@ impl<'a> Flattener<'a> {
                 string_vector_expr_params,
                 real_vector_params,
                 real_vector_expr_params,
-            } => ElementKind::Xspice {
-                model: self.resolve_xspice_scoped_model(
+            } => {
+                let model = self.resolve_xspice_scoped_model(
                     model,
                     scope,
                     element_path,
                     model_scope_path,
                     abort,
-                )?,
-                pspice_u_timing: pspice_u_timing.clone(),
-                ports: ports.clone(),
-                params: self.merge_deferred_params(params, expr_params, scope, abort)?,
-                expr_params: Vec::new(),
-                string_params: self.merge_deferred_string_params(
-                    string_params,
-                    string_expr_params,
-                    scope,
-                    element_path,
-                    abort,
-                )?,
-                string_expr_params: Vec::new(),
-                string_vector_params: self.merge_deferred_string_vector_params(
-                    string_vector_params,
-                    string_vector_expr_params,
-                    scope,
-                    element_path,
-                    abort,
-                )?,
-                string_vector_expr_params: Vec::new(),
-                real_vector_params: self.merge_deferred_real_vector_params(
-                    real_vector_params,
-                    real_vector_expr_params,
-                    scope,
-                    abort,
-                )?,
-                real_vector_expr_params: Vec::new(),
-            },
+                )?;
+                let params = self.merge_deferred_params(params, expr_params, scope, abort)?;
+                // Numeric fields can use resolved instance overrides. String
+                // aliases retain their enclosing lexical parameter scope.
+                let numeric_scope = (!params.is_empty()
+                    && (!real_vector_expr_params.is_empty()
+                        || !string_expr_params.is_empty()
+                        || !string_vector_expr_params.is_empty()))
+                .then(|| {
+                    let mut numeric_scope = scope.clone();
+                    for (name, value) in &params {
+                        numeric_scope.set(name, *value);
+                    }
+                    numeric_scope
+                });
+                let numeric_scope = numeric_scope.as_ref().unwrap_or(scope);
+                ElementKind::Xspice {
+                    model,
+                    pspice_u_timing: pspice_u_timing.clone(),
+                    ports: ports.clone(),
+                    params,
+                    expr_params: Vec::new(),
+                    string_params: self.merge_deferred_string_params(
+                        string_params,
+                        string_expr_params,
+                        scope,
+                        numeric_scope,
+                        element_path,
+                        abort,
+                    )?,
+                    string_expr_params: Vec::new(),
+                    string_vector_params: self.merge_deferred_string_vector_params(
+                        string_vector_params,
+                        string_vector_expr_params,
+                        scope,
+                        numeric_scope,
+                        element_path,
+                        abort,
+                    )?,
+                    string_vector_expr_params: Vec::new(),
+                    real_vector_params: self.merge_deferred_real_vector_params(
+                        real_vector_params,
+                        real_vector_expr_params,
+                        numeric_scope,
+                        abort,
+                    )?,
+                    real_vector_expr_params: Vec::new(),
+                }
+            }
 
             ElementKind::VoltageSourceDeferred(raw_spec) => self.resolve_deferred_source_kind(
                 raw_spec,
@@ -3007,6 +3027,7 @@ impl<'a> Flattener<'a> {
         instance_params: &[(String, String)],
         deferred_params: &[(String, String)],
         scope: &ParamContext,
+        numeric_scope: &ParamContext,
         element_path: &str,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<(String, String)>, ParseWithAbortError> {
@@ -3035,7 +3056,7 @@ impl<'a> Flattener<'a> {
                     name,
                     &real_expr,
                     &imag_expr,
-                    scope,
+                    numeric_scope,
                     element_path,
                     abort,
                 )?
@@ -3106,6 +3127,7 @@ impl<'a> Flattener<'a> {
         instance_params: &[(String, Vec<String>)],
         deferred_params: &[(String, String)],
         scope: &ParamContext,
+        numeric_scope: &ParamContext,
         element_path: &str,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<(String, Vec<String>)>, ParseWithAbortError> {
@@ -3119,7 +3141,7 @@ impl<'a> Flattener<'a> {
                 self.resolve_deferred_xspice_complex_vector(
                     name,
                     entries,
-                    scope,
+                    numeric_scope,
                     element_path,
                     abort,
                 )?
