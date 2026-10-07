@@ -1,4 +1,6 @@
 use super::*;
+use crate::netlist::XspiceNumericScope;
+use std::collections::HashSet;
 
 pub(in crate::engine::builder) struct ResolvedXspiceModel {
     pub(in crate::engine::builder) code_model: std::sync::Arc<dyn crate::xspice::CodeModel>,
@@ -376,6 +378,7 @@ fn resolve_scalar_instance_expression_params(
     model_name: &str,
     instance_params: &[(String, f64)],
     instance_expr_params: &[(String, String)],
+    non_scalar_fields: &HashSet<String>,
 ) -> Result<Vec<(String, f64)>, SimulationError> {
     if instance_expr_params.is_empty() {
         return Ok(Vec::new());
@@ -389,6 +392,7 @@ fn resolve_scalar_instance_expression_params(
     crate::netlist::expr::resolve_real_instance_expressions(
         &context,
         instance_expr_params,
+        non_scalar_fields,
         netlist.abort,
     )
     .map_err(|error| match error {
@@ -403,6 +407,7 @@ fn resolve_instance_string_expression_params(
     model_name: &str,
     instance_params: &[(String, f64)],
     instance_string_expr_params: &[(String, String)],
+    non_scalar_fields: &HashSet<String>,
 ) -> Result<Vec<(String, String)>, SimulationError> {
     let mut resolved = Vec::with_capacity(instance_string_expr_params.len());
     let mut numeric_context = None;
@@ -417,13 +422,17 @@ fn resolve_instance_string_expression_params(
                 )?);
             }
             let value = resolve_instance_complex_value(
-                numeric_context
-                    .as_ref()
-                    .expect("numeric context initialized"),
+                XspiceNumericScope {
+                    parameters: numeric_context
+                        .as_ref()
+                        .expect("numeric context initialized"),
+                    non_scalar_fields,
+                },
                 model_name,
                 name,
                 &real,
                 &imag,
+                netlist.abort,
             )?;
             resolved.push((name.clone(), value));
             continue;
@@ -441,14 +450,15 @@ fn resolve_instance_string_expression_params(
 }
 
 fn resolve_instance_complex_value(
-    context: &ModelEvaluationContext<'_>,
+    context: XspiceNumericScope<'_>,
     model_name: &str,
     parameter: &str,
     real: &str,
     imag: &str,
+    abort: &dyn AbortSignal,
 ) -> Result<String, SimulationError> {
     let evaluate = |expression: &str, component: &str| {
-        let value = context.evaluate_instance(expression).map_err(|error| {
+        let value = context.evaluate_real(parameter, expression, abort).map_err(|error| {
             map_model_expression_error(error, |error| format!(
                 "XSPICE model '{model_name}' instance complex parameter '{parameter}' could not resolve {component} expression '{expression}': {error}"
             ))
@@ -473,18 +483,23 @@ fn resolve_instance_real_vector_expression_params(
     model_name: &str,
     instance_params: &[(String, f64)],
     instance_vector_expr_params: &[(String, Vec<String>)],
+    non_scalar_fields: &HashSet<String>,
 ) -> Result<Vec<(String, Vec<f64>)>, SimulationError> {
     if instance_vector_expr_params.is_empty() {
         return Ok(Vec::new());
     }
 
     let ctx = build_instance_eval_context(netlist, model_def, instance_params)?;
+    let ctx = XspiceNumericScope {
+        parameters: &ctx,
+        non_scalar_fields,
+    };
     let mut resolved = Vec::with_capacity(instance_vector_expr_params.len());
 
     for (name, exprs) in instance_vector_expr_params {
         let mut values = Vec::with_capacity(exprs.len());
         for expr in exprs {
-            let value = ctx.evaluate_instance(expr).map_err(|error| {
+            let value = ctx.evaluate_real(name, expr, netlist.abort).map_err(|error| {
                 map_model_expression_error(error, |err| format!(
                     "XSPICE model '{}' instance vector parameter '{}' could not resolve expression '{}': {}",
                     model_name, name, expr, err
@@ -553,6 +568,7 @@ fn resolve_instance_string_vector_expression_params(
     model_name: &str,
     instance_params: &[(String, f64)],
     instance_string_vector_expr_params: &[(String, String)],
+    non_scalar_fields: &HashSet<String>,
 ) -> Result<Vec<(String, Vec<String>)>, SimulationError> {
     let mut resolved = Vec::with_capacity(instance_string_vector_expr_params.len());
     let mut numeric_context = None;
@@ -566,15 +582,25 @@ fn resolve_instance_string_vector_expression_params(
                     instance_params,
                 )?);
             }
-            let context = numeric_context
-                .as_ref()
-                .expect("numeric context initialized");
+            let context = XspiceNumericScope {
+                parameters: numeric_context
+                    .as_ref()
+                    .expect("numeric context initialized"),
+                non_scalar_fields,
+            };
             let values = entries
                 .into_iter()
                 .map(|entry| match entry {
                     crate::netlist::DeferredXspiceStringVectorEntry::Resolved(value) => Ok(value),
                     crate::netlist::DeferredXspiceStringVectorEntry::Complex { real, imag } => {
-                        resolve_instance_complex_value(context, model_name, name, &real, &imag)
+                        resolve_instance_complex_value(
+                            context,
+                            model_name,
+                            name,
+                            &real,
+                            &imag,
+                            netlist.abort,
+                        )
                     }
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -1109,6 +1135,7 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
         .as_ref()
         .map(|value| value.as_ref())
         .unwrap_or(instance);
+    let non_scalar_fields = instance.non_scalar_fields();
     let XspiceInstanceParams {
         params: instance_params,
         expr_params: instance_expr_params,
@@ -1143,6 +1170,7 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
             model_name,
             instance_params,
             instance_expr_params,
+            &non_scalar_fields,
         )?;
         let numeric_params = merge_numeric_params(instance_params, &instance_expr_params);
         let resolved_instance_real_vector_expr_params =
@@ -1152,6 +1180,7 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
                 model_name,
                 &numeric_params,
                 instance_real_vector_expr_params,
+                &non_scalar_fields,
             )?;
         let resolved_instance_string_vector_expr_params =
             resolve_instance_string_vector_expression_params(
@@ -1160,6 +1189,7 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
                 model_name,
                 &numeric_params,
                 instance_string_vector_expr_params,
+                &non_scalar_fields,
             )?;
         let instance_real_vector_params = merge_vector_params(
             instance_real_vector_params,
@@ -1189,6 +1219,7 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
             model_name,
             &numeric_params,
             instance_string_expr_params,
+            &non_scalar_fields,
         )?;
         let string_params = merge_string_params(
             instance_string_params,
@@ -1244,6 +1275,7 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
         model_name,
         instance_params,
         instance_expr_params,
+        &non_scalar_fields,
     )?;
     let instance_numeric_params = merge_numeric_params(instance_params, &instance_expr_params);
     let resolved_instance_real_vector_expr_params = resolve_instance_real_vector_expression_params(
@@ -1252,6 +1284,7 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
         model_name,
         &instance_numeric_params,
         instance_real_vector_expr_params,
+        &non_scalar_fields,
     )?;
     let resolved_instance_string_vector_expr_params =
         resolve_instance_string_vector_expression_params(
@@ -1260,6 +1293,7 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
             model_name,
             &instance_numeric_params,
             instance_string_vector_expr_params,
+            &non_scalar_fields,
         )?;
     let instance_real_vector_params = merge_vector_params(
         instance_real_vector_params,
@@ -1284,6 +1318,7 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
         model_name,
         &instance_numeric_params,
         instance_string_expr_params,
+        &non_scalar_fields,
     )?;
     let (model_string_vector_params, model_string_params_from_string_vectors) =
         split_string_vectors_for_scalar_strings(
@@ -1351,7 +1386,6 @@ mod tests {
 
     #[test]
     fn typed_instance_fields_use_resolved_scalar_overrides() {
-        let registry = crate::xspice::CodeModelRegistry::with_builtins();
         for model in ["print_param_types", "alias"] {
             let netlist = Netlist::parse(&format!(
                 "* typed instance dependencies\nA1 [in] {model} real={{base+1}} \
@@ -1360,36 +1394,7 @@ mod tests {
                  .MODEL alias print_param_types(real=1)\n.END\n"
             ))
             .unwrap();
-            let crate::netlist::ElementKind::Xspice {
-                params,
-                expr_params,
-                string_params,
-                string_expr_params,
-                string_vector_params,
-                string_vector_expr_params,
-                real_vector_params,
-                real_vector_expr_params,
-                ..
-            } = &netlist.elements[0].kind
-            else {
-                panic!("expected XSPICE instance");
-            };
-            let resolved = resolve_xspice_model_instance(
-                &ModelResolution::new(&netlist, &NoAbort),
-                &registry,
-                model,
-                XspiceInstanceParams {
-                    params,
-                    expr_params,
-                    string_params,
-                    string_expr_params,
-                    string_vector_params,
-                    string_vector_expr_params,
-                    real_vector_params,
-                    real_vector_expr_params,
-                },
-            )
-            .unwrap();
+            let resolved = resolve_first_xspice(&netlist);
             assert_eq!(
                 resolved
                     .numeric_params
@@ -1403,6 +1408,66 @@ mod tests {
             assert_eq!(resolved.string_params[0].1, "<4 5>");
             assert_eq!(resolved.string_vector_params[0].1, ["<4 5>"]);
         }
+    }
+
+    fn resolve_first_xspice(netlist: &Netlist) -> ResolvedXspiceModel {
+        let registry = crate::xspice::CodeModelRegistry::with_builtins();
+        let crate::netlist::ElementKind::Xspice {
+            model,
+            params,
+            expr_params,
+            string_params,
+            string_expr_params,
+            string_vector_params,
+            string_vector_expr_params,
+            real_vector_params,
+            real_vector_expr_params,
+            ..
+        } = &netlist.elements[0].kind
+        else {
+            panic!("expected XSPICE instance");
+        };
+        resolve_xspice_model_instance(
+            &ModelResolution::new(netlist, &NoAbort),
+            &registry,
+            model,
+            XspiceInstanceParams {
+                params,
+                expr_params,
+                string_params,
+                string_expr_params,
+                string_vector_params,
+                string_vector_expr_params,
+                real_vector_params,
+                real_vector_expr_params,
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn nonnumeric_sibling_masks_preserve_self_reference_values() {
+        let netlist = Netlist::parse(
+            "* field self-references\nA1 [in] print_param_types \
+             real={if(1,2,string)} string=\"text\" real_array=[{real_array+1}] \
+             complex=<{RE(complex)+1} {IMAG(complex)}> \
+             complex_array=[<{complex_array+1} 0>]\n\
+             .PARAM real_array=7 complex={2+3j} complex_array=7 string=7\n.END\n",
+        )
+        .unwrap();
+        let resolved = resolve_first_xspice(&netlist);
+        assert_eq!(resolved.numeric_params[0].1, 2.0);
+        assert_eq!(resolved.real_vector_params[0].1, [8.0]);
+        assert_eq!(
+            resolved
+                .string_params
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("complex"))
+                .unwrap()
+                .1,
+            "<3 3>"
+        );
+        assert_eq!(resolved.string_vector_params[0].1, ["<8 0>"]);
     }
 
     struct ParamOnlyModel {

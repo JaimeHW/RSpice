@@ -52,7 +52,7 @@ mod startup;
 mod topology;
 mod xspice_params;
 mod xspice_parser;
-pub(crate) use xspice_params::XspiceInstanceParams;
+pub(crate) use xspice_params::{XspiceInstanceParams, XspiceNumericScope};
 
 pub use add_resistors::*;
 pub use ast::*;

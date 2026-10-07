@@ -458,7 +458,9 @@ or model value. Root expressions that read sibling fields wait for the complete
 instance context. Retained `.GLOBAL_PARAM` dependencies resolve against completed
 instance bindings at the top level and inside subcircuits. Transitive reads
 preserve complex values and pending-sibling masking; independent root expressions keep their source-order
-statistical sampling.
+statistical sampling. Explicit nonnumeric instance fields block numeric fallback
+to enclosing parameters, including transitive dependencies and user functions.
+Unused conditional branches and each field's enclosing self-reference remain valid.
 Complex instance components resolve forward parameter and function references.
 Numeric vector entries and complex components accept comma-separated function
 arguments and whitespace inside groups.

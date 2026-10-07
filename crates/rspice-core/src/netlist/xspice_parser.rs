@@ -71,6 +71,7 @@ impl XspiceParseContext<'_> {
             expression,
             self.params,
             self.instance_fields,
+            &HashSet::new(),
             self.current_field,
             self.abort,
         )

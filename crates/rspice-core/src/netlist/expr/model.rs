@@ -11,9 +11,22 @@ pub(crate) fn evaluate_instance_expression(
     expression: &str,
     context: &ParamContext,
     pending_names: &HashSet<String>,
+    non_scalar_fields: &HashSet<String>,
     current_name: &str,
     abort: &dyn AbortSignal,
 ) -> Result<ComplexValue, ExpressionEvaluationError> {
+    let describe_field = |error| match error {
+        ExpressionEvaluationError::Expression(ExprError::UndefinedParam(ref name))
+            if !name.eq_ignore_ascii_case(current_name)
+                && non_scalar_fields.contains(&name.to_ascii_uppercase()) =>
+        {
+            ExprError::InvalidArgument(format!(
+                "instance field '{name}' is nonnumeric in scalar expressions"
+            ))
+            .into()
+        }
+        error => error,
+    };
     if !context.has_retained_parameter_expressions() {
         return super::api::eval_expression_complex_with_probe_and_resolver(
             expression,
@@ -28,7 +41,8 @@ pub(crate) fn evaluate_instance_expression(
                 }
             },
             abort,
-        );
+        )
+        .map_err(describe_field);
     }
     let evaluate = |context: &ParamContext| {
         let blocked = pending_names
@@ -44,8 +58,9 @@ pub(crate) fn evaluate_instance_expression(
                 error => ExprError::InvalidArgument(error.to_string()).into(),
             })
     };
-    evaluate(&context.isolated_random_clone())?;
-    evaluate(context)
+    evaluate(&context.isolated_random_clone())
+        .and_then(|_| evaluate(context))
+        .map_err(describe_field)
 }
 
 /// Resolve scalar instance fields in dependency order, publishing each
@@ -54,6 +69,7 @@ pub(crate) fn evaluate_instance_expression(
 pub(crate) fn resolve_real_instance_expressions(
     context: &ParamContext,
     expressions: &[(String, String)],
+    non_scalar_fields: &HashSet<String>,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<(String, Value)>, ParameterResolutionError> {
     check_abort(abort)?;
@@ -63,6 +79,7 @@ pub(crate) fn resolve_real_instance_expressions(
         .iter()
         .map(|(name, _)| name.to_ascii_uppercase())
         .collect::<HashSet<_>>();
+    pending_names.extend(non_scalar_fields.iter().cloned());
     let mut resolved = Vec::with_capacity(expressions.len());
 
     while !pending.is_empty() {
@@ -73,8 +90,14 @@ pub(crate) fn resolve_real_instance_expressions(
             // A pending explicit field shadows an enclosing/model fallback
             // for sibling reads. Its own expression can still use its previous
             // enclosing value, as in GAIN={GAIN*2}.
-            let value =
-                evaluate_instance_expression(expression, &context, &pending_names, name, abort);
+            let value = evaluate_instance_expression(
+                expression,
+                &context,
+                &pending_names,
+                non_scalar_fields,
+                name,
+                abort,
+            );
             match value {
                 Ok(value) => {
                     let value = require_real(value).map_err(|error| {
@@ -99,7 +122,8 @@ pub(crate) fn resolve_real_instance_expressions(
                     let waiting_for_sibling = matches!(&error,
                         ExprError::UndefinedParam(dependency)
                         if !dependency.eq_ignore_ascii_case(name)
-                            && pending_names.contains(&dependency.to_ascii_uppercase()));
+                            && pending_names.contains(&dependency.to_ascii_uppercase())
+                            && !non_scalar_fields.contains(&dependency.to_ascii_uppercase()));
                     // A declared sibling is waiting on another definition;
                     // report the actual missing leaf or invalid expression.
                     if !waiting_for_sibling && first_error.is_none() {
@@ -165,14 +189,6 @@ impl<'a> ModelEvaluationContext<'a> {
             self.context
                 .define_global_expression(&name, expression, value);
         }
-    }
-
-    pub(crate) fn evaluate_instance(
-        &self,
-        expression: &str,
-    ) -> Result<Value, ExpressionEvaluationError> {
-        evaluate_instance_expression(expression, &self.context, &HashSet::new(), "", self.abort)
-            .and_then(|value| require_real(value).map_err(Into::into))
     }
 
     pub(crate) fn real_model_expression(

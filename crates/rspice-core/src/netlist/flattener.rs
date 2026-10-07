@@ -2198,6 +2198,11 @@ impl<'a> Flattener<'a> {
                     self.xspice_model_definition(&model),
                     abort,
                 )?;
+                let instance = materialized
+                    .as_ref()
+                    .map(|value| value.as_ref())
+                    .unwrap_or(instance);
+                let non_scalar_fields = instance.non_scalar_fields();
                 let super::XspiceInstanceParams {
                     params,
                     expr_params,
@@ -2207,10 +2212,7 @@ impl<'a> Flattener<'a> {
                     string_vector_expr_params,
                     real_vector_params,
                     real_vector_expr_params,
-                } = materialized
-                    .as_ref()
-                    .map(|value| value.as_ref())
-                    .unwrap_or(instance);
+                } = instance;
                 let needs_numeric_scope = !expr_params.is_empty()
                     || !real_vector_expr_params.is_empty()
                     || string_expr_params.iter().any(|(_, expression)| {
@@ -2223,8 +2225,15 @@ impl<'a> Flattener<'a> {
                     .then(|| self.xspice_numeric_scope(&model, scope, abort))
                     .transpose()?;
                 let evaluation_scope = model_scope.as_ref().unwrap_or(scope);
-                let params =
-                    self.merge_xspice_scalar_params(params, expr_params, evaluation_scope, abort)?;
+                let params = self.merge_xspice_scalar_params(
+                    params,
+                    expr_params,
+                    super::XspiceNumericScope {
+                        parameters: evaluation_scope,
+                        non_scalar_fields: &non_scalar_fields,
+                    },
+                    abort,
+                )?;
                 // Numeric fields can use resolved instance overrides. String
                 // aliases retain their enclosing lexical parameter scope.
                 let numeric_scope = (!params.is_empty()
@@ -2238,7 +2247,10 @@ impl<'a> Flattener<'a> {
                     }
                     numeric_scope
                 });
-                let numeric_scope = numeric_scope.as_ref().unwrap_or(evaluation_scope);
+                let numeric_scope = super::XspiceNumericScope {
+                    parameters: numeric_scope.as_ref().unwrap_or(evaluation_scope),
+                    non_scalar_fields: &non_scalar_fields,
+                };
                 ElementKind::Xspice {
                     model,
                     pspice_u_timing: pspice_u_timing.clone(),
@@ -2989,13 +3001,13 @@ impl<'a> Flattener<'a> {
         &self,
         instance_params: &[(String, Value)],
         deferred_params: &[(String, String)],
-        scope: &ParamContext,
+        scope: super::XspiceNumericScope<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<(String, Value)>, ParseWithAbortError> {
         if deferred_params.is_empty() {
             return Ok(instance_params.to_vec());
         }
-        let mut context = scope.clone();
+        let mut context = scope.parameters.clone();
         context.adopt_random(&self.random);
         for (name, value) in instance_params {
             context.set(name, *value);
@@ -3007,6 +3019,7 @@ impl<'a> Flattener<'a> {
             .iter()
             .map(|(name, _)| name.to_ascii_uppercase())
             .collect::<HashSet<_>>();
+        pending_names.extend(scope.non_scalar_fields.iter().cloned());
         for (name, expression) in deferred_params {
             // Retained definitions must not substitute stale sibling defaults
             // before the dependency resolver can apply their explicit overrides.
@@ -3051,13 +3064,16 @@ impl<'a> Flattener<'a> {
                 },
             ));
         }
-        let resolved =
-            super::expr::resolve_real_instance_expressions(&context, &expressions, abort).map_err(
-                |error| match error {
-                    super::expr::ParameterResolutionError::Aborted => ParseWithAbortError::Aborted,
-                    error => ParseError::InvalidValue(error.to_string()).into(),
-                },
-            )?;
+        let resolved = super::expr::resolve_real_instance_expressions(
+            &context,
+            &expressions,
+            scope.non_scalar_fields,
+            abort,
+        )
+        .map_err(|error| match error {
+            super::expr::ParameterResolutionError::Aborted => ParseWithAbortError::Aborted,
+            error => ParseError::InvalidValue(error.to_string()).into(),
+        })?;
         let mut merged = instance_params.to_vec();
         for (name, value) in resolved {
             match merged
@@ -3215,7 +3231,7 @@ impl<'a> Flattener<'a> {
         instance_params: &[(String, String)],
         deferred_params: &[(String, String)],
         scope: &ParamContext,
-        numeric_scope: &ParamContext,
+        numeric_scope: super::XspiceNumericScope<'_>,
         element_path: &str,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<(String, String)>, ParseWithAbortError> {
@@ -3279,7 +3295,7 @@ impl<'a> Flattener<'a> {
         &self,
         instance_params: &[(String, Vec<Value>)],
         deferred_params: &[(String, Vec<String>)],
-        scope: &ParamContext,
+        scope: super::XspiceNumericScope<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<(String, Vec<Value>)>, ParseWithAbortError> {
         if deferred_params.is_empty() {
@@ -3290,7 +3306,7 @@ impl<'a> Flattener<'a> {
         for (name, exprs) in deferred_params {
             let values = exprs
                 .iter()
-                .map(|expr| self.resolve_xspice_numeric_value(expr, scope, abort))
+                .map(|expr| self.resolve_xspice_numeric_value(name, expr, scope, abort))
                 .collect::<Result<Vec<_>, _>>()?;
             match merged
                 .iter_mut()
@@ -3307,7 +3323,7 @@ impl<'a> Flattener<'a> {
         &self,
         instance_params: &[(String, Vec<String>)],
         deferred_params: &[(String, String)],
-        numeric_scope: &ParamContext,
+        numeric_scope: super::XspiceNumericScope<'_>,
         element_path: &str,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<(String, Vec<String>)>, ParseWithAbortError> {
@@ -3346,7 +3362,7 @@ impl<'a> Flattener<'a> {
         &self,
         param_name: &str,
         entries: Vec<super::DeferredXspiceStringVectorEntry>,
-        scope: &ParamContext,
+        scope: super::XspiceNumericScope<'_>,
         element_path: &str,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<String>, ParseWithAbortError> {
@@ -3372,7 +3388,7 @@ impl<'a> Flattener<'a> {
         param_name: &str,
         real_expr: &str,
         imag_expr: &str,
-        scope: &ParamContext,
+        scope: super::XspiceNumericScope<'_>,
         element_path: &str,
         abort: &dyn AbortSignal,
     ) -> Result<String, ParseWithAbortError> {
@@ -3402,32 +3418,36 @@ impl<'a> Flattener<'a> {
 
     fn resolve_xspice_numeric_value(
         &self,
+        field: &str,
         expression: &str,
-        scope: &ParamContext,
+        scope: super::XspiceNumericScope<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<Value, ParseWithAbortError> {
-        let mut context = scope.clone();
+        let mut context = scope.parameters.clone();
         context.adopt_random(&self.random);
-        super::expr::evaluate_instance_expression(expression, &context, &HashSet::new(), "", abort)
-            .and_then(|value| super::expr::require_real(value).map_err(Into::into))
-            .map_err(|error| match error {
-                super::expr::ExpressionEvaluationError::Aborted => ParseWithAbortError::Aborted,
-                super::expr::ExpressionEvaluationError::Expression(error) => {
-                    ParseError::InvalidValue(error.to_string()).into()
-                }
-            })
+        super::XspiceNumericScope {
+            parameters: &context,
+            ..scope
+        }
+        .evaluate_real(field, expression, abort)
+        .map_err(|error| match error {
+            super::expr::ExpressionEvaluationError::Aborted => ParseWithAbortError::Aborted,
+            super::expr::ExpressionEvaluationError::Expression(error) => {
+                ParseError::InvalidValue(error.to_string()).into()
+            }
+        })
     }
 
     fn resolve_deferred_xspice_complex_component(
         &self,
         param_name: &str,
         expr: &str,
-        scope: &ParamContext,
+        scope: super::XspiceNumericScope<'_>,
         element_path: &str,
         component: &str,
         abort: &dyn AbortSignal,
     ) -> Result<Value, ParseWithAbortError> {
-        self.resolve_xspice_numeric_value(expr, scope, abort)
+        self.resolve_xspice_numeric_value(param_name, expr, scope, abort)
         .map_err(|err| {
             map_resolution_error(err, |err| {
                 ParseError::InvalidValue(format!(

@@ -104,7 +104,47 @@ impl MaterializedXspiceParams {
     }
 }
 
+/// Numeric consumers retain the enclosing values for self-references while
+/// explicit non-scalar siblings mask every path to an enclosing numeric value.
+#[derive(Clone, Copy)]
+pub(crate) struct XspiceNumericScope<'a> {
+    pub parameters: &'a ParamContext,
+    pub non_scalar_fields: &'a HashSet<String>,
+}
+
+impl XspiceNumericScope<'_> {
+    pub(crate) fn evaluate_real(
+        self,
+        field: &str,
+        expression: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<f64, super::expr::ExpressionEvaluationError> {
+        super::expr::evaluate_instance_expression(
+            expression,
+            self.parameters,
+            self.non_scalar_fields,
+            self.non_scalar_fields,
+            field,
+            abort,
+        )
+        .and_then(|value| super::expr::require_real(value).map_err(Into::into))
+    }
+}
+
 impl XspiceInstanceParams<'_> {
+    pub(crate) fn non_scalar_fields(self) -> HashSet<String> {
+        self.string_params
+            .iter()
+            .chain(self.string_expr_params)
+            .map(|(name, _)| name)
+            .chain(self.string_vector_params.iter().map(|(name, _)| name))
+            .chain(self.string_vector_expr_params.iter().map(|(name, _)| name))
+            .chain(self.real_vector_params.iter().map(|(name, _)| name))
+            .chain(self.real_vector_expr_params.iter().map(|(name, _)| name))
+            .map(|name| name.to_ascii_uppercase())
+            .collect()
+    }
+
     /// Classify ambiguous literals and string bindings. Retain numeric expressions
     /// for the ordinary instance resolver, so it cannot sample or freeze a
     /// sibling/model binding before the complete numeric context is available.
