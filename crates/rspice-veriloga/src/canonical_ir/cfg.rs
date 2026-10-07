@@ -1621,10 +1621,11 @@ impl CfgValueKind {
 
     pub(crate) fn map_operands(&mut self, mut map: impl FnMut(ValueId) -> ValueId) {
         match self {
-            Self::DigitalAnalogVariable { array_index, .. } => {
-                if let Some(selection) = array_index {
-                    selection.index = map(selection.index);
-                }
+            Self::DigitalAnalogVariable {
+                array_index: Some(selection),
+                ..
+            } => {
+                selection.index = map(selection.index);
             }
             Self::AnalogTaskGuard(value) => *value = map(*value),
             Self::AnalogTask(task) => {
