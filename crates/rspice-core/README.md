@@ -493,11 +493,26 @@ must validate every active card. Scoped expressions, startup identities,
 duplicate rules, statistical phases and typed device-condition errors remain
 intact. Terminal resource failures and cancellation still stop immediately.
 
-General dependency planning remains incomplete. Root `.IC`, `.NODESET` and
-`.INITCOND` forward parameter references still need dependency completion.
-Other earlier card failures and eager parameter error classes can still prevent
-temperature discovery. These cases and broader statistical/runtime binding
-qualification remain in the implementation plan.
+Root `.IC`, `.NODESET` and `.INITCOND` operands now accept forward parameter
+references. Startup and analysis cards share captured authored bindings and the
+lexical dependency resolver. Pending startup cards bind after declaration,
+source and model completion, before pending analyses, and publish in authored
+order. Already-known values and functions retain their source-order meaning.
+Scoped voltage expressions still evaluate with each instance's parameters,
+including values supplied only by an X-line. Device startup values retain their
+authored lexical scope, and duplicate `.INITCOND` cards retain typed errors.
+
+Long startup cards use cursor checkpoints instead of copying all tokens for
+every target/value. Constraint validation skips path searches when an endpoint
+has not entered the graph. The qualified 256-entry IC/NODESET cases allocate
+about 95% fewer bytes during parsing; this measures allocation volume, not peak
+memory or elapsed time. Native, CLI and optimized WebAssembly evidence is in
+`tests/testdata/qualification/core-forward-startup-windows-20261006.json`.
+
+General dependency planning remains incomplete. Other earlier card failures and
+eager parameter error classes can still prevent temperature discovery. Further
+physical-override combinations, statistical/runtime binding, general graph and
+binding complexity, and broader resource qualification remain in the plan.
 
 The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and
 the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.

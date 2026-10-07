@@ -1,0 +1,283 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C04",
+  "related_packages": [
+    "C00",
+    "C13",
+    "C14"
+  ],
+  "batch": "Forward startup bindings and long-card allocation reduction",
+  "status": "forward_startup_bindings_delivered_general_planning_and_qualification_remain",
+  "base_revision": "27edd6531da134067ad5b06ec688021828dcda40",
+  "source_revision": "289e39df2a075f9264cb85bf07764badea89d4a8",
+  "implementation_commits": [
+    "8241897329ea1f5a6986b97f492bf5da775aeaa0",
+    "df8a9bd02bfc77fea11289a61272f37df927176e",
+    "289e39df2a075f9264cb85bf07764badea89d4a8"
+  ],
+  "captured_utc": "2026-10-07T02:20:49.962873+00:00",
+  "host": "x86_64-pc-windows-msvc",
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+    "cli_rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "cli_toolchain_reason": "Prior pinned Rust 1.94/faer compiler crash remains unresolved; repository pin unchanged.",
+    "wasm_target": "wasm32-unknown-unknown",
+    "wasm_profile": "release",
+    "wasm_features": [
+      "wasm",
+      "veriloga-wasm-jit"
+    ],
+    "wasm_runtime": "headless Chrome dedicated worker",
+    "WASM_BINDGEN_TEST_TIMEOUT": "180",
+    "webdriver_config_sha256": "93458ed98943268e089c8c9a793bf2e899872e62941ac54795b0c27b7104785b",
+    "wasm_runner_version": "wasm-bindgen-test-runner 0.2.126",
+    "wasm_runner_executable_sha256": "e451b278c106269fa9a2731a4f8e77f888ccd2694b2b3a1760319198f6c2a68e",
+    "cargo_build_jobs": 1
+  },
+  "commands": [
+    {
+      "command": "cargo test --locked -p rspice-core -j 1 --lib netlist:: -- --test-threads=8",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1116
+      ],
+      "log": "target/core-qualification/forward-startup-netlist-final.log",
+      "log_sha256": "35ac3d940649f52fa976665483b3831210ee71314e18179b92d74a2a2a4976e0"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core -j 1 --test startup_card_allocations --test forward_startup --test provisional_startup_temperature --test differential_startup --test provisional_subckt_temperature --test parent_temperature_options --test pending_temperature_recovery --test temperature_replay_budget --test provisional_parameter_temperature --test provisional_conditional_temperature --test provisional_option_temperature --test provisional_temperature --test forward_analyses --test analysis_error_origins --test analysis_card_transactions --test forward_parameters --test forward_sources --test temperature_options --test transient_checkpoint --test resource_limits -- --test-threads=8 --nocapture",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        4,
+        4,
+        12,
+        17,
+        11,
+        11,
+        12,
+        9,
+        13,
+        14,
+        15,
+        13,
+        12,
+        10,
+        9,
+        25,
+        1,
+        21,
+        3,
+        36
+      ],
+      "log": "target/core-qualification/forward-startup-core-final.log",
+      "log_sha256": "dacba57751703721aca661502f840056384049d7d00126920eb43ea1d8bad1b3"
+    },
+    {
+      "command": "cargo +1.95.0 test --locked -p rspice-cli -j 1 --test temperature_axis --test analysis_error_origins --test check_hierarchy --test run_flags --test resolved_run_policy --test corner_checkpoints --target-dir target/core-cli-195",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1,
+        6,
+        3,
+        2,
+        7,
+        6
+      ],
+      "log": "target/core-qualification/forward-startup-cli-final.log",
+      "log_sha256": "20ceb44a5c4bc0188bfc4cb5299c40feff90e5e57e44f80522fe24b527713db7"
+    },
+    {
+      "command": "cargo clippy --locked -j 1 -p rspice-core -p rspice-cli -p rspice-wasm -p rspice-engine-adapter --lib --bins --test startup_card_allocations --test forward_startup -- -D warnings",
+      "outcome": "passed",
+      "test_target_passed_counts": [],
+      "log": "target/core-qualification/forward-startup-clippy-final.log",
+      "log_sha256": "f7442859a61229f26db890cc156ecbc1deb743467b1367a053c5a259ec291cfb"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core -j 1 --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test forward_startup --test forward_analyses --test analysis_card_transactions --test analysis_error_origins --test provisional_startup_temperature --test provisional_subckt_temperature --test parent_temperature_options --test pending_temperature_recovery --test temperature_replay_budget --test provisional_conditional_temperature --test temperature_options --test forward_parameters -- --nocapture",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        4,
+        4,
+        16,
+        10,
+        12,
+        9,
+        13,
+        14,
+        12,
+        10,
+        19,
+        3
+      ],
+      "log": "target/core-qualification/forward-startup-wasm-final.log",
+      "log_sha256": "fed2637b151d4f33da657e9281b90f11f0df32f7cf62be267996d753a5a499e8"
+    }
+  ],
+  "formatting": {
+    "targets": 594,
+    "batches": 11,
+    "failed_batches": 0,
+    "command": "python target/core-qualification/check-workspace-format.py",
+    "outcome": "passed",
+    "log": "target/core-qualification/forward-startup-format-final.log",
+    "log_sha256": "c4cf9870018c531fcef5fc6d9372da97cc5e134ec8646d2e80cdaa2f26a1d67a"
+  },
+  "executed_tests": {
+    "native": 1393,
+    "optimized_wasm": 126
+  },
+  "test_accounting": "Final qualification uses the clean committed source revision. No executed tests were ignored. Development runs, three CLI reproductions, and publication-ledger checks are excluded from executed_tests. Native-only tests are absent from the WASM configuration.",
+  "source_hash_format": "SHA-256 of committed Git blob bytes",
+  "source_files_sha256": {
+    "Cargo.lock": "d95121ce0366b929ed8dffb0ff37b17fc330071d35e226af3d0d8ff889cdf1db",
+    "crates/rspice-core/src/netlist/parser.rs": "bd84e7c40ea5b549c8d9a5adb954ebab7f01add835a11d83fe6a8b46eb768302",
+    "crates/rspice-core/src/netlist/parser/card_binding.rs": "9845ec46612d45dc670caf3823aa4fb84a337b9d868526672a38c4420b170963",
+    "crates/rspice-core/src/netlist/parser/command_parsers.rs": "b68d6b79f507036b92bed40e54d18d12d1592bed1d31630d35c39d2353108206",
+    "crates/rspice-core/src/netlist/parser/commands.rs": "99f3a7a25a56feee006db6caf993a5046f4272d481930cc77e8c84a0224564bb",
+    "crates/rspice-core/src/netlist/parser/commands/analysis/plan.rs": "5b662f1bb24ff859bc5e4beafd1395d427af70d141400bd4985c4c708e4b10cf",
+    "crates/rspice-core/src/netlist/parser/line.rs": "145e2e9f645206a02f67e731e2dc158f5e3ebbbe4f7fa330d71b0f3955f00512",
+    "crates/rspice-core/src/netlist/parser/startup_cards.rs": "3de8057b886560c9e4f9ecb2e1582857d7caa52bfc10817c584e4ebac425a61d",
+    "crates/rspice-core/src/netlist/parser/state.rs": "8ce5801a7ebac9e48f5cd6fc62ab11da0258afa798b31a49582915c6708b1dfd",
+    "crates/rspice-core/src/netlist/parser/stream.rs": "c4864d8a8be64e0df09f49004fe6253ca677a761f505d9ae5a9fe7d1cef1919a",
+    "crates/rspice-core/src/netlist/parser/temperature/options.rs": "fb6decfd2cffc9e7ef018068761be09f3f15ec30a1ae9fe83c7689ba26f7c60d",
+    "crates/rspice-core/src/netlist/startup.rs": "b42e4ba37b2bd7ed2330566ada720a1f5b0e1d2b110b7f8da0f46df1c92862da",
+    "crates/rspice-core/tests/forward_startup.rs": "dff0acaad0d669c19395dd076d41758658701ea5dee8c5f536205c5f2e3c33aa",
+    "crates/rspice-core/tests/startup_card_allocations.rs": "01d15fdceedc695007649b5defab09e89633e64080fa3487b2743af82fa7f09d",
+    "rust-toolchain.toml": "0a73f8e6f0e60b4a2bba97a16fdc0c66517abad4410e72582981b9578bc1aa62"
+  },
+  "implementation": [
+    "Cursor checkpoints replace per-field token-vector copies and retain numeric operand caches/missing dependencies. Constraint-path lookup immediately rejects absent endpoints, avoiding quadratic graph searches for new startup targets.",
+    "Analysis and startup plans share CardBinding and LexicalScopes. Deferred startup cards preserve resolved authored values, functions and builtins, then bind after declaration/source/model completion and before deferred analyses. Failed statistical probes use isolated streams; retries retain completed operands.",
+    "Ready and pending startup cards publish in authored order only after successful validation. Scoped voltage expressions retain instance-only parameters; queued scoped records update both the definition registry and nested copies. INITCOND retains lexical value ownership, inline/file grammar and duplicate precedence.",
+    "Earlier pending startup failures are validated on isolated contexts before selecting later ordinary errors, including unfinished scopes and physical includes. Existing earlier provisional errors, resource refusals and cancellation retain priority. Temperature recovery still requires fresh-source confirmation."
+  ],
+  "acceptance_evidence": [
+    "Twelve portable forward-startup tests exercise IC/device-IC first transient samples, NODESET release to an independent resistor-divider solution, literal/bare/signed operands, derived/global/parent references, captured values/functions, exact samples, source order, instance-only/nested overrides, queued registry copies, duplicate precedence, invalid overwritten cards, mixed errors, include continuations, selected temperatures and every observed cancellation boundary.",
+    "Existing temperature-discovery and physical-override unit tests, startup/differential integration, checkpoint, analysis-transaction/origin, declaration/source, resource and CLI tests remain active.",
+    "startup_card_allocations.rs counts gross allocation requests only during parsing for 64 and 256 entries, covering root/scoped IC/NODESET. It admits capacity rounding with a 6x growth ceiling; it does not measure peak memory or elapsed time."
+  ],
+  "allocation_measurements": {
+    "baseline_revision": "27edd6531da134067ad5b06ec688021828dcda40",
+    "baseline_note": "Baseline source plus the new allocation regression before the fix; fixture was untracked at that point.",
+    "baseline_log": "target/core-qualification/startup-cursor-before.log",
+    "baseline_log_sha256": "74407e36e5ca78cabffd1dddbd685a3f1289ec850d8220aa089c3b60e1cee7e2",
+    "metric": "Sum of requested allocation/reallocation bytes on the parsing thread, excluding deck construction and assertions",
+    "measurements": [
+      {
+        "directive": ".IC",
+        "scoped": false,
+        "baseline_bytes_64": 6058977,
+        "baseline_bytes_256": 79377449,
+        "qualified_bytes_64": 1397723,
+        "qualified_bytes_256": 3849667,
+        "qualified_growth_ratio": 2.7542417202836327,
+        "reduction_at_256": 0.951501754610431
+      },
+      {
+        "directive": ".IC",
+        "scoped": true,
+        "baseline_bytes_64": 8048642,
+        "baseline_bytes_256": 114103426,
+        "qualified_bytes_64": 1241612,
+        "qualified_bytes_256": 4925132,
+        "qualified_growth_ratio": 3.9667239040859785,
+        "reduction_at_256": 0.9568362478441269
+      },
+      {
+        "directive": ".NODESET",
+        "scoped": false,
+        "baseline_bytes_64": 5625544,
+        "baseline_bytes_256": 79382664,
+        "qualified_bytes_64": 963020,
+        "qualified_bytes_256": 3849772,
+        "qualified_growth_ratio": 3.997603372723308,
+        "reduction_at_256": 0.9515036179687797
+      },
+      {
+        "directive": ".NODESET",
+        "scoped": true,
+        "baseline_bytes_64": 8050657,
+        "baseline_bytes_256": 114111201,
+        "qualified_bytes_64": 1241717,
+        "qualified_bytes_256": 4925237,
+        "qualified_growth_ratio": 3.9664730369319257,
+        "reduction_at_256": 0.956838268663915
+      }
+    ]
+  },
+  "baseline_reproductions": [
+    {
+      "source_revision": "19ff4bfa4907421a7b0711ed26e8d0da3c2320a1",
+      "command": "target/core-cli-195/debug/rspice.exe --error-format json check --json target/core-qualification/startup-forward-ic.cir",
+      "outcome": "unresolved_forward_startup_parameter",
+      "exit_code": 65,
+      "log": "target/core-qualification/startup-temperature-forward-ic-remaining.log",
+      "log_sha256": "2b429f85e7b6263f39f9f55d01bd56f309b8f28d1aa9b04c69cd208dfd46d798",
+      "deck": "Forward initial condition\nR1 out 0 1k\nC1 out 0 1u\n.ic V(out)={level}\n.param level=1\n.tran 1u 2u uic\n.end\n"
+    },
+    {
+      "source_revision": "19ff4bfa4907421a7b0711ed26e8d0da3c2320a1",
+      "command": "target/core-cli-195/debug/rspice.exe --error-format json check --json target/core-qualification/startup-forward-nodeset.cir",
+      "outcome": "unresolved_forward_startup_parameter",
+      "exit_code": 65,
+      "log": "target/core-qualification/startup-temperature-forward-nodeset-remaining.log",
+      "log_sha256": "613c46fae00f5f378da03841f084f115211446c40d9be101580930b01c5bfacf",
+      "deck": "Forward node set\nR1 out 0 1k\n.nodeset V(out)={level}\n.param level=1\n.end\n"
+    },
+    {
+      "source_revision": "19ff4bfa4907421a7b0711ed26e8d0da3c2320a1",
+      "command": "target/core-cli-195/debug/rspice.exe --error-format json check --json target/core-qualification/startup-forward-device.cir",
+      "outcome": "unresolved_forward_startup_parameter",
+      "exit_code": 65,
+      "log": "target/core-qualification/startup-temperature-forward-device-remaining.log",
+      "log_sha256": "87b01a1e65bdf4de4c652ce0f6e525ee7f12fd618ebc38d127786c3fa0f8c95e",
+      "deck": "Forward device initial condition\nR1 out 0 1k\nC1 out 0 1u\n.initcond C1 IC={level}\n.param level=1\n.tran 1u 2u uic\n.end\n"
+    }
+  ],
+  "resolved_reproductions": [
+    {
+      "source_revision": "289e39df2a075f9264cb85bf07764badea89d4a8",
+      "command": "target/core-cli-195/debug/rspice.exe --error-format json check --json target/core-qualification/startup-forward-ic.cir",
+      "outcome": "valid",
+      "exit_code": 0,
+      "deck": "Forward initial condition\nR1 out 0 1k\nC1 out 0 1u\n.ic V(out)={level}\n.param level=1\n.tran 1u 2u uic\n.end\n",
+      "log": "target/core-qualification/forward-startup-ic-resolved.log",
+      "log_sha256": "4b5406f3362aa7a6e2a0cd008976bd318e62e237131488700099b8f67deb62b6"
+    },
+    {
+      "source_revision": "289e39df2a075f9264cb85bf07764badea89d4a8",
+      "command": "target/core-cli-195/debug/rspice.exe --error-format json check --json target/core-qualification/startup-forward-nodeset.cir",
+      "outcome": "valid",
+      "exit_code": 0,
+      "deck": "Forward node set\nR1 out 0 1k\n.nodeset V(out)={level}\n.param level=1\n.end\n",
+      "log": "target/core-qualification/forward-startup-nodeset-resolved.log",
+      "log_sha256": "4fcf8a1b96d8540dcacc8cf4ad37b7191cdc3567273d0ee8580384c513363783"
+    },
+    {
+      "source_revision": "289e39df2a075f9264cb85bf07764badea89d4a8",
+      "command": "target/core-cli-195/debug/rspice.exe --error-format json check --json target/core-qualification/startup-forward-device.cir",
+      "outcome": "valid",
+      "exit_code": 0,
+      "deck": "Forward device initial condition\nR1 out 0 1k\nC1 out 0 1u\n.initcond C1 IC={level}\n.param level=1\n.tran 1u 2u uic\n.end\n",
+      "log": "target/core-qualification/forward-startup-device-resolved.log",
+      "log_sha256": "249fb93076eb18c2c528eb21fd2f123fab8e5f225ca3d40908c5af659ebd32c4"
+    }
+  ],
+  "remaining": [
+    "All C00-C14 packages remain open/in progress. Control dispatch remains 5/29; the remaining 24 dispositions and broader table/control/adapter contracts are not closed by parser work.",
+    "Complete the remaining earlier-card/eager-parameter temperature cases and general statistical/runtime dependency planning. Continue qualification of physical overrides with forward startup operands and more complex cross-scope combinations.",
+    "The allocation gate covers fresh single-ended startup targets. General constraint-graph complexity, many independent scoped deferred operands, whole-run peak memory, inner-loop cancellation and performance limits remain to be qualified.",
+    "Prior Rust 1.94/1.95 and wasm-bindgen-runner access violations remain unresolved C14 incidents. These successful serial builds do not diagnose their causes."
+  ],
+  "publication_validation": {
+    "command": "cargo test --locked -p rspice-core -j 1 --lib engine::requirements",
+    "outcome": "passed",
+    "tests": 3,
+    "counted_in_executed_tests": false,
+    "log": "target/core-qualification/forward-startup-ledger.log",
+    "log_sha256": "d2ed2c5f828b9900b6724abd97663d5fcb65f89113b9c8e7db6e593fd4ade089"
+  }
+}
