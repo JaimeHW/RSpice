@@ -386,6 +386,7 @@ mod elaboration;
 mod flow_probes;
 mod function_effects;
 mod implicit_integrator;
+mod parameter_constants;
 mod retained_inputs;
 mod switch_branches;
 mod symbols;
@@ -1374,7 +1375,7 @@ impl SemanticAnalyzer {
                 .default
                 .as_ref()
                 .filter(|_| !is_parameter_array)
-                .map(|expression| self.normalize_scalar_parameter_default(param, expression))
+                .map(|expression| self.normalize_scalar_parameter_default(param, expression, module))
                 .transpose()?;
             let declared_default_value = normalized_default
                 .as_ref()
@@ -1599,7 +1600,9 @@ impl SemanticAnalyzer {
             let default = localparam
                 .default
                 .as_ref()
-                .map(|expression| self.normalize_scalar_parameter_default(localparam, expression))
+                .map(|expression| {
+                    self.normalize_scalar_parameter_default(localparam, expression, module)
+                })
                 .transpose()?;
             if let Some(default) = &default {
                 if let Some(value) = self.eval_const_value(default).and_then(|value| {
@@ -6147,6 +6150,7 @@ impl SemanticAnalyzer {
         &self,
         parameter: &ParameterDecl,
         expression: &Expression,
+        module: &Module,
     ) -> CompileResult<Expression> {
         let mut closed = parameter.param_type != ParamType::String;
         flow_probes::visit_expression(expression, &mut |expression| {
@@ -6192,7 +6196,8 @@ impl SemanticAnalyzer {
         if matches!(expression, Expression::Digital(DigitalExpr::FourState(_))) {
             Ok(expression.clone())
         } else {
-            self.normalize_integer_expression(expression)
+            let folded = self.fold_real_parameter_operands(parameter, expression, module);
+            self.normalize_integer_expression(folded.as_ref().unwrap_or(expression))
         }
     }
 

@@ -430,3 +430,81 @@ endmodule
         "{mixed_runtime}"
     );
 }
+
+#[test]
+fn packed_operands_in_real_parameter_defaults_keep_widths_after_overrides() {
+    for (operand, expected) in [
+        ("(8'd255+8'd2)", 1.0),
+        ("{4'h3,(8'd255+8'd2)}", 769.0),
+        ("(1'b1 ? (8'd255+8'd2) : 8'd0)", 1.0),
+        ("((8'd255+8'd1)==16'd256)", 1.0),
+        ("-(8'sh80)", -128.0),
+    ] {
+        let source = format!(
+            "module packed_default(p,n); inout p,n; electrical p,n; \
+             parameter real BASE=2.5; parameter real RESULT=BASE+{operand}; \
+             analog I(p,n)<+RESULT; endmodule"
+        );
+        let model = DeviceFixture::compile(&source);
+        let mut device = model.device("X", &[1, 0]);
+        assert_eq!(
+            device.try_evaluate().unwrap()[0],
+            2.5 + expected,
+            "{operand}"
+        );
+        for base in [10.5, -2.5] {
+            device.try_set_parameter("BASE", base).unwrap();
+            device.try_resolve_parameter_defaults().unwrap();
+            assert_eq!(
+                device.try_evaluate().unwrap()[0],
+                base + expected,
+                "{operand}, BASE={base}"
+            );
+        }
+    }
+}
+
+#[test]
+fn packed_parameter_operand_folding_respects_integer_assignment_context() {
+    let model = DeviceFixture::compile(
+        "module integer_context(p,n); inout p,n; electrical p,n; \
+         parameter integer WORD=255; \
+         parameter integer RESULT=WORD+(8'd255+8'd2); \
+         analog I(p,n)<+RESULT; endmodule",
+    );
+    let mut device = model.device("X", &[1, 0]);
+    assert_eq!(device.try_evaluate().unwrap()[0], 512.0);
+    device.try_set_parameter("WORD", 1.0).unwrap();
+    device.try_resolve_parameter_defaults().unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 258.0);
+}
+
+#[test]
+fn packed_real_parameter_boundaries_keep_comparisons_and_branches_dynamic() {
+    for (expression, expected) in [
+        ("BASE>(8'd255+8'd1)", [1.0, 0.0]),
+        ("BASE>0 ? (8'd255+8'd2) : BASE", [1.0, -2.5]),
+        ("BASE<0 ? BASE : -(8'sh80)", [-128.0, -2.5]),
+        ("(BASE*2)+(8'd255+8'd2)", [6.0, -4.0]),
+    ] {
+        let source = format!(
+            "module real_boundaries(p,n); inout p,n; electrical p,n; \
+             parameter real BASE=2.5; parameter real RESULT={expression}; \
+             analog I(p,n)<+RESULT; endmodule"
+        );
+        let model = DeviceFixture::compile(&source);
+        let mut device = model.device("X", &[1, 0]);
+        assert_eq!(
+            device.try_evaluate().unwrap()[0],
+            expected[0],
+            "{expression}"
+        );
+        device.try_set_parameter("BASE", -2.5).unwrap();
+        device.try_resolve_parameter_defaults().unwrap();
+        assert_eq!(
+            device.try_evaluate().unwrap()[0],
+            expected[1],
+            "{expression}"
+        );
+    }
+}

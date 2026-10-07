@@ -2764,3 +2764,64 @@ endmodule
             .all(|point| point.value.state == rspice_core::xspice::DigitalState::Zero)
     );
 }
+
+#[test]
+fn packed_dependent_real_defaults_match_digital_values_after_spice_overrides() {
+    let model = ModelFile::new(
+        "packed_dependent",
+        r#"
+`timescale 1ns/1ps
+module packed_dependent(p,c,l,q);
+ inout p,c,l; electrical p,c,l; output reg q=0;
+ parameter real BASE=2.5;
+ parameter real RESULT=BASE+(8'd255+8'd2);
+ parameter real CONCAT=BASE+{4'h3,(8'd255+8'd2)};
+ localparam real LOCAL=BASE+(8'sh7f+8'sd1);
+ analog begin
+   I(p)<+(V(p)-RESULT)/1000;
+   I(c)<+(V(c)-CONCAT)/1000;
+   I(l)<+(V(l)-LOCAL)/1000;
+ end
+ initial #1 q=(RESULT==BASE+1)&&(CONCAT==BASE+769)&&(LOCAL==BASE-128);
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* packed dependent values\n.param vcc=1\n\
+         Xa pa ca la qa packed_dependent\n\
+         Xb pb cb lb qb packed_dependent BASE=10.5\n\
+         Rpa pa 0 1k\nRca ca 0 1k\nRla la 0 1k\nRqa qa 0 1k\n\
+         Rpb pb 0 1k\nRcb cb 0 1k\nRlb lb 0 1k\nRqb qb 0 1k\n\
+         .va \"{}\" packed_dependent module=packed_dependent\n.end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 2e-9, 0.1e-9);
+    for (node, expected) in [
+        ("pa", 1.75),
+        ("ca", 385.75),
+        ("la", -62.75),
+        ("pb", 5.75),
+        ("cb", 389.75),
+        ("lb", -58.75),
+    ] {
+        assert!(
+            waveform(&result, node)
+                .iter()
+                .all(|value| (value - expected).abs() < 1e-8),
+            "{node}"
+        );
+    }
+    for node in ["qa", "qb"] {
+        let events = result.digital_trace_named(node).unwrap();
+        assert_eq!(events.len(), 2, "{node}: {events:?}");
+        assert_eq!(
+            events[0].value.state,
+            rspice_core::xspice::DigitalState::Zero
+        );
+        assert_eq!(
+            events[1].value.state,
+            rspice_core::xspice::DigitalState::One
+        );
+        assert!((events[1].time - 1e-9).abs() < 1e-22, "{node}: {events:?}");
+    }
+}

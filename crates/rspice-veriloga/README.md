@@ -546,6 +546,16 @@ typing and the full typed external parameter ABI remain open. Wasm helper ABI
 remains 20.
 Source: [VAMS-2023, 3.4.1 and 4.2](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
 
+Schema 93 preserves closed packed operands at a known real conversion
+boundary inside a dependent parameter or localparam default. For example,
+`parameter real BASE=2.5; parameter real RESULT=BASE+(8'd255+8'd2);`
+produces 3.5 and responds to subsequent BASE overrides. Arithmetic,
+comparisons and mixed real conditional arms share the typed constant
+evaluator before scalar lowering; integer assignment context is retained.
+This does not yet cover packed operations whose operands themselves depend on
+parameters, or realness that requires general implicit parameter/function
+type inference. Those remain part of the parameter typing and ABI work.
+
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
 initializer patterns, multidimensional shapes, full parameter-dependent
 shape/override support beyond the scalar digital path, and remaining mixed-host/platform qualification
