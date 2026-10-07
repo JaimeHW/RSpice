@@ -529,7 +529,7 @@ impl<'a> ExprParser<'a> {
         // Xyce treats braces as ordinary expression-grouping delimiters at
         // every nesting depth, alongside parentheses.
         if self.check('(') || self.check('{') {
-            let open = self.advance().expect("checked grouping delimiter");
+            let open = self.advance().ok_or(ExprError::UnexpectedChar('\0'))?;
             let close = if open == '(' { ')' } else { '}' };
             let expr = self.parse_ternary()?; // Full expression inside parens
             self.skip_ws();
@@ -654,7 +654,7 @@ impl<'a> ExprParser<'a> {
             let suffix_start = self.pos;
             while self.peek().is_some_and(|ch| ch.is_ascii_alphabetic()) {
                 if self.advance().is_none() {
-                    break;
+                    return Err(ExprError::UnexpectedChar('\0'));
                 }
             }
             let suffix = &self.input[suffix_start..self.pos];

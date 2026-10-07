@@ -125,3 +125,28 @@ pub(crate) fn needs_forward_reference_probe(expression: &str, params: &ParamCont
     }
     false
 }
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+
+    #[test]
+    fn grouping_and_numeric_suffixes_cancel_at_every_parser_boundary() {
+        for source in ["(1+2)", "{1+2}", "10kOhm", "2j", "'1/(27-28)'"] {
+            let mut completed = false;
+            for limit in 0..256 {
+                let abort = crate::abort_signal::CountingAbort::new(limit);
+                match parse_expression_with_abort(source, &abort) {
+                    Err(ParseExpressionWithAbortError::Aborted) => {}
+                    Ok(_) => completed = true,
+                    result => panic!("{source}, poll limit {limit}: {result:?}"),
+                }
+                assert_eq!(abort.polls_after_abort(), 0, "{source}, poll limit {limit}");
+                if completed {
+                    break;
+                }
+            }
+            assert!(completed, "{source} never completed");
+        }
+    }
+}
