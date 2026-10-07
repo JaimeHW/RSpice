@@ -1914,22 +1914,10 @@ fn parse_xspice_complex_literal(
         });
     }
 
-    let real = parse_xspice_complex_component(
-        stream,
-        line_num,
-        param_name,
-        netlist_params,
-        "real",
-        defer_simple_param_refs,
-    )?;
-    let imag = parse_xspice_complex_component(
-        stream,
-        line_num,
-        param_name,
-        netlist_params,
-        "imaginary",
-        defer_simple_param_refs,
-    )?;
+    let real =
+        parse_xspice_complex_component(stream, line_num, param_name, netlist_params, "real")?;
+    let imag =
+        parse_xspice_complex_component(stream, line_num, param_name, netlist_params, "imaginary")?;
 
     skip_vector_commas(stream);
     if !stream.consume(&TokenKind::Other('>')) {
@@ -1943,6 +1931,23 @@ fn parse_xspice_complex_literal(
         });
     }
 
+    // Recognize the entire pair, including both expression grammars, before
+    // evaluating either component. String-vector parsing may abandon this
+    // candidate; that fallback must not consume statistical samples.
+    let real = resolve_xspice_complex_component(
+        real,
+        line_num,
+        param_name,
+        netlist_params,
+        defer_simple_param_refs,
+    )?;
+    let imag = resolve_xspice_complex_component(
+        imag,
+        line_num,
+        param_name,
+        netlist_params,
+        defer_simple_param_refs,
+    )?;
     match (real, imag) {
         (XspiceComplexComponent::Resolved(real), XspiceComplexComponent::Resolved(imag)) => {
             Ok(XspiceComplexLiteral::Resolved(format!("<{real} {imag}>")))
@@ -1960,7 +1965,6 @@ fn parse_xspice_complex_component(
     param_name: &str,
     netlist_params: &XspiceParseContext<'_>,
     component: &str,
-    defer_simple_param_refs: bool,
 ) -> Result<XspiceComplexComponent, ParseError> {
     netlist_params.check_abort()?;
     skip_vector_commas(stream);
@@ -1996,22 +2000,39 @@ fn parse_xspice_complex_component(
         return Ok(XspiceComplexComponent::Resolved(sign * value));
     }
     let expr_text = signed_xspice_expr(sign, expr_text);
-    if !defer_simple_param_refs && let Ok(value) = netlist_params.evaluate(&expr_text) {
+    expr::parse_expression_with_abort(&expr_text, netlist_params.abort).map_err(
+        |error| match error {
+            expr::ParseExpressionWithAbortError::Aborted => {
+                ParseError::InvalidValue("XSPICE numeric parsing cancelled".into())
+            }
+            expr::ParseExpressionWithAbortError::Parse(error) => ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Invalid {component} part of complex XSPICE parameter '{param_name}': {error}"
+                ),
+            },
+        },
+    )?;
+    Ok(XspiceComplexComponent::Deferred(expr_text))
+}
+
+fn resolve_xspice_complex_component(
+    component: XspiceComplexComponent,
+    line_num: usize,
+    param_name: &str,
+    netlist_params: &XspiceParseContext<'_>,
+    defer_simple_param_refs: bool,
+) -> Result<XspiceComplexComponent, ParseError> {
+    netlist_params.check_abort()?;
+    if !defer_simple_param_refs
+        && let XspiceComplexComponent::Deferred(expression) = &component
+        && let Ok(value) = netlist_params.evaluate(expression)
+    {
         return Ok(XspiceComplexComponent::Resolved(real_instance_value(
             value, line_num, param_name,
         )?));
     }
-    if defer_simple_param_refs {
-        return Ok(XspiceComplexComponent::Deferred(expr_text));
-    }
-
-    Err(ParseError::Syntax {
-        line: line_num,
-        message: format!(
-            "Could not resolve {component} part of complex XSPICE parameter '{}': {}",
-            param_name, expr_text
-        ),
-    })
+    Ok(component)
 }
 
 fn xspice_complex_component_expr(component: XspiceComplexComponent) -> String {
