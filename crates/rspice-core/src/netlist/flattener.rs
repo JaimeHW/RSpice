@@ -2913,15 +2913,30 @@ impl<'a> Flattener<'a> {
         // Keep scoped static fields from accepting runtime quantities hidden
         // inside parameters or functions. Preparation does not sample them.
         let mut expressions = Vec::with_capacity(deferred_params.len());
+        let mut pending_names = deferred_params
+            .iter()
+            .map(|(name, _)| name.to_ascii_uppercase())
+            .collect::<HashSet<_>>();
         for (name, expression) in deferred_params {
-            let prepared = prepare_behavioral_expression_with_abort(expression, &context, abort)
-                .map_err(|error| {
-                    map_preparation_error(error, |error| {
-                        ParseError::InvalidValue(format!(
-                            "instance parameter '{name}' could not be prepared: {error}"
-                        ))
-                    })
-                })?;
+            // Retained definitions must not substitute stale sibling defaults
+            // before the dependency resolver can apply their explicit overrides.
+            // A field's self-reference still sees its enclosing definition.
+            let key = name.to_ascii_uppercase();
+            pending_names.remove(&key);
+            let prepared = prepare_behavioral_expression_preserving_parameters_with_abort(
+                expression,
+                &context,
+                &pending_names,
+                abort,
+            )
+            .map_err(|error| {
+                map_preparation_error(error, |error| {
+                    ParseError::InvalidValue(format!(
+                        "instance parameter '{name}' could not be prepared: {error}"
+                    ))
+                })
+            })?;
+            pending_names.insert(key);
             if behavioral_expression_references_runtime_quantity(&prepared) {
                 return Err(ParseError::InvalidValue(format!(
                     "runtime-dependent instance/model parameter '{name}' is not supported by this device target"
