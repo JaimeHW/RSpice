@@ -683,6 +683,9 @@ converted from its grid `D(node)`/`E(node)` columns, which is lossy: `0`, `1`
 and `0.5` become `0`, `1` and `x`, one change per level held rather than one
 per grid point, and the drive strength those columns already dropped is not
 recovered. A source with neither event timelines nor such columns is refused.
+Version 1 RAW event plots require real columns and a time coordinate in seconds.
+Conflicting unit metadata, complex components, malformed rows, and invalid times
+are rejected before selection or publication, including in redundant bus plots.
 Sampled columns must have a time coordinate. Explicit `s`, `ms`, `us` (also
 `µs`/`μs`), `ns`, `ps`, and `fs` units are converted to seconds; a time coordinate
 without a unit already denotes seconds. Frequency, index, and other non-time

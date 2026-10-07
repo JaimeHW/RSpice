@@ -25,7 +25,8 @@
 //! What a node plot does *not* carry is everything outside the timeline
 //! itself: no unit, no width, and no record of which `.SAVE` or `.OPTIONS`
 //! decision selected the node in the first place. A plot is one node's times
-//! and one node's values.
+//! in seconds and one node's real values. Conflicting table-unit metadata or
+//! complex columns are refused instead of silently changing this interpretation.
 //!
 //! # Buses
 //!
@@ -57,9 +58,15 @@ use crate::io::raw_export::{RawBusTimeline, RawEventKind, RawEventTimeline};
 use crate::io::{RawFile, RawWaveformData};
 use crate::xspice::{DigitalState, DigitalStrength, DigitalValue};
 
+mod validation;
+
 /// Why one rawfile event plot could not be decoded.
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum EventPlotError {
+    /// The event carrier contradicts its real-valued, seconds-based layout.
+    #[error("'{plot}' has invalid event data: {message}")]
+    InvalidData { plot: String, message: String },
+
     /// The plot does not declare exactly a time column and one node.
     #[error(
         "'{plot}' declares {variables} variable(s); an event plot declares a time column and one node"
@@ -310,6 +317,7 @@ pub fn decode_event_plots(file: &RawFile) -> Result<RawEventTraces, EventPlotErr
         let Some(kind) = RawEventKind::from_plot_name(&plot.header.plotname) else {
             continue;
         };
+        validation::validate(plot, kind)?;
         match kind {
             RawEventKind::Digital => traces.digital_traces.push(decode_digital_plot(plot)?),
             RawEventKind::Real => traces.real_traces.push(decode_real_plot(plot)?),
