@@ -165,6 +165,7 @@ enum PreparedEvalFrame {
 struct PreparedExpressionBuilder<'a> {
     ctx: &'a ParamContext,
     external_parameters: &'a HashSet<String>,
+    external_bindings: &'a mut dyn FnMut(&Expr) -> Result<Option<String>, ExprError>,
     programs: Vec<PreparedProgram>,
     function_programs: HashMap<String, usize>,
     maximum_builtin_args: usize,
@@ -238,9 +239,22 @@ impl PreparedExpression {
         ctx: &ParamContext,
         external_parameters: &HashSet<String>,
     ) -> Result<Self, ExprError> {
+        Self::compile_with_bindings(expr, ctx, external_parameters, &mut |_| Ok(None))
+    }
+
+    /// Bind host-owned symbolic operands in the root and every reachable user
+    /// function. Bindings become typed external nodes, preserving lazy reads
+    /// and function argument scope without rewriting or expanding call bodies.
+    pub(crate) fn compile_with_bindings(
+        expr: &Expr,
+        ctx: &ParamContext,
+        external_parameters: &HashSet<String>,
+        external_bindings: &mut dyn FnMut(&Expr) -> Result<Option<String>, ExprError>,
+    ) -> Result<Self, ExprError> {
         let mut builder = PreparedExpressionBuilder {
             ctx,
             external_parameters,
+            external_bindings,
             programs: Vec::new(),
             function_programs: HashMap::new(),
             maximum_builtin_args: 0,
@@ -735,50 +749,54 @@ impl<'a> PreparedExpressionBuilder<'a> {
     }
 
     fn compile_node(&mut self, program: usize, expression: &Expr) -> Result<usize, ExprError> {
-        let node = match expression {
-            Expr::Number(value) => PreparedNode::Number(*value),
-            Expr::ComplexNumber(value) => PreparedNode::ComplexNumber(*value),
-            Expr::StringLiteral(value) => PreparedNode::StringLiteral(value.clone()),
-            Expr::Param(name)
-                if self.external_parameters.contains(name)
-                    && !self.programs[program].formal_args.contains(name) =>
-            {
-                PreparedNode::External(name.clone())
-            }
-            Expr::Param(name) => PreparedNode::Param {
-                formal_index: self.programs[program]
-                    .formal_args
-                    .iter()
-                    .position(|formal| formal == name),
-                name: name.clone(),
-            },
-            Expr::UnaryOp { op, operand } => PreparedNode::Unary {
-                op: *op,
-                operand: self.compile_node(program, operand)?,
-            },
-            Expr::BinOp { op, left, right } => PreparedNode::Binary {
-                op: *op,
-                left: self.compile_node(program, left)?,
-                right: self.compile_node(program, right)?,
-            },
-            Expr::FnCall { name, args } => {
-                let upper = name.to_ascii_uppercase();
-                let user_program = if self.ctx.has_function(&upper) {
-                    Some(self.ensure_function_program(&upper)?)
-                } else {
-                    None
-                };
-                if user_program.is_none() && upper != "IF" {
-                    self.maximum_builtin_args = self.maximum_builtin_args.max(args.len());
+        let node = if let Some(binding) = (self.external_bindings)(expression)? {
+            PreparedNode::External(binding)
+        } else {
+            match expression {
+                Expr::Number(value) => PreparedNode::Number(*value),
+                Expr::ComplexNumber(value) => PreparedNode::ComplexNumber(*value),
+                Expr::StringLiteral(value) => PreparedNode::StringLiteral(value.clone()),
+                Expr::Param(name)
+                    if self.external_parameters.contains(name)
+                        && !self.programs[program].formal_args.contains(name) =>
+                {
+                    PreparedNode::External(name.clone())
                 }
-                let args = args
-                    .iter()
-                    .map(|argument| self.compile_node(program, argument))
-                    .collect::<Result<Vec<_>, _>>()?;
-                PreparedNode::Function {
-                    name: upper,
-                    args,
-                    user_program,
+                Expr::Param(name) => PreparedNode::Param {
+                    formal_index: self.programs[program]
+                        .formal_args
+                        .iter()
+                        .position(|formal| formal == name),
+                    name: name.clone(),
+                },
+                Expr::UnaryOp { op, operand } => PreparedNode::Unary {
+                    op: *op,
+                    operand: self.compile_node(program, operand)?,
+                },
+                Expr::BinOp { op, left, right } => PreparedNode::Binary {
+                    op: *op,
+                    left: self.compile_node(program, left)?,
+                    right: self.compile_node(program, right)?,
+                },
+                Expr::FnCall { name, args } => {
+                    let upper = name.to_ascii_uppercase();
+                    let user_program = if self.ctx.has_function(&upper) {
+                        Some(self.ensure_function_program(&upper)?)
+                    } else {
+                        None
+                    };
+                    if user_program.is_none() && upper != "IF" {
+                        self.maximum_builtin_args = self.maximum_builtin_args.max(args.len());
+                    }
+                    let args = args
+                        .iter()
+                        .map(|argument| self.compile_node(program, argument))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    PreparedNode::Function {
+                        name: upper,
+                        args,
+                        user_program,
+                    }
                 }
             }
         };

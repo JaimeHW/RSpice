@@ -2662,3 +2662,66 @@ fn polynomial_preparation_can_be_cancelled_before_lowering_finishes() {
     assert_eq!(error, BehavioralPreparationError::Aborted);
     assert_eq!(abort.count(), 9);
 }
+
+#[test]
+fn prepared_host_bindings_reach_shared_function_bodies_and_remain_lazy() {
+    let mut ctx = ParamContext::new();
+    ctx.define_function("choose", vec!["X".into()], "IF(X,HOST(),0)");
+    let mut bound_calls = 0;
+    let expression = parse_expression("choose(0)+choose(1)").unwrap();
+    let mut prepared = PreparedExpression::compile_with_bindings(
+        &expression,
+        &ctx,
+        &std::collections::HashSet::new(),
+        &mut |node| {
+            if matches!(node, Expr::FnCall { name, .. } if name == "HOST") {
+                bound_calls += 1;
+                // A typed host binding cannot be captured by a formal with the
+                // same spelling. Production measurement keys also use NUL.
+                Ok(Some("X".to_owned()))
+            } else {
+                Ok(None)
+            }
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        bound_calls, 1,
+        "shared bodies must not expand at every call"
+    );
+    let mut reads = 0;
+    let value = prepared
+        .evaluate_with(&ctx, &mut |name| {
+            assert_eq!(name, "X");
+            reads += 1;
+            Ok(Some(7.0.into()))
+        })
+        .unwrap();
+    assert_eq!(value, 7.0.into());
+    assert_eq!(reads, 1, "the unused branch must not read the host");
+}
+
+#[test]
+fn host_binding_errors_inside_user_functions_propagate_from_compilation() {
+    let mut ctx = ParamContext::new();
+    ctx.define_function("outer", vec![], "HOST()");
+    let error = PreparedExpression::compile_with_bindings(
+        &parse_expression("outer()").unwrap(),
+        &ctx,
+        &std::collections::HashSet::new(),
+        &mut |node| {
+            if matches!(node, Expr::FnCall { name, .. } if name == "HOST") {
+                Err(ExprError::InvalidArgument(
+                    "host compilation cancelled".to_owned(),
+                ))
+            } else {
+                Ok(None)
+            }
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        error,
+        ExprError::InvalidArgument("host compilation cancelled".to_owned())
+    );
+}
