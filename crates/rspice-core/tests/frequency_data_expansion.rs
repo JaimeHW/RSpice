@@ -118,3 +118,25 @@ fn a_table_shared_by_textual_and_typed_consumers_is_not_removed() {
         }
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn runtime_table_continuation_rows_survive_textual_expansion() {
+    let source = "Mixed tables\n.param supply=1\nV1 out 0 {supply} AC 1\nR1 out 0 1k\n.data bias supply\n1\n2\n.enddata\n.data points FREQ\n100\n+ 10\n.enddata\n.dc data=bias\n.ac data=points\n.end\n";
+    let decks = try_expand_multi_run(source).unwrap();
+    assert_eq!(decks.len(), 2);
+    for deck in decks {
+        let netlist = Netlist::parse(&deck.source).unwrap();
+        assert_eq!(netlist.data_tables.len(), 1);
+        assert_eq!(
+            netlist
+                .frequency_data_table_points("points")
+                .unwrap()
+                .iter()
+                .map(|point| point.frequency)
+                .collect::<Vec<_>>(),
+            [100.0, 10.0]
+        );
+        assert!(deck.source.contains("+ 10"));
+    }
+}
