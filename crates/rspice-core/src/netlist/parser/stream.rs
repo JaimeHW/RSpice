@@ -267,6 +267,18 @@ impl TokenStream<'_> {
         )?)
     }
 
+    pub(super) fn model_expression_references_temperature(
+        &self,
+        expression: &str,
+        params: &ParamContext,
+    ) -> bool {
+        // Cancellation stays latched at the numeric parse boundary. Retain the
+        // expression rather than trying to evaluate it after an interrupted scan.
+        params
+            .model_expression_references_temperature_with_abort(expression, self.abort)
+            .unwrap_or(true)
+    }
+
     pub(super) fn evaluate_expression(
         &self,
         expression: &str,

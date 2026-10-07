@@ -31,6 +31,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub const DEFAULT_RANDOM_SEED: u64 = 1;
 
 const DEFAULT_TEMPERATURE_C: Value = 27.0;
+
+/// Model quantities bound by construction after instance and card overrides.
+pub(crate) const MODEL_TEMPERATURE_PARAMETERS: [&str; 4] = ["TEMP", "TEMPER", "TNOM", "VT"];
 const GOLDEN_GAMMA: u64 = 0x9E37_79B9_7F4A_7C15;
 
 /// Finalizer from SplitMix64 (Steele, Lea, Flood 2014).
@@ -967,12 +970,44 @@ impl ParamContext {
         expression: &str,
         matches_parameter: impl Fn(&str) -> bool,
     ) -> bool {
+        self.expression_references_parameters_with_abort(
+            expression,
+            matches_parameter,
+            &crate::abort_signal::NoAbort,
+        )
+        .expect("NoAbort cannot cancel parameter dependency inspection")
+    }
+
+    /// Inspect functions without expanding their call graph or sampling values.
+    /// A formal named TEMP shadows that name only inside its own function body.
+    pub(crate) fn model_expression_references_temperature_with_abort(
+        &self,
+        expression: &str,
+        abort: &dyn crate::abort_signal::AbortSignal,
+    ) -> Result<bool, super::BehavioralPreparationError> {
+        self.expression_references_parameters_with_abort(
+            expression,
+            |name| {
+                MODEL_TEMPERATURE_PARAMETERS
+                    .iter()
+                    .any(|parameter| name.eq_ignore_ascii_case(parameter))
+            },
+            abort,
+        )
+    }
+
+    pub(crate) fn expression_references_parameters_with_abort(
+        &self,
+        expression: &str,
+        matches_parameter: impl Fn(&str) -> bool,
+        abort: &dyn crate::abort_signal::AbortSignal,
+    ) -> Result<bool, super::BehavioralPreparationError> {
         let mut pending = vec![(expression, &[] as &[String])];
         let mut visited = std::collections::HashSet::new();
         while let Some((expression, formals)) = pending.pop() {
             let found = super::behavioral::any_expression_identifier_with_abort(
                 expression,
-                &crate::abort_signal::NoAbort,
+                abort,
                 |name, is_call| {
                     if is_call {
                         if let Some(function) = self.get_function(name)
@@ -997,13 +1032,12 @@ impl ParamContext {
                                     }))
                     }
                 },
-            )
-            .expect("NoAbort cannot cancel parameter dependency inspection");
+            )?;
             if found {
-                return true;
+                return Ok(true);
             }
         }
-        false
+        Ok(false)
     }
 
     pub(crate) fn capture_statistical_parameter_expression(

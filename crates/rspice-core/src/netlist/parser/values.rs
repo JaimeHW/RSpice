@@ -35,32 +35,6 @@ pub(super) fn card_values_may_sample(stream: &TokenStream) -> bool {
         })
 }
 
-/// Temperature- and thermal-voltage-dependent model expressions must remain
-/// symbolic.  Evaluating them against the parser's default 27 C context
-/// would freeze the device parameter before an analysis starts.
-pub(super) fn model_expression_references_temperature(expression: &str) -> bool {
-    let bytes = expression.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index].is_ascii_alphabetic() || bytes[index] == b'_' {
-            let start = index;
-            index += 1;
-            while index < bytes.len()
-                && (bytes[index].is_ascii_alphanumeric() || bytes[index] == b'_')
-            {
-                index += 1;
-            }
-            let identifier = expression[start..index].to_ascii_uppercase();
-            if matches!(identifier.as_str(), "TEMP" | "TEMPER" | "TNOM" | "VT") {
-                return true;
-            }
-        } else {
-            index += 1;
-        }
-    }
-    false
-}
-
 pub(super) fn split_spice_fields(line: &str) -> Vec<String> {
     let mut fields = Vec::new();
     let mut current = String::new();
@@ -472,7 +446,9 @@ pub(super) fn parse_model_params(
                                 name,
                                 value,
                             );
-                        } else if params.expression_references_spectre_statistics(&value) {
+                        } else if stream.model_expression_references_temperature(&value, params)
+                            || params.expression_references_spectre_statistics(&value)
+                        {
                             stream.advance();
                             expr_params.push((name, value));
                         } else if let Some(value) = try_signed_model_value(stream, params) {
@@ -529,7 +505,7 @@ pub(super) fn parse_model_params(
                             let expr = expr.clone();
                             stream.advance();
                             if defer_expression_params
-                                || model_expression_references_temperature(&expr)
+                                || stream.model_expression_references_temperature(&expr, params)
                                 || params.expression_references_spectre_statistics(&expr)
                             {
                                 expr_params.push((name, expr));
@@ -617,6 +593,10 @@ pub(super) fn parse_model_params(
                                 name,
                                 value,
                             );
+                        } else if let Some(expr) =
+                            try_deferred_model_temperature_value(stream, params)
+                        {
+                            expr_params.push((name, expr));
                         } else if stream.consume(&TokenKind::LParen) {
                             if let Some(value) = try_signed_model_value(stream, params) {
                                 numeric_params.push((name, value));
@@ -670,6 +650,8 @@ pub(super) fn parse_model_params(
                     }
                     _ => numeric_params.push((name, 1.0)),
                 }
+            } else if let Some(expr) = try_deferred_model_temperature_value(stream, params) {
+                expr_params.push((name, expr));
             } else if let Some(value) = try_signed_model_value(stream, params) {
                 // Xyce and SPICE-compatible model cards also permit the
                 // positional `NAME VALUE` form (for example, `BF 20`).
@@ -798,7 +780,7 @@ fn try_xspice_model_scalar_expression(
         return Some(ParsedModelScalarExpression::Resolved(value));
     }
     if defer_expression_params
-        || model_expression_references_temperature(&expr)
+        || stream.model_expression_references_temperature(&expr, params)
         || params.expression_references_spectre_statistics(&expr)
     {
         return Some(ParsedModelScalarExpression::Deferred(expr));
@@ -807,6 +789,33 @@ fn try_xspice_model_scalar_expression(
     match stream.evaluate_expression(&expr, params) {
         Ok(value) => Some(ParsedModelScalarExpression::Resolved(value)),
         Err(_) => Some(ParsedModelScalarExpression::Deferred(expr)),
+    }
+}
+
+fn try_deferred_model_temperature_value(
+    stream: &mut TokenStream,
+    params: &ParamContext,
+) -> Option<String> {
+    if matches!(stream.peek().kind, TokenKind::Number(_)) {
+        return None;
+    }
+    let checkpoint = stream.checkpoint();
+    let expression = if let Some(expression) = take_value_expression_string(stream, params) {
+        Some(expression)
+    } else if stream.consume(&TokenKind::LParen) {
+        take_value_expression_string(stream, params).filter(|_| stream.consume(&TokenKind::RParen))
+    } else {
+        collect_contiguous_expression(stream)
+    };
+    let Some(expression) = expression else {
+        stream.restore_checkpoint(checkpoint);
+        return None;
+    };
+    if stream.model_expression_references_temperature(&expression, params) {
+        Some(expression)
+    } else {
+        stream.restore_checkpoint(checkpoint);
+        None
     }
 }
 
@@ -1577,7 +1586,9 @@ fn parse_model_real_vector_entry(
         ParsedModelRealVectorEntry::Resolved(sign * value)
     } else if let Some(value) = parse_boolean_literal(&expr) {
         ParsedModelRealVectorEntry::Resolved(sign * value)
-    } else if defer_expression_params || model_expression_references_temperature(&expr) {
+    } else if defer_expression_params
+        || stream.model_expression_references_temperature(&expr, params)
+    {
         ParsedModelRealVectorEntry::Deferred(signed_expr(expr))
     } else {
         let value = stream.evaluate_expression(&expr, params).map_err(|err| {

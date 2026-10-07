@@ -2896,3 +2896,46 @@ fn control_quoted_vectors_preserve_regular_strings_and_ternary_separators() {
         Err(ParseExpressionWithAbortError::Aborted)
     ));
 }
+
+#[test]
+fn model_temperature_dependency_inspection_visits_function_graph_once() {
+    use crate::abort_signal::CountingAbort;
+    let mut context = ParamContext::new();
+    context.define_function("f0", vec![], "1");
+    for index in 1..=30 {
+        context.define_function(
+            &format!("f{index}"),
+            vec![],
+            &format!("f{}()+f{}()", index - 1, index - 1),
+        );
+    }
+    let abort = CountingAbort::new(128);
+    assert!(
+        !context
+            .model_expression_references_temperature_with_abort("f30()", &abort)
+            .unwrap()
+    );
+    assert!(abort.count() < 128);
+}
+
+#[test]
+fn model_temperature_dependency_inspection_cancels_without_sampling() {
+    use crate::abort_signal::{CountingAbort, NoAbort};
+    let mut context = ParamContext::new();
+    context.define_function("thermal", vec![], "rand()+TEMP");
+    assert!(
+        context
+            .model_expression_references_temperature_with_abort("thermal()", &NoAbort)
+            .unwrap()
+    );
+    assert_eq!(
+        context.random().next_uniform(),
+        RandomState::default().next_uniform()
+    );
+    let abort = CountingAbort::new(1);
+    assert!(matches!(
+        context.model_expression_references_temperature_with_abort("thermal()", &abort),
+        Err(BehavioralPreparationError::Aborted)
+    ));
+    assert_eq!(abort.polls_after_abort(), 0);
+}

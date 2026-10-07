@@ -4104,9 +4104,19 @@ fn resolve_static_model_expression_params_with_abort(
                 // circuit probes) must remain deferred.  Evaluating them
                 // against the parser's nominal context would silently freeze
                 // a model parameter before the active operating point exists.
+                let temperature_dependent = context
+                    .model_expression_references_temperature_with_abort(&expression, abort)
+                    .map_err(|error| match error {
+                        super::expr::BehavioralPreparationError::Aborted => {
+                            ParseWithAbortError::Aborted
+                        }
+                        super::expr::BehavioralPreparationError::Semantic(error) => {
+                            ParseError::InvalidValue(error).into()
+                        }
+                    })?;
                 if crate::netlist::expr::behavioral_expression_references_runtime_quantity(
                     &expression,
-                ) || values::model_expression_references_temperature(&expression)
+                ) || temperature_dependent
                     || state
                         .spectre_statistics
                         .references_parameter(&expression, &context)
