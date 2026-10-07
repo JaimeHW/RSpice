@@ -671,7 +671,7 @@ jobs:
         env:
           WASM_BINDGEN_USE_BROWSER: '1'
         run: cargo test --locked -p rspice-wasm -p rspice-cloud-client --lib --target wasm32-unknown-unknown
-      - name: Test core GP contracts in a WebAssembly worker
+      - name: Test core GP and pole-zero contracts in a WebAssembly worker
         env:
           WASM_BINDGEN_USE_DEDICATED_WORKER: '1'
           WASM_BINDGEN_TEST_TIMEOUT: '180'
@@ -680,6 +680,7 @@ jobs:
           --release --no-default-features --features wasm,veriloga-wasm-jit
           --test bjt_excess_phase_transient --test gp_history_resources
           --test gp_phase_cancellation --test gp_phase_regimes
+          --test pole_zero_public_contract --test pole_zero_descriptor_rank
       - name: Test UI clocks in a browser window
         env:
           WASM_BINDGEN_USE_BROWSER: '1'

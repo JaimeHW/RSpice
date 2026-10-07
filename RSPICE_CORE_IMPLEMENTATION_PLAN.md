@@ -637,3 +637,39 @@ There are now eight implemented control dispositions and 21 remaining. C04c
 still requires PoleZero, Sensitivity, Stb, Sp, Disto and DcMatch; C04d–C04g and
 the broader C04 binding, configuration, resource and performance qualification
 remain open. All 15 packages retain their existing open/in-progress status.
+
+## C04c pole-zero prerequisites — October 7, 2026
+
+Direct PZ completion and identity are repaired in `fd274f3f7`: both solver
+paths honor cancellation from the final progress callback, and results retain
+the physical input/output quantities and differential circuit node names.
+`b5289f9c9` moves the shared exact constraint kernel beneath analysis owners
+without duplicating its equations or storage/cancellation policy.
+
+`de509f0f3` repairs a numerical defect discovered while preparing PZ control:
+a differential RC with H(s)=1/(1+0.001*s) previously produced a spurious unstable
+pole and zero near +1.14e19. Exact algebraic closure now separates infinite
+chains before solving the finite state matrix. Permanent regressions preserve
+true fast modes beyond that magnitude, exact infinite multiplicity, higher-index
+zeros, row/column permutations, irregular refusal, inner cancellation and typed
+workspace limits. Both new regression targets are included in the existing
+optimized Firefox worker CI command; local WASM execution used Chrome.
+The scoped evidence is `core-pole-zero-descriptor-windows-20261007.json` in the
+qualification directory. It records native and optimized WASM execution,
+dependent callers, unchanged thresholds and the unresolved Rust 1.94 MIR ICE.
+
+PZ control support remains unimplemented. Before closing that slice, complete:
+
+1. Dense high-frequency gain, including static gain, zero asymptotes and
+   improper transfers. The current dense path leaves `hf_gain` absent even
+   for a 1 kohm static transimpedance. Use descriptor equations and analytical
+   regressions; an arbitrary high-frequency sample is insufficient.
+2. Root/gain unit contracts and complex control assignments, conditions,
+   scalar/root indexing and presentations without discarding imaginary parts.
+3. Explicit `pz` and declarative `run`, immutable retained dataset identities,
+   cumulative budgets, failure rollback, and CLI/WASM publication through the
+   shared core card runner.
+4. Broader option/model, resource and performance evidence on committed source.
+
+These prerequisite repairs do not change the control inventory: eight of 29
+dispositions are implemented, 21 remain, and all 15 packages remain open.
