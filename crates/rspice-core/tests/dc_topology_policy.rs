@@ -17,6 +17,62 @@ fn voltage(result: &rspice_core::solver::SimulationResult, node: &str) -> f64 {
         .unwrap_or_else(|| panic!("missing voltage for node {node}"))
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn homogeneous_dc_retains_a_unique_bias_when_floating_lu_loses_a_pivot() {
+    for exponent in [-100, 0, 100] {
+        let scale = 2.0_f64.powi(exponent);
+        for algebraic_first in [false, true] {
+            let first = format!("G11 a 0 a 0 {:.17e}\n", 0.06666666666666668 * scale);
+            let second = format!("G22 b 0 b 0 {:.17e}\n", 0.3 * scale);
+            let netlist = parse(&format!(
+                "Unique zero bias\n{}{}G12 a 0 b 0 {:.17e}\nG21 b 0 a 0 {:.17e}\n.op\n.end\n",
+                if algebraic_first { &second } else { &first },
+                if algebraic_first { &first } else { &second },
+                0.1 * scale,
+                0.2 * scale,
+            ));
+            let mut config = SimulationConfig::default();
+            config.convergence_config.gmin_target = 0.0;
+            config.convergence_config.gmin_stepping = false;
+            config.convergence_config.source_stepping = false;
+            let engine = Engine::new_with_resolved_config(config);
+            // Exact binary64 determinant is nonzero. Neither a numerical
+            // shunt nor a continuation aid is needed to select this bias.
+            let result = engine.run_dc_op(&netlist).unwrap_or_else(|error| {
+                panic!("scale=2^{exponent}, order={algebraic_first}: {error}")
+            });
+            assert_eq!(voltage(&result, "a"), 0.0);
+            assert_eq!(voltage(&result, "b"), 0.0);
+            assert_eq!(engine.convergence_quality().gmin_stepping_count, 0);
+            assert_eq!(engine.convergence_quality().source_stepping_count, 0);
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn zero_residual_does_not_admit_an_underdetermined_dc_bias() {
+    for exponent in [-100, 0, 100] {
+        let scale = 2.0_f64.powi(exponent);
+        // Rows are exactly proportional in binary64, so infinitely many
+        // solutions have a zero residual, including the all-zero vector.
+        let netlist = parse(&format!(
+            "Nonunique zero bias\nG11 a 0 a 0 {scale:.17e}\nG12 a 0 b 0 {scale:.17e}\nG21 b 0 a 0 {:.17e}\nG22 b 0 b 0 {:.17e}\n.op\n.end\n",
+            2.0 * scale,
+            2.0 * scale,
+        ));
+        let mut config = SimulationConfig::default();
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.gmin_stepping = false;
+        config.convergence_config.source_stepping = false;
+        let error = Engine::new_with_resolved_config(config)
+            .run_dc_op(&netlist)
+            .expect_err("the circuit has no unique bias");
+        assert!(error.to_string().contains("singular"), "{error}");
+    }
+}
+
 #[test]
 fn internal_current_source_preserves_physical_differential_solution() {
     let netlist = parse(

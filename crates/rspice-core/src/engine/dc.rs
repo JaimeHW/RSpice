@@ -1747,7 +1747,7 @@ impl Engine {
                         if abort.is_aborted() {
                             return Err(SimulationError::Aborted);
                         }
-                        engine.solve_linear(&mut circuit, &mut matrix)?
+                        engine.solve_linear_with_abort(&mut circuit, &mut matrix, abort)?
                     };
                 let solution =
                     if circuit.has_nonlinear_devices() || !circuit.generic_switches.is_empty() {

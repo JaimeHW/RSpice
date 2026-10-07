@@ -21,6 +21,61 @@ pub(crate) mod finite;
 pub(crate) mod transition;
 pub(crate) use descriptor::{ConstraintDisposition, close_descriptor};
 
+/// Prove full rank of a square matrix without rounding its coefficients.
+/// Entries must be unique and ordered by column; absent entries are zero.
+/// Eliminate columns as rows of the transpose so only one incoming sparse
+/// column is retained beside the bounded elimination workspace.
+pub(crate) fn has_full_rank(
+    size: usize,
+    entries: impl IntoIterator<Item = (usize, usize, Value)>,
+    limits: crate::resource::ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<bool, ConstraintError> {
+    if abort.is_aborted() {
+        return Err(ConstraintError::Aborted);
+    }
+    crate::resource::ResourceLimitError::ensure(
+        crate::resource::ResourceKind::MatrixUnknowns,
+        size,
+        limits.max_matrix_unknowns,
+    )?;
+    let mut reducer = ExactElimination::<()>::new(size, limits)?;
+    let mut column = 0;
+    let mut equation = ExactRow::default();
+    for (row, next_column, value) in entries {
+        if abort.is_aborted() {
+            return Err(ConstraintError::Aborted);
+        }
+        if row >= size || next_column >= size || next_column < column || !value.is_finite() {
+            return Err(ConstraintError::Invalid(
+                "invalid exact-rank matrix entry".to_owned(),
+            ));
+        }
+        if next_column != column {
+            if next_column != column + 1 || reducer.admit(equation, 0, abort)?.is_some() {
+                return Ok(false);
+            }
+            equation = ExactRow::default();
+            column = next_column;
+        }
+        if value != 0.0 {
+            // A binary64 integer coefficient has at most 2098 bits. Account
+            // for it and map overhead before materializing the next entry.
+            reducer.check_cost(equation.words().saturating_add(160))?;
+            equation
+                .nodes
+                .insert(row, integer_coefficient(value).unwrap());
+        }
+    }
+    if size == 0 {
+        return Ok(true);
+    }
+    if column != size - 1 || reducer.admit(equation, 0, abort)?.is_some() {
+        return Ok(false);
+    }
+    Ok(reducer.rows.len() == size)
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ExactRow<K> {
     pub(crate) nodes: BTreeMap<usize, BigInt>,
@@ -301,5 +356,62 @@ impl<K: Ord + Copy> ExactElimination<K> {
         self.pivots[pivot] = Some(self.rows.len());
         self.rows.push((pivot, row));
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod rank_tests {
+    use super::*;
+    use crate::abort_signal::{CountingAbort, NoAbort};
+    use crate::resource::{ResourceKind, ResourceLimits};
+
+    const REGULAR: [(usize, usize, Value); 4] = [
+        (0, 0, 0.06666666666666668),
+        (1, 0, 0.2),
+        (0, 1, 0.1),
+        (1, 1, 0.3),
+    ];
+
+    #[test]
+    fn rank_preserves_sub_ulp_determinants_and_empty_columns() {
+        let limits = ResourceLimits::default();
+        assert!(has_full_rank(2, REGULAR, limits, &NoAbort).unwrap());
+        for entries in [
+            vec![(0, 0, 1.0), (1, 0, 2.0), (0, 1, 1.0), (1, 1, 2.0)],
+            vec![(1, 1, 1.0)],
+            vec![(0, 0, 1.0)],
+            vec![],
+        ] {
+            assert!(!has_full_rank(2, entries, limits, &NoAbort).unwrap());
+        }
+    }
+
+    #[test]
+    fn rank_honors_abort_and_workspace_limits_during_elimination() {
+        let limits = ResourceLimits::default();
+        let counter = CountingAbort::new(usize::MAX);
+        assert!(has_full_rank(2, REGULAR, limits, &counter).unwrap());
+        for threshold in 0..counter.count() {
+            let abort = CountingAbort::new(threshold);
+            assert!(matches!(
+                has_full_rank(2, REGULAR, limits, &abort),
+                Err(ConstraintError::Aborted)
+            ));
+            assert_eq!(abort.count(), threshold + 1);
+        }
+        let mut limited = limits;
+        limited.max_result_values = 100;
+        assert!(matches!(
+            has_full_rank(2, REGULAR, limited, &NoAbort),
+            Err(ConstraintError::ResourceLimit(error))
+                if error.resource == ResourceKind::ResultValues
+        ));
+        limited = limits;
+        limited.max_matrix_unknowns = 1;
+        assert!(matches!(
+            has_full_rank(2, REGULAR, limited, &NoAbort),
+            Err(ConstraintError::ResourceLimit(error))
+                if error.resource == ResourceKind::MatrixUnknowns
+        ));
     }
 }

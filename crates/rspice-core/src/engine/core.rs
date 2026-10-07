@@ -1659,7 +1659,7 @@ impl Engine {
                         abort,
                     )
                 } else {
-                    self.solve_linear(circuit, matrix)
+                    self.solve_linear_with_abort(circuit, matrix, abort)
                 }
             }
             DcOpStartup::Zero => {
@@ -1667,7 +1667,7 @@ impl Engine {
                     let seed = vec![0.0; circuit.matrix_size()];
                     self.solve_nonlinear_with_guess_and_abort(circuit, matrix, Some(&seed), abort)
                 } else {
-                    self.solve_linear(circuit, matrix)
+                    self.solve_linear_with_abort(circuit, matrix, abort)
                 }
             }
             DcOpStartup::Automatic { use_hints } => {
@@ -1682,7 +1682,7 @@ impl Engine {
                     if abort.is_aborted() {
                         return Err(SimulationError::Aborted);
                     }
-                    self.solve_linear(circuit, matrix)
+                    self.solve_linear_with_abort(circuit, matrix, abort)
                 }
             }
         }?;

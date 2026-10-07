@@ -831,7 +831,7 @@ impl Engine {
                 // Last-resort seed: linearized solve with nonlinear devices effectively open.
                 // This keeps transient progression possible for strongly nonlinear decks that
                 // fail strict t=0 operating-point convergence.
-                match self.solve_linear(circuit, matrix) {
+                match self.solve_linear_with_abort(circuit, matrix, abort) {
                     Ok(mut solution) => {
                         for v in &mut solution {
                             if !v.is_finite() {
@@ -844,6 +844,12 @@ impl Engine {
                             "Transient startup using linearized initial seed after DC OP failure."
                         );
                         Ok((solution, InitialSolutionMode::LinearizedSeed, None))
+                    }
+                    Err(linear_err)
+                        if linear_err.is_stopped()
+                            || matches!(linear_err, SimulationError::ResourceLimit(_)) =>
+                    {
+                        Err(linear_err)
                     }
                     Err(linear_err) => Err(SimulationError::Circuit(format!(
                         "Transient startup failed: primary DC error: {}; linearized fallback error: {}",

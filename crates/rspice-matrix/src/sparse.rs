@@ -1306,6 +1306,14 @@ impl StaticMatrix {
         })
     }
 
+    /// Borrow each stored `(row, column, value)` in column order, including
+    /// explicit zeros, without copying or equilibrating the coefficients.
+    pub fn stored_entries(&self) -> impl Iterator<Item = (usize, usize, Value)> + '_ {
+        self.stored_positions()
+            .zip(&self.values)
+            .map(|((row, column), &value)| (row, column, value))
+    }
+
     /// Create a zero-valued matrix with the same sparsity structure.
     ///
     /// This is used for residual probes that must stamp into an independent

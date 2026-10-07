@@ -204,11 +204,15 @@ impl Engine {
     }
 
     /// Solve a linear circuit (no nonlinear devices)
-    pub(crate) fn solve_linear(
+    pub(crate) fn solve_linear_with_abort(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
+        abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         let size = circuit.matrix_size();
         let mut rhs = vec![0.0; size];
 
@@ -226,11 +230,31 @@ impl Engine {
         }
 
         let direct_result = matrix.solve(&rhs);
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         if let Ok(sol) = direct_result {
             return Ok(sol);
         }
 
         let mut last_err = direct_result.expect_err("checked Err branch");
+        if matches!(last_err, SolverError::SingularMatrix) && rhs.iter().all(|&value| value == 0.0)
+        {
+            // Floating LU may round a small Schur pivot to zero in a regular
+            // homogeneous system. Zero is its unique solution only when the
+            // original assembled coefficients have full rank. A zero residual
+            // alone would also accept a genuinely singular circuit.
+            let mut limits = self.config.resource_limits;
+            limits.max_result_values = limits.max_result_values.saturating_sub(rhs.len());
+            if crate::numerics::exact_constraints::has_full_rank(
+                size,
+                matrix.stored_entries(),
+                limits,
+                abort,
+            )? {
+                return Ok(rhs);
+            }
+        }
         let conv_cfg = &self.config.convergence_config;
 
         if conv_cfg.gmin_stepping {
