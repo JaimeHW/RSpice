@@ -6,24 +6,15 @@ use crate::circuit::{ResistorFlickerNoise, ThermalResistorState};
 /// applies only when an instance specifies L or W (ressetup.c); the missing
 /// dimension comes from its model default, or 10 um. Exact KF=0 disables
 /// the mechanism; malformed active controls must not silently disable it.
-pub(in crate::engine::builder) fn resolve_resistor_flicker_noise(
-    netlist: &ModelResolution<'_>,
-    model_name: Option<&str>,
-    instance_params: &[(String, f64)],
-    temperature_kelvin: f64,
+fn resolve_resistor_flicker_noise(
+    evaluation: &ResistorEvaluation<'_>,
 ) -> Result<Option<ResistorFlickerNoise>, SimulationError> {
-    let Some(model_name) = model_name else {
+    let Some(model_def) = evaluation.model_def else {
         return Ok(None);
     };
-    let Some(model_def) = find_model_def(netlist, model_name) else {
-        return Ok(None);
-    };
-    let (eval_ctx, _, _) = resolve_passive_eval_context(
-        netlist,
-        Some(model_def),
-        instance_params,
-        temperature_kelvin,
-    )?;
+    let model_name = &model_def.name;
+    let instance_params = evaluation.context.instance_params;
+    let eval_ctx = &evaluation.eval_ctx;
     let parameter = |names: &[&str], default: f64| -> Result<f64, SimulationError> {
         if let Some((name, value)) = model_def.string_params.iter().find(|(name, _)| {
             names
@@ -34,7 +25,7 @@ pub(in crate::engine::builder) fn resolve_resistor_flicker_noise(
                 "Resistor model '{model_name}' flicker parameter {name} must be numeric, got '{value}'"
             )));
         }
-        let value = resolve_model_param(model_def, names, &eval_ctx)?.unwrap_or(default);
+        let value = resolve_model_param(model_def, names, eval_ctx)?.unwrap_or(default);
         if !value.is_finite() {
             return Err(SimulationError::Circuit(format!(
                 "Resistor model '{model_name}' flicker parameter {} must be finite, got {value}",
@@ -333,35 +324,21 @@ fn resolve_level2_thermal_resistor_state(
     Ok(Some(state))
 }
 
-pub(in crate::engine::builder) fn resolve_resistor_thermal_state(
-    element_name: &str,
-    netlist: &ModelResolution<'_>,
-    model_name: Option<&str>,
-    instance_params: &[(String, f64)],
-    temperature_kelvin: f64,
+fn resolve_resistor_thermal_state(
+    evaluation: &ResistorEvaluation<'_>,
 ) -> Result<Option<ThermalResistorState>, SimulationError> {
-    let Some(model_name) = model_name else {
+    let Some(model_def) = evaluation.model_def else {
         return Ok(None);
     };
-    let model_def = find_model_def(netlist, model_name).ok_or_else(|| {
-        SimulationError::Circuit(format!("resistor references unknown model '{model_name}'"))
-    })?;
-    let (eval_ctx, temperature_celsius, _) = resolve_passive_eval_context(
-        netlist,
-        Some(model_def),
-        instance_params,
-        temperature_kelvin,
-    )?;
-    let level = resolve_resistor_model_level(element_name, model_name, model_def, &eval_ctx)?;
-    if level != 2 {
+    if evaluation.model_level != Some(2) {
         return Ok(None);
     }
     resolve_level2_thermal_resistor_state(
-        netlist,
+        evaluation.netlist,
         model_def,
-        instance_params,
-        &eval_ctx,
-        temperature_celsius,
+        evaluation.context.instance_params,
+        &evaluation.eval_ctx,
+        evaluation.temperature_celsius,
     )
 }
 
@@ -631,6 +608,93 @@ pub(in crate::engine::builder) struct ResistorResolutionContext<'a> {
     pub spice_dialect: SpiceDialect,
 }
 
+/// One model evaluation per physical instance. Electrical, thermal and noise
+/// consumers share its resolved values and statistical samples.
+pub(in crate::engine::builder) struct ResistorEvaluation<'a> {
+    netlist: &'a ModelResolution<'a>,
+    element_name: &'a str,
+    context: ResistorResolutionContext<'a>,
+    model_def: Option<&'a crate::netlist::ModelDef>,
+    eval_ctx: ModelEvaluationContext<'a>,
+    temperature_celsius: f64,
+    tnom_celsius: f64,
+    model_level: Option<i32>,
+}
+
+impl<'a> ResistorEvaluation<'a> {
+    pub(in crate::engine::builder) fn new(
+        netlist: &'a ModelResolution<'a>,
+        element_name: &'a str,
+        context: ResistorResolutionContext<'a>,
+    ) -> Result<Self, SimulationError> {
+        let ResistorResolutionContext {
+            model_name,
+            instance_params,
+            temperature_kelvin,
+            ..
+        } = context;
+        let model_def = if let Some(model_name) = model_name {
+            let model_def = find_model_def(netlist, model_name).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "Resistor '{}' references unknown model '{}'",
+                    element_name, model_name
+                ))
+            })?;
+            ensure_model_type(
+                "Resistor",
+                element_name,
+                model_name,
+                model_def,
+                &["R", "RES", "RESISTOR"],
+            )?;
+            Some(model_def)
+        } else {
+            None
+        };
+
+        let (eval_ctx, current_temp_c, tnom_c) =
+            resolve_passive_eval_context(netlist, model_def, instance_params, temperature_kelvin)?;
+        let resistor_level = if let (Some(model_def), Some(model_name)) = (model_def, model_name) {
+            let level =
+                resolve_resistor_model_level(element_name, model_name, model_def, &eval_ctx)?;
+            Some(level)
+        } else {
+            None
+        };
+
+        Ok(Self {
+            netlist,
+            element_name,
+            context,
+            model_def,
+            eval_ctx,
+            temperature_celsius: current_temp_c,
+            tnom_celsius: tnom_c,
+            model_level: resistor_level,
+        })
+    }
+
+    pub(in crate::engine::builder) fn effective_parameters(
+        &self,
+        value: f64,
+        value_expr: Option<&str>,
+    ) -> Result<ResolvedResistorParameters, SimulationError> {
+        resolve_resistor_parameters(self, value, value_expr)
+    }
+
+    pub(in crate::engine::builder) fn thermal_state(
+        &self,
+    ) -> Result<Option<ThermalResistorState>, SimulationError> {
+        resolve_resistor_thermal_state(self)
+    }
+
+    pub(in crate::engine::builder) fn flicker_noise(
+        &self,
+    ) -> Result<Option<ResistorFlickerNoise>, SimulationError> {
+        resolve_resistor_flicker_noise(self)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 /// Resistor parameters after `.PARAM`, model-card, and `.STEP` resolution.
 pub struct ResolvedResistorParameters {
@@ -664,40 +728,28 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
     value_expr: Option<&str>,
     context: ResistorResolutionContext<'_>,
 ) -> Result<ResolvedResistorParameters, SimulationError> {
+    ResistorEvaluation::new(netlist, element_name, context)?.effective_parameters(value, value_expr)
+}
+
+fn resolve_resistor_parameters(
+    evaluation: &ResistorEvaluation<'_>,
+    value: f64,
+    value_expr: Option<&str>,
+) -> Result<ResolvedResistorParameters, SimulationError> {
+    let netlist = evaluation.netlist;
+    let element_name = evaluation.element_name;
     let ResistorResolutionContext {
         model_name,
         instance_params,
         temperature_kelvin,
         spice_dialect,
-    } = context;
-    let model_def = if let Some(model_name) = model_name {
-        let model_def = find_model_def(netlist, model_name).ok_or_else(|| {
-            SimulationError::Circuit(format!(
-                "Resistor '{}' references unknown model '{}'",
-                element_name, model_name
-            ))
-        })?;
-        ensure_model_type(
-            "Resistor",
-            element_name,
-            model_name,
-            model_def,
-            &["R", "RES", "RESISTOR"],
-        )?;
-        Some(model_def)
-    } else {
-        None
-    };
-
-    let (eval_ctx, current_temp_c, tnom_c) =
-        resolve_passive_eval_context(netlist, model_def, instance_params, temperature_kelvin)?;
+    } = evaluation.context;
+    let model_def = evaluation.model_def;
+    let eval_ctx = &evaluation.eval_ctx;
+    let current_temp_c = evaluation.temperature_celsius;
+    let tnom_c = evaluation.tnom_celsius;
+    let resistor_level = evaluation.model_level;
     let uses_xyce_default = resistor_uses_xyce_default_value(instance_params);
-    let resistor_level = if let (Some(model_def), Some(model_name)) = (model_def, model_name) {
-        let level = resolve_resistor_model_level(element_name, model_name, model_def, &eval_ctx)?;
-        Some(level)
-    } else {
-        None
-    };
 
     let (mut resistance, mut reported_resistance) =
         if let (Some(2), Some(model_def), Some(model_name)) =
@@ -709,7 +761,7 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
                     model_name,
                     model_def,
                     instance_params,
-                    &eval_ctx,
+                    eval_ctx,
                 )?;
                 (Some(resistance), Some(resistance))
             } else {
@@ -720,7 +772,7 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
                     value_expr,
                     model_def,
                     instance_params,
-                    &eval_ctx,
+                    eval_ctx,
                 )?;
                 (
                     Some(resolved.electrical_resistance),
@@ -757,7 +809,7 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
         let model_resistance = resolve_model_param(
             model_def,
             &["R", "RES", "R0", "VALUE", "RESISTANCE"],
-            &eval_ctx,
+            eval_ctx,
         )?;
 
         if resistor_level != Some(2) {
@@ -766,7 +818,7 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
                     element_name,
                     model_def,
                     instance_params,
-                    &eval_ctx,
+                    eval_ctx,
                     netlist.params.expression_dialect(),
                     spice_dialect,
                 )?
@@ -834,21 +886,21 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
     let width = if let Some(width) = instance_param(instance_params, &["W", "WIDTH"]) {
         width
     } else if let Some(model_def) = model_def {
-        resolve_model_param(model_def, &["DEFW"], &eval_ctx)?.unwrap_or(10.0e-6)
+        resolve_model_param(model_def, &["DEFW"], eval_ctx)?.unwrap_or(10.0e-6)
     } else {
         10.0e-6
     };
     let tc1 = if let Some(tc1) = instance_param(instance_params, &["TC1"]) {
         tc1
     } else if let Some(model_def) = model_def {
-        resolve_model_param(model_def, &["TC1"], &eval_ctx)?.unwrap_or(0.0)
+        resolve_model_param(model_def, &["TC1"], eval_ctx)?.unwrap_or(0.0)
     } else {
         0.0
     };
     let tc2 = if let Some(tc2) = instance_param(instance_params, &["TC2"]) {
         tc2
     } else if let Some(model_def) = model_def {
-        resolve_model_param(model_def, &["TC2"], &eval_ctx)?.unwrap_or(0.0)
+        resolve_model_param(model_def, &["TC2"], eval_ctx)?.unwrap_or(0.0)
     } else {
         0.0
     };
@@ -871,7 +923,7 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
     let tce = if let Some(tce) = instance_param(instance_params, &["TCE"]) {
         Some(tce)
     } else if let Some(model_def) = model_def {
-        resolve_model_param(model_def, &["TCE"], &eval_ctx)?
+        resolve_model_param(model_def, &["TCE"], eval_ctx)?
     } else {
         None
     };
@@ -907,7 +959,8 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
     })
 }
 
-pub(in crate::engine::builder) fn resolve_resistor_instance_value(
+#[cfg(test)]
+fn resolve_resistor_instance_value(
     netlist: &ModelResolution<'_>,
     element_name: &str,
     value: f64,
@@ -951,39 +1004,11 @@ pub(in crate::engine::builder) fn resolve_behavioral_resistor_policy(
     element_name: &str,
     context: ResistorResolutionContext<'_>,
 ) -> Result<ResolvedBehavioralResistorPolicy, SimulationError> {
-    let ResistorResolutionContext {
-        model_name,
-        instance_params,
-        temperature_kelvin,
-        spice_dialect,
-    } = context;
-    let model_def = if let Some(model_name) = model_name {
-        Some(find_model_def(netlist, model_name).ok_or_else(|| {
-            SimulationError::Circuit(format!(
-                "Resistor '{}' references unknown model '{}'",
-                element_name, model_name
-            ))
-        })?)
-    } else {
-        None
-    };
-    let (_, temperature_celsius, _) =
-        resolve_passive_eval_context(netlist, model_def, instance_params, temperature_kelvin)?;
-    let scale = resolve_resistor_instance_value(
-        netlist,
-        element_name,
-        1.0,
-        None,
-        ResistorResolutionContext {
-            model_name,
-            instance_params,
-            temperature_kelvin,
-            spice_dialect,
-        },
-    )?;
+    let evaluation = ResistorEvaluation::new(netlist, element_name, context)?;
+    let scale = evaluation.effective_parameters(1.0, None)?.resistance;
     Ok(ResolvedBehavioralResistorPolicy {
         scale,
-        temperature_celsius,
+        temperature_celsius: evaluation.temperature_celsius,
     })
 }
 
@@ -1300,13 +1325,18 @@ R1 in 0 RMOD L=2 A=1 M=2
         .expect("transient thermal material resolves");
         assert_eq!(resolved_transient.resistance, 1.0e-8);
         assert_eq!(resolved_transient.reported_resistance, 2.0e-8);
-        let state = resolve_resistor_thermal_state(
-            "R1",
+        let state = ResistorEvaluation::new(
             &ModelResolution::new(&netlist, &NoAbort),
-            model.as_deref(),
-            instance_params,
-            crate::constants::TEMP_REFERENCE,
+            "R1",
+            ResistorResolutionContext {
+                model_name: model.as_deref(),
+                instance_params,
+                temperature_kelvin: crate::constants::TEMP_REFERENCE,
+                spice_dialect: SpiceDialect::Xyce,
+            },
         )
+        .expect("thermal model resolves")
+        .thermal_state()
         .expect("transient thermal state resolves")
         .expect("thermal state is present");
         assert_eq!(state.length, 2.0);

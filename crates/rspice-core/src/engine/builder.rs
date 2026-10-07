@@ -4043,11 +4043,9 @@ fn add_generated_xspice_auto_bridge_resistor(
         )));
     }
 
-    let resolved = resolve_resistor_effective_parameters(
+    let evaluation = ResistorEvaluation::new(
         generated,
         &element.name,
-        *value,
-        value_expr.as_deref(),
         ResistorResolutionContext {
             model_name: model.as_deref(),
             instance_params,
@@ -4055,6 +4053,7 @@ fn add_generated_xspice_auto_bridge_resistor(
             spice_dialect,
         },
     )?;
+    let resolved = evaluation.effective_parameters(*value, value_expr.as_deref())?;
     let resistance = resolved.resistance;
     let small_signal_resistance =
         resolve_resistor_small_signal_value(&element.name, resistance, instance_params)?;
@@ -4099,12 +4098,7 @@ fn add_generated_xspice_auto_bridge_resistor(
         if let Some(noisy) = instance_param(instance_params, &["NOISY", "NOISE"]) {
             circuit.resistor_branches.set_last_noisy(noisy != 0.0);
         }
-        if let Some(flicker) = resolve_resistor_flicker_noise(
-            generated,
-            model.as_deref(),
-            instance_params,
-            temperature,
-        )? {
+        if let Some(flicker) = evaluation.flicker_noise()? {
             circuit.resistor_branches.set_last_flicker_noise(flicker);
         }
     } else {
@@ -4129,12 +4123,7 @@ fn add_generated_xspice_auto_bridge_resistor(
         if let Some(noisy) = instance_param(instance_params, &["NOISY", "NOISE"]) {
             circuit.resistors.set_last_noisy(noisy != 0.0);
         }
-        if let Some(flicker) = resolve_resistor_flicker_noise(
-            generated,
-            model.as_deref(),
-            instance_params,
-            temperature,
-        )? {
+        if let Some(flicker) = evaluation.flicker_noise()? {
             circuit.resistors.set_last_flicker_noise(flicker);
         }
     }
@@ -5821,11 +5810,9 @@ impl Engine {
                     } else {
                         *value
                     };
-                    let resolved = resolve_resistor_effective_parameters(
+                    let evaluation = ResistorEvaluation::new(
                         netlist,
                         &element.name,
-                        primary_value,
-                        value_expr,
                         ResistorResolutionContext {
                             model_name: model.as_deref(),
                             instance_params,
@@ -5833,6 +5820,7 @@ impl Engine {
                             spice_dialect: self.config.spice_dialect,
                         },
                     )?;
+                    let resolved = evaluation.effective_parameters(primary_value, value_expr)?;
                     if resolved.resistance.is_finite()
                         && resolved.resistance > 0.0
                         && let (Some(capture), Some(direction)) =
@@ -5847,13 +5835,7 @@ impl Engine {
                         );
                     }
                     let resistance = resolved.resistance;
-                    let thermal_state = resolve_resistor_thermal_state(
-                        &element.name,
-                        netlist,
-                        model.as_deref(),
-                        instance_params,
-                        self.config.temperature,
-                    )?;
+                    let thermal_state = evaluation.thermal_state()?;
                     let small_signal_resistance = resolve_resistor_small_signal_value(
                         &element.name,
                         resistance,
@@ -5906,12 +5888,7 @@ impl Engine {
                         if let Some(noisy) = instance_param(instance_params, &["NOISY", "NOISE"]) {
                             circuit.resistor_branches.set_last_noisy(noisy != 0.0);
                         }
-                        if let Some(flicker) = resolve_resistor_flicker_noise(
-                            netlist,
-                            model.as_deref(),
-                            instance_params,
-                            self.config.temperature,
-                        )? {
+                        if let Some(flicker) = evaluation.flicker_noise()? {
                             circuit.resistor_branches.set_last_flicker_noise(flicker);
                         }
                         continue;
@@ -5961,12 +5938,7 @@ impl Engine {
                     }
                     // Model-card flicker noise (resnoise.c), folded with the
                     // effective noise area at build time.
-                    if let Some(flicker) = resolve_resistor_flicker_noise(
-                        netlist,
-                        model.as_deref(),
-                        instance_params,
-                        self.config.temperature,
-                    )? {
+                    if let Some(flicker) = evaluation.flicker_noise()? {
                         circuit.resistors.set_last_flicker_noise(flicker);
                     }
                 }
