@@ -817,92 +817,61 @@ impl LivePreparedExpression {
         params: &crate::netlist::ParamContext,
         abort: &dyn AbortSignal,
     ) -> Result<Self, LivePreparedExpressionCompileError> {
-        fn rewrite_probes(
-            expression: &NetExpr,
-            probes: &mut HashMap<String, LiveRawOutputOperator>,
-            abort: &dyn AbortSignal,
-        ) -> Result<NetExpr, LivePreparedExpressionCompileError> {
-            if abort.is_aborted() {
-                return Err(LivePreparedExpressionCompileError::Aborted);
-            }
-            Ok(match expression {
-                NetExpr::UnaryOp { op, operand } => NetExpr::UnaryOp {
-                    op: *op,
-                    operand: Box::new(rewrite_probes(operand, probes, abort)?),
-                },
-                NetExpr::BinOp { op, left, right } => NetExpr::BinOp {
-                    op: *op,
-                    left: Box::new(rewrite_probes(left, probes, abort)?),
-                    right: Box::new(rewrite_probes(right, probes, abort)?),
-                },
-                NetExpr::FnCall { name, args }
-                    if is_equation_probe_accessor(name)
-                        || is_equation_noise_accessor(name)
-                        || is_equation_generic_output_accessor(name) =>
-                {
-                    let prefix = name.to_ascii_uppercase();
-                    let arguments = args
-                        .iter()
-                        .map(|argument| {
-                            equation_probe_argument(Some(argument)).ok_or_else(|| {
-                                LivePreparedExpressionCompileError::Detail(format!(
-                                    "{prefix}() in continuous measure has an invalid argument"
-                                ))
-                            })
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-                    let authored = format!("{prefix}({})", arguments.join(","));
-                    // NUL cannot occur in a parsed identifier. The prepared
-                    // compiler also promotes these keys to typed External
-                    // nodes, keeping the internal probe namespace disjoint
-                    // from every authored parameter name.
-                    let key = format!("\0RSPICE_LIVE_PROBE_{}", probes.len());
-                    probes.insert(
-                        key.clone(),
-                        LiveRawOutputOperator::compile(&authored)
-                            .map_err(LivePreparedExpressionCompileError::Detail)?,
-                    );
-                    NetExpr::Param(key)
-                }
-                NetExpr::FnCall { name, args } => NetExpr::FnCall {
-                    name: name.clone(),
-                    args: args
-                        .iter()
-                        .map(|argument| rewrite_probes(argument, probes, abort))
-                        .collect::<Result<Vec<_>, _>>()?,
-                },
-                NetExpr::Number(_)
-                | NetExpr::ComplexNumber(_)
-                | NetExpr::StringLiteral(_)
-                | NetExpr::Param(_) => expression.clone(),
-            })
-        }
-
         let mut probes = HashMap::new();
-        let rewritten = rewrite_probes(expression, &mut probes, abort)?;
-        if abort.is_aborted() {
+        let mut compilation_aborted = false;
+        let evaluator = PreparedExpression::compile_with_bindings(
+            expression,
+            params,
+            &HashSet::new(),
+            &mut |node| {
+                if abort.is_aborted() {
+                    compilation_aborted = true;
+                    return Err(crate::netlist::expr::ExprError::InvalidArgument(
+                        "expression compilation aborted".to_owned(),
+                    ));
+                }
+                let NetExpr::FnCall { name, args } = node else {
+                    return Ok(None);
+                };
+                if params.has_function(name)
+                    || !(is_equation_probe_accessor(name)
+                        || is_equation_noise_accessor(name)
+                        || is_equation_generic_output_accessor(name))
+                {
+                    return Ok(None);
+                }
+                let prefix = name.to_ascii_uppercase();
+                let arguments = args
+                    .iter()
+                    .map(|argument| {
+                        equation_probe_argument(Some(argument)).ok_or_else(|| {
+                            crate::netlist::expr::ExprError::InvalidArgument(format!(
+                                "{prefix}() in measurement has an invalid argument"
+                            ))
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let authored = format!("{prefix}({})", arguments.join(","));
+                // Parsed identifiers cannot contain NUL. The compiler stores
+                // this as a typed external node, separate from formal arguments.
+                let key = format!("\0RSPICE_LIVE_PROBE_{}", probes.len());
+                probes.insert(
+                    key.clone(),
+                    LiveRawOutputOperator::compile(&authored)
+                        .map_err(crate::netlist::expr::ExprError::InvalidArgument)?,
+                );
+                Ok(Some(key))
+            },
+        );
+        if compilation_aborted || abort.is_aborted() {
             return Err(LivePreparedExpressionCompileError::Aborted);
         }
-        let external_parameters = probes.keys().cloned().collect::<HashSet<_>>();
-        let evaluator = if external_parameters.is_empty() {
-            PreparedExpression::compile(&rewritten, params)
-        } else {
-            PreparedExpression::compile_with_external_parameters(
-                &rewritten,
-                params,
-                &external_parameters,
-            )
-        }
-        .map_err(|error| {
+        let evaluator = evaluator.map_err(|error| {
             LivePreparedExpressionCompileError::Detail(format!(
                 "failed to prepare live expression: {error}"
             ))
         })?;
-        if abort.is_aborted() {
-            return Err(LivePreparedExpressionCompileError::Aborted);
-        }
         let mut parameters = HashMap::new();
-        let mut compilation_aborted = false;
         evaluator.visit_runtime_parameters(|name| {
             if abort.is_aborted() {
                 compilation_aborted = true;
@@ -940,6 +909,16 @@ impl LivePreparedExpression {
         reads: &mut LiveMeasureReadContext<'_, '_>,
         params: &crate::netlist::ParamContext,
     ) -> Result<ComplexValue, String> {
+        self.value_with(row, signals, params, &mut |name| reads.read_measure(name))
+    }
+
+    fn value_with(
+        &mut self,
+        row: usize,
+        signals: &CanonicalMeasureSignalIndex<'_>,
+        params: &crate::netlist::ParamContext,
+        read_measure: &mut impl FnMut(&str) -> Result<Option<Value>, String>,
+    ) -> Result<ComplexValue, String> {
         let probes = &self.probes;
         let parameters = &self.parameters;
         self.evaluator
@@ -954,8 +933,7 @@ impl LivePreparedExpression {
                     return Ok(None);
                 };
                 if !parameter.is_axis_symbol
-                    && let Some(value) = reads
-                        .read_measure(&parameter.canonical_measure)
+                    && let Some(value) = read_measure(&parameter.canonical_measure)
                         .map_err(crate::netlist::expr::ExprError::InvalidArgument)?
                 {
                     return Ok(Some(ComplexValue::from(value)));
@@ -971,8 +949,7 @@ impl LivePreparedExpression {
                     return Ok(Some(ComplexValue::from(value)));
                 }
                 if parameter.is_axis_symbol
-                    && let Some(value) = reads
-                        .read_measure(&parameter.canonical_measure)
+                    && let Some(value) = read_measure(&parameter.canonical_measure)
                         .map_err(crate::netlist::expr::ExprError::InvalidArgument)?
                 {
                     return Ok(Some(ComplexValue::from(value)));
@@ -4634,36 +4611,6 @@ fn equation_axis_is_in_window(
     td.is_none_or(at_or_above) && from.is_none_or(at_or_above) && to.is_none_or(at_or_below)
 }
 
-fn evaluate_measure_expression(
-    expression: &NetExpr,
-    row: usize,
-    signals: &CanonicalMeasureSignalIndex<'_>,
-    measures: &HashMap<String, Value>,
-    params: &crate::netlist::ParamContext,
-    normalize_nonfinite: bool,
-    description: &str,
-) -> Result<Value, String> {
-    let bound = bind_equation_expression(expression, row, signals, measures)?;
-    let value = crate::netlist::expr::evaluate_complex_raw_with(&bound, params, &mut |name| {
-        signals
-            .parameter(name, row)
-            .map_err(crate::netlist::expr::ExprError::InvalidArgument)
-    })
-    .map_err(|error| format!("{description} failed: {error}"))?;
-    // Xyce evaluates measurement expressions as complex values, applies
-    // fixNan/fixInf independently to both root components, then projects the
-    // real component in MeasureBase::getOutputValue. Preserve that boundary:
-    // bare measure getters remain raw, but every authored expression root is
-    // finite before MAX/ERR/FIND/EQN/PARAM consumes it.
-    if normalize_nonfinite {
-        let real = crate::netlist::expr::normalize_xyce_expression_component(value.re);
-        let _imaginary = crate::netlist::expr::normalize_xyce_expression_component(value.im);
-        Ok(real)
-    } else {
-        Ok(value.re)
-    }
-}
-
 fn lookup_compiled_raw_equation_reference(
     authored: &str,
     canonical_measure: &str,
@@ -4698,183 +4645,6 @@ fn split_equation_output_operator(operator: &str) -> Option<(&str, Vec<String>)>
 
 fn is_equation_voltage_accessor(name: &str) -> bool {
     matches!(name, "V" | "VR" | "VI" | "VM" | "VP" | "VDB")
-}
-
-fn lookup_equation_voltage_operator(
-    signals: &CanonicalMeasureSignalIndex<'_>,
-    prefix: &str,
-    arguments: &[String],
-    row: usize,
-) -> Result<Value, String> {
-    if !(1..=2).contains(&arguments.len()) {
-        return Err(format!(
-            "{prefix}() in continuous measure requires one or two arguments"
-        ));
-    }
-    let authored = format!("{prefix}({})", arguments.join(","));
-    if let Some(value) = lookup_equation_signal_optional(signals, &authored, row)? {
-        return Ok(value);
-    }
-    let node_component = |component: &str, node: &str| -> Result<Value, String> {
-        if node == "0" {
-            return Ok(0.0);
-        }
-        if let Some(value) =
-            lookup_equation_signal_optional(signals, &format!("{component}({node})"), row)?
-        {
-            return Ok(value);
-        }
-        if component == "VR" {
-            return lookup_equation_signal(signals, &format!("V({node})"), row);
-        }
-        Err(format!(
-            "continuous measure signal '{component}({node})' is unavailable at row {row}"
-        ))
-    };
-    let (positive, negative) = match arguments {
-        [only] => {
-            return if prefix == "V" {
-                lookup_equation_signal(signals, &format!("V({only})"), row)
-            } else {
-                lookup_equation_signal(signals, &authored, row)
-            };
-        }
-        [positive, negative, ..] => (positive, negative),
-        [] => return lookup_equation_signal(signals, &authored, row),
-    };
-    match prefix {
-        "V" | "VR" => Ok(node_component("VR", positive)? - node_component("VR", negative)?),
-        "VI" => Ok(node_component("VI", positive)? - node_component("VI", negative)?),
-        "VM" | "VP" | "VDB" => {
-            let real = node_component("VR", positive)? - node_component("VR", negative)?;
-            let imaginary = node_component("VI", positive)? - node_component("VI", negative)?;
-            let magnitude = real.hypot(imaginary);
-            Ok(match prefix {
-                "VM" => magnitude,
-                "VP" => imaginary.atan2(real).to_degrees(),
-                "VDB" => 20.0 * magnitude.log10(),
-                other => {
-                    return Err(format!("voltage accessor '{other}' is not supported"));
-                }
-            })
-        }
-        other => Err(format!("voltage accessor '{other}' is not supported")),
-    }
-}
-
-fn bind_equation_expression(
-    expression: &NetExpr,
-    row: usize,
-    signals: &CanonicalMeasureSignalIndex<'_>,
-    measures: &HashMap<String, Value>,
-) -> Result<NetExpr, String> {
-    Ok(match expression {
-        NetExpr::Param(name) => {
-            let is_axis_symbol = matches!(
-                name.to_ascii_uppercase().as_str(),
-                "TIME" | "FREQ" | "FREQUENCY" | "HERTZ"
-            );
-            if is_axis_symbol {
-                if let Some(value) = lookup_equation_signal_optional(signals, name, row)? {
-                    NetExpr::Number(value)
-                } else if let Some(value) = measures.get(&name.to_ascii_uppercase()).copied() {
-                    NetExpr::Number(value)
-                } else {
-                    expression.clone()
-                }
-            } else if let Some(value) = measures.get(&name.to_ascii_uppercase()).copied() {
-                NetExpr::Number(value)
-            } else if let Some(value) = lookup_equation_signal_optional(signals, name, row)? {
-                NetExpr::Number(value)
-            } else {
-                expression.clone()
-            }
-        }
-        NetExpr::UnaryOp { op, operand } => NetExpr::UnaryOp {
-            op: *op,
-            operand: Box::new(bind_equation_expression(operand, row, signals, measures)?),
-        },
-        NetExpr::BinOp { op, left, right } => NetExpr::BinOp {
-            op: *op,
-            left: Box::new(bind_equation_expression(left, row, signals, measures)?),
-            right: Box::new(bind_equation_expression(right, row, signals, measures)?),
-        },
-        NetExpr::FnCall { name, args } if is_equation_probe_accessor(name) => {
-            let prefix = name.to_ascii_uppercase();
-            if is_equation_voltage_accessor(&prefix) {
-                let arguments = args
-                    .iter()
-                    .map(|argument| {
-                        equation_probe_argument(Some(argument)).ok_or_else(|| {
-                            format!("{prefix}() in continuous measure has an invalid argument")
-                        })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                NetExpr::Number(lookup_equation_voltage_operator(
-                    signals, &prefix, &arguments, row,
-                )?)
-            } else if args.len() == 1 {
-                let first = equation_probe_argument(args.first()).ok_or_else(|| {
-                    format!("{prefix}() in continuous measure has an invalid argument")
-                })?;
-                NetExpr::Number(lookup_equation_signal(
-                    signals,
-                    &format!("{prefix}({first})"),
-                    row,
-                )?)
-            } else {
-                return Err(format!(
-                    "{prefix}() in continuous measure has invalid arity"
-                ));
-            }
-        }
-        NetExpr::FnCall { name, args } if is_equation_noise_accessor(name) => {
-            let prefix = name.to_ascii_uppercase();
-            if !(1..=2).contains(&args.len()) {
-                return Err(format!(
-                    "{prefix}() in continuous measure requires one or two arguments"
-                ));
-            }
-            let arguments = args
-                .iter()
-                .map(|argument| {
-                    equation_probe_argument(Some(argument)).ok_or_else(|| {
-                        format!("{prefix}() in continuous measure has an invalid argument")
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let probe = format!("{prefix}({})", arguments.join(","));
-            NetExpr::Number(lookup_equation_signal(signals, &probe, row)?)
-        }
-        NetExpr::FnCall { name, args } if is_equation_generic_output_accessor(name) => {
-            let prefix = name.to_ascii_uppercase();
-            let arguments = args
-                .iter()
-                .map(|argument| {
-                    equation_probe_argument(Some(argument)).ok_or_else(|| {
-                        format!("{prefix}() in continuous measure has an invalid argument")
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let probe = format!("{prefix}({})", arguments.join(","));
-            let value = if prefix == "N" {
-                LiveRawOutputOperator::compile(&probe)?.value(row, signals)?
-            } else {
-                lookup_equation_signal(signals, &probe, row)?
-            };
-            NetExpr::Number(value)
-        }
-        NetExpr::FnCall { name, args } => NetExpr::FnCall {
-            name: name.clone(),
-            args: args
-                .iter()
-                .map(|arg| bind_equation_expression(arg, row, signals, measures))
-                .collect::<Result<Vec<_>, _>>()?,
-        },
-        NetExpr::Number(_) | NetExpr::ComplexNumber(_) | NetExpr::StringLiteral(_) => {
-            expression.clone()
-        }
-    })
 }
 
 fn is_equation_probe_accessor(name: &str) -> bool {
@@ -4913,25 +4683,6 @@ fn equation_probe_argument(argument: Option<&NetExpr>) -> Option<String> {
         }
         _ => None,
     }
-}
-
-fn lookup_equation_signal(
-    signals: &CanonicalMeasureSignalIndex<'_>,
-    name: &str,
-    row: usize,
-) -> Result<Value, String> {
-    lookup_equation_signal_optional(signals, name, row)?
-        .ok_or_else(|| format!("continuous measure signal '{name}' is unavailable at row {row}"))
-}
-
-fn lookup_equation_signal_optional(
-    signals: &CanonicalMeasureSignalIndex<'_>,
-    name: &str,
-    row: usize,
-) -> Result<Option<Value>, String> {
-    Ok(signals
-        .get(name)?
-        .and_then(|values| values.get(row).copied()))
 }
 
 fn lookup_equation_signal_canonical_optional(
@@ -6353,6 +6104,14 @@ fn materialize_measure_expression_signals_with_limits_and_abort(
         let Ok(expression) = crate::netlist::expr::parse_expression(expression) else {
             continue;
         };
+        let mut expression =
+            match LivePreparedExpression::compile_with_abort(&expression, params.base, abort) {
+                Ok(expression) => expression,
+                Err(LivePreparedExpressionCompileError::Aborted) => {
+                    return Err(SimulationError::Aborted);
+                }
+                Err(LivePreparedExpressionCompileError::Detail(_)) => continue,
+            };
         let mut waveform = Vec::new();
         waveform
             .try_reserve_exact(axis.len())
@@ -6360,20 +6119,14 @@ fn materialize_measure_expression_signals_with_limits_and_abort(
                 object: "measurement expression waveform",
                 source,
             })?;
-        let measures = HashMap::new();
-        let context = format!("expression '{name}'");
         for row in 0..axis.len() {
             super::measure::continuous::poll(abort, row)?;
-            match evaluate_measure_expression(
-                &expression,
-                row,
-                &signal_index,
-                &measures,
-                params.base,
-                true,
-                &context,
-            ) {
-                Ok(value) => waveform.push(value),
+            match expression.value_with(row, &signal_index, params.base, &mut |_| Ok(None)) {
+                // Authored measurement expressions normalize non-finite root
+                // components before the scalar measurement engine consumes them.
+                Ok(value) => waveform.push(
+                    crate::netlist::expr::normalize_xyce_expression_component(value.re),
+                ),
                 Err(_) => break,
             }
         }
