@@ -149,6 +149,13 @@ pub(crate) enum NativeOp {
         len: usize,
         lower: i64,
     },
+    /// Expanded to checked chunk reads before target encoding.
+    LoadPackedVariableDyn {
+        base: usize,
+        validity_base: usize,
+        len: usize,
+        layout: crate::array_index::PackedArrayLayout,
+    },
     LoadBranchUnknown(usize),
     LoadTemperature,
     LoadThermalVoltage,
@@ -1607,6 +1614,42 @@ impl NativeProgram {
                         lower: *lower,
                     });
                 }
+                Instruction::PushPackedVariableDyn {
+                    base,
+                    validity_base,
+                    len,
+                    layout,
+                } => {
+                    if layout.chunk_len() != Some(*len) {
+                        return Err(JitError::Verifier {
+                            model: model.clone(),
+                            detail: "invalid packed input layout".into(),
+                        });
+                    }
+                    for first in [base, validity_base] {
+                        validate_range(
+                            model.clone(),
+                            "packed input chunk range",
+                            *first,
+                            *len,
+                            limits.variable_count,
+                        )?;
+                    }
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        2,
+                    )?;
+                    ops.push(NativeOp::LoadPackedVariableDyn {
+                        base: *base,
+                        validity_base: *validity_base,
+                        len: *len,
+                        layout: *layout,
+                    });
+                    depth -= 1;
+                }
                 Instruction::PushVariableDyn { base, len, lower } => {
                     validate_range(
                         model.clone(),
@@ -2891,7 +2934,19 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 array,
                 index,
                 discrete_validity,
-            } => self.lower_array_access(array.as_str(), discrete_validity.as_deref(), *index),
+                packed,
+            } => {
+                if let Some(packed) = packed {
+                    self.lower_packed_array_access(
+                        array.as_str(),
+                        discrete_validity.as_deref(),
+                        *index,
+                        packed,
+                    )
+                } else {
+                    self.lower_array_access(array.as_str(), discrete_validity.as_deref(), *index)
+                }
+            }
             HirExprKind::BranchAccess {
                 kind: access,
                 pos,
@@ -3195,6 +3250,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirExprKind::Call { name, args } => {
                 self.lower_call_derivative(expression.id, name.as_str(), args.as_slice(), wrt)
             }
+            HirExprKind::ArrayAccess {
+                packed: Some(_), ..
+            } => self.push(NativeOp::Const(0.0)),
             HirExprKind::ArrayAccess { array, index, .. } => {
                 self.lower_array_access_derivative(array.as_str(), *index, wrt)
             }
@@ -3261,6 +3319,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 first,
                 second,
             ),
+            HirExprKind::ArrayAccess {
+                packed: Some(_), ..
+            } => self.push(NativeOp::Const(0.0)),
             HirExprKind::ArrayAccess { array, index, .. } => {
                 self.lower_array_access_second_derivative(array.as_str(), *index, first, second)
             }
@@ -3326,6 +3387,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirExprKind::SystemFunction { name, args } | HirExprKind::Call { name, args } => {
                 self.call_derivative_is_zero(name.as_str(), args.as_slice(), wrt)
             }
+            HirExprKind::ArrayAccess {
+                packed: Some(_), ..
+            } => Ok(true),
             HirExprKind::ArrayAccess { array, .. } => {
                 Ok(self.array_derivative_is_zero(array.as_str(), wrt))
             }
@@ -3405,6 +3469,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirExprKind::SystemFunction { name, args } | HirExprKind::Call { name, args } => {
                 self.call_second_derivative_is_zero(name.as_str(), args.as_slice(), first, second)
             }
+            HirExprKind::ArrayAccess {
+                packed: Some(_), ..
+            } => Ok(true),
             HirExprKind::ArrayAccess { array, .. } => {
                 Ok(self.array_second_derivative_is_zero(array.as_str(), first, second))
             }
@@ -7340,6 +7407,52 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
     }
 
+    fn lower_packed_array_access(
+        &mut self,
+        array: &str,
+        validity: Option<&str>,
+        word: ExprId,
+        packed: &crate::canonical_ir::hir::HirPackedArrayIndex,
+    ) -> JitResult<()> {
+        let Some((base, len, lower)) = self.resolve_array_variable_range(array)? else {
+            return Err(self.unsupported("missing packed input array"));
+        };
+        let Some(validity) = validity else {
+            return Err(self.unsupported("missing packed input validity"));
+        };
+        let Some((validity_base, validity_len, validity_lower)) =
+            self.resolve_array_variable_range(validity)?
+        else {
+            return Err(self.unsupported("missing packed input validity array"));
+        };
+        if lower != 0
+            || validity_lower != 0
+            || len != validity_len
+            || packed.layout.chunk_len() != Some(len)
+        {
+            return Err(self.unsupported("invalid packed input layout"));
+        }
+        for first in [base, validity_base] {
+            validate_range(
+                self.model.clone(),
+                "canonical packed input range",
+                first,
+                len,
+                self.limits.variable_count,
+            )?;
+        }
+        self.lower(word)?;
+        self.lower(packed.bit)?;
+        self.ops.push(NativeOp::LoadPackedVariableDyn {
+            base,
+            validity_base,
+            len,
+            layout: packed.layout,
+        });
+        self.depth -= 1;
+        Ok(())
+    }
+
     fn lower_array_access(
         &mut self,
         array: &str,
@@ -8321,6 +8434,7 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::LoadVariable(_) => "LoadVariable",
         NativeOp::LoadVariableDyn { .. } => "LoadVariableDyn",
         NativeOp::LoadDiscreteVariableDyn { .. } => "LoadDiscreteVariableDyn",
+        NativeOp::LoadPackedVariableDyn { .. } => "LoadPackedVariableDyn",
         NativeOp::LoadBranchUnknown(_) => "LoadBranchUnknown",
         NativeOp::LoadTemperature => "LoadTemperature",
         NativeOp::LoadThermalVoltage => "LoadThermalVoltage",
@@ -9352,7 +9466,8 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
             (layout.operand_count(), 1)
         }
 
-        NativeOp::Add
+        NativeOp::LoadPackedVariableDyn { .. }
+        | NativeOp::Add
         | NativeOp::Sub
         | NativeOp::Mul
         | NativeOp::Div
@@ -9518,6 +9633,7 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::PushVariable(_) => "PushVariable",
         Instruction::PushVariableDyn { .. } => "PushVariableDyn",
         Instruction::PushDiscreteVariableDyn { .. } => "PushDiscreteVariableDyn",
+        Instruction::PushPackedVariableDyn { .. } => "PushPackedVariableDyn",
         Instruction::PushTemperature => "PushTemperature",
         Instruction::PushVt => "PushVt",
         Instruction::PushTime => "PushTime",

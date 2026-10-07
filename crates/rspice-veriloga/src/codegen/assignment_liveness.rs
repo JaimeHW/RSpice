@@ -111,6 +111,12 @@ fn mark_program_variable_reads_changed(
                 validity_base,
                 len,
                 ..
+            }
+            | Instruction::PushPackedVariableDyn {
+                base,
+                validity_base,
+                len,
+                ..
             } => {
                 for base in [base, validity_base] {
                     if let Some(end) = base.checked_add(len) {

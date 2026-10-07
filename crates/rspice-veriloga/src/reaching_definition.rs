@@ -310,7 +310,7 @@ fn variable_reads(arena: &ExprArena, expr: NodeId) -> Vec<SmolStr> {
         arena::visit(arena, expr, &mut |node| {
             match *node {
                 Node::Var(name) => reads.push(arena.name(name).clone()),
-                Node::VarIndexed { payload, .. } => {
+                Node::VarIndexed { payload, .. } | Node::VarPackedIndexed { payload, .. } => {
                     reads.push(arena.name(arena.indexed(payload).array).clone());
                 }
                 _ => {}

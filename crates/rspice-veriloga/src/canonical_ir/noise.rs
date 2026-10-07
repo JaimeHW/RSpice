@@ -722,7 +722,10 @@ pub(super) fn push_expression_children(kind: &HirExprKind, stack: &mut Vec<ExprI
         HirExprKind::Call { args, .. }
         | HirExprKind::SystemFunction { args, .. }
         | HirExprKind::ArrayLiteral { elements: args, .. } => stack.extend(args.iter().copied()),
-        HirExprKind::ArrayAccess { index, .. } => stack.push(*index),
+        HirExprKind::ArrayAccess { index, packed, .. } => {
+            stack.push(*index);
+            stack.extend(packed.iter().map(|packed| packed.bit));
+        }
         HirExprKind::AnalogOperator { op } => push_analog_children(op, stack),
         HirExprKind::NullArgument
         | HirExprKind::Number { .. }

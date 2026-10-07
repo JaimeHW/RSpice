@@ -142,6 +142,7 @@ impl TableId {
 /// The array read a [`Node::VarIndexed`] performs, less its index expression.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct IndexedRead {
+    pub packed: Option<rspice_veriloga_runtime::array_index::PackedArrayLayout>,
     /// Availability array name/base sharing the numeric read's selector.
     pub discrete_validity: Option<(NameId, usize)>,
     /// Array name, for shadow naming.
@@ -177,6 +178,12 @@ pub enum Node {
         payload: u32,
         /// Element index expression.
         index: NodeId,
+    },
+    /// Word and packed-bit selectors, each evaluated once, over encoded chunks.
+    VarPackedIndexed {
+        payload: u32,
+        index: NodeId,
+        bit: NodeId,
     },
     /// Voltage at a terminal pair, ground spelled `u32::MAX`.
     Voltage(u32, u32),
@@ -982,6 +989,10 @@ pub fn for_each_child<F: FnMut(NodeId)>(arena: &ExprArena, node: &Node, f: &mut 
         | Node::Ddx { expr: inner, .. }
         | Node::TableLookup { input: inner, .. }
         | Node::VarIndexed { index: inner, .. } => f(*inner),
+        Node::VarPackedIndexed { index, bit, .. } => {
+            f(*index);
+            f(*bit);
+        }
         Node::Idt(inner, second) | Node::Limit(inner, second) => {
             f(*inner);
             optional(*second, f);
@@ -1387,6 +1398,22 @@ pub fn rebuild_children(
                 table,
             })
         }
+        Node::VarPackedIndexed {
+            payload,
+            index,
+            bit,
+        } => {
+            let new_index = descend(arena, index);
+            let new_bit = descend(arena, bit);
+            if new_index == index && new_bit == bit {
+                return id;
+            }
+            arena.push(Node::VarPackedIndexed {
+                payload,
+                index: new_index,
+                bit: new_bit,
+            })
+        }
         Node::VarIndexed { payload, index } => rebuild_unary(
             arena,
             id,
@@ -1768,6 +1795,7 @@ mod tests {
         let indexed = {
             let array = arena.intern("a");
             arena.push_indexed(IndexedRead {
+                packed: None,
                 discrete_validity: None,
                 array,
                 base: 0,

@@ -2834,6 +2834,7 @@ impl<'a> Parser<'a> {
                         )));
                     }
                     return Ok(Expression::ArrayAccess(ArrayAccessExpr {
+                        packed: None,
                         discrete_validity: None,
                         array: name.into(),
                         index: Box::new(index),

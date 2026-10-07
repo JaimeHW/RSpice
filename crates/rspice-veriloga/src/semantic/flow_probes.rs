@@ -867,7 +867,9 @@ pub(super) fn visit_expression(expression: &Expression, visit: &mut impl FnMut(&
             Expression::SystemFunction(expr) => {
                 pending.extend(expr.args.iter().map(Pending::Expression))
             }
-            Expression::ArrayAccess(expr) => pending.push(Pending::Expression(&expr.index)),
+            Expression::ArrayAccess(expr) => {
+                pending.extend(expr.children().map(Pending::Expression))
+            }
             Expression::ArrayLiteral(expr) => {
                 pending.extend(expr.elements.iter().map(Pending::Element))
             }
@@ -925,7 +927,11 @@ pub(super) fn for_child_mut<'a>(
         }
         Expression::Call(expr) => expr.args.iter_mut().for_each(visit),
         Expression::SystemFunction(expr) => expr.args.iter_mut().for_each(visit),
-        Expression::ArrayAccess(expr) => visit(&mut expr.index),
+        Expression::ArrayAccess(expr) => {
+            for child in expr.children_mut() {
+                visit(child);
+            }
+        }
         Expression::ArrayLiteral(expr) => rewrite_elements(&mut expr.elements, visit),
         Expression::AnalogOperator(AnalogOperator::Limit {
             proposed,

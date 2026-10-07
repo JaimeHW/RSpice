@@ -623,7 +623,11 @@ impl Unroller<'_> {
                     self.substitute(argument);
                 }
             }
-            Expression::ArrayAccess(access) => self.substitute(&mut access.index),
+            Expression::ArrayAccess(access) => {
+                for child in access.children_mut() {
+                    self.substitute(child);
+                }
+            }
             Expression::ArrayLiteral(literal) => {
                 for element in &mut literal.elements {
                     self.substitute_concat_element(element);

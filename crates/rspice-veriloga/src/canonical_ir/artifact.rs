@@ -1208,9 +1208,10 @@ fn hir_expr_kind_label(kind: &HirExprKind) -> String {
             array,
             index,
             discrete_validity,
+            packed,
         } => {
             format!(
-                "array_access array:{} index:{}{}",
+                "array_access array:{} index:{}{} packed:{packed:?}",
                 enc_str(array),
                 index.index(),
                 discrete_validity

@@ -2886,6 +2886,7 @@ impl ProcessLowerer<'_> {
         let input = self.digital_array_read(
             block,
             &crate::ast::ArrayAccessExpr {
+                packed: None,
                 array: access.name.clone(),
                 index: access.index.clone(),
                 discrete_validity: None,

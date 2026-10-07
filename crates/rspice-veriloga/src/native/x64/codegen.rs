@@ -1193,7 +1193,8 @@ impl FunctionCompiler {
                                 source,
                             );
                         }
-                        NativeOp::LoadDiscreteVariableDyn { .. } => {
+                        NativeOp::LoadDiscreteVariableDyn { .. }
+                        | NativeOp::LoadPackedVariableDyn { .. } => {
                             return Err(JitError::Encoding {
                                 model: MODEL.into(),
                                 detail:

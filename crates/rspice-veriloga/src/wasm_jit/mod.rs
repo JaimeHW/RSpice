@@ -1738,6 +1738,15 @@ endmodule
         }
 
         fn for_source_with_plan(source: &str, module_name: &str, postfix: bool) -> Self {
+            Self::for_source_with_options(source, module_name, postfix, CompilerOptions::default())
+        }
+
+        fn for_source_with_options(
+            source: &str,
+            module_name: &str,
+            postfix: bool,
+            options: CompilerOptions,
+        ) -> Self {
             use std::mem::size_of;
 
             use wasmi::{Engine, Linker, Memory, MemoryType, Module, Store};
@@ -1759,7 +1768,7 @@ endmodule
                 WASM_JIT_MEMORY_IMPORT,
             };
 
-            let report = VerilogACompiler::new(CompilerOptions::default())
+            let report = VerilogACompiler::new(options)
                 .compile_runtime(source, Some(module_name))
                 .expect("compile fused-kernel model");
             let artifact = if postfix {
@@ -2122,6 +2131,103 @@ endmodule
                 .export(WasmJitExecutableEntry::Jacobian { stamp, entry })
                 .expect("Jacobian export")
                 .to_owned()
+        }
+    }
+
+    #[test]
+    fn dynamic_packed_wasm_reads_agree_in_both_plans() {
+        let source = r#"module packed_wasm(p,n,c); inout p,n,c; electrical p,n,c;
+            reg [0:29] data[-1:0];
+            initial begin data[-1]=30'bz; data[0]=30'bx; data[0][14]=1; end
+            analog I(c)<+data[V(n)][V(p)];
+            endmodule"#;
+        let options = || CompilerOptions {
+            enable_ams: true,
+            ..Default::default()
+        };
+        let report = VerilogACompiler::new(options())
+            .compile_runtime(source, None)
+            .unwrap();
+        let hir = &report.canonical_ir.hir;
+        for postfix in [false, true] {
+            let mut harness = FusedKernelHarness::for_source_with_options(
+                source,
+                "packed_wasm",
+                postfix,
+                options(),
+            );
+            let kernel = harness
+                .artifact
+                .evaluation_kernel_export()
+                .unwrap()
+                .to_owned();
+            for (word, bit, encoded, expected) in [
+                (0.0, 14.0, 32769.0, Some(1.0)),
+                (0.0, 14.0, 32768.0, Some(0.0)),
+                (0.0, 14.0, 0.0, None),
+                (-1.0, 14.0, 32769.0, None),
+                (0.0, 15.0, 32769.0, None),
+                (0.0, 30.0, 32769.0, None),
+                (1.0, 14.0, 32769.0, None),
+                (0.0, 14.0, 32769.5, None),
+                (0.0, 14.0, ((1u64 << 30) as f64) + 32769.0, None),
+            ] {
+                harness.reset();
+                harness.store.data_mut().take_error();
+                for [value, valid] in &hir.discrete_inputs {
+                    let selection = hir
+                        .discrete_selections
+                        .iter()
+                        .find(|s| s.value == *value)
+                        .unwrap();
+                    let selected = selection.signal == "data[0]" && selection.lsb == 15;
+                    for (slot, sample) in [
+                        (usize::from(*value), if selected { encoded } else { 0.0 }),
+                        (usize::from(*valid), 1.0),
+                    ] {
+                        harness
+                            .store
+                            .data_mut()
+                            .context_mut()
+                            .sample_discrete_state(slot, sample)
+                            .unwrap();
+                        harness
+                            .write_f64(FusedKernelHarness::VARIABLES as usize + slot * 8, sample);
+                    }
+                }
+                harness
+                    .store
+                    .data_mut()
+                    .context_mut()
+                    .begin_stateful_evaluation();
+                let inputs = harness
+                    .store
+                    .data()
+                    .context()
+                    .evaluation_state_inputs()
+                    .to_vec();
+                for (slot, sample) in inputs.into_iter().enumerate() {
+                    harness.write_f64(
+                        FusedKernelHarness::EVALUATION_INPUTS as usize + slot * 8,
+                        sample,
+                    );
+                }
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, bit);
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, word);
+                harness.write_f64(FusedKernelHarness::SEQUENTIAL_CURRENTS as usize, 99.0);
+                let status = harness.call(&kernel);
+                let published = harness.read_f64(FusedKernelHarness::SEQUENTIAL_CURRENTS as usize);
+                match expected {
+                    Some(value) => {
+                        assert_eq!(status, 0, "postfix={postfix}, {word}[{bit}]");
+                        assert_eq!(published, value);
+                    }
+                    None => assert_ne!(
+                        status, 0,
+                        "postfix={postfix}, {word}[{bit}], encoded={encoded}"
+                    ),
+                }
+            }
         }
     }
 

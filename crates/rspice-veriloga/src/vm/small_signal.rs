@@ -932,6 +932,43 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
                         ))?;
                 self.stack.push(value);
             }
+            Instruction::PushPackedVariableDyn {
+                base,
+                validity_base,
+                len,
+                layout,
+            } => {
+                let bit = self.pop_real("packed bit")?;
+                let word = self.pop_real("packed word")?;
+                let (chunk, bit) = layout.locate(word, bit).map_err(|error| {
+                    VmError::InvalidRuntimeOperation(format!("invalid packed selection: {error:?}"))
+                })?;
+                if layout.chunk_len() != Some(*len) {
+                    return Err(VmError::InvalidInstruction("packed input shape mismatch"));
+                }
+                let slot = base
+                    .checked_add(chunk)
+                    .ok_or(VmError::InvalidInstruction("packed slot overflow"))?;
+                let valid = validity_base
+                    .checked_add(chunk)
+                    .ok_or(VmError::InvalidInstruction("packed validity overflow"))?;
+                let encoded = *self
+                    .variables
+                    .get(slot)
+                    .ok_or(VmError::InvalidInstruction("missing packed input"))?;
+                let valid = *self
+                    .variables
+                    .get(valid)
+                    .ok_or(VmError::InvalidInstruction("missing packed validity"))?;
+                let encoded = rspice_veriloga_runtime::checked_discrete_value(
+                    valid.binary64().re,
+                    encoded.binary64().re,
+                )
+                .map_err(|reason| VmError::InvalidRuntimeOperation(reason.into()))?;
+                let value = crate::array_index::decode_packed_bit(encoded, bit)
+                    .map_err(|reason| VmError::InvalidRuntimeOperation(reason.into()))?;
+                self.stack.push(V::new(value, 0.0));
+            }
             Instruction::PushDiscreteVariableDyn {
                 base,
                 validity_base,
@@ -1480,6 +1517,53 @@ mod tests {
     use crate::codegen::Instruction;
     use crate::laplace::StateSpaceFilter;
     use crate::timing_contract::SlewRateMagnitudes;
+
+    #[test]
+    fn dynamic_packed_portable_real_and_small_signal_reads_agree() {
+        let layout = crate::array_index::PackedArrayLayout {
+            word_lower: -1,
+            word_len: 2,
+            packed_msb: 39,
+            packed_lsb: 10,
+        };
+        for (word, bit, encoded, succeeds) in [
+            (0.0, 25.0, 32769.0, true),
+            (0.0, 25.0, 0.0, false),
+            (0.0, 24.0, 32769.0, false),
+            (-1.0, 25.0, 32769.0, false),
+            (0.0, 40.0, 32769.0, false),
+            (1.0, 25.0, 32769.0, false),
+            (0.0, f64::NAN, 32769.0, false),
+            (0.0, 25.0, 32769.25, false),
+            (0.0, 25.0, -32769.0, false),
+            (0.0, 25.0, ((1u64 << 30) as f64) + 32769.0, false),
+        ] {
+            let mut context = ac_context();
+            context.variables = vec![0.0, 0.0, 0.0, encoded, 1.0, 1.0, 1.0, 1.0];
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(word),
+                    Instruction::PushConst(bit),
+                    Instruction::PushPackedVariableDyn {
+                        base: 0,
+                        validity_base: 4,
+                        len: 4,
+                        layout,
+                    },
+                ],
+                ..Default::default()
+            };
+            let real = crate::vm::Vm::new(&mut context).execute(&program);
+            let complex = SmallSignalVm::new(&context, 1e3).unwrap().execute(&program);
+            if succeeds {
+                assert_eq!(real.unwrap(), 1.0);
+                assert_eq!(complex.unwrap(), Complex64::new(1.0, 0.0));
+            } else {
+                assert!(real.is_err(), "{word}[{bit}], {encoded}");
+                assert!(complex.is_err(), "{word}[{bit}], {encoded}");
+            }
+        }
+    }
 
     fn ac_context() -> VmContext {
         let mut context = VmContext::new(0);

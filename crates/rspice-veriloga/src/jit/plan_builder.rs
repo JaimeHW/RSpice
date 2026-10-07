@@ -959,8 +959,13 @@ fn canonical_expr_contains_ddt(
         | HirExprKind::NoiseSource { operands: args, .. } => {
             canonical_expr_list_contains_ddt(model, mir, args)
         }
-        HirExprKind::Unary { operand, .. } | HirExprKind::ArrayAccess { index: operand, .. } => {
-            canonical_expr_contains_ddt(model, mir, *operand)
+        HirExprKind::Unary { operand, .. } => canonical_expr_contains_ddt(model, mir, *operand),
+        HirExprKind::ArrayAccess { index, packed, .. } => {
+            Ok(canonical_expr_contains_ddt(model, mir, *index)?
+                || match packed {
+                    Some(packed) => canonical_expr_contains_ddt(model, mir, packed.bit)?,
+                    None => false,
+                })
         }
         HirExprKind::Binary { left, right, .. } => {
             Ok(canonical_expr_contains_ddt(model, mir, *left)?
@@ -1679,8 +1684,13 @@ fn canonical_expr_contains_noise(
         | HirExprKind::ArrayLiteral { elements: args, .. } => {
             canonical_expr_list_contains_noise(model, mir, args)
         }
-        HirExprKind::Unary { operand, .. } | HirExprKind::ArrayAccess { index: operand, .. } => {
-            canonical_expr_contains_noise(model, mir, *operand)
+        HirExprKind::Unary { operand, .. } => canonical_expr_contains_noise(model, mir, *operand),
+        HirExprKind::ArrayAccess { index, packed, .. } => {
+            Ok(canonical_expr_contains_noise(model, mir, *index)?
+                || match packed {
+                    Some(packed) => canonical_expr_contains_noise(model, mir, packed.bit)?,
+                    None => false,
+                })
         }
         HirExprKind::Binary { left, right, .. } => {
             Ok(canonical_expr_contains_noise(model, mir, *left)?

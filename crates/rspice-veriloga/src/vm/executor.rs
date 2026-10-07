@@ -428,6 +428,48 @@ impl<'a> Vm<'a> {
                     .ok_or(VmError::InvalidInstruction("missing dynamic variable slot"))?;
                 self.stack.push(v);
             }
+            Instruction::PushPackedVariableDyn {
+                base,
+                validity_base,
+                len,
+                layout,
+            } => {
+                let bit = self
+                    .stack
+                    .pop()
+                    .ok_or(VmError::StackUnderflow("packed bit"))?;
+                let word = self
+                    .stack
+                    .pop()
+                    .ok_or(VmError::StackUnderflow("packed word"))?;
+                let (chunk, bit) = layout.locate(word, bit).map_err(|error| {
+                    VmError::InvalidRuntimeOperation(format!("invalid packed selection: {error:?}"))
+                })?;
+                if layout.chunk_len() != Some(*len) {
+                    return Err(VmError::InvalidInstruction("packed input shape mismatch"));
+                }
+                let slot = base
+                    .checked_add(chunk)
+                    .ok_or(VmError::InvalidInstruction("packed slot overflow"))?;
+                let valid = validity_base
+                    .checked_add(chunk)
+                    .ok_or(VmError::InvalidInstruction("packed validity overflow"))?;
+                let encoded = *self
+                    .context
+                    .variables
+                    .get(slot)
+                    .ok_or(VmError::InvalidInstruction("missing packed input"))?;
+                let valid = *self
+                    .context
+                    .variables
+                    .get(valid)
+                    .ok_or(VmError::InvalidInstruction("missing packed validity"))?;
+                let encoded = rspice_veriloga_runtime::checked_discrete_value(valid, encoded)
+                    .map_err(|reason| VmError::InvalidRuntimeOperation(reason.into()))?;
+                let value = crate::array_index::decode_packed_bit(encoded, bit)
+                    .map_err(|reason| VmError::InvalidRuntimeOperation(reason.into()))?;
+                self.stack.push(value);
+            }
             Instruction::PushDiscreteVariableDyn {
                 base,
                 validity_base,

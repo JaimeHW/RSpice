@@ -142,6 +142,8 @@ pub struct AnalyzedModule {
 
 #[derive(Debug, Clone)]
 pub struct AnalyzedDiscreteSelection {
+    /// Chunk contains value bits and a known-bit mask instead of a numeric group.
+    pub encoded: bool,
     pub value: usize,
     pub signal: SmolStr,
     /// Least-significant selected position in digital storage (may be outside it).

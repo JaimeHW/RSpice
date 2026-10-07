@@ -1062,8 +1062,17 @@ fn validate_expressions(
                     *else_expr,
                 );
             }
-            HirExprKind::ArrayAccess { index, .. } => {
+            HirExprKind::ArrayAccess { index, packed, .. } => {
                 validate_expression_child(diagnostics, expressions, expression, "index", *index);
+                if let Some(packed) = packed {
+                    validate_expression_child(
+                        diagnostics,
+                        expressions,
+                        expression,
+                        "packed bit",
+                        packed.bit,
+                    );
+                }
             }
             HirExprKind::ArrayLiteral { elements, .. } => {
                 validate_expression_child_list(

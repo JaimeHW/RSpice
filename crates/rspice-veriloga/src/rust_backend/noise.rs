@@ -1658,7 +1658,10 @@ fn collect_expr_variable_ids(
             | HirExprKind::ArrayLiteral { elements: args, .. } => {
                 stack.extend(args.iter().copied())
             }
-            HirExprKind::ArrayAccess { index, .. } => stack.push(*index),
+            HirExprKind::ArrayAccess { index, packed, .. } => {
+                stack.push(*index);
+                stack.extend(packed.iter().map(|packed| packed.bit));
+            }
             HirExprKind::AnalogOperator { op } => push_analog_children(op, &mut stack),
             HirExprKind::NoiseSource { operands, .. } => stack.extend(operands.iter().copied()),
             HirExprKind::NullArgument

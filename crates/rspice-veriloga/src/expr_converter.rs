@@ -707,14 +707,27 @@ impl<'a> ExprConverter<'a> {
                         Ok((arena.intern(name), validity_base))
                     })
                     .transpose()?;
+                let bit = access
+                    .packed
+                    .as_ref()
+                    .map(|packed| self.convert(arena, &packed.bit))
+                    .transpose()?;
                 let payload = arena.push_indexed(IndexedRead {
+                    packed: access.packed.as_ref().map(|packed| packed.layout),
                     discrete_validity,
                     array,
                     base,
                     len,
                     lower,
                 });
-                Ok(arena.push(Node::VarIndexed { payload, index }))
+                Ok(arena.push(match bit {
+                    Some(bit) => Node::VarPackedIndexed {
+                        payload,
+                        index,
+                        bit,
+                    },
+                    None => Node::VarIndexed { payload, index },
+                }))
             }
             Expression::ArrayLiteral(_) => {
                 Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(

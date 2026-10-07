@@ -414,6 +414,9 @@ impl MirEquationLowerer<'_, '_> {
                 };
                 Ok(constant.then_some(0.0))
             }
+            HirExprKind::ArrayAccess {
+                packed: Some(_), ..
+            } => Ok(Some(0.0)),
             HirExprKind::ArrayAccess { array, .. } => Ok(self
                 .resolve_mixed_array_shadow(array, axes)?
                 .is_none()
@@ -472,6 +475,9 @@ impl MirEquationLowerer<'_, '_> {
         }
         match &self.expression(expression)?.kind {
             HirExprKind::Identifier { name } => self.lower_identifier(&shadow_name(name, axes)),
+            HirExprKind::ArrayAccess {
+                packed: Some(_), ..
+            } => self.push(NativeOp::Const(0.0)),
             HirExprKind::ArrayAccess { array, index, .. } => {
                 let Some((base, len, lower)) = self.resolve_mixed_array_shadow(array, axes)? else {
                     return self.push(NativeOp::Const(0.0));

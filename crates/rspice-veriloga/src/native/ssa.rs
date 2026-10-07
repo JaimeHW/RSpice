@@ -23,9 +23,10 @@
 
 #![cfg_attr(not(feature = "native"), allow(dead_code))]
 
-#[cfg(test)]
-use crate::jit::expr::CompareOp;
-use crate::jit::expr::{NativeOp, NativeProgram, UnaryMathOp, native_op_stack_effect};
+use crate::jit::expr::{
+    CompareOp, IntegerBinaryOp, LogicalOp, NativeOp, NativeProgram, UnaryMathOp,
+    native_op_stack_effect,
+};
 use crate::jit::value_cache::{native_op_hash, native_ops_are_codegen_identical};
 use crate::jit::{JitError, JitResult};
 use std::collections::HashMap;
@@ -2248,7 +2249,114 @@ impl ProgramLowerer {
                         .into(),
                     })?;
             let operands = stack.split_off(operand_start).into_boxed_slice();
-            let result = if let NativeOp::LoadDiscreteVariableDyn {
+            let result = if let NativeOp::LoadPackedVariableDyn {
+                base,
+                validity_base,
+                len,
+                layout,
+            } = op
+            {
+                if layout.chunk_len() != Some(len) {
+                    return Err(JitError::Verifier {
+                        model: MODEL.into(),
+                        detail: "invalid packed input layout".into(),
+                    });
+                }
+                let width = layout.width().expect("validated packed width");
+                let chunks = layout.chunks_per_word().expect("validated packed chunks");
+                // Both selectors are already SSA values; no consumer can reevaluate them.
+                let word = self.emit(
+                    NativeOp::CheckedArrayIndex {
+                        len: layout.word_len as usize,
+                        lower: layout.word_lower,
+                    },
+                    Box::new([operands[0]]),
+                )?;
+                let mut bit = self.emit(
+                    NativeOp::CheckedArrayIndex {
+                        len: width as usize,
+                        lower: layout.packed_msb.min(layout.packed_lsb),
+                    },
+                    Box::new([operands[1]]),
+                )?;
+                if layout.packed_msb < layout.packed_lsb {
+                    bit = self.emit(
+                        NativeOp::SubFromConst(f64::from(width - 1)),
+                        Box::new([bit]),
+                    )?;
+                }
+                let chunk_bits = f64::from(crate::array_index::PACKED_CHUNK_BITS);
+                let quotient = self.emit(NativeOp::DivConst(chunk_bits), Box::new([bit]))?;
+                let chunk = self.emit(
+                    NativeOp::UnaryMath(UnaryMathOp::Floor),
+                    Box::new([quotient]),
+                )?;
+                let first_bit = self.emit(NativeOp::MulConst(chunk_bits), Box::new([chunk]))?;
+                let shift = self.emit(NativeOp::Sub, Box::new([bit, first_bit]))?;
+                let word = self.emit(NativeOp::MulConst(f64::from(chunks)), Box::new([word]))?;
+                let offset = self.emit(NativeOp::Add, Box::new([word, chunk]))?;
+                let encoded = self.emit(
+                    NativeOp::LoadVariableDyn {
+                        base,
+                        len,
+                        lower: 0,
+                    },
+                    Box::new([offset]),
+                )?;
+                let available = self.emit(
+                    NativeOp::LoadVariableDyn {
+                        base: validity_base,
+                        len,
+                        lower: 0,
+                    },
+                    Box::new([offset]),
+                )?;
+                let encoded = self.emit(NativeOp::DiscreteValue, Box::new([available, encoded]))?;
+                let rounded =
+                    self.emit(NativeOp::UnaryMath(UnaryMathOp::Floor), Box::new([encoded]))?;
+                let integral = self.emit(
+                    NativeOp::Compare(CompareOp::Eq),
+                    Box::new([rounded, encoded]),
+                )?;
+                let nonnegative = self.emit(
+                    NativeOp::CompareConst(CompareOp::Ge, 0.0),
+                    Box::new([encoded]),
+                )?;
+                let in_range = self.emit(
+                    NativeOp::CompareConst(
+                        CompareOp::Lt,
+                        f64::from(1u32 << (2 * crate::array_index::PACKED_CHUNK_BITS)),
+                    ),
+                    Box::new([encoded]),
+                )?;
+                let valid = self.emit(
+                    NativeOp::Logical(LogicalOp::And),
+                    Box::new([integral, nonnegative]),
+                )?;
+                let valid = self.emit(
+                    NativeOp::Logical(LogicalOp::And),
+                    Box::new([valid, in_range]),
+                )?;
+                let encoded = self.emit(NativeOp::DiscreteValue, Box::new([valid, encoded]))?;
+                let known_shift = self.emit(NativeOp::AddConst(chunk_bits), Box::new([shift]))?;
+                let known = self.emit(
+                    NativeOp::IntegerBinary(IntegerBinaryOp::Shr),
+                    Box::new([encoded, known_shift]),
+                )?;
+                let known = self.emit(
+                    NativeOp::IntegerBinaryConst(IntegerBinaryOp::BitAnd, 1),
+                    Box::new([known]),
+                )?;
+                let value = self.emit(
+                    NativeOp::IntegerBinary(IntegerBinaryOp::Shr),
+                    Box::new([encoded, shift]),
+                )?;
+                let value = self.emit(
+                    NativeOp::IntegerBinaryConst(IntegerBinaryOp::BitAnd, 1),
+                    Box::new([value]),
+                )?;
+                self.emit(NativeOp::DiscreteValue, Box::new([known, value]))?
+            } else if let NativeOp::LoadDiscreteVariableDyn {
                 base,
                 validity_base,
                 len,
@@ -3751,6 +3859,7 @@ fn op_may_call(op: NativeOp) -> bool {
             | NativeOp::CheckedValue
             | NativeOp::DiscreteValue
             | NativeOp::LoadDiscreteVariableDyn { .. }
+            | NativeOp::LoadPackedVariableDyn { .. }
             | NativeOp::CheckedArrayIndex { .. }
             | NativeOp::IntegerCast
             | NativeOp::IntegerBinary(_)
@@ -3962,6 +4071,7 @@ fn op_may_fail(op: NativeOp) -> bool {
             | NativeOp::LoadPriorCurrent(_)
             | NativeOp::LoadVariableDyn { .. }
             | NativeOp::LoadDiscreteVariableDyn { .. }
+            | NativeOp::LoadPackedVariableDyn { .. }
             | NativeOp::TableLookup(_)
             | NativeOp::TableDerivative(_)
             | NativeOp::TableDerivativeApply(_)

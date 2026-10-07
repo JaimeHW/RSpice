@@ -1347,11 +1347,31 @@ pub struct CallExpr {
 /// Array access expression
 #[derive(Debug, Clone)]
 pub struct ArrayAccessExpr {
+    /// Compiler-generated packed read. Source parsing leaves this empty.
+    pub packed: Option<PackedArrayIndex>,
     pub array: SmolStr,
     /// Paired availability array for a numeric discrete read; shares this index.
     pub discrete_validity: Option<SmolStr>,
     pub index: Box<Expression>,
     pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct PackedArrayIndex {
+    pub bit: Box<Expression>,
+    pub layout: rspice_veriloga_runtime::array_index::PackedArrayLayout,
+}
+
+impl ArrayAccessExpr {
+    pub fn children(&self) -> impl Iterator<Item = &Expression> {
+        std::iter::once(self.index.as_ref())
+            .chain(self.packed.iter().map(|packed| packed.bit.as_ref()))
+    }
+
+    pub fn children_mut(&mut self) -> impl Iterator<Item = &mut Expression> {
+        std::iter::once(self.index.as_mut())
+            .chain(self.packed.iter_mut().map(|packed| packed.bit.as_mut()))
+    }
 }
 
 /// One item inside a concatenation or assignment pattern.

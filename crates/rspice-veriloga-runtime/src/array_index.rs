@@ -63,6 +63,83 @@ pub fn saturated_array_upper(lower: i64, len: usize) -> i64 {
     upper.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
 }
 
+/// One positive i32 holds a chunk's value bits and known-bit mask exactly.
+/// X and Z are both unavailable when converted to an analog numeric bit.
+pub const PACKED_CHUNK_BITS: u32 = 15;
+
+/// Source bounds behind a flattened word-major bank of encoded packed chunks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PackedArrayLayout {
+    pub word_lower: i64,
+    pub word_len: u32,
+    pub packed_msb: i64,
+    pub packed_lsb: i64,
+}
+
+impl PackedArrayLayout {
+    pub fn width(self) -> Option<u32> {
+        self.packed_msb
+            .abs_diff(self.packed_lsb)
+            .checked_add(1)
+            .and_then(|width| u32::try_from(width).ok())
+            .filter(|width| *width <= 65_536)
+    }
+
+    pub fn chunks_per_word(self) -> Option<u32> {
+        self.width().map(|width| width.div_ceil(PACKED_CHUNK_BITS))
+    }
+
+    pub fn chunk_len(self) -> Option<usize> {
+        if self.word_len == 0
+            || self.word_len > 65_536
+            || self
+                .word_lower
+                .checked_add(i64::from(self.word_len) - 1)
+                .is_none()
+        {
+            return None;
+        }
+        (self.chunks_per_word()? as usize).checked_mul(self.word_len as usize)
+    }
+
+    /// Validate each authored coordinate before combining it: an out-of-range
+    /// packed bit must never wrap into a neighboring word's chunk.
+    pub fn locate(self, word: f64, bit: f64) -> Result<(usize, u32), ArrayIndexError> {
+        let width = self.width().ok_or(ArrayIndexError::SlotOverflow)?;
+        let len = self.chunk_len().ok_or(ArrayIndexError::SlotOverflow)?;
+        let word = checked_array_slot(word, 0, self.word_len as usize, self.word_lower)?;
+        let bit = checked_array_slot(bit, 0, width as usize, self.packed_msb.min(self.packed_lsb))?;
+        let bit = if self.packed_msb < self.packed_lsb {
+            width as usize - 1 - bit
+        } else {
+            bit
+        };
+        let chunk = word
+            .checked_mul(self.chunks_per_word().unwrap() as usize)
+            .and_then(|base| base.checked_add(bit / PACKED_CHUNK_BITS as usize))
+            .filter(|chunk| *chunk < len)
+            .ok_or(ArrayIndexError::SlotOverflow)?;
+        Ok((chunk, bit as u32 % PACKED_CHUNK_BITS))
+    }
+}
+
+/// Decode only the selected bit. The encoded chunk is always finite; availability
+/// belongs to its selected mask bit, not to other bits in the same chunk.
+pub fn decode_packed_bit(encoded: f64, bit: u32) -> Result<f64, &'static str> {
+    if bit >= PACKED_CHUNK_BITS
+        || !encoded.is_finite()
+        || encoded.fract() != 0.0
+        || !(0.0..f64::from(1u32 << (2 * PACKED_CHUNK_BITS))).contains(&encoded)
+    {
+        return Err("invalid encoded packed discrete input");
+    }
+    let encoded = encoded as u32;
+    let known = (encoded >> (PACKED_CHUNK_BITS + bit)) & 1;
+    let value = (encoded >> bit) & 1;
+    crate::checked_discrete_value(f64::from(known), f64::from(value))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ArrayIndexError, checked_array_slot, checked_rounded_i64};

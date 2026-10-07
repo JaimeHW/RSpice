@@ -113,6 +113,7 @@ fn is_executable_here(program: &NativeProgram) -> bool {
                 | NativeOp::LoadVariable(_)
                 | NativeOp::LoadVariableDyn { .. }
                 | NativeOp::LoadDiscreteVariableDyn { .. }
+                | NativeOp::LoadPackedVariableDyn { .. }
                 | NativeOp::LoadBranchUnknown(_)
                 | NativeOp::LoadTemperature
                 | NativeOp::LoadThermalVoltage

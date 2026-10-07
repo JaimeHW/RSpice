@@ -122,6 +122,12 @@ fn program_reads_any_variable(program: &NativeProgram, variables: &HashSet<usize
             validity_base,
             len,
             ..
+        }
+        | NativeOp::LoadPackedVariableDyn {
+            base,
+            validity_base,
+            len,
+            ..
         } => [base, validity_base].into_iter().any(|base| {
             let end = base.checked_add(len);
             variables

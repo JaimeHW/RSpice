@@ -66,6 +66,7 @@ impl Flow<'_> {
                 Expression::ArrayAccess(access) => {
                     if let Some(array) = self.module.arrays.get(&access.array) {
                         if let Expression::Number(index) = &*access.index
+                            && access.packed.is_none()
                             && index.value.is_finite()
                             && index.value.round() >= array.lower as f64
                             && index.value.round() < (array.lower as f64 + array.len as f64)

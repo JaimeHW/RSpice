@@ -1519,7 +1519,12 @@ fn collect_canonical_parameter_default_references(
                 visit(*argument)?;
             }
         }
-        HirExprKind::ArrayAccess { index, .. } => visit(*index)?,
+        HirExprKind::ArrayAccess { index, packed, .. } => {
+            visit(*index)?;
+            if let Some(packed) = packed {
+                visit(packed.bit)?;
+            }
+        }
         HirExprKind::ArrayLiteral { elements, .. } => {
             for element in elements {
                 visit(*element)?;
@@ -1766,7 +1771,10 @@ fn parameter_simparam_queries(
                 then_expr,
                 else_expr,
             } => pending.extend([*condition, *then_expr, *else_expr]),
-            HirExprKind::ArrayAccess { index, .. } => pending.push(*index),
+            HirExprKind::ArrayAccess { index, packed, .. } => {
+                pending.push(*index);
+                pending.extend(packed.iter().map(|p| p.bit));
+            }
             HirExprKind::ArrayLiteral { elements, .. } => pending.extend(elements.iter().copied()),
             _ => {}
         }

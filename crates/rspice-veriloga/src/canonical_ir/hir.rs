@@ -206,6 +206,8 @@ pub enum HirExprKind {
         name: SmolStr,
     },
     ArrayAccess {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        packed: Option<HirPackedArrayIndex>,
         array: SmolStr,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         discrete_validity: Option<SmolStr>,
@@ -675,15 +677,21 @@ fn same_expression_kind(left: &HirExprKind, right: &HirExprKind) -> bool {
         (
             HirExprKind::ArrayAccess {
                 array: left,
+                packed: left_packed,
                 discrete_validity: left_validity,
                 ..
             },
             HirExprKind::ArrayAccess {
                 array: right,
+                packed: right_packed,
                 discrete_validity: right_validity,
                 ..
             },
-        ) => left == right && left_validity == right_validity,
+        ) => {
+            left == right
+                && left_validity == right_validity
+                && left_packed.as_ref().map(|p| p.layout) == right_packed.as_ref().map(|p| p.layout)
+        }
         (HirExprKind::Binary { op: left, .. }, HirExprKind::Binary { op: right, .. }) => {
             left == right
         }
@@ -756,9 +764,18 @@ impl ExecutedSite {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HirPackedArrayIndex {
+    pub bit: ExprId,
+    pub layout: rspice_veriloga_runtime::array_index::PackedArrayLayout,
+}
+
 /// Fixed packed selection applied to four-state storage before analog conversion.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HirDiscreteSelection {
+    /// Chunk contains value bits and a known-bit mask instead of a numeric group.
+    #[serde(default)]
+    pub encoded: bool,
     pub value: VariableId,
     pub signal: SmolStr,
     pub lsb: i64,
@@ -1060,6 +1077,7 @@ impl HirModel {
                 .discrete_selections
                 .iter()
                 .map(|selection| HirDiscreteSelection {
+                    encoded: selection.encoded,
                     value: VariableId::from(selection.value),
                     signal: selection.signal.clone(),
                     lsb: selection.lsb,
@@ -1177,7 +1195,12 @@ impl HirModel {
             !input_values.contains(&selection.value)
                 || !selected.insert(selection.value)
                 || selection.signal.is_empty()
-                || !(1..=31).contains(&selection.width)
+                || !(1..=if selection.encoded {
+                    crate::array_index::PACKED_CHUNK_BITS
+                } else {
+                    31
+                })
+                    .contains(&selection.width)
                 || self
                     .variables
                     .get(usize::from(selection.value))
@@ -1185,7 +1208,7 @@ impl HirModel {
         }) {
             diagnostics.push(IrDiagnostic::global_error(
                 CompilerPhase::HirValidation,
-                "packed discrete selections must name unique integer input slots and 1..31 bits",
+                "packed discrete selections must name unique integer input slots and 1..31 bits for numeric groups or 1..15 bits for encoded chunks",
             ));
         }
         validate_dense_array_ids(&mut diagnostics, &self.arrays);
@@ -1218,6 +1241,11 @@ impl HirModel {
         let declared_branches = self.declared_branch_names();
         let value_symbols = self.known_value_symbol_names();
         let discrete_inputs: HashSet<_> = self.discrete_inputs.iter().copied().collect();
+        let discrete_selections: HashMap<_, _> = self
+            .discrete_selections
+            .iter()
+            .map(|selection| (selection.value, selection))
+            .collect();
 
         for (expected, expression) in self.expressions.iter().enumerate() {
             let expected = u32::try_from(expected).expect("HIR expression count exceeds u32::MAX");
@@ -1238,6 +1266,7 @@ impl HirModel {
                 &declared_branches,
                 &value_symbols,
                 &discrete_inputs,
+                &discrete_selections,
             );
         }
     }
@@ -1250,6 +1279,7 @@ impl HirModel {
         declared_branches: &HashSet<SmolStr>,
         value_symbols: &HashSet<SmolStr>,
         discrete_inputs: &HashSet<[VariableId; 2]>,
+        discrete_selections: &HashMap<VariableId, &HirDiscreteSelection>,
     ) {
         match &expression.kind {
             HirExprKind::NullArgument
@@ -1301,7 +1331,51 @@ impl HirModel {
                 array,
                 index,
                 discrete_validity,
+                packed,
             } => {
+                if let Some(packed) = packed {
+                    self.validate_expression_child(
+                        diagnostics,
+                        expression,
+                        "packed bit",
+                        packed.bit,
+                    );
+                    let layout = packed.layout;
+                    let valid =
+                        self.arrays
+                            .iter()
+                            .find(|a| a.name == *array)
+                            .is_some_and(|array| {
+                                array.lower == 0
+                                    && layout.chunk_len() == Some(array.len as usize)
+                                    && discrete_validity.is_some()
+                                    && (0..array.len).all(|offset| {
+                                        let chunks = layout.chunks_per_word().unwrap();
+                                        let lsb = (offset % chunks)
+                                            * crate::array_index::PACKED_CHUNK_BITS;
+                                        array
+                                            .base
+                                            .index()
+                                            .checked_add(offset)
+                                            .and_then(|id| {
+                                                discrete_selections
+                                                    .get(&VariableId::from(id as usize))
+                                            })
+                                            .is_some_and(|selection| {
+                                                selection.encoded
+                                                    && selection.lsb == i64::from(lsb)
+                                                    && selection.width
+                                                        == (layout.width().unwrap() - lsb).min(
+                                                            crate::array_index::PACKED_CHUNK_BITS,
+                                                        )
+                                            })
+                                    })
+                            });
+                    if !valid {
+                        diagnostics.push(IrDiagnostic::error(CompilerPhase::HirValidation,
+                            "packed indexed reads require a valid layout and matching encoded chunk inputs", expression.span));
+                    }
+                }
                 self.validate_expression_child(diagnostics, expression, "index", *index);
                 self.validate_array_access_target(diagnostics, expression, array, value_symbols);
                 if let Some(validity) = discrete_validity {
@@ -2976,11 +3050,19 @@ impl HirLowerer {
                     args: self.lower_expr_ids(&call.args),
                 }),
             Expression::BranchAccess(access) => self.lower_branch_access_kind(access),
-            Expression::ArrayAccess(array) => HirExprKind::ArrayAccess {
-                array: array.array.clone(),
-                discrete_validity: array.discrete_validity.clone(),
-                index: self.lower_expr(&array.index).id,
-            },
+            Expression::ArrayAccess(array) => {
+                let index = self.lower_expr(&array.index).id;
+                let packed = array.packed.as_ref().map(|packed| HirPackedArrayIndex {
+                    bit: self.lower_expr(&packed.bit).id,
+                    layout: packed.layout,
+                });
+                HirExprKind::ArrayAccess {
+                    packed,
+                    array: array.array.clone(),
+                    discrete_validity: array.discrete_validity.clone(),
+                    index,
+                }
+            }
             Expression::ArrayLiteral(array) => HirExprKind::ArrayLiteral {
                 elements: self.lower_array_literal_elements(&array.elements),
                 assignment_pattern: array.assignment_pattern,

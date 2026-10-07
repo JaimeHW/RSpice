@@ -1626,6 +1626,16 @@ fn rewrite_expression(expression: &Expression, scope: &ScopeMap) -> CompileResul
             }
         }
         Expression::ArrayAccess(access) => Expression::ArrayAccess(ArrayAccessExpr {
+            packed: access
+                .packed
+                .as_ref()
+                .map(|packed| {
+                    Ok::<_, CompileError>(crate::ast::PackedArrayIndex {
+                        bit: Box::new(rewrite_expression(&packed.bit, scope)?),
+                        layout: packed.layout,
+                    })
+                })
+                .transpose()?,
             discrete_validity: access.discrete_validity.as_ref().map(|name| {
                 scope
                     .arrays

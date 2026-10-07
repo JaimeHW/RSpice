@@ -389,3 +389,49 @@ fn discrete_array_read_evaluates_one_selector_before_both_lanes() {
         "an unavailable selected value is not published"
     );
 }
+
+#[test]
+fn dynamic_packed_read_evaluates_each_selector_once_and_guards_encoding() {
+    let assignments = [assignment(
+        10,
+        vec![
+            NativeOp::LoadVariable(0),
+            NativeOp::AddConst(1.0),
+            NativeOp::StoreVariable(0),
+            NativeOp::LoadVariable(1),
+            NativeOp::AddConst(1.0),
+            NativeOp::StoreVariable(1),
+            NativeOp::LoadPackedVariableDyn {
+                base: 2,
+                validity_base: 6,
+                len: 4,
+                layout: crate::array_index::PackedArrayLayout {
+                    word_lower: -1,
+                    word_len: 2,
+                    packed_msb: 0,
+                    packed_lsb: 29,
+                },
+            },
+        ],
+    )];
+    // word 0, authored bit 14 -> storage bit 15 -> second chunk of word 0.
+    // Only bit 0 in that chunk is known; other bits may be X/Z.
+    for (encoded, valid, succeeds) in [
+        (32769.0, 1.0, true),
+        (0.0, 1.0, false),
+        (32769.0, 0.0, false),
+        (32769.25, 1.0, false),
+        (-32769.0, 1.0, false),
+        ((1u64 << 30) as f64 + 32769.0, 1.0, false),
+        (f64::NAN, 1.0, false),
+    ] {
+        let mut variables = [
+            -1.0, 13.0, 0.0, 0.0, 0.0, encoded, 1.0, 1.0, 1.0, valid, 99.0,
+        ];
+        let context = execute(&assignments, &mut variables);
+        assert_eq!(variables[0], 0.0);
+        assert_eq!(variables[1], 14.0);
+        assert_eq!(context.take_runtime_error().is_none(), succeeds);
+        assert_eq!(variables[10], if succeeds { 1.0 } else { 99.0 });
+    }
+}

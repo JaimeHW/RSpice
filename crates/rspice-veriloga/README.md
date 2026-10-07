@@ -328,8 +328,18 @@ limit applies to the selection, including selections from wider or signed parent
 selected values are zero-extended. Runtime unpacked indices retain a single paired
 read and selector evaluation. Projection state uses existing cache, trial rejection
 and checkpoint paths. Storage/sampling scale with the distinct selected ranges and
-array cells, rather than all bits of a wide parent. Runtime packed bit selectors in
-analog expressions still require implementation.
+array cells, rather than all bits of a wide parent.
+Schema 75 adds runtime packed bit selectors in analog expressions, including
+`array[word][bit]`. Shared 15-bit chunks encode both values and known-bit masks
+in exact positive integers; only the selected bit must be known. Word and bit
+selectors each execute once, retain their own operator history, and are checked
+against their authored bounds before a chunk is addressed. Ascending and
+descending packed declarations, nonzero bounds, inactive guards, cache
+invalidation, trial rejection and checkpoint restore use the same contract.
+The portable real/small-signal evaluators and native/Wasm paths reject invalid
+indices, unknown selected bits and malformed chunk encodings. Native and Wasm
+lowering use existing checked arithmetic operations; the Wasm helper ABI remains
+20. Projected storage is bounded and scales by words and 15-bit chunks.
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
 initializer patterns, multidimensional shapes, full parameter-dependent
 shape/child-override support, and remaining mixed-host/platform qualification

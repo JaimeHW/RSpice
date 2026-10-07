@@ -2,6 +2,7 @@
 //! the mixed host before conversion, so unselected X/Z bits cannot poison a read.
 
 use super::*;
+use crate::array_index::{PACKED_CHUNK_BITS, PackedArrayLayout};
 
 #[derive(Clone, Copy)]
 struct SignalShape {
@@ -17,13 +18,14 @@ struct Projection {
     width: u32,
     value: SmolStr,
     validity: SmolStr,
+    packed: Option<PackedArrayLayout>,
 }
 
 #[derive(Default)]
 pub(super) struct ProjectionBuilder {
     signals: HashMap<SmolStr, SignalShape>,
     projections: Vec<Projection>,
-    indices: HashMap<(SmolStr, i64, u32), usize>,
+    indices: HashMap<(SmolStr, i64, u32, bool), usize>,
     cells: usize,
 }
 
@@ -73,13 +75,12 @@ impl SemanticAnalyzer {
                 "packed analog read of `{name}` requires a four-state scalar or a selected unpacked element"
             )));
         }
+        let word = word.map(|word| self.lower_expression(word)).transpose()?;
         let (high, low) = match select {
             PackedSelect::Bit(bit) => {
                 let bit = self.lower_expression(bit)?;
                 let Some(bit) = self.constant_array_index(&bit, &name)? else {
-                    return Err(error(format!(
-                        "runtime packed bit selectors in analog reads of `{name}` are not implemented"
-                    )));
+                    return self.lower_dynamic_packed_read(&name, shape, word, bit, span);
                 };
                 (bit, bit)
             }
@@ -113,13 +114,107 @@ impl SemanticAnalyzer {
         // Saturation is safe here: the bounded-width group is entirely outside
         // storage when its exact least-significant offset cannot fit in i64.
         let lsb = shape.range.position_of(low);
-        let word = word.map(|word| self.lower_expression(word)).transpose()?;
-        let key = (name.clone(), lsb, width);
+        let ordinal = self.register_packed_projection(&name, shape, lsb, width, None, span)?;
+        let projection = &self.discrete_projection.projections[ordinal];
+        let identifier = |name| Expression::Identifier(Identifier { name, span });
+        if let Some(word) = word {
+            let layout = &self.arrays[&projection.value];
+            if let Some(index) = self.constant_array_index(&word, &name)? {
+                self.check_array_bounds(&name, layout, index, span)?;
+                Ok(Self::binary_expr(
+                    BinaryOp::DiscreteValue,
+                    identifier(format!("{}[{index}]", projection.validity).into()),
+                    identifier(format!("{}[{index}]", projection.value).into()),
+                ))
+            } else {
+                // The paired operation carries the selector once all the way
+                // through VM, canonical SSA and native/Wasm lowering.
+                Ok(Expression::ArrayAccess(ArrayAccessExpr {
+                    packed: None,
+                    array: projection.value.clone(),
+                    discrete_validity: Some(projection.validity.clone()),
+                    index: Box::new(word),
+                    span,
+                }))
+            }
+        } else {
+            Ok(Self::binary_expr(
+                BinaryOp::DiscreteValue,
+                identifier(projection.validity.clone()),
+                identifier(projection.value.clone()),
+            ))
+        }
+    }
+
+    fn lower_dynamic_packed_read(
+        &mut self,
+        name: &SmolStr,
+        shape: SignalShape,
+        word: Option<Expression>,
+        bit: Expression,
+        span: Span,
+    ) -> CompileResult<Expression> {
+        let bounds = shape.unpacked.unwrap_or(VectorBounds::SCALAR);
+        let layout = PackedArrayLayout {
+            word_lower: bounds.msb.min(bounds.lsb),
+            word_len: bounds.width(),
+            packed_msb: shape.range.msb,
+            packed_lsb: shape.range.lsb,
+        };
+        let word = word.unwrap_or_else(|| Self::number_expr(0.0, span));
+        let ordinal = self.register_packed_projection(
+            name,
+            shape,
+            0,
+            shape.range.width(),
+            Some(layout),
+            span,
+        )?;
+        let projection = &self.discrete_projection.projections[ordinal];
+        Ok(Expression::ArrayAccess(ArrayAccessExpr {
+            packed: Some(PackedArrayIndex {
+                bit: Box::new(bit),
+                layout,
+            }),
+            array: projection.value.clone(),
+            discrete_validity: Some(projection.validity.clone()),
+            index: Box::new(word),
+            span,
+        }))
+    }
+
+    fn register_packed_projection(
+        &mut self,
+        name: &SmolStr,
+        shape: SignalShape,
+        lsb: i64,
+        width: u32,
+        packed: Option<PackedArrayLayout>,
+        span: Span,
+    ) -> CompileResult<usize> {
+        let error = |detail: String| {
+            CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::UnsupportedFeature(detail),
+                span,
+            ))
+        };
+        let key = (name.clone(), lsb, width, packed.is_some());
         let existing = self.discrete_projection.indices.get(&key).copied();
         let ordinal = if let Some(ordinal) = existing {
             ordinal
         } else {
-            let cells = shape.unpacked.map_or(1, |range| range.width() as usize);
+            let cells = if let Some(layout) = packed {
+                layout
+                    .chunk_len()
+                    .ok_or_else(|| error("invalid packed projection shape".into()))?
+            } else {
+                shape.unpacked.map_or(1, |range| range.width() as usize)
+            };
+            let array_lower = if packed.is_some() {
+                Some(0)
+            } else {
+                shape.unpacked.map(|bounds| bounds.msb.min(bounds.lsb))
+            };
             let total = self
                 .discrete_projection
                 .cells
@@ -141,14 +236,14 @@ impl SemanticAnalyzer {
                     span,
                     attrs: Default::default(),
                 })?;
-                if let Some(bounds) = shape.unpacked {
+                if let Some(lower) = array_lower {
                     // The array's identity/extent is available during semantic
                     // lowering; final storage is allocated after body locals.
                     self.arrays.insert(
                         name.clone(),
                         AnalyzedArray {
                             base: 0,
-                            lower: bounds.msb.min(bounds.lsb),
+                            lower,
                             len: cells,
                         },
                     );
@@ -158,8 +253,7 @@ impl SemanticAnalyzer {
             // revisits the already lowered selection expression.
             self.discrete_validity
                 .insert(value.clone(), validity.clone());
-            if let Some(bounds) = shape.unpacked {
-                let lower = bounds.msb.min(bounds.lsb);
+            if let Some(lower) = array_lower {
                 for offset in 0..cells {
                     let index = lower + offset as i64;
                     self.discrete_validity.insert(
@@ -175,6 +269,7 @@ impl SemanticAnalyzer {
                 width,
                 value,
                 validity,
+                packed,
             });
             self.discrete_projection.cells = total;
             self.discrete_projection.indices.insert(key, ordinal);
@@ -197,54 +292,32 @@ impl SemanticAnalyzer {
                 })?;
             }
         }
-        let projection = &self.discrete_projection.projections[ordinal];
-        let identifier = |name| Expression::Identifier(Identifier { name, span });
-        if let Some(word) = word {
-            let layout = &self.arrays[&projection.value];
-            if let Some(index) = self.constant_array_index(&word, &name)? {
-                self.check_array_bounds(&name, layout, index, span)?;
-                Ok(Self::binary_expr(
-                    BinaryOp::DiscreteValue,
-                    identifier(format!("{}[{index}]", projection.validity).into()),
-                    identifier(format!("{}[{index}]", projection.value).into()),
-                ))
-            } else {
-                // The paired operation carries the selector once all the way
-                // through VM, canonical SSA and native/Wasm lowering.
-                Ok(Expression::ArrayAccess(ArrayAccessExpr {
-                    array: projection.value.clone(),
-                    discrete_validity: Some(projection.validity.clone()),
-                    index: Box::new(word),
-                    span,
-                }))
-            }
-        } else {
-            Ok(Self::binary_expr(
-                BinaryOp::DiscreteValue,
-                identifier(projection.validity.clone()),
-                identifier(projection.value.clone()),
-            ))
-        }
+        Ok(ordinal)
     }
 
     pub(super) fn finish_discrete_projections(&mut self, module: &mut AnalyzedModule) {
         for projection in &self.discrete_projection.projections {
-            let (lower, len) = projection.shape.unpacked.map_or((0, 1), |bounds| {
-                (bounds.msb.min(bounds.lsb), bounds.width() as usize)
-            });
+            let is_array = projection.packed.is_some() || projection.shape.unpacked.is_some();
+            let (lower, len) = if let Some(layout) = projection.packed {
+                (0, layout.chunk_len().expect("validated packed layout"))
+            } else {
+                projection.shape.unpacked.map_or((0, 1), |bounds| {
+                    (bounds.msb.min(bounds.lsb), bounds.width() as usize)
+                })
+            };
             let value_base = module.variables.len();
             let validity_base = value_base + len;
             for (name, base) in [
                 (&projection.value, value_base),
                 (&projection.validity, validity_base),
             ] {
-                if projection.shape.unpacked.is_some() {
+                if is_array {
                     let layout = AnalyzedArray { base, lower, len };
                     self.arrays.insert(name.clone(), layout.clone());
                     module.arrays.insert(name.clone(), layout);
                 }
                 for offset in 0..len {
-                    let name = if projection.shape.unpacked.is_some() {
+                    let name = if is_array {
                         format!("{name}[{}]", lower + offset as i64).into()
                     } else {
                         name.clone()
@@ -263,15 +336,27 @@ impl SemanticAnalyzer {
             for offset in 0..len {
                 let value = value_base + offset;
                 module.discrete_inputs.push((value, validity_base + offset));
+                let (source_index, lsb, width) = if let Some(layout) = projection.packed {
+                    let chunks = layout.chunks_per_word().unwrap() as usize;
+                    let lsb = (offset % chunks) as u32 * PACKED_CHUNK_BITS;
+                    (
+                        layout.word_lower + (offset / chunks) as i64,
+                        i64::from(lsb),
+                        (projection.width - lsb).min(PACKED_CHUNK_BITS),
+                    )
+                } else {
+                    (lower + offset as i64, projection.lsb, projection.width)
+                };
                 module.discrete_selections.push(AnalyzedDiscreteSelection {
+                    encoded: projection.packed.is_some(),
                     value,
                     signal: if projection.shape.unpacked.is_some() {
-                        format!("{}[{}]", projection.signal, lower + offset as i64).into()
+                        format!("{}[{source_index}]", projection.signal).into()
                     } else {
                         projection.signal.clone()
                     },
-                    lsb: projection.lsb,
-                    width: projection.width,
+                    lsb,
+                    width,
                 });
             }
         }

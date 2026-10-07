@@ -2554,9 +2554,9 @@ impl SemanticAnalyzer {
                 .args
                 .iter()
                 .any(|arg| Self::expr_contains_identifier(arg, expected)),
-            Expression::ArrayAccess(access) => {
-                Self::expr_contains_identifier(&access.index, expected)
-            }
+            Expression::ArrayAccess(access) => access
+                .children()
+                .any(|child| Self::expr_contains_identifier(child, expected)),
             Expression::ArrayLiteral(array) => array
                 .elements
                 .iter()
@@ -2615,7 +2615,9 @@ impl SemanticAnalyzer {
                 .args
                 .iter()
                 .any(|arg| Self::expr_contains_call(arg, expected)),
-            Expression::ArrayAccess(access) => Self::expr_contains_call(&access.index, expected),
+            Expression::ArrayAccess(access) => access
+                .children()
+                .any(|child| Self::expr_contains_call(child, expected)),
             Expression::ArrayLiteral(array) => array
                 .elements
                 .iter()
@@ -2673,9 +2675,9 @@ impl SemanticAnalyzer {
                 .args
                 .iter()
                 .any(|arg| Self::expr_contains_number_close(arg, expected)),
-            Expression::ArrayAccess(access) => {
-                Self::expr_contains_number_close(&access.index, expected)
-            }
+            Expression::ArrayAccess(access) => access
+                .children()
+                .any(|child| Self::expr_contains_number_close(child, expected)),
             Expression::ArrayLiteral(array) => array
                 .elements
                 .iter()
@@ -4304,7 +4306,7 @@ impl SemanticAnalyzer {
                         pending.extend(function.args.iter().rev().map(Pending::Expression));
                     }
                     Expression::ArrayAccess(access) => {
-                        pending.push(Pending::Expression(&access.index));
+                        pending.extend(access.children().map(Pending::Expression));
                     }
                     Expression::ArrayLiteral(array) => {
                         pending.extend(array.elements.iter().rev().map(Pending::Element));
@@ -5204,6 +5206,7 @@ impl SemanticAnalyzer {
     ) -> CompileResult<()> {
         let layout = self.arrays.get(&array_name).cloned().expect("checked");
         let fallback = Expression::ArrayAccess(ArrayAccessExpr {
+            packed: None,
             discrete_validity: None,
             array: array_name.clone(),
             index: Box::new(index.clone()),
@@ -5685,16 +5688,26 @@ impl SemanticAnalyzer {
                     span: call.span,
                 })
             }
-            Expression::ArrayAccess(access) => Expression::ArrayAccess(ArrayAccessExpr {
-                discrete_validity: access.discrete_validity.clone(),
-                array: access.array.clone(),
-                index: Box::new(self.materialize_output_function_calls(
-                    &access.index,
-                    module,
-                    sink,
-                )?),
-                span: access.span,
-            }),
+            Expression::ArrayAccess(access) => {
+                let index = Box::new(self.materialize_output_function_calls(
+                    &access.index, module, sink,
+                )?);
+                let packed = access.packed.as_ref().map(|packed| {
+                    Ok::<_, CompileError>(PackedArrayIndex {
+                        bit: Box::new(self.materialize_output_function_calls(
+                            &packed.bit, module, sink,
+                        )?),
+                        layout: packed.layout,
+                    })
+                }).transpose()?;
+                Expression::ArrayAccess(ArrayAccessExpr {
+                    packed,
+                    discrete_validity: access.discrete_validity.clone(),
+                    array: access.array.clone(),
+                    index,
+                    span: access.span,
+                })
+            }
             Expression::ArrayLiteral(array) => Expression::ArrayLiteral(ArrayLiteralExpr {
                 elements: array
                     .elements
@@ -5917,9 +5930,9 @@ impl SemanticAnalyzer {
                     || self.expression_contains_output_function_call(&conditional.then_expr)
                     || self.expression_contains_output_function_call(&conditional.else_expr)
             }
-            Expression::ArrayAccess(access) => {
-                self.expression_contains_output_function_call(&access.index)
-            }
+            Expression::ArrayAccess(access) => access
+                .children()
+                .any(|child| self.expression_contains_output_function_call(child)),
             Expression::ArrayLiteral(array) => array
                 .elements
                 .iter()
@@ -6117,7 +6130,9 @@ impl SemanticAnalyzer {
                     }
                 }
                 Expression::ArrayAccess(a) => {
-                    *a.index = self.normalize_integer_expression(&a.index)?
+                    for child in a.children_mut() {
+                        *child = self.normalize_integer_expression(child)?;
+                    }
                 }
                 _ => {}
             }
@@ -6468,6 +6483,18 @@ impl SemanticAnalyzer {
                 }
             }
             Expression::ArrayAccess(a) => {
+                if let Some(packed) = &a.packed {
+                    return Ok(Expression::ArrayAccess(ArrayAccessExpr {
+                        packed: Some(PackedArrayIndex {
+                            bit: Box::new(self.lower_expression(&packed.bit)?),
+                            layout: packed.layout,
+                        }),
+                        array: a.array.clone(),
+                        discrete_validity: a.discrete_validity.clone(),
+                        index: Box::new(self.lower_expression(&a.index)?),
+                        span: a.span,
+                    }));
+                }
                 if self
                     .discrete_projection
                     .is_scalar(&self.resolve_substituted_name(&a.array))
@@ -6510,6 +6537,7 @@ impl SemanticAnalyzer {
                     }))
                 } else {
                     self.checked_discrete_read(Expression::ArrayAccess(ArrayAccessExpr {
+                        packed: None,
                         discrete_validity: None,
                         array: array_name,
                         index: Box::new(index),
@@ -6813,9 +6841,9 @@ impl SemanticAnalyzer {
                     argument_index,
                 )
             }
-            Expression::ArrayAccess(access) => {
-                Self::validate_zi_freeze_expression(&access.index, operator, argument_index)
-            }
+            Expression::ArrayAccess(access) => access.children().try_for_each(|child| {
+                Self::validate_zi_freeze_expression(child, operator, argument_index)
+            }),
             Expression::ArrayLiteral(array) => {
                 for element in &array.elements {
                     Self::validate_zi_freeze_array_element(element, operator, argument_index)?;
@@ -9692,12 +9720,14 @@ impl SemanticAnalyzer {
                 if let Some(&index) = parameter_indices.get(&access.array) {
                     references.push((index, access.array.clone(), access.span));
                 }
-                Self::collect_parameter_identifier_references(
-                    &access.index,
-                    parameter_indices,
-                    param_given_indices,
-                    references,
-                );
+                for child in access.children() {
+                    Self::collect_parameter_identifier_references(
+                        child,
+                        parameter_indices,
+                        param_given_indices,
+                        references,
+                    );
+                }
             }
             Expression::ArrayLiteral(array) => {
                 for element in &array.elements {
@@ -9786,7 +9816,9 @@ impl SemanticAnalyzer {
                 .iter()
                 .any(|a| Self::references_identifiers(a, names)),
             Expression::ArrayAccess(a) => {
-                names.contains(&a.array) || Self::references_identifiers(&a.index, names)
+                names.contains(&a.array)
+                    || a.children()
+                        .any(|child| Self::references_identifiers(child, names))
             }
             Expression::ArrayLiteral(a) => a
                 .elements
@@ -9896,11 +9928,13 @@ impl SemanticAnalyzer {
                 canonical_storage
                     .get(&access.array)
                     .is_some_and(|has_model_storage| !has_model_storage)
-                    || Self::references_parameter_without_model_storage(
-                        &access.index,
-                        canonical_storage,
-                        external_storage,
-                    )
+                    || access.children().any(|child| {
+                        Self::references_parameter_without_model_storage(
+                            child,
+                            canonical_storage,
+                            external_storage,
+                        )
+                    })
             }
             Expression::ArrayLiteral(array) => array.elements.iter().any(|element| {
                 Self::array_element_references_parameter_without_model_storage(

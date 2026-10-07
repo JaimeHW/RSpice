@@ -498,11 +498,6 @@ endmodule
             "value[3:0]",
             "reverses its declared range",
         ),
-        (
-            "reg [95:0] value;",
-            "value[index]",
-            "runtime packed bit selectors",
-        ),
         ("real value;", "value[0]", "four-state"),
     ] {
         let source = format!(
@@ -514,4 +509,140 @@ endmodule
             .expect("invalid packed read");
         assert!(error.to_string().contains(diagnostic), "{read}: {error}");
     }
+}
+
+#[test]
+fn dynamic_packed_analog_selectors_preserve_chunks_validity_and_history() {
+    use rspice_veriloga::canonical_ir::state::{CanonicalStateFamily, CanonicalStateLayout};
+    use rspice_veriloga::vm::{Vm, VmContext};
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let source = r#"
+module dynamic_packed(p); inout p; electrical p;
+ reg [95:0] data[-1:0]; reg [0:95] ascending;
+ integer word; real selector;
+ initial begin word=-1; selector=14; data[-1]=96'bx; ascending=96'bz; end
+ analog I(p)<+data[absdelay(word,1)][absdelay(selector,1)]+ascending[selector];
+endmodule
+"#;
+    let runtime = compiler.compile_runtime(source, None).unwrap();
+    let hir = &runtime.canonical_ir.hir;
+    assert_eq!(
+        CanonicalStateLayout::from_hir(hir).family_len(CanonicalStateFamily::DelayBuffer),
+        2
+    );
+    assert_eq!(
+        hir.discrete_selections.len(),
+        21,
+        "seven chunks per 96-bit word"
+    );
+    let mut context = VmContext::new(runtime.model.num_terminals);
+    context.variables.resize(runtime.model.num_variables, 0.0);
+    context.allocate_delay_buffers(2);
+    for [value, valid] in &hir.discrete_inputs {
+        context.variables[usize::from(*valid)] = 1.0;
+        let Some(selection) = hir.discrete_selections.iter().find(|s| s.value == *value) else {
+            continue;
+        };
+        assert!(selection.encoded);
+        let known: &[(i64, bool)] = match selection.signal.as_str() {
+            "data[-1]" => &[(14, true), (15, false), (95, true)],
+            "data[0]" => &[(15, true), (95, false)],
+            "ascending" => &[(81, true), (80, true), (0, false)],
+            name => panic!("unexpected source {name}"),
+        };
+        let mut encoded = 0u32;
+        for &(position, value) in known {
+            let bit = position - selection.lsb;
+            if (0..i64::from(selection.width)).contains(&bit) {
+                encoded |= 1 << (15 + bit);
+                encoded |= u32::from(value) << bit;
+            }
+        }
+        context.variables[usize::from(*value)] = f64::from(encoded);
+    }
+    let slot = |name: &str| {
+        usize::from(
+            hir.discrete_inputs
+                .iter()
+                .find(|pair| hir.variables[usize::from(pair[0])].name == name)
+                .unwrap()[0],
+        )
+    };
+    #[cfg(feature = "native")]
+    let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+        "x",
+        runtime.model.clone(),
+        &runtime.canonical_ir,
+        &[1],
+    )
+    .unwrap();
+    let program = &runtime.model.stamp_programs[0].value_program;
+    for (word, bit, expected) in [
+        (-1.0, 14.0, Some(2.0)),
+        (-1.0, 15.0, Some(1.0)),
+        (-1.0, 95.0, Some(1.0)),
+        (0.0, 15.0, Some(2.0)),
+        (0.0, 95.0, Some(0.0)),
+        (-1.0, 14.5, Some(1.0)),
+        (-1.0, 13.0, None),
+        (0.0, 14.0, None),
+        (-1.0, 96.0, None),
+        (1.0, 15.0, None),
+    ] {
+        context.variables[slot("word")] = word;
+        context.variables[slot("selector")] = bit;
+        let result = Vm::new(&mut context).execute(program);
+        match expected {
+            Some(value) => assert_eq!(result.unwrap(), value, "{word}[{bit}]"),
+            None => assert!(result.is_err(), "{word}[{bit}]"),
+        }
+        #[cfg(feature = "native")]
+        {
+            for pair in &hir.discrete_inputs {
+                for slot in pair {
+                    let slot = usize::from(*slot);
+                    device
+                        .sample_discrete_state(slot, context.variables[slot])
+                        .unwrap();
+                }
+            }
+            let mut rhs = 0.0;
+            let result = device.try_stamp(&[0.0], |_, _, _| {}, |_, v| rhs += v);
+            match expected {
+                Some(value) => {
+                    result.unwrap();
+                    assert_eq!(rhs, -value, "{word}[{bit}]");
+                }
+                None => assert!(result.is_err(), "{word}[{bit}]"),
+            }
+        }
+    }
+    let mut malformed = hir.clone();
+    malformed.discrete_selections[0].encoded = false;
+    assert!(malformed.validate().is_err());
+    let mut malformed = hir.clone();
+    if let rspice_veriloga::canonical_ir::hir::HirExprKind::ArrayAccess {
+        packed: Some(packed),
+        ..
+    } = &mut malformed
+        .expressions
+        .iter_mut()
+        .find(|e| {
+            matches!(
+                &e.kind,
+                rspice_veriloga::canonical_ir::hir::HirExprKind::ArrayAccess {
+                    packed: Some(_),
+                    ..
+                }
+            )
+        })
+        .unwrap()
+        .kind
+    {
+        packed.layout.word_len = 0;
+    }
+    assert!(malformed.validate().is_err());
 }

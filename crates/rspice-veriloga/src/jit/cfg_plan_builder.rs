@@ -796,6 +796,7 @@ fn noise_magnitude_source(plan: &NativeModelPlan, entry: CfgPlanEntry) -> NoiseM
             NativeOp::LoadVariable(_)
                 | NativeOp::LoadVariableDyn { .. }
                 | NativeOp::LoadDiscreteVariableDyn { .. }
+                | NativeOp::LoadPackedVariableDyn { .. }
         )
     }) {
         NoiseMagnitude::Exit

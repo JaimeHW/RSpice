@@ -871,8 +871,10 @@ fn hir_expr_is_instance_static(
             array,
             index,
             discrete_validity,
+            packed,
         } => {
-            discrete_validity.is_none()
+            packed.is_none()
+                && discrete_validity.is_none()
                 && recurse(*index)
                 && hir
                     .arrays
@@ -1852,7 +1854,12 @@ impl<'a> CfgLowerer<'a> {
                     self.metadata_noise_expr(argument);
                 }
             }
-            HirExprKind::ArrayAccess { index, .. } => self.metadata_noise_expr(index),
+            HirExprKind::ArrayAccess { index, packed, .. } => {
+                self.metadata_noise_expr(index);
+                if let Some(packed) = packed {
+                    self.metadata_noise_expr(packed.bit);
+                }
+            }
             HirExprKind::ArrayLiteral { elements, .. } => {
                 for element in elements {
                     self.metadata_noise_expr(element);
@@ -2401,6 +2408,98 @@ impl<'a> CfgLowerer<'a> {
         }
     }
 
+    fn packed_array_read(
+        &mut self,
+        name: &str,
+        validity: Option<&str>,
+        word: ExprId,
+        packed: &super::hir::HirPackedArrayIndex,
+        span: SourceSpanRef,
+    ) -> ValueId {
+        let value = self.hir.arrays.iter().find(|a| a.name == name).cloned();
+        let valid = validity
+            .and_then(|name| self.hir.arrays.iter().find(|a| a.name == name))
+            .cloned();
+        let layout = packed.layout;
+        let (Some(value), Some(valid), Some(width), Some(chunks)) =
+            (value, valid, layout.width(), layout.chunks_per_word())
+        else {
+            self.unsupported(span, "invalid packed input projection".into());
+            return self.real_constant(0.0);
+        };
+        let word = self.expr(word);
+        let bit = self.expr(packed.bit);
+        let word = self.builder.push(
+            self.block,
+            CfgValueType::Real,
+            CfgValueKind::ArrayIndex {
+                input: word,
+                lower: layout.word_lower,
+                len: layout.word_len,
+            },
+        );
+        let mut bit = self.builder.push(
+            self.block,
+            CfgValueType::Real,
+            CfgValueKind::ArrayIndex {
+                input: bit,
+                lower: layout.packed_msb.min(layout.packed_lsb),
+                len: width,
+            },
+        );
+        if layout.packed_msb < layout.packed_lsb {
+            let last = self.real_constant(f64::from(width - 1));
+            bit = self.binary(CfgBinaryOp::Sub, last, bit);
+        }
+        let chunk_bits = self.real_constant(f64::from(crate::array_index::PACKED_CHUNK_BITS));
+        let quotient = self.binary(CfgBinaryOp::Div, bit, chunk_bits);
+        let chunk = self.unary(CfgUnaryOp::Floor, quotient);
+        let first_bit = self.binary(CfgBinaryOp::Mul, chunk, chunk_bits);
+        let shift = self.binary(CfgBinaryOp::Sub, bit, first_bit);
+        let chunks = self.real_constant(f64::from(chunks));
+        let word = self.binary(CfgBinaryOp::Mul, word, chunks);
+        let offset = self.binary(CfgBinaryOp::Add, word, chunk);
+        let encoded = self.array_read_offset(&value, offset);
+        let available = self.array_read_offset(&valid, offset);
+        let encoded = self.binary(CfgBinaryOp::DiscreteValue, available, encoded);
+        let rounded = self.unary(CfgUnaryOp::Floor, encoded);
+        let integral = self.binary(CfgBinaryOp::Eq, rounded, encoded);
+        let zero = self.real_constant(0.0);
+        let nonnegative = self.binary(CfgBinaryOp::Ge, encoded, zero);
+        let limit = self.real_constant(f64::from(
+            1u32 << (2 * crate::array_index::PACKED_CHUNK_BITS),
+        ));
+        let in_range = self.binary(CfgBinaryOp::Lt, encoded, limit);
+        let valid = self.binary(CfgBinaryOp::And, integral, nonnegative);
+        let valid = self.binary(CfgBinaryOp::And, valid, in_range);
+        let encoded = self.binary(CfgBinaryOp::DiscreteValue, valid, encoded);
+        let known_shift = self.binary(CfgBinaryOp::Add, shift, chunk_bits);
+        let one = self.real_constant(1.0);
+        let mut extract = |shift| {
+            let shifted = self.builder.push(
+                self.block,
+                CfgValueType::Real,
+                CfgValueKind::IntegerBitwise {
+                    op: CfgIntegerBitwiseOp::Shr,
+                    left: encoded,
+                    right: shift,
+                },
+            );
+            self.builder.push(
+                self.block,
+                CfgValueType::Real,
+                CfgValueKind::IntegerBitwise {
+                    op: CfgIntegerBitwiseOp::And,
+                    left: shifted,
+                    right: one,
+                },
+            )
+        };
+        let known = extract(known_shift);
+        let value = extract(shift);
+        self.binary(CfgBinaryOp::DiscreteValue, known, value)
+    }
+
     fn array_read_offset(&mut self, array: &super::hir::HirArray, offset: ValueId) -> ValueId {
         if let Some(&base) = self.evaluation_input_arrays.get(&array.name) {
             return self.builder.push(
@@ -2439,7 +2538,20 @@ impl<'a> CfgLowerer<'a> {
                 array,
                 index,
                 discrete_validity,
-            } => self.array_read(array, discrete_validity.as_deref(), *index, span),
+                packed,
+            } => {
+                if let Some(packed) = packed {
+                    self.packed_array_read(
+                        array,
+                        discrete_validity.as_deref(),
+                        *index,
+                        packed,
+                        span,
+                    )
+                } else {
+                    self.array_read(array, discrete_validity.as_deref(), *index, span)
+                }
+            }
             HirExprKind::Binary { op, left, right } => self.binary_expr(op, *left, *right, span),
             HirExprKind::Unary { op, operand } => self.unary_expr(op, *operand, span),
             HirExprKind::Conditional {

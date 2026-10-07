@@ -224,7 +224,11 @@ impl Effects {
                 self.expression(&conditional.then_expr);
                 self.expression(&conditional.else_expr);
             }
-            Expression::ArrayAccess(access) => self.expression(&access.index),
+            Expression::ArrayAccess(access) => {
+                for child in access.children() {
+                    self.expression(child);
+                }
+            }
             Expression::ArrayLiteral(array) => self.elements(&array.elements),
             Expression::Digital(digital) => {
                 for child in digital.children() {

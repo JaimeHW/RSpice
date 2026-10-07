@@ -926,6 +926,9 @@ impl SemanticAnalyzer {
 
     pub(super) fn checked_discrete_read(&self, mut value: Expression) -> Expression {
         if let Expression::ArrayAccess(access) = &mut value {
+            if access.packed.is_some() {
+                return value;
+            }
             if let Some(validity) = self.discrete_validity.get(&access.array) {
                 access.discrete_validity = Some(validity.clone());
             }

@@ -749,6 +749,13 @@ pub enum Instruction {
         len: usize,
         lower: i64,
     },
+    /// Pop bit then word selectors, read one encoded chunk and decode one bit.
+    PushPackedVariableDyn {
+        base: usize,
+        validity_base: usize,
+        len: usize,
+        layout: rspice_veriloga_runtime::array_index::PackedArrayLayout,
+    },
     /// Push temperature
     PushTemperature,
     /// Push thermal voltage

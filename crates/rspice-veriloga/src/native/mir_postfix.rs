@@ -472,6 +472,35 @@ impl<'a, S: CfgScalar> PlanWalk<'a, S> {
                     .map_err(|_| PostfixRefusal::RuntimeError(name))?;
                 *stack.last_mut().ok_or(PostfixRefusal::Malformed(name))? = value;
             }
+            NativeOp::LoadPackedVariableDyn {
+                base,
+                validity_base,
+                len,
+                layout,
+            } => {
+                let bit = stack.pop().ok_or(PostfixRefusal::Malformed(name))?.real();
+                let word = stack.pop().ok_or(PostfixRefusal::Malformed(name))?.real();
+                if layout.chunk_len() != Some(len) {
+                    return Err(PostfixRefusal::RuntimeError(name));
+                }
+                let (chunk, bit) = layout
+                    .locate(word, bit)
+                    .map_err(|_| PostfixRefusal::RuntimeError(name))?;
+                let read = |base: usize| {
+                    base.checked_add(chunk)
+                        .and_then(|slot| self.variables.get(slot))
+                        .copied()
+                        .ok_or(PostfixRefusal::RuntimeError(name))
+                };
+                let encoded = rspice_veriloga_runtime::checked_discrete_value(
+                    read(validity_base)?.real(),
+                    read(base)?.real(),
+                )
+                .map_err(|_| PostfixRefusal::RuntimeError(name))?;
+                let value = crate::array_index::decode_packed_bit(encoded, bit)
+                    .map_err(|_| PostfixRefusal::RuntimeError(name))?;
+                stack.push(S::from_f64(value));
+            }
             NativeOp::LoadBranchUnknown(index) => {
                 let value = self.read(self.point.branch_unknowns, index, name)?;
                 stack.push(S::from_f64(value));

@@ -1254,8 +1254,8 @@ struct DiscreteAnalogInput {
     signal: DigitalSignalId,
     variable: usize,
     validity: usize,
-    /// (least-significant storage position, width), before numeric conversion.
-    selection: Option<(i64, u32)>,
+    /// (least-significant storage position, width, encoded chunk), before numeric conversion.
+    selection: Option<(i64, u32, bool)>,
     signed: bool,
     real: bool,
     name: String,
@@ -1264,16 +1264,24 @@ struct DiscreteAnalogInput {
 impl DiscreteAnalogInput {
     /// Shared by ordinary sampling and the circuit's Active-region exchange.
     fn four_state_value(&self, value: &FourStateValue) -> Option<f64> {
-        if let Some((lsb, width)) = self.selection {
+        if let Some((lsb, width, encoded)) = self.selection {
             let mut selected = 0u32;
+            let mut known = 0u32;
             for bit in 0..width {
                 let position = lsb.checked_add(i64::from(bit))?;
                 let position = u32::try_from(position).ok()?;
                 match value.bit(position) {
-                    FourStateBit::Zero => {}
-                    FourStateBit::One => selected |= 1 << bit,
+                    FourStateBit::Zero => known |= 1 << bit,
+                    FourStateBit::One => {
+                        selected |= 1 << bit;
+                        known |= 1 << bit;
+                    }
+                    _ if encoded => {}
                     _ => return None,
                 }
+            }
+            if encoded {
+                selected |= known << rspice_veriloga_runtime::array_index::PACKED_CHUNK_BITS;
             }
             return Some(f64::from(selected));
         }
@@ -1518,7 +1526,8 @@ impl MixedSignalHost {
                     signal: signal.id,
                     variable: usize::from(*value),
                     validity: usize::from(*validity),
-                    selection: selection.map(|selection| (selection.lsb, selection.width)),
+                    selection: selection
+                        .map(|selection| (selection.lsb, selection.width, selection.encoded)),
                     signed: signal.integer && selection.is_none(),
                     real: signal.kind.is_real(),
                     name: signal.name.to_string(),
@@ -5087,6 +5096,67 @@ endmodule
         host.restore(&checkpoint).unwrap();
         begin(&mut host, 1);
         assert_eq!(stamp(&mut host).unwrap(), -51.0);
+        host.accept_trial().unwrap();
+    }
+
+    #[test]
+    fn dynamic_packed_analog_views_preserve_selected_bits_and_rollback() {
+        let source = r#"
+module dynamic_view(p); inout p; electrical p;
+ reg [95:0] data[-1:0]; reg [0:95] ascending;
+ integer word, selector; reg enabled;
+ initial begin
+   word=-1; selector=14; enabled=1;
+   data[-1]=96'bx; data[-1][14]=1; data[-1][15]=0;
+   ascending=96'bz; ascending[14]=1; ascending[15]=1;
+ end
+ analog if (enabled) I(p)<+data[word][selector]+ascending[selector]; else I(p)<+7;
+endmodule
+"#;
+        let mut host =
+            MixedSignalHost::compile(source, None, "x", &[1], SchedulerLimits::default()).unwrap();
+        let stamp = |host: &mut MixedSignalHost| {
+            while host.settle_analog_bridges(&[0.0]).unwrap() {}
+            let mut rhs = 0.0;
+            host.stamp(&[0.0], |_, _, _| {}, |_, v| rhs += v)
+                .map(|_| rhs)
+        };
+        begin(&mut host, 0);
+        assert_eq!(stamp(&mut host).unwrap(), -2.0);
+        host.accept_trial().unwrap();
+        let checkpoint = host.checkpoint().unwrap();
+        begin(&mut host, 1);
+        host.force_digital(&[("selector", &format!("{:032b}", 15))])
+            .unwrap();
+        assert_eq!(stamp(&mut host).unwrap(), -1.0);
+        host.reject_trial().unwrap();
+        assert_eq!(
+            host.analog.checkpoint_state().unwrap(),
+            checkpoint.analog_checkpoint
+        );
+        for (word, selector) in [(-1i32, 13), (0, 14), (-1, 96)] {
+            host.restore(&checkpoint).unwrap();
+            begin(&mut host, 1);
+            host.force_digital(&[
+                ("word", &format!("{word:032b}")),
+                ("selector", &format!("{selector:032b}")),
+                ("enabled", "0"),
+            ])
+            .unwrap();
+            assert_eq!(
+                stamp(&mut host).unwrap(),
+                -7.0,
+                "inactive selections remain unevaluated"
+            );
+            host.force_digital(&[("enabled", "1")]).unwrap();
+            assert!(stamp(&mut host).is_err(), "{word}[{selector}]");
+            if host.trial_active() {
+                host.reject_trial().unwrap();
+            }
+        }
+        host.restore(&checkpoint).unwrap();
+        begin(&mut host, 1);
+        assert_eq!(stamp(&mut host).unwrap(), -2.0);
         host.accept_trial().unwrap();
     }
 

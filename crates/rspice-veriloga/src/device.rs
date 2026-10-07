@@ -8408,6 +8408,12 @@ impl VerilogADevice {
                         validity_base,
                         len,
                         ..
+                    }
+                    | Instruction::PushPackedVariableDyn {
+                        base,
+                        validity_base,
+                        len,
+                        ..
                     } => {
                         for base in [*base, *validity_base] {
                             out.extend(base..base.saturating_add(*len));
@@ -8826,6 +8832,7 @@ impl VerilogADevice {
                         Instruction::PushVariable(_)
                             | Instruction::PushVariableDyn { .. }
                             | Instruction::PushDiscreteVariableDyn { .. }
+                            | Instruction::PushPackedVariableDyn { .. }
                     )
                 })
             }) {

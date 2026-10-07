@@ -1567,6 +1567,9 @@ impl DeviceIR {
                 }
                 // ddt() cannot appear in an element index (assignments
                 // reject it upstream), so an indexed read is resistive
+                Node::VarPackedIndexed { index, bit, .. } => {
+                    contains_ddt(arena, index) || contains_ddt(arena, bit)
+                }
                 Node::VarIndexed { index, .. } => contains_ddt(arena, index),
                 Node::Heavy(_, heavy) => contains_ddt_heavy(arena, arena.heavy(heavy)),
                 Node::Const(_)
@@ -2202,7 +2205,7 @@ pub mod autodiff {
             Node::Var(name) => {
                 out.insert(arena.name(name).clone());
             }
-            Node::VarIndexed { payload, .. } => {
+            Node::VarIndexed { payload, .. } | Node::VarPackedIndexed { payload, .. } => {
                 let read = arena.indexed(payload);
                 out.insert(arena.name(read.array).clone());
                 if let Some((validity, _)) = read.discrete_validity {
@@ -2334,7 +2337,7 @@ pub mod autodiff {
         let recurse = |e: NodeId| derivative_axes(arena, e, deps, num_nodes);
         let optional = |slot: Option<NodeId>| slot.map_or(0, &recurse);
         match *arena.node(expr) {
-            Node::FreezeDerivative(_) => 0,
+            Node::VarPackedIndexed { .. } | Node::FreezeDerivative(_) => 0,
             Node::Voltage(pos, neg) => node_bit(unpack_index(pos)) | node_bit(unpack_index(neg)),
             Node::BranchCurrent(ordinal) => axis_bit(
                 &DerivativeWrt::BranchCurrent(unpack_index(ordinal)),
@@ -2773,6 +2776,19 @@ pub mod autodiff {
             let node = *self.arena.node(expr);
             match node {
                 Node::Var(name) => self.require(self.arena.name(name).clone(), order, pending),
+                Node::VarPackedIndexed {
+                    payload,
+                    index,
+                    bit,
+                } => {
+                    let read = *self.arena.indexed(payload);
+                    self.require(self.arena.name(read.array).clone(), 0, pending);
+                    if let Some((validity, _)) = read.discrete_validity {
+                        self.require(self.arena.name(validity).clone(), 0, pending);
+                    }
+                    self.expression(index, 0, pending);
+                    self.expression(bit, 0, pending);
+                }
                 Node::VarIndexed { payload, index } => {
                     self.require(
                         self.arena.name(self.arena.indexed(payload).array).clone(),
@@ -3369,6 +3385,7 @@ pub mod autodiff {
             }
             // A runtime index selects an element; it is not part of the
             // differentiable value path.
+            Node::VarPackedIndexed { .. } => {}
             Node::VarIndexed { payload, .. } => {
                 let array = arena.indexed(payload).array;
                 if let Some(processes) = deps.get(arena.name(array).as_str()) {
@@ -4473,6 +4490,7 @@ pub mod autodiff {
 
             // Runtime-indexed reads chain through the array's shadow run
             // at the same element; the index itself only selects
+            Node::VarPackedIndexed { .. } => constant!(0.0),
             Node::VarIndexed { payload, index } => {
                 let read = *arena.indexed(payload);
                 let array = arena.name(read.array).clone();
@@ -4481,6 +4499,7 @@ pub mod autodiff {
                         let shadow = ShadowContext::shadow_name(&array, wrt);
                         let interned = arena.intern(&shadow);
                         let payload = arena.push_indexed(IndexedRead {
+                            packed: None,
                             discrete_validity: None,
                             array: interned,
                             base: shadow_base,
@@ -5795,6 +5814,7 @@ pub mod autodiff {
             let index = noise(arena, 1);
             let array = arena.intern("samples");
             let payload = arena.push_indexed(arena::IndexedRead {
+                packed: None,
                 discrete_validity: None,
                 array,
                 base: 0,

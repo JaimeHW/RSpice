@@ -1295,6 +1295,23 @@ impl CodeGenerator {
                         })?;
                     program.instructions.push(Instruction::PushVariable(idx));
                 }
+                Node::VarPackedIndexed {
+                    payload,
+                    index,
+                    bit,
+                } => {
+                    self.emit_expr(arena, index, emit_ctx, program)?;
+                    self.emit_expr(arena, bit, emit_ctx, program)?;
+                    let read = arena.indexed(payload);
+                    program
+                        .instructions
+                        .push(Instruction::PushPackedVariableDyn {
+                            base: read.base,
+                            validity_base: read.discrete_validity.expect("paired packed input").1,
+                            len: read.len,
+                            layout: read.packed.expect("packed input shape"),
+                        });
+                }
                 Node::VarIndexed { payload, index } => {
                     self.emit_expr(arena, index, emit_ctx, program)?;
                     let read = arena.indexed(payload);

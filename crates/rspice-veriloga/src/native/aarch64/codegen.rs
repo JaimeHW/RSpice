@@ -1655,7 +1655,7 @@ impl FunctionCompiler {
             NativeOp::StoreVariable(index) => {
                 self.emit_array_store(result, self.variables_register(), index)?
             }
-            NativeOp::LoadDiscreteVariableDyn { .. } => {
+            NativeOp::LoadDiscreteVariableDyn { .. } | NativeOp::LoadPackedVariableDyn { .. } => {
                 return Err(JitError::Encoding {
                     model: MODEL.into(),
                     detail: "paired discrete read reached encoding before SSA expansion".into(),
