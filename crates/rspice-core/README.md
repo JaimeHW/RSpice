@@ -455,8 +455,9 @@ at the root and inside subcircuits without consuming samples on failed retries.
 Pending instance overrides cannot be replaced by enclosing globals or model
 defaults in sibling expressions; a self-reference may still use its enclosing
 or model value. Root expressions that read sibling fields wait for the complete
-instance context. Retained `.GLOBAL_PARAM` expansion preserves those dependencies
-inside subcircuits, and independent root expressions keep their source-order
+instance context. Retained `.GLOBAL_PARAM` dependencies resolve against completed instance bindings
+at the top level and inside subcircuits. Transitive reads preserve complex values
+and pending-sibling masking; independent root expressions keep their source-order
 statistical sampling.
 Complex instance components resolve forward parameter and function references.
 Component functions accept comma-separated arguments and whitespace inside groups.

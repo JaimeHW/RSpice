@@ -66,20 +66,11 @@ impl std::ops::Deref for XspiceParseContext<'_> {
 
 impl XspiceParseContext<'_> {
     fn evaluate(&self, expression: &str) -> Result<crate::ComplexValue, expr::ExprError> {
-        expr::eval_expression_complex_with_probe_and_resolver(
+        expr::evaluate_instance_expression(
             expression,
             self.params,
-            &mut |parameter| {
-                if !parameter.eq_ignore_ascii_case(self.current_field)
-                    && self
-                        .instance_fields
-                        .contains(&parameter.to_ascii_uppercase())
-                {
-                    Err(expr::ExprError::UndefinedParam(parameter.to_string()))
-                } else {
-                    Ok(None)
-                }
-            },
+            self.instance_fields,
+            self.current_field,
             self.abort,
         )
         .map_err(|error| match error {

@@ -320,6 +320,7 @@ fn build_instance_eval_context<'a>(
             ModelEvaluationContext::new(ctx, netlist.abort)
         }
     };
+    ctx.retain_instance_expressions(&netlist.params);
     for (name, value) in instance_params {
         ctx.set(name, *value);
     }
@@ -447,7 +448,7 @@ fn resolve_instance_complex_value(
     imag: &str,
 ) -> Result<String, SimulationError> {
     let evaluate = |expression: &str, component: &str| {
-        let value = context.evaluate(expression).map_err(|error| {
+        let value = context.evaluate_instance(expression).map_err(|error| {
             map_model_expression_error(error, |error| format!(
                 "XSPICE model '{model_name}' instance complex parameter '{parameter}' could not resolve {component} expression '{expression}': {error}"
             ))
@@ -483,7 +484,7 @@ fn resolve_instance_real_vector_expression_params(
     for (name, exprs) in instance_vector_expr_params {
         let mut values = Vec::with_capacity(exprs.len());
         for expr in exprs {
-            let value = ctx.evaluate(expr).map_err(|error| {
+            let value = ctx.evaluate_instance(expr).map_err(|error| {
                 map_model_expression_error(error, |err| format!(
                     "XSPICE model '{}' instance vector parameter '{}' could not resolve expression '{}': {}",
                     model_name, name, expr, err

@@ -4,6 +4,50 @@ use super::*;
 use crate::abort_signal::AbortSignal;
 use std::collections::HashSet;
 
+/// Evaluate an instance expression against authoritative retained definitions.
+/// Failed forward attempts use an isolated stream; only successful evaluation
+/// consumes the live stream. Pending siblings also mask transitive reads.
+pub(crate) fn evaluate_instance_expression(
+    expression: &str,
+    context: &ParamContext,
+    pending_names: &HashSet<String>,
+    current_name: &str,
+    abort: &dyn AbortSignal,
+) -> Result<ComplexValue, ExpressionEvaluationError> {
+    if !context.has_retained_parameter_expressions() {
+        return super::api::eval_expression_complex_with_probe_and_resolver(
+            expression,
+            context,
+            &mut |parameter| {
+                if !parameter.eq_ignore_ascii_case(current_name)
+                    && pending_names.contains(&parameter.to_ascii_uppercase())
+                {
+                    Err(ExprError::UndefinedParam(parameter.to_owned()))
+                } else {
+                    Ok(None)
+                }
+            },
+            abort,
+        );
+    }
+    let evaluate = |context: &ParamContext| {
+        let blocked = pending_names
+            .iter()
+            .filter(|name| !name.eq_ignore_ascii_case(current_name))
+            .cloned()
+            .collect();
+        ParameterResolver::with_blocked_parameters(blocked)
+            .evaluate_expression(expression, context, abort)
+            .map_err(|error| match error {
+                ParameterResolutionError::Aborted => ExpressionEvaluationError::Aborted,
+                ParameterResolutionError::Expression(error) => error.into(),
+                error => ExprError::InvalidArgument(error.to_string()).into(),
+            })
+    };
+    evaluate(&context.isolated_random_clone())?;
+    evaluate(context)
+}
+
 /// Resolve scalar instance fields in dependency order, publishing each
 /// successful value for sibling expressions. An unresolved attempt must not
 /// consume statistical samples before a later pass can resolve its bindings.
@@ -29,20 +73,8 @@ pub(crate) fn resolve_real_instance_expressions(
             // A pending explicit field shadows an enclosing/model fallback
             // for sibling reads. Its own expression can still use its previous
             // enclosing value, as in GAIN={GAIN*2}.
-            let value = super::api::eval_expression_complex_with_probe_and_resolver(
-                expression,
-                &context,
-                &mut |parameter| {
-                    if !parameter.eq_ignore_ascii_case(name)
-                        && pending_names.contains(&parameter.to_ascii_uppercase())
-                    {
-                        Err(ExprError::UndefinedParam(parameter.to_string()))
-                    } else {
-                        Ok(None)
-                    }
-                },
-                abort,
-            );
+            let value =
+                evaluate_instance_expression(expression, &context, &pending_names, name, abort);
             match value {
                 Ok(value) => {
                     let value = require_real(value).map_err(|error| {
@@ -101,6 +133,29 @@ impl<'a> ModelEvaluationContext<'a> {
 
     pub(crate) fn evaluate(&self, expression: &str) -> Result<Value, ExpressionEvaluationError> {
         eval_expression_complex_with_abort(expression, &self.context, self.abort)
+            .and_then(|value| require_real(value).map_err(Into::into))
+    }
+
+    /// Model construction materializes its defaults. Instance overrides must
+    /// still see the enclosing symbolic graph after those defaults are bound.
+    pub(crate) fn retain_instance_expressions(&mut self, enclosing: &ParamContext) {
+        for (name, expression) in enclosing.all_parameter_expressions() {
+            let value = self.context.get_complex(&name);
+            self.context
+                .define_parameter_expression(&name, expression, value);
+        }
+        for (name, expression) in enclosing.all_global_expressions() {
+            let value = self.context.get_global_complex(&name);
+            self.context
+                .define_global_expression(&name, expression, value);
+        }
+    }
+
+    pub(crate) fn evaluate_instance(
+        &self,
+        expression: &str,
+    ) -> Result<Value, ExpressionEvaluationError> {
+        evaluate_instance_expression(expression, &self.context, &HashSet::new(), "", self.abort)
             .and_then(|value| require_real(value).map_err(Into::into))
     }
 

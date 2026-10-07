@@ -59,9 +59,32 @@ struct PendingParameter {
 #[derive(Default)]
 pub(crate) struct ParameterResolver {
     values: HashMap<usize, [HashMap<String, ComplexValue>; 2]>,
+    blocked_parameters: HashSet<String>,
 }
 
 impl ParameterResolver {
+    /// Mask pending instance siblings even through retained parameter bodies.
+    /// Ordinary declaration resolution keeps this set empty.
+    pub(crate) fn with_blocked_parameters(blocked_parameters: HashSet<String>) -> Self {
+        Self {
+            blocked_parameters,
+            ..Self::default()
+        }
+    }
+
+    fn lookup(
+        &self,
+        scope: usize,
+        name: &str,
+        environment: &impl ParameterEnvironment,
+    ) -> Result<Option<ComplexValue>, ExprError> {
+        if self.blocked_parameters.contains(name) {
+            Err(ExprError::UndefinedParam(name.to_owned()))
+        } else {
+            Ok(self.scoped_value(scope, name, environment))
+        }
+    }
+
     /// Evaluate an unnamed consumer while sharing the cache of its demanded
     /// parameter bindings. Suspended evaluation never replays statistical work
     /// performed before a forward reference.
@@ -75,7 +98,7 @@ impl ParameterResolver {
         loop {
             match program.resume_with_abort(
                 params,
-                &mut |name| Ok(self.scoped_value(0, name, params)),
+                &mut |name| self.lookup(0, name, params),
                 abort,
             )? {
                 PreparedProgress::Complete(value) => {
@@ -205,7 +228,7 @@ impl ParameterResolver {
             let params = environment.parameters(current.scope);
             match current.program.resume_with_abort(
                 params,
-                &mut |dependency| Ok(self.scoped_value(current.scope, dependency, environment)),
+                &mut |dependency| self.lookup(current.scope, dependency, environment),
                 abort,
             )? {
                 PreparedProgress::Complete(value) => {

@@ -2952,7 +2952,7 @@ impl<'a> Flattener<'a> {
             .chain(self.models)
             .find(|model| model.name.eq_ignore_ascii_case(model_name));
         if let Some(model) = model {
-            let resolved = super::expr::ModelEvaluationContext::resolve(
+            let mut resolved = super::expr::ModelEvaluationContext::resolve(
                 scope,
                 context,
                 &model.params,
@@ -2967,6 +2967,7 @@ impl<'a> Flattener<'a> {
                     ParseError::InvalidValue(format!("XSPICE model '{model_name}': {error}")).into()
                 }
             })?;
+            resolved.retain_instance_expressions(scope);
             Ok((*resolved).clone())
         } else {
             context.set("TEMP", temp);
@@ -3023,8 +3024,16 @@ impl<'a> Flattener<'a> {
                     "runtime-dependent instance/model parameter '{name}' is not supported by this device target"
                 )).into());
             }
+            // Numeric instance resolution follows retained definitions itself,
+            // preserving complex values that behavioral lowering would project.
             let preserves_bindings =
-                scalar_expression_preserves_bindings(expression, &context, abort)?;
+                match super::expr::parse_expression_with_abort(expression, abort) {
+                    Ok(_) => true,
+                    Err(super::expr::ParseExpressionWithAbortError::Parse(_)) => false,
+                    Err(super::expr::ParseExpressionWithAbortError::Aborted) => {
+                        return Err(ParseWithAbortError::Aborted);
+                    }
+                };
             expressions.push((
                 name.clone(),
                 if preserves_bindings {
@@ -3273,14 +3282,7 @@ impl<'a> Flattener<'a> {
         for (name, exprs) in deferred_params {
             let values = exprs
                 .iter()
-                .map(|expr| {
-                    resolve_parametric_value(
-                        &ParametricValue::Expression(expr.clone()),
-                        scope,
-                        &self.random,
-                        abort,
-                    )
-                })
+                .map(|expr| self.resolve_xspice_numeric_value(expr, scope, abort))
                 .collect::<Result<Vec<_>, _>>()?;
             match merged
                 .iter_mut()
@@ -3390,6 +3392,24 @@ impl<'a> Flattener<'a> {
         ))
     }
 
+    fn resolve_xspice_numeric_value(
+        &self,
+        expression: &str,
+        scope: &ParamContext,
+        abort: &dyn AbortSignal,
+    ) -> Result<Value, ParseWithAbortError> {
+        let mut context = scope.clone();
+        context.adopt_random(&self.random);
+        super::expr::evaluate_instance_expression(expression, &context, &HashSet::new(), "", abort)
+            .and_then(|value| super::expr::require_real(value).map_err(Into::into))
+            .map_err(|error| match error {
+                super::expr::ExpressionEvaluationError::Aborted => ParseWithAbortError::Aborted,
+                super::expr::ExpressionEvaluationError::Expression(error) => {
+                    ParseError::InvalidValue(error.to_string()).into()
+                }
+            })
+    }
+
     fn resolve_deferred_xspice_complex_component(
         &self,
         param_name: &str,
@@ -3399,12 +3419,7 @@ impl<'a> Flattener<'a> {
         component: &str,
         abort: &dyn AbortSignal,
     ) -> Result<Value, ParseWithAbortError> {
-        resolve_parametric_value(
-            &ParametricValue::Expression(expr.to_string()),
-            scope,
-            &self.random,
-            abort,
-        )
+        self.resolve_xspice_numeric_value(expr, scope, abort)
         .map_err(|err| {
             map_resolution_error(err, |err| {
                 ParseError::InvalidValue(format!(
