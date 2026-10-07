@@ -2030,7 +2030,7 @@ impl SemanticAnalyzer {
         }
     }
 
-    /// Check a constant bit index against the signal's declared bounds.
+    /// Resolve a constant select index against its declared range.
     ///
     /// Answers the range it checked against and the index it checked, so that
     /// a part select's two bounds do not have to be resolved a second time to
@@ -2049,10 +2049,6 @@ impl SemanticAnalyzer {
         index: &HashMap<SmolStr, usize>,
         bound: SelectBound,
     ) -> Option<(VectorBounds, i64)> {
-        let analog_storage = matches!(
-            self.resolve_digital_name(name, index),
-            Resolution::Analog(SymbolKind::Variable)
-        );
         let unpacked = match self.resolve_digital_name(name, index) {
             Resolution::Digital(position) => signals[position].unpacked.is_some(),
             Resolution::Analog(SymbolKind::Variable) => self.arrays.contains_key(name),
@@ -2149,10 +2145,11 @@ impl SemanticAnalyzer {
             // A scalar signal has exactly one bit, numbered zero.
             None => selected == 0,
         };
-        // A sampled analog integer is an ordinary 32-bit value in the
-        // digital expression. Nonexistent selected bits retain the runtime's
-        // X result, including partially overlapping part selections.
-        if !inside && !analog_storage {
+        // IEEE 1364-2005 5.2.1 defines out-of-range vector reads as X and
+        // writes as clipped to the declared range. Constancy does not change
+        // that behavior: keep the authored index for lowering and the runtime.
+        // Scalar declarations retain their existing separate validation.
+        if !inside && range.is_none() {
             let declared = range.map_or_else(
                 || {
                     kind.map_or_else(

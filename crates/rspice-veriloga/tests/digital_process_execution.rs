@@ -4854,6 +4854,69 @@ fn runtime_delays_convert_unknown_signed_and_wide_values_without_clamping() {
 }
 
 #[test]
+fn constant_vector_selections_clip_reads_writes_and_linked_targets() {
+    let source = r#"
+module selects;
+ reg [7:4] descending; reg [4:7] ascending;
+ reg [3:0] low, high, ascending_low, ascending_high, distant, local_part;
+ reg [15:0] extended; reg missing_bit; integer count;
+ initial begin : sample
+   integer local_count;
+   descending=4'b1010; ascending=4'b1010; count=-1; local_count=-1;
+   low=descending[5:2]; high=descending[9:6];
+   ascending_low=ascending[6:9]; ascending_high=ascending[2:5];
+   distant=descending[64'h20000000000003:64'h20000000000000];
+   local_part=local_count[33:30];
+   extended=count[33:30]; missing_bit=descending[100];
+   descending[5:2]=4'b0100; ascending[2:5]=4'b0110;
+   descending[3]=1; descending[100]=1; ascending[3]=1; ascending[100]=1;
+   descending[64'h20000000000003:64'h20000000000000]=0;
+   descending[9:6] <= #5 4'b0011;
+   ascending[6:9] <= #5 4'b1100;
+ end
+endmodule
+module top; selects u1(); selects u2(); endmodule
+"#;
+    for (module, prefixes) in [("selects", vec![""]), ("top", vec!["u1.", "u2."])] {
+        let mut h = Harness::from_module(source, Some(module));
+        h.plan = serde_json::from_slice(&serde_json::to_vec(&h.plan).unwrap()).unwrap();
+        h.plan.validate().unwrap();
+        for process in 0..h.plan.processes.len() {
+            expect_finished(h.start(process));
+        }
+        for prefix in &prefixes {
+            for (name, expected) in [
+                ("low", "10xx"),
+                ("high", "xx10"),
+                ("ascending_low", "10xx"),
+                ("ascending_high", "xx10"),
+                ("distant", "xxxx"),
+                ("local_part", "xx11"),
+                ("extended", "000000000000xx11"),
+                ("missing_bit", "x"),
+                ("descending", "1001"),
+                ("ascending", "1010"),
+            ] {
+                assert_eq!(
+                    h.get(&format!("{prefix}{name}")),
+                    expected,
+                    "{module}: {prefix}{name}"
+                );
+            }
+        }
+        let updates = std::mem::take(&mut h.store.deferred);
+        assert_eq!(updates.len(), prefixes.len() * 2);
+        for update in updates {
+            apply_deferred(&h.plan, &mut h.store, &update).unwrap();
+        }
+        for prefix in &prefixes {
+            assert_eq!(h.get(&format!("{prefix}descending")), "1101");
+            assert_eq!(h.get(&format!("{prefix}ascending")), "1011");
+        }
+    }
+}
+
+#[test]
 fn packed_parameter_selections_validate_bounds_before_sizing() {
     for (selection, diagnostic) in [
         ("P[4294967295:0]", "width"),

@@ -371,8 +371,13 @@ source diagnostics instead of overflowing a width calculation or reaching an
 ill-typed executable node. Scalar and array reads share checked packed-selection
 lowering; unrepresentable endpoint offsets preserve the selected width and X
 result. Existing runtime operations and Wasm helper ABI 20 are unchanged.
-Constant out-of-range checking for ordinary digital scalars remains to be
-aligned with the runtime's clipped-selection behavior.
+Schema 79 also admits constant out-of-range selections of declared digital
+vectors and integers. Missing read bits produce X and writes affect only the
+overlapping bits, using the same runtime operations as packed arrays. Declared
+direction, constant part bounds and the width limit remain enforced. Direct
+and linked instances preserve this behavior through deferred updates.
+Constant/runtime bit-selector conversion and selections of un-ranged scalar
+declarations still need reconciliation; dynamic scalar bit writes remain open.
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
 initializer patterns, multidimensional shapes, full parameter-dependent
 shape/child-override support, and remaining mixed-host/platform qualification

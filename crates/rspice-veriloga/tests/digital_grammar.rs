@@ -736,53 +736,28 @@ fn undeclared_identifiers_inside_a_process_are_refused() {
     );
 }
 
-/// A constant select outside a signal's declared bounds is a defect the
-/// declaration already proves, so it is refused here rather than at run time.
+/// Constant vector selects have the same clipped semantics as runtime selects.
+/// Declaration direction and width are still validated separately.
 #[test]
-fn constant_selects_are_checked_against_declared_bounds() {
-    let message = analyze_error(&digital_module(
-        "    wire clk;\n\
-         \x20   reg [3:0] nibble;\n\
-         \x20   always @(posedge clk) nibble[7] <= 1'b1;",
-    ));
-    assert!(
-        message.contains("bit 7 of `nibble`, which is declared [3:0]"),
-        "expected an out-of-bounds diagnostic, got {message:?}"
-    );
+fn constant_vector_selects_allow_clipped_reads_and_writes() {
+    for (declaration, target) in [
+        ("reg [3:0] nibble;", "nibble[7]"),
+        ("reg [7:4] high;", "high[3]"),
+        ("reg [4:7] high;", "high[8]"),
+        ("reg [7:4] high;", "high[5:2]"),
+        ("reg [4:7] high;", "high[2:5]"),
+        ("integer count;", "count[33:30]"),
+    ] {
+        let analyzed = analyze(&digital_module(&format!(
+            "{declaration} reg [3:0] observed; initial begin observed={target}; {target}=4'b1010; end"
+        )));
+        assert_eq!(only_module(&analyzed).digital.processes.len(), 1);
+    }
 
-    let message = analyze_error(&digital_module(
-        "    wire clk;\n\
-         \x20   reg scalar;\n\
-         \x20   always @(posedge clk) scalar[1] <= 1'b1;",
-    ));
+    let message = analyze_error(&digital_module("reg scalar; initial scalar[1]=1'b1;"));
     assert!(
         message.contains("bit 1 of `scalar`, which is declared a scalar (1 bit)"),
         "expected a scalar-select diagnostic, got {message:?}"
-    );
-
-    // A range that does not reach zero names its bits 7 down to 4 and nothing
-    // else, so bit 3 is out of bounds even though a four-bit value has one.
-    // IEEE 1364-2005 section 3.3.1 makes the declaration the authority on
-    // which indices exist, not the width it works out to.
-    let message = analyze_error(&digital_module(
-        "    wire clk;\n\
-         \x20   reg [7:4] high;\n\
-         \x20   always @(posedge clk) high[3] <= 1'b1;",
-    ));
-    assert!(
-        message.contains("bit 3 of `high`, which is declared [7:4]"),
-        "expected an out-of-bounds diagnostic, got {message:?}"
-    );
-
-    // And the same range written the other way round.
-    let message = analyze_error(&digital_module(
-        "    wire clk;\n\
-         \x20   reg [4:7] high;\n\
-         \x20   always @(posedge clk) high[8] <= 1'b1;",
-    ));
-    assert!(
-        message.contains("bit 8 of `high`, which is declared [4:7]"),
-        "expected an out-of-bounds diagnostic, got {message:?}"
     );
 }
 
@@ -860,7 +835,7 @@ fn a_part_select_must_run_in_the_declarations_direction() {
 }
 
 #[test]
-fn part_selects_resolve_and_are_bounds_checked() {
+fn part_selects_resolve_with_clipped_bounds() {
     let analyzed = analyze(&digital_module(
         "    wire clk;\n\
          \x20   reg [7:0] bus;\n\
@@ -869,16 +844,13 @@ fn part_selects_resolve_and_are_bounds_checked() {
     ));
     assert_eq!(only_module(&analyzed).digital.signals.len(), 3);
 
-    let message = analyze_error(&digital_module(
+    let analyzed = analyze(&digital_module(
         "    wire clk;\n\
          \x20   reg [7:0] bus;\n\
          \x20   reg [3:0] high;\n\
          \x20   always @(posedge clk) high <= bus[9:4];",
     ));
-    assert!(
-        message.contains("bit 9 of `bus`, which is declared [7:0]"),
-        "expected a part-select bounds diagnostic, got {message:?}"
-    );
+    assert_eq!(only_module(&analyzed).digital.signals.len(), 3);
 }
 
 /// The two halves of the language share one expression grammar, so a
