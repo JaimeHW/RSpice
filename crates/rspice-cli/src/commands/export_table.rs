@@ -574,7 +574,9 @@ fn raw_token(value: &str) -> std::borrow::Cow<'_, str> {
 }
 
 pub(crate) fn delimited_cell(value: &str, delimiter: char) -> String {
-    if value.contains(delimiter)
+    // Quote authored leading U+FEFF so it cannot become a file-level signature.
+    if value.starts_with('\u{feff}')
+        || value.contains(delimiter)
         || value.contains('"')
         || value.contains('\n')
         || value.contains('\r')

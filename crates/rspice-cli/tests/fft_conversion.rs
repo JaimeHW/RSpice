@@ -170,6 +170,40 @@ fn quoted_multiline_fft_coordinate_text_survives_delimited_conversion() {
 }
 
 #[test]
+fn utf8_signatures_preserve_fft_schema_detection_and_metadata() {
+    let directory = test_dir("fft_utf8_signatures");
+    let source = source(&directory);
+    let expected = read_json(&source);
+    for format in ["csv", "tsv"] {
+        let encoded = directory.join(format!("fft.{format}"));
+        let recovered = directory.join("recovered.json");
+        let output = convert(&source, &encoded, "json", format, &[]);
+        assert!(output.status.success(), "{output:?}");
+        let content = std::fs::read_to_string(&encoded).unwrap();
+        for quoted in [false, true] {
+            let content = if quoted {
+                content.replacen("schema_version", "\"schema_version\"", 1)
+            } else {
+                content.clone()
+            };
+            std::fs::write(&encoded, format!("\u{feff}{content}")).unwrap();
+            let output = convert(&encoded, &recovered, format, "json", &[]);
+            assert!(
+                output.status.success(),
+                "{format}, quoted={quoted}: {output:?}"
+            );
+            assert_eq!(read_json(&recovered), expected);
+            let compared = cli(&[
+                "compare",
+                encoded.to_str().unwrap(),
+                source.to_str().unwrap(),
+            ]);
+            assert!(compared.status.success(), "{compared:?}");
+        }
+    }
+}
+
+#[test]
 fn fft_raw_metadata_is_inert_and_legacy_command_files_remain_readable() {
     let directory = test_dir("inert_raw_metadata");
     let source = source(&directory);

@@ -4,6 +4,9 @@
 /// Quote syntax is checked by `parse_record`; escaped pairs leave quote state
 /// unchanged here, so their contents cannot split a logical record.
 pub(crate) fn records(content: &str) -> impl Iterator<Item = (usize, &str)> {
+    // A UTF-8 signature is transport metadata only at the start of the file.
+    // Keep U+FEFF inside quoted fields and in all subsequent records intact.
+    let content = content.strip_prefix('\u{feff}').unwrap_or(content);
     let mut start = 0;
     let mut start_line = 1;
     let mut line = 1;

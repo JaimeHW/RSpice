@@ -660,7 +660,8 @@ rejected before conversion or comparison can replace an existing artifact.
 Quoted CSV/TSV fields preserve delimiters, escaped quotes, surrounding whitespace
 and embedded line endings. Waveform tables, operating-point reports and FFT
 tables share these rules; malformed quotes are rejected, with data-row errors
-located by physical source line.
+located by physical source line. A UTF-8 byte-order mark at the start of a file
+is accepted; quoted field contents remain unchanged.
 `--interpolate` resamples analog signals linearly and holds digital and real
 event signals until their next transition. It never extrapolates or resamples
 between differently declared coordinate units.

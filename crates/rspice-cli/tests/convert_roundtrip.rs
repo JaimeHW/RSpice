@@ -452,6 +452,63 @@ fn csv_reader_accepts_quoted_comma_signal_names() {
 }
 
 #[test]
+fn utf8_signatures_preserve_waveform_and_operating_point_imports() {
+    let dir = test_dir("delimited_utf8_signatures");
+    let reference = dir.join("reference.json");
+    let recovered = dir.join("recovered.json");
+    for (format, separator) in [("csv", ','), ("tsv", '\t')] {
+        let input = dir.join(format!("source.{format}"));
+        for content in [
+            "time,V(out)\r\n0,1\r\n1,2\r\n",
+            "\"time\",V(out)\r\n0,1\r\n1,2\r\n",
+            "signal,value\r\nV(out),1\r\n\u{feff}V(other),2\r\n",
+            "\"signal\",\"value\"\r\nV(out),1\r\n\u{feff}V(other),2\r\n",
+        ] {
+            let content = content.replace(',', &separator.to_string());
+            std::fs::write(&input, &content).unwrap();
+            convert(&input, &reference, "json", &[]);
+            let expected = common::read_json(&reference);
+            for prefix in ["\u{feff}", "\u{feff}\r\n"] {
+                std::fs::write(&input, format!("{prefix}{content}")).unwrap();
+                convert(&input, &recovered, "json", &[]);
+                assert_eq!(common::read_json(&recovered), expected, "{format}");
+                rspice(&[
+                    "compare",
+                    input.to_str().unwrap(),
+                    reference.to_str().unwrap(),
+                ]);
+            }
+        }
+    }
+}
+
+#[test]
+fn authored_leading_feff_survives_delimited_export_and_import() {
+    let dir = test_dir("authored_feff");
+    let source = dir.join("source.json");
+    let original = serde_json::json!({
+        "analysis": "converted", "plot_name": "Converted Data",
+        "scale": {"name": "\u{feff}time", "type": "value", "values": [0.0,1.0]},
+        "signals": [{"name": "\u{feff}signal", "type": "value", "values": [2.0,3.0]}],
+    });
+    std::fs::write(&source, serde_json::to_vec(&original).unwrap()).unwrap();
+    for format in ["csv", "tsv"] {
+        let encoded = dir.join(format!("authored.{format}"));
+        let recovered = dir.join("recovered.json");
+        convert(&source, &encoded, format, &[]);
+        let content = std::fs::read_to_string(&encoded).unwrap();
+        assert!(content.starts_with("\"\u{feff}time\""));
+        for prefix in ["", "\u{feff}"] {
+            std::fs::write(&encoded, format!("{prefix}{content}")).unwrap();
+            convert(&encoded, &recovered, "json", &[]);
+            let actual = common::read_json(&recovered);
+            assert_eq!(actual["scale"], original["scale"], "{format}");
+            assert_eq!(actual["signals"], original["signals"], "{format}");
+        }
+    }
+}
+
+#[test]
 fn variable_and_range_filters_apply() {
     let dir = test_dir("filters");
     let raw = simulate(&dir, TRAN_DECK, "raw", "tran.raw");
