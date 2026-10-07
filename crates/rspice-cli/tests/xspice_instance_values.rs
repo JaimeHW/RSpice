@@ -129,3 +129,45 @@ fn signed_instance_expressions_preserve_precedence_in_published_results() {
         assert!((csv_voltage(&result, "grouped") + 5.0).abs() < 1e-12);
     }
 }
+
+#[test]
+fn repeated_assignments_and_scalar_dependencies_agree_in_check_and_run() {
+    let mut reference = rspice_core::netlist::ParamContext::new();
+    reference.set_random_seed(37);
+    let sample = rspice_core::netlist::expr::eval_expression("aunif(100,1)", &reference).unwrap();
+    for (fields, expected) in [
+        ("gain={missing} GAIN=2", 2.0),
+        ("gain=1 gain=2 gain={later}", 3.0),
+        ("gain={in_offset+1} in_offset={later}", 16.0),
+        ("gain={aunif(100,1)+in_offset} in_offset={later-3}", sample),
+    ] {
+        for scoped in [false, true] {
+            let directory = common::test_dir("instance_assignments_and_dependencies");
+            let deck = directory.join("deck.cir");
+            let result = directory.join("result.csv");
+            let mut body = format!("A1 in out gain {fields}");
+            if scoped {
+                body = format!(".SUBCKT cell in out\n{body}\n.ENDS\nX1 in out cell");
+            }
+            std::fs::write(&deck, format!("* instance bindings\n.OPTIONS SEED=37\nV1 in 0 1\n{body}\n.PARAM later=3\n.OP\n.END\n")).unwrap();
+            for command in ["check", "run"] {
+                let mut process = Command::new(env!("CARGO_BIN_EXE_rspice"));
+                process.args(["--quiet", command]).arg(&deck);
+                if command == "run" {
+                    process.args(["--format", "csv", "--output"]).arg(&result);
+                }
+                let output = process.output().unwrap();
+                assert!(
+                    output.status.success(),
+                    "{command}, scoped={scoped}, {fields}: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            let actual = csv_voltage(&result, "out");
+            assert!(
+                (actual - expected).abs() < 1e-10,
+                "scoped={scoped}, {fields}: {actual} != {expected}"
+            );
+        }
+    }
+}
