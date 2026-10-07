@@ -441,6 +441,13 @@ values and suspended expressions resume after a dependency becomes available.
 `TNOM` and its dependencies resolve once before the remaining model values, so
 nominal-temperature overrides do not cause a second statistical evaluation.
 
+Resistor construction shares one model evaluation across electrical, thermal,
+and flicker-noise consumers, including branch-form and generated auto-bridge
+resistors. Each physical instance retains its own samples. Thermal material
+updates use the same dependency resolver, preserve enclosing parameter bindings,
+and retain the nominal temperature already resolved during construction. Initial
+thermal material values reuse the construction result instead of sampling again.
+
 Native diode, BJT, MOS, JFET, and MESFET scalar model expressions resolve at
 construction using the instance's `TEMP`/`DTEMP` and the model's `TNOM`.
 Bare, signed, and parenthesized temperature references follow the same rules as

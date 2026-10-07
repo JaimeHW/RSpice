@@ -306,7 +306,8 @@ fn resolve_level2_thermal_resistor_state(
         reported_resistance: 0.0,
         output_resistance: 0.0,
         output_conductance: 0.0,
-        base_context: base_eval_context(netlist),
+        base_context: netlist.params.clone(),
+        gmin: netlist.options.gmin.unwrap_or(crate::constants::GMIN),
         tnom_celsius: model_tnom,
         model_params: model_def.params.clone(),
         model_expr_params: model_def.expr_params.clone(),
@@ -314,13 +315,11 @@ fn resolve_level2_thermal_resistor_state(
         instance_heat_capacity: instance_param(instance_params, &["HEATCAPACITY"]),
         instance_thermal_heat_capacity: instance_param(instance_params, &["THERMAL_HEATCAPACITY"]),
     };
-    state
-        .update_material_at_temperature(temperature_celsius)
-        .map_err(|error| {
-            SimulationError::Circuit(format!(
-                "thermal resistor material resolution failed: {error}"
-            ))
-        })?;
+    state.initialize_material(eval_ctx).map_err(|error| {
+        SimulationError::Circuit(format!(
+            "thermal resistor material resolution failed: {error}"
+        ))
+    })?;
     Ok(Some(state))
 }
 

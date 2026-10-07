@@ -10,6 +10,7 @@
 //! charge models whose capacitance depends on the solution.
 
 use super::*;
+use crate::netlist::expr::{ModelEvaluationContext, ModelNominalTemperature};
 
 mod capacitor_noise;
 
@@ -48,6 +49,8 @@ pub struct ThermalResistorState {
     pub output_conductance: Value,
     /// Retained expression scope for temperature-dependent material values.
     pub base_context: crate::netlist::ParamContext,
+    /// Engine fallback kept separate from authored enclosing bindings.
+    pub gmin: Value,
     pub tnom_celsius: Value,
     pub model_params: Vec<(String, Value)>,
     pub model_expr_params: Vec<(String, String)>,
@@ -84,65 +87,64 @@ impl ThermalResistorState {
     fn material_context(
         &self,
         temperature_celsius: Value,
-    ) -> Result<crate::netlist::ParamContext, String> {
+    ) -> Result<ModelEvaluationContext<'_>, String> {
         let mut context = self.base_context.clone();
-        context.set("TEMP", temperature_celsius);
-        context.set("TEMPER", temperature_celsius);
-        context.set("TNOM", self.tnom_celsius);
-        context.set(
-            "VT",
-            crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(
-                temperature_celsius,
-            )),
-        );
-        crate::netlist::expr::materialize_available_parameter_expressions(&mut context);
-        for (name, value) in &self.model_params {
-            context.set(name, *value);
-        }
-
-        let mut pending = self.model_expr_params.clone();
-        while !pending.is_empty() {
-            let mut progress = false;
-            let mut unresolved = Vec::new();
-            for (name, expression) in pending {
-                match crate::netlist::expr::eval_expression(&expression, &context) {
-                    Ok(value) => {
-                        context.set(&name, value);
-                        progress = true;
-                    }
-                    Err(_) => unresolved.push((name, expression)),
-                }
-            }
-            if !progress {
-                let names = unresolved
-                    .iter()
-                    .map(|(name, _)| name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                return Err(format!(
-                    "thermal resistor material expressions could not be resolved: {names}"
-                ));
-            }
-            pending = unresolved;
-        }
-        Ok(context)
+        context.set("GMIN", self.gmin);
+        ModelEvaluationContext::resolve(
+            &self.base_context,
+            context,
+            &self.model_params,
+            &self.model_expr_params,
+            temperature_celsius,
+            ModelNominalTemperature::Resolved(self.tnom_celsius),
+            &crate::abort_signal::NoAbort,
+        )
+        .map_err(|error| {
+            format!("thermal resistor material expressions could not be resolved: {error}")
+        })
     }
 
-    fn model_value(&self, context: &crate::netlist::ParamContext, names: &[&str]) -> Option<Value> {
-        names.iter().find_map(|candidate| {
-            self.model_params
+    fn model_value(
+        &self,
+        context: &ModelEvaluationContext<'_>,
+        names: &[&str],
+    ) -> Result<Option<Value>, String> {
+        for candidate in names {
+            if let Some((_, value)) = self
+                .model_params
                 .iter()
                 .find(|(name, _)| name.eq_ignore_ascii_case(candidate))
-                .map(|(_, value)| *value)
-                .or_else(|| {
-                    self.model_expr_params
-                        .iter()
-                        .find(|(name, _)| name.eq_ignore_ascii_case(candidate))
-                        .and_then(|(_, expression)| {
-                            crate::netlist::expr::eval_expression(expression, context).ok()
-                        })
-                })
-        })
+            {
+                return Ok(Some(*value));
+            }
+            if let Some((name, expression)) = self
+                .model_expr_params
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(candidate))
+            {
+                return context
+                    .model_expression(name, expression)
+                    .map(|value| Some(value.re))
+                    .map_err(|error| {
+                        format!(
+                            "thermal resistor material {name} could not be resolved: {}",
+                            crate::netlist::expr::ParameterResolutionError::from(error)
+                        )
+                    });
+            }
+        }
+        Ok(None)
+    }
+
+    /// Initialize from the instance's already-resolved model without another
+    /// statistical evaluation or an uncancellable construction-time retry.
+    pub(crate) fn initialize_material(
+        &mut self,
+        context: &ModelEvaluationContext<'_>,
+    ) -> Result<(), String> {
+        let material = self.prepare_material_with_context(self.temperature_celsius, context)?;
+        self.apply_material(material);
+        Ok(())
     }
 
     /// Re-evaluate dependent material values and the nominal resistance at a
@@ -166,18 +168,27 @@ impl ThermalResistorState {
             ));
         }
         let context = self.material_context(temperature_celsius)?;
-        let resistivity = self
-            .instance_resistivity
-            .or_else(|| self.model_value(&context, &["RESISTIVITY"]))
+        self.prepare_material_with_context(temperature_celsius, &context)
+    }
+
+    fn prepare_material_with_context(
+        &self,
+        temperature_celsius: Value,
+        context: &ModelEvaluationContext<'_>,
+    ) -> Result<ThermalMaterialCandidate, String> {
+        let material = |instance: Option<Value>, name: &str| -> Result<Option<Value>, String> {
+            match instance {
+                Some(value) => Ok(Some(value)),
+                None => self.model_value(context, &[name]),
+            }
+        };
+        let resistivity = material(self.instance_resistivity, "RESISTIVITY")?
             .ok_or_else(|| "thermal resistor requires RESISTIVITY".to_string())?;
-        let heat_capacity = self
-            .instance_heat_capacity
-            .or_else(|| self.model_value(&context, &["HEATCAPACITY"]))
+        let heat_capacity = material(self.instance_heat_capacity, "HEATCAPACITY")?
             .ok_or_else(|| "thermal resistor requires HEATCAPACITY".to_string())?;
-        let thermal_heat_capacity = self
-            .instance_thermal_heat_capacity
-            .or_else(|| self.model_value(&context, &["THERMAL_HEATCAPACITY"]))
-            .unwrap_or(heat_capacity);
+        let thermal_heat_capacity =
+            material(self.instance_thermal_heat_capacity, "THERMAL_HEATCAPACITY")?
+                .unwrap_or(heat_capacity);
         if !resistivity.is_finite()
             || resistivity <= 0.0
             || !heat_capacity.is_finite()
