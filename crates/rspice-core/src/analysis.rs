@@ -127,8 +127,8 @@ pub use {
         canonical_measure_signal_name,
     },
     measure_signals::{
-        AcSweepSeries, DcSweepSeries, EquationMeasureTrace, MeasureParameterSeries,
-        NoiseSweepSeries, evaluate_ac_continuous_measurements,
+        AcSweepSeries, DcSweepSeries, EquationMeasureTrace, NoiseSweepSeries,
+        evaluate_ac_continuous_measurements,
         evaluate_ac_continuous_measurements_with_limits_and_abort,
         evaluate_ac_equation_measurements, evaluate_ac_measurements,
         evaluate_ac_measurements_with_abort,

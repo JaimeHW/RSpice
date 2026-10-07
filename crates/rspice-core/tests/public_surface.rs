@@ -60,10 +60,11 @@ use rspice_core::analysis::harmonic_balance::{
 // One opaque metadata writer serves CLI FFT RAW publication via inert Options.
 // Bounded continuous measurement entry points and their relocated re-exports
 // serve CLI run/basic.rs (DC/TRAN), run/frequency.rs (AC/NOISE), and the core
-// transient post-processor. Resolved AC/NOISE table measurements add four CLI
-// entry points and an opaque parameter-series type/re-export. Its accessors
-// remain internal. The actual census is 5,562, with no growth headroom.
-const MAX_PUBLIC_ITEMS: usize = 5562;
+// transient post-processor. Reconciled their seven added source declarations
+// against the prior five-item gap. Four further AC/noise table measurement
+// adapters (scalar and continuous) serve CLI run/frequency.rs while keeping
+// resolved parameter snapshots internal. The census is 5,560, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5560;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

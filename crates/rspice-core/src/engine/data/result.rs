@@ -1,5 +1,6 @@
 //! Compact coordinates for table-driven frequency results.
-use crate::analysis::{AcResult, MeasureParameterSeries, NoiseResult};
+use crate::analysis::measure_signals::MeasureParameterSeries;
+use crate::analysis::{AcResult, NoiseResult};
 use crate::{ModelFinish, Value};
 
 /// Resolved meaning of a frequency-table column. Declared parameters take
@@ -52,7 +53,7 @@ pub struct FrequencyDataResult<T> {
     pub columns: Vec<FrequencyDataColumn>,
     pub points: Vec<T>,
     /// Resolved parameter changes, without retaining a netlist for each row.
-    pub parameters: MeasureParameterSeries,
+    pub(crate) parameters: MeasureParameterSeries,
     pub requested_rows: usize,
     pub finish: Option<ModelFinish>,
 }

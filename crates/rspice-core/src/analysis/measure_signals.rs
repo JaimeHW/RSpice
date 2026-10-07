@@ -27,7 +27,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 mod parameters;
-pub use parameters::MeasureParameterSeries;
+pub(crate) use parameters::MeasureParameterSeries;
 pub(crate) use parameters::MeasureParameters;
 
 mod continuous;

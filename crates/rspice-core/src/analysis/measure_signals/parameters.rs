@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 /// Compact resolved parameter overrides aligned with accepted analysis points.
 #[derive(Debug, Clone, Default)]
-pub struct MeasureParameterSeries {
+pub(crate) struct MeasureParameterSeries {
     rows: usize,
     columns: BTreeMap<String, Vec<Option<ComplexValue>>>,
 }
@@ -46,7 +46,6 @@ fn same(left: Option<ComplexValue>, right: Option<ComplexValue>) -> bool {
 
 impl MeasureParameterSeries {
     /// Number of accepted rows represented by this snapshot.
-    #[cfg(test)]
     pub(crate) fn point_count(&self) -> usize {
         self.rows
     }
@@ -61,6 +60,11 @@ impl MeasureParameterSeries {
     /// Resolve an override at the exact accepted row. An absent column uses
     /// the original deck; an absent value in an existing column is undefined.
     pub(crate) fn resolve(&self, name: &str, row: usize) -> Result<Option<ComplexValue>, String> {
+        if row >= self.point_count() {
+            return Err(format!(
+                "parameter '{name}' is unavailable at analysis row {row}"
+            ));
+        }
         let Some(column) = self.columns.get(&name.to_uppercase()) else {
             return Ok(None);
         };
@@ -170,5 +174,17 @@ mod tests {
             MeasureParameterSeries::default().prepare_row(&context, &context, &abort),
             Err(SimulationError::Aborted)
         ));
+    }
+
+    #[test]
+    fn unmodified_bindings_still_require_an_accepted_row() {
+        let mut original = ParamContext::new();
+        original.set("P", 1.0);
+        let mut series = MeasureParameterSeries::default();
+        assert!(series.resolve("P", 0).is_err());
+        let pending = series.prepare_row(&original, &original, &NoAbort).unwrap();
+        series.commit_row(pending, &NoAbort).unwrap();
+        assert_eq!(series.resolve("P", 0).unwrap(), None);
+        assert!(series.resolve("P", 1).is_err());
     }
 }
