@@ -1809,6 +1809,20 @@ impl From<SensitivityElementTag> for ElementType {
 pub struct PoleZeroPayload {
     pub input: String,
     pub output: String,
+    /// Angular frequency for both root vectors. Absent only in legacy documents.
+    #[serde(
+        default,
+        with = "super::wire::optional_signal_unit",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub root_unit: Option<SignalUnit>,
+    /// Unit of both gains. Legacy documents did not retain this information.
+    #[serde(
+        default,
+        with = "super::wire::optional_signal_unit",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub gain_unit: Option<SignalUnit>,
     pub poles: Vec<ComplexSample>,
     pub zeros: Vec<ComplexSample>,
     pub pole_evidence: RootSetEvidenceDocument,
@@ -1821,6 +1835,22 @@ pub struct PoleZeroPayload {
 
 impl PoleZeroPayload {
     fn validate(&self) -> Result<(), ResultDocumentError> {
+        if self
+            .root_unit
+            .as_ref()
+            .is_some_and(|unit| unit != &SignalUnit::RadianPerSecond)
+            || self.gain_unit.as_ref().is_some_and(|unit| {
+                !matches!(
+                    unit,
+                    SignalUnit::Ohm | SignalUnit::Dimensionless | SignalUnit::Unspecified
+                )
+            })
+        {
+            return Err(ResultDocumentError::Malformed {
+                location: "pole-zero units",
+                detail: "roots must use rad/s; voltage/current or voltage/voltage gains use ohms or dimensionless units".into(),
+            });
+        }
         super::require_name("pole-zero input", &self.input)?;
         super::require_name("pole-zero output", &self.output)?;
         for root in self.poles.iter().chain(&self.zeros) {

@@ -26,6 +26,7 @@
 //! ```
 
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::signal_unit::SignalUnit;
 use crate::{Complex64, Value};
 use faer::Mat;
 use std::f64::consts::PI;
@@ -261,9 +262,9 @@ pub enum StabilityVerdict {
 /// Result of pole-zero analysis
 #[derive(Debug, Clone)]
 pub struct PoleZeroResult {
-    /// System poles (natural frequencies)
+    /// System poles in rad/s, without conversion to Hz.
     pub poles: Vec<Complex64>,
-    /// System zeros
+    /// System zeros in rad/s, without conversion to Hz.
     pub zeros: Vec<Complex64>,
     /// Completeness and numerical evidence for [`Self::poles`].
     pub pole_evidence: RootSetEvidence,
@@ -275,6 +276,8 @@ pub struct PoleZeroResult {
     /// the observed transfer has a nonzero positive-power term; a finite gain
     /// outside binary64 range is an explicit extraction error.
     pub hf_gain: Option<Value>,
+    /// Unit of both gains: ohms for voltage/current, dimensionless for voltage/voltage.
+    pub gain_unit: SignalUnit,
     /// Input specification
     pub input: String,
     /// Output specification  
@@ -283,7 +286,7 @@ pub struct PoleZeroResult {
 
 impl PoleZeroResult {
     /// Create empty result
-    pub fn new(input: &str, output: &str) -> Self {
+    pub fn new(input: &str, output: &str, gain_unit: SignalUnit) -> Self {
         Self {
             poles: Vec::new(),
             zeros: Vec::new(),
@@ -291,6 +294,7 @@ impl PoleZeroResult {
             zero_evidence: RootSetEvidence::NotRequested,
             dc_gain: None,
             hf_gain: None,
+            gain_unit,
             input: input.to_string(),
             output: output.to_string(),
         }
@@ -573,6 +577,14 @@ enum TriangularKind {
 }
 
 impl PoleZeroConfig {
+    fn gain_unit(&self) -> SignalUnit {
+        if self.input_is_current {
+            SignalUnit::Ohm
+        } else {
+            SignalUnit::Dimensionless
+        }
+    }
+
     /// Create default configuration for poles and zeros
     pub fn poles_and_zeros(input: usize, output: usize) -> Self {
         Self {

@@ -510,6 +510,8 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
             ResultPayload::PoleZero(PoleZeroPayload {
                 input: "v1".to_owned(),
                 output: "v(out)".to_owned(),
+                root_unit: Some(SignalUnit::RadianPerSecond),
+                gain_unit: Some(SignalUnit::Dimensionless),
                 poles: Vec::new(),
                 zeros: Vec::new(),
                 pole_evidence: RootSetEvidenceDocument::NotRequested,

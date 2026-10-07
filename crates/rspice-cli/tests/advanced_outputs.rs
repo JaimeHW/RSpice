@@ -385,6 +385,95 @@ fn pole_zero_explicit_current_transfer_preserves_current_port_contract() {
 }
 
 #[test]
+fn pole_zero_publication_retains_angular_frequency_and_gain_units() {
+    let dir = test_dir("pz-units");
+    for (excitation, gain_unit, source, expected_pole) in [
+        (
+            "current",
+            "ohm",
+            "Current RC\nR1 out 0 1k\nC1 out 0 1u\n.pz out 0 out 0 cur pz\n.end\n",
+            -1000.0,
+        ),
+        (
+            "voltage",
+            "dimensionless",
+            "Voltage RC\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1u\n.pz in 0 out 0 vol pz\n.end\n",
+            -1000.0,
+        ),
+        (
+            "floating",
+            "ohm",
+            "Floating C\nR1 a 0 1k\nR2 b 0 1k\nC1 a b 1u\n.pz a 0 a 0 cur pz\n.end\n",
+            -500.0,
+        ),
+    ] {
+        let deck = write_deck(&dir, &format!("{excitation}.sp"), source);
+        for format in ["json", "ascii"] {
+            let out = dir.join(format!("{excitation}.{format}"));
+            let output = run_rspice(&[
+                "--quiet",
+                "run",
+                deck.to_str().unwrap(),
+                "-o",
+                out.to_str().unwrap(),
+                "-f",
+                format,
+            ]);
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let text = std::fs::read_to_string(&out).unwrap();
+            if format == "json" {
+                let document: serde_json::Value = serde_json::from_str(&text).unwrap();
+                assert_eq!(document["payload"]["rootUnit"]["unit"], "radian_per_second");
+                assert_eq!(document["payload"]["gainUnit"]["unit"], gain_unit);
+                let pole = document["payload"]["poles"][0]["real"].as_f64().unwrap();
+                assert!((pole - expected_pole).abs() < 1e-8);
+                if excitation == "floating" {
+                    let zero = document["payload"]["zeros"][0]["real"].as_f64().unwrap();
+                    assert!((zero + 1000.0).abs() < 1e-8);
+                }
+            } else {
+                let column = text
+                    .lines()
+                    .find(|line| line.split_whitespace().nth(1) == Some("pole(1)"))
+                    .unwrap();
+                assert_eq!(column.split_whitespace().nth(2), Some("pole"));
+                if excitation == "floating" {
+                    let zero = text
+                        .lines()
+                        .find(|line| line.split_whitespace().nth(1) == Some("zero(1)"))
+                        .unwrap();
+                    assert_eq!(zero.split_whitespace().nth(2), Some("zero"));
+                }
+                let converted = dir.join(format!("{excitation}-converted.json"));
+                let output = run_rspice(&[
+                    "--quiet",
+                    "convert",
+                    out.to_str().unwrap(),
+                    converted.to_str().unwrap(),
+                    "--to",
+                    "json",
+                ]);
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                let flat: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(converted).unwrap()).unwrap();
+                for signal in flat["signals"].as_array().unwrap() {
+                    assert_eq!(signal["unit"], "rad/s");
+                }
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn sensitivity_exports_table() {
     let dir = test_dir("sens");
     let deck = write_deck(

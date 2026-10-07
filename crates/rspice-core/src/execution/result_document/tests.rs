@@ -408,7 +408,7 @@ fn sensitivity_result() -> SensitivityResult {
 }
 
 fn pole_zero_result() -> PoleZeroResult {
-    let mut result = PoleZeroResult::new("V1", "V(out)");
+    let mut result = PoleZeroResult::new("V1", "V(out)", SignalUnit::Dimensionless);
     result.poles = vec![Complex64::new(-1.0e6, 0.0)];
     let certificate = SpectrumCertificate::exact(1, 0).expect("exact certificate");
     result.pole_evidence = RootSetEvidence::Qualified { certificate };

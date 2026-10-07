@@ -75,7 +75,7 @@ impl PoleZeroAnalyzer {
         let helper =
             Self::new(Matrix::identity(n), Matrix::identity(n)).with_resource_limits(limits);
         let model = StateSpaceModel { a, b, c, d };
-        let mut result = PoleZeroResult::new(input_label, output_label);
+        let mut result = PoleZeroResult::new(input_label, output_label, config.gain_unit());
         if config.compute_poles {
             ensure_pole_zero_not_aborted(abort)?;
             let mut spectrum = helper.eigenvalues_from_matrix(&model.a)?;
@@ -281,6 +281,7 @@ impl PoleZeroAnalyzer {
         let mut result = PoleZeroResult::new(
             &format!("node{}", config.input_pos),
             &format!("node{}", config.output_pos),
+            config.gain_unit(),
         );
         ensure_pole_zero_not_aborted(abort)?;
 

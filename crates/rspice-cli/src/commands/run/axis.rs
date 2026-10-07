@@ -862,6 +862,7 @@ fn execution_signal_unit_name(unit: &rspice_core::execution::SignalUnit) -> Stri
         SignalUnit::Second => "second".to_string(),
         SignalUnit::Degree => "degree".to_string(),
         SignalUnit::Radian => "radian".to_string(),
+        SignalUnit::RadianPerSecond => "radian_per_second".to_string(),
         SignalUnit::Dimensionless => "dimensionless".to_string(),
         SignalUnit::Logic => "logic".to_string(),
         SignalUnit::Custom(name) => format!("custom:{name}"),

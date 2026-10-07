@@ -1512,9 +1512,11 @@ fn report_pz(
 
         let singularity =
             |label: &str, index: usize, value: &rspice_core::Complex64| ExportColumn {
-                unit: None,
+                unit: Some(rspice_core::execution::SignalUnit::RadianPerSecond.symbol()),
                 name: format!("{label}({})", index + 1),
-                var_type: "frequency".to_string(),
+                // Retain the SPICE rawfile pole/zero types, whose values are
+                // Laplace-plane roots rather than ordinary frequency in Hz.
+                var_type: label.to_string(),
                 data: ColumnData::Complex {
                     real: vec![value.re],
                     imag: vec![value.im],
@@ -1541,7 +1543,20 @@ fn report_pz(
             scale: vec![0.0],
             columns,
         };
-        let schema = table_schema(&table)?;
+        let schema = super::document::distinct_schema(table.columns.iter().map(|column| {
+            use rspice_core::execution::{
+                SignalDescriptor, SignalKind, SignalOwner, SignalShape, SignalUnit, SignalValueType,
+            };
+            SignalDescriptor::new(
+                &column.name,
+                &column.name,
+                SignalKind::Scalar,
+                SignalUnit::RadianPerSecond,
+                SignalValueType::Complex,
+                SignalShape::Scalar,
+                SignalOwner::Analysis,
+            )
+        }))?;
         super::document::publish_table_result(
             ctx,
             &output.path,

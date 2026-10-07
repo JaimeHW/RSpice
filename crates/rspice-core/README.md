@@ -669,6 +669,13 @@ classified as unbounded. Exact preparation retains cancellation and configured
 workspace limits. This contract applies to newly computed results; manually
 constructed or historical results can still have an unavailable gain.
 
+PZ poles and zeros use angular frequency (`SignalUnit::RadianPerSecond`,
+`rad/s`); their numeric values are not Hz. Both gains retain `gain_unit` as
+ohms for current excitation and dimensionless for voltage excitation. SDK
+callers constructing `PoleZeroResult` now pass that unit to `new` and include
+it in struct literals. Document version 12 carries `rootUnit` and `gainUnit`;
+versions 1–11 retain absent unit metadata without guessing from port labels.
+
 How each analysis is reached (netlist card, CLI flag, or engine API only)
 varies. The [CLI README](../rspice-cli/README.md) documents the netlist-card
 and flag surface; anything not listed there is engine-API only.

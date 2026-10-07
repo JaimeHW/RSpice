@@ -273,7 +273,11 @@ fn requested_pole_and_zero_sets_are_independent() {
 fn an_empty_pole_set_is_not_evidence_of_stability() {
     // An empty set can mean that poles were not requested, were filtered, or
     // could not be computed. None of those states proves asymptotic stability.
-    let result = PoleZeroResult::new("input", "output");
+    let result = PoleZeroResult::new(
+        "input",
+        "output",
+        rspice_core::execution::SignalUnit::Unspecified,
+    );
     assert!(
         !result.is_stable(),
         "an absent pole set must be indeterminate rather than vacuously stable"
@@ -428,7 +432,11 @@ fn approximate_and_legacy_poles_have_indeterminate_stability() {
     let strict_tolerance = 128.0 * f64::EPSILON;
     let certificate = SpectrumCertificate::new(1, 0, 1.0e-9, strict_tolerance)
         .expect("a complete spectrum below the hard residual limit is valid");
-    let mut result = PoleZeroResult::new("input", "output");
+    let mut result = PoleZeroResult::new(
+        "input",
+        "output",
+        rspice_core::execution::SignalUnit::Unspecified,
+    );
     result.poles = vec![Complex64::new(-1.0, 0.0)];
     result.pole_evidence = RootSetEvidence::from_certificate(1, certificate)
         .expect("the certificate count matches the root vector");

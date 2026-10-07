@@ -2377,6 +2377,8 @@ impl AnalysisResultDocument {
         let payload = PoleZeroPayload {
             input: result.input.clone(),
             output: result.output.clone(),
+            root_unit: Some(SignalUnit::RadianPerSecond),
+            gain_unit: Some(result.gain_unit.clone()),
             poles: project(&result.poles, "pole")?,
             zeros: project(&result.zeros, "zero")?,
             pole_evidence: RootSetEvidenceDocument::from(&result.pole_evidence),

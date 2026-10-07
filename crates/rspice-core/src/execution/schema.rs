@@ -604,6 +604,7 @@ mod tests {
             SignalUnit::Second,
             SignalUnit::Degree,
             SignalUnit::Radian,
+            SignalUnit::RadianPerSecond,
             SignalUnit::Dimensionless,
             SignalUnit::Logic,
             SignalUnit::Unspecified,

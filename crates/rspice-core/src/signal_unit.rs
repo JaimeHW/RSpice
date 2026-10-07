@@ -12,6 +12,8 @@ pub enum SignalUnit {
     Second,
     Degree,
     Radian,
+    /// Angular frequency, including complex Laplace-plane roots.
+    RadianPerSecond,
     Dimensionless,
     Logic,
     /// The producing analysis knows of no physical unit for this quantity.
@@ -49,6 +51,7 @@ impl SignalUnit {
             Self::Second => "s".to_owned(),
             Self::Degree => "deg".to_owned(),
             Self::Radian => "rad".to_owned(),
+            Self::RadianPerSecond => "rad/s".to_owned(),
             Self::Dimensionless => "1".to_owned(),
             Self::Logic => "logic".to_owned(),
             Self::Custom(symbol) => symbol.clone(),

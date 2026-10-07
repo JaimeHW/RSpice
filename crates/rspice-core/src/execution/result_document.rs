@@ -15,7 +15,7 @@
 //! ```text
 //! {
 //!   "schema":        "rspice-analysis-result"   fixed identifier
-//!   "schemaVersion": 11                          this build's exact version
+//!   "schemaVersion": 12                          this build's exact version
 //!   "resultKind":    "op" | "dc" | "ac" | "tran" | "noise" | "sp" |
 //!                    "port-noise" | "distortion" | "tf" | "stb" |
 //!                    "sensitivity" | "pole-zero" | "fourier" | "fft" |
@@ -225,7 +225,7 @@ use crate::execution::topology::TopologyFingerprint;
 pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 
 /// Schema version this build produces.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 11;
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 12;
 
 /// Version 9 adds the sampling request and resolved crossing geometry to PNoise.
 ///
@@ -260,6 +260,8 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 11;
 /// Version 10 adds explicitly ordered current impulse derivatives, with SI
 /// coefficients separate from ordinary integrated charge.
 /// Version 11 adds frequency-table provenance and physical row coordinates.
+/// Version 12 adds explicit pole-zero root and gain units. Earlier documents
+/// keep both units absent; input labels cannot reconstruct the excitation kind.
 ///
 /// A new result *family* costs no version. No document of an existing family
 /// changes shape, and no reader of an earlier version has a document of the
@@ -267,7 +269,8 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 11;
 /// Bumping for one would instead make every family's freshly produced
 /// document undecodable by every current reader, which is the compatibility
 /// break this constant exists to avoid.
-const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 11] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 12] =
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
 /// First version whose transient payload may declare a digital bus.
 const FIRST_DIGITAL_BUS_DOCUMENT_VERSION: u32 = 2;
@@ -652,6 +655,15 @@ impl AnalysisResultDocument {
                 return Err(ResultDocumentError::Malformed {
                     location: "FFT status",
                     detail: "FFT point count does not match its completion status".into(),
+                });
+            }
+        }
+        if let ResultPayload::PoleZero(payload) = &self.payload {
+            let required = self.schema_version >= 12;
+            if payload.root_unit.is_some() != required || payload.gain_unit.is_some() != required {
+                return Err(ResultDocumentError::Malformed {
+                    location: "pole-zero units",
+                    detail: "pole-zero units must be present from document version 12 and absent in earlier versions".into(),
                 });
             }
         }

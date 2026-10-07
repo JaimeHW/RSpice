@@ -366,6 +366,7 @@ fn unit_tag(unit: &SignalUnit) -> (String, Option<String>) {
         SignalUnit::Second => ("second".to_owned(), None),
         SignalUnit::Degree => ("degree".to_owned(), None),
         SignalUnit::Radian => ("radian".to_owned(), None),
+        SignalUnit::RadianPerSecond => ("radian_per_second".to_owned(), None),
         SignalUnit::Dimensionless => ("dimensionless".to_owned(), None),
         SignalUnit::Logic => ("logic".to_owned(), None),
         SignalUnit::Unspecified => ("unspecified".to_owned(), None),
@@ -627,7 +628,7 @@ mod tests {
     ///
     /// `Logic` is excluded because a logic-unit signal is a digital signal,
     /// which this binding deliberately does not map.
-    const SCALAR_UNITS: [SignalUnit; 11] = [
+    const SCALAR_UNITS: [SignalUnit; 12] = [
         SignalUnit::Volt,
         SignalUnit::Ampere,
         SignalUnit::Ohm,
@@ -637,6 +638,7 @@ mod tests {
         SignalUnit::Second,
         SignalUnit::Degree,
         SignalUnit::Radian,
+        SignalUnit::RadianPerSecond,
         SignalUnit::Dimensionless,
         SignalUnit::Unspecified,
     ];

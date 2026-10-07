@@ -59,6 +59,7 @@ pub enum SignalUnitView {
     Second,
     Degree,
     Radian,
+    RadianPerSecond,
     Dimensionless,
     Logic,
     /// The producing analysis knows of no physical unit for the quantity —
@@ -82,6 +83,7 @@ impl SignalUnitView {
             SignalUnit::Second => Self::Second,
             SignalUnit::Degree => Self::Degree,
             SignalUnit::Radian => Self::Radian,
+            SignalUnit::RadianPerSecond => Self::RadianPerSecond,
             SignalUnit::Dimensionless => Self::Dimensionless,
             SignalUnit::Logic => Self::Logic,
             SignalUnit::Unspecified => Self::Unspecified,
