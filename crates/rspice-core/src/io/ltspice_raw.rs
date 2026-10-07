@@ -18,7 +18,8 @@ use thiserror::Error;
 
 mod table_metadata;
 pub use table_metadata::{
-    raw_table_units, write_raw_table_metadata, write_raw_table_metadata_with_text,
+    raw_table_has_coordinate, raw_table_units, write_raw_table_layout_metadata,
+    write_raw_table_metadata, write_raw_table_metadata_with_text,
     write_raw_table_metadata_with_units,
 };
 
@@ -73,7 +74,8 @@ pub struct RawFileHeader {
     pub no_variables: usize,
     /// Number of data points
     pub no_points: usize,
-    /// Command that produced this data
+    /// Authored Command header or canonical RSpice table metadata decoded from
+    /// inert Option chunks. The reader never executes this text.
     pub command: String,
     /// Whether data is binary (vs ASCII)
     pub is_binary: bool,
@@ -348,12 +350,13 @@ fn parse_plot(
 /// ngspice's own reader keys on these lines and aborts the load on any line it
 /// does not recognise, so they are exactly what "the next plot starts here"
 /// means to every reader of the format.
-const PLOT_HEADER_KEYS: [&str; 8] = [
+const PLOT_HEADER_KEYS: [&str; 9] = [
     "plotname:",
     "title:",
     "date:",
     "flags:",
     "command:",
+    "option:",
     "no. variables:",
     "no. points:",
     "variables:",
@@ -422,6 +425,7 @@ fn parse_header<R: BufRead>(
     let mut bytes_read: u64 = 0;
     let mut saw_no_variables = false;
     let mut saw_no_points = false;
+    let mut table_options = table_metadata::MetadataOptions::default();
 
     loop {
         let mut line = String::new();
@@ -487,6 +491,7 @@ fn parse_header<R: BufRead>(
                 "date" => header.date = value.to_string(),
                 "plotname" => header.plotname = value.to_string(),
                 "command" => header.command = value.to_string(),
+                "option" => table_options.read(value)?,
                 "flags" => {
                     header.flags = value.split_whitespace().map(|s| s.to_string()).collect();
                     header.is_complex = header
@@ -548,6 +553,7 @@ fn parse_header<R: BufRead>(
         }
     }
 
+    table_options.finish(&mut header)?;
     Ok((header, variables, bytes_read))
 }
 

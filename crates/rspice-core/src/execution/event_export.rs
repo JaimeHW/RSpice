@@ -298,7 +298,8 @@ fn unobserved_event_code() -> u8 {
 /// Plots whose name does not declare an event family — the analysis plot a
 /// rawfile opens with, and anything another writer appended — are ordinary
 /// plots and are passed over, never refused. A plot that does declare a
-/// family and then contradicts it is a corrupt artifact and is refused.
+/// family and then contradicts it is a corrupt artifact and is refused. Explicit
+/// coordinate-first table metadata takes precedence over a matching display name.
 ///
 /// # Buses
 ///
@@ -314,6 +315,14 @@ pub fn decode_event_plots(file: &RawFile) -> Result<RawEventTraces, EventPlotErr
     let mut traces = RawEventTraces::default();
     let mut bus_plots = Vec::new();
     for plot in &file.plots {
+        if crate::io::ltspice_raw::raw_table_has_coordinate(&plot.header).map_err(|error| {
+            EventPlotError::InvalidData {
+                plot: plot.header.plotname.clone(),
+                message: error.to_string(),
+            }
+        })? {
+            continue;
+        }
         let Some(kind) = RawEventKind::from_plot_name(&plot.header.plotname) else {
             continue;
         };

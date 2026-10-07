@@ -9,6 +9,37 @@ fn fixture() -> RawFile {
 }
 
 #[test]
+fn explicit_tables_do_not_become_event_histories_from_their_display_title() {
+    for kind in [RawEventKind::Digital, RawEventKind::Real, RawEventKind::Bus] {
+        let mut file = fixture();
+        let plot = &mut file.plots[0];
+        plot.header.plotname = kind.plot_name().into();
+        let mut metadata = b"Title: table\nPlotname: table\n".to_vec();
+        crate::io::ltspice_raw::write_raw_table_layout_metadata(
+            &mut metadata,
+            &[],
+            &[Some("ms".into()), None],
+            None,
+        )
+        .unwrap();
+        metadata.extend_from_slice(b"Flags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\n1 V(out) voltage\nValues:\n0 0 1\n");
+        plot.header.command = crate::io::parse_raw_reader(&mut Cursor::new(metadata))
+            .unwrap()
+            .header
+            .command;
+        let traces = decode_event_plots(&file).unwrap();
+        assert!(traces.digital_traces.is_empty());
+        assert!(traces.real_traces.is_empty());
+        assert!(traces.digital_buses.is_empty());
+
+        // Removing the explicit layout restores the legacy event contract.
+        file.plots[0].header.command =
+            "RSpiceTableV2 {\"real_variables\":[],\"units\":[\"ms\",null]}".into();
+        assert!(decode_event_plots(&file).is_err());
+    }
+}
+
+#[test]
 fn public_event_decoder_rejects_partial_columns_and_nonfinite_times() {
     for mutation in 0..7 {
         let mut file = fixture();

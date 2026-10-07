@@ -54,7 +54,9 @@ use rspice_core::analysis::harmonic_balance::{
 // callers without forcing the default numerical budget on their output.
 // One text-provenance writer lets CLI RAW exports preserve exact table labels.
 // Transfer gain units are retained for typed documents and control consumers.
-const MAX_PUBLIC_ITEMS: usize = 5546;
+// An explicit coordinate-layout writer and reader disambiguate CLI table exports
+// from legacy operating-point, FFT and event carriers that share display titles.
+const MAX_PUBLIC_ITEMS: usize = 5548;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

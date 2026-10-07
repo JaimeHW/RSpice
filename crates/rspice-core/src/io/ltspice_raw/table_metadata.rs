@@ -1,13 +1,17 @@
 //! Optional RSpice provenance for table column kinds, units and exact labels.
 //!
-//! RAW's numeric encoding is plot-wide. A standard Command header records the
-//! original real columns so reopening does not turn frequencies or indices into
-//! complex signals. Other readers can ignore the header and read ordinary RAW.
+//! RAW's numeric encoding is plot-wide. Standard Option headers record the
+//! original column kinds, units, layout and labels. Legacy Command metadata is
+//! still read, but never emitted: ngspice executes Command headers when loading.
 use super::*;
+
+mod options;
+pub(super) use options::MetadataOptions;
 
 const PREFIX: &str = "RSpiceTableV1 ";
 const UNITS_PREFIX: &str = "RSpiceTableV2 ";
 const TEXT_PREFIX: &str = "RSpiceTableV3 ";
+const LAYOUT_PREFIX: &str = "RSpiceTableV4 ";
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -17,6 +21,14 @@ struct Metadata {
     units: Option<Vec<Option<String>>>,
     #[serde(default)]
     text: Option<TextMetadata>,
+    #[serde(default)]
+    layout: Option<TableLayout>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum TableLayout {
+    CoordinateFirst,
 }
 
 #[derive(serde::Deserialize)]
@@ -24,6 +36,51 @@ struct Metadata {
 struct TextMetadata {
     plot_name: String,
     variables: Vec<(String, String)>,
+}
+
+/// Declare an ordinary table whose first variable is its real coordinate.
+/// V4 makes the layout authoritative even when the display plot name resembles
+/// an operating point, FFT or event carrier. Optional text retains labels that
+/// need escaping in the ordinary RAW header; units include the coordinate.
+pub fn write_raw_table_layout_metadata<W: std::io::Write + ?Sized>(
+    writer: &mut W,
+    real_variables: &[usize],
+    units: &[Option<String>],
+    text: Option<(&str, &[(&str, &str)])>,
+) -> std::io::Result<()> {
+    #[derive(serde::Serialize)]
+    struct TextRef<'a> {
+        plot_name: &'a str,
+        variables: &'a [(&'a str, &'a str)],
+    }
+    #[derive(serde::Serialize)]
+    struct MetadataRef<'a> {
+        real_variables: &'a [usize],
+        units: &'a [Option<String>],
+        layout: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        text: Option<TextRef<'a>>,
+    }
+    options::write(
+        writer,
+        4,
+        &MetadataRef {
+            real_variables,
+            units,
+            layout: "coordinate-first",
+            text: text.map(|(plot_name, variables)| TextRef {
+                plot_name,
+                variables,
+            }),
+        },
+    )
+}
+
+/// Whether validated table provenance explicitly declares a real first coordinate.
+/// Legacy metadata only describes units/column kinds, leaving plot-name inference
+/// to the consumer. V4 explicitly takes precedence over that inference.
+pub fn raw_table_has_coordinate(header: &RawFileHeader) -> Result<bool, RawParseError> {
+    Ok(read_metadata(header)?.is_some_and(|metadata| metadata.layout.is_some()))
 }
 
 /// Write exact table labels alongside real-column and unit provenance.
@@ -37,17 +94,15 @@ pub fn write_raw_table_metadata_with_text<W: std::io::Write + ?Sized>(
     plot_name: &str,
     variables: &[(&str, &str)],
 ) -> std::io::Result<()> {
-    write!(writer, "Command: {TEXT_PREFIX}")?;
-    serde_json::to_writer(
-        &mut *writer,
+    options::write(
+        writer,
+        3,
         &serde_json::json!({
             "real_variables": real_variables,
             "units": units,
             "text": {"plot_name": plot_name, "variables": variables},
         }),
     )
-    .map_err(std::io::Error::other)?;
-    writeln!(writer)
 }
 
 /// Write table provenance including explicit unit symbols in RAW variable order.
@@ -57,34 +112,40 @@ pub fn write_raw_table_metadata_with_units<W: std::io::Write + ?Sized>(
     real_variables: &[usize],
     units: &[Option<String>],
 ) -> std::io::Result<()> {
-    write!(writer, "Command: {UNITS_PREFIX}")?;
-    serde_json::to_writer(
-        &mut *writer,
+    options::write(
+        writer,
+        2,
         &serde_json::json!({
             "real_variables": real_variables,
             "units": units,
         }),
     )
-    .map_err(std::io::Error::other)?;
-    writeln!(writer)
 }
 
 fn read_metadata(header: &RawFileHeader) -> Result<Option<Metadata>, RawParseError> {
-    let (encoded, with_units, with_text) =
-        if let Some(encoded) = header.command.strip_prefix(PREFIX) {
-            (encoded, false, false)
-        } else if let Some(encoded) = header.command.strip_prefix(UNITS_PREFIX) {
-            (encoded, true, false)
-        } else if let Some(encoded) = header.command.strip_prefix(TEXT_PREFIX) {
-            (encoded, true, true)
-        } else {
-            return Ok(None);
-        };
+    let (encoded, version) = if let Some(encoded) = header.command.strip_prefix(PREFIX) {
+        (encoded, 1)
+    } else if let Some(encoded) = header.command.strip_prefix(UNITS_PREFIX) {
+        (encoded, 2)
+    } else if let Some(encoded) = header.command.strip_prefix(TEXT_PREFIX) {
+        (encoded, 3)
+    } else if let Some(encoded) = header.command.strip_prefix(LAYOUT_PREFIX) {
+        (encoded, 4)
+    } else if header.command.starts_with("RSpiceTableV") {
+        return Err(RawParseError::UnsupportedFormat(
+            "unsupported RAW table metadata version".into(),
+        ));
+    } else {
+        return Ok(None);
+    };
     let metadata: Metadata = serde_json::from_str(encoded).map_err(|error| {
         RawParseError::InvalidHeader(format!("invalid RAW table metadata: {error}"))
     })?;
-    if with_units != metadata.units.is_some()
-        || with_text != metadata.text.is_some()
+    if (version >= 2) != metadata.units.is_some()
+        || (version < 3 && metadata.text.is_some())
+        || (version == 3 && metadata.text.is_none())
+        || (version == 4) != metadata.layout.is_some()
+        || (version == 4 && header.is_complex && metadata.real_variables.first() != Some(&0))
         || metadata
             .text
             .as_ref()
@@ -95,7 +156,7 @@ fn read_metadata(header: &RawFileHeader) -> Result<Option<Metadata>, RawParseErr
         })
     {
         return Err(RawParseError::InvalidHeader(
-            "RAW table metadata must match its version and variable count and use nonempty unit symbols".into(),
+            "RAW table metadata must match its version and variable count, use nonempty unit symbols and declare a real table coordinate".into(),
         ));
     }
     Ok(Some(metadata))
@@ -108,7 +169,7 @@ pub fn raw_table_units(
     Ok(read_metadata(header)?.and_then(|metadata| metadata.units))
 }
 
-/// Write the optional Command header for a mixed real/complex result table.
+/// Write optional metadata for a mixed real/complex result table.
 /// Indices refer to the RAW variable order, including the independent variable.
 pub fn write_raw_table_metadata<W: std::io::Write + ?Sized>(
     writer: &mut W,
@@ -118,10 +179,7 @@ pub fn write_raw_table_metadata<W: std::io::Write + ?Sized>(
     struct MetadataRef<'a> {
         real_variables: &'a [usize],
     }
-    write!(writer, "Command: {PREFIX}")?;
-    serde_json::to_writer(&mut *writer, &MetadataRef { real_variables })
-        .map_err(std::io::Error::other)?;
-    writeln!(writer)
+    options::write(writer, 1, &MetadataRef { real_variables })
 }
 
 pub(super) fn restore_table_metadata(
@@ -176,6 +234,79 @@ pub(super) fn restore_table_metadata(
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn explicit_table_layout_retains_coordinate_kind_and_optional_text() {
+        for complex in [false, true] {
+            for with_text in [false, true] {
+                let mut bytes = b"Title: table\nPlotname: DC Operating Point\n".to_vec();
+                let labels = [(" time ", "time"), (" V(out) ", "voltage")];
+                write_raw_table_layout_metadata(
+                    &mut bytes,
+                    if complex { &[0] } else { &[] },
+                    &[None, None],
+                    with_text.then_some(("", labels.as_slice())),
+                )
+                .unwrap();
+                let (flags, values) = if complex {
+                    ("complex", "0,0 1,2")
+                } else {
+                    ("real", "0 1")
+                };
+                writeln!(bytes, "Flags: {flags}\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\n1 V(out) voltage\nValues:\n0 {values}").unwrap();
+                let parsed = parse_raw_reader(&mut std::io::Cursor::new(bytes)).unwrap();
+                assert!(raw_table_has_coordinate(&parsed.header).unwrap());
+                assert_eq!(
+                    parsed.header.plotname,
+                    if with_text { "" } else { "DC Operating Point" }
+                );
+                assert_eq!(
+                    parsed.variables[0].name,
+                    if with_text { " time " } else { "time" }
+                );
+                assert!(parsed.waveforms[0].y_imag.is_none());
+                assert_eq!(parsed.waveforms[1].y_imag.is_some(), complex);
+            }
+        }
+    }
+
+    #[test]
+    fn layout_metadata_rejects_unsupported_versions_missing_layout_and_complex_coordinates() {
+        for (prefix, layout, indices, flags, values) in [
+            (
+                "RSpiceTableV99 ",
+                "\"coordinate-first\"",
+                "[]",
+                "real",
+                "0 1",
+            ),
+            (LAYOUT_PREFIX, "null", "[]", "real", "0 1"),
+            (LAYOUT_PREFIX, "\"unknown\"", "[]", "real", "0 1"),
+            (UNITS_PREFIX, "\"coordinate-first\"", "[]", "real", "0 1"),
+            (
+                LAYOUT_PREFIX,
+                "\"coordinate-first\"",
+                "[]",
+                "complex",
+                "0,0 1,2",
+            ),
+            (
+                LAYOUT_PREFIX,
+                "\"coordinate-first\"",
+                "[0]",
+                "complex",
+                "0,1 1,2",
+            ),
+        ] {
+            let source = format!(
+                "Title: table\nPlotname: table\nCommand: {prefix}{{\"real_variables\":{indices},\"units\":[null,null],\"layout\":{layout}}}\nFlags: {flags}\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\n1 V(out) voltage\nValues:\n0 {values}\n"
+            );
+            assert!(
+                parse_raw_reader(&mut std::io::Cursor::new(source)).is_err(),
+                "{prefix}{layout} {indices} {values}"
+            );
+        }
+    }
 
     #[test]
     fn exact_labels_restore_both_variable_descriptors_and_waveforms() {
