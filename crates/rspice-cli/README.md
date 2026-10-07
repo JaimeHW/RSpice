@@ -636,6 +636,14 @@ types in versioned RSpice metadata when those labels need escaping. Their header
 declarations escape whitespace, control characters and literal percent signs so
 distinct names remain distinct for readers that ignore that metadata. Ordinary
 labels retain their existing declarations.
+Table exports also declare that their first variable is the independent
+coordinate. This layout takes precedence over display titles such as
+`DC Operating Point`, `Transient FFT`, or an event plot name, so conversion does
+not invent an extra coordinate or reinterpret a table as another result format.
+Legacy RAW operating points and event/FFT carriers retain their existing layouts;
+unsupported RSpice table-metadata versions are rejected.
+Metadata is stored in numbered, hex-encoded `Option:` chunks so RAW readers do
+not execute it as a `Command:`. Older RSpice `Command:` metadata remains readable.
 
 Quoted CSV/TSV fields preserve delimiters, escaped quotes, surrounding whitespace
 and embedded line endings. Waveform tables, operating-point reports and FFT

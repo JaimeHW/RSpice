@@ -412,10 +412,13 @@ pub(super) fn raw_result(
         return Ok(ImportedResult::Fft(fft));
     }
 
-    let operating_point = matches!(
-        data.header.plotname.trim().to_ascii_lowercase().as_str(),
-        "dc op" | "operating point" | "dc operating point"
-    );
+    let coordinate_first = rspice_core::io::ltspice_raw::raw_table_has_coordinate(&data.header)
+        .map_err(|error| conversion_error(path, error))?;
+    let operating_point = !coordinate_first
+        && matches!(
+            data.header.plotname.trim().to_ascii_lowercase().as_str(),
+            "dc op" | "operating point" | "dc operating point"
+        );
     let mut waveforms = data.waveforms.into_iter().peekable();
     let Some(first) = waveforms.peek() else {
         return Err(conversion_error(path, "rawfile contains no variables"));
@@ -461,7 +464,7 @@ pub(super) fn raw_result(
             units[0].clone()
         },
         analysis: "converted".to_string(),
-        plot_name: if data.header.plotname.is_empty() {
+        plot_name: if data.header.plotname.is_empty() && !coordinate_first {
             "Converted Data".to_string()
         } else {
             data.header.plotname
@@ -481,7 +484,10 @@ pub(crate) fn decode_raw_fft_plots(
 ) -> Result<std::collections::BTreeMap<usize, crate::commands::run::FftBundle>, CliError> {
     let mut fft_plots = std::collections::BTreeMap::new();
     for (index, plot) in file.plots.iter().enumerate() {
-        if plot.header.plotname == "Transient FFT" {
+        if plot.header.plotname == "Transient FFT"
+            && !rspice_core::io::ltspice_raw::raw_table_has_coordinate(&plot.header)
+                .map_err(|error| conversion_error(path, error))?
+        {
             let decoded = crate::commands::run::decode_fft_raw_plot(plot)
                 .and_then(crate::commands::run::FftBundle::from_raw)
                 .map_err(|error| conversion_error(path, error))?;

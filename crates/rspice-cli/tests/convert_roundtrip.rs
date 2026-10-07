@@ -61,6 +61,11 @@ fn raw_tables_preserve_exact_labels_without_declaration_collisions() {
         // A reader that ignores RSpice metadata must still see separate columns.
         let bytes = std::fs::read(&encoded).unwrap();
         let text = String::from_utf8_lossy(&bytes);
+        assert!(!text.lines().any(|line| line.starts_with("Command:")));
+        assert!(
+            text.lines()
+                .any(|line| line.starts_with("Option: rspice_table_v4_"))
+        );
         let declarations: Vec<_> = text
             .lines()
             .skip_while(|line| *line != "Variables:")
@@ -113,6 +118,94 @@ fn mixed_real_and_complex_raw_columns_keep_their_original_representation() {
         let recovered = common::read_json(&decoded);
         assert_eq!(recovered["signals"], original["signals"]);
         assert_eq!(recovered["scale"], original["scale"]);
+    }
+}
+
+#[test]
+fn raw_table_titles_do_not_change_layout_or_select_special_decoders() {
+    let dir = test_dir("raw_display_titles");
+    let source = dir.join("source.json");
+    for title in [
+        "DC Operating Point",
+        " operating point ",
+        "DC OP",
+        "Transient FFT",
+        "Digital Events (rspice-digital-events/1)",
+        "Real Events (rspice-real-events/1)",
+        "Digital Bus (rspice-digital-bus/1)",
+        "",
+    ] {
+        let original = serde_json::json!({
+            "analysis": "table", "plot_name": title,
+            "scale": {"name": "time", "type": "time", "unit": "ms", "values": [0.25,0.5,0.75]},
+            "signals": [
+                {"name": "D(clk)", "type": "digital", "values": [0.0,1.0,0.0]},
+                {"name": "E(ctrl)", "type": "real", "values": [2.5,3.5,4.5]},
+            ],
+        });
+        std::fs::write(&source, serde_json::to_vec(&original).unwrap()).unwrap();
+        let reference_vcd = dir.join("source.vcd");
+        convert(&source, &reference_vcd, "vcd", &[]);
+        for format in ["raw", "ascii"] {
+            let encoded = dir.join(format!("table.{format}"));
+            let decoded = dir.join(format!("table.{format}.json"));
+            let converted_vcd = dir.join(format!("table.{format}.vcd"));
+            convert(&source, &encoded, format, &[]);
+            convert(&encoded, &decoded, "json", &[]);
+            let recovered = common::read_json(&decoded);
+            for field in ["plot_name", "scale", "signals"] {
+                assert_eq!(
+                    recovered[field], original[field],
+                    "{title:?} {format}: {field}"
+                );
+            }
+            rspice(&[
+                "compare",
+                source.to_str().unwrap(),
+                encoded.to_str().unwrap(),
+            ]);
+            convert(&encoded, &converted_vcd, "vcd", &[]);
+            assert_eq!(
+                std::fs::read(&converted_vcd).unwrap(),
+                std::fs::read(&reference_vcd).unwrap(),
+                "{title:?} {format}"
+            );
+        }
+    }
+}
+
+#[test]
+fn operating_point_conversion_cycles_keep_the_coordinate_out_of_signals() {
+    let dir = test_dir("op_raw_conversion_cycles");
+    for input_format in ["csv", "json", "hdf5", "raw", "ascii"] {
+        let source = simulate(
+            &dir,
+            "* op conversion\nV1 in 0 5\nR1 in 0 1k\n.op\n.end\n",
+            input_format,
+            &format!("op.{input_format}"),
+        );
+        let reference = dir.join("reference.json");
+        convert(&source, &reference, "json", &[]);
+        let original = common::read_json(&reference);
+        for raw_format in ["raw", "ascii"] {
+            let encoded = dir.join(format!("converted.{raw_format}"));
+            let decoded = dir.join(format!("converted.{raw_format}.json"));
+            convert(&reference, &encoded, raw_format, &[]);
+            // Two cycles catch coordinate columns accumulating as signal columns.
+            for _ in 0..2 {
+                convert(&encoded, &decoded, "json", &[]);
+                let recovered = common::read_json(&decoded);
+                assert_eq!(
+                    recovered["scale"], original["scale"],
+                    "{input_format} {raw_format}"
+                );
+                assert_eq!(
+                    recovered["signals"], original["signals"],
+                    "{input_format} {raw_format}"
+                );
+                convert(&decoded, &encoded, raw_format, &[]);
+            }
+        }
     }
 }
 
