@@ -12,6 +12,7 @@ enum WorkerCircuitPoles {
     NotComputed,
     Available {
         roots: WorkerF64Series,
+        roots_digest: rspice_app_types::product::ContentDigest,
         evidence: RootSetEvidence,
     },
     Unavailable {
@@ -43,6 +44,10 @@ impl WorkerCircuitPoles {
                     values.extend([pole.re, pole.im]);
                 }
                 Self::Available {
+                    roots_digest: crate::execution_identity::f64_sequence_digest(
+                        "rspice.worker-stb-circuit-poles/v1",
+                        &values,
+                    ),
                     roots: WorkerF64Series::from_vec(values, buffers),
                     evidence: spectrum.evidence,
                 }
@@ -58,7 +63,11 @@ impl WorkerCircuitPoles {
         Ok(match self {
             Self::NotComputed => CircuitPoleEvidence::NotComputed,
             Self::Unavailable { cause } => CircuitPoleEvidence::Unavailable { cause },
-            Self::Available { roots, evidence } => {
+            Self::Available {
+                roots,
+                roots_digest,
+                evidence,
+            } => {
                 if !matches!(roots, WorkerF64Series::Buffer { .. })
                     || !roots.len().is_multiple_of(2)
                     || roots.len() > remaining
@@ -66,6 +75,13 @@ impl WorkerCircuitPoles {
                     return Err("circuit poles require a bounded dedicated buffer".into());
                 }
                 let values = roots.into_vec(buffers)?;
+                if crate::execution_identity::f64_sequence_digest(
+                    "rspice.worker-stb-circuit-poles/v1",
+                    &values,
+                ) != roots_digest
+                {
+                    return Err("circuit-pole buffer digest mismatch".into());
+                }
                 let mut poles = Vec::new();
                 poles
                     .try_reserve_exact(values.len() / 2)
