@@ -257,6 +257,8 @@ spreads the plan across workers, and a request above
 `resources.max_parallel_workers` is rejected rather than silently clamped. A
 failing run does not abort the rest, which is HSPICE semantics, so each one
 lands in the reports and the process exit status reflects the whole plan.
+This also applies to simulation failures from command-line analysis modes
+such as `--pz-input/--pz-output`, `--pss-freq`, and `--monte-carlo`.
 `resources.max_batch_runs` bounds how large a plan may get.
 
 Corner runs write per-corner tagged outputs (`res.csv` becomes `res.tt.csv`,

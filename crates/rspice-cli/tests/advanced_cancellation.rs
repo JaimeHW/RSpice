@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::test_dir;
+use common::{read_json, test_dir};
 
 use std::process::Command;
 
@@ -12,6 +12,9 @@ fn monte_carlo_timeout_is_typed_prompt_and_does_not_publish_an_artifact() {
     let directory = test_dir("monte_carlo");
     let deck = directory.path().join("long_monte_carlo.sp");
     let artifact = directory.path().join("monte_carlo.json");
+    let summary_path = directory.join("summary.json");
+    let measurements_path = directory.join("measurements.json");
+    let report_path = directory.join("report.tap");
     std::fs::write(
         &deck,
         "* cancellable advanced analysis\n\
@@ -51,6 +54,14 @@ fn monte_carlo_timeout_is_typed_prompt_and_does_not_publish_an_artifact() {
             artifact.to_str().expect("UTF-8 artifact path"),
             "-f",
             "json",
+            "--summary",
+            summary_path.to_str().unwrap(),
+            "--meas-file",
+            measurements_path.to_str().unwrap(),
+            "--report-format",
+            "tap",
+            "--report-file",
+            report_path.to_str().unwrap(),
         ])
         .output()
         .expect("run rspice");
@@ -76,5 +87,25 @@ fn monte_carlo_timeout_is_typed_prompt_and_does_not_publish_an_artifact() {
         !artifact.exists(),
         "a cancelled analysis must not publish {}",
         artifact.display()
+    );
+    let summary = read_json(&summary_path);
+    assert_eq!(summary["status"], "timed_out");
+    assert_eq!(summary["passed"], false);
+    assert_eq!(summary["counts"]["failed_runs"], 1);
+    assert_eq!(summary["outputs"], serde_json::json!([]));
+    assert_eq!(summary["runs"][0]["error_details"]["category"], "timeout");
+    let measurements = read_json(&measurements_path);
+    assert_eq!(measurements["failed"], 1);
+    assert_eq!(
+        measurements["measurements"][0]["name"],
+        "__rspice_run_status__"
+    );
+    let tap = std::fs::read_to_string(&report_path).unwrap();
+    assert!(tap.contains("1..2"), "{tap}");
+    assert_eq!(
+        tap.lines()
+            .filter(|line| line.starts_with("not ok "))
+            .count(),
+        2
     );
 }

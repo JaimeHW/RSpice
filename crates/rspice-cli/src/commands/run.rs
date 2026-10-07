@@ -687,7 +687,7 @@ struct ConcreteDeckOutcome {
 /// Run one concrete deck (all of its analyses) and assemble its report.
 /// Multi-run failures don't abort the remaining runs — HSPICE semantics —
 /// so errors land in the report instead of bubbling, except for setup
-/// errors (bad output paths, alternate-mode failures).
+/// and output errors (bad arguments or unpublished result artifacts).
 fn run_concrete_deck(
     netlist: &Netlist,
     args: &RunArgs,
@@ -724,71 +724,58 @@ fn run_concrete_deck(
     };
 
     let start_time = Instant::now();
-    let requested_mode = run_requested_mode(&ctx, config)?;
-    if requested_mode.ran() {
-        if requested_mode.needs_measurement_finalization() {
-            ctx.record_unevaluated_measurements()?;
-        }
-        // A command-line analysis mode deliberately supersedes the deck's
-        // authored cards, so their planned identities stay unconsumed. Only
-        // the deferred namespace failure is still a defect here.
-        if let Some(message) = ctx.planned_namespace_error.borrow_mut().take() {
-            return Err(CliError::InternalError { message });
-        }
-        let measurements = ctx.measurements.borrow().clone();
-        let passed = measurements.iter().all(|meas| meas.passed);
-        return Ok(ConcreteDeckOutcome {
-            report: SimulationReport {
-                name,
-                netlist: args.input.display().to_string(),
-                passed,
-                duration_secs: start_time.elapsed().as_secs_f64(),
-                error: None,
-                error_details: None,
-                measurements,
-            },
-            published: ctx.published.into_inner(),
-            outputs: ctx.outputs.into_inner(),
-        });
-    }
-
-    let mut ran_analysis = false;
     let mut simulation_error: Option<String> = None;
     let mut simulation_error_details: Option<crate::cli::ErrorDetails> = None;
-
-    for (idx, analysis) in analyses_in_execution_order(netlist).enumerate() {
-        if verbose {
-            crate::console::line(format_args!(
-                "\nRunning analysis {}/{}: {:?}",
-                idx + 1,
-                netlist.analyses.len(),
-                analysis
-            ))?;
-        }
-
-        ran_analysis = true;
-        if let Err(e) = ctx.run_analysis(analysis) {
-            if is_run_setup_or_output_error(&e) {
-                return Err(e);
+    let requested_mode = match run_requested_mode(&ctx, config) {
+        Ok(outcome) => outcome.ran(),
+        Err(error) => {
+            if is_run_setup_or_output_error(&error) {
+                return Err(error);
             }
-            simulation_error_details = Some(e.details());
-            simulation_error = Some(simulation_error_message(&e));
-            break;
+            simulation_error_details = Some(error.details());
+            simulation_error = Some(simulation_error_message(&error));
+            // The requested mode supersedes the deck even when it fails.
+            // Retain the failure for reporting without falling back to cards.
+            true
         }
-    }
+    };
 
-    if !ran_analysis && simulation_error.is_none() {
-        if !quiet {
-            crate::console::line(format_args!(
-                "No analysis commands - running default DC OP..."
-            ))?;
-        }
-        if let Err(e) = basic::run_dc_op(&ctx) {
-            if is_run_setup_or_output_error(&e) {
-                return Err(e);
+    if !requested_mode {
+        let mut ran_analysis = false;
+        for (idx, analysis) in analyses_in_execution_order(netlist).enumerate() {
+            if verbose {
+                crate::console::line(format_args!(
+                    "\nRunning analysis {}/{}: {:?}",
+                    idx + 1,
+                    netlist.analyses.len(),
+                    analysis
+                ))?;
             }
-            simulation_error_details = Some(e.details());
-            simulation_error = Some(simulation_error_message(&e));
+
+            ran_analysis = true;
+            if let Err(e) = ctx.run_analysis(analysis) {
+                if is_run_setup_or_output_error(&e) {
+                    return Err(e);
+                }
+                simulation_error_details = Some(e.details());
+                simulation_error = Some(simulation_error_message(&e));
+                break;
+            }
+        }
+
+        if !ran_analysis && simulation_error.is_none() {
+            if !quiet {
+                crate::console::line(format_args!(
+                    "No analysis commands - running default DC OP..."
+                ))?;
+            }
+            if let Err(e) = basic::run_dc_op(&ctx) {
+                if is_run_setup_or_output_error(&e) {
+                    return Err(e);
+                }
+                simulation_error_details = Some(e.details());
+                simulation_error = Some(simulation_error_message(&e));
+            }
         }
     }
 
@@ -797,7 +784,16 @@ fn run_concrete_deck(
     }
     ctx.record_unevaluated_measurements()?;
     if simulation_error.is_none() {
-        ctx.ensure_planned_namespaces_consumed()?;
+        if requested_mode {
+            // A command-line mode supersedes the authored cards, so their
+            // planned identities stay unconsumed. Deferred namespace errors
+            // still need to be reported.
+            if let Some(message) = ctx.planned_namespace_error.borrow_mut().take() {
+                return Err(CliError::InternalError { message });
+            }
+        } else {
+            ctx.ensure_planned_namespaces_consumed()?;
+        }
     }
 
     let duration = start_time.elapsed().as_secs_f64();

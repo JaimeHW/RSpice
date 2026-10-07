@@ -1226,10 +1226,6 @@ impl RequestedModeOutcome {
     pub(super) fn ran(self) -> bool {
         !matches!(self, Self::NotRequested)
     }
-
-    pub(super) fn needs_measurement_finalization(self) -> bool {
-        matches!(self, Self::RanNeedsMeasurementFinalization)
-    }
 }
 
 pub(super) fn run_requested_mode(
