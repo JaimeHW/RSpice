@@ -14,6 +14,7 @@ use crate::hdf5::read_hdf5_sections_with_limits;
 use std::path::Path;
 
 mod delimited;
+mod json;
 mod snapshot;
 pub(crate) use delimited::{parse_record as parse_delimited_record, records as delimited_records};
 mod touchstone;
@@ -819,8 +820,7 @@ pub(super) fn parse_untyped_json(
     content: &str,
     resource_limits: rspice_core::ResourceLimits,
 ) -> Result<ImportedResult, CliError> {
-    let value: serde_json::Value =
-        serde_json::from_str(content).map_err(|e| conversion_error(path, e))?;
+    let value = json::parse(content).map_err(|e| conversion_error(path, e))?;
     let read_unit = |object: &serde_json::Value| -> Result<Option<String>, CliError> {
         match object.get("unit") {
             None | Some(serde_json::Value::Null) => Ok(None),

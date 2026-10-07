@@ -665,6 +665,9 @@ and embedded line endings. Waveform tables, operating-point reports and FFT
 tables share these rules; malformed quotes are rejected, with data-row errors
 located by physical source line. A UTF-8 byte-order mark at the start of a file
 is accepted; quoted field contents remain unchanged.
+Legacy table and FFT JSON objects must use unique field names. Repeated fields,
+including escaped spellings of the same key, fail with a source line and column
+before selection, conversion, comparison or golden-file promotion.
 `--interpolate` resamples analog signals linearly and holds digital and real
 event signals until their next transition. It never extrapolates or resamples
 between differently declared coordinate units.

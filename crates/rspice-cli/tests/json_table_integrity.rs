@@ -152,3 +152,89 @@ fn separate_real_and_complex_json_signals_round_trip_in_every_table_format() {
         assert_eq!(actual["signals"], expected["signals"], "{format}");
     }
 }
+
+#[test]
+fn repeated_json_fields_cannot_discard_samples_or_change_signal_identity() {
+    let directory = test_dir("duplicate_json_fields");
+    let input = directory.join("input.json");
+    let golden = directory.join("golden.json");
+    let missing = directory.join("missing.json");
+    let original = serde_json::to_string(&source()).unwrap();
+    std::fs::write(&golden, &original).unwrap();
+    for (needle, preceding, key) in [
+        (r#""values":[0.0,1.0]"#, r#""values":[99,99],"#, "values"),
+        (r#""real":[2.0,3.0]"#, r#""real":[99,99],"#, "real"),
+        (r#""imag":[4.0,5.0]"#, r#""imag":null,"#, "imag"),
+        (r#""name":"V(out)""#, r#""name":"I(out)","#, "name"),
+        (r#""type":"voltage""#, r#""type":"current","#, "type"),
+        (
+            r#""analysis":"converted""#,
+            r#""analysis":"fft","#,
+            "analysis",
+        ),
+        (r#""scale":{"#, r#""scale":{},"#, "scale"),
+        (r#""signals":["#, r#""signals":[],"#, "signals"),
+        // Keys are compared after JSON escaping, and identical values are
+        // still duplicates rather than an implicit agreement between writers.
+        (r#""real":[2.0,3.0]"#, r#""\u0072eal":[2.0,3.0],"#, "real"),
+    ] {
+        assert!(original.contains(needle));
+        let invalid = original.replacen(needle, &format!("{preceding}{needle}"), 1);
+        std::fs::write(&input, &invalid).unwrap();
+        let check = |output: Output| {
+            assert_eq!(output.status.code(), Some(1), "{key}: {output:?}");
+            let message = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                message.contains("duplicate JSON field") && message.contains(key),
+                "{message}"
+            );
+            assert!(
+                message.contains("line") && message.contains("column"),
+                "{message}"
+            );
+        };
+        for format in ["json", "csv", "tsv", "raw", "ascii", "hdf5", "vcd"] {
+            let output = directory.join(format!("protected.{format}"));
+            std::fs::write(&output, "predecessor").unwrap();
+            check(cli(&[
+                "convert",
+                input.to_str().unwrap(),
+                output.to_str().unwrap(),
+                "--to",
+                format,
+                "--variables",
+                "D(clk)",
+            ]));
+            assert_eq!(std::fs::read_to_string(output).unwrap(), "predecessor");
+        }
+        check(cli(&[
+            "convert",
+            input.to_str().unwrap(),
+            input.to_str().unwrap(),
+            "--to",
+            "json",
+        ]));
+        assert_eq!(std::fs::read_to_string(&input).unwrap(), invalid);
+        for bless in [false, true] {
+            let mut args = vec![
+                "compare",
+                input.to_str().unwrap(),
+                golden.to_str().unwrap(),
+                "--variables",
+                "D(clk)",
+            ];
+            if bless {
+                args.push("--bless");
+            }
+            check(cli(&args));
+            assert_eq!(std::fs::read_to_string(&golden).unwrap(), original);
+        }
+        check(cli(&[
+            "compare",
+            input.to_str().unwrap(),
+            missing.to_str().unwrap(),
+            "--bless",
+        ]));
+        assert!(!missing.exists());
+    }
+}

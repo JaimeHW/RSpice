@@ -50,6 +50,40 @@ fn source(directory: &Path) -> PathBuf {
     paths.remove(0)
 }
 
+#[test]
+fn fft_json_rejects_repeated_coefficients_before_conversion_or_blessing() {
+    let directory = test_dir("fft_duplicate_json_fields");
+    let input = source(&directory);
+    let original = std::fs::read_to_string(&input).unwrap();
+    let invalid = original.replacen("\"real\":", "\"real\": 99, \"real\":", 1);
+    assert_ne!(invalid, original);
+    std::fs::write(&input, invalid).unwrap();
+    let golden = directory.join("golden.json");
+    std::fs::write(&golden, &original).unwrap();
+    let missing = directory.join("missing.json");
+    for (command, destination, options) in [
+        ("convert", &golden, vec!["--to", "json"]),
+        ("compare", &golden, vec![]),
+        ("compare", &golden, vec!["--bless"]),
+        ("compare", &missing, vec!["--bless"]),
+    ] {
+        let mut args = vec![
+            command,
+            input.to_str().unwrap(),
+            destination.to_str().unwrap(),
+        ];
+        args.extend(options);
+        let output = cli(&args);
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("duplicate JSON field"),
+            "{output:?}"
+        );
+        assert_eq!(std::fs::read_to_string(&golden).unwrap(), original);
+        assert!(!missing.exists());
+    }
+}
+
 /// Replace only FFT provenance, preserving the exact ASCII or binary payload.
 fn rewrite_raw_metadata(
     bytes: &[u8],
