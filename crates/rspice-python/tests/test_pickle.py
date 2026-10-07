@@ -270,6 +270,12 @@ class TestResults:
 
         assert restored.num_poles == original.num_poles
         assert restored.dc_gain == original.dc_gain
+        assert original.gain_unit == "1"
+        assert restored.gain_unit == original.gain_unit
+        assert restored.root_unit == "rad/s"
+        document = original.document()
+        assert document["payload"]["rootUnit"]["unit"] == "radian_per_second"
+        assert document["payload"]["gainUnit"]["unit"] == "dimensionless"
         np.testing.assert_allclose(restored.poles_array, original.poles_array)
         assert restored.pole_evidence.kind == original.pole_evidence.kind
         assert restored.zero_evidence.kind == original.zero_evidence.kind
@@ -310,6 +316,16 @@ class TestResults:
         assert legacy.pole_evidence.kind == "legacy_unknown"
         assert legacy.zero_evidence.kind == "legacy_unknown"
         assert legacy.is_stable is None
+        assert legacy.gain_unit is None
+        assert legacy.root_unit == "rad/s"
+
+    def test_pole_zero_pickle_preserves_explicit_gain_units(self):
+        state = synthetic_qualified_pole_zero_result().__reduce__()[1]
+        for unit in ["1", "ohm", "unspecified"]:
+            restored = round_trip(rspice.PoleZeroResult._unpickle(*state[:5], unit))
+            assert restored.gain_unit == unit
+        with pytest.raises(ValueError, match="invalid pole-zero gain unit"):
+            rspice.PoleZeroResult._unpickle(*state[:5], "Hz")
 
     def test_unknown_pole_zero_evidence_tag_is_rejected(self):
         with pytest.raises(ValueError, match="unknown root-set evidence tag"):

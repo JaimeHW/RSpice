@@ -203,6 +203,9 @@ pub struct PyPoleZeroResult {
     /// High-frequency gain H(∞) if finite
     #[pyo3(get)]
     pub hf_gain: Option<f64>,
+    /// Unit symbol for both gains; absent in old pickles.
+    #[pyo3(get)]
+    pub gain_unit: Option<String>,
     /// Input specification
     #[pyo3(get)]
     pub input: String,
@@ -236,6 +239,7 @@ impl PyPoleZeroResult {
             zero_evidence: PyRootSetEvidence::from_core(&result.zero_evidence)?,
             dc_gain: result.dc_gain,
             hf_gain: result.hf_gain,
+            gain_unit: Some(result.gain_unit.symbol()),
             input: result.input.clone(),
             output: result.output.clone(),
             evidence: Some(DocumentEvidence::sole(
@@ -259,6 +263,12 @@ impl PyPoleZeroResult {
 
 #[pymethods]
 impl PyPoleZeroResult {
+    /// Unit of every pole and zero, without conversion to Hz.
+    #[getter]
+    fn root_unit(&self) -> String {
+        rspice_core::execution::SignalUnit::RadianPerSecond.symbol()
+    }
+
     /// Typed inventory of every signal in this result's shared document.
     ///
     /// The descriptors are the ones the CLI, the WASM build and the engine
@@ -423,14 +433,21 @@ impl PyPoleZeroResult {
 
     /// Rebuild from pickled state. Not part of the public API.
     #[staticmethod]
-    #[pyo3(signature = (poles, zeros, gains, ports, evidence=None))]
+    #[pyo3(signature = (poles, zeros, gains, ports, evidence=None, gain_unit=None))]
     fn _unpickle(
         poles: Vec<PyComplexValue>,
         zeros: Vec<PyComplexValue>,
         gains: (Option<f64>, Option<f64>),
         ports: (String, String),
         evidence: Option<(RootSetEvidenceState, RootSetEvidenceState)>,
+        gain_unit: Option<String>,
     ) -> PyResult<Self> {
+        if gain_unit
+            .as_deref()
+            .is_some_and(|unit| !matches!(unit, "1" | "ohm" | "unspecified"))
+        {
+            return Err(crate::errors::value_error("invalid pole-zero gain unit"));
+        }
         let (dc_gain, hf_gain) = gains;
         let (input, output) = ports;
         let (pole_evidence, zero_evidence) = if let Some((poles, zeros)) = evidence {
@@ -466,6 +483,7 @@ impl PyPoleZeroResult {
             zero_evidence: PyRootSetEvidence::from_core(&zero_evidence)?,
             dc_gain,
             hf_gain,
+            gain_unit,
             input,
             output,
             evidence: None,
@@ -484,6 +502,7 @@ impl PyPoleZeroResult {
             (Option<f64>, Option<f64>),
             (String, String),
             (RootSetEvidenceState, RootSetEvidenceState),
+            Option<String>,
         ),
     )> {
         Ok((
@@ -494,6 +513,7 @@ impl PyPoleZeroResult {
                 (self.dc_gain, self.hf_gain),
                 (self.input.clone(), self.output.clone()),
                 (self.pole_evidence.to_state(), self.zero_evidence.to_state()),
+                self.gain_unit.clone(),
             ),
         ))
     }
