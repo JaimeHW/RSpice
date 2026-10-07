@@ -198,6 +198,33 @@ fn timeout_interrupts_runtime_model_expressions_during_construction() {
 }
 
 #[test]
+fn timeout_interrupts_eager_xspice_instance_expressions() {
+    let functions = work_functions();
+    let dir = common::test_dir("xspice-instance-expression-timeout");
+    for (index, body) in [
+        "A1 out aux gain gain={work(26)}",
+        "A1 out aux gain gain=work(26)+0",
+        "A1 [out] print_param_types real_array=[0 {work(26)}]",
+        "A1 [out] print_param_types complex=<work(26) 1>",
+        "A1 [out] print_param_types complex=<1 work(26)>",
+        "A1 [out] print_param_types complex_array=[<1 work(26)>]",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let deck = dir.join(format!("xspice-{index}.cir"));
+        std::fs::write(
+            &deck,
+            format!(
+                "* XSPICE parse deadline\n{functions}V1 out 0 1\nR1 out 0 1k\n{body}\n.OP\n.END\n"
+            ),
+        )
+        .unwrap();
+        assert_times_out(&deck, body, false);
+    }
+}
+
+#[test]
 fn timeout_interrupts_thermal_material_updates_after_heating() {
     let functions = work_functions();
     let dir = common::test_dir("thermal-update-expression-timeout");
