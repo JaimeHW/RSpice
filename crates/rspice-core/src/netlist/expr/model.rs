@@ -96,7 +96,13 @@ pub(crate) fn resolve_real_instance_expressions(
                     return Err(ParameterResolutionError::Aborted);
                 }
                 Err(ExpressionEvaluationError::Expression(error)) => {
-                    if first_error.is_none() {
+                    let waiting_for_sibling = matches!(&error,
+                        ExprError::UndefinedParam(dependency)
+                        if !dependency.eq_ignore_ascii_case(name)
+                            && pending_names.contains(&dependency.to_ascii_uppercase()));
+                    // A declared sibling is waiting on another definition;
+                    // report the actual missing leaf or invalid expression.
+                    if !waiting_for_sibling && first_error.is_none() {
                         first_error = Some((name, error));
                     }
                     unresolved.push(entry);
@@ -104,10 +110,20 @@ pub(crate) fn resolve_real_instance_expressions(
             }
         }
         if !progress {
-            let (name, error) = first_error.expect("unresolved expression has an error");
-            return Err(ParameterResolutionError::Definition(format!(
-                "instance expression parameter '{name}' could not be resolved: {error}"
-            )));
+            let diagnostic = match first_error {
+                Some((name, error)) => {
+                    format!("instance expression parameter '{name}' could not be resolved: {error}")
+                }
+                None => format!(
+                    "instance expression parameters could not be resolved (cyclic dependency): {}",
+                    unresolved
+                        .iter()
+                        .map(|(name, _)| name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            };
+            return Err(ParameterResolutionError::Definition(diagnostic));
         }
         pending = unresolved;
     }

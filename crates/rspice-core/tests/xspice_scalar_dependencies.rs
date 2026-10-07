@@ -289,3 +289,33 @@ fn masked_sibling_reads_preserve_other_parse_time_random_draws() {
         Engine::default().build_circuit(&netlist).unwrap();
     }
 }
+
+#[test]
+fn dependency_diagnostics_identify_missing_leaves_and_cycles() {
+    for (fields, diagnostic) in [
+        (
+            "gain={in_offset} in_offset={missing}",
+            "Undefined parameter: MISSING",
+        ),
+        (
+            "in_offset={missing} gain={in_offset}",
+            "Undefined parameter: MISSING",
+        ),
+        (
+            "gain={in_offset} in_offset={absent()}",
+            "Unknown function: ABSENT",
+        ),
+        ("gain={in_offset} in_offset={gain}", "cyclic dependency"),
+        ("gain={gain}", "Undefined parameter: GAIN"),
+    ] {
+        for scoped in [false, true] {
+            let source = deck(fields, "", scoped);
+            let error = Engine::default()
+                .build_circuit(&Netlist::parse(&source).unwrap())
+                .map(|_| ())
+                .expect_err(&source)
+                .to_string();
+            assert!(error.contains(diagnostic), "{source}: {error}");
+        }
+    }
+}
