@@ -1,4 +1,4 @@
-//! Check Command - Validate netlist syntax
+//! Check Command - Validate netlist syntax, topology, and circuit construction
 
 use crate::cli::{CheckArgs, CliError, Config};
 use rspice_core::{Engine, Netlist};
@@ -261,7 +261,7 @@ fn validate_netlist(
     // Always-on topology checks: these decks produce singular systems, so
     // catching them statically beats a NaN at runtime.
     check_topology(netlist, &flattened.elements, &mut result);
-    check_external_model_build(netlist, &mut result, &engine)?;
+    check_circuit_build(netlist, &mut result, &engine)?;
 
     if args.connectivity {
         check_connectivity(netlist, &flattened.elements, &mut result);
@@ -274,20 +274,18 @@ fn validate_netlist(
     Ok(result)
 }
 
-/// Elaborate decks with external model declarations to prove they build.
+/// Construct every deck so native and external models receive the same checks.
 ///
 /// External runtimes are stubbed out, while device construction uses the
 /// resolved configuration for this coordinate. Cancellation is propagated as
 /// an interrupt rather than reported as a defect in the customer's deck.
-fn check_external_model_build(
+fn check_circuit_build(
     netlist: &Netlist,
     result: &mut ValidationResult,
     engine: &Engine,
 ) -> Result<(), CliError> {
-    if !netlist_contains_xspice(netlist) && netlist.veriloga_includes.is_empty() {
-        return Ok(());
-    }
-    let _external_guard = XspiceCheckExternalRuntimeGuard::install();
+    let has_xspice = netlist_contains_xspice(netlist);
+    let _external_guard = has_xspice.then(XspiceCheckExternalRuntimeGuard::install);
     // A cached runtime still has to satisfy this invocation's source limits.
     // Use the same bounded discovery as `run` before accepting a cache hit.
     let build = engine
@@ -330,10 +328,12 @@ fn check_external_model_build(
             Ok(())
         }
         Err(error) => {
-            let model_kind = if netlist_contains_xspice(netlist) {
+            let model_kind = if has_xspice {
                 "XSPICE"
-            } else {
+            } else if !netlist.veriloga_includes.is_empty() {
                 "Verilog-A"
+            } else {
+                "Circuit"
             };
             result.errors.push(ValidationIssue {
                 compiler_diagnostic: None,

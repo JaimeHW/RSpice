@@ -16,7 +16,7 @@ cargo build --release -p rspice-cli
 | Command | Purpose |
 | :--- | :--- |
 | `run` | Execute the analyses a netlist requests, or one requested from the command line |
-| `check` | Validate netlist and control syntax, analysis requests, output symbols, topology, and XSPICE/Verilog-A construction |
+| `check` | Validate netlist and control syntax, analysis requests, output symbols, topology, and native/XSPICE/Verilog-A construction |
 | `info` | Summarize a netlist without simulating it |
 | `models` | List the shipped SPICE model packs and look up parts in them |
 | `compare` | Compare a result against a golden reference |
@@ -613,9 +613,10 @@ from the netlist reader are reported as warnings; output symbols referenced by
 `.PRINT`/`.PLOT`/`.SAVE`/`.PROBE` must resolve, so an undefined `V(x)` or
 `I(rbogus)` is an error; a loop of ideal voltage sources or inductors is an
 error and a node connected only to current sources warns about its undefined
-voltage; and a deck containing XSPICE devices or Verilog-A declarations is built into a circuit with
-external runtimes stubbed out, so a model that cannot be constructed fails here
-rather than at run time. Construction uses the selected dialect, configured
+voltage. Every deck is built into a circuit, with external runtimes stubbed out,
+so native, XSPICE, and Verilog-A model construction errors fail validation.
+Real-valued model parameters reject nonzero imaginary results, including deferred
+expressions; `RE()`, `IMG()`, and `MAG()` permit explicit projection. Construction uses the selected dialect, configured
 simulation settings, and each materialized coordinate's deck options and
 temperature. `--strict` turns a warning-only deck
 into a usage failure, which exits 2. The JSON document reports both verdicts
