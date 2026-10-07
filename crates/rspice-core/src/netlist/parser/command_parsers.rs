@@ -342,23 +342,22 @@ pub(super) fn parse_step_command(
         // Parse start stop increment/points
         let start = expect_value(stream, line_num, params)?;
         let stop = expect_value(stream, line_num, params)?;
-        let step_or_points = expect_value(stream, line_num, params)?;
 
         match sweep_prefix.as_deref() {
             Some("DEC") => StepSweep::Decade {
-                points_per_decade: parse_step_points_per_interval(step_or_points, "DEC", line_num)?,
+                points_per_decade: parse_step_points_per_interval(stream, "DEC", line_num, params)?,
                 start,
                 stop,
             },
             Some("OCT") => StepSweep::Octave {
-                points_per_octave: parse_step_points_per_interval(step_or_points, "OCT", line_num)?,
+                points_per_octave: parse_step_points_per_interval(stream, "OCT", line_num, params)?,
                 start,
                 stop,
             },
             _ => StepSweep::Linear {
                 start,
                 stop,
-                step: step_or_points,
+                step: expect_value(stream, line_num, params)?,
             },
         }
     };
@@ -372,23 +371,18 @@ pub(super) fn parse_step_command(
 }
 
 fn parse_step_points_per_interval(
-    value: Value,
+    stream: &mut TokenStream,
     sweep_type: &str,
     line_num: usize,
+    params: &ParamContext,
 ) -> Result<usize, ParseError> {
-    // A usize contains values below 2^BITS. Expressing this exclusive bound in
-    // floating point avoids the rounding of `usize::MAX as f64` on 64-bit hosts.
-    let usize_upper_bound = 2.0_f64.powi(usize::BITS as i32);
-    if !value.is_finite() || value < 1.0 || value.fract() != 0.0 || value >= usize_upper_bound {
-        return Err(ParseError::Syntax {
+    let field = format!(".STEP {sweep_type} points per interval");
+    expect_positive_usize_value(stream, line_num, params, &field).map_err(|error| {
+        ParseError::Syntax {
             line: line_num,
-            message: format!(
-                ".STEP {sweep_type} points per interval must be a positive integer representable as usize, found {value}"
-            ),
-        });
-    }
-
-    Ok(value as usize)
+            message: format!("{field} must be a positive integer representable as usize: {error}"),
+        }
+    })
 }
 
 /// Parse .TEMP command: .TEMP t1 [t2 t3...]
