@@ -329,7 +329,9 @@ fn pnoise_resistor_flicker_retains_signed_current_modulation() {
 }
 
 #[test]
-fn pnoise_rejects_active_device_colored_controls_but_accepts_exact_zero() {
+fn pnoise_rejects_unqualified_colored_controls_but_accepts_exact_zero() {
+    // Classic MOS colored noise is supported and qualified against stationary
+    // channel/flicker laws in hb_classic_mos.rs.
     let cases = [
         (
             "resistor",
@@ -344,13 +346,6 @@ fn pnoise_rejects_active_device_colored_controls_but_accepts_exact_zero() {
             "v1 in 0 1\nr1 in out 1k\nd1 out 0 dm\n.model dm D (IS=1e-12 KF=0 AF=1)",
             "out",
             "d1",
-        ),
-        (
-            "MOSFET",
-            "vdd vdd 0 5\nvg g 0 1.5\nrd vdd d 10k\nm1 d g 0 0 mm w=20u l=2u\n.model mm NMOS (LEVEL=1 VTO=1 KP=60u KF=1e-24 AF=1)",
-            "vdd vdd 0 5\nvg g 0 1.5\nrd vdd d 10k\nm1 d g 0 0 mm w=20u l=2u\n.model mm NMOS (LEVEL=1 VTO=1 KP=60u KF=0 AF=1)",
-            "d",
-            "m1",
         ),
         (
             "JFET",
@@ -503,10 +498,7 @@ fn pnoise_mos_dtemp_matches_ambient_while_inexact_jfet_scaling_fails_closed() {
     let contribution = |contributors: &[(String, Vec<f64>)], label: &str| {
         let value = contributors
             .iter()
-            .find(|(name, _)| {
-                name.to_ascii_lowercase()
-                    .contains(&label.to_ascii_lowercase())
-            })
+            .find(|(name, _)| name.eq_ignore_ascii_case(label))
             .map(|(_, values)| values[0])
             .unwrap_or_else(|| panic!("missing channel contributor '{label}': {:?}", contributors));
         assert!(
@@ -531,8 +523,8 @@ m1 d g 0 0 nm w=20u l=2u
     );
     let mos_hot_contributors = run_contributors(mos_ambient, T_REF + 150.0);
     let mos_offset_contributors = run_contributors(&mos_dtemp, T_REF);
-    let mos_hot = contribution(&mos_hot_contributors, "m1 channel thermal");
-    let mos_offset = contribution(&mos_offset_contributors, "m1 channel thermal");
+    let mos_hot = contribution(&mos_hot_contributors, "M1:ID");
+    let mos_offset = contribution(&mos_offset_contributors, "M1:ID");
     assert!(
         (mos_offset - mos_hot).abs() <= 1.0e-10 * mos_hot,
         "MOS DTEMP channel noise must equal the same absolute ambient temperature: {mos_offset:.6e} vs {mos_hot:.6e}"
@@ -544,9 +536,9 @@ m1 d g 0 0 nm w=20u l=2u
     let mos_absolute_contributors = run_contributors(mos_ambient, 423.15);
     let mos_priority_contributors = run_contributors(&mos_temp_priority, T_REF);
     let mos_extreme_contributors = run_contributors(&mos_temp_priority, 1.0e20);
-    let mos_absolute = contribution(&mos_absolute_contributors, "m1 channel thermal");
-    let mos_priority = contribution(&mos_priority_contributors, "m1 channel thermal");
-    let mos_extreme_ambient = contribution(&mos_extreme_contributors, "m1 channel thermal");
+    let mos_absolute = contribution(&mos_absolute_contributors, "M1:ID");
+    let mos_priority = contribution(&mos_priority_contributors, "M1:ID");
+    let mos_extreme_ambient = contribution(&mos_extreme_contributors, "M1:ID");
     assert!(
         (mos_priority - mos_absolute).abs() <= 1.0e-10 * mos_absolute,
         "MOS TEMP must set the absolute channel-noise temperature and outrank DTEMP: {mos_priority:.6e} vs {mos_absolute:.6e}"
@@ -556,7 +548,7 @@ m1 d g 0 0 nm w=20u l=2u
         mos_priority.to_bits(),
         "MOS TEMP must not be reconstructed through a lossy ambient-relative offset"
     );
-    for label in ["m1.__rd thermal", "m1.__rs thermal"] {
+    for label in ["M1:RD", "M1:RS"] {
         let ordinary = contribution(&mos_priority_contributors, label);
         let extreme = contribution(&mos_extreme_contributors, label);
         assert_eq!(
