@@ -11786,6 +11786,35 @@ mod tests {
         );
     }
 
+    #[test]
+    fn xspice_vectors_read_final_scalar_overrides_instead_of_enclosing_values() {
+        for fields in [
+            "real=4 integer=5 real_array=[real integer]",
+            "real_array=[real integer] real=4 integer=5",
+            "real_array=\"[real integer]\" real={later+1} integer={later+2}",
+            "real_array=[{field()} {integer}] real={later+1} integer={later+2}",
+        ] {
+            for scoped in [false, true] {
+                let mut body = format!("A1 [in] print_param_types {fields}");
+                if scoped {
+                    body = format!(".SUBCKT cell in\n{body}\n.ENDS\nX1 in cell");
+                }
+                let source = format!(
+                    "* vector override bindings\n.PARAM real=1 integer=2\n.FUNC field() {{real}}\n{body}\n.PARAM later=3\n.END\n"
+                );
+                let circuit = Engine::default()
+                    .build_circuit(&Netlist::parse(&source).unwrap())
+                    .unwrap();
+                let instance = single_xspice_instance(&circuit, "print_param_types");
+                assert_eq!(
+                    instance.real_vector_param("real_array"),
+                    Some([4.0, 5.0].as_slice()),
+                    "{source}"
+                );
+            }
+        }
+    }
+
     fn xspice_model_count(circuit: &CircuitData, model_name: &str) -> usize {
         circuit
             .xspice_instances

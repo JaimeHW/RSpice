@@ -43,6 +43,7 @@ use super::lexer::{
 use super::{Element, ElementKind, ParamContext, ParseError, XspiceDigitalNode, XspicePort, expr};
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
+use std::collections::HashSet;
 
 //=============================================================================
 // Main Parser Entry Point
@@ -51,6 +52,9 @@ use crate::abort_signal::{AbortSignal, NoAbort};
 struct XspiceParseContext<'a> {
     params: &'a ParamContext,
     abort: &'a dyn AbortSignal,
+    eager: bool,
+    instance_fields: &'a HashSet<String>,
+    current_field: &'a str,
 }
 
 impl std::ops::Deref for XspiceParseContext<'_> {
@@ -62,13 +66,32 @@ impl std::ops::Deref for XspiceParseContext<'_> {
 
 impl XspiceParseContext<'_> {
     fn evaluate(&self, expression: &str) -> Result<crate::ComplexValue, expr::ExprError> {
-        expr::eval_expression_complex_with_probe_and_abort(expression, self.params, self.abort)
-            .map_err(|error| match error {
-                expr::ExpressionEvaluationError::Expression(error) => error,
-                expr::ExpressionEvaluationError::Aborted => {
-                    expr::ExprError::InvalidArgument("XSPICE numeric parsing cancelled".into())
+        expr::eval_expression_complex_with_probe_and_resolver(
+            expression,
+            self.params,
+            &mut |parameter| {
+                if !parameter.eq_ignore_ascii_case(self.current_field)
+                    && self
+                        .instance_fields
+                        .contains(&parameter.to_ascii_uppercase())
+                {
+                    Err(expr::ExprError::UndefinedParam(parameter.to_string()))
+                } else {
+                    Ok(None)
                 }
-            })
+            },
+            self.abort,
+        )
+        .map_err(|error| match error {
+            expr::ExpressionEvaluationError::Expression(error) => error,
+            expr::ExpressionEvaluationError::Aborted => {
+                expr::ExprError::InvalidArgument("XSPICE numeric parsing cancelled".into())
+            }
+        })
+    }
+
+    fn try_evaluate(&self, expression: &str) -> Option<crate::ComplexValue> {
+        self.eager.then(|| self.evaluate(expression).ok()).flatten()
     }
 
     fn check_abort(&self) -> Result<(), ParseError> {
@@ -96,15 +119,21 @@ pub(crate) fn parse_xspice(
     defer_simple_param_refs: bool,
     abort: &dyn AbortSignal,
 ) -> Result<(), ParseError> {
+    // Recognize all assignments before folding any expressions. A sibling
+    // override must shadow its enclosing binding even when it occurs later.
     let context = XspiceParseContext {
         params: netlist_params,
         abort,
+        eager: false,
+        instance_fields: &HashSet::new(),
+        current_field: "",
     };
     let netlist_params = &context;
     // Collect all ports and potential model name in order
     // We use a strategy where all identifiers are added as ports,
     // and at the end we take the last analog port as the model name
     let mut ports = Vec::new();
+    let mut assignments = Vec::new();
     let mut params = Vec::new();
     let mut expr_params = Vec::new();
     let mut string_params = Vec::new();
@@ -152,45 +181,14 @@ pub(crate) fn parse_xspice(
                     // This is a parameter assignment
                     stream.advance(); // consume identifier
                     stream.advance(); // consume '='
-                    // A later assignment replaces the entire typed value,
-                    // including a previously deferred expression.
-                    remove_previous_param(&mut params, &id_str);
-                    remove_previous_param(&mut expr_params, &id_str);
-                    remove_previous_param(&mut string_params, &id_str);
-                    remove_previous_param(&mut string_expr_params, &id_str);
-                    remove_previous_param(&mut string_vector_params, &id_str);
-                    remove_previous_param(&mut string_vector_expr_params, &id_str);
-                    remove_previous_param(&mut real_vector_params, &id_str);
-                    remove_previous_param(&mut real_vector_expr_params, &id_str);
-                    match parse_param_value(
+                    let value = parse_param_value(
                         stream,
                         line_num,
                         &id_str,
                         netlist_params,
                         defer_simple_param_refs,
-                    )? {
-                        XspiceParamValue::Resolved(value) => {
-                            let value = real_instance_value(value, line_num, &id_str)?;
-                            params.push((id_str, value));
-                        }
-                        XspiceParamValue::Deferred(expr) => expr_params.push((id_str, expr)),
-                        XspiceParamValue::String(value) => string_params.push((id_str, value)),
-                        XspiceParamValue::StringDeferred(expr) => {
-                            string_expr_params.push((id_str, expr))
-                        }
-                        XspiceParamValue::StringVector(values) => {
-                            string_vector_params.push((id_str, values))
-                        }
-                        XspiceParamValue::StringVectorDeferred(expr) => {
-                            string_vector_expr_params.push((id_str, expr))
-                        }
-                        XspiceParamValue::RealVector(values) => {
-                            real_vector_params.push((id_str, values))
-                        }
-                        XspiceParamValue::RealVectorDeferred(exprs) => {
-                            real_vector_expr_params.push((id_str, exprs))
-                        }
-                    }
+                    )?;
+                    assignments.push((id_str, value));
                 } else if id_str.starts_with('%') {
                     // Typed analog port: %v node, %i vsrc, %vd[...], %id[...],
                     // %vnam name, %g node, %gd n+ n-, %h node, or %hd n+ n-.
@@ -265,6 +263,53 @@ pub(crate) fn parse_xspice(
             line: line_num,
             message: format!("XSPICE element {} has no ports", name),
         });
+    }
+
+    let instance_fields = assignments
+        .iter()
+        .map(|(name, _): &(String, XspiceParamValue)| name.to_ascii_uppercase())
+        .collect::<HashSet<_>>();
+    for (id_str, value) in assignments {
+        let context = XspiceParseContext {
+            params: netlist_params.params,
+            abort,
+            eager: true,
+            instance_fields: &instance_fields,
+            current_field: &id_str,
+        };
+        context.check_abort()?;
+        let value = if defer_simple_param_refs {
+            value
+        } else {
+            fold_instance_value(value, &context, line_num, &id_str)?
+        };
+        // A later assignment replaces the entire typed value,
+        // including a previously deferred expression.
+        remove_previous_param(&mut params, &id_str);
+        remove_previous_param(&mut expr_params, &id_str);
+        remove_previous_param(&mut string_params, &id_str);
+        remove_previous_param(&mut string_expr_params, &id_str);
+        remove_previous_param(&mut string_vector_params, &id_str);
+        remove_previous_param(&mut string_vector_expr_params, &id_str);
+        remove_previous_param(&mut real_vector_params, &id_str);
+        remove_previous_param(&mut real_vector_expr_params, &id_str);
+        match value {
+            XspiceParamValue::Resolved(value) => {
+                let value = real_instance_value(value, line_num, &id_str)?;
+                params.push((id_str, value));
+            }
+            XspiceParamValue::Deferred(expr) => expr_params.push((id_str, expr)),
+            XspiceParamValue::String(value) => string_params.push((id_str, value)),
+            XspiceParamValue::StringDeferred(expr) => string_expr_params.push((id_str, expr)),
+            XspiceParamValue::StringVector(values) => string_vector_params.push((id_str, values)),
+            XspiceParamValue::StringVectorDeferred(expr) => {
+                string_vector_expr_params.push((id_str, expr))
+            }
+            XspiceParamValue::RealVector(values) => real_vector_params.push((id_str, values)),
+            XspiceParamValue::RealVectorDeferred(exprs) => {
+                real_vector_expr_params.push((id_str, exprs))
+            }
+        }
     }
 
     // Create the element
@@ -1014,6 +1059,95 @@ enum XspiceParamValue {
     RealVectorDeferred(Vec<String>),
 }
 
+// Fold independent root expressions in source order, while sibling reads stay
+// deferred until the builder has the complete instance scope. Keep successful
+// vector components so a later unresolved entry cannot redraw an earlier sample.
+fn fold_instance_value(
+    value: XspiceParamValue,
+    context: &XspiceParseContext<'_>,
+    line: usize,
+    name: &str,
+) -> Result<XspiceParamValue, ParseError> {
+    let complex = |real, imag| {
+        fold_complex_pair(
+            XspiceComplexComponent::Deferred(real),
+            XspiceComplexComponent::Deferred(imag),
+            line,
+            name,
+            context,
+            false,
+        )
+    };
+    Ok(match value {
+        XspiceParamValue::Deferred(expression) => match context.try_evaluate(&expression) {
+            Some(value) => XspiceParamValue::Resolved(value),
+            None => XspiceParamValue::Deferred(expression),
+        },
+        XspiceParamValue::RealVectorDeferred(expressions) => {
+            let entries = expressions
+                .into_iter()
+                .map(|expression| {
+                    context.check_abort()?;
+                    Ok(match context.try_evaluate(&expression) {
+                        Some(value) => {
+                            XspiceVectorEntry::Resolved(real_instance_value(value, line, name)?)
+                        }
+                        None => XspiceVectorEntry::Deferred(expression),
+                    })
+                })
+                .collect::<Result<Vec<_>, ParseError>>()?;
+            real_vector_value(entries)
+        }
+        XspiceParamValue::StringDeferred(expression) => {
+            if let Some((real, imag)) = parse_deferred_xspice_complex(&expression) {
+                match complex(real, imag)? {
+                    XspiceComplexLiteral::Resolved(value) => XspiceParamValue::String(value),
+                    XspiceComplexLiteral::Deferred { real, imag } => {
+                        XspiceParamValue::StringDeferred(encode_deferred_xspice_complex(
+                            &real, &imag,
+                        ))
+                    }
+                }
+            } else if let Some(value) = context.try_evaluate(&expression) {
+                XspiceParamValue::Resolved(value)
+            } else {
+                XspiceParamValue::StringDeferred(expression)
+            }
+        }
+        XspiceParamValue::StringVectorDeferred(expression) => {
+            if let Some(entries) = parse_deferred_xspice_complex_vector(&expression) {
+                let entries = entries
+                    .into_iter()
+                    .map(|entry| {
+                        context.check_abort()?;
+                        Ok(match entry {
+                            DeferredXspiceStringVectorEntry::Resolved(value) => {
+                                XspiceStringVectorEntry::Resolved(value)
+                            }
+                            DeferredXspiceStringVectorEntry::Complex { real, imag } => {
+                                match complex(real, imag)? {
+                                    XspiceComplexLiteral::Resolved(value) => {
+                                        XspiceStringVectorEntry::Resolved(value)
+                                    }
+                                    XspiceComplexLiteral::Deferred { real, imag } => {
+                                        XspiceStringVectorEntry::DeferredComplex { real, imag }
+                                    }
+                                }
+                            }
+                        })
+                    })
+                    .collect::<Result<Vec<_>, ParseError>>()?;
+                string_vector_value(entries)
+            } else if let Some(value) = context.try_evaluate(&expression) {
+                XspiceParamValue::Resolved(value)
+            } else {
+                XspiceParamValue::StringVectorDeferred(expression)
+            }
+        }
+        value => value,
+    })
+}
+
 enum XspiceComplexComponent {
     Resolved(Value),
     Deferred(String),
@@ -1205,9 +1339,9 @@ fn parse_scalar_param_token_value(
                     Ok(XspiceParamValue::Deferred(expr_text))
                 }
             } else {
-                match netlist_params.evaluate(&expr_text) {
-                    Ok(value) => Ok(XspiceParamValue::Resolved(value)),
-                    Err(_) => {
+                match netlist_params.try_evaluate(&expr_text) {
+                    Some(value) => Ok(XspiceParamValue::Resolved(value)),
+                    None => {
                         if let Some(value) = netlist_params.get_string(&expr_text) {
                             let parsed = parse_string_backed_param_value(
                                 param_name,
@@ -1273,7 +1407,7 @@ fn parse_scalar_param_token_value(
             if param_name.eq_ignore_ascii_case("model") {
                 stream.advance();
                 if let Some(value) = netlist_params.get_complex(&raw) {
-                    if defer_simple_param_refs {
+                    if defer_simple_param_refs || !netlist_params.eager {
                         Ok(XspiceParamValue::Deferred(raw))
                     } else {
                         Ok(XspiceParamValue::Resolved(value))
@@ -1333,7 +1467,7 @@ fn parse_scalar_param_token_value(
             } else {
                 stream.advance();
                 if let Some(value) = netlist_params.get_complex(&raw) {
-                    if defer_simple_param_refs {
+                    if defer_simple_param_refs || !netlist_params.eager {
                         Ok(XspiceParamValue::Deferred(raw))
                     } else {
                         Ok(XspiceParamValue::Resolved(value))
@@ -1382,7 +1516,7 @@ fn try_scalar_expression_param(
     if let Some(value) = parse_boolean_literal(&expr) {
         return Some(XspiceParamValue::Resolved(value.into()));
     }
-    if !defer_simple_param_refs && let Ok(value) = netlist_params.evaluate(&expr) {
+    if !defer_simple_param_refs && let Some(value) = netlist_params.try_evaluate(&expr) {
         return Some(XspiceParamValue::Resolved(value));
     }
     Some(XspiceParamValue::Deferred(expr))
@@ -1643,6 +1777,9 @@ pub(crate) fn parse_xspice_string_vector_literal(
         &XspiceParseContext {
             params: &ParamContext::new(),
             abort: &NoAbort,
+            eager: true,
+            instance_fields: &HashSet::new(),
+            current_field: param_name,
         },
         false,
     )? {
@@ -1720,6 +1857,10 @@ fn parse_real_vector_param(
         }
     }
 
+    Ok(real_vector_value(entries))
+}
+
+fn real_vector_value(entries: Vec<XspiceVectorEntry>) -> XspiceParamValue {
     if entries
         .iter()
         .any(|entry| matches!(entry, XspiceVectorEntry::Deferred(_)))
@@ -1731,7 +1872,7 @@ fn parse_real_vector_param(
                 XspiceVectorEntry::Deferred(expr) => expr,
             })
             .collect();
-        Ok(XspiceParamValue::RealVectorDeferred(exprs))
+        XspiceParamValue::RealVectorDeferred(exprs)
     } else {
         let values = entries
             .into_iter()
@@ -1740,7 +1881,7 @@ fn parse_real_vector_param(
                 XspiceVectorEntry::Deferred(_) => unreachable!(),
             })
             .collect();
-        Ok(XspiceParamValue::RealVector(values))
+        XspiceParamValue::RealVector(values)
     }
 }
 
@@ -1781,7 +1922,7 @@ fn parse_real_vector_entry(
         return Ok(XspiceVectorEntry::Resolved(sign * value));
     }
     let expr_text = signed_xspice_expr(sign, expr_text);
-    if !defer_simple_param_refs && let Ok(value) = netlist_params.evaluate(&expr_text) {
+    if !defer_simple_param_refs && let Some(value) = netlist_params.try_evaluate(&expr_text) {
         return Ok(XspiceVectorEntry::Resolved(real_instance_value(
             value, line_num, param_name,
         )?));
@@ -1811,37 +1952,7 @@ fn parse_string_vector_param(
         match &stream.peek().kind {
             TokenKind::RBracket => {
                 stream.advance();
-                if entries
-                    .iter()
-                    .any(|entry| matches!(entry, XspiceStringVectorEntry::DeferredComplex { .. }))
-                {
-                    let deferred_entries = entries
-                        .iter()
-                        .map(|entry| match entry {
-                            XspiceStringVectorEntry::Resolved(value) => {
-                                DeferredXspiceStringVectorEntry::Resolved(value.clone())
-                            }
-                            XspiceStringVectorEntry::DeferredComplex { real, imag } => {
-                                DeferredXspiceStringVectorEntry::Complex {
-                                    real: real.clone(),
-                                    imag: imag.clone(),
-                                }
-                            }
-                        })
-                        .collect::<Vec<_>>();
-                    return Ok(XspiceParamValue::StringVectorDeferred(
-                        encode_deferred_xspice_complex_vector(&deferred_entries),
-                    ));
-                }
-
-                let values = entries
-                    .into_iter()
-                    .map(|entry| match entry {
-                        XspiceStringVectorEntry::Resolved(value) => value,
-                        XspiceStringVectorEntry::DeferredComplex { .. } => unreachable!(),
-                    })
-                    .collect();
-                return Ok(XspiceParamValue::StringVector(values));
+                return Ok(string_vector_value(entries));
             }
             TokenKind::StringLit(value) => {
                 let value = value.clone();
@@ -1882,6 +1993,40 @@ fn parse_string_vector_param(
             )),
         }
     }
+}
+
+fn string_vector_value(entries: Vec<XspiceStringVectorEntry>) -> XspiceParamValue {
+    if entries
+        .iter()
+        .any(|entry| matches!(entry, XspiceStringVectorEntry::DeferredComplex { .. }))
+    {
+        let deferred_entries = entries
+            .iter()
+            .map(|entry| match entry {
+                XspiceStringVectorEntry::Resolved(value) => {
+                    DeferredXspiceStringVectorEntry::Resolved(value.clone())
+                }
+                XspiceStringVectorEntry::DeferredComplex { real, imag } => {
+                    DeferredXspiceStringVectorEntry::Complex {
+                        real: real.clone(),
+                        imag: imag.clone(),
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+        return XspiceParamValue::StringVectorDeferred(encode_deferred_xspice_complex_vector(
+            &deferred_entries,
+        ));
+    }
+
+    let values = entries
+        .into_iter()
+        .map(|entry| match entry {
+            XspiceStringVectorEntry::Resolved(value) => value,
+            XspiceStringVectorEntry::DeferredComplex { .. } => unreachable!(),
+        })
+        .collect();
+    XspiceParamValue::StringVector(values)
 }
 
 fn parse_string_vector_bare_value(
@@ -1963,6 +2108,24 @@ fn parse_xspice_complex_literal(
     // Recognize the entire pair, including both expression grammars, before
     // evaluating either component. String-vector parsing may abandon this
     // candidate; that fallback must not consume statistical samples.
+    fold_complex_pair(
+        real,
+        imag,
+        line_num,
+        param_name,
+        netlist_params,
+        defer_simple_param_refs,
+    )
+}
+
+fn fold_complex_pair(
+    real: XspiceComplexComponent,
+    imag: XspiceComplexComponent,
+    line_num: usize,
+    param_name: &str,
+    netlist_params: &XspiceParseContext<'_>,
+    defer_simple_param_refs: bool,
+) -> Result<XspiceComplexLiteral, ParseError> {
     let real = resolve_xspice_complex_component(
         real,
         line_num,
@@ -2055,7 +2218,7 @@ fn resolve_xspice_complex_component(
     netlist_params.check_abort()?;
     if !defer_simple_param_refs
         && let XspiceComplexComponent::Deferred(expression) = &component
-        && let Ok(value) = netlist_params.evaluate(expression)
+        && let Some(value) = netlist_params.try_evaluate(expression)
     {
         return Ok(XspiceComplexComponent::Resolved(real_instance_value(
             value, line_num, param_name,

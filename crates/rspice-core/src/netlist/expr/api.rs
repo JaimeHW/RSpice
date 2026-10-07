@@ -111,7 +111,7 @@ pub(crate) fn eval_expression_complex_with_probe_and_abort(
 
 /// The resolver is a side-effect-free parameter lookup/filter: both the
 /// isolated probe and the selected live evaluation consult the same bindings.
-pub(super) fn eval_expression_complex_with_probe_and_resolver(
+pub(crate) fn eval_expression_complex_with_probe_and_resolver(
     input: &str,
     ctx: &ParamContext,
     resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
