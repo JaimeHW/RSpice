@@ -2391,7 +2391,7 @@ pub mod autodiff {
                 | BinaryOp::Shl
                 | BinaryOp::Shr => 0,
             },
-            Node::Unary(UnaryOp::Neg | UnaryOp::Pos, inner) => recurse(inner),
+            Node::Unary(UnaryOp::Neg | UnaryOp::Pos | UnaryOp::ToReal, inner) => recurse(inner),
             Node::Unary(UnaryOp::Not | UnaryOp::BitNot | UnaryOp::ToInteger, _) => 0,
             Node::Limexp(inner) | Node::Ddt(inner) => recurse(inner),
             Node::Idt(inner, ic) => recurse(inner) | optional(ic),
@@ -3455,7 +3455,7 @@ pub mod autodiff {
                 | BinaryOp::Shl
                 | BinaryOp::Shr => {}
             },
-            Node::Unary(UnaryOp::Neg | UnaryOp::Pos, inner) => collect!(inner),
+            Node::Unary(UnaryOp::Neg | UnaryOp::Pos | UnaryOp::ToReal, inner) => collect!(inner),
             Node::Unary(UnaryOp::Not | UnaryOp::BitNot | UnaryOp::ToInteger, _) => {}
             Node::Conditional(condition, then_expr, else_expr) => {
                 // The predicate selects a derivative branch but is not itself
@@ -4636,7 +4636,7 @@ pub mod autodiff {
                 arena.push(Node::Unary(UnaryOp::Neg, di))
             }
             // Unary plus is the identity
-            Node::Unary(UnaryOp::Pos, inner) => differentiate!(inner),
+            Node::Unary(UnaryOp::Pos | UnaryOp::ToReal, inner) => differentiate!(inner),
             // Logical/bitwise negation is piecewise constant
             Node::Unary(UnaryOp::Not | UnaryOp::BitNot | UnaryOp::ToInteger, _) => constant!(0.0),
 

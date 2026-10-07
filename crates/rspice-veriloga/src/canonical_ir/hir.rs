@@ -3035,7 +3035,17 @@ impl HirLowerer {
                 right: self.lower_expr(&binary.right).id,
             },
             Expression::Unary(unary) => HirExprKind::Unary {
-                op: format!("{:?}", unary.op).into(),
+                // Scalar runtime lanes already use binary64. Preserve the
+                // semantic conversion's identity without adding a runtime op.
+                op: format!(
+                    "{:?}",
+                    if unary.op == UnaryOp::ToReal {
+                        UnaryOp::Pos
+                    } else {
+                        unary.op
+                    }
+                )
+                .into(),
                 operand: self.lower_expr(&unary.operand).id,
             },
             Expression::Conditional(conditional) => HirExprKind::Conditional {
@@ -3324,6 +3334,7 @@ fn exact_retained_replication_count(expression: &Expression) -> Option<i64> {
             let value = evaluate(&unary.operand)?;
             match unary.op {
                 UnaryOp::ToInteger => i32::try_from(value).ok().map(i64::from),
+                UnaryOp::ToReal => None,
                 UnaryOp::Pos => Some(value),
                 UnaryOp::Neg => value.checked_neg(),
                 UnaryOp::Not => Some(i64::from(value == 0)),

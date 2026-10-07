@@ -220,6 +220,11 @@ fn shapes(lowerer: &ProcessLowerer<'_>, root: &Expression) -> Shapes {
             Expression::Unary(value) => {
                 let input: Shape = get(&value.operand);
                 match value.op {
+                    UnaryOp::ToReal => Shape {
+                        width: 0,
+                        signed: true,
+                        real: true,
+                    },
                     UnaryOp::ToInteger => Shape {
                         width: 32,
                         signed: true,
@@ -990,7 +995,7 @@ fn apply(
             )
         }
         Operation::Unary(op, context, real) => match op {
-            UnaryOp::Pos => return right,
+            UnaryOp::Pos | UnaryOp::ToReal => return right,
             UnaryOp::Not => (bits(1), CfgValueKind::DigitalLogicalNot { input: right }),
             UnaryOp::BitNot => (
                 bits(context.width),

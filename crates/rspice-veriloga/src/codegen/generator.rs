@@ -1427,7 +1427,7 @@ impl CodeGenerator {
                         }
                         crate::ast::UnaryOp::Neg => program.instructions.push(Instruction::Neg),
                         // Unary plus is the identity
-                        crate::ast::UnaryOp::Pos => {}
+                        crate::ast::UnaryOp::Pos | crate::ast::UnaryOp::ToReal => {}
                         crate::ast::UnaryOp::Not => program.instructions.push(Instruction::Not),
                         // Bitwise complement is represented through the shared
                         // integer conversion and 32-bit XOR contract: ~x == x ^ -1.

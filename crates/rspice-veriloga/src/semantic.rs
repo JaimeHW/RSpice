@@ -173,6 +173,7 @@ fn resolve_integer_operator_tree(
                 let (operand_type, wide) = types.pop().expect("unary operand typed");
                 let value_type = match unary.op {
                     UnaryOp::ToInteger | UnaryOp::BitNot => ValueType::Integer,
+                    UnaryOp::ToReal => ValueType::Real,
                     UnaryOp::Not => ValueType::Boolean,
                     _ => operand_type,
                 };
@@ -388,6 +389,7 @@ mod function_effects;
 mod implicit_integrator;
 mod packed_parameters;
 mod parameter_constants;
+mod parameter_defaults;
 mod retained_inputs;
 mod switch_branches;
 mod symbols;
@@ -441,7 +443,10 @@ pub struct SemanticAnalyzer {
     /// instances may override parameters, so these must never influence
     /// generated code)
     param_consts: HashMap<SmolStr, ConstantValue>,
-    /// Exact values without numeric runtime slots; changes require re-elaboration.
+    /// External parameter queries resolve aliases and ASCII case once.
+    external_parameter_names: HashMap<String, SmolStr>,
+    /// Immutable packed parameters and closed local literals. Public numeric
+    /// slots never enter this environment; they remain instance-dependent.
     exact_parameter_constants: parameter_constants::ExactParameterConstants,
     /// Values that cannot vary per instance (localparams derived purely
     /// from literals). Safe for loop unrolling and code folding.
@@ -524,6 +529,7 @@ impl SemanticAnalyzer {
             next_analog_site: 0,
             in_analog_initial: false,
             param_consts: HashMap::new(),
+            external_parameter_names: HashMap::new(),
             exact_parameter_constants: Default::default(),
             invariant_consts: HashMap::new(),
             digital_selector_constants: Default::default(),
@@ -625,6 +631,7 @@ impl SemanticAnalyzer {
                 self.local_counter = 0;
                 self.next_analog_site = 0;
                 self.param_consts.clear();
+                self.external_parameter_names.clear();
                 self.exact_parameter_constants = Default::default();
                 self.invariant_consts.clear();
                 self.digital_selector_constants = Default::default();
@@ -1215,9 +1222,21 @@ impl SemanticAnalyzer {
             })?;
         }
 
-        // Phase 7: Analyze parameters (defaults may reference earlier ones)
+        // Phase 7: Analyze public and local parameters in source declaration order.
         let param_names: std::collections::HashSet<SmolStr> =
             module.parameters.iter().map(|p| p.name.clone()).collect();
+        self.external_parameter_names.extend(
+            module
+                .parameters
+                .iter()
+                .map(|parameter| (parameter.name.to_ascii_lowercase(), parameter.name.clone())),
+        );
+        for alias in &module.aliasparams {
+            if param_names.contains(&alias.target) {
+                self.external_parameter_names
+                    .insert(alias.alias.to_ascii_lowercase(), alias.target.clone());
+            }
+        }
         let parameter_scopes: Vec<_> = module
             .parameters
             .iter()
@@ -1267,18 +1286,92 @@ impl SemanticAnalyzer {
                 .filter(|parameter| !parameter.dimensions.is_empty())
                 .map(|parameter| parameter.name.clone()),
         );
-        self.validate_parameter_default_dependencies(
-            &module.parameters,
-            &module.aliasparams,
-            &parameter_indices,
-        );
-        for (parameter_index, ((param, scope), also_model)) in module
-            .parameters
+        let declarations = parameter_defaults::declaration_order(module);
+        let ordered: Vec<_> = declarations
             .iter()
-            .zip(parameter_scopes)
-            .zip(parameter_also_model)
-            .enumerate()
-        {
+            .map(|&(local, index)| {
+                if local {
+                    &module.localparams[index]
+                } else {
+                    &module.parameters[index]
+                }
+            })
+            .collect();
+        let all_indices =
+            ordered
+                .iter()
+                .enumerate()
+                .fold(HashMap::new(), |mut indices, (index, parameter)| {
+                    indices.entry(parameter.name.clone()).or_insert(index);
+                    indices
+                });
+        let errors_before = self.errors.len();
+        self.validate_parameter_default_dependencies(
+            &ordered,
+            &module.aliasparams,
+            &all_indices,
+            &param_names,
+        );
+        if self.errors.len() > errors_before {
+            return Err(self.errors.remove(errors_before).into());
+        }
+        let mut localparam_defaults = vec![None; module.localparams.len()];
+        let mut local_defaults = parameter_defaults::LocalDefaults::default();
+        for (local, parameter_index) in declarations {
+            if local {
+                let localparam = &module.localparams[parameter_index];
+                let default = self.prepare_localparam_default(localparam, module)?;
+                if localparam.param_type == ParamType::String {
+                    local_defaults.insert_string(localparam.name.clone());
+                } else if let Some(default) = &default {
+                    let converted = if matches!(default, Expression::Digital(DigitalExpr::FourState(_)))
+                    {
+                        default.clone()
+                    } else {
+                        let target = if localparam.type_is_explicit {
+                            match localparam.param_type {
+                                ParamType::Real => ValueType::Real,
+                                ParamType::Integer => ValueType::Integer,
+                                ParamType::String => ValueType::String,
+                            }
+                        } else {
+                            self.infer_type(default)?
+                        };
+                        let (mut value, source_type) =
+                            self.coerce_assignment_expression(default.clone(), target)?;
+                        if target == ValueType::Real && source_type != ValueType::Real {
+                            value = Expression::Unary(UnaryExpr {
+                                op: UnaryOp::ToReal,
+                                span: value.span(),
+                                operand: Box::new(value),
+                            });
+                        }
+                        value
+                    };
+                    local_defaults.insert(localparam.name.clone(), converted);
+                }
+                localparam_defaults[parameter_index] = default;
+                continue;
+            }
+            let original = &module.parameters[parameter_index];
+            let mut expanded = original.clone();
+            expanded.default = original
+                .default
+                .as_ref()
+                .map(|value| local_defaults.expand(value))
+                .transpose()?;
+            for dimension in &mut expanded.dimensions {
+                dimension.start = local_defaults.expand(&dimension.start)?;
+                dimension.end = local_defaults.expand(&dimension.end)?;
+            }
+            if let Some(range) = &mut expanded.range {
+                local_defaults.expand_range(range)?;
+            }
+            // Readonly local dependencies become typed expressions over public
+            // slots. They never become independently overridable parameters.
+            let param = &expanded;
+            let scope = parameter_scopes[parameter_index];
+            let also_model = parameter_also_model[parameter_index];
             let is_parameter_array = !param.dimensions.is_empty();
             let mut materialized_array_default = if is_parameter_array {
                 param
@@ -1535,6 +1628,7 @@ impl SemanticAnalyzer {
                 && let Some(range) = &parameter.range
             {
                 let mut range = range.clone();
+                local_defaults.expand_range(&mut range)?;
                 for bound in &mut range.bounds {
                     bound.lower = bound
                         .lower
@@ -1590,55 +1684,6 @@ impl SemanticAnalyzer {
                 alias: decl.alias.clone(),
                 target,
             });
-        }
-
-        // Pre-pass for Phase 8: seed the constant environments with
-        // localparam values so array bounds may reference them (their full
-        // lowering to computed variables happens in Phase 9)
-        let mut localparam_defaults = Vec::with_capacity(module.localparams.len());
-        for localparam in &module.localparams {
-            if !localparam.dimensions.is_empty() {
-                return Err(CompileError::Semantic(SemanticError::new(
-                    SemanticErrorKind::UnsupportedFeature(format!(
-                        "localparam array '{}' is retained with its declared dimensions, but array-valued localparam storage and indexing are not implemented",
-                        localparam.name
-                    )),
-                    localparam.span,
-                )));
-            }
-            let default = localparam
-                .default
-                .as_ref()
-                .map(|expression| {
-                    self.normalize_scalar_parameter_default(localparam, expression, module)
-                })
-                .transpose()?;
-            self.exact_parameter_constants
-                .retain(localparam, default.as_ref());
-            if let Some(default) = &default {
-                if let Some(value) = self.eval_const_value(default).and_then(|value| {
-                    Self::constant_for_declared_type(value, localparam.param_type)
-                }) {
-                    self.param_consts.insert(localparam.name.clone(), value);
-                }
-                if let Some(value) = self.eval_const_invariant_value(default).and_then(|value| {
-                    Self::constant_for_declared_type(value, localparam.param_type)
-                }) {
-                    self.invariant_consts.insert(localparam.name.clone(), value);
-                }
-            }
-            localparam_defaults.push(default);
-            self.define_symbol(Symbol {
-                name: localparam.name.clone(),
-                kind: SymbolKind::Parameter,
-                value_type: match localparam.param_type {
-                    ParamType::Real => ValueType::Real,
-                    ParamType::Integer => ValueType::Integer,
-                    ParamType::String => ValueType::String,
-                },
-                span: localparam.span,
-                attrs: Default::default(),
-            })?;
         }
 
         // Phase 8: Analyze variables
@@ -5656,7 +5701,7 @@ impl SemanticAnalyzer {
             | Expression::Digital(_)
             | Expression::BranchAccess(_) => expr.clone(),
             Expression::SystemFunction(function) => {
-                if let Some(resolved) = self.lower_module_time_function(function)? {
+                if let Some(resolved) = self.lower_module_query_function(function)? {
                     return Ok(resolved);
                 }
                 let mut function = SystemFunction {
@@ -6247,7 +6292,7 @@ impl SemanticAnalyzer {
         }
         resolve_integer_operator_tree(expr, |expression| {
             if let Expression::SystemFunction(function) = expression
-                && let Some(resolved) = self.lower_module_time_function(function)?
+                && let Some(resolved) = self.lower_module_query_function(function)?
             {
                 return Ok((resolved, ValueType::Real));
             }
@@ -6287,7 +6332,7 @@ impl SemanticAnalyzer {
 
     /// Resolve declaration-owned queries before flattening and before any
     /// function call in an unused fallback can acquire executable side effects.
-    fn lower_module_time_function(
+    fn lower_module_query_function(
         &self,
         function: &SystemFunction,
     ) -> CompileResult<Option<Expression>> {
@@ -6304,6 +6349,32 @@ impl SemanticAnalyzer {
                 span: function.span,
             })
         };
+        if function.name.eq_ignore_ascii_case("$param_given")
+            || function.name.eq_ignore_ascii_case("param_given")
+        {
+            let [Expression::Identifier(identifier)] = function.args.as_slice() else {
+                return Err(invalid("$param_given requires one parameter name".into()));
+            };
+            let Some(canonical) = self
+                .external_parameter_names
+                .get(&identifier.name.to_ascii_lowercase())
+            else {
+                return Err(invalid(format!(
+                    "$param_given names unknown parameter '{}'",
+                    identifier.name
+                )));
+            };
+            // Keep this as a name query. A same-spelled local variable is not
+            // an operand, and both executable backends receive the same key.
+            return Ok(Some(Expression::SystemFunction(SystemFunction {
+                name: "$param_given".into(),
+                args: vec![Expression::Identifier(Identifier {
+                    name: canonical.clone(),
+                    span: identifier.span,
+                })],
+                span: function.span,
+            })));
+        }
         if function.name.eq_ignore_ascii_case("$realtime") {
             if !function.args.is_empty() {
                 return Err(invalid("$realtime expects no arguments".into()));
@@ -6470,7 +6541,7 @@ impl SemanticAnalyzer {
                 })
             }
             Expression::SystemFunction(f) => {
-                if let Some(resolved) = self.lower_module_time_function(f)? {
+                if let Some(resolved) = self.lower_module_query_function(f)? {
                     return Ok(resolved);
                 }
                 self.validate_limit_call(f)?;
@@ -8072,6 +8143,7 @@ impl SemanticAnalyzer {
                     let operand_type = types.pop().expect("unary operand type was inferred");
                     match unary.op {
                         UnaryOp::ToInteger => ValueType::Integer,
+                        UnaryOp::ToReal => ValueType::Real,
                         UnaryOp::Pos | UnaryOp::Neg => operand_type,
                         UnaryOp::Not => ValueType::Boolean,
                         UnaryOp::BitNot => {
@@ -8443,6 +8515,7 @@ impl SemanticAnalyzer {
             Expression::Unary(u) => {
                 let v = eval(&u.operand)?;
                 Some(match u.op {
+                    UnaryOp::ToReal => ConstantValue::Real(v.as_f64()),
                     UnaryOp::ToInteger => {
                         ConstantValue::Integer(i64::from(real_to_integer(v.as_f64()).ok()?))
                     }
@@ -9668,15 +9741,16 @@ impl SemanticAnalyzer {
         }
     }
 
-    /// Verilog-AMS 2.3.1 section 3.4 permits a parameter initializer to read
+    /// Verilog-AMS 2023 section 3.4 permits a parameter initializer to read
     /// only parameters declared before it. Enforce that language rule here,
     /// before symbolic defaults reach any backend, so composite forward and
     /// cyclic references cannot acquire order-dependent values.
     fn validate_parameter_default_dependencies(
         &mut self,
-        parameters: &[ParameterDecl],
+        parameters: &[&ParameterDecl],
         aliases: &[AliasParamDecl],
         indices: &HashMap<SmolStr, usize>,
+        public_names: &HashSet<SmolStr>,
     ) {
         // External SPICE parameter names and the generated `$param_given`
         // resolver are intentionally case-insensitive. Reject collisions up
@@ -9686,6 +9760,9 @@ impl SemanticAnalyzer {
         let mut param_given_indices: std::collections::HashMap<String, (usize, SmolStr)> =
             std::collections::HashMap::new();
         for (index, parameter) in parameters.iter().enumerate() {
+            if !public_names.contains(&parameter.name) {
+                continue;
+            }
             Self::insert_external_parameter_name(
                 &mut param_given_indices,
                 parameter.name.as_str(),
@@ -9780,6 +9857,11 @@ impl SemanticAnalyzer {
                 }
             }
             Expression::Digital(digital) => {
+                if let Some(name) = digital.base_name()
+                    && let Some(&index) = parameter_indices.get(name)
+                {
+                    references.push((index, name.clone(), digital.span()));
+                }
                 for child in digital.children() {
                     Self::collect_parameter_identifier_references(
                         child,

@@ -604,8 +604,30 @@ distinguishes retained metadata from work that needs a digital runtime.
 Unsupported direct analog reads and packed localparam range constraints still
 produce diagnostics.
 
-General packed operations over mutable numeric parameters, forward exact
-dependencies, non-scalar overrides, and typed range constraints remain open.
+Schema 97 analyzes interleaved `parameter` and `localparam` declarations in
+source order. Public defaults can read earlier exact or numeric locals while
+preserving integer assignment rounding and real arithmetic boundaries.
+Readonly local expressions are expanded over public numeric slots, so defaults
+and range constraints still respond to instance updates. Local dependencies
+cannot hide a model default's dependence on an instance-only parameter.
+`$param_given` keeps its name argument through expansion and resolves canonical
+names and aliases using the existing external lookup rules before either backend.
+
+Expansion is measured before materialization and limited to 1,048,576 expression
+nodes and 128 local dependency levels. Local analog computations retain their
+prologue variables. Closed numeric local literals can participate in typed
+constant selection without freezing any public numeric parameter.
+Declared string locals stay outside numeric expansion and constant caches;
+public defaults that need their values report the missing typed string evaluator.
+
+Forward default references are rejected, including references through packed
+selects and between local/public declarations: VAMS-2023 section 3.4 requires
+previously defined parameters, and section 3.4.5 applies the parameter rules
+to locals. Earlier notes listing forward exact defaults as missing standard
+functionality were incorrect. See the [VAMS-2023 reference](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
+
+General packed operations over mutable numeric parameters, non-scalar
+overrides, and typed range constraints remain open.
 Exact parameters whose overrides change their numeric/elaboration
 classification still require the corresponding general parameter typing work;
 this pass does not freeze numeric slots to hide that gap.

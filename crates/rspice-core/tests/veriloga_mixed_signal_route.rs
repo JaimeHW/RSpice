@@ -2839,8 +2839,9 @@ module packed_local_driver(q);
  parameter COUNT=64'h20000000000001;
  localparam COPY=PATTERN;
  localparam MASKED=COPY & 129'h1_ffffffff_ffffffff_ffffffff_ffffff00;
+ parameter FINAL=MASKED;
  initial #1 q=(COPY===129'h1_00000000_00000000_00000000_000000xz)
-              &&(MASKED===129'h1_00000000_00000000_00000000_00000000)
+              &&(FINAL===129'h1_00000000_00000000_00000000_00000000)
               &&(COUNT===64'h20000000000001);
 endmodule
 module exact_packed(p,q);
@@ -2849,7 +2850,8 @@ module exact_packed(p,q);
  parameter COUNT=64'h20000000000001;
  parameter real GAIN=2;
  localparam COPY=PATTERN;
- localparam real RESULT=GAIN+(COPY[15:8]+8'd255+8'd1);
+ localparam real LOCAL_RESULT=GAIN+(COPY[15:8]+8'd255+8'd1);
+ parameter real RESULT=LOCAL_RESULT;
  aliasparam STRENGTH=GAIN;
  packed_local_driver #(.PATTERN(COPY), .COUNT(COUNT)) driver(q);
  analog I(p)<+(V(p)-RESULT*q)/1000;

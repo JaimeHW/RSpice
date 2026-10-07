@@ -25,6 +25,24 @@ impl ExactParameterConstants {
         if !declaration.dimensions.is_empty() || declaration.param_type == ParamType::String {
             return;
         }
+        self.retain_literal(declaration, value);
+    }
+
+    /// A local literal cannot be overridden, even when its analog prologue
+    /// uses a binary64 variable. Public numeric parameters never enter here.
+    pub(super) fn retain_local_literal(&mut self, declaration: &ParameterDecl, value: &Expression) {
+        if !declaration.dimensions.is_empty() || declaration.param_type == ParamType::String {
+            return;
+        }
+        if matches!(
+            value,
+            Expression::Number(_) | Expression::Digital(DigitalExpr::FourState(_))
+        ) {
+            self.retain_literal(declaration, value);
+        }
+    }
+
+    fn retain_literal(&mut self, declaration: &ParameterDecl, value: &Expression) {
         let mut declaration = declaration.clone();
         declaration.default = Some(value.clone());
         self.names.insert(declaration.name.clone());
@@ -93,6 +111,7 @@ impl SemanticAnalyzer {
         while let Some(value) = pending.pop() {
             let shape = match value {
                 Expression::Identifier(value) => RealShape::Known(real_names.contains(&value.name)),
+                Expression::Unary(value) if value.op == UnaryOp::ToReal => RealShape::Known(true),
                 Expression::Number(value) => RealShape::Known(
                     !value.raw.contains('\'')
                         && parse_integer_literal(&value.raw).ok().flatten().is_none(),

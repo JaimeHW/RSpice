@@ -210,7 +210,7 @@ impl Algebra {
             Node::Unary(op, inner) => {
                 self.emit(lowerer, inner)?;
                 match op {
-                    UnaryOp::Pos => Ok(()),
+                    UnaryOp::Pos | UnaryOp::ToReal => Ok(()),
                     UnaryOp::Neg => lowerer.append_unary(NativeOp::Neg),
                     UnaryOp::Not => lowerer.append_unary(NativeOp::Logical(LogicalOp::Not)),
                     UnaryOp::ToInteger => lowerer.append_unary(NativeOp::IntegerCast),

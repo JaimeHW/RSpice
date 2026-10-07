@@ -1129,6 +1129,11 @@ impl<'a> ExprConverter<'a> {
         unary: &crate::ast::UnaryExpr,
     ) -> CompileResult<NodeId> {
         let operand = self.convert(arena, &unary.operand)?;
+        if unary.op == crate::ast::UnaryOp::ToReal {
+            // Continuous runtime values already occupy binary64 slots. The
+            // conversion has served its purpose in semantic operator typing.
+            return Ok(operand);
+        }
         if unary.op == crate::ast::UnaryOp::ToInteger {
             // The IR already has a checked integer identity, with a zero
             // tangent and an IntegerCast specialization in the JITs.

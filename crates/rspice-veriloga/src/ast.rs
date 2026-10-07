@@ -1341,6 +1341,8 @@ pub struct UnaryExpr {
 pub enum UnaryOp {
     /// Compiler-inserted assignment conversion; never parsed as an operator.
     ToInteger,
+    /// Compiler-inserted numeric assignment conversion to real.
+    ToReal,
     Neg,    // -
     Pos,    // +
     Not,    // !

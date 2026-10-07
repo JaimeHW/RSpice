@@ -665,3 +665,210 @@ endmodule
         "{error}"
     );
 }
+
+#[test]
+fn interleaved_parameters_keep_exact_locals_and_numeric_assignment_boundaries() {
+    let compiler = compiler();
+    let report = compiler
+        .compile_runtime(
+            r#"
+module ordered(p,q);
+ inout p; electrical p;
+ parameter integer BASE=5;
+ localparam real AS_REAL=BASE;
+ parameter real HALF=AS_REAL/2;
+ localparam integer ROUNDED=HALF;
+ parameter real RESULT=ROUNDED+HALF;
+ localparam integer NIBBLE=16'h10ff;
+ parameter SELECTED=NIBBLE[7:0];
+ localparam WORD=129'h1_00000000_00000000_00000000_000001xz;
+ parameter COPY=WORD;
+ localparam MASKED=COPY & 129'h1_ffffffff_ffffffff_ffffffff_ffffff00;
+ parameter FINAL=MASKED;
+ output reg [128:0] q=FINAL;
+ analog I(p)<+RESULT+(SELECTED-255);
+endmodule
+"#,
+            None,
+        )
+        .unwrap();
+    report.validate_integrity().unwrap();
+    assert_eq!(
+        initial(&report, "q"),
+        DigitalInitialValue::FourState(bits("129'h1_00000000_00000000_00000000_00000100"))
+    );
+    assert_eq!(
+        report
+            .abi
+            .parameters
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect::<Vec<_>>(),
+        ["BASE", "HALF", "RESULT", "SELECTED"]
+    );
+    assert_eq!(
+        report
+            .abi
+            .elaboration_parameters
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect::<Vec<_>>(),
+        ["COPY", "FINAL"]
+    );
+    let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+        "ordered",
+        report.model,
+        &report.canonical_ir,
+        &[1],
+    )
+    .unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 5.5);
+    device.try_set_parameter("BASE", 7.0).unwrap();
+    device.try_resolve_parameter_defaults().unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 7.5);
+    device.try_set_parameter("HALF", 1.25).unwrap();
+    device.try_resolve_parameter_defaults().unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 2.25);
+    assert!(!device.try_set_parameter("AS_REAL", 10.0).unwrap());
+    device.try_set_parameter("SELECTED", 256.0).unwrap();
+    device.try_resolve_parameter_defaults().unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 3.25);
+}
+
+#[test]
+fn interleaved_parameter_defaults_reject_forward_self_and_excessive_expansion() {
+    let compiler = compiler();
+    for (declarations, diagnostic) in [
+        (
+            "localparam A=B+1; parameter B=2;",
+            "references later parameter 'B'",
+        ),
+        (
+            "localparam A=B; localparam B=32'bx;",
+            "references later parameter 'B'",
+        ),
+        (
+            "parameter A=B; localparam B=32'bx;",
+            "references later parameter 'B'",
+        ),
+        (
+            "parameter A=B[7:0]; parameter B=32'bx;",
+            "references later parameter 'B'",
+        ),
+        ("localparam A=A+1;", "references itself"),
+        (
+            "localparam string S=65; parameter P=S;",
+            "default depends on string localparam 'S'",
+        ),
+        (
+            r#"localparam string S="A"; localparam T=S; parameter P=T;"#,
+            "default depends on string localparam 'S'",
+        ),
+    ] {
+        let source = format!("module bad(q); {declarations} output reg q=0; endmodule");
+        let error = compiler
+            .compile_runtime(&source, None)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(diagnostic), "{source}: {error}");
+    }
+    let mut source = "module huge(q); parameter real BASE=1.0; localparam real L0=BASE;".to_owned();
+    for index in 1..22 {
+        source.push_str(&format!(
+            "localparam real L{index}=L{}+L{};",
+            index - 1,
+            index - 1
+        ));
+    }
+    source.push_str("parameter real RESULT=L21; output reg q=0; endmodule");
+    let error = compiler
+        .compile_runtime(&source, None)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("localparam dependency expansion"), "{error}");
+
+    // The argument names the public l21 parameter using external lookup rules;
+    // it does not expand the enormous, case-distinct local L21 expression.
+    let query = source
+        .replace(
+            "module huge(q);",
+            "module huge(p,q); inout p; electrical p;",
+        )
+        .replace(
+            "parameter real BASE=1.0;",
+            "parameter real l21=0; parameter real BASE=1.0;",
+        )
+        .replace(
+            "RESULT=L21",
+            "RESULT=$param_given(L21)+$param_given(selector)",
+        )
+        .replace(
+            "endmodule",
+            "aliasparam SELECTOR=l21; analog I(p)<+RESULT; endmodule",
+        );
+    let report = compiler.compile_runtime(&query, None).unwrap();
+    let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+        "query",
+        report.model,
+        &report.canonical_ir,
+        &[1],
+    )
+    .unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 0.0);
+    device.try_set_parameter("SELECTOR", 2.0).unwrap();
+    device.try_resolve_parameter_defaults().unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 2.0);
+}
+
+#[test]
+fn interleaved_numeric_local_defaults_keep_ranges_and_scope_dependencies_live() {
+    let compiler = compiler();
+    let report = compiler
+        .compile_runtime(
+            r#"
+module ordered_range(p,q);
+ inout p; electrical p; output reg q=0;
+ parameter real BASE=2.0;
+ localparam real LIMIT=BASE+1.0;
+ parameter real VALUE=1.0 from [0:LIMIT];
+ localparam integer COUNT=VALUE;
+ parameter real RESULT=COUNT+VALUE;
+ analog I(p)<+RESULT;
+endmodule
+"#,
+            None,
+        )
+        .unwrap();
+    let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+        "range",
+        report.model,
+        &report.canonical_ir,
+        &[1],
+    )
+    .unwrap();
+    device.try_set_parameter("VALUE", 2.5).unwrap();
+    device.try_resolve_parameter_defaults().unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 5.5);
+    device.try_set_parameter("BASE", 1.0).unwrap();
+    assert!(
+        device.try_resolve_parameter_defaults().is_err(),
+        "LIMIT must follow BASE"
+    );
+
+    let error = compiler
+        .compile_runtime(
+            r#"
+module scope(p,q);
+ inout p; electrical p; output reg q=0;
+ (* type="instance" *) parameter real BASE=2;
+ localparam real PRIVATE=BASE+1;
+ parameter real MODEL=PRIVATE;
+ analog I(p)<+MODEL;
+endmodule
+"#,
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("instance parameter"), "{error}");
+}

@@ -875,7 +875,7 @@ fn branch_body_cannot_perturb_its_own_guard() {
                         f64::from(crate::integer_runtime::real_to_integer(v).unwrap())
                     }
                     UnaryOp::Neg => -v,
-                    UnaryOp::Pos => v,
+                    UnaryOp::Pos | UnaryOp::ToReal => v,
                     UnaryOp::Not => f64::from(v == 0.0),
                     UnaryOp::BitNot => !(v as i64) as f64,
                 }
@@ -2744,4 +2744,26 @@ fn a_runtime_loop_keeps_its_body_as_a_region() {
         assignment_targets(body).contains(&"i".to_string()),
         "loop body must retain the update that advances it, got {body:?}"
     );
+}
+
+#[test]
+fn parameter_defaults_and_array_bounds_can_read_earlier_localparams() {
+    let module = analyze_one(&module_src(
+        r#"
+        parameter integer base=2;
+        localparam integer count=base+1;
+        localparam real first=base*0.5;
+        parameter real taps[0:count-1]='{first, 2.0, 3.0};
+        analog I(p,n)<+V(p,n);
+    "#,
+    ));
+    assert_eq!(
+        module
+            .parameters
+            .iter()
+            .map(|parameter| parameter.name.as_str())
+            .collect::<Vec<_>>(),
+        ["base", "taps"]
+    );
+    assert_eq!(module.parameters[1].dimensions.len(), 1);
 }
