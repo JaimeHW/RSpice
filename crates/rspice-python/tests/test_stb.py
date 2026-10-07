@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 import pickle
+import json
 
 import rspice
 
@@ -18,6 +19,51 @@ C1 ctrl 0 159.154943091895n
 
 
 class TestStb:
+    def test_circuit_poles_and_hidden_instability_survive_pickle(self, engine):
+        for hidden in [False, True]:
+            source = SINGLE_POLE_STB.replace(
+                ".end", "Ghidden hidden 0 hidden 0 -1\nChidden hidden 0 1\n.end"
+            ) if hidden else SINGLE_POLE_STB
+            result = engine.run_stb(rspice.Netlist.parse(source), "VPROBE",
+                                    variation="lin", points=3, start_freq=10, stop_freq=1e7)
+            for value in [result, pickle.loads(pickle.dumps(result))]:
+                assert value.circuit_pole_status == "available"
+                assert value.circuit_pole_failure is None
+                assert value.is_stable is (not hidden)
+                assert len(value.circuit_poles) == (2 if hidden else 1)
+                assert value.circuit_pole_evidence.kind == "qualified"
+                if hidden:
+                    assert value.circuit_poles[0].real == pytest.approx(1.0)
+
+    def test_unsupported_pole_evidence_survives_pickle_without_a_stability_claim(self, engine):
+        source = SINGLE_POLE_STB.replace(".end", "B1 ctrl 0 I={FREQ*1p*V(ctrl)}\n.end")
+        result = engine.run_stb(rspice.Netlist.parse(source), "VPROBE",
+                                variation="lin", points=3, start_freq=10, stop_freq=1e7)
+        for value in [result, pickle.loads(pickle.dumps(result))]:
+            assert value.circuit_pole_status == "unavailable"
+            assert value.circuit_pole_failure["kind"] == "unsupported"
+            assert value.is_stable is None
+            assert value.circuit_poles is None
+            assert value.circuit_pole_evidence is None
+
+    def test_circuit_pole_pickle_rejects_corruption_and_keeps_legacy_absence(self, engine):
+        result = engine.run_stb(rspice.Netlist.parse(SINGLE_POLE_STB), "VPROBE",
+                                variation="lin", points=3, start_freq=10, stop_freq=1e7)
+        restore, args = result.__reduce__()
+        legacy = restore(*args[:-1])
+        assert legacy.circuit_pole_status == "not_computed"
+        assert legacy.circuit_poles is None
+        assert legacy.is_stable is None
+        malformed = list(args)
+        state = json.loads(malformed[-1][1])
+        state["spectrum"]["poles"] = []
+        malformed[-1] = (1, json.dumps(state))
+        with pytest.raises(ValueError, match="circuit-pole evidence"):
+            restore(*malformed)
+        malformed[-1] = (2, "{}")
+        with pytest.raises(ValueError, match="circuit-pole pickle version"):
+            restore(*malformed)
+
     @pytest.mark.parametrize("points", [1, 3])
     def test_zero_gain_has_explicit_bode_validity_and_survives_pickle(self, engine, points):
         result = engine.run_stb(

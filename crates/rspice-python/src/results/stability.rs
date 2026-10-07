@@ -555,6 +555,7 @@ pub struct PyStbResult {
     /// The core loop analysis, retained for typed scalar availability,
     /// signal descriptors, units and authored execution identity.
     evidence: Option<DocumentEvidence<rspice_core::analysis::stb::StbResult>>,
+    restored_circuit_poles: rspice_core::analysis::stb::CircuitPoleEvidence,
 }
 
 impl CarriesDocumentEvidence for PyStbResult {
@@ -571,6 +572,12 @@ impl CarriesDocumentEvidence for PyStbResult {
 }
 
 impl PyStbResult {
+    fn circuit_pole_state(&self) -> &rspice_core::analysis::stb::CircuitPoleEvidence {
+        self.evidence
+            .as_ref()
+            .map_or(&self.restored_circuit_poles, |e| &e.core.circuit_poles)
+    }
+
     fn bode_points(&self) -> &[rspice_core::analysis::stb::BodePoint] {
         self.evidence
             .as_ref()
@@ -624,6 +631,7 @@ impl PyStbResult {
             frequencies: result.frequencies.clone(),
             loop_gains: result.loop_gains.clone(),
             restored_bode_points: Vec::new(),
+            restored_circuit_poles: Default::default(),
             probe_name: result.probe_name.clone(),
             gain_margin_db: margins.gain_margin.map(|m| m.value),
             gain_margin_frequency: margins.gain_margin.map(|m| m.frequency),
@@ -642,6 +650,83 @@ impl PyStbResult {
 
 #[pymethods]
 impl PyStbResult {
+    /// Complete finite circuit poles in rad/s, or None when unavailable.
+    #[getter]
+    fn circuit_poles<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> Option<Bound<'py, PyArray1<rspice_core::Complex64>>> {
+        self.circuit_pole_state()
+            .spectrum()
+            .map(|s| s.poles.to_pyarray(py))
+    }
+
+    #[getter]
+    fn circuit_pole_evidence(&self) -> PyResult<Option<PyRootSetEvidence>> {
+        self.circuit_pole_state()
+            .spectrum()
+            .map(|s| PyRootSetEvidence::from_core(&s.evidence))
+            .transpose()
+    }
+
+    /// Only qualified complete circuit modes establish stability; margins do not.
+    #[getter]
+    fn is_stable(&self) -> Option<bool> {
+        use rspice_core::analysis::pole_zero::StabilityVerdict;
+        if !self.success {
+            return None;
+        }
+        match self.circuit_pole_state().stability_verdict() {
+            StabilityVerdict::Stable => Some(true),
+            StabilityVerdict::Unstable => Some(false),
+            StabilityVerdict::Indeterminate => None,
+        }
+    }
+
+    #[getter]
+    fn circuit_pole_status(&self) -> &'static str {
+        use rspice_core::analysis::stb::CircuitPoleEvidence as E;
+        match self.circuit_pole_state() {
+            E::NotComputed => "not_computed",
+            E::Available { .. } => "available",
+            E::Unavailable { .. } => "unavailable",
+        }
+    }
+
+    #[getter]
+    fn circuit_pole_failure<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<Option<Bound<'py, pyo3::types::PyDict>>> {
+        use rspice_core::analysis::stb::{CircuitPoleEvidence as E, CircuitPoleFailure as F};
+        let E::Unavailable { cause } = self.circuit_pole_state() else {
+            return Ok(None);
+        };
+        let result = pyo3::types::PyDict::new(py);
+        match cause {
+            F::Unsupported { capability, detail } => {
+                result.set_item("kind", "unsupported")?;
+                result.set_item("capability", capability)?;
+                result.set_item("detail", detail)?;
+            }
+            F::Numerical { detail } => {
+                result.set_item("kind", "numerical")?;
+                result.set_item("detail", detail)?;
+            }
+            F::ResourceLimit {
+                resource,
+                requested,
+                limit,
+            } => {
+                result.set_item("kind", "resource_limit")?;
+                result.set_item("resource", resource)?;
+                result.set_item("requested", requested)?;
+                result.set_item("limit", limit)?;
+            }
+        }
+        Ok(Some(result))
+    }
+
     /// Independently measured zero-frequency return ratio, or None.
     #[getter]
     fn dc_loop_gain(&self) -> Option<PyComplexValue> {
@@ -746,7 +831,7 @@ impl PyStbResult {
     /// Rebuild from pickled state. Not part of the public API.
     #[staticmethod]
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (frequencies, loop_gains, probe_name, margins, flags, warnings, assessment, dc_state=None, margin_state=None))]
+    #[pyo3(signature = (frequencies, loop_gains, probe_name, margins, flags, warnings, assessment, dc_state=None, margin_state=None, circuit_state=None))]
     fn _unpickle(
         frequencies: Vec<f64>,
         loop_gains: Vec<(f64, f64)>,
@@ -757,6 +842,7 @@ impl PyStbResult {
         assessment: String,
         dc_state: Option<(u8, Option<(f64, f64)>)>,
         margin_state: Option<StbMarginState>,
+        circuit_state: Option<(u8, String)>,
     ) -> PyResult<Self> {
         let dc_loop_gain = match dc_state {
             Some((1, value)) => value.map(|(re, im)| rspice_core::Complex64::new(re, im)),
@@ -832,6 +918,47 @@ impl PyStbResult {
                 projected.margins
             }
         };
+        let restored_circuit_poles = match circuit_state {
+            None => Default::default(),
+            Some((1, text)) => {
+                let limits = rspice_core::ResourceLimits::default();
+                if text.len() > limits.max_external_data_bytes {
+                    return Err(crate::errors::value_error(
+                        "STB circuit-pole pickle exceeds byte limit",
+                    ));
+                }
+                let evidence: rspice_core::analysis::stb::CircuitPoleEvidence =
+                    serde_json::from_str(&text).map_err(|e| {
+                        crate::errors::value_error(format!("invalid STB circuit-pole pickle: {e}"))
+                    })?;
+                evidence
+                    .validate_with_abort(&limits, &rspice_core::NoAbort)
+                    .map_err(|e| crate::errors::value_error(e.to_string()))?;
+                evidence
+            }
+            Some((version, _)) => {
+                return Err(crate::errors::value_error(format!(
+                    "unsupported STB circuit-pole pickle version {version}"
+                )));
+            }
+        };
+        let limits = rspice_core::ResourceLimits::default();
+        let retained_values = projected
+            .retained_value_count()
+            .saturating_sub(4)
+            .saturating_add(restored_circuit_poles.retained_value_count());
+        let retained_bytes = warnings
+            .iter()
+            .fold(restored_circuit_poles.diagnostic_bytes(), |n, s| {
+                n.saturating_add(s.len())
+            });
+        if retained_values > limits.max_result_values
+            || retained_bytes > limits.max_external_data_bytes
+        {
+            return Err(crate::errors::value_error(
+                "STB pickle exceeds retained-evidence limits",
+            ));
+        }
         let _ = (margins, assessment); // Legacy scalar placeholders and inferred verdict.
         let success = flags.2 && projected.success;
         let assessment = if success {
@@ -844,6 +971,7 @@ impl PyStbResult {
             frequencies,
             loop_gains: gains,
             restored_bode_points: projected.bode_points,
+            restored_circuit_poles,
             probe_name,
             gain_margin_db: restored.gain_margin.map(|m| m.value),
             gain_margin_frequency: restored.gain_margin.map(|m| m.frequency),
@@ -876,6 +1004,7 @@ impl PyStbResult {
             String,
             Option<(u8, Option<(f64, f64)>)>,
             Option<StbMarginState>,
+            Option<(u8, String)>,
         ),
     )> {
         Ok((
@@ -900,6 +1029,11 @@ impl PyStbResult {
                     1,
                     self.gain_margin_db.zip(self.gain_margin_frequency),
                     self.phase_margin_degrees.zip(self.phase_margin_frequency),
+                )),
+                Some((
+                    1,
+                    serde_json::to_string(self.circuit_pole_state())
+                        .map_err(|e| crate::errors::value_error(e.to_string()))?,
                 )),
             ),
         ))
