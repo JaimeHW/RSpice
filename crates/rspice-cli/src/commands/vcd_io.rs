@@ -739,10 +739,9 @@ pub(crate) fn vcd_table(
     )?;
     let ticks: Vec<u64> = ticks.into_iter().collect();
 
-    let period = document.timescale.seconds();
     let scale: Vec<f64> = ticks
         .iter()
-        .map(|tick| time::tick_seconds(path, *tick, period))
+        .map(|tick| time::tick_seconds(path, *tick, document.timescale))
         .collect::<Result<_, _>>()?;
 
     let mut columns = Vec::with_capacity(document.signals.len());

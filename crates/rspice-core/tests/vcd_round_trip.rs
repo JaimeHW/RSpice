@@ -15,7 +15,7 @@ use rspice_core::engine::{
     DigitalBusDeclaration, DigitalBusSource, DigitalTrace, DigitalTracePoint, RealTrace,
     RealTracePoint,
 };
-use rspice_core::execution::{EventProjectionError, event_vcd_document};
+use rspice_core::execution::{EventProjectionError, event_vcd_document, vcd_event_histories};
 use rspice_core::io::{
     VcdBit, VcdChange, VcdDocument, VcdMagnitude, VcdSignal, VcdSignalKind, VcdTimeUnit,
     VcdTimescale, VcdValue, VcdVariable, parse_vcd_reader, write_vcd,
@@ -281,6 +281,28 @@ fn multiplication_roundoff_does_not_move_long_timeline_events() {
     ));
 }
 
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    #[test]
+    fn long_timeline_ticks_are_the_nearest_integer_femtosecond(
+        bits in 16.0_f64.to_bits()..18_446.744_073_709_55_f64.to_bits()
+    ) {
+        let time = f64::from_bits(bits);
+        let document = event_vcd_document("tran", &[digital_trace("clk", &[time])], &[], &[])
+            .expect("the nearest whole femtosecond is within binary64 time precision");
+        let tick = document.signals[0].changes[0].tick * document.timescale.femtoseconds();
+        // Independent integer oracle for the exact binary64 rational value.
+        // In this range its denominator is 2^38 through 2^48, so neither
+        // product can overflow u128. Halfway cases may choose either neighbor.
+        let significand = (bits & ((1_u64 << 52) - 1)) | (1_u64 << 52);
+        let shift = 1075 - (bits >> 52);
+        let numerator = u128::from(significand) * 1_000_000_000_000_000;
+        let projected = u128::from(tick) << shift;
+        prop_assert!(projected.abs_diff(numerator) <= (1_u128 << (shift - 1)));
+    }
+}
+
 #[test]
 fn distinct_recorded_times_cannot_become_simultaneous() {
     let first = 1e-9_f64;
@@ -357,4 +379,47 @@ fn identical_times_keep_delta_changes_and_cross_signal_simultaneity() {
     );
     assert_eq!(document.signals[1].changes[1].tick, 1);
     assert_eq!(document.signals[2].changes[0].tick, 1);
+}
+
+#[test]
+fn imported_histories_reject_ticks_that_lose_precision_in_seconds() {
+    for (timescale, tick) in [
+        (VcdTimeUnit::Seconds, 9_007_199_254_740_993),
+        (VcdTimeUnit::Seconds, u64::MAX),
+        (VcdTimeUnit::Femtoseconds, 9_007_199_254_740_892),
+    ] {
+        for (width, kind, value) in [
+            (1, VcdSignalKind::Logic, VcdValue::Logic(vec![VcdBit::One])),
+            (
+                2,
+                VcdSignalKind::Logic,
+                VcdValue::Logic(vec![VcdBit::One; 2]),
+            ),
+            (64, VcdSignalKind::Real, VcdValue::Real(1.0)),
+        ] {
+            let mut document = VcdDocument::new(VcdTimescale {
+                magnitude: VcdMagnitude::One,
+                unit: timescale,
+            });
+            document.signals.push(VcdSignal {
+                identifier: "!".to_owned(),
+                variables: vec![VcdVariable {
+                    scope: vec![],
+                    name: "out".to_owned(),
+                }],
+                width,
+                kind,
+                changes: vec![VcdChange { tick, value }],
+            });
+            let error = vcd_event_histories(&document)
+                .expect_err("event evidence must not silently change the integer timestamp");
+            assert_eq!(
+                error,
+                EventProjectionError::InexactTick {
+                    variable: "out".to_owned(),
+                    tick,
+                }
+            );
+        }
+    }
 }

@@ -92,6 +92,18 @@ pub enum EventProjectionError {
         tick: u64,
     },
 
+    /// The integer VCD time would lose precision in an event history.
+    #[error(
+        "variable '{variable}' at VCD tick {tick} cannot be represented in event-history \
+         seconds without losing time precision"
+    )]
+    InexactTick {
+        /// The VCD variable whose timestamp cannot be imported.
+        variable: String,
+        /// The rejected integer position.
+        tick: u64,
+    },
+
     /// The time is negative, not finite, or past the last tick a `u64` can
     /// address.
     #[error("node '{node}' has an event at {time} s, which is outside the range VCD can address")]
@@ -530,10 +542,20 @@ pub struct VcdEventHistories {
 /// originally used: a vector says what its bits are, not what the nodes
 /// carrying them were called. Member histories are change-compressed on the
 /// way in, because that is the invariant a recorded history has.
+/// Integer timestamps that cannot retain their tick when converted to the
+/// histories' binary64 seconds are refused as [`EventProjectionError::InexactTick`].
 pub fn vcd_event_histories(
     document: &VcdDocument,
 ) -> Result<VcdEventHistories, EventProjectionError> {
-    let period = document.timescale.seconds();
+    let time_at = |variable: &str, tick| {
+        document
+            .timescale
+            .seconds_at_tick(tick)
+            .ok_or_else(|| EventProjectionError::InexactTick {
+                variable: variable.to_owned(),
+                tick,
+            })
+    };
     let shared = shared_scope_depth(&document.signals);
     let mut histories = VcdEventHistories::default();
     let mut seen: BTreeSet<String> = BTreeSet::new();
@@ -554,7 +576,7 @@ pub fn vcd_event_histories(
                         });
                     };
                     points.push(RealTracePoint {
-                        time: change.tick as Value * period,
+                        time: time_at(&reference, change.tick)?,
                         value,
                     });
                 }
@@ -571,7 +593,7 @@ pub fn vcd_event_histories(
                     // one, so this loop runs exactly once per change.
                     for bit in logic_bits(&reference, signal.width, change)? {
                         points.push(DigitalTracePoint {
-                            time: change.tick as Value * period,
+                            time: time_at(&reference, change.tick)?,
                             value: digital_value_from_vcd_bit(*bit),
                         });
                     }
@@ -622,7 +644,7 @@ pub fn vcd_event_histories(
                     .collect();
                 for change in &signal.changes {
                     let bits = logic_bits(&reference, signal.width, change)?;
-                    let time = change.tick as Value * period;
+                    let time = time_at(&reference, change.tick)?;
                     for (member, bit) in members.iter_mut().zip(bits) {
                         let value = digital_value_from_vcd_bit(*bit);
                         // A recorded history keeps changes only, which is the

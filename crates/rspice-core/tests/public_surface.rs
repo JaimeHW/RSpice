@@ -991,7 +991,9 @@ use rspice_core::analysis::harmonic_balance::{
 // Studio, CLI, Python, WASM and the adapter when executing .MC confidence options.
 // +1 deliberate API: Studio's deck-statistics driver passes the solved event
 // mask to the same observed-trial aggregator used by parameter Monte Carlo.
-const MAX_PUBLIC_ITEMS: usize = 5467;
+// +1 deliberate API: VcdTimescale::seconds_at_tick supplies one precision
+// check to the CLI table converter and core event-history importer.
+const MAX_PUBLIC_ITEMS: usize = 5468;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

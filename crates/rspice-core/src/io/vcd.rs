@@ -254,6 +254,22 @@ impl VcdTimescale {
     pub fn seconds(self) -> f64 {
         self.magnitude.value() as f64 * self.unit.seconds()
     }
+
+    /// Convert an integer tick to binary64 seconds without losing its position.
+    ///
+    /// Returns `None` if either the integer cast or the timescale multiplication
+    /// prevents recovering the original tick. Keep the integer VCD timeline
+    /// when this happens rather than importing shifted or simultaneous events.
+    pub fn seconds_at_tick(self, tick: u64) -> Option<f64> {
+        let position = tick as f64;
+        let period = self.seconds();
+        let seconds = position * period;
+        // Widen the comparison: u64::MAX rounds up to 2^64 in binary64, and
+        // casting back to u64 would saturate and conceal the lost position.
+        (position as u128 == u128::from(tick)
+            && (seconds / period).round() as u128 == u128::from(tick))
+        .then_some(seconds)
+    }
 }
 
 impl fmt::Display for VcdTimescale {

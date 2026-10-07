@@ -1,6 +1,7 @@
 //! Admit timeline coordinates before projecting them onto VCD event ticks.
 use super::{CliError, ExportTable, Path, conversion_error};
 use crate::commands::export_table::type_unit;
+use rspice_core::io::VcdTimescale;
 
 /// Resolve a declared time unit and validate every sample before coalescing
 /// unchanged levels. An ordinary numeric sweep does not imply elapsed time.
@@ -76,20 +77,17 @@ pub(super) fn seconds_factor(path: &Path, table: &ExportTable) -> Result<f64, Cl
 
 /// A table stores binary64 seconds, whereas VCD stores integer ticks. Admit a
 /// timestamp only if both the integer cast and the scaled time retain its tick.
-pub(super) fn tick_seconds(path: &Path, tick: u64, period: f64) -> Result<f64, CliError> {
-    let position = tick as f64;
-    let seconds = position * period;
-    // Widen the integer comparison: u64::MAX rounds up to 2^64 in binary64,
-    // and casting straight back to u64 would saturate and hide the loss.
-    if position as u128 != u128::from(tick)
-        || (seconds / period).round() as u128 != u128::from(tick)
-    {
-        return Err(conversion_error(
+pub(super) fn tick_seconds(
+    path: &Path,
+    tick: u64,
+    timescale: VcdTimescale,
+) -> Result<f64, CliError> {
+    timescale.seconds_at_tick(tick).ok_or_else(|| {
+        conversion_error(
             path,
             format!(
                 "VCD tick {tick} cannot be represented as table seconds without losing time precision; keep VCD output to retain the integer timeline"
             ),
-        ));
-    }
-    Ok(seconds)
+        )
+    })
 }
