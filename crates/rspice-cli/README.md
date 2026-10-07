@@ -301,13 +301,17 @@ its goal fails the measurement, with `TOL` defaulting to
 `max(1% of |goal|, 1e-12)`. Results print under `--meas` and are always
 collected for report files.
 
-Xyce `TRAN_CONT`, `DC_CONT`, and `AC_CONT` measurements may add
+Xyce `TRAN_CONT`, `DC_CONT`, `AC_CONT`, and `NOISE_CONT` measurements may add
 `FAILVALUE=value` when the run selects `--spice-dialect xyce`. The threshold is
 checked independently for every retained record with the exact inclusive
 contract `abs(raw_value) >= FAILVALUE`. A non-finite raw value or threshold
 fails closed. The stream passes only when evaluation succeeds, produces at
 least one record, and every record passes; failed records remain in the stream
 instead of being replaced by a single aggregate failure.
+
+`NOISE_CONT` evaluates against the same noise signals as scalar `NOISE`
+measurements, including ordinary sweeps, `.DATA` frequency tables, and analyses
+launched by `.CONTROL` commands.
 
 Continuous rows are serialized additively. Measurement JSON, CSV, and
 `--summary` JSON retain `record_index`, raw value, threshold, per-record verdict,

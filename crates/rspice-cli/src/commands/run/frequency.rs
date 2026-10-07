@@ -1213,6 +1213,9 @@ fn finish_noise_projected(
         analysis: Some("Noise measurement projection".to_string()),
     })?;
     ctx.record_measurements("NOISE", measurements)?;
+    let continuous_measurements =
+        rspice_core::analysis::evaluate_noise_continuous_measurements(ctx.netlist, results);
+    super::shared::record_continuous_measurements(ctx, "NOISE_CONT", continuous_measurements)?;
 
     if !ctx.quiet {
         crate::console::line(format_args!(
