@@ -99,6 +99,34 @@ pub(crate) fn eval_expression_complex_with_abort(
     )
 }
 
+/// Probe forward bindings without consuming the live statistical stream. Reuse
+/// the parsed expression and perform the selected evaluation only once.
+pub(crate) fn eval_expression_complex_with_probe_and_abort(
+    input: &str,
+    ctx: &ParamContext,
+    abort: &dyn crate::abort_signal::AbortSignal,
+) -> Result<ComplexValue, ExpressionEvaluationError> {
+    let expr = parse_expression_with_abort(input, abort)?;
+    // A function not yet defined is also a forward reference. Conservatively
+    // probe calls (and grouping) before a prefix can draw from the live stream.
+    if input.contains('(') || expression_needs_forward_reference_probe(&expr, ctx) {
+        evaluate_complex_with_functions_and_abort(
+            &expr,
+            &ctx.isolated_random_clone(),
+            &mut |_| Ok(None),
+            &mut |_, _| Ok(None),
+            abort,
+        )?;
+    }
+    evaluate_complex_with_functions_and_abort(
+        &expr,
+        ctx,
+        &mut |_| Ok(None),
+        &mut |_, _| Ok(None),
+        abort,
+    )
+}
+
 /// Evaluate a simple expression without parameters
 pub fn eval_simple(input: &str) -> Result<Value, ExprError> {
     eval_expression(input, &ParamContext::new())
@@ -117,7 +145,11 @@ pub(crate) fn needs_forward_reference_probe(expression: &str, params: &ParamCont
     let Ok(parsed) = parse_expression(expression) else {
         return false;
     };
-    let mut pending = vec![&parsed];
+    expression_needs_forward_reference_probe(&parsed, params)
+}
+
+fn expression_needs_forward_reference_probe(expression: &Expr, params: &ParamContext) -> bool {
+    let mut pending = vec![expression];
     while let Some(node) = pending.pop() {
         match node {
             Expr::Param(name)
@@ -143,6 +175,27 @@ pub(crate) fn needs_forward_reference_probe(expression: &str, params: &ParamCont
 #[cfg(test)]
 mod cancellation_tests {
     use super::*;
+
+    #[test]
+    fn failed_forward_probes_leave_the_live_statistical_stream_untouched() {
+        for source in ["aunif(0,1)+missing", "aunif(0,1)+late()"] {
+            let mut params = ParamContext::new();
+            params.set_random_seed(73);
+            let reference = params.isolated_random_clone();
+            assert!(
+                eval_expression_complex_with_probe_and_abort(
+                    source,
+                    &params,
+                    &crate::abort_signal::NoAbort
+                )
+                .is_err()
+            );
+            assert_eq!(
+                eval_expression("aunif(0,1)", &params).unwrap(),
+                eval_expression("aunif(0,1)", &reference).unwrap()
+            );
+        }
+    }
 
     #[test]
     fn grouping_and_numeric_suffixes_cancel_at_every_parser_boundary() {

@@ -287,6 +287,18 @@ impl TokenStream<'_> {
         self.evaluate_value_capturing_direction(expression, params, None)
     }
 
+    pub(super) fn evaluate_model_expression(
+        &self,
+        expression: &str,
+        params: &ParamContext,
+    ) -> Result<Value, ExprError> {
+        crate::netlist::expr::eval_expression_complex_with_probe_and_abort(
+            expression, params, self.abort,
+        )
+        .map(|value| value.re)
+        .map_err(numeric_expression_error)
+    }
+
     pub(super) fn evaluate_value_capturing_direction(
         &self,
         expression: &str,

@@ -4124,7 +4124,7 @@ fn resolve_static_model_expression_params_with_abort(
                     unresolved.push((name, expression));
                     continue;
                 }
-                match crate::netlist::expr::eval_expression_complex_with_abort(
+                match crate::netlist::expr::eval_expression_complex_with_probe_and_abort(
                     &expression,
                     &context,
                     abort,

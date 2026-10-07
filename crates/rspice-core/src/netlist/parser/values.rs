@@ -509,7 +509,9 @@ pub(super) fn parse_model_params(
                                 || params.expression_references_spectre_statistics(&expr)
                             {
                                 expr_params.push((name, expr));
-                            } else if let Ok(value) = stream.evaluate_expression(&expr, params) {
+                            } else if let Ok(value) =
+                                stream.evaluate_model_expression(&expr, params)
+                            {
                                 numeric_params.push((name, value));
                             } else if let Some(value) = params.get_string(&expr) {
                                 push_model_string_value(
@@ -786,7 +788,7 @@ fn try_xspice_model_scalar_expression(
         return Some(ParsedModelScalarExpression::Deferred(expr));
     }
 
-    match stream.evaluate_expression(&expr, params) {
+    match stream.evaluate_model_expression(&expr, params) {
         Ok(value) => Some(ParsedModelScalarExpression::Resolved(value)),
         Err(_) => Some(ParsedModelScalarExpression::Deferred(expr)),
     }
