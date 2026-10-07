@@ -672,7 +672,11 @@ between differently declared coordinate units.
 RAW and HDF5 inputs are validated in full before any section is selected.
 RAW table coordinates must be real: complex-encoded axes may have zero imaginary
 components, but nonzero imaginary coordinates are rejected instead of discarded.
-Legacy RAW operating points retain their complex first signal on an ordinal axis.
+Legacy RAW operating points, pole-zero results, transfer functions, integrated
+noise and DC sensitivity results keep every signal on an ordinal axis. AC
+sensitivity retains its frequency coordinate. Explicit RSpice table layouts
+and older `point`/`index` coordinate declarations take precedence over these
+legacy plot titles.
 When they contain multiple results, `compare` and tabular `convert` require
 `--section NAME_OR_INDEX`: an exact RAW plot name or HDF5 group name, or a
 one-based index from the available-section list in the diagnostic. This

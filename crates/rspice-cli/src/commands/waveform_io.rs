@@ -386,21 +386,41 @@ pub(crate) fn raw_read_error(path: &Path, error: rspice_core::io::RawParseError)
     }
 }
 
-fn raw_operating_point(
+/// SPICE scalar-result plots omit the reference vector. RSpice table metadata,
+/// including the explicit point/index column of older exports, takes precedence.
+fn raw_has_ordinal_axis(
     header: &rspice_core::io::ltspice_raw::RawFileHeader,
+    variables: &[rspice_core::io::ltspice_raw::RawVariable],
     coordinate_first: bool,
 ) -> bool {
-    !coordinate_first
-        && matches!(
-            header.plotname.trim().to_ascii_lowercase().as_str(),
-            "dc op" | "operating point" | "dc operating point"
-        )
+    if coordinate_first
+        || variables.first().is_some_and(|variable| {
+            variable.var_type.eq_ignore_ascii_case("index")
+                && (variable.name.eq_ignore_ascii_case("point")
+                    || variable.name.eq_ignore_ascii_case("index"))
+        })
+    {
+        return false;
+    }
+    match header.plotname.trim().to_ascii_lowercase().as_str() {
+        "dc op"
+        | "operating point"
+        | "dc operating point"
+        | "ac operating point"
+        | "distortion operating point"
+        | "pole-zero analysis"
+        | "transfer function"
+        | "integrated noise - v^2 or a^2" => true,
+        // ngspice uses the same title for DC scalars and complex AC spectra.
+        "sensitivity analysis" => !header.is_complex,
+        _ => false,
+    }
 }
 
 /// All table coordinates are real. Validate every plot before selection so
 /// discarded imaginary axis values cannot disappear during conversion or bless.
-/// Legacy operating points have an implicit ordinal axis: their first variable
-/// is a signal, whose imaginary values remain part of the result.
+/// Legacy scalar plots have an implicit ordinal axis: their first variable is
+/// a signal, whose imaginary values remain part of the result.
 pub(crate) fn validate_raw_coordinates(
     path: &Path,
     file: &rspice_core::io::ltspice_raw::RawFile,
@@ -413,7 +433,7 @@ pub(crate) fn validate_raw_coordinates(
             let coordinate_first =
                 rspice_core::io::ltspice_raw::raw_table_has_coordinate(&plot.header)
                     .map_err(|error| raw_read_error(path, error))?;
-            if raw_operating_point(&plot.header, coordinate_first) {
+            if raw_has_ordinal_axis(&plot.header, &plot.variables, coordinate_first) {
                 continue;
             }
             return Err(conversion_error(
@@ -457,12 +477,12 @@ pub(super) fn raw_result(
 
     let coordinate_first = rspice_core::io::ltspice_raw::raw_table_has_coordinate(&data.header)
         .map_err(|error| conversion_error(path, error))?;
-    let operating_point = raw_operating_point(&data.header, coordinate_first);
+    let ordinal_axis = raw_has_ordinal_axis(&data.header, &data.variables, coordinate_first);
     let mut waveforms = data.waveforms.into_iter().peekable();
     let Some(first) = waveforms.peek() else {
         return Err(conversion_error(path, "rawfile contains no variables"));
     };
-    let (scale_name, scale_type, scale) = if operating_point {
+    let (scale_name, scale_type, scale) = if ordinal_axis {
         (
             "point".to_string(),
             "index".to_string(),
@@ -481,7 +501,7 @@ pub(super) fn raw_result(
     };
 
     let columns = waveforms
-        .zip(data.variables.iter().skip(usize::from(!operating_point)))
+        .zip(data.variables.iter().skip(usize::from(!ordinal_axis)))
         .map(|(waveform, variable)| ExportColumn {
             unit: units[variable.index].clone(),
             name: waveform.name,
@@ -497,11 +517,7 @@ pub(super) fn raw_result(
         .collect();
 
     Ok(ExportTable {
-        scale_unit: if operating_point {
-            None
-        } else {
-            units[0].clone()
-        },
+        scale_unit: if ordinal_axis { None } else { units[0].clone() },
         analysis: "converted".to_string(),
         plot_name: if data.header.plotname.is_empty() && !coordinate_first {
             "Converted Data".to_string()
