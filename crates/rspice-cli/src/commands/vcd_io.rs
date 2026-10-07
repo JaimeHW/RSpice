@@ -456,6 +456,7 @@ fn event_traces_of(
                 resource_limits,
             )
             .map_err(|error| crate::commands::waveform_io::raw_read_error(path, error))?;
+            crate::commands::waveform_io::decode_raw_fft_plots(path, &file)?;
             rspice_core::execution::decode_event_plots(&file)
                 .map_err(|error| conversion_error(path, error))?
         }

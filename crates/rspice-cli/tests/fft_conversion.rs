@@ -211,6 +211,38 @@ fn selecting_a_raw_plot_still_validates_other_fft_plot_metadata() {
 }
 
 #[test]
+fn raw_event_exports_validate_companion_fft_metadata() {
+    let directory = test_dir("event_fft_container");
+    let source = source(&directory);
+    for format in ["raw", "ascii"] {
+        let fft = directory.join("spectrum.raw");
+        assert!(convert(&source, &fft, "json", format, &[]).status.success());
+        let mut bytes = b"Title: Events\nPlotname: Real Events (rspice-real-events/1)\nFlags: real double\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\n1 E(ctrl) real\nValues:\n0 0 1\n".to_vec();
+        bytes.extend(std::fs::read(fft).unwrap());
+        let input = directory.join("events.raw");
+        let output = directory.join("events.vcd");
+        std::fs::write(&input, &bytes).unwrap();
+        let valid = convert(&input, &output, format, "vcd", &[]);
+        assert!(valid.status.success(), "{format}: {valid:?}");
+        let original = std::fs::read(&output).unwrap();
+        let needle = b"\"analysis_id\":\"fft-004\"";
+        let offset = bytes
+            .windows(needle.len())
+            .position(|part| part == needle)
+            .unwrap();
+        bytes[offset..offset + needle.len()].copy_from_slice(b"\"analysis_id\":\"fft-999\"");
+        std::fs::write(&input, bytes).unwrap();
+        let invalid = convert(&input, &output, format, "vcd", &[]);
+        assert_eq!(invalid.status.code(), Some(1), "{format}: {invalid:?}");
+        assert!(
+            String::from_utf8_lossy(&invalid.stderr).contains("FFT"),
+            "{invalid:?}"
+        );
+        assert_eq!(std::fs::read(&output).unwrap(), original);
+    }
+}
+
+#[test]
 fn typed_fft_comparison_retains_transform_contracts_across_formats() {
     let directory = test_dir("comparison");
     let source = source(&directory);

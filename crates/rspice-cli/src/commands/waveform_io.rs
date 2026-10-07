@@ -375,16 +375,7 @@ fn raw_result(
 ) -> Result<ImportedResult, CliError> {
     rspice_core::execution::decode_event_plots(&file)
         .map_err(|error| conversion_error(path, error))?;
-    // Validate every typed plot before choosing one, including unselected FFTs.
-    let mut fft_plots = std::collections::BTreeMap::new();
-    for (index, plot) in file.plots.iter().enumerate() {
-        if plot.header.plotname == "Transient FFT" {
-            let decoded = crate::commands::run::decode_fft_raw_plot(plot)
-                .and_then(crate::commands::run::FftBundle::from_raw)
-                .map_err(|error| conversion_error(path, error))?;
-            fft_plots.insert(index, decoded);
-        }
-    }
+    let mut fft_plots = decode_raw_fft_plots(path, &file)?;
     let names: Vec<_> = file
         .plots
         .iter()
@@ -463,6 +454,23 @@ fn raw_result(
         columns,
     }
     .into())
+}
+
+/// Validate every FFT plot before selecting a table or projecting event traces.
+pub(crate) fn decode_raw_fft_plots(
+    path: &Path,
+    file: &rspice_core::io::ltspice_raw::RawFile,
+) -> Result<std::collections::BTreeMap<usize, crate::commands::run::FftBundle>, CliError> {
+    let mut fft_plots = std::collections::BTreeMap::new();
+    for (index, plot) in file.plots.iter().enumerate() {
+        if plot.header.plotname == "Transient FFT" {
+            let decoded = crate::commands::run::decode_fft_raw_plot(plot)
+                .and_then(crate::commands::run::FftBundle::from_raw)
+                .map_err(|error| conversion_error(path, error))?;
+            fft_plots.insert(index, decoded);
+        }
+    }
+    Ok(fft_plots)
 }
 
 /// The transposed table an operating point publishes, read back as a table.
