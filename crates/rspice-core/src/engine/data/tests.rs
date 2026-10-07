@@ -128,3 +128,70 @@ fn temperature_coordinate_preserves_unrelated_resolved_policy() {
         .unwrap();
     assert_eq!(result.points, [300.15, 400.15]);
 }
+
+#[test]
+fn row_parameter_snapshots_preserve_complex_dependencies_and_accepted_prefixes() {
+    let netlist = Netlist::parse("Table parameters\n.param P=1 Q={2*P} C={P*1j}\n.data points FREQ P\n10 1\n20 5\n10 7\n.enddata\n.end\n").unwrap();
+    for stop_before_third in [false, true] {
+        let (_, result) = Engine::default()
+            .run_frequency_data(
+                &netlist,
+                "points",
+                options(),
+                &NoAbort,
+                |_, row, frequency, _| {
+                    if stop_before_third && row.params.get("P") == Some(7.0) {
+                        return Err(SimulationError::ModelFinished(Box::new(finish())));
+                    }
+                    Ok(vec![frequency])
+                },
+                |_| 1,
+            )
+            .unwrap();
+        let count = if stop_before_third { 2 } else { 3 };
+        assert_eq!(result.parameters.point_count(), count);
+        for (row, expected) in [1.0, 5.0, 7.0].into_iter().take(count).enumerate() {
+            assert_eq!(
+                result.parameters.resolve("P", row).unwrap().unwrap().re,
+                expected
+            );
+            assert_eq!(
+                result.parameters.resolve("q", row).unwrap().unwrap().re,
+                2.0 * expected
+            );
+            assert_eq!(
+                result.parameters.resolve("C", row).unwrap().unwrap().im,
+                expected
+            );
+        }
+        assert_eq!(result.points.len(), count);
+        assert_eq!(result.finish.is_some(), stop_before_third);
+    }
+}
+
+#[test]
+fn row_parameter_storage_is_charged_before_solver_execution() {
+    let netlist = Netlist::parse(
+        "Budget\n.param P=1 Q={2*P} C={P*1j}\n.data points FREQ P\n10 5\n.enddata\n.end\n",
+    )
+    .unwrap();
+    let base = Engine::default();
+    let mut config = base.config().clone();
+    // Two coordinates fit, but the resolved parameter columns do not.
+    config.resource_limits.max_result_values = 2;
+    let error = base
+        .try_resolved_with_config(config)
+        .unwrap()
+        .run_frequency_data(
+            &netlist,
+            "points",
+            options(),
+            &NoAbort,
+            |_, _, _, _| panic!("over-budget row must not reach solver"),
+            |_: &f64| 1,
+        )
+        .unwrap_err();
+    assert!(
+        matches!(error, SimulationError::ResourceLimit(error) if error.resource == ResourceKind::ResultValues && error.limit == 2)
+    );
+}

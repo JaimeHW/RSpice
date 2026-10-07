@@ -73,8 +73,8 @@ pub use context::{
 };
 pub use error::ExprError;
 pub(crate) use eval::{
-    PreparedExpression, PreparedProgress, evaluate_complex_raw, evaluate_complex_with,
-    normalize_xyce_expression_component, normalize_xyce_expression_result,
+    PreparedExpression, PreparedProgress, evaluate_complex_raw, evaluate_complex_raw_with,
+    evaluate_complex_with, normalize_xyce_expression_component, normalize_xyce_expression_result,
 };
 pub use eval::{evaluate, evaluate_complex};
 pub(crate) use parameter_direction::ComplexDirection;

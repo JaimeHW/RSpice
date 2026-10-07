@@ -26,6 +26,10 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+mod parameters;
+pub use parameters::MeasureParameterSeries;
+pub(crate) use parameters::MeasureParameters;
+
 mod continuous;
 pub use continuous::*;
 
@@ -413,12 +417,14 @@ struct IndexedMeasureSignal<'a> {
 /// Distinct physical columns that collapse to one key are retained as a typed
 /// lookup failure instead of depending on `HashMap` iteration order.
 pub(crate) struct CanonicalMeasureSignalIndex<'a> {
+    parameters: Option<&'a MeasureParameterSeries>,
     signals: HashMap<String, IndexedMeasureSignal<'a>>,
 }
 
 impl<'a> CanonicalMeasureSignalIndex<'a> {
     pub(crate) fn new(signals: &HashMap<String, &'a [Value]>) -> Self {
         let mut index = Self {
+            parameters: None,
             signals: HashMap::with_capacity(signals.len()),
         };
         for (name, waveform) in signals {
@@ -432,6 +438,7 @@ impl<'a> CanonicalMeasureSignalIndex<'a> {
         abort: &dyn AbortSignal,
     ) -> Result<Self, SimulationError> {
         let mut index = Self {
+            parameters: None,
             signals: HashMap::new(),
         };
         for (work, (name, waveform)) in signals.iter().enumerate() {
@@ -439,6 +446,16 @@ impl<'a> CanonicalMeasureSignalIndex<'a> {
             index.insert(name, waveform);
         }
         Ok(index)
+    }
+
+    fn with_parameters(mut self, parameters: Option<&'a MeasureParameterSeries>) -> Self {
+        self.parameters = parameters;
+        self
+    }
+
+    fn parameter(&self, name: &str, row: usize) -> Result<Option<ComplexValue>, String> {
+        self.parameters
+            .map_or(Ok(None), |parameters| parameters.resolve(name, row))
     }
 
     fn insert(&mut self, name: &str, waveform: &'a [Value]) {
@@ -960,7 +977,10 @@ impl LivePreparedExpression {
                 {
                     return Ok(Some(ComplexValue::from(value)));
                 }
-                Ok(parameter.context_value)
+                Ok(signals
+                    .parameter(name, row)
+                    .map_err(crate::netlist::expr::ExprError::InvalidArgument)?
+                    .or(parameter.context_value))
             })
             .map_err(|error| error.to_string())
     }
@@ -1495,6 +1515,7 @@ pub fn evaluate_tran_equation_measurements(
         -1.0,
         None,
         Some(result),
+        None,
         &NoAbort,
     )
     .map_err(|error| match error {
@@ -2916,6 +2937,7 @@ fn evaluate_equation_measurements_with_abort(
         implicit_default,
         dc_sweep_ascending,
         None,
+        None,
         abort,
     )
     .map(|evaluation| evaluation.traces)
@@ -2936,6 +2958,7 @@ fn evaluate_equation_measurements_with_observations(
     implicit_default: Value,
     dc_sweep_ascending: Option<bool>,
     current_result: Option<&TransientResult>,
+    parameters: Option<&MeasureParameterSeries>,
     abort: &dyn AbortSignal,
 ) -> Result<LiveMeasurementEvaluation, EquationMeasurementEvaluationError> {
     if abort.is_aborted() {
@@ -3067,7 +3090,7 @@ fn evaluate_equation_measurements_with_observations(
                 })
         });
     }
-    let signal_index = CanonicalMeasureSignalIndex::new(signals);
+    let signal_index = CanonicalMeasureSignalIndex::new(signals).with_parameters(parameters);
 
     let segment_starts = if analysis.eq_ignore_ascii_case("DC") {
         dc_primary_segment_starts(netlist, axis.len())
@@ -4621,8 +4644,12 @@ fn evaluate_measure_expression(
     description: &str,
 ) -> Result<Value, String> {
     let bound = bind_equation_expression(expression, row, signals, measures)?;
-    let value = crate::netlist::expr::evaluate_complex_raw(&bound, params)
-        .map_err(|error| format!("{description} failed: {error}"))?;
+    let value = crate::netlist::expr::evaluate_complex_raw_with(&bound, params, &mut |name| {
+        signals
+            .parameter(name, row)
+            .map_err(crate::netlist::expr::ExprError::InvalidArgument)
+    })
+    .map_err(|error| format!("{description} failed: {error}"))?;
     // Xyce evaluates measurement expressions as complex values, applies
     // fixNan/fixInf independently to both root components, then projects the
     // real component in MeasureBase::getOutputValue. Preserve that boundary:
@@ -5732,6 +5759,29 @@ pub fn evaluate_noise_measurements_with_abort(
     sweep: &[crate::analysis::NoiseResult],
     abort: &dyn AbortSignal,
 ) -> Result<Vec<MeasureResult>, SimulationError> {
+    evaluate_noise_measurements_with_parameters(netlist, sweep, None, abort)
+}
+
+/// Evaluate scalar NOISE table measurements with the resolved row parameters.
+pub fn evaluate_noise_table_measurements_with_abort(
+    netlist: &Netlist,
+    table: &crate::engine::FrequencyDataResult<crate::analysis::NoiseResult>,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<MeasureResult>, SimulationError> {
+    evaluate_noise_measurements_with_parameters(
+        netlist,
+        &table.points,
+        Some(&table.parameters),
+        abort,
+    )
+}
+
+fn evaluate_noise_measurements_with_parameters(
+    netlist: &Netlist,
+    sweep: &[crate::analysis::NoiseResult],
+    parameters: Option<&MeasureParameterSeries>,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<MeasureResult>, SimulationError> {
     if abort.is_aborted() {
         return Err(SimulationError::Aborted);
     }
@@ -5739,7 +5789,7 @@ pub fn evaluate_noise_measurements_with_abort(
     if statements.is_empty() {
         return Ok(Vec::new());
     }
-    let series = match NoiseSweepSeries::from_sweep(sweep) {
+    let series = match NoiseSweepSeries::from_sweep_with_abort(sweep, abort) {
         Ok(Some(series)) => series,
         Ok(None) => {
             return Ok(failed_measurements(
@@ -5779,16 +5829,18 @@ pub fn evaluate_noise_measurements_with_abort(
     // NOISE equations participate in the accepted-point stream just like AC
     // equations. A later WHEN/FIND-WHEN statement must see the equation's
     // current value as a waveform, rather than only its final scalar result.
-    let equation_traces = match evaluate_equation_measurements_with_abort(
+    let equation_traces = match evaluate_equation_measurements_with_observations(
         netlist,
         "NOISE",
         series.axis(),
         &signals,
         -1.0,
         None,
+        None,
+        parameters,
         abort,
     ) {
-        Ok(traces) => Ok(traces),
+        Ok(evaluation) => Ok(evaluation.traces),
         Err(EquationMeasurementEvaluationError::Aborted) => {
             return Err(SimulationError::Aborted);
         }
@@ -5799,7 +5851,10 @@ pub fn evaluate_noise_measurements_with_abort(
             &statements,
             series.axis(),
             &signals,
-            &netlist.params,
+            MeasureParameters {
+                base: &netlist.params,
+                rows: parameters,
+            },
             &[],
             traces,
             MeasureEvaluationPolicy {
@@ -5808,7 +5863,16 @@ pub fn evaluate_noise_measurements_with_abort(
                 use_legacy_tran_trig_targ: false,
             },
         ),
-        Err(_) => evaluate_statements(&statements, series.axis(), &signals, &netlist.params, false),
+        Err(_) => evaluate_statements(
+            &statements,
+            series.axis(),
+            &signals,
+            MeasureParameters {
+                base: &netlist.params,
+                rows: parameters,
+            },
+            false,
+        ),
     };
     overlay_continuous_equation_results(&statements, &mut results, equation_traces, "NOISE");
     super::measure_units::annotate_native(
@@ -5864,7 +5928,7 @@ fn evaluate_statements(
     statements: &[&MeasureStatement],
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
-    params: &crate::netlist::ParamContext,
+    params: MeasureParameters<'_>,
     use_legacy_tran_trig_targ: bool,
 ) -> Vec<MeasureResult> {
     evaluate_statements_with_segment_starts(
@@ -5881,7 +5945,7 @@ fn evaluate_statements_with_segment_starts(
     statements: &[&MeasureStatement],
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
-    params: &crate::netlist::ParamContext,
+    params: MeasureParameters<'_>,
     segment_starts: &[usize],
     use_legacy_tran_trig_targ: bool,
 ) -> Vec<MeasureResult> {
@@ -5919,7 +5983,7 @@ fn evaluate_statements_with_equation_traces(
     statements: &[&MeasureStatement],
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
-    params: &crate::netlist::ParamContext,
+    params: MeasureParameters<'_>,
     segment_starts: &[usize],
     traces: &[EquationMeasureTrace],
     policy: MeasureEvaluationPolicy,
@@ -5931,7 +5995,7 @@ fn evaluate_statements_with_equation_traces(
     } = policy;
     let statement_dependencies = statements
         .iter()
-        .map(|statement| statement_live_dependencies(statement, params))
+        .map(|statement| statement_live_dependencies(statement, params.base))
         .collect::<Vec<_>>();
     let equation_positions = traces
         .iter()
@@ -6169,7 +6233,7 @@ fn materialize_measure_expression_signals(
     statements: &[&MeasureStatement],
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
-    params: &crate::netlist::ParamContext,
+    params: MeasureParameters<'_>,
 ) -> Vec<(String, Vec<Value>)> {
     materialize_measure_expression_signals_with_limits_and_abort(
         statements,
@@ -6186,11 +6250,12 @@ fn materialize_measure_expression_signals_with_limits_and_abort(
     statements: &[&MeasureStatement],
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
-    params: &crate::netlist::ParamContext,
+    params: MeasureParameters<'_>,
     limits: &ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<(String, Vec<Value>)>, SimulationError> {
-    let signal_index = CanonicalMeasureSignalIndex::new_with_abort(signals, abort)?;
+    let signal_index =
+        CanonicalMeasureSignalIndex::new_with_abort(signals, abort)?.with_parameters(params.rows);
     let mut names = Vec::new();
     let mut add = |name: &str| {
         let expression = name.starts_with('{') && name.ends_with('}');
@@ -6270,7 +6335,7 @@ fn materialize_measure_expression_signals_with_limits_and_abort(
                 &OutputOperandKind::Probe(probe),
                 axis,
                 &signal_index,
-                params,
+                params.base,
                 abort,
             ) {
                 Ok(column) => {
@@ -6304,7 +6369,7 @@ fn materialize_measure_expression_signals_with_limits_and_abort(
                 row,
                 &signal_index,
                 &measures,
-                params,
+                params.base,
                 true,
                 &context,
             ) {
@@ -6793,6 +6858,7 @@ fn evaluate_tran_measurements_with_signals_and_abort(
         -1.0,
         None,
         current_result,
+        None,
         abort,
     ) {
         Ok(evaluation) => {
@@ -6809,7 +6875,7 @@ fn evaluate_tran_measurements_with_signals_and_abort(
             &statements,
             time,
             &signals,
-            &netlist.params,
+            (&netlist.params).into(),
             &[],
             traces,
             MeasureEvaluationPolicy {
@@ -6822,7 +6888,7 @@ fn evaluate_tran_measurements_with_signals_and_abort(
             &statements,
             time,
             &signals,
-            &netlist.params,
+            (&netlist.params).into(),
             netlist.options.measure_use_lttm(),
         ),
     };
@@ -6986,7 +7052,7 @@ pub fn evaluate_dc_measurements_with_parameter_contexts_and_abort(
             &statements,
             series.axis(),
             &signals,
-            &netlist.params,
+            (&netlist.params).into(),
             &segment_starts,
             traces,
             MeasureEvaluationPolicy {
@@ -6999,7 +7065,7 @@ pub fn evaluate_dc_measurements_with_parameter_contexts_and_abort(
             &statements,
             series.axis(),
             &signals,
-            &netlist.params,
+            (&netlist.params).into(),
             &segment_starts,
             false,
         ),
@@ -7135,6 +7201,24 @@ pub fn evaluate_ac_measurements_with_abort(
     sweep: &[AcResult],
     abort: &dyn AbortSignal,
 ) -> Result<Vec<MeasureResult>, SimulationError> {
+    evaluate_ac_measurements_with_parameters(netlist, sweep, None, abort)
+}
+
+/// Evaluate scalar AC table measurements with the resolved row parameters.
+pub fn evaluate_ac_table_measurements_with_abort(
+    netlist: &Netlist,
+    table: &crate::engine::FrequencyDataResult<AcResult>,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<MeasureResult>, SimulationError> {
+    evaluate_ac_measurements_with_parameters(netlist, &table.points, Some(&table.parameters), abort)
+}
+
+fn evaluate_ac_measurements_with_parameters(
+    netlist: &Netlist,
+    sweep: &[AcResult],
+    parameters: Option<&MeasureParameterSeries>,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<MeasureResult>, SimulationError> {
     if abort.is_aborted() {
         return Err(SimulationError::Aborted);
     }
@@ -7175,16 +7259,18 @@ pub fn evaluate_ac_measurements_with_abort(
     // Continuous equation measures participate in the accepted-point stream.
     // A later WHEN/FIND-WHEN statement therefore observes the equation's
     // current value as a waveform, not only its final scalar result.
-    let equation_traces = match evaluate_equation_measurements_with_abort(
+    let equation_traces = match evaluate_equation_measurements_with_observations(
         netlist,
         "AC",
         series.axis(),
         &signals,
         -1.0,
         None,
+        None,
+        parameters,
         abort,
     ) {
-        Ok(traces) => Ok(traces),
+        Ok(evaluation) => Ok(evaluation.traces),
         Err(EquationMeasurementEvaluationError::Aborted) => {
             return Err(SimulationError::Aborted);
         }
@@ -7195,7 +7281,10 @@ pub fn evaluate_ac_measurements_with_abort(
             &statements,
             series.axis(),
             &signals,
-            &netlist.params,
+            MeasureParameters {
+                base: &netlist.params,
+                rows: parameters,
+            },
             &[],
             traces,
             MeasureEvaluationPolicy {
@@ -7204,7 +7293,16 @@ pub fn evaluate_ac_measurements_with_abort(
                 use_legacy_tran_trig_targ: false,
             },
         ),
-        Err(_) => evaluate_statements(&statements, series.axis(), &signals, &netlist.params, false),
+        Err(_) => evaluate_statements(
+            &statements,
+            series.axis(),
+            &signals,
+            MeasureParameters {
+                base: &netlist.params,
+                rows: parameters,
+            },
+            false,
+        ),
     };
     overlay_continuous_equation_results(&statements, &mut results, equation_traces, "AC");
     super::measure_units::annotate_native(netlist, "AC", &mut results, signals.keys(), None);
@@ -7316,7 +7414,7 @@ mod tests {
                 &statements,
                 &result.time,
                 &signals,
-                &netlist.params,
+                (&netlist.params).into(),
                 &limits,
                 &abort
             ),

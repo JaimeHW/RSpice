@@ -79,7 +79,7 @@ fn ensure_series(
 fn evaluate(
     statements: &[&MeasureStatement],
     data: MeasureData<'_, '_>,
-    params: &crate::netlist::ParamContext,
+    params: MeasureParameters<'_>,
     limits: &ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<ContinuousMeasureResult>, SimulationError> {
@@ -119,6 +119,7 @@ fn with_aliases(
     analysis: OutputAnalysisKind,
     statements: &[&MeasureStatement],
     data: MeasureData<'_, '_>,
+    parameters: Option<&MeasureParameterSeries>,
     limits: &ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<ContinuousMeasureResult>, SimulationError> {
@@ -155,7 +156,10 @@ fn with_aliases(
             signals: &signals,
             ..data
         },
-        &netlist.params,
+        MeasureParameters {
+            base: &netlist.params,
+            rows: parameters,
+        },
         limits,
         abort,
     )
@@ -242,6 +246,7 @@ pub fn evaluate_tran_continuous_measurements_with_limits_and_abort(
             signals: &signals,
             segment_starts: &[],
         },
+        None,
         &output_limits,
         abort,
     )?
@@ -369,6 +374,7 @@ pub fn evaluate_dc_continuous_measurements_with_parameter_contexts_limits_and_ab
             signals: &signals,
             segment_starts: &segments,
         },
+        None,
         limits,
         abort,
     )
@@ -430,6 +436,32 @@ pub fn evaluate_ac_continuous_measurements_with_limits_and_abort(
     limits: &ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<ContinuousMeasureResult>, SimulationError> {
+    evaluate_ac_continuous_with_parameters(netlist, sweep, None, limits, abort)
+}
+
+/// Evaluate AC table events with resolved row parameters and bounded storage.
+pub fn evaluate_ac_table_continuous_measurements_with_limits_and_abort(
+    netlist: &Netlist,
+    table: &crate::engine::FrequencyDataResult<AcResult>,
+    limits: &ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<ContinuousMeasureResult>, SimulationError> {
+    evaluate_ac_continuous_with_parameters(
+        netlist,
+        &table.points,
+        Some(&table.parameters),
+        limits,
+        abort,
+    )
+}
+
+fn evaluate_ac_continuous_with_parameters(
+    netlist: &Netlist,
+    sweep: &[AcResult],
+    parameters: Option<&MeasureParameterSeries>,
+    limits: &ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<ContinuousMeasureResult>, SimulationError> {
     let statements = statements(netlist, "AC_CONT", sweep.len(), limits, abort)?;
     if statements.is_empty() {
         return Ok(Vec::new());
@@ -463,6 +495,7 @@ pub fn evaluate_ac_continuous_measurements_with_limits_and_abort(
             signals: &series.equation_signal_map(),
             segment_starts: &[],
         },
+        parameters,
         limits,
         abort,
     )
@@ -489,6 +522,32 @@ pub fn evaluate_noise_continuous_measurements(
 pub fn evaluate_noise_continuous_measurements_with_limits_and_abort(
     netlist: &Netlist,
     sweep: &[crate::analysis::NoiseResult],
+    limits: &ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<ContinuousMeasureResult>, SimulationError> {
+    evaluate_noise_continuous_with_parameters(netlist, sweep, None, limits, abort)
+}
+
+/// Evaluate NOISE table events with resolved row parameters and bounded storage.
+pub fn evaluate_noise_table_continuous_measurements_with_limits_and_abort(
+    netlist: &Netlist,
+    table: &crate::engine::FrequencyDataResult<crate::analysis::NoiseResult>,
+    limits: &ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<ContinuousMeasureResult>, SimulationError> {
+    evaluate_noise_continuous_with_parameters(
+        netlist,
+        &table.points,
+        Some(&table.parameters),
+        limits,
+        abort,
+    )
+}
+
+fn evaluate_noise_continuous_with_parameters(
+    netlist: &Netlist,
+    sweep: &[crate::analysis::NoiseResult],
+    parameters: Option<&MeasureParameterSeries>,
     limits: &ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<ContinuousMeasureResult>, SimulationError> {
@@ -538,6 +597,7 @@ pub fn evaluate_noise_continuous_measurements_with_limits_and_abort(
             signals: &series.equation_signal_map(),
             segment_starts: &[],
         },
+        parameters,
         limits,
         abort,
     )

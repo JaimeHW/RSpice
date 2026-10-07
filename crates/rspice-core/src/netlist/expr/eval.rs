@@ -65,6 +65,15 @@ pub(crate) fn evaluate_complex_raw(
     ExpressionEvaluator::new(ctx).evaluate(expr)
 }
 
+/// Resolve row-local values without changing measurement root normalization.
+pub(crate) fn evaluate_complex_raw_with(
+    expr: &Expr,
+    ctx: &ParamContext,
+    resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
+) -> Result<ComplexValue, ExprError> {
+    ExpressionEvaluator::new(ctx).evaluate_with(expr, resolver, &mut |_, _| Ok(None))
+}
+
 /// Compile an expression into an index-based program that can be evaluated
 /// repeatedly without cloning its AST or allocating evaluator stacks. Runtime
 /// parameter reads are exposed through a resolver so live measurements can

@@ -16,6 +16,7 @@
 //! .MEAS TRAN vavg AVG V(out)
 //! ```
 
+use super::measure_signals::MeasureParameters;
 use crate::Value;
 use crate::netlist::canonical_symbol;
 use crate::netlist::measure::XYCE_DEFAULT_MEASURE_MINVAL;
@@ -837,13 +838,16 @@ impl MeasureEngine {
         &self,
         data: MeasureData<'_, '_>,
     ) -> Vec<MeasureResult> {
-        self.evaluate_with_segment_starts_and_context(data, &crate::netlist::ParamContext::new())
+        self.evaluate_with_segment_starts_and_context(
+            data,
+            (&crate::netlist::ParamContext::new()).into(),
+        )
     }
 
     pub(crate) fn evaluate_with_segment_starts_and_context(
         &self,
         data: MeasureData<'_, '_>,
-        params: &crate::netlist::ParamContext,
+        params: MeasureParameters<'_>,
     ) -> Vec<MeasureResult> {
         let MeasureData {
             axis: time,
@@ -862,7 +866,7 @@ impl MeasureEngine {
         time: &[Value],
         signal_maps: &[HashMap<String, &[Value]>],
         segment_starts: &[usize],
-        params: &crate::netlist::ParamContext,
+        params: MeasureParameters<'_>,
     ) -> Vec<MeasureResult> {
         let signal_map_refs = signal_maps.iter().collect::<Vec<_>>();
         self.evaluate_with_signal_maps(time, &signal_map_refs, segment_starts, params)
@@ -873,7 +877,7 @@ impl MeasureEngine {
         time: &[Value],
         signal_maps: &[&HashMap<String, &[Value]>],
         segment_starts: &[usize],
-        params: &crate::netlist::ParamContext,
+        params: MeasureParameters<'_>,
     ) -> Vec<MeasureResult> {
         if self.measurements.is_empty() {
             return Vec::new();
@@ -942,7 +946,7 @@ impl MeasureEngine {
         for (idx, m) in self.measurements.iter().enumerate() {
             if let MeasureType::Param { expression } = &m.measure_type {
                 results[idx] = self
-                    .eval_param(&m.name, expression, &results, params)
+                    .eval_param(&m.name, expression, &results, params, time.len() - 1)
                     .check_contract(m);
             }
         }
@@ -1908,9 +1912,10 @@ impl MeasureEngine {
         name: &str,
         expression: &MeasureExpression,
         prior: &[MeasureResult],
-        params: &crate::netlist::ParamContext,
+        params: MeasureParameters<'_>,
+        row: usize,
     ) -> MeasureResult {
-        let mut ctx = params.clone();
+        let mut ctx = params.base.clone();
         for result in prior {
             if let Some(value) = result.raw_value {
                 ctx.set(&result.name, value);
@@ -1922,9 +1927,22 @@ impl MeasureEngine {
                 return MeasureResult::failed(name, &format!("PARAM expression failed: {err}"));
             }
         };
-        match crate::netlist::expr::evaluate_complex_raw(&parsed, &ctx) {
+        match crate::netlist::expr::evaluate_complex_raw_with(&parsed, &ctx, &mut |name| {
+            // Named measurement results retain precedence over deck parameters.
+            if prior
+                .iter()
+                .any(|result| result.name.eq_ignore_ascii_case(name) && result.raw_value.is_some())
+            {
+                return Ok(None);
+            }
+            params
+                .rows
+                .map_or(Ok(None), |parameters| parameters.resolve(name, row))
+                .map_err(crate::netlist::expr::ExprError::InvalidArgument)
+        }) {
             Ok(value) => {
-                let xyce = params.expression_dialect() == crate::config::ExpressionDialect::Xyce;
+                let xyce =
+                    params.base.expression_dialect() == crate::config::ExpressionDialect::Xyce;
                 let value = if xyce && expression.is_expression() {
                     crate::netlist::expr::normalize_xyce_expression_result(value)
                 } else {
@@ -4244,7 +4262,7 @@ mod tests {
                 signals: &signals,
                 segment_starts: &[],
             },
-            &params,
+            (&params).into(),
         );
         assert!(xyce[0].passed, "{:?}", xyce[0]);
         assert_eq!(xyce[0].value, Some(0.0));
@@ -4291,7 +4309,7 @@ mod tests {
                 signals: &signals,
                 segment_starts: &[],
             },
-            &params,
+            (&params).into(),
         );
 
         assert_eq!(results[0].value, Some(Value::NEG_INFINITY));

@@ -448,3 +448,64 @@ fn row_replay_honors_the_callers_source_limit_for_ac_and_noise() {
         2,
     );
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn table_measurement_adapters_share_resolved_complex_parameter_environments() {
+    use rspice_core::NoAbort;
+    use rspice_core::analysis::*;
+    let mut source = String::from(
+        "Resolved rows\n.param P=1 Q={2*P} C={P*1j} AC_P={P} NOISE_P={P}\n.func row_value(x) {x+Q+imag(C)}\nV1 out 0 DC 1 AC 1\nR1 out 0 {P*1k}\n.data points FREQ P\n10 3\n20 5\n10 7\n.enddata\n",
+    );
+    for family in ["AC", "NOISE"] {
+        source.push_str(&format!(".meas {family} {family}_P FIND {{Q}} AT=20\n.meas {family} {family}_post PARAM='{family}_P+row_value(2)'\n.meas {family} {family}_equation EQN {{row_value(2)}}\n.meas {family} {family}_maximum MAX {{imag(C)}}\n.meas {family}_CONT {family}_event FIND {{row_value(2)}} AT=20\n"));
+    }
+    source.push_str(".end\n");
+    let netlist = Netlist::parse(&source).unwrap();
+    let engine = Engine::default();
+    let ac = engine.run_ac_table(&netlist, "points").unwrap();
+    let noise = engine
+        .run_noise_table_named_with_input_source(&netlist, "out", None, "V1", "points", 300.15)
+        .unwrap();
+    for measures in [
+        evaluate_ac_table_measurements_with_abort(&netlist, &ac, &NoAbort).unwrap(),
+        evaluate_noise_table_measurements_with_abort(&netlist, &noise, &NoAbort).unwrap(),
+    ] {
+        assert_eq!(
+            measures
+                .iter()
+                .map(|measure| measure.value)
+                .collect::<Vec<_>>(),
+            [Some(10.0), Some(33.0), Some(23.0), Some(7.0)]
+        );
+        assert!(
+            measures.iter().all(|measure| measure.passed),
+            "{measures:?}"
+        );
+    }
+    for events in [
+        evaluate_ac_table_continuous_measurements_with_limits_and_abort(
+            &netlist,
+            &ac,
+            &ResourceLimits::default(),
+            &NoAbort,
+        )
+        .unwrap(),
+        evaluate_noise_table_continuous_measurements_with_limits_and_abort(
+            &netlist,
+            &noise,
+            &ResourceLimits::default(),
+            &NoAbort,
+        )
+        .unwrap(),
+    ] {
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].records.len(), 1);
+        assert_eq!(events[0].records[0].value, 17.0);
+    }
+    let abort = rspice_core::abort_signal::CountingAbort::new(0);
+    assert!(matches!(
+        evaluate_ac_table_measurements_with_abort(&netlist, &ac, &abort),
+        Err(SimulationError::Aborted)
+    ));
+}

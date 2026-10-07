@@ -202,6 +202,7 @@ impl Engine {
             table_name: table.name.clone(),
             columns: plan.columns,
             points: Vec::new(),
+            parameters: Default::default(),
             requested_rows: table.rows.len(),
             finish: None,
         };
@@ -266,9 +267,16 @@ impl Engine {
             if let Some(temperature) = temperature {
                 row.options.temp = Some(temperature);
             }
+            let pending_parameters =
+                result
+                    .parameters
+                    .prepare_row(&netlist.params, &row.params, abort)?;
+            let row_retained_values =
+                retained_values.saturating_add(pending_parameters.additional_values);
+            self.ensure_result_values(row_retained_values)?;
             let mut config =
                 self.frequency_row_config(&row, temperature, options.default_temperature);
-            config.resource_limits.max_result_values -= retained_values;
+            config.resource_limits.max_result_values -= row_retained_values;
             let bounded = self.try_resolved_with_config(config)?;
             let mut points = match solve_row(&bounded, &row, values[frequency_column], abort) {
                 Err(SimulationError::ModelFinished(finish)) if !result.points.is_empty() => {
@@ -279,7 +287,7 @@ impl Engine {
                     cumulative_limit(
                         error,
                         ResourceKind::ResultValues,
-                        retained_values,
+                        row_retained_values,
                         self.config().resource_limits.max_result_values,
                     )
                 })?,
@@ -294,11 +302,12 @@ impl Engine {
                 )));
             }
             let point = points.remove(0);
-            retained_values = retained_values.saturating_add(value_count(&point));
+            retained_values = row_retained_values.saturating_add(value_count(&point));
             self.ensure_result_values(retained_values)?;
             for (column, &value) in result.columns.iter_mut().zip(values) {
                 column.values.push(value);
             }
+            result.parameters.commit_row(pending_parameters, abort)?;
             result.points.push(point);
             if options.retain_netlists {
                 row_netlists.push(row);

@@ -1232,6 +1232,18 @@ impl ParamContext {
         values
     }
 
+    /// Visit cached real and complex numeric bindings without evaluating
+    /// retained expressions or consuming random samples. Names shadowed across
+    /// scopes may occur more than once, with their effective resolved value.
+    pub(crate) fn resolved_numeric_parameters(&self) -> impl Iterator<Item = (&str, ComplexValue)> {
+        self.params
+            .keys()
+            .chain(self.complex_params.keys())
+            .chain(self.global_params.keys())
+            .chain(self.global_complex_params.keys())
+            .filter_map(|name| self.get_complex(name).map(|value| (name.as_str(), value)))
+    }
+
     /// Deterministic semantic snapshot used to bind transient checkpoints to
     /// the elaborated parameter environment. Map iteration order and runtime
     /// allocation addresses are deliberately excluded.
