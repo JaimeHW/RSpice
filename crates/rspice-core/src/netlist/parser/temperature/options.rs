@@ -194,7 +194,7 @@ impl TemperatureOptionPlan {
             .get_or_insert_with(|| ParseError::InvalidValue(format!("{origin}: {error}")));
     }
 
-    pub(in super::super) fn retain_option_error(
+    pub(in super::super) fn retain_card_error(
         &mut self,
         error: ParseError,
         line: usize,

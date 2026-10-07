@@ -45,7 +45,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                 let Some(sink) = temperature_options.as_mut() else {
                     return Err(error);
                 };
-                sink.plan.retain_option_error(error, line_num, sink.origin);
+                sink.plan.retain_card_error(error, line_num, sink.origin);
                 // RESTART's positional schedule owns the rest of this card.
                 // Its error remains fatal unless a fresh pass validates it.
                 stream.skip_to_eol();
@@ -1106,7 +1106,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
             let Some(sink) = temperature_options.as_mut() else {
                 return Err(error);
             };
-            sink.plan.retain_option_error(error, line_num, sink.origin);
+            sink.plan.retain_card_error(error, line_num, sink.origin);
             // This pass is already invalid. Consume the failed field through
             // its own grammar boundary so later assignments can select TEMP
             // or TNOM. A fresh pass must validate every field before success.

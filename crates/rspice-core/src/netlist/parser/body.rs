@@ -160,13 +160,9 @@ pub(super) fn parse(
             break;
         }
         // DATA cards are consumed here rather than by process_line_gated.
-        // Inactive branches must neither evaluate rows nor publish a table.
-        if (head.eq_ignore_ascii_case(".data") || head.eq_ignore_ascii_case(".enddata"))
-            && state.conditionals_suppress()
-        {
-            continue;
-        }
-        if head.eq_ignore_ascii_case(".data") {
+        // Inactive cards use ordinary logical-line collection so '+' text
+        // stays attached to its card and cannot invent a conditional directive.
+        if head.eq_ignore_ascii_case(".data") && !state.conditionals_suppress() {
             data_table = Some(DataTableBuilder::new(
                 line_num,
                 trimmed,
@@ -175,7 +171,7 @@ pub(super) fn parse(
             )?);
             continue;
         }
-        if head.eq_ignore_ascii_case(".enddata") {
+        if head.eq_ignore_ascii_case(".enddata") && !state.conditionals_suppress() {
             return Err(ParseError::Syntax {
                 line: line_num,
                 message: ".ENDDATA without matching .DATA".to_string(),

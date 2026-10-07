@@ -80,3 +80,14 @@ fn active_tables_keep_syntax_numeric_and_resource_validation() {
     .unwrap_err();
     assert!(matches!(error, ParseError::ResourceLimit(_)), "{error}");
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn inactive_data_continuations_cannot_invent_conditional_directives() {
+    let netlist = Netlist::parse(
+        "Inactive continuation\n.if 0\n.data ignored\n+ .endif\n.param hidden=1\n.enddata\n.endif\n.param visible=1\n.end\n",
+    ).unwrap();
+    assert!(netlist.data_tables.is_empty());
+    assert_eq!(netlist.params.get("hidden"), None);
+    assert_eq!(netlist.params.get("visible"), Some(1.0));
+}

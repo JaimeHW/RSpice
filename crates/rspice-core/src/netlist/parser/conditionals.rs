@@ -10,6 +10,11 @@
 //! Conditions in regions that are themselves suppressed are *not* evaluated
 //! (they may reference parameters that were never defined); their branches
 //! are unconditionally inactive.
+//!
+//! An expression failure leaves the decision unresolved for the current pass.
+//! No branch of that chain emits cards, but its structure is still validated.
+//! Independent later cards can select TEMP/TNOM; the retained error prevents
+//! publication unless a fresh source pass evaluates the decision successfully.
 
 use super::*;
 
@@ -22,6 +27,8 @@ pub(super) struct ConditionalFrame {
     /// whole block is inside a suppressed region, in which case no branch
     /// may ever activate).
     branch_taken: bool,
+    /// A failed decision cannot select this or any later branch in this pass.
+    unresolved: bool,
     /// Whether `.else` has been seen (no further branches are legal).
     else_seen: bool,
     /// Line number of the opening `.if`, for unbalanced-block diagnostics.
@@ -97,19 +104,21 @@ impl ParseState {
         &mut self,
         directive: ConditionalDirective<'_>,
         line_num: usize,
+        origin: &NetlistSourceLocation,
     ) -> Result<(), ParseError> {
         match directive {
             ConditionalDirective::If(condition) => {
                 let parent_active = !self.conditionals_suppress();
-                let taken = if parent_active {
-                    evaluate_condition(condition, self.condition_scope(), line_num)?
+                let decision = if parent_active {
+                    self.condition_decision(condition, line_num, origin)?
                 } else {
-                    false
+                    Some(false)
                 };
                 self.conditional_stack.push(ConditionalFrame {
-                    active: parent_active && taken,
+                    active: parent_active && decision == Some(true),
                     // Inside a suppressed region no branch may ever fire.
-                    branch_taken: taken || !parent_active,
+                    branch_taken: decision == Some(true) || !parent_active,
+                    unresolved: decision.is_none(),
                     else_seen: false,
                     opened_at_line: line_num,
                 });
@@ -133,25 +142,17 @@ impl ParseState {
                         message: ".elseif after .else".to_string(),
                     });
                 }
-                if frame.branch_taken || !parent_active {
+                if frame.branch_taken || frame.unresolved || !parent_active {
                     frame.active = false;
                 } else {
-                    // Borrow juggling: evaluate with the scope context, then
-                    // update the frame.
-                    let taken = {
-                        let scope = self
-                            .subckt_stack
-                            .last()
-                            .map(|f| &f.local_params)
-                            .unwrap_or(&self.params);
-                        evaluate_condition(condition, scope, line_num)?
-                    };
+                    let decision = self.condition_decision(condition, line_num, origin)?;
                     let frame = self
                         .conditional_stack
                         .last_mut()
                         .expect("frame checked above");
-                    frame.active = taken;
-                    frame.branch_taken = taken;
+                    frame.active = decision == Some(true);
+                    frame.branch_taken = decision == Some(true);
+                    frame.unresolved = decision.is_none();
                 }
             }
             ConditionalDirective::Else => {
@@ -174,7 +175,7 @@ impl ParseState {
                     });
                 }
                 frame.else_seen = true;
-                frame.active = parent_active && !frame.branch_taken;
+                frame.active = parent_active && !frame.branch_taken && !frame.unresolved;
                 frame.branch_taken = true;
             }
             ConditionalDirective::EndIf => {
@@ -188,23 +189,80 @@ impl ParseState {
         }
         Ok(())
     }
+
+    fn condition_decision(
+        &mut self,
+        condition: &str,
+        line_num: usize,
+        origin: &NetlistSourceLocation,
+    ) -> Result<Option<bool>, ParseError> {
+        let text = condition.trim();
+        if text.is_empty() {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: ".if/.elseif requires a condition expression".to_string(),
+            });
+        }
+        match eval_expression(text, self.condition_scope()) {
+            Ok(value) => Ok(Some(value != 0.0)),
+            Err(error) => {
+                self.temperature_options.retain_card_error(
+                    ParseError::Syntax {
+                        line: line_num,
+                        message: format!("invalid conditional expression `{text}`: {error}"),
+                    },
+                    line_num,
+                    origin,
+                );
+                Ok(None)
+            }
+        }
+    }
 }
 
-fn evaluate_condition(
-    condition: &str,
-    scope: &ParamContext,
-    line_num: usize,
-) -> Result<bool, ParseError> {
-    let text = condition.trim();
-    if text.is_empty() {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: ".if/.elseif requires a condition expression".to_string(),
-        });
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unresolved_chains_emit_nothing_and_skip_later_condition_samples() {
+        let mut state = ParseState::new();
+        state.params.set_random_seed(37);
+        let reference = state.params.isolated_random_clone();
+        for (index, line) in [
+            ".if (1/(TEMP-27))",
+            ".param first=1",
+            ".if missing",
+            ".param nested=1",
+            ".endif",
+            ".elseif aunif(0,1)",
+            ".param second=1",
+            ".else",
+            ".param third=1",
+            ".endif",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            process_line_gated(
+                line,
+                index + 2,
+                &NetlistSourceLocation::in_memory(index + 2),
+                &mut state,
+                false,
+                &NoAbort,
+            )
+            .unwrap();
+        }
+        assert!(state.conditional_stack.is_empty());
+        for name in ["first", "nested", "second", "third"] {
+            assert_eq!(state.params.get(name), None, "{name}");
+        }
+        let error = state.temperature_options.take_error().unwrap();
+        assert!(error.to_string().contains("Division by zero"), "{error}");
+        assert_eq!(
+            eval_expression("aunif(0,1)", &state.params).unwrap(),
+            eval_expression("aunif(0,1)", &reference).unwrap()
+        );
     }
-    let value = eval_expression(text, scope).map_err(|e| ParseError::Syntax {
-        line: line_num,
-        message: format!("invalid conditional expression `{text}`: {e}"),
-    })?;
-    Ok(value != 0.0)
 }

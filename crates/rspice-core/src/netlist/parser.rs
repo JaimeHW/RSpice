@@ -4346,7 +4346,7 @@ fn process_line_gated(
             capture.has_uncaptured_dependencies = true;
         }
         return state
-            .apply_conditional_directive(directive, line_num)
+            .apply_conditional_directive(directive, line_num, origin)
             .map_err(map_current_error);
     }
     if state.conditionals_suppress() {

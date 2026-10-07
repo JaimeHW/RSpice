@@ -264,6 +264,49 @@ mod tests {
     use super::*;
 
     #[test]
+    fn conditional_discovery_stops_at_every_cancellation_boundary() {
+        for source in [
+            "Conditional abort\n.if (1/(TEMP-27))\n.param selected=1\n.else\n.param selected=2\n.endif\n.temp 85\n.end\n",
+            "Sampled conditional abort\n.options seed=37\n.if 0\n.elseif (1/(TEMP-27)+aunif(0,1)>0)\n.param selected=1\n.endif\n.options temp={ambient}\n.param ambient=85\n.end\n",
+            "Scoped conditional abort\n.subckt parent p\n.if (1/(TEMP-27))\nR1 p 0 1k\n.endif\n.ends\n.temp 85\n.end\n",
+        ] {
+            let mut completed = false;
+            for limit in 0..1024 {
+                let abort = crate::abort_signal::CountingAbort::new(limit);
+                let result = super::super::parse_netlist_with_options_and_abort(
+                    source,
+                    NetlistParseOptions::default(),
+                    &abort,
+                );
+                assert_eq!(abort.polls_after_abort(), 0, "poll limit {limit}");
+                match result {
+                    Err(ParseWithAbortError::Aborted) => {}
+                    Ok(netlist) => {
+                        assert!(limit > 20);
+                        assert_eq!(netlist.options.temp, Some(85.0));
+                        completed = true;
+                        break;
+                    }
+                    error => panic!("unexpected result at poll limit {limit}: {error:?}"),
+                }
+            }
+            assert!(completed, "cancellation coverage never completed: {source}");
+        }
+    }
+
+    #[test]
+    fn physical_override_selects_the_conditional_branch_before_authored_temperatures() {
+        let netlist = parse_netlist_with_parameter_overrides_and_abort(
+            "Conditional coordinate\n.if (1/(TEMP-27)>0)\n.param selected=1\n.else\n.param selected=2\n.endif\n.temp 27\n.end\n",
+            NetlistParseOptions::default(),
+            &[ParameterOverride { name: "TEMP".into(), value: 85.0, global: false, direction: false }],
+            &NoAbort,
+        ).unwrap();
+        assert_eq!(netlist.options.temp, Some(85.0));
+        assert_eq!(netlist.params.get("selected"), Some(1.0));
+    }
+
+    #[test]
     fn eager_parameter_recovery_stops_at_every_cancellation_boundary() {
         let source = "Cancellation during discovery\n.param scale={1/(TEMP-27)}\n.temp {ambient}\n.param ambient=85\n.end\n";
         for limit in 0..512 {
