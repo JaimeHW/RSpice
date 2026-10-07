@@ -62,6 +62,38 @@ pub(crate) struct ParameterResolver {
 }
 
 impl ParameterResolver {
+    /// Evaluate an unnamed consumer while sharing the cache of its demanded
+    /// parameter bindings. Suspended evaluation never replays statistical work
+    /// performed before a forward reference.
+    pub(crate) fn evaluate_expression(
+        &mut self,
+        expression: &str,
+        params: &ParamContext,
+        abort: &dyn AbortSignal,
+    ) -> Result<ComplexValue, ParameterResolutionError> {
+        let mut program = Self::prepare_program(expression, params, abort)?;
+        loop {
+            match program.resume_with_abort(
+                params,
+                &mut |name| Ok(self.scoped_value(0, name, params)),
+                abort,
+            )? {
+                PreparedProgress::Complete(value) => {
+                    return Ok(
+                        if params.expression_dialect() == crate::config::ExpressionDialect::Xyce {
+                            normalize_xyce_expression_result(value)
+                        } else {
+                            value
+                        },
+                    );
+                }
+                PreparedProgress::MissingParameter(name) => {
+                    self.resolve_binding(0, &name, params, abort)?;
+                }
+            }
+        }
+    }
+
     pub(crate) fn resolve(
         &mut self,
         name: &str,
@@ -285,6 +317,19 @@ impl ParameterResolver {
         params: &ParamContext,
         abort: &dyn AbortSignal,
     ) -> Result<PendingParameter, ParameterResolutionError> {
+        Ok(PendingParameter {
+            scope,
+            namespace,
+            name,
+            program: Self::prepare_program(expression, params, abort)?,
+        })
+    }
+
+    fn prepare_program(
+        expression: &str,
+        params: &ParamContext,
+        abort: &dyn AbortSignal,
+    ) -> Result<PreparedExpression, ParameterResolutionError> {
         let parsed = parse_expression_with_abort(expression, abort)
             .map_err(ExpressionEvaluationError::from)?;
         let mut program = PreparedExpression::compile_with_abort(&parsed, params, abort)?;
@@ -312,12 +357,7 @@ impl ParameterResolver {
             )?;
         }
         program.begin_evaluation();
-        Ok(PendingParameter {
-            scope,
-            namespace,
-            name,
-            program,
-        })
+        Ok(program)
     }
 }
 
@@ -338,6 +378,61 @@ impl std::fmt::Display for ParameterResolutionError {
 mod tests {
     use super::*;
     use crate::abort_signal::{CountingAbort, NoAbort};
+
+    #[test]
+    fn unnamed_consumers_share_dependencies_without_replaying_their_prefix() {
+        let mut params = ParamContext::new();
+        params.set_random_seed(73);
+        params.define_parameter_expression("later", "aunif(10,1)", None);
+        let reference = params.isolated_random_clone();
+        let prefix = eval_expression("aunif(0,1)", &reference).unwrap();
+        let later = eval_expression("aunif(10,1)", &reference).unwrap();
+        let mut resolver = ParameterResolver::default();
+        assert_eq!(
+            resolver
+                .evaluate_expression("aunif(0,1)+later+later", &params, &NoAbort)
+                .unwrap(),
+            ComplexValue::from(prefix + later + later)
+        );
+        assert_eq!(
+            resolver
+                .evaluate_expression("if(1,later,missing)", &params, &NoAbort)
+                .unwrap(),
+            ComplexValue::from(later)
+        );
+        assert_eq!(
+            eval_expression("aunif(0,1)", &params).unwrap(),
+            eval_expression("aunif(0,1)", &reference).unwrap()
+        );
+    }
+
+    #[test]
+    fn unnamed_consumers_propagate_cancellation_without_polling_after_abort() {
+        let mut params = ParamContext::new();
+        params.define_parameter_expression("later", "85", None);
+        let complete = CountingAbort::new(usize::MAX);
+        assert_eq!(
+            ParameterResolver::default()
+                .evaluate_expression("later+later", &params, &complete)
+                .unwrap(),
+            ComplexValue::from(170.0)
+        );
+        for limit in 0..=complete.count() {
+            let abort = CountingAbort::new(limit);
+            let result =
+                ParameterResolver::default().evaluate_expression("later+later", &params, &abort);
+            assert_eq!(abort.polls_after_abort(), 0, "limit {limit}");
+            match result {
+                Ok(value) => {
+                    assert_eq!(value, ComplexValue::from(170.0));
+                    return;
+                }
+                Err(ParameterResolutionError::Aborted) => {}
+                result => panic!("{result:?}"),
+            }
+        }
+        panic!("evaluation did not finish within the poll budget");
+    }
 
     #[test]
     fn lexical_dependencies_use_their_owner_and_share_samples_between_children() {

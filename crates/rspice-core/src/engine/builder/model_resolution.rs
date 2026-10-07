@@ -24,6 +24,7 @@ struct ModelEvaluationContext<'a> {
     context: crate::netlist::ParamContext,
     abort: &'a dyn AbortSignal,
     resolved_expressions: HashMap<String, crate::ComplexValue>,
+    expression_errors: HashMap<String, crate::netlist::expr::ExprError>,
 }
 
 impl<'a> ModelEvaluationContext<'a> {
@@ -32,6 +33,7 @@ impl<'a> ModelEvaluationContext<'a> {
             context,
             abort,
             resolved_expressions: HashMap::new(),
+            expression_errors: HashMap::new(),
         }
     }
 
@@ -52,6 +54,11 @@ impl<'a> ModelEvaluationContext<'a> {
         name: &str,
         expression: &str,
     ) -> Result<crate::ComplexValue, crate::netlist::expr::ExpressionEvaluationError> {
+        if let Some(error) = self.expression_errors.get(&name.to_ascii_uppercase()) {
+            return Err(crate::netlist::expr::ExpressionEvaluationError::Expression(
+                error.clone(),
+            ));
+        }
         match self.resolved_expressions.get(&name.to_ascii_uppercase()) {
             Some(value) => Ok(*value),
             None => crate::netlist::expr::eval_expression_complex_with_abort(
@@ -320,16 +327,10 @@ fn resolve_passive_eval_context<'a>(
         ));
     };
 
-    let initial_ctx = build_model_eval_context(netlist, model_def, current_temp_c, base_tnom_c)?;
-    let model_tnom_c = resolve_model_param(model_def, &["TNOM"], &initial_ctx)?
+    let ctx = build_model_eval_context(netlist, model_def, current_temp_c, base_tnom_c)?;
+    let model_tnom_c = resolve_model_param(model_def, &["TNOM"], &ctx)?
         .map(normalize_temperature_param_to_celsius)
         .unwrap_or(base_tnom_c);
-
-    let ctx = if (model_tnom_c - base_tnom_c).abs() > f64::EPSILON {
-        build_model_eval_context(netlist, model_def, current_temp_c, model_tnom_c)?
-    } else {
-        initial_ctx
-    };
 
     Ok((ctx, current_temp_c, model_tnom_c))
 }
@@ -342,8 +343,8 @@ fn build_model_eval_context<'a>(
 ) -> Result<ModelEvaluationContext<'a>, SimulationError> {
     check_build_abort(netlist.abort)?;
     let mut params = base_eval_context(netlist);
-    set_temperature_scalars(&mut params, current_temp_c, tnom_c);
-    materialize_model_parameters(&mut params, netlist.abort)?;
+    let numeric_tnom = model_param(&model_def.params, &["TNOM"]);
+    set_temperature_scalars(&mut params, current_temp_c, numeric_tnom.unwrap_or(tnom_c));
     let mut ctx = ModelEvaluationContext::new(params, netlist.abort);
     let enclosing_binding = |name: &str| {
         netlist.params.has_any_parameter_binding(name)
@@ -360,34 +361,89 @@ fn build_model_eval_context<'a>(
             ctx.set(name, *value);
         }
     }
-    let mut pending = model_def.expr_params.clone();
-    while !pending.is_empty() {
-        let mut unresolved = Vec::new();
-        let mut progress = false;
-        for (name, expr) in pending {
-            match crate::netlist::expr::eval_expression_complex_with_abort(
-                &expr,
-                &ctx,
-                netlist.abort,
-            ) {
-                Ok(value) => {
-                    if !enclosing_binding(&name) {
-                        ctx.set_complex(&name, value);
-                    }
-                    ctx.resolved_expressions
-                        .insert(name.to_ascii_uppercase(), value);
-                    progress = true;
-                }
-                Err(crate::netlist::expr::ExpressionEvaluationError::Aborted) => {
-                    return Err(SimulationError::Aborted);
-                }
-                Err(_) => unresolved.push((name, expr)),
+
+    if numeric_tnom.is_none()
+        && let Some((name, expression)) = model_def
+            .expr_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("TNOM"))
+    {
+        // TNOM defines the context for all remaining model values. Resolve
+        // only its dependencies first, retaining their samples for the main
+        // pass instead of evaluating the entire model twice.
+        let mut nominal_params = ctx.context.clone();
+        let mut model_dependencies = Vec::new();
+        for (name, expression) in &model_def.expr_params {
+            check_build_abort(netlist.abort)?;
+            if !nominal_params.has_any_parameter_binding(name) {
+                nominal_params.define_parameter_expression(name, expression, None);
+                model_dependencies.push(name);
             }
         }
-        if !progress {
-            break;
+        let mut resolver = crate::netlist::expr::ParameterResolver::default();
+        let value = resolver
+            .evaluate_expression(expression, &nominal_params, netlist.abort)
+            .map_err(|error| match error {
+                crate::netlist::expr::ParameterResolutionError::Aborted => SimulationError::Aborted,
+                error => SimulationError::Circuit(format!(
+                    "Model '{}' parameter '{}' could not be resolved: {}",
+                    model_def.name, name, error
+                )),
+            })?;
+        resolver.materialize_into(&mut ctx.context);
+        for name in model_dependencies {
+            if let Some(value) =
+                resolver.scoped_value(0, &name.to_ascii_uppercase(), &nominal_params)
+            {
+                ctx.set_complex(name, value);
+                ctx.resolved_expressions
+                    .insert(name.to_ascii_uppercase(), value);
+            }
         }
-        pending = unresolved;
+        ctx.set_complex("TNOM", value);
+        ctx.resolved_expressions.insert("TNOM".to_owned(), value);
+    }
+    materialize_model_parameters(&mut ctx.context, netlist.abort)?;
+    for (name, expression) in &model_def.expr_params {
+        check_build_abort(netlist.abort)?;
+        if !ctx.has_any_parameter_binding(name) {
+            ctx.define_parameter_expression(name, expression, None);
+        }
+    }
+    let mut resolver = crate::netlist::expr::ParameterResolver::default();
+    for (name, expression) in &model_def.expr_params {
+        check_build_abort(netlist.abort)?;
+        let key = name.to_ascii_uppercase();
+        if ctx.resolved_expressions.contains_key(&key) {
+            continue;
+        }
+        // A field with an enclosing binding has its own model value, but its
+        // name in another expression still denotes that enclosing parameter.
+        let cached = (!enclosing_binding(name))
+            .then(|| resolver.scoped_value(0, &key, &ctx.context))
+            .flatten();
+        let result = match cached {
+            Some(value) => Ok(value),
+            None => resolver.evaluate_expression(expression, &ctx.context, netlist.abort),
+        };
+        match result {
+            Ok(value) => {
+                if !enclosing_binding(name) {
+                    ctx.set_complex(name, value);
+                }
+                ctx.resolved_expressions.insert(key, value);
+            }
+            Err(crate::netlist::expr::ParameterResolutionError::Aborted) => {
+                return Err(SimulationError::Aborted);
+            }
+            Err(error) => {
+                let error = match error {
+                    crate::netlist::expr::ParameterResolutionError::Expression(error) => error,
+                    error => crate::netlist::expr::ExprError::InvalidArgument(error.to_string()),
+                };
+                ctx.expression_errors.insert(key, error);
+            }
+        }
     }
     Ok(ctx)
 }
