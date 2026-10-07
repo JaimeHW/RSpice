@@ -12,7 +12,7 @@ use super::*;
 /// instance scaling: `SCALE` multiplies the value, `M`/`MULT` parallel
 /// multiplicity divides it (m parallel inductors of value L behave as L/m).
 pub(in crate::engine::builder) fn resolve_inductor_instance_value(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     element_name: &str,
     value: f64,
     model_name: Option<&str>,
@@ -218,7 +218,7 @@ fn synthesize_ngspice_geometry_inductance(
     element_name: &str,
     model_def: &crate::netlist::ModelDef,
     instance_params: &[(String, f64)],
-    eval_ctx: &crate::netlist::ParamContext,
+    eval_ctx: &ModelEvaluationContext<'_>,
 ) -> Result<Option<f64>, SimulationError> {
     let model_turns = resolve_model_param(model_def, &["NT"], eval_ctx)?;
     let length = resolve_model_param(model_def, &["LENGTH"], eval_ctx)?;
@@ -333,7 +333,7 @@ mod tests {
         };
 
         resolve_inductor_instance_value(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &element.name,
             *value,
             model.as_deref(),
@@ -367,7 +367,7 @@ mod tests {
         };
 
         resolve_inductor_instance_value(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &element.name,
             *value,
             model.as_deref(),

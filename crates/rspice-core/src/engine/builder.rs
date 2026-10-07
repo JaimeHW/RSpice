@@ -1473,6 +1473,22 @@ pub(crate) fn resolve_native_xyce_memristor_family(
     model_name: &str,
     temperature_kelvin: f64,
 ) -> Result<NativeXyceMemristorFamily, SimulationError> {
+    resolve_native_xyce_memristor_family_with_context(
+        &ModelResolution::new(netlist, &NoAbort),
+        model_def,
+        element_name,
+        model_name,
+        temperature_kelvin,
+    )
+}
+
+fn resolve_native_xyce_memristor_family_with_context(
+    netlist: &ModelResolution<'_>,
+    model_def: &crate::netlist::ModelDef,
+    element_name: &str,
+    model_name: &str,
+    temperature_kelvin: f64,
+) -> Result<NativeXyceMemristorFamily, SimulationError> {
     ensure_model_type(
         "Xyce memristor",
         element_name,
@@ -1508,8 +1524,8 @@ pub(crate) fn resolve_native_xyce_memristor_family(
     }
 }
 
-pub(crate) fn build_xyce_team_memristor(
-    netlist: &Netlist,
+fn build_xyce_team_memristor(
+    netlist: &ModelResolution<'_>,
     model_def: &crate::netlist::ModelDef,
     element_name: &str,
     model_name: &str,
@@ -1791,8 +1807,8 @@ fn xyce_pem_instance_params(
     Ok(instance)
 }
 
-pub(crate) fn build_xyce_pem_memristor(
-    netlist: &Netlist,
+fn build_xyce_pem_memristor(
+    netlist: &ModelResolution<'_>,
     model_def: &crate::netlist::ModelDef,
     element_name: &str,
     model_name: &str,
@@ -1806,7 +1822,7 @@ pub(crate) fn build_xyce_pem_memristor(
         model_def,
         &["MEMRISTOR"],
     )?;
-    if resolve_native_xyce_memristor_family(
+    if resolve_native_xyce_memristor_family_with_context(
         netlist,
         model_def,
         element_name,
@@ -1916,7 +1932,9 @@ pub fn build_native_xyce_memristor(
     instance_params: &[(String, f64)],
     temperature_kelvin: f64,
 ) -> Result<crate::device::XyceMemristor, SimulationError> {
-    match resolve_native_xyce_memristor_family(
+    let resolution = ModelResolution::new(netlist, &NoAbort);
+    let netlist = &resolution;
+    match resolve_native_xyce_memristor_family_with_context(
         netlist,
         model_def,
         element_name,
@@ -1957,7 +1975,7 @@ fn xyce_memristor_namespace_key(name: &str) -> String {
 /// external tables; schema/equation validation remains owned by the ordinary
 /// construction pass below.
 fn validate_xyce_memristor_generated_namespaces(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     elements: &[Element],
     temperature_kelvin: f64,
 ) -> Result<(), SimulationError> {
@@ -1991,7 +2009,7 @@ fn validate_xyce_memristor_generated_namespaces(
             continue;
         };
         if !deferred_params.is_empty()
-            || resolve_native_xyce_memristor_family(
+            || resolve_native_xyce_memristor_family_with_context(
                 netlist,
                 model_def,
                 &element.name,
@@ -2160,7 +2178,7 @@ fn xspice_meter_zero_source_other_node<'a>(element: &'a Element, target: &str) -
 }
 
 fn xspice_meter_resolved_capacitance(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     element: &Element,
     temperature: f64,
     spice_dialect: SpiceDialect,
@@ -2218,7 +2236,7 @@ fn xspice_meter_resolved_capacitance(
 }
 
 fn xspice_meter_resolved_inductance(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     element: &Element,
     temperature: f64,
     spice_dialect: SpiceDialect,
@@ -2280,7 +2298,7 @@ fn xspice_meter_parallel_inductance(existing: f64, next: f64) -> f64 {
 }
 
 fn xspice_meter_equivalent_capacitance(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     flat_elements: &[Element],
     input_node: &str,
     temperature: f64,
@@ -2315,7 +2333,7 @@ fn xspice_meter_equivalent_capacitance(
 }
 
 fn xspice_meter_equivalent_inductance(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     flat_elements: &[Element],
     input_node: &str,
     temperature: f64,
@@ -2350,7 +2368,7 @@ fn xspice_meter_equivalent_inductance(
 }
 
 fn xspice_meter_measured_value(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     flat_elements: &[Element],
     probe: XspiceMeterProbe<'_>,
     temperature: f64,
@@ -3991,7 +4009,7 @@ fn parse_generated_xspice_auto_bridge_deck(
 
 fn add_generated_xspice_auto_bridge_resistor(
     circuit: &mut CircuitData,
-    generated: &Netlist,
+    generated: &ModelResolution<'_>,
     element: &Element,
     temperature: crate::Value,
     spice_dialect: SpiceDialect,
@@ -4125,7 +4143,7 @@ fn add_generated_xspice_auto_bridge_resistor(
 
 fn add_generated_xspice_auto_bridge_capacitor(
     circuit: &mut CircuitData,
-    generated: &Netlist,
+    generated: &ModelResolution<'_>,
     element: &Element,
     temperature: crate::Value,
     spice_dialect: SpiceDialect,
@@ -4198,7 +4216,7 @@ fn capacitor_ic_dc_mode(spice_dialect: SpiceDialect) -> crate::netlist::Capacito
 
 fn add_generated_xspice_auto_bridge_inductor(
     circuit: &mut CircuitData,
-    generated: &Netlist,
+    generated: &ModelResolution<'_>,
     element: &Element,
     temperature: crate::Value,
     spice_dialect: SpiceDialect,
@@ -4270,7 +4288,7 @@ struct XspiceAutoBridgeContext<'a> {
 
 fn add_generated_xspice_auto_bridge_instance(
     circuit: &mut CircuitData,
-    generated: &Netlist,
+    generated: &ModelResolution<'_>,
     element: &Element,
     template_key: &str,
     context: XspiceAutoBridgeContext<'_>,
@@ -4318,6 +4336,9 @@ fn add_generated_xspice_auto_bridge_instance(
         },
     )
     .map_err(|e| {
+        if matches!(e, SimulationError::Aborted) {
+            return e;
+        }
         SimulationError::Circuit(format!(
             "Failed to resolve generated XSPICE auto-bridge model '{}' for template '{}': {}",
             model, template_key, e
@@ -4376,6 +4397,7 @@ fn add_generated_xspice_auto_bridge_subcircuit(
     generated: &Netlist,
     template: &XspiceAutoBridgeTemplate,
     context: XspiceAutoBridgeContext<'_>,
+    abort: &dyn AbortSignal,
 ) -> Result<(), SimulationError> {
     let XspiceAutoBridgeContext {
         temperature,
@@ -4385,12 +4407,16 @@ fn add_generated_xspice_auto_bridge_subcircuit(
         resource_limits: _,
         ..
     } = context;
-    let flattened = flatten_netlist_with_models(generated).map_err(|e| {
-        SimulationError::Circuit(format!(
-            "Failed to flatten generated XSPICE auto-bridge template '{}': {}",
-            template.key, e
-        ))
-    })?;
+    let flattened = flatten_netlist_with_models_config_with_abort(
+        generated,
+        FlattenerConfig {
+            max_depth: context.resource_limits.max_hierarchy_depth,
+            max_elements: context.resource_limits.max_flattened_elements,
+            ..Default::default()
+        },
+        abort,
+    )
+    .map_err(|error| map_build_parse_error("generated XSPICE auto-bridge hierarchy", error))?;
     if !flattened.scoped_initial_conditions.is_empty() || !flattened.scoped_node_sets.is_empty() {
         return Err(SimulationError::Circuit(format!(
             "XSPICE auto-bridge template '{}' generated subcircuit startup directives; RSpice supports device/model cards in this path",
@@ -4407,8 +4433,11 @@ fn add_generated_xspice_auto_bridge_subcircuit(
         &effective_generated
     };
 
+    let resolution = ModelResolution::new(generated, abort);
+    let generated = &resolution;
     let mut added_xspice = false;
     for element in &flattened.elements {
+        check_build_abort(abort)?;
         match &element.kind {
             ElementKind::Resistor { .. } => {
                 add_generated_xspice_auto_bridge_resistor(
@@ -4574,7 +4603,7 @@ fn add_template_xspice_auto_bridge(
         )),
     })?;
     if device_is_subcircuit {
-        add_generated_xspice_auto_bridge_subcircuit(circuit, &generated, template, context)?;
+        add_generated_xspice_auto_bridge_subcircuit(circuit, &generated, template, context, abort)?;
         log::debug!(
             "Generated XSPICE subcircuit auto-bridge on nodes {} from template {}",
             node_list,
@@ -4596,7 +4625,7 @@ fn add_template_xspice_auto_bridge(
     let element = &generated.elements[0];
     add_generated_xspice_auto_bridge_instance(
         circuit,
-        &generated,
+        &ModelResolution::new(&generated, abort),
         element,
         &template.key,
         context,
@@ -4968,6 +4997,8 @@ impl Engine {
             return Ok(None);
         };
 
+        let resolution = ModelResolution::new(netlist, &NoAbort);
+        let netlist = &resolution;
         resolve_resistor_effective_parameters(
             netlist,
             &element.name,
@@ -5041,6 +5072,8 @@ impl Engine {
             return Ok(None);
         };
 
+        let resolution = ModelResolution::new(netlist, &NoAbort);
+        let netlist = &resolution;
         resolve_inductor_instance_value(
             netlist,
             &element.name,
@@ -5089,6 +5122,8 @@ impl Engine {
             return Ok(None);
         };
 
+        let resolution = ModelResolution::new(netlist, &NoAbort);
+        let netlist = &resolution;
         resolve_capacitor_instance_value(
             netlist,
             &element.name,
@@ -5138,6 +5173,8 @@ impl Engine {
             &effective_model_netlist
         };
 
+        let resolution = ModelResolution::new(netlist, &NoAbort);
+        let netlist = &resolution;
         let mut inspection = ModelBinInspection::default();
         // Evaluate every declared bin card before resolving instances. This
         // makes the receipt a complete audit of the exact executable model
@@ -5378,6 +5415,8 @@ impl Engine {
             }
             &effective_model_netlist
         };
+        let resolution = ModelResolution::new(netlist, abort);
+        let netlist = &resolution;
         if let Some(tstop) = transient_stop_time {
             super::transient::noise::expand_transient_noise(
                 &mut flat_elements,
@@ -7815,7 +7854,7 @@ impl Engine {
                             element.name, model
                         ))
                     })?;
-                    let family = resolve_native_xyce_memristor_family(
+                    let family = resolve_native_xyce_memristor_family_with_context(
                         netlist,
                         model_def,
                         &element.name,
@@ -9305,6 +9344,9 @@ impl Engine {
                         },
                     )
                     .map_err(|e| {
+                        if matches!(e, SimulationError::Aborted) {
+                            return e;
+                        }
                         SimulationError::Circuit(format!(
                             "Failed to resolve XSPICE model '{}' for element {}: {}",
                             model, element.name, e
@@ -10168,7 +10210,7 @@ mod tests {
 
         add_generated_xspice_auto_bridge_resistor(
             &mut circuit,
-            &generated,
+            &ModelResolution::new(&generated, &NoAbort),
             element,
             crate::constants::TEMP_REFERENCE,
             SpiceDialect::Xyce,
@@ -10205,7 +10247,7 @@ mod tests {
             let mut circuit = CircuitData::new();
             add_generated_xspice_auto_bridge_resistor(
                 &mut circuit,
-                &generated,
+                &ModelResolution::new(&generated, &NoAbort),
                 element,
                 crate::constants::TEMP_REFERENCE,
                 SpiceDialect::Xyce,

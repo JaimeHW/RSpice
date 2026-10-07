@@ -5,7 +5,7 @@ use super::*;
 /// Keep this separate from linear-inductor temperature scaling: squaring the
 /// turns factor in L alone would omit its effect on the material bias.
 pub(in crate::engine::builder) fn resolve_xyce_core_temperature_factor(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     model_def: &crate::netlist::ModelDef,
     temperature_kelvin: f64,
 ) -> Result<f64, SimulationError> {

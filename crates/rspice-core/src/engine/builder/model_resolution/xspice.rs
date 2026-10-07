@@ -233,13 +233,13 @@ fn reject_scalar_params_for_vector_specs(
 }
 
 fn resolve_scalar_expression_params(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     model_def: &crate::netlist::ModelDef,
     code_model: &dyn crate::xspice::CodeModel,
 ) -> Result<Vec<(String, f64)>, SimulationError> {
     let current_temp_c = netlist.options.temp.unwrap_or(27.0);
     let tnom_c = netlist.options.tnom.unwrap_or(27.0);
-    let ctx = build_model_eval_context(netlist, model_def, current_temp_c, tnom_c);
+    let ctx = build_model_eval_context(netlist, model_def, current_temp_c, tnom_c)?;
     let mut resolved = Vec::with_capacity(model_def.expr_params.len());
 
     for (name, expr) in &model_def.expr_params {
@@ -279,14 +279,19 @@ fn resolve_scalar_expression_params(
             }
         }
 
-        let value = crate::netlist::expr::eval_expression(expr, &ctx).map_err(|err| {
-            SimulationError::Circuit(format!(
-                "XSPICE model '{}' expression parameter '{}' could not be resolved: {}",
-                code_model.name(),
-                name,
-                err
-            ))
-        })?;
+        let value = ctx
+            .model_expression(name, expr)
+            .map(|value| value.re)
+            .map_err(|error| {
+                map_model_expression_error(error, |err| {
+                    format!(
+                        "XSPICE model '{}' expression parameter '{}' could not be resolved: {}",
+                        code_model.name(),
+                        name,
+                        err
+                    )
+                })
+            })?;
         if !value.is_finite() {
             return Err(SimulationError::Circuit(format!(
                 "XSPICE model '{}' expression parameter '{}' resolved to non-finite value {}",
@@ -301,27 +306,27 @@ fn resolve_scalar_expression_params(
     Ok(resolved)
 }
 
-fn build_instance_eval_context(
-    netlist: &Netlist,
+fn build_instance_eval_context<'a>(
+    netlist: &ModelResolution<'a>,
     model_def: Option<&crate::netlist::ModelDef>,
     instance_params: &[(String, f64)],
-) -> crate::netlist::ParamContext {
+) -> Result<ModelEvaluationContext<'a>, SimulationError> {
     let current_temp_c = netlist.options.temp.unwrap_or(27.0);
     let tnom_c = netlist.options.tnom.unwrap_or(27.0);
     let mut ctx = match model_def {
-        Some(model_def) => build_model_eval_context(netlist, model_def, current_temp_c, tnom_c),
+        Some(model_def) => build_model_eval_context(netlist, model_def, current_temp_c, tnom_c)?,
         None => {
             let mut ctx = base_eval_context(netlist);
             ctx.set("TEMP", current_temp_c);
             ctx.set("TEMPER", current_temp_c);
             ctx.set("TNOM", tnom_c);
-            ctx
+            ModelEvaluationContext::new(ctx, netlist.abort)
         }
     };
     for (name, value) in instance_params {
         ctx.set(name, *value);
     }
-    ctx
+    Ok(ctx)
 }
 
 fn validate_xspice_expression_param_type(
@@ -367,7 +372,7 @@ fn validate_xspice_expression_param_type(
 }
 
 fn resolve_scalar_instance_expression_params(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     model_def: Option<&crate::netlist::ModelDef>,
     code_model: &dyn crate::xspice::CodeModel,
     model_name: &str,
@@ -382,7 +387,7 @@ fn resolve_scalar_instance_expression_params(
         validate_xspice_expression_param_type(code_model, name)?;
     }
 
-    let mut ctx = build_instance_eval_context(netlist, model_def, instance_params);
+    let mut ctx = build_instance_eval_context(netlist, model_def, instance_params)?;
     let mut pending = instance_expr_params.to_vec();
     let mut resolved = Vec::with_capacity(instance_expr_params.len());
 
@@ -392,7 +397,7 @@ fn resolve_scalar_instance_expression_params(
         let mut first_error = None;
 
         for (name, expr) in pending {
-            match crate::netlist::expr::eval_expression(&expr, &ctx) {
+            match ctx.evaluate(&expr) {
                 Ok(value) if value.is_finite() => {
                     ctx.set(&name, value);
                     resolved.push((name, value));
@@ -404,7 +409,10 @@ fn resolve_scalar_instance_expression_params(
                         model_name, name, value
                     )));
                 }
-                Err(err) => {
+                Err(crate::netlist::expr::ExpressionEvaluationError::Aborted) => {
+                    return Err(SimulationError::Aborted);
+                }
+                Err(crate::netlist::expr::ExpressionEvaluationError::Expression(err)) => {
                     if first_error.is_none() {
                         first_error = Some((name.clone(), err.to_string()));
                     }
@@ -428,7 +436,7 @@ fn resolve_scalar_instance_expression_params(
 }
 
 fn resolve_instance_string_expression_params(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     model_name: &str,
     instance_string_expr_params: &[(String, String)],
 ) -> Result<Vec<(String, String)>, SimulationError> {
@@ -448,7 +456,7 @@ fn resolve_instance_string_expression_params(
 }
 
 fn resolve_instance_real_vector_expression_params(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     model_def: Option<&crate::netlist::ModelDef>,
     model_name: &str,
     instance_params: &[(String, f64)],
@@ -458,14 +466,14 @@ fn resolve_instance_real_vector_expression_params(
         return Ok(Vec::new());
     }
 
-    let ctx = build_instance_eval_context(netlist, model_def, instance_params);
+    let ctx = build_instance_eval_context(netlist, model_def, instance_params)?;
     let mut resolved = Vec::with_capacity(instance_vector_expr_params.len());
 
     for (name, exprs) in instance_vector_expr_params {
         let mut values = Vec::with_capacity(exprs.len());
         for expr in exprs {
-            let value = crate::netlist::expr::eval_expression(expr, &ctx).map_err(|err| {
-                SimulationError::Circuit(format!(
+            let value = ctx.evaluate(expr).map_err(|error| {
+                map_model_expression_error(error, |err| format!(
                     "XSPICE model '{}' instance vector parameter '{}' could not resolve expression '{}': {}",
                     model_name, name, expr, err
                 ))
@@ -485,7 +493,7 @@ fn resolve_instance_real_vector_expression_params(
 }
 
 fn resolve_model_real_vector_expression_params(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     model_def: &crate::netlist::ModelDef,
     code_model: &dyn crate::xspice::CodeModel,
 ) -> Result<Vec<(String, Vec<f64>)>, SimulationError> {
@@ -495,14 +503,14 @@ fn resolve_model_real_vector_expression_params(
 
     let current_temp_c = netlist.options.temp.unwrap_or(27.0);
     let tnom_c = netlist.options.tnom.unwrap_or(27.0);
-    let ctx = build_model_eval_context(netlist, model_def, current_temp_c, tnom_c);
+    let ctx = build_model_eval_context(netlist, model_def, current_temp_c, tnom_c)?;
     let mut resolved = Vec::with_capacity(model_def.real_vector_expr_params.len());
 
     for (name, exprs) in &model_def.real_vector_expr_params {
         let mut values = Vec::with_capacity(exprs.len());
         for expr in exprs {
-            let value = crate::netlist::expr::eval_expression(expr, &ctx).map_err(|err| {
-                SimulationError::Circuit(format!(
+            let value = ctx.evaluate(expr).map_err(|error| {
+                map_model_expression_error(error, |err| format!(
                     "XSPICE model '{}' vector parameter '{}' could not resolve expression '{}': {}",
                     code_model.name(),
                     name,
@@ -528,7 +536,7 @@ fn resolve_model_real_vector_expression_params(
 }
 
 fn resolve_instance_string_vector_expression_params(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     model_name: &str,
     instance_string_vector_expr_params: &[(String, String)],
 ) -> Result<Vec<(String, Vec<String>)>, SimulationError> {
@@ -834,7 +842,7 @@ fn reject_native_xtradev_instance_string_params(
 }
 
 fn resolve_native_xtradev_expr_params(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     model_def: &crate::netlist::ModelDef,
     kind: &str,
     element_name: &str,
@@ -842,13 +850,13 @@ fn resolve_native_xtradev_expr_params(
 ) -> Result<Vec<(String, f64)>, SimulationError> {
     let current_temp_c = netlist.options.temp.unwrap_or(27.0);
     let tnom_c = netlist.options.tnom.unwrap_or(27.0);
-    let ctx = build_model_eval_context(netlist, model_def, current_temp_c, tnom_c);
+    let ctx = build_model_eval_context(netlist, model_def, current_temp_c, tnom_c)?;
     let mut resolved = Vec::with_capacity(model_def.expr_params.len());
 
     for (name, expr) in &model_def.expr_params {
         validate_native_xtradev_param_name(kind, element_name, model_name, name)?;
-        let value = crate::netlist::expr::eval_expression(expr, &ctx).map_err(|err| {
-            SimulationError::Circuit(format!(
+        let value = ctx.model_expression(name, expr).map(|value| value.re).map_err(|error| {
+                map_model_expression_error(error, |err| format!(
                 "XSPICE xtradev {kind} instance '{element_name}' model '{model_name}' parameter \
                  '{name}' could not be resolved: {err}"
             ))
@@ -866,7 +874,7 @@ fn resolve_native_xtradev_expr_params(
 }
 
 fn resolve_native_xtradev_instance_expr_params(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     model_def: Option<&crate::netlist::ModelDef>,
     kind: &str,
     element_name: &str,
@@ -878,7 +886,7 @@ fn resolve_native_xtradev_instance_expr_params(
         return Ok(Vec::new());
     }
 
-    let mut ctx = build_instance_eval_context(netlist, model_def, instance_params);
+    let mut ctx = build_instance_eval_context(netlist, model_def, instance_params)?;
     let mut pending = instance_expr_params.to_vec();
     let mut resolved = Vec::with_capacity(instance_expr_params.len());
 
@@ -888,7 +896,7 @@ fn resolve_native_xtradev_instance_expr_params(
         let mut first_error = None;
 
         for (name, expr) in pending {
-            match crate::netlist::expr::eval_expression(&expr, &ctx) {
+            match ctx.evaluate(&expr) {
                 Ok(value) if value.is_finite() => {
                     ctx.set(&name, value);
                     resolved.push((name, value));
@@ -900,7 +908,10 @@ fn resolve_native_xtradev_instance_expr_params(
                          parameter '{name}' resolved to non-finite value {value}"
                     )));
                 }
-                Err(err) => {
+                Err(crate::netlist::expr::ExpressionEvaluationError::Aborted) => {
+                    return Err(SimulationError::Aborted);
+                }
+                Err(crate::netlist::expr::ExpressionEvaluationError::Expression(err)) => {
                     if first_error.is_none() {
                         first_error = Some((name.clone(), err.to_string()));
                     }
@@ -924,7 +935,7 @@ fn resolve_native_xtradev_instance_expr_params(
 }
 
 fn resolve_native_xtradev_params(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     model_def: Option<&crate::netlist::ModelDef>,
     kind: &str,
     element_name: &str,
@@ -985,7 +996,7 @@ fn resolve_native_xtradev_params(
 }
 
 pub(in crate::engine::builder) fn resolve_native_xtradev_reactive_model(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     model_name: &str,
     element_name: &str,
     instance: XspiceInstanceParams<'_>,
@@ -1066,7 +1077,7 @@ pub(in crate::engine::builder) fn resolve_native_xtradev_reactive_model(
 }
 
 pub(in crate::engine::builder) fn resolve_xspice_model_instance(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     registry: &crate::xspice::CodeModelRegistry,
     model_name: &str,
     instance: XspiceInstanceParams<'_>,
@@ -1352,7 +1363,7 @@ mod tests {
         let registry = crate::xspice::CodeModelRegistry::new();
 
         let err = match resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "custom_gate",
             XspiceInstanceParams {
@@ -1390,7 +1401,7 @@ mod tests {
         let registry = crate::xspice::CodeModelRegistry::new();
 
         let err = match resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "ext",
             XspiceInstanceParams {
@@ -1437,7 +1448,7 @@ mod tests {
         )));
 
         let resolved = resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "divider",
             XspiceInstanceParams {
@@ -1479,7 +1490,7 @@ mod tests {
         )));
 
         let resolved = resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "vp",
             XspiceInstanceParams {
@@ -1520,7 +1531,7 @@ mod tests {
         )));
 
         let resolved = resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "lut",
             XspiceInstanceParams {
@@ -1567,7 +1578,7 @@ mod tests {
         )));
 
         let resolved = resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "bp",
             XspiceInstanceParams {
@@ -1614,7 +1625,7 @@ mod tests {
         )));
 
         let resolved = resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "pp",
             XspiceInstanceParams {
@@ -1661,7 +1672,7 @@ mod tests {
         )));
 
         let resolved = resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "bp",
             XspiceInstanceParams {
@@ -1702,7 +1713,7 @@ mod tests {
         )));
 
         let err = match resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "vp",
             XspiceInstanceParams {
@@ -1743,7 +1754,7 @@ mod tests {
         )));
 
         let err = match resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "vp",
             XspiceInstanceParams {
@@ -1784,7 +1795,7 @@ mod tests {
         )));
 
         let err = match resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "vp",
             XspiceInstanceParams {
@@ -1825,7 +1836,7 @@ mod tests {
         )));
 
         let resolved = resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "gp",
             XspiceInstanceParams {
@@ -1866,7 +1877,7 @@ mod tests {
         )));
 
         let resolved = resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "gain_probe",
             XspiceInstanceParams {
@@ -1907,7 +1918,7 @@ mod tests {
         )));
 
         let resolved = resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "fp",
             XspiceInstanceParams {
@@ -1948,7 +1959,7 @@ mod tests {
         )));
 
         let resolved = resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "file_probe",
             XspiceInstanceParams {
@@ -1989,7 +2000,7 @@ mod tests {
         )));
 
         let resolved = resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "vp",
             XspiceInstanceParams {
@@ -2029,7 +2040,7 @@ mod tests {
         )));
 
         let resolved = resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "bit_probe",
             XspiceInstanceParams {
@@ -2070,7 +2081,7 @@ mod tests {
         )));
 
         let resolved = resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "pp",
             XspiceInstanceParams {
@@ -2115,7 +2126,7 @@ mod tests {
         )));
 
         let resolved = resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "pp",
             XspiceInstanceParams {
@@ -2161,7 +2172,7 @@ mod tests {
         )));
 
         let err = match resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "vector_probe",
             XspiceInstanceParams {
@@ -2202,7 +2213,7 @@ mod tests {
         )));
 
         let err = match resolve_xspice_model_instance(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &registry,
             "gp",
             XspiceInstanceParams {

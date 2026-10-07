@@ -69,7 +69,7 @@ impl Engine {
             check_build_abort(abort)?;
             if let ElementKind::XyceMemristor { model, .. } = &element.kind {
                 collect_pem_data_inputs(
-                    &isolated,
+                    &ModelResolution::new(&isolated, abort),
                     &element.name,
                     model,
                     engine.config.temperature,
@@ -104,7 +104,7 @@ impl Engine {
                 continue;
             }
             let resolved = resolve_xspice_model_instance(
-                &isolated,
+                &ModelResolution::new(&isolated, abort),
                 registry,
                 model,
                 XspiceInstanceParams {
@@ -145,7 +145,7 @@ impl Engine {
 }
 
 fn collect_pem_data_inputs(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     element_name: &str,
     model_name: &str,
     temperature: Value,
@@ -156,8 +156,13 @@ fn collect_pem_data_inputs(
             "Xyce memristor '{element_name}' references unknown model '{model_name}'"
         ))
     })?;
-    if resolve_native_xyce_memristor_family(netlist, model, element_name, model_name, temperature)?
-        != NativeXyceMemristorFamily::Pem
+    if resolve_native_xyce_memristor_family_with_context(
+        netlist,
+        model,
+        element_name,
+        model_name,
+        temperature,
+    )? != NativeXyceMemristorFamily::Pem
     {
         return Ok(());
     }

@@ -1,5 +1,104 @@
 use super::*;
 
+/// Explicit cancellation policy shared by model resolution during one build.
+/// Inspectors use `NoAbort`; cancellable construction supplies its caller's signal.
+pub(super) struct ModelResolution<'a> {
+    netlist: &'a Netlist,
+    abort: &'a dyn AbortSignal,
+}
+
+impl<'a> ModelResolution<'a> {
+    pub(super) fn new(netlist: &'a Netlist, abort: &'a dyn AbortSignal) -> Self {
+        Self { netlist, abort }
+    }
+}
+
+impl std::ops::Deref for ModelResolution<'_> {
+    type Target = Netlist;
+    fn deref(&self) -> &Self::Target {
+        self.netlist
+    }
+}
+
+struct ModelEvaluationContext<'a> {
+    context: crate::netlist::ParamContext,
+    abort: &'a dyn AbortSignal,
+    resolved_expressions: HashMap<String, crate::ComplexValue>,
+}
+
+impl<'a> ModelEvaluationContext<'a> {
+    fn new(context: crate::netlist::ParamContext, abort: &'a dyn AbortSignal) -> Self {
+        Self {
+            context,
+            abort,
+            resolved_expressions: HashMap::new(),
+        }
+    }
+
+    fn evaluate(
+        &self,
+        expression: &str,
+    ) -> Result<Value, crate::netlist::expr::ExpressionEvaluationError> {
+        crate::netlist::expr::eval_expression_complex_with_abort(
+            expression,
+            &self.context,
+            self.abort,
+        )
+        .map(|value| value.re)
+    }
+
+    fn model_expression(
+        &self,
+        name: &str,
+        expression: &str,
+    ) -> Result<crate::ComplexValue, crate::netlist::expr::ExpressionEvaluationError> {
+        match self.resolved_expressions.get(&name.to_ascii_uppercase()) {
+            Some(value) => Ok(*value),
+            None => crate::netlist::expr::eval_expression_complex_with_abort(
+                expression,
+                &self.context,
+                self.abort,
+            ),
+        }
+    }
+}
+
+impl std::ops::Deref for ModelEvaluationContext<'_> {
+    type Target = crate::netlist::ParamContext;
+    fn deref(&self) -> &Self::Target {
+        &self.context
+    }
+}
+impl std::ops::DerefMut for ModelEvaluationContext<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.context
+    }
+}
+
+fn map_model_expression_error(
+    error: crate::netlist::expr::ExpressionEvaluationError,
+    describe: impl FnOnce(crate::netlist::expr::ExprError) -> String,
+) -> SimulationError {
+    match error {
+        crate::netlist::expr::ExpressionEvaluationError::Aborted => SimulationError::Aborted,
+        crate::netlist::expr::ExpressionEvaluationError::Expression(error) => {
+            SimulationError::Circuit(describe(error))
+        }
+    }
+}
+
+fn materialize_model_parameters(
+    context: &mut crate::netlist::ParamContext,
+    abort: &dyn AbortSignal,
+) -> Result<(), SimulationError> {
+    crate::netlist::expr::materialize_available_parameter_expressions_with_abort(context, abort)
+        .map(|_| ())
+        .map_err(|error| match error {
+            crate::netlist::expr::ParameterResolutionError::Aborted => SimulationError::Aborted,
+            error => SimulationError::Circuit(error.to_string()),
+        })
+}
+
 mod capacitors;
 mod inductors;
 mod magnetic;
@@ -196,12 +295,12 @@ impl<'a> InstanceParameterContext<'a> {
 /// honoring instance `TEMP`/`DTEMP` overrides and the model card's `TNOM`.
 ///
 /// Returns `(context, instance_temperature_celsius, tnom_celsius)`.
-fn resolve_passive_eval_context(
-    netlist: &Netlist,
+fn resolve_passive_eval_context<'a>(
+    netlist: &ModelResolution<'a>,
     model_def: Option<&crate::netlist::ModelDef>,
     instance_params: &[(String, f64)],
     temperature_kelvin: f64,
-) -> Result<(crate::netlist::ParamContext, f64, f64), SimulationError> {
+) -> Result<(ModelEvaluationContext<'a>, f64, f64), SimulationError> {
     let mut current_temp_c = crate::constants::kelvin_to_celsius(temperature_kelvin);
     if let Some(temp) = instance_param(instance_params, &["TEMP"]) {
         current_temp_c = normalize_temperature_param_to_celsius(temp);
@@ -213,17 +312,21 @@ fn resolve_passive_eval_context(
     let Some(model_def) = model_def else {
         let mut ctx = base_eval_context(netlist);
         set_temperature_scalars(&mut ctx, current_temp_c, base_tnom_c);
-        crate::netlist::expr::materialize_available_parameter_expressions(&mut ctx);
-        return Ok((ctx, current_temp_c, base_tnom_c));
+        materialize_model_parameters(&mut ctx, netlist.abort)?;
+        return Ok((
+            ModelEvaluationContext::new(ctx, netlist.abort),
+            current_temp_c,
+            base_tnom_c,
+        ));
     };
 
-    let initial_ctx = build_model_eval_context(netlist, model_def, current_temp_c, base_tnom_c);
+    let initial_ctx = build_model_eval_context(netlist, model_def, current_temp_c, base_tnom_c)?;
     let model_tnom_c = resolve_model_param(model_def, &["TNOM"], &initial_ctx)?
         .map(normalize_temperature_param_to_celsius)
         .unwrap_or(base_tnom_c);
 
     let ctx = if (model_tnom_c - base_tnom_c).abs() > f64::EPSILON {
-        build_model_eval_context(netlist, model_def, current_temp_c, model_tnom_c)
+        build_model_eval_context(netlist, model_def, current_temp_c, model_tnom_c)?
     } else {
         initial_ctx
     };
@@ -231,43 +334,55 @@ fn resolve_passive_eval_context(
     Ok((ctx, current_temp_c, model_tnom_c))
 }
 
-fn build_model_eval_context(
-    netlist: &Netlist,
+fn build_model_eval_context<'a>(
+    netlist: &ModelResolution<'a>,
     model_def: &crate::netlist::ModelDef,
     current_temp_c: f64,
     tnom_c: f64,
-) -> crate::netlist::ParamContext {
-    let mut ctx = base_eval_context(netlist);
-    set_temperature_scalars(&mut ctx, current_temp_c, tnom_c);
-    crate::netlist::expr::materialize_available_parameter_expressions(&mut ctx);
-
+) -> Result<ModelEvaluationContext<'a>, SimulationError> {
+    check_build_abort(netlist.abort)?;
+    let mut params = base_eval_context(netlist);
+    set_temperature_scalars(&mut params, current_temp_c, tnom_c);
+    materialize_model_parameters(&mut params, netlist.abort)?;
+    let mut ctx = ModelEvaluationContext::new(params, netlist.abort);
     for (name, value) in &model_def.params {
+        check_build_abort(netlist.abort)?;
         ctx.set(name, *value);
     }
-
     let mut pending = model_def.expr_params.clone();
-    let mut progress = true;
-    while !pending.is_empty() && progress {
-        progress = false;
+    while !pending.is_empty() {
         let mut unresolved = Vec::new();
+        let mut progress = false;
         for (name, expr) in pending {
-            if let Ok(value) = crate::netlist::expr::eval_expression(&expr, &ctx) {
-                ctx.set(&name, value);
-                progress = true;
-            } else {
-                unresolved.push((name, expr));
+            match crate::netlist::expr::eval_expression_complex_with_abort(
+                &expr,
+                &ctx,
+                netlist.abort,
+            ) {
+                Ok(value) => {
+                    ctx.set_complex(&name, value);
+                    ctx.resolved_expressions
+                        .insert(name.to_ascii_uppercase(), value);
+                    progress = true;
+                }
+                Err(crate::netlist::expr::ExpressionEvaluationError::Aborted) => {
+                    return Err(SimulationError::Aborted);
+                }
+                Err(_) => unresolved.push((name, expr)),
             }
+        }
+        if !progress {
+            break;
         }
         pending = unresolved;
     }
-
-    ctx
+    Ok(ctx)
 }
 
 fn resolve_model_param(
     model_def: &crate::netlist::ModelDef,
     names: &[&str],
-    ctx: &crate::netlist::ParamContext,
+    ctx: &ModelEvaluationContext<'_>,
 ) -> Result<Option<f64>, SimulationError> {
     if let Some(value) = model_param(&model_def.params, names) {
         return Ok(Some(value));
@@ -279,12 +394,17 @@ fn resolve_model_param(
             .iter()
             .find(|(name, _)| name.eq_ignore_ascii_case(candidate))
         {
-            let value = crate::netlist::expr::eval_expression(expr, ctx).map_err(|e| {
-                SimulationError::Circuit(format!(
-                    "Model '{}' parameter '{}' could not be resolved: {}",
-                    model_def.name, name, e
-                ))
-            })?;
+            let value = ctx
+                .model_expression(name, expr)
+                .map_err(|error| {
+                    map_model_expression_error(error, |e| {
+                        format!(
+                            "Model '{}' parameter '{}' could not be resolved: {}",
+                            model_def.name, name, e
+                        )
+                    })
+                })?
+                .re;
             return Ok(Some(value));
         }
     }
@@ -299,7 +419,7 @@ fn resolve_instance_or_model_param(
     instance_names: &[&str],
     model_def: Option<&crate::netlist::ModelDef>,
     model_names: &[&str],
-    ctx: &crate::netlist::ParamContext,
+    ctx: &ModelEvaluationContext<'_>,
 ) -> Result<Option<f64>, SimulationError> {
     if let Some(value) = instance_param(instance_params, instance_names) {
         return Ok(Some(value));
@@ -317,7 +437,7 @@ fn canonical_supported_model_param<'a>(name: &str, supported: &'a [&'a str]) -> 
 }
 
 pub(super) fn resolve_supported_model_params_upper_map(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     model_def: &crate::netlist::ModelDef,
     element_kind: &str,
     element_name: &str,
@@ -388,12 +508,17 @@ pub(super) fn resolve_supported_model_params_upper_map(
 
     for (name, expr) in &model_def.expr_params {
         if let Some(param) = canonical_supported_model_param(name, supported) {
-            let value = crate::netlist::expr::eval_expression(expr, &ctx).map_err(|err| {
-                SimulationError::Circuit(format!(
-                    "{} '{}' model '{}' parameter {} could not be resolved: {}",
-                    element_kind, element_name, model_name, param, err
-                ))
-            })?;
+            let value = ctx
+                .model_expression(name, expr)
+                .map_err(|error| {
+                    map_model_expression_error(error, |err| {
+                        format!(
+                            "{} '{}' model '{}' parameter {} could not be resolved: {}",
+                            element_kind, element_name, model_name, param, err
+                        )
+                    })
+                })?
+                .re;
             if !value.is_finite() {
                 return Err(SimulationError::Circuit(format!(
                     "{} '{}' model '{}' uses non-finite model parameter {}={}",
@@ -486,7 +611,7 @@ pub struct ModelBinInspection {
 
 impl ModelBinCardGeometry {
     pub(super) fn resolve(
-        netlist: &Netlist,
+        netlist: &ModelResolution<'_>,
         model_def: &crate::netlist::ModelDef,
         temperature_kelvin: f64,
     ) -> Result<Option<Self>, SimulationError> {
@@ -500,7 +625,7 @@ impl ModelBinCardGeometry {
 
         let current_temp_c = crate::constants::kelvin_to_celsius(temperature_kelvin);
         let tnom_c = netlist.options.tnom.unwrap_or(27.0);
-        let context = build_model_eval_context(netlist, model_def, current_temp_c, tnom_c);
+        let context = build_model_eval_context(netlist, model_def, current_temp_c, tnom_c)?;
         let bound = |name: &str| -> Result<Option<f64>, SimulationError> {
             if !model_parameter_is_declared(model_def, name) {
                 return Ok(None);
@@ -762,7 +887,7 @@ pub(super) struct ResolvedModelBinMatch<'a> {
 }
 
 pub(super) fn resolve_binned_model_def<'a>(
-    netlist: &'a Netlist,
+    netlist: &'a ModelResolution<'_>,
     element_name: &str,
     model_name: &str,
     instance_params: &[(String, f64)],
@@ -832,7 +957,7 @@ pub(super) fn resolve_binned_model_def<'a>(
 }
 
 pub(super) fn find_binned_model_def<'a>(
-    netlist: &'a Netlist,
+    netlist: &'a ModelResolution<'_>,
     element_name: &str,
     model_name: &str,
     instance_params: &[(String, f64)],

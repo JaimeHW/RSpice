@@ -21,7 +21,7 @@ pub const XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION: f64 = 0.0233;
 /// instance scaling: `SCALE` multiplies the value, `M`/`MULT` parallel
 /// multiplicity multiplies the value (m parallel capacitors add).
 pub(in crate::engine::builder) fn resolve_capacitor_instance_value(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     element_name: &str,
     value: f64,
     model_name: Option<&str>,
@@ -287,7 +287,7 @@ mod tests {
         };
 
         resolve_capacitor_instance_value(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &element.name,
             *value,
             model.as_deref(),
@@ -408,7 +408,7 @@ mod tests {
         };
 
         let c = resolve_capacitor_instance_value(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &element.name,
             *value,
             model.as_deref(),
@@ -446,7 +446,7 @@ mod tests {
         };
 
         let resolved = resolve_capacitor_instance_value(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &element.name,
             *value,
             model.as_deref(),
@@ -502,7 +502,7 @@ mod tests {
         };
 
         let error = resolve_capacitor_instance_value(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &element.name,
             *value,
             model.as_deref(),

@@ -7,7 +7,7 @@ use crate::circuit::{ResistorFlickerNoise, ThermalResistorState};
 /// dimension comes from its model default, or 10 um. Exact KF=0 disables
 /// the mechanism; malformed active controls must not silently disable it.
 pub(in crate::engine::builder) fn resolve_resistor_flicker_noise(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     model_name: Option<&str>,
     instance_params: &[(String, f64)],
     temperature_kelvin: f64,
@@ -124,7 +124,7 @@ fn resolve_resistor_model_level(
     element_name: &str,
     model_name: &str,
     model_def: &crate::netlist::ModelDef,
-    eval_ctx: &crate::netlist::ParamContext,
+    eval_ctx: &ModelEvaluationContext<'_>,
 ) -> Result<i32, SimulationError> {
     for (name, value) in &model_def.string_params {
         if name.eq_ignore_ascii_case("LEVEL") {
@@ -191,7 +191,7 @@ fn resolve_level2_thermal_resistor_static_value(
     model_name: &str,
     model_def: &crate::netlist::ModelDef,
     instance_params: &[(String, f64)],
-    eval_ctx: &crate::netlist::ParamContext,
+    eval_ctx: &ModelEvaluationContext<'_>,
 ) -> Result<f64, SimulationError> {
     let resistivity = resolve_instance_or_model_param(
         instance_params,
@@ -252,11 +252,11 @@ fn resolve_level2_thermal_resistor_static_value(
 /// Material expressions are retained verbatim so `TEMP`-dependent tables and
 /// expression dependencies are reevaluated after every accepted transient
 /// step, exactly at the device's current temperature.
-pub(in crate::engine::builder) fn resolve_level2_thermal_resistor_state(
-    netlist: &Netlist,
+fn resolve_level2_thermal_resistor_state(
+    netlist: &ModelResolution<'_>,
     model_def: &crate::netlist::ModelDef,
     instance_params: &[(String, f64)],
-    eval_ctx: &crate::netlist::ParamContext,
+    eval_ctx: &ModelEvaluationContext<'_>,
     temperature_celsius: f64,
 ) -> Result<Option<ThermalResistorState>, SimulationError> {
     if !level2_requests_self_consistent_thermal_resistor(model_def, instance_params) {
@@ -335,7 +335,7 @@ pub(in crate::engine::builder) fn resolve_level2_thermal_resistor_state(
 
 pub(in crate::engine::builder) fn resolve_resistor_thermal_state(
     element_name: &str,
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     model_name: Option<&str>,
     instance_params: &[(String, f64)],
     temperature_kelvin: f64,
@@ -390,7 +390,7 @@ fn resolve_level2_resistor_electrical_subset(
     value_expr: Option<&str>,
     model_def: &crate::netlist::ModelDef,
     instance_params: &[(String, f64)],
-    eval_ctx: &crate::netlist::ParamContext,
+    eval_ctx: &ModelEvaluationContext<'_>,
 ) -> Result<ResolvedResistorBaseValue, SimulationError> {
     let uses_xyce_default = resistor_uses_xyce_default_value(instance_params);
     let mut resistance = instance_param(instance_params, &["R", "VALUE"]);
@@ -400,14 +400,14 @@ fn resolve_level2_resistor_electrical_subset(
     if resistance.is_none()
         && let Some(expr) = value_expr
     {
-        resistance = Some(
-            crate::netlist::expr::eval_expression(expr, eval_ctx).map_err(|e| {
-                SimulationError::Circuit(format!(
+        resistance = Some(eval_ctx.evaluate(expr).map_err(|error| {
+            map_model_expression_error(error, |e| {
+                format!(
                     "Resistor '{}' value expression could not be resolved: {}",
                     element_name, e
-                ))
-            })?,
-        );
+                )
+            })
+        })?);
     }
 
     if resistance.is_none() {
@@ -544,7 +544,7 @@ fn resolve_level1_model_geometry_resistance(
     element_name: &str,
     model_def: &crate::netlist::ModelDef,
     instance_params: &[(String, f64)],
-    eval_ctx: &crate::netlist::ParamContext,
+    eval_ctx: &ModelEvaluationContext<'_>,
     expression_dialect: crate::config::ExpressionDialect,
     spice_dialect: SpiceDialect,
 ) -> Result<Option<f64>, SimulationError> {
@@ -658,7 +658,7 @@ pub struct ResolvedResistorParameters {
 /// `TC2` inherit their model values (then zero), and `TEMP` inherits the
 /// active circuit temperature when the instance has no override.
 pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     element_name: &str,
     value: f64,
     value_expr: Option<&str>,
@@ -741,14 +741,14 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
             if resistance.is_none()
                 && let Some(expr) = value_expr
             {
-                resistance = Some(
-                    crate::netlist::expr::eval_expression(expr, &eval_ctx).map_err(|e| {
-                        SimulationError::Circuit(format!(
+                resistance = Some(eval_ctx.evaluate(expr).map_err(|error| {
+                    map_model_expression_error(error, |e| {
+                        format!(
                             "Resistor '{}' value expression could not be resolved: {}",
                             element_name, e
-                        ))
-                    })?,
-                );
+                        )
+                    })
+                })?);
             }
             (resistance, None)
         };
@@ -908,7 +908,7 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
 }
 
 pub(in crate::engine::builder) fn resolve_resistor_instance_value(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     element_name: &str,
     value: f64,
     value_expr: Option<&str>,
@@ -947,7 +947,7 @@ pub(in crate::engine::builder) struct ResolvedBehavioralResistorPolicy {
 /// base resistance, while model `R`, the selected temperature law, and `1/M`
 /// remain applicable.
 pub(in crate::engine::builder) fn resolve_behavioral_resistor_policy(
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     element_name: &str,
     context: ResistorResolutionContext<'_>,
 ) -> Result<ResolvedBehavioralResistorPolicy, SimulationError> {
@@ -1089,7 +1089,7 @@ mod tests {
         };
 
         let dc = resolve_resistor_instance_value(
-            netlist,
+            &ModelResolution::new(netlist, &NoAbort),
             &element.name,
             *value,
             value_expr.as_deref(),
@@ -1137,7 +1137,7 @@ mod tests {
             panic!("test element is not a resistor");
         };
         resolve_resistor_effective_parameters(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &element.name,
             *value,
             value_expr.as_deref(),
@@ -1286,7 +1286,7 @@ R1 in 0 RMOD L=2 A=1 M=2
             panic!("thermal boundary fixture is not a resistor");
         };
         let resolved_transient = resolve_resistor_effective_parameters(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &element.name,
             *value,
             value_expr.as_deref(),
@@ -1302,7 +1302,7 @@ R1 in 0 RMOD L=2 A=1 M=2
         assert_eq!(resolved_transient.reported_resistance, 2.0e-8);
         let state = resolve_resistor_thermal_state(
             "R1",
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             model.as_deref(),
             instance_params,
             crate::constants::TEMP_REFERENCE,
@@ -1449,7 +1449,7 @@ R1 a 0 0
         };
 
         let resolved = resolve_resistor_instance_value(
-            &netlist,
+            &ModelResolution::new(&netlist, &NoAbort),
             &element.name,
             *value,
             value_expr.as_deref(),

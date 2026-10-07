@@ -86,7 +86,7 @@ pub(in crate::engine::builder) struct BehavioralResistorPolicy {
 
 pub(in crate::engine::builder) fn add_behavioral_resistor(
     circuit: &mut CircuitData,
-    netlist: &Netlist,
+    netlist: &ModelResolution<'_>,
     element: &crate::netlist::Element,
     expression: &str,
     model: BehavioralResistorModel<'_>,
