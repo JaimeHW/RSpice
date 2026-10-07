@@ -61,8 +61,7 @@
 //!
 //! - A process-local `string`: a process computes in four-state and real
 //!   values, and a string is neither.
-//! - A process-local `reg` whose bounds are not literal, and an array of any
-//!   kind inside a process.
+//! - Multidimensional process-local arrays and whole-array values.
 //! - A non-constant part-select bound.
 //!
 //! Refused before this pass, and still refused: tasks and functions,
@@ -90,6 +89,7 @@
 //! twice.
 
 mod constants;
+mod local_arrays;
 mod local_storage;
 use constants::ResolvedConstants;
 
@@ -481,6 +481,7 @@ fn lower_with_analog_variables(
             allocate(),
             &mut signals,
             &array_storage,
+            &mut arrays,
             &module_scope,
             &module_constants,
             analog_variables,
@@ -520,6 +521,7 @@ fn lower_with_analog_variables(
                 allocate(),
                 &mut signals,
                 &array_storage,
+                &mut arrays,
                 scope,
                 constants,
                 &no_analog_variables,
@@ -679,6 +681,8 @@ fn lower_continuous_assign(
     time_scale: crate::time_scale::ModuleTimeScale,
 ) -> Result<CfgDigitalProcess, Vec<DigitalLoweringDiagnostic>> {
     let mut lowerer = ProcessLowerer {
+        process: None,
+        local_arrays: Vec::new(),
         constant_expression: false,
         time_scale,
         signals,
@@ -895,6 +899,7 @@ fn lower_process(
     id: DigitalProcessId,
     signals: &mut Vec<DigitalSignal>,
     arrays: &HashMap<DigitalSignalId, super::digital::DigitalArrayRef>,
+    local_arrays: &mut Vec<super::digital::DigitalArray>,
     index: &HashMap<&str, DigitalSignalId>,
     constants: &ResolvedConstants,
     analog_variables: &HashMap<SmolStr, AnalogVariable>,
@@ -902,6 +907,8 @@ fn lower_process(
     time_scale: crate::time_scale::ModuleTimeScale,
 ) -> Result<CfgDigitalProcess, Vec<DigitalLoweringDiagnostic>> {
     let mut lowerer = ProcessLowerer {
+        process: None,
+        local_arrays: Vec::new(),
         constant_expression: false,
         time_scale,
         signals,
@@ -918,6 +925,7 @@ fn lower_process(
         static_local_count: 0,
     };
 
+    lowerer.process = Some(id);
     let kind = match process.kind {
         AstKind::Always => DigitalProcessKind::Always,
         AstKind::Initial => DigitalProcessKind::Initial,
@@ -972,6 +980,7 @@ fn lower_process(
         return Err(lowerer.diagnostics);
     }
 
+    local_arrays.extend(lowerer.local_arrays);
     let function = lowerer.builder.finish(entry).map_err(|error| {
         vec![DigitalLoweringDiagnostic::invariant(
             format!("lowering process {id} produced an invalid graph: {error}"),
@@ -1028,14 +1037,14 @@ enum LoopUpdate<'a> {
     Decrement(DigitalLocalId),
 }
 
-/// A variable that lives in the process function rather than in the signal
-/// store.
+/// A lexical local represented by SSA values or shared scalar/array storage.
 struct ProcessLocal {
     /// `None` for a counter the lowering invented, which no source name can
     /// reach and which therefore cannot be shadowed or read by mistake.
     name: Option<SmolStr>,
-    /// Allocated only for deferred updates or event observation.
+    /// Stored scalar, or first cell of an array; None for an SSA local.
     shared: Option<DigitalSignalId>,
+    array: Option<(VectorBounds, super::digital::DigitalArrayRef)>,
     integer: bool,
     packed: bool,
     /// Whether the variable holds a real rather than four-state bits.
@@ -1202,6 +1211,8 @@ impl ProcessBuilder {
 }
 
 struct ProcessLowerer<'a> {
+    process: Option<DigitalProcessId>,
+    local_arrays: Vec<super::digital::DigitalArray>,
     /// Closed parameter expressions may use pure analog math intrinsics.
     constant_expression: bool,
     time_scale: crate::time_scale::ModuleTimeScale,
@@ -1368,6 +1379,7 @@ impl ProcessLowerer<'_> {
         self.locals.push(ProcessLocal {
             name,
             shared: None,
+            array: None,
             integer: false,
             packed: true,
             real: false,
@@ -1418,6 +1430,7 @@ impl ProcessLowerer<'_> {
         self.locals.push(ProcessLocal {
             name,
             shared: None,
+            array: None,
             integer: false,
             packed: false,
             real: true,
@@ -1614,6 +1627,15 @@ impl ProcessLowerer<'_> {
     /// assignments in source order, interleaving numeric and packed declarations.
     fn declare_block_locals(&mut self, block: BlockId, inner: &crate::ast::DigitalBlock) {
         let mut initializers = Vec::new();
+        let names: BTreeSet<_> =
+            inner
+                .variables
+                .iter()
+                .flat_map(|declaration| declaration.items.iter().map(|item| item.name.to_string()))
+                .chain(inner.digital_variables.iter().flat_map(|declaration| {
+                    declaration.items.iter().map(|item| item.name.to_string())
+                }))
+                .collect();
         for declaration in &inner.variables {
             // A `real` is not a narrow four-state value and does not go through
             // the width machinery at all: it is declared, initialized and read
@@ -1622,18 +1644,9 @@ impl ProcessLowerer<'_> {
             // reads one into a `real residue`).
             if matches!(declaration.var_type, crate::ast::VarType::Real) {
                 for item in &declaration.items {
-                    if !item.dimensions.is_empty() {
-                        self.error(
-                            format!(
-                                "an array `{}` inside a process has no lowered form yet",
-                                item.name
-                            ),
-                            item.span,
-                        );
-                        continue;
-                    }
                     let local =
                         self.declare_real_local(block, Some(item.name.clone()), item.span, None);
+                    self.declare_local_array(block, local, &item.dimensions, &names);
                     if let Some(init) = &item.init {
                         initializers.push((item.span.start, local, init));
                     }
@@ -1656,16 +1669,6 @@ impl ProcessLowerer<'_> {
                 }
             };
             for item in &declaration.items {
-                if !item.dimensions.is_empty() {
-                    self.error(
-                        format!(
-                            "an array `{}` inside a process has no lowered form yet",
-                            item.name
-                        ),
-                        item.span,
-                    );
-                    continue;
-                }
                 // IEEE 1364-2005 table 5-21 makes an `integer` signed, and
                 // gives it no qualifier with which to say otherwise. So a loop
                 // counter compares signed, and `i < 0` can be true.
@@ -1681,6 +1684,7 @@ impl ProcessLowerer<'_> {
                     None,
                 );
                 self.locals[usize::from(local)].integer = true;
+                self.declare_local_array(block, local, &item.dimensions, &names);
                 if let Some(init) = &item.init {
                     initializers.push((item.span.start, local, init));
                 }
@@ -1704,16 +1708,6 @@ impl ProcessLowerer<'_> {
             };
             let Some(bounds) = bounds else { continue };
             for item in &declaration.items {
-                if !item.dimensions.is_empty() {
-                    self.error(
-                        format!(
-                            "an array `{}` inside a process has no lowered form yet",
-                            item.name
-                        ),
-                        item.span,
-                    );
-                    continue;
-                }
                 let local = self.declare_local(
                     block,
                     Some(item.name.clone()),
@@ -1723,6 +1717,7 @@ impl ProcessLowerer<'_> {
                     None,
                 );
                 self.locals[usize::from(local)].packed = declaration.range.is_some();
+                self.declare_local_array(block, local, &item.dimensions, &names);
                 if let Some(init) = &item.init {
                     initializers.push((item.span.start, local, init));
                 }
@@ -1732,6 +1727,10 @@ impl ProcessLowerer<'_> {
         // the authored order even though the AST separates declaration kinds.
         initializers.sort_by_key(|(offset, _, _)| *offset);
         for (_, local, init) in initializers {
+            if self.locals[usize::from(local)].array.is_some() {
+                self.initialize_local_array(block, local, init);
+                continue;
+            }
             let value = if self.local_is_real(local) {
                 self.real_expression(block, init)
             } else {
@@ -3009,8 +3008,10 @@ impl ProcessLowerer<'_> {
     }
 
     fn digital_array(&self, name: &str) -> Option<super::digital::DigitalArrayRef> {
-        if self.lookup_local(name).is_some() {
-            return None;
+        if let Some(local) = self.lookup_local(name) {
+            return self.locals[usize::from(local)]
+                .array
+                .map(|(_, array)| array);
         }
         self.index
             .get(name)
@@ -3020,7 +3021,7 @@ impl ProcessLowerer<'_> {
 
     fn read_dependencies(&self, name: &str) -> Vec<DigitalSignalId> {
         if let Some(local) = self.lookup_local(name) {
-            return self.locals[usize::from(local)].shared.into_iter().collect();
+            return self.local_read_dependencies(local);
         }
         if let Some(array) = self.digital_array(name) {
             array

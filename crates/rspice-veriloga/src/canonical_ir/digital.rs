@@ -378,6 +378,9 @@ pub struct DigitalArray {
 /// A static lexical declaration whose value needs scheduler-visible storage.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DigitalLocalStorage {
+    /// Logical unpacked index; None identifies a scalar declaration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub element: Option<i64>,
     pub process: DigitalProcessId,
     pub declaration: super::ids::DigitalLocalId,
     pub name: SmolStr,

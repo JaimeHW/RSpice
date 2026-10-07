@@ -53,6 +53,8 @@ pub(super) fn scalar(
     let mut probes = Vec::new();
     let mut signals = Vec::new();
     let mut lowerer = ProcessLowerer {
+        process: None,
+        local_arrays: Vec::new(),
         constant_expression: true,
         time_scale,
         signals: &mut signals,
@@ -228,6 +230,8 @@ fn resolve_one(
     let mut probes = Vec::new();
     let mut signals = Vec::new();
     let mut lowerer = ProcessLowerer {
+        process: None,
+        local_arrays: Vec::new(),
         constant_expression: true,
         time_scale,
         signals: &mut signals,
@@ -391,6 +395,8 @@ pub(super) fn initializer(
     let mut probes = Vec::new();
     let mut signals = Vec::new();
     let mut lowerer = ProcessLowerer {
+        process: None,
+        local_arrays: Vec::new(),
         constant_expression: true,
         time_scale,
         signals: &mut signals,
@@ -472,12 +478,21 @@ fn collect_parameters(
         DigitalStatement::Null(_) => {}
         DigitalStatement::Block(block) => {
             let mut locals = locals.clone();
+            locals.extend(block.variables.iter().flat_map(|declaration| {
+                declaration.items.iter().map(|item| item.name.to_string())
+            }));
+            locals.extend(block.digital_variables.iter().flat_map(|declaration| {
+                declaration.items.iter().map(|item| item.name.to_string())
+            }));
             for declaration in &block.variables {
                 for item in &declaration.items {
                     if let Some(value) = &item.init {
                         collect_visible(value, &locals, reads);
                     }
-                    locals.insert(item.name.to_string());
+                    for dimension in &item.dimensions {
+                        collect_visible(&dimension.start, &locals, reads);
+                        collect_visible(&dimension.end, &locals, reads);
+                    }
                 }
             }
             for declaration in &block.digital_variables {
@@ -489,7 +504,10 @@ fn collect_parameters(
                     if let Some(value) = &item.init {
                         collect_visible(value, &locals, reads);
                     }
-                    locals.insert(item.name.to_string());
+                    for dimension in &item.dimensions {
+                        collect_visible(&dimension.start, &locals, reads);
+                        collect_visible(&dimension.end, &locals, reads);
+                    }
                 }
             }
             for child in &block.statements {

@@ -14,6 +14,9 @@ impl ProcessLowerer<'_> {
         // Read every startup SSA definition before changing any local's representation.
         let initial: Vec<_> = required
             .into_iter()
+            .filter(|local| self.locals[usize::from(*local)].shared.is_none())
+            .collect::<Vec<_>>()
+            .into_iter()
             .map(|local| (local, self.read_local(entry, local)))
             .collect();
         for (local, value) in initial {
@@ -31,6 +34,7 @@ impl ProcessLowerer<'_> {
             let signal = DigitalSignalId::from(self.signals.len());
             self.signals.push(DigitalSignal {
                 local: Some(DigitalLocalStorage {
+                    element: None,
                     process,
                     declaration: local,
                     name,
@@ -269,7 +273,7 @@ impl ProcessLowerer<'_> {
         self.scoped_reads(statement, &mut locals, &mut module);
         locals
             .into_iter()
-            .filter_map(|local| self.locals[usize::from(local)].shared)
+            .flat_map(|local| self.local_read_dependencies(local))
             // Resolve module bindings directly: an outer shadow must not replace
             // a read already resolved in a nested lexical region.
             .chain(module.into_iter().flat_map(|name| {

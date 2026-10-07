@@ -513,6 +513,7 @@ pub struct ElaboratedDigitalSignal {
 /// consults the module's signals.
 #[derive(Debug, Clone)]
 pub struct AnalyzedProcessLocal {
+    pub unpacked: Option<VectorBounds>,
     pub name: SmolStr,
     pub kind: ProcessLocalKind,
     /// Packed range of a `reg`, `None` for a scalar or a non-vector type.
@@ -1660,19 +1661,14 @@ impl SemanticAnalyzer {
                 VarType::String => ProcessLocalKind::String,
             };
             for item in &declaration.items {
-                if !item.dimensions.is_empty() {
-                    self.record_error_at(
-                        SemanticErrorKind::UnsupportedFeature(format!(
-                            "array dimensions on the process-local `{}` are not supported yet",
-                            item.name
-                        )),
-                        item.span,
-                    );
+                let unpacked = self.resolve_unpacked_range(&item.dimensions, &item.name);
+                if !item.dimensions.is_empty() && unpacked.is_none() {
                     continue;
                 }
                 self.push_process_local(
                     &mut scope,
                     AnalyzedProcessLocal {
+                        unpacked,
                         name: item.name.clone(),
                         kind,
                         range: None,
@@ -1688,20 +1684,14 @@ impl SemanticAnalyzer {
         for declaration in &block.digital_variables {
             let range = self.resolve_vector_range(declaration.range.as_ref(), "reg");
             for item in &declaration.items {
-                if !item.dimensions.is_empty() {
-                    self.record_error_at(
-                        SemanticErrorKind::UnsupportedFeature(format!(
-                            "unpacked array dimensions on the process-local `{}` are not \
-                             supported yet; declare a packed vector instead",
-                            item.name
-                        )),
-                        item.span,
-                    );
+                let unpacked = self.resolve_unpacked_range(&item.dimensions, &item.name);
+                if !item.dimensions.is_empty() && unpacked.is_none() {
                     continue;
                 }
                 self.push_process_local(
                     &mut scope,
                     AnalyzedProcessLocal {
+                        unpacked,
                         name: item.name.clone(),
                         kind: ProcessLocalKind::Reg,
                         range,
@@ -1798,9 +1788,12 @@ impl SemanticAnalyzer {
             }
             DigitalLValue::Identifier { name, span } => {
                 self.check_assignable(name, *span, signals, index, procedural);
-                if let Resolution::Digital(position) = self.resolve_digital_name(name, index)
-                    && signals[position].unpacked.is_some()
-                {
+                let unpacked = match self.resolve_digital_name(name, index) {
+                    Resolution::Digital(position) => signals[position].unpacked.is_some(),
+                    Resolution::ProcessLocal(local) => local.unpacked.is_some(),
+                    _ => false,
+                };
+                if unpacked {
                     self.record_error_at(SemanticErrorKind::UnsupportedFeature(format!(
                         "whole-array assignment to `{name}` requires array-valued assignment lowering"
                     )), *span);
@@ -1884,6 +1877,23 @@ impl SemanticAnalyzer {
         index: &HashMap<SmolStr, usize>,
     ) {
         let range = match self.resolve_digital_name(&select.name, index) {
+            Resolution::ProcessLocal(local)
+                if local.unpacked.is_some() && local.kind.is_selectable() =>
+            {
+                let range = local.range.or_else(|| {
+                    (local.kind == ProcessLocalKind::Integer).then_some(INTEGER_BOUNDS)
+                });
+                let Some(range) = range else {
+                    self.record_error_at(
+                        SemanticErrorKind::InvalidExpression(format!(
+                            "packed selection of `{}` requires vector or integer elements; scalar elements have no selectable bits",
+                            select.name
+                        )), select.span,
+                    );
+                    return;
+                };
+                range
+            }
             Resolution::Digital(position)
                 if signals[position].unpacked.is_some() && !signals[position].class.is_real() =>
             {
@@ -2052,6 +2062,7 @@ impl SemanticAnalyzer {
         bound: SelectBound,
     ) -> Option<(VectorBounds, i64)> {
         let unpacked = match self.resolve_digital_name(name, index) {
+            Resolution::ProcessLocal(local) => local.unpacked.is_some(),
             Resolution::Digital(position) => signals[position].unpacked.is_some(),
             Resolution::Analog(SymbolKind::Variable) => self.arrays.contains_key(name),
             _ => false,

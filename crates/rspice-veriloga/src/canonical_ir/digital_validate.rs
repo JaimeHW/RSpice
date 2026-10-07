@@ -227,7 +227,8 @@ impl CanonicalDigitalPlan {
                 if !signal.procedurally_assignable
                     || local.name.is_empty()
                     || self.process(local.process).is_none()
-                    || !local_declarations.insert((local.process, local.declaration))
+                    || (local.element.is_none()
+                        && !local_declarations.insert((local.process, local.declaration)))
                 {
                     return Err(error(
                         "digital local storage requires a unique declaration and valid owning process",
@@ -301,17 +302,34 @@ impl CanonicalDigitalPlan {
             let first = self
                 .signal(array.storage.base)
                 .ok_or_else(|| error("digital array names absent storage"))?;
+            if let Some(local) = &first.local {
+                if !local_declarations.insert((local.process, local.declaration)) {
+                    return Err(error(
+                        "digital local arrays require unique declaration identities",
+                    ));
+                }
+            }
             for slot in range {
                 let cell = self
                     .signal(super::ids::DigitalSignalId::new(slot))
                     .ok_or_else(|| error("digital array exceeds declared signal storage"))?;
-                if cell.local.is_some() {
-                    return Err(error(
-                        "digital local storage cannot alias module array elements",
-                    ));
-                }
                 let occupied = &mut array_cells[slot as usize];
                 let index = array.storage.lower + i64::from(slot - array.storage.base.index());
+                let local_matches = match (&first.local, &cell.local) {
+                    (None, None) => true,
+                    (Some(first), Some(local)) => {
+                        local.process == first.process
+                            && local.declaration == first.declaration
+                            && local.name == first.name
+                            && local.element == Some(index)
+                    }
+                    _ => false,
+                };
+                if !local_matches {
+                    return Err(error(
+                        "digital array cells have inconsistent local ownership or indices",
+                    ));
+                }
                 if *occupied
                     || !cell.procedurally_assignable
                     || cell.name != format!("{}[{index}]", array.name)
@@ -335,6 +353,15 @@ impl CanonicalDigitalPlan {
                 }
                 *occupied = true;
             }
+        }
+        if self.signals.iter().enumerate().any(|(slot, signal)| {
+            signal
+                .local
+                .as_ref()
+                .is_some_and(|local| local.element.is_some())
+                && !array_cells[slot]
+        }) {
+            return Err(error("digital local array element has no owning array"));
         }
         for (index, probe) in self.analog_probes.iter().enumerate() {
             if usize::from(probe.id) != index

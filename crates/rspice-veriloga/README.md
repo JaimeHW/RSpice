@@ -410,8 +410,8 @@ instance linking. Deferred bit targets capture their selector at scheduling
 and merge into current storage when delivered. Real locals accept value-change
 events; edge events require integral values. Artifact validation rejects
 invalid local ownership, duplicate declaration identities, module-array aliases
-and real edge subscriptions. Local arrays and hierarchical local references
-remain open; Wasm helper ABI remains 20. Continuous net-assignment selectors must
+and real edge subscriptions. Hierarchical local references remain open;
+local arrays are implemented in schema 86. Wasm helper ABI remains 20. Continuous net-assignment selectors must
 be constant under VAMS-2023 A.8.5; runtime selectors are language errors, rather
 than a missing dynamic-driver execution path. Parameter-based constant selectors
 are supported. Runtime bit reads and procedural bit writes remain supported.
@@ -431,6 +431,22 @@ unknown/high-impedance operand bits produce an all-unknown result. Real powers
 keep their existing real arithmetic path. Chained powers now associate left to
 right as VAMS-2023 4.2.2 specifies; explicit parentheses preserve grouping.
 The shared digital evaluator also supplies powers in constant select bounds.
+Wasm helper ABI remains 20.
+Schema 86 adds one-dimensional process-local reg, integer and real arrays,
+using ordinary signal cells and existing array read/write and event operations.
+Each cell retains the owning process, lexical declaration and logical element
+index. Ascending/descending bounds, packed selections, X/Z, type conversions,
+deferred target capture and per-element events follow the module-array paths.
+Static storage survives waits and process restart, with independent instances.
+Implicit sensitivity includes every cell of arrays read in its lexical scope.
+Local array bounds use exact constant evaluation, including parameters; a local
+shadow cannot be replaced by a module parameter. Arrays retain the existing
+65,536-element storage limit. Multidimensional shapes remain open.
+RSpice's declaration-initializer extension accepts complete element patterns in
+authored index order, initializes all declarations to typed defaults first,
+and evaluates each pattern before publishing its values. Block declaration
+initializers remain an extension to VAMS-2023 A.2.8. Artifact validation rejects
+orphan cells, inconsistent element identities and aliased local declarations.
 Wasm helper ABI remains 20.
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
 initializer patterns, multidimensional shapes, full parameter-dependent

@@ -2448,14 +2448,14 @@ module variable_sampler(p,q);
  end
  initial begin : sample
    reg signed [4:0] initial_gain=-(2 ** 4);
-   integer local_gain=initial_gain;
-   local_gain[3:2]<=#1 2'b10;
+   integer local_gain[1:0]='{initial_gain,100};
+   local_gain[1][3:2]<=#1 2'b10;
    period[4]=1.537e-9; enabled=1; index=-2;
    startup_ok=(measured[index]-4*LOAD/(1000+LOAD)<1e-8)
      && (measured[index]-4*LOAD/(1000+LOAD)>-1e-8);
-   @(local_gain); index=0; selection_bit=0; index[selection_bit]=1;
-   gain[index]=local_gain**1; selection_bit=2;
-   local_gain[selection_bit]=1; gain[index][selection_bit]=local_gain[selection_bit]; index=-1;
+   @(local_gain[1]); index=0; selection_bit=0; index[selection_bit]=1;
+   gain[index]=local_gain[1]**1; selection_bit=2;
+   local_gain[1][selection_bit]=1; gain[index][selection_bit]=local_gain[1][selection_bit]; index=-1;
    selected[-1][15]=1; selection_word=-1; selection_bit=15;
    q=startup_ok && (count==-3) && (adjustment[-2]==-1)
      && count[31] && (count[3:0]==13)

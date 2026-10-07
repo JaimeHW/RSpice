@@ -2858,14 +2858,11 @@ fn no_digital_lowering_refusal_reaches_the_author_as_an_internal_error() {
             "process-local `string`",
             "Unsupported feature: ",
         ),
-        // An unpacked array inside a process: the analyzer owns this one and
-        // the lowering's own array arms are unreachable behind it. The row
-        // stays because the suite's subject is what an author is told, not
-        // which pass says it.
+        // One-dimensional local arrays execute; multidimensional layout is pending.
         (
             "    reg q;\n\
-             \x20   initial begin : work reg [1:0] m [0:3]; q = 1'b0; end",
-            "unpacked array dimensions on the process-local `m`",
+             \x20   initial begin : work reg [1:0] m [0:3][0:1]; q = 1'b0; end",
+            "multidimensional discrete array `m`",
             "Unsupported feature: ",
         ),
         // `@*` over a statement that reads nothing would never resume.
@@ -7186,4 +7183,167 @@ endmodule
     assert_eq!(h.get("driven"), "00011001");
     expect_finished(h.resume(0, &state));
     assert_eq!(h.get("recomputed"), "00011001");
+}
+
+#[test]
+fn local_arrays_preserve_typed_elements_deferred_targets_and_events() {
+    let mut h = Harness::from_source(
+        r#"
+module local_arrays;
+ parameter integer HI=5, LO=4;
+ integer slot;
+ reg [7:0] captured, observed, altered_unknown, shadow_value, invalid, finished, implicit_value;
+ reg [31:0] signed_value, rounded_value;
+ reg ascending_bit, defaults_ok;
+ real real_result;
+ initial begin : work
+   integer ints[3:2]='{-1,2.5};
+   reg signed [7:0] memory[HI:LO]='{-2,8'bx001z010};
+   reg [0:7] ascending[-1:0]='{8'h80,0};
+   real gains[-2:-1]='{0.5,-2.0};
+   integer default_int[0:0];
+   real default_real[0:0];
+   signed_value=ints[3]; rounded_value=ints[2];
+   defaults_ok=(default_int[0]===32'bx) && (default_real[0]==0.0);
+   ascending_bit=ascending[-1][0];
+   slot=HI; memory[slot][3:0]<=4'h3; slot=LO;
+   memory[5][7:4]=4'ha; memory[4][7:4]=4'h4;
+   memory[99]=0; memory[1'bx]=0; invalid=memory[99];
+   altered_unknown=memory[4];
+   gains[-1]<=gains[-2]+1.25;
+   begin : nested
+     integer memory[0:1]='{11,12};
+     shadow_value=memory[1];
+   end
+   captured=#1 memory[5];
+   observed=memory[5]; real_result=gains[-1];
+   memory[4]<=#1 8'h66;
+   @(memory[4]); finished=memory[4];
+   @* implicit_value=memory[slot]+ints[2];
+ end
+endmodule
+"#,
+    );
+    h.plan = serde_json::from_slice(&serde_json::to_vec(&h.plan).unwrap()).unwrap();
+    h.plan.validate().unwrap();
+    let array = h.plan.arrays[0].storage;
+    let first = usize::from(array.base);
+    for corrupt in 0..4 {
+        let mut invalid = h.plan.clone();
+        match corrupt {
+            0 => {
+                invalid.arrays.remove(0);
+            }
+            1 => invalid.signals[first].local.as_mut().unwrap().element = Some(99),
+            2 => {
+                invalid.signals[first + 1]
+                    .local
+                    .as_mut()
+                    .unwrap()
+                    .declaration = 999_usize.into()
+            }
+            _ => invalid.signals[first].local.as_mut().unwrap().element = None,
+        }
+        assert!(
+            invalid.validate().is_err(),
+            "malformed local array {corrupt}"
+        );
+    }
+    let first_wait = expect_suspended(h.start(0));
+    assert_eq!(h.get("signed_value"), "1".repeat(32));
+    assert_eq!(h.get("rounded_value"), format!("{:032b}", 3));
+    assert_eq!(h.get("defaults_ok"), "1");
+    assert_eq!(h.get("ascending_bit"), "1");
+    assert_eq!(h.get("altered_unknown"), "0100z010");
+    assert_eq!(h.get("invalid"), "xxxxxxxx");
+    assert_eq!(h.get("shadow_value"), "00001100");
+    h.flush_nonblocking();
+    let second = expect_suspended(h.resume(0, first_wait.resume_state()));
+    assert_eq!(
+        h.get("captured"),
+        "10101110",
+        "blocking RHS precedes the NBA"
+    );
+    assert_eq!(
+        h.get("observed"),
+        "10100011",
+        "captured word selector and live packed merge"
+    );
+    assert_eq!(h.get_real("real_result"), 1.75);
+    let (DigitalWaitRequest::Expressions(mut event), state) = second.into_parts() else {
+        panic!("local array element event");
+    };
+    let updates = std::mem::take(&mut h.store.deferred);
+    assert_eq!(updates.len(), 1);
+    let element = h
+        .plan
+        .signals
+        .iter()
+        .find(|signal| {
+            signal
+                .local
+                .as_ref()
+                .is_some_and(|local| local.name == "memory" && local.element == Some(4))
+        })
+        .unwrap()
+        .id;
+    apply_deferred(&h.plan, &mut h.store, &updates[0]).unwrap();
+    let mut scratch = rspice_veriloga::canonical_ir::digital_eval::DigitalEvalScratch::new();
+    assert!(
+        event
+            .observe(&h.plan, element, &mut h.store, &mut scratch)
+            .unwrap()
+    );
+    let third = expect_suspended(h.resume(0, &state));
+    assert_eq!(h.get("finished"), "01100110");
+    let DigitalWaitRequest::Event(terms) = third.wait() else {
+        panic!("implicit local array dependencies");
+    };
+    assert_eq!(
+        terms.len(),
+        5,
+        "two memory cells, two integer cells and slot"
+    );
+    assert!(terms.iter().any(|term| term.signal == element));
+    expect_finished(h.resume(0, third.resume_state()));
+    assert_eq!(h.get("implicit_value"), "01101001");
+}
+
+#[test]
+fn local_arrays_remain_static_and_independent_in_linked_instances() {
+    let mut h = Harness::from_module(
+        r#"
+module counters(output reg [31:0] q, output real r);
+ parameter integer FIRST=-2, LAST=-1;
+ always begin : work
+   integer counts[FIRST:LAST]='{1,100};
+   real samples[1:0]='{0.5,0.0};
+   #1;
+   counts[FIRST]=counts[FIRST]+1;
+   samples[1]=samples[1]+0.25;
+   q=counts[FIRST]; r=samples[1];
+ end
+endmodule
+module top; counters a(); counters b(); endmodule
+"#,
+        Some("top"),
+    );
+    h.plan = serde_json::from_slice(&serde_json::to_vec(&h.plan).unwrap()).unwrap();
+    h.plan.validate().unwrap();
+    let mut states: Vec<_> = (0..2)
+        .map(|process| expect_suspended(h.start(process)).resume_state().clone())
+        .collect();
+    for (process, name, expected, real) in [
+        (0, "a", 2, 0.75),
+        (0, "a", 3, 1.0),
+        (1, "b", 2, 0.75),
+        (0, "a", 4, 1.25),
+    ] {
+        states[process] = expect_suspended(h.resume(process, &states[process]))
+            .resume_state()
+            .clone();
+        assert_eq!(h.get(&format!("{name}.q")), format!("{expected:032b}"));
+        assert_eq!(h.get_real(&format!("{name}.r")), real);
+    }
+    assert_eq!(h.get("b.q"), format!("{:032b}", 2));
 }
