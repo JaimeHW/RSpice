@@ -31,7 +31,7 @@
       "id": "C04",
       "status": "in_progress",
       "requirement": "Control execution",
-      "qualification_task": "Complete the remaining 22 control dispositions, table document/adapter integration and broader row-option qualification, producer dependencies, scalar/complex presentation and bounded orchestration. Delivered parser/control contracts are indexed by the implementation plan and existing_evidence. Latest: 824189732 reduces long startup-card allocations, df8a9bd02 shares authored numeric binding, and 289e39df2 completes root IC/NODESET/INITCOND forward references with lexical device values, captured source bindings, instance expressions, ordered publication, exact sampling, physical errors and cancellation. core-forward-startup-windows-20261006.json records native/CLI/optimized-WASM tests and allocation-growth measurements. Earlier-card/eager-parameter temperature cases, general statistical/runtime binding, further physical-override combinations, inner-loop cancellation, general graph/binding complexity and broader qualification remain open. Prior compiler/runner access violations remain unresolved C14 causes; CLI runtime qualification uses Rust 1.95."
+      "qualification_task": "Complete the remaining 22 control dispositions, typed table document/export integration, broader option/binding qualification, producer dependencies and bounded orchestration. Core table dispatch/presentation is delivered by b6d545304; cacddf36c aligns circuit/noise temperatures, 33c176b7a preserves only executed option overrides, and d7f95d93a retains frequency/control tables during textual expansion. core-control-frequency-data-windows-20261006.json records independent equations, native/CLI/optimized-WASM evidence, atomic publication, budgets and explicit remaining adapter gaps. Preserve the earlier parser contracts indexed in the plan and existing_evidence. Broader earlier-card/eager-parameter temperature cases, statistical/runtime binding, physical overrides, cancellation/complexity and C14 compiler/runner causes remain open."
     },
     {
       "id": "C05",
@@ -504,7 +504,9 @@
     "tests/testdata/qualification/core-startup-temperature-recovery-windows-20261006.json",
     "tests/testdata/qualification/core-forward-startup-windows-20261006.json",
     "tests/forward_startup.rs",
-    "tests/startup_card_allocations.rs"
+    "tests/startup_card_allocations.rs",
+    "tests/frequency_data_expansion.rs",
+    "tests/testdata/qualification/core-control-frequency-data-windows-20261006.json"
   ],
   "open_inventory_tasks": [
     "Enumerate every per-instance predicate and pair it with supported/unsupported numerical fixtures; family declarations alone are insufficient.",

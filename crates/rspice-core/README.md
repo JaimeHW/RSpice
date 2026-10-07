@@ -529,6 +529,9 @@ by control commands survive as overrides during source replay. Circuit equations
 and noise densities use the same temperature; the noise fallback applies to
 unresolved rows without a temperature option. Table control publication through
 the CLI/WASM typed-document adapters remains an open implementation-plan slice.
+Textual multi-run expansion preserves tables needed by frequency/control consumers,
+including shared tables and ALTER variants. Scoped qualification is recorded in
+`tests/testdata/qualification/core-control-frequency-data-windows-20261006.json`.
 
 The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and
 the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.
