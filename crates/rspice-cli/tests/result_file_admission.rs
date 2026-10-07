@@ -24,12 +24,11 @@ fn reader(source: &Path, destination: &Path, operation: &str) -> Command {
 }
 
 #[test]
-fn every_result_format_enforces_its_byte_limit_before_decoding() {
+fn every_result_format_enforces_byte_and_retained_value_limits() {
     let dir = test_dir("result_file_bytes");
     let grid = dir.join("grid.csv");
     std::fs::write(&grid, "time,D(clk)\n0,0\n1e-9,1\n").unwrap();
     let config = dir.join("limit.toml");
-    std::fs::write(&config, "[resources]\nmax_external_data_bytes=16\n").unwrap();
     for (format, extension) in [
         ("raw", "raw"),
         ("ascii", "ascii"),
@@ -58,29 +57,35 @@ fn every_result_format_enforces_its_byte_limit_before_decoding() {
         }
         let original = std::fs::read(&source).unwrap();
         assert!(original.len() > 16);
-        for operation in ["compare", "bless", "csv", "vcd"] {
-            let destination = dir.join(format!("destination.{extension}"));
-            std::fs::write(&destination, "preserve destination").unwrap();
-            let output = reader(&source, &destination, operation)
-                .arg("--config")
-                .arg(&config)
-                .output()
-                .unwrap();
-            assert_eq!(
-                output.status.code(),
-                Some(75),
-                "{format}, {operation}: {output:?}"
-            );
-            let report: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
-            assert_eq!(report["error"]["code"], "resource_limit");
-            assert_eq!(report["error"]["resource"], "external_data_bytes");
-            assert_eq!(report["error"]["limit"], 16);
-            assert_eq!(report["error"]["path"], source.to_str().unwrap());
-            assert_eq!(
-                std::fs::read_to_string(&destination).unwrap(),
-                "preserve destination"
-            );
-            assert_eq!(std::fs::read(&source).unwrap(), original);
+        for (resource, limit) in [("max_external_data_bytes", 16), ("max_result_values", 1)] {
+            std::fs::write(&config, format!("[resources]\n{resource}={limit}\n")).unwrap();
+            for operation in ["compare", "bless", "csv", "vcd"] {
+                let destination = dir.join(format!("destination.{extension}"));
+                std::fs::write(&destination, "preserve destination").unwrap();
+                let output = reader(&source, &destination, operation)
+                    .arg("--config")
+                    .arg(&config)
+                    .output()
+                    .unwrap();
+                assert_eq!(
+                    output.status.code(),
+                    Some(75),
+                    "{format}, {resource}, {operation}: {output:?}"
+                );
+                let report: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+                assert_eq!(report["error"]["code"], "resource_limit");
+                assert_eq!(
+                    report["error"]["resource"],
+                    resource.strip_prefix("max_").unwrap()
+                );
+                assert_eq!(report["error"]["limit"], limit);
+                assert_eq!(report["error"]["path"], source.to_str().unwrap());
+                assert_eq!(
+                    std::fs::read_to_string(&destination).unwrap(),
+                    "preserve destination"
+                );
+                assert_eq!(std::fs::read(&source).unwrap(), original);
+            }
         }
     }
 }
@@ -137,6 +142,46 @@ fn fifo_inputs_fail_promptly_without_waiting_for_a_writer() {
                 std::fs::read_to_string(&destination).unwrap(),
                 "preserve destination"
             );
+        }
+    }
+}
+
+#[test]
+fn table_result_limits_count_both_complex_components_and_allow_exact_bounds() {
+    let dir = test_dir("complex_result_limits");
+    let grid = dir.join("grid.csv");
+    std::fs::write(&grid, "frequency,Re(V(out)),Im(V(out))\n1,2,3\n2,4,5\n").unwrap();
+    let config = dir.join("limit.toml");
+    for format in ["csv", "tsv", "json", "hdf5"] {
+        let extension = if format == "hdf5" { "h5" } else { format };
+        let source = dir.join(format!("source.{extension}"));
+        let output = reader(&grid, &source, format).output().unwrap();
+        assert!(output.status.success(), "{format}: {output:?}");
+        let destination = dir.join("destination.json");
+        for limit in [5, 6] {
+            std::fs::write(&config, format!("[resources]\nmax_result_values={limit}\n")).unwrap();
+            std::fs::write(&destination, "preserve output").unwrap();
+            let output = reader(&source, &destination, "json")
+                .arg("--config")
+                .arg(&config)
+                .output()
+                .unwrap();
+            if limit == 5 {
+                assert_eq!(output.status.code(), Some(75), "{format}: {output:?}");
+                let report: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+                assert_eq!(report["error"]["resource"], "result_values");
+                assert_eq!(report["error"]["requested"], 6);
+                assert_eq!(
+                    std::fs::read_to_string(&destination).unwrap(),
+                    "preserve output"
+                );
+            } else {
+                assert!(output.status.success(), "{format}: {output:?}");
+                let table = common::read_json(&destination);
+                assert_eq!(table["scale"]["values"], serde_json::json!([1.0, 2.0]));
+                assert_eq!(table["signals"][0]["real"], serde_json::json!([2.0, 4.0]));
+                assert_eq!(table["signals"][0]["imag"], serde_json::json!([3.0, 5.0]));
+            }
         }
     }
 }

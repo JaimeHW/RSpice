@@ -200,6 +200,25 @@ pub(crate) fn read_input_bytes_limited(path: &Path, limit: usize) -> Result<Vec<
 /// stated on both sides of the boundary a file crosses.
 pub(crate) const MIN_RESULT_SAMPLES: usize = 1;
 
+fn enforce_table_value_limits(
+    path: &Path,
+    requested: usize,
+    limits: rspice_core::ResourceLimits,
+) -> Result<(), CliError> {
+    enforce_resource_limit(
+        path,
+        rspice_core::ResourceKind::ExternalDataValues,
+        requested,
+        limits.max_external_data_values,
+    )?;
+    enforce_resource_limit(
+        path,
+        rspice_core::ResourceKind::ResultValues,
+        requested,
+        limits.max_result_values,
+    )
+}
+
 fn validate_table_shape(
     path: &Path,
     table: ExportTable,
@@ -221,12 +240,7 @@ fn validate_table_shape(
             ColumnData::Complex { real, imag } => real.len().saturating_add(imag.len()),
         });
     }
-    enforce_resource_limit(
-        path,
-        rspice_core::ResourceKind::ExternalDataValues,
-        retained_values,
-        resource_limits.max_external_data_values,
-    )?;
+    enforce_table_value_limits(path, retained_values, resource_limits)?;
     validate_values(path, &table.scale_name, "scale", &table.scale)?;
     let expected = table.scale.len();
     for column in &table.columns {
@@ -641,12 +655,7 @@ fn parse_delimited(
         }
 
         parsed_values = parsed_values.saturating_add(fields.len());
-        enforce_resource_limit(
-            path,
-            rspice_core::ResourceKind::ExternalDataValues,
-            parsed_values,
-            resource_limits.max_external_data_values,
-        )?;
+        enforce_table_value_limits(path, parsed_values, resource_limits)?;
 
         scale.push(parse(&fields[0], &header[0])?);
         for (i, field) in fields.iter().skip(1).enumerate() {
@@ -790,12 +799,7 @@ fn parse_json(
             .as_array()
             .ok_or_else(|| conversion_error(path, format!("'{}' is not an array", what)))?;
         let requested = parsed_values.get().saturating_add(values.len());
-        enforce_resource_limit(
-            path,
-            rspice_core::ResourceKind::ExternalDataValues,
-            requested,
-            resource_limits.max_external_data_values,
-        )?;
+        enforce_table_value_limits(path, requested, resource_limits)?;
         parsed_values.set(requested);
         values
             .iter()

@@ -649,6 +649,8 @@ checked. HDF5 decoding uses the same bounded, owned input bytes.
 Typed JSON imports validate the declared schema, version, and full retained
 payload before selecting or converting data. Value budgets include event
 histories and other retained evidence omitted from the selected output.
+For tables, `max_result_values` counts coordinate values and both components
+of complex samples.
 
 `convert --variables` matches names without case sensitivity. A qualified name
 such as `V(out)` or `D(clk)` selects that exact signal. Bare aliases must be
