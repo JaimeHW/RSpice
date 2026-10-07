@@ -887,6 +887,25 @@ class TestPeriodicResults:
 
 
 class TestCompressedTransientResult:
+    def test_continuous_measurement_streams_survive_pickle(self, engine):
+        deck = rspice.Netlist.parse(
+            "* Continuous compressed measurements\n"
+            "V1 in 0 SIN(0 1 1k)\nR1 in out 1k\nC1 out 0 100n\n"
+            ".MEASURE TRAN_CONT sample FIND V(out) AT=173u\n"
+            ".MEASURE TRAN_CONT crossings WHEN V(out)=0.25 CROSS=1\n.END\n"
+        )
+        original = engine.run_tran_compressed(
+            deck, stop_time=3e-3, max_step=1e-4, abs_tol=0.1, rel_tol=0.1
+        )
+        assert original.num_points < original.input_points
+        analog = original.__reduce__()[1][4]
+        assert analog[0] == 5
+        streams = analog[9]
+        assert len(streams) == 2
+        assert len(streams[0][1]) == 1
+        assert len(streams[1][1]) > 1
+        assert round_trip(original).__reduce__()[1][4][9] == streams
+
     def test_waveforms_and_interpolation_survive(self, engine, analysis_netlist):
         original = engine.run_tran_compressed(
             analysis_netlist, stop_time=2e-3, max_step=2e-5
@@ -1006,6 +1025,7 @@ class TestCompressedTransientResult:
             fourier,
             measurements,
             buses,
+            continuous_measurements,
         ) = state[-2]
         compression_report = state[-1]
         tail = (
@@ -1016,6 +1036,7 @@ class TestCompressedTransientResult:
             fourier,
             measurements,
             buses,
+            continuous_measurements,
         )
         legacy = (2, step_sizes, *tail)
         with pytest.raises(
@@ -1027,9 +1048,7 @@ class TestCompressedTransientResult:
         with pytest.raises(ValueError, match="unsupported compressed-transient analog"):
             unpickler(*state[:-2], future, compression_report)
 
-        # The version has to agree with the shape: a nine-field state is
-        # version 4 and an eight-field one is version 3, so a state carrying
-        # the other's number is refused rather than read as either.
+        # Version 5 has ten fields; the older versions have distinct shapes.
         mismatched = (3, step_sizes, *tail)
         with pytest.raises(ValueError, match="unsupported compressed-transient analog"):
             unpickler(*state[:-2], mismatched, compression_report)
@@ -1037,9 +1056,15 @@ class TestCompressedTransientResult:
         # A state written before the bus contract is read, not refused: it is
         # this state with no bus table, and nothing that wrote one could
         # declare a bus.
-        without_buses = (3, step_sizes, *tail[:-1])
+        without_buses = (3, step_sizes, *tail[:-2])
         restored = unpickler(*state[:-2], without_buses, compression_report)
         assert restored.digital_buses() == []
+        assert restored.__reduce__()[1][4][9] == []
+
+        without_continuous = (4, step_sizes, *tail[:-1])
+        restored = unpickler(*state[:-2], without_continuous, compression_report)
+        assert restored.digital_buses() == original.digital_buses()
+        assert restored.__reduce__()[1][4][9] == []
 
         # A sample is a number or a typed absence, never both and never
         # neither: the validity mask cannot be silently dropped or invented.

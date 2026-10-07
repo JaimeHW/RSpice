@@ -7,7 +7,7 @@ use self::waveform::{
     TransientResultCompressed, TransientSampleAbsence,
 };
 use crate::analysis::fourier::FourierResult;
-use crate::analysis::measure::MeasureResult;
+use crate::analysis::measure::{ContinuousMeasureResult, MeasureResult};
 use crate::netlist::{FftFormat, FftOutput, FftWindow, XyceFftMode, XyceOutputIntervalSchedule};
 use crate::xspice::{DigitalState, DigitalStrength, DigitalValue};
 use crate::{NodeId, Value};
@@ -1096,12 +1096,17 @@ pub struct TransientPostResults {
     pub fourier: Vec<TransientFourierResult>,
     /// Source-authored transient `.MEASURE` results in netlist order.
     pub measurements: Vec<MeasureResult>,
+    /// Source-authored `TRAN_CONT` streams evaluated before waveform decimation.
+    pub continuous_measurements: Vec<ContinuousMeasureResult>,
 }
 
 impl TransientPostResults {
     /// Whether no post-process product was requested or produced.
     pub fn is_empty(&self) -> bool {
-        self.fft.is_empty() && self.fourier.is_empty() && self.measurements.is_empty()
+        self.fft.is_empty()
+            && self.fourier.is_empty()
+            && self.measurements.is_empty()
+            && self.continuous_measurements.is_empty()
     }
 }
 

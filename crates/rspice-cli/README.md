@@ -323,6 +323,10 @@ diagnostics. `--allow-failed-meas` permits a successful process exit and overall
 summary verdict when only measurements fail. Individual measurement and
 per-run verdicts remain unchanged in every report format.
 
+With `--compress`, both scalar and continuous transient measurements use the
+original accepted samples. Waveform compression cannot change event coordinates,
+record values, or verification verdicts.
+
 TAP report names escape directive markers and line breaks so authored text
 cannot change a test's verdict or add test records. YAML diagnostics preserve
 the original messages, including quotes and control characters.

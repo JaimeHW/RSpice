@@ -15,12 +15,14 @@
 use super::*;
 
 mod channel;
+mod continuous;
 mod identity;
 mod post;
 mod report;
 mod traces;
 
 use channel::*;
+use continuous::*;
 use identity::*;
 use post::*;
 use traces::*;
@@ -30,7 +32,9 @@ pub(crate) use report::{
     rebuild_compression_report,
 };
 
-pub(crate) const COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION: usize = 4;
+pub(crate) const COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION: usize = 5;
+
+const COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION_WITHOUT_CONTINUOUS: usize = 4;
 
 /// The version written before the digital bus contract existed.
 ///
@@ -42,6 +46,20 @@ pub(crate) const COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION: usize = 4;
 pub(crate) const COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION_WITHOUT_BUSES: usize = 3;
 
 pub(crate) type CompressedTransientAnalogState = (
+    usize,
+    Vec<f64>,
+    Vec<CompressedChannelPersistenceState>,
+    Vec<CompressedDigitalTracePersistenceState>,
+    Vec<CompressedRealTracePersistenceState>,
+    CompressedIdentityPersistenceState,
+    Vec<CompressedFourierPersistenceState>,
+    Vec<CompressedMeasurementPersistenceState>,
+    Vec<CompressedDigitalBusPersistenceState>,
+    Vec<ContinuousMeasurementState>,
+);
+
+/// Version 4 stored scalar measurements but no continuous measurement streams.
+pub(crate) type CompressedTransientAnalogStateWithoutContinuous = (
     usize,
     Vec<f64>,
     Vec<CompressedChannelPersistenceState>,
@@ -71,9 +89,12 @@ pub(crate) type CompressedTransientAnalogStateWithoutBuses = (
 /// is matched to a shape before its version tag is read rather than after.
 #[derive(Debug, Clone, pyo3::FromPyObject)]
 pub(crate) enum VersionedCompressedTransientAnalogState {
-    /// Nine fields: the current contract, carrying a bus table.
+    /// Ten fields: the current contract, carrying continuous measurements.
     #[pyo3(transparent)]
     Current(CompressedTransientAnalogState),
+    /// Nine fields: scalar measurements and a bus table.
+    #[pyo3(transparent)]
+    WithoutContinuous(CompressedTransientAnalogStateWithoutContinuous),
     /// Eight fields: written before the bus contract existed.
     #[pyo3(transparent)]
     WithoutBuses(CompressedTransientAnalogStateWithoutBuses),
@@ -119,6 +140,12 @@ pub(crate) fn compressed_transient_analog_state(
             .iter()
             .map(digital_bus_persistence_state)
             .collect(),
+        result
+            .post_results
+            .continuous_measurements
+            .iter()
+            .map(continuous_measurement_state)
+            .collect(),
     )
 }
 
@@ -152,6 +179,7 @@ pub(crate) fn rebuild_compressed_transient(
         fourier,
         measurements,
         buses,
+        continuous_measurements,
     ) = match analog_state {
         VersionedCompressedTransientAnalogState::Current((
             version,
@@ -163,6 +191,7 @@ pub(crate) fn rebuild_compressed_transient(
             fourier,
             measurements,
             buses,
+            continuous_measurements,
         )) => (
             version,
             COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION,
@@ -174,6 +203,30 @@ pub(crate) fn rebuild_compressed_transient(
             fourier,
             measurements,
             buses,
+            continuous_measurements,
+        ),
+        VersionedCompressedTransientAnalogState::WithoutContinuous((
+            version,
+            step_sizes,
+            channels,
+            digital_traces,
+            real_traces,
+            identity,
+            fourier,
+            measurements,
+            buses,
+        )) => (
+            version,
+            COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION_WITHOUT_CONTINUOUS,
+            step_sizes,
+            channels,
+            digital_traces,
+            real_traces,
+            identity,
+            fourier,
+            measurements,
+            buses,
+            Vec::new(),
         ),
         VersionedCompressedTransientAnalogState::WithoutBuses((
             version,
@@ -197,6 +250,7 @@ pub(crate) fn rebuild_compressed_transient(
             // Nothing that wrote this state could declare a bus, so an empty
             // table is what it says rather than what it lost.
             Vec::new(),
+            Vec::new(),
         ),
     };
     if version < COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION_WITHOUT_BUSES {
@@ -204,12 +258,11 @@ pub(crate) fn rebuild_compressed_transient(
             "compressed-transient analog pickle state version {version} predates the descriptor-indexed channel container with per-sample validity, event traces, parent identity, and post-results; rerun the analysis"
         )));
     }
-    // The shape a state arrived in is what its version has to agree with: a
-    // nine-field state is version 4 and an eight-field one is version 3, so a
-    // state claiming the other's number is refused rather than read as either.
+    // Version and tuple shape must agree. Older versions did not compute
+    // continuous products, so they restore an empty collection explicitly.
     if version != expected_version {
         return Err(crate::errors::value_error(format!(
-            "unsupported compressed-transient analog pickle state version {version}; this build reads version {COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION_WITHOUT_BUSES} (no bus table) and version {COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION}, each in its own shape"
+            "unsupported compressed-transient analog pickle state version {version}; this build reads versions 3, 4 and {COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION}, each in its own shape"
         )));
     }
     let Some(compression_report) = compression_state else {
@@ -254,6 +307,10 @@ pub(crate) fn rebuild_compressed_transient(
             measurements: measurements
                 .into_iter()
                 .map(rebuild_measurement)
+                .collect::<PyResult<Vec<_>>>()?,
+            continuous_measurements: continuous_measurements
+                .into_iter()
+                .map(rebuild_continuous_measurement)
                 .collect::<PyResult<Vec<_>>>()?,
         },
         identity: rebuild_identity(identity)?,

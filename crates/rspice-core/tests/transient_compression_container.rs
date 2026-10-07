@@ -255,6 +255,8 @@ C1 out 0 1n\n\
 .fft v(out) np=64\n\
 .meas tran vmax MAX v(out)\n\
 .meas tran vmin MIN v(out)\n\
+.meas tran_cont sample FIND v(out) AT=173n\n\
+.meas tran_cont crossings WHEN v(out)=0.25 CROSS=1\n\
 .tran 100n 20u\n\
 .end\n";
 
@@ -292,6 +294,19 @@ fn compressed_post_results_match_the_uncompressed_trajectory() {
     );
 
     assert_eq!(compressed.post_results, expected);
+    let continuous =
+        rspice_core::analysis::evaluate_tran_continuous_measurements(&netlist, &uncompressed);
+    assert_eq!(continuous.len(), 2);
+    assert!(continuous.iter().all(|stream| stream.passed()));
+    assert!(continuous[1].records.len() > 1);
+    assert_eq!(compressed.post_results.continuous_measurements, continuous);
+    assert!(
+        !rspice_core::engine::TransientPostResults {
+            continuous_measurements: continuous,
+            ..Default::default()
+        }
+        .is_empty()
+    );
     assert_eq!(compressed.post_results.fft, uncompressed.fft_results);
     for measurement in &compressed.post_results.measurements {
         assert!(

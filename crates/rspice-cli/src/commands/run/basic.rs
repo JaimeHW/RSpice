@@ -988,8 +988,10 @@ pub(super) fn finish_transient_result(
         })?,
     };
     ctx.record_measurements("TRAN", measurements)?;
-    let continuous_measurements =
-        rspice_core::analysis::evaluate_tran_continuous_measurements(ctx.netlist, result);
+    let continuous_measurements = match post_results {
+        Some(post) => post.continuous_measurements.clone(),
+        None => rspice_core::analysis::evaluate_tran_continuous_measurements(ctx.netlist, result),
+    };
     super::shared::record_continuous_measurements(ctx, "TRAN_CONT", continuous_measurements)?;
 
     // Perform checked SAVE/PRINT materialization independently of
