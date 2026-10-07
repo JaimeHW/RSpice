@@ -225,6 +225,26 @@ fn timeout_interrupts_eager_xspice_instance_expressions() {
 }
 
 #[test]
+fn timeout_interrupts_forward_complex_instance_evaluation() {
+    let functions = work_functions();
+    let dir = common::test_dir("forward-complex-expression-timeout");
+    for (index, field) in [
+        "complex=<work(26) 1>",
+        "complex=<1 work(26)>",
+        "complex_array=[<1 work(26)>]",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let deck = dir.join(format!("complex-{index}.cir"));
+        std::fs::write(&deck, format!(
+            "* deferred complex deadline\nV1 in 0 1\nA1 [in] print_param_types {field}\n{functions}.OP\n.END\n"
+        )).unwrap();
+        assert_times_out(&deck, field, true);
+    }
+}
+
+#[test]
 fn timeout_interrupts_thermal_material_updates_after_heating() {
     let functions = work_functions();
     let dir = common::test_dir("thermal-update-expression-timeout");
