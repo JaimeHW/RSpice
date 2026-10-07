@@ -26,6 +26,15 @@ pub(super) fn qualify_local_model_name(scope: &str, local_name: &str) -> String 
     format!("{scope}::{local_name}")
 }
 
+/// One unresolved bare reference and the exact model card that owns it.
+#[derive(Debug)]
+pub(super) struct PendingModelParameterReference {
+    pub(super) model_index: usize,
+    pub(super) parameter: String,
+    pub(super) reference: String,
+    pub(super) line: usize,
+}
+
 /// Parse a `.model` card.
 ///
 /// `bare_ident_deferrals` collects parameters whose value was an unresolvable
@@ -37,7 +46,7 @@ pub(super) fn qualify_local_model_name(scope: &str, local_name: &str) -> String 
 /// value is not known until the parameter scope closes, and the Xyce diode
 /// warnings that can only be emitted once the card is complete.
 pub(super) struct ModelDefinitionDeferrals<'a> {
-    pub bare_ident_deferrals: &'a mut Vec<(String, String, usize)>,
+    pub bare_ident_deferrals: &'a mut Vec<PendingModelParameterReference>,
     pub pending_xyce_diode_model_warnings: &'a mut Vec<PendingXyceDiodeModelWarning>,
 }
 
@@ -131,7 +140,14 @@ pub(super) fn parse_model_definition(
         origin,
     )?;
     let authored_parameter_order = model_params.authored_parameter_order.clone();
-    bare_ident_deferrals.append(&mut model_params.bare_ident_deferrals);
+    bare_ident_deferrals.extend(model_params.bare_ident_deferrals.drain(..).map(
+        |(parameter, reference, line)| PendingModelParameterReference {
+            model_index,
+            parameter,
+            reference,
+            line,
+        },
+    ));
 
     let Some(base_name) = ako_base else {
         let model = ModelDef {

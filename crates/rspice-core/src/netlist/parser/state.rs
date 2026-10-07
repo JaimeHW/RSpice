@@ -98,9 +98,8 @@ pub(super) struct ParseState {
     pub(super) fft_analyses: Vec<FftAnalysis>,
     pub(super) data_tables: Vec<DataTable>,
     pub(super) models: Vec<ModelDef>,
-    ///  parameters written as an unresolvable bare identifier, with
-    /// the parameter name, the reference, and the line that wrote it.
-    pub(super) model_bare_ident_deferrals: Vec<(String, String, usize)>,
+    /// Unresolved bare model references, retaining their owning model card.
+    pub(super) model_bare_ident_deferrals: Vec<PendingModelParameterReference>,
     pub(super) pending_xyce_diode_model_warnings: Vec<PendingXyceDiodeModelWarning>,
     pub(super) subcircuits: Vec<SubcircuitDef>,
     pub(super) params: ParamContext,
@@ -379,7 +378,7 @@ pub(super) struct ParseLineContext<'a> {
     pub(super) deferred_body_params: Option<&'a mut Vec<(String, String)>>,
     /// Sink for  parameters written as an unresolvable bare
     /// identifier, carrying the parameter name, the reference, and the line.
-    pub(super) model_bare_ident_deferrals: &'a mut Vec<(String, String, usize)>,
+    pub(super) model_bare_ident_deferrals: &'a mut Vec<PendingModelParameterReference>,
     pub(super) pending_xyce_diode_model_warnings: &'a mut Vec<PendingXyceDiodeModelWarning>,
 }
 
@@ -421,7 +420,7 @@ pub(super) struct ParseCommandContext<'a> {
     /// A bare identifier is a forward reference until the deck ends and a
     /// typo afterwards; only end-of-parse validation can tell which, and it
     /// needs the line to report the second case the way the parser used to.
-    pub(super) model_bare_ident_deferrals: &'a mut Vec<(String, String, usize)>,
+    pub(super) model_bare_ident_deferrals: &'a mut Vec<PendingModelParameterReference>,
     pub(super) pending_xyce_diode_model_warnings: &'a mut Vec<PendingXyceDiodeModelWarning>,
 }
 

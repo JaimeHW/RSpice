@@ -4085,6 +4085,11 @@ fn resolve_static_model_expression_params_with_abort(
             continue;
         }
 
+        // A model's resolved fields belong only to that model. Reusing this
+        // context across cards would overwrite deck parameters and make later
+        // models depend on the order in which unrelated models were declared.
+        let mut context = context.clone();
+
         // Model parameters may cite each other, so keep folding until a pass
         // resolves nothing new. Bounded by the number of deferred parameters:
         // each round either resolves at least one or stops.
@@ -4147,14 +4152,25 @@ fn resolve_static_model_expression_params_with_abort(
     // whoever consumes it — the XSPICE resolver rejects its own with a better
     // message — and inferring the difference from expression text after the
     // fact would catch those too.
-    if let Some((param, reference, line)) = state
-        .model_bare_ident_deferrals
-        .iter()
-        .find(|(_, reference, _)| context.get(reference).is_none())
-    {
+    if let Some(pending) = state.model_bare_ident_deferrals.iter().find(|pending| {
+        context.get(&pending.reference).is_none()
+            && !state.models.get(pending.model_index).is_some_and(|model| {
+                !model
+                    .expr_params
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case(&pending.parameter))
+                    && model
+                        .params
+                        .iter()
+                        .any(|(name, _)| name.eq_ignore_ascii_case(&pending.parameter))
+            })
+    }) {
         return Err(ParseError::Syntax {
-            line: *line,
-            message: format!("Expected value for model parameter '{param}', found {reference}"),
+            line: pending.line,
+            message: format!(
+                "Expected value for model parameter '{}', found {}",
+                pending.parameter, pending.reference
+            ),
         }
         .into());
     }
