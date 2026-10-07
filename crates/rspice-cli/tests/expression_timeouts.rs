@@ -16,6 +16,7 @@ fn timeout_interrupts_control_assignments_conditions_and_command_arguments() {
         "alter R1 work(26)",
         "alter @V1[sin] [ 0 work(26) 1 ]",
         "set num_threads=work(26)",
+        "option abstol=1n reltol={work(26)}",
         "pz in 0 out 0 vol pz\nprint pole(work(26))",
         "pz in 0 out 0 vol pz\nsettype frequency pole(work(26))",
         "pz in 0 out 0 vol pz\nplot pole(1) xlimit 0 work(26)",
@@ -50,6 +51,36 @@ fn timeout_interrupts_parameter_evaluation_during_parsing() {
             "* parameter deadline\n{functions}{declaration}\nV1 out 0 1\nR1 out 0 1k\n.OP\n.END\n"
         )).unwrap();
         assert_times_out(&deck, declaration, false);
+    }
+}
+
+#[test]
+fn timeout_interrupts_numeric_cards_and_forward_reference_retries() {
+    let functions = work_functions();
+    let dir = common::test_dir("numeric-card-expression-timeout");
+    for (index, card) in [
+        ".OPTIONS reltol={work(26)}\n.OP",
+        ".TRAN {work(26)} 1",
+        ".TRAN 1 {work(26)}",
+        ".TRAN 1 100 {work(26)}",
+        ".AC LIN {work(26)} 1 100",
+        ".DC V1 0 {work(26)} 1",
+        ".IC V(out)={work(26)}\n.OP",
+        ".NODESET V(out)={work(26)}\n.OP",
+        ".TRAN {later+work(26)} 1\n.PARAM later=1",
+        ".IC V(out)={later+work(26)}\n.PARAM later=1\n.OP",
+        ".OPTIONS TEMP={later+work(26)}\n.PARAM later=1\n.OP",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let deck = dir.join(format!("numeric-{index}.cir"));
+        std::fs::write(
+            &deck,
+            format!("* numeric card deadline\n{functions}V1 out 0 1\nR1 out 0 1k\n{card}\n.END\n"),
+        )
+        .unwrap();
+        assert_times_out(&deck, card, false);
     }
 }
 
