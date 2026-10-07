@@ -18,7 +18,8 @@ use thiserror::Error;
 
 mod table_metadata;
 pub use table_metadata::{
-    raw_table_units, write_raw_table_metadata, write_raw_table_metadata_with_units,
+    raw_table_units, write_raw_table_metadata, write_raw_table_metadata_with_text,
+    write_raw_table_metadata_with_units,
 };
 
 use crate::resource::{
@@ -313,7 +314,7 @@ fn parse_plot(
 ) -> Result<(RawWaveformData, usize), RawParseError> {
     let mut reader = BufReader::new(Cursor::new(bytes));
     // Parse ASCII header
-    let (mut header, variables, data_offset) = parse_header(&mut reader, resource_limits)?;
+    let (mut header, mut variables, data_offset) = parse_header(&mut reader, resource_limits)?;
     let data_offset = usize::try_from(data_offset).map_err(|_| {
         RawParseError::DataError("raw data offset exceeds this platform".to_string())
     })?;
@@ -330,7 +331,7 @@ fn parse_plot(
     if header.no_points == 0 {
         header.no_points = actual_points;
     }
-    table_metadata::restore_real_columns(&header, &mut waveforms)?;
+    table_metadata::restore_table_metadata(&mut header, &mut variables, &mut waveforms)?;
 
     Ok((
         RawWaveformData {

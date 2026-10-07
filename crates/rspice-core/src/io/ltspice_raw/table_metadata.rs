@@ -1,4 +1,4 @@
-//! Optional RSpice provenance for real columns in an otherwise complex RAW plot.
+//! Optional RSpice provenance for table column kinds, units and exact labels.
 //!
 //! RAW's numeric encoding is plot-wide. A standard Command header records the
 //! original real columns so reopening does not turn frequencies or indices into
@@ -7,6 +7,7 @@ use super::*;
 
 const PREFIX: &str = "RSpiceTableV1 ";
 const UNITS_PREFIX: &str = "RSpiceTableV2 ";
+const TEXT_PREFIX: &str = "RSpiceTableV3 ";
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -14,6 +15,39 @@ struct Metadata {
     real_variables: Vec<usize>,
     #[serde(default)]
     units: Option<Vec<Option<String>>>,
+    #[serde(default)]
+    text: Option<TextMetadata>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TextMetadata {
+    plot_name: String,
+    variables: Vec<(String, String)>,
+}
+
+/// Write exact table labels alongside real-column and unit provenance.
+/// V3 keeps the original plot name and `(name, type)` pairs in variable order,
+/// including the independent variable. Callers can then use whitespace-free
+/// declarations without losing labels that RAW's header syntax cannot express.
+pub fn write_raw_table_metadata_with_text<W: std::io::Write + ?Sized>(
+    writer: &mut W,
+    real_variables: &[usize],
+    units: &[Option<String>],
+    plot_name: &str,
+    variables: &[(&str, &str)],
+) -> std::io::Result<()> {
+    write!(writer, "Command: {TEXT_PREFIX}")?;
+    serde_json::to_writer(
+        &mut *writer,
+        &serde_json::json!({
+            "real_variables": real_variables,
+            "units": units,
+            "text": {"plot_name": plot_name, "variables": variables},
+        }),
+    )
+    .map_err(std::io::Error::other)?;
+    writeln!(writer)
 }
 
 /// Write table provenance including explicit unit symbols in RAW variable order.
@@ -36,24 +70,32 @@ pub fn write_raw_table_metadata_with_units<W: std::io::Write + ?Sized>(
 }
 
 fn read_metadata(header: &RawFileHeader) -> Result<Option<Metadata>, RawParseError> {
-    let (encoded, with_units) = if let Some(encoded) = header.command.strip_prefix(PREFIX) {
-        (encoded, false)
-    } else if let Some(encoded) = header.command.strip_prefix(UNITS_PREFIX) {
-        (encoded, true)
-    } else {
-        return Ok(None);
-    };
+    let (encoded, with_units, with_text) =
+        if let Some(encoded) = header.command.strip_prefix(PREFIX) {
+            (encoded, false, false)
+        } else if let Some(encoded) = header.command.strip_prefix(UNITS_PREFIX) {
+            (encoded, true, false)
+        } else if let Some(encoded) = header.command.strip_prefix(TEXT_PREFIX) {
+            (encoded, true, true)
+        } else {
+            return Ok(None);
+        };
     let metadata: Metadata = serde_json::from_str(encoded).map_err(|error| {
         RawParseError::InvalidHeader(format!("invalid RAW table metadata: {error}"))
     })?;
     if with_units != metadata.units.is_some()
+        || with_text != metadata.text.is_some()
+        || metadata
+            .text
+            .as_ref()
+            .is_some_and(|text| text.variables.len() != header.no_variables)
         || metadata.units.as_ref().is_some_and(|units| {
             units.len() != header.no_variables
                 || units.iter().flatten().any(|unit| unit.trim().is_empty())
         })
     {
         return Err(RawParseError::InvalidHeader(
-            "RAW table unit metadata must match its version and variable count and use nonempty symbols".into(),
+            "RAW table metadata must match its version and variable count and use nonempty unit symbols".into(),
         ));
     }
     Ok(Some(metadata))
@@ -82,8 +124,9 @@ pub fn write_raw_table_metadata<W: std::io::Write + ?Sized>(
     writeln!(writer)
 }
 
-pub(super) fn restore_real_columns(
-    header: &RawFileHeader,
+pub(super) fn restore_table_metadata(
+    header: &mut RawFileHeader,
+    variables: &mut [RawVariable],
     waveforms: &mut [RawWaveform],
 ) -> Result<(), RawParseError> {
     let Some(metadata) = read_metadata(header)? else {
@@ -116,6 +159,16 @@ pub(super) fn restore_real_columns(
         }
         waveform.y_imag = None;
     }
+    if let Some(text) = metadata.text {
+        header.plotname = text.plot_name;
+        for ((variable, waveform), (name, var_type)) in
+            variables.iter_mut().zip(waveforms).zip(text.variables)
+        {
+            waveform.name.clone_from(&name);
+            variable.name = name;
+            variable.var_type = var_type;
+        }
+    }
     Ok(())
 }
 
@@ -123,6 +176,80 @@ pub(super) fn restore_real_columns(
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn exact_labels_restore_both_variable_descriptors_and_waveforms() {
+        for complex in [false, true] {
+            let mut bytes = Vec::new();
+            writeln!(bytes, "Title: escaped\nPlotname: escaped").unwrap();
+            write_raw_table_metadata_with_text(
+                &mut bytes,
+                if complex { &[0] } else { &[] },
+                &[Some("ms".into()), None],
+                " plot\r\nname ",
+                &[
+                    (" time ", "elapsed time"),
+                    ("V(α\n\"out\")", "custom\ttype"),
+                ],
+            )
+            .unwrap();
+            let (flags, values) = if complex {
+                ("complex", "0,0 1,2")
+            } else {
+                ("real", "0 1")
+            };
+            writeln!(bytes, "Flags: {flags}\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 escaped_time time\n1 escaped_name value\nValues:\n0 {values}").unwrap();
+            let parsed = parse_raw_reader(&mut std::io::Cursor::new(bytes)).unwrap();
+            assert_eq!(parsed.header.plotname, " plot\r\nname ");
+            assert_eq!(parsed.variables[0].name, " time ");
+            assert_eq!(parsed.variables[0].var_type, "elapsed time");
+            assert_eq!(parsed.variables[1].name, "V(α\n\"out\")");
+            assert_eq!(parsed.variables[1].var_type, "custom\ttype");
+            for (variable, waveform) in parsed.variables.iter().zip(&parsed.waveforms) {
+                assert_eq!(waveform.name, variable.name);
+            }
+            assert_eq!(
+                raw_table_units(&parsed.header).unwrap(),
+                Some(vec![Some("ms".into()), None])
+            );
+            assert!(parsed.waveforms[0].y_imag.is_none());
+            assert_eq!(parsed.waveforms[1].y_imag.is_some(), complex);
+        }
+    }
+
+    #[test]
+    fn text_metadata_requires_its_version_and_complete_variable_order() {
+        let valid = serde_json::json!({
+            "real_variables": [], "units": [null, "V"],
+            "text": {"plot_name": "original", "variables": [["time", "time"], ["V(out)", "voltage"]]},
+        });
+        let mut cases = vec![(PREFIX, valid.clone()), (UNITS_PREFIX, valid.clone())];
+        for value in [
+            serde_json::Value::Null,
+            serde_json::json!({"plot_name": "original", "variables": [["time", "time"]]}),
+            serde_json::json!({"plot_name": "original", "variables": [["time", "time"], ["V(out)", 5]]}),
+        ] {
+            let mut invalid = valid.clone();
+            invalid["text"] = value;
+            cases.push((TEXT_PREFIX, invalid));
+        }
+        let mut missing = valid.clone();
+        missing.as_object_mut().unwrap().remove("text");
+        cases.push((TEXT_PREFIX, missing));
+        let mut missing_units = valid;
+        missing_units.as_object_mut().unwrap().remove("units");
+        cases.push((TEXT_PREFIX, missing_units));
+        for (prefix, metadata) in cases {
+            let source = format!(
+                "Title: invalid\nPlotname: escaped\nCommand: {prefix}{metadata}\nFlags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\n1 V(out) voltage\nValues:\n0 0 1\n"
+            );
+            assert!(
+                parse_raw_reader(&mut std::io::Cursor::new(source)).is_err(),
+                "{prefix}{metadata}"
+            );
+        }
+    }
+
     #[test]
     fn explicit_units_roundtrip_for_real_and_mixed_tables_and_reject_malformed_metadata() {
         for complex in [false, true] {

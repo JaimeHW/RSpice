@@ -52,7 +52,8 @@ use rspice_core::analysis::harmonic_balance::{
 /// this accounting does not exempt any family from the ratchet.
 // Two bounded/cancellable table projection entry points serve CLI/WASM
 // callers without forcing the default numerical budget on their output.
-const MAX_PUBLIC_ITEMS: usize = 5544;
+// One text-provenance writer lets CLI RAW exports preserve exact table labels.
+const MAX_PUBLIC_ITEMS: usize = 5545;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
