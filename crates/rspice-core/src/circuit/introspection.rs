@@ -1115,6 +1115,18 @@ impl CircuitData {
         &self.generic_switches
     }
 
+    /// Borrow one canonical name without cloning and sorting the whole namespace.
+    pub(crate) fn node_name_by_id(&self, id: NodeId) -> Option<&str> {
+        if id == 0 {
+            return Some("0");
+        }
+        self.node_map
+            .iter()
+            .filter(|(_, candidate)| **candidate == id)
+            .map(|(name, _)| name.as_str())
+            .min()
+    }
+
     /// Get node names sorted by their node index (1, 2, 3, ...)
     /// Returns a Vec where index i contains the name of node (i+1)
     /// This is useful for waveform output labels like V(N001), V(N002)

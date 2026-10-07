@@ -807,48 +807,57 @@ impl Engine {
             .devices
             .iter()
             .any(|bjt| bjt.uses_vbic_dynamic_charges());
-        if !has_external_vbic_descriptor_states
-            && Self::pz_ac_nqs_state_count(&circuit) == 0
-            && let Some(result) =
+        let reduced =
+            if !has_external_vbic_descriptor_states && Self::pz_ac_nqs_state_count(&circuit) == 0 {
                 Self::try_sparse_pz_state_space(&g_descriptor, &c_descriptor, &config, abort)?
-        {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            self.ensure_result_values(
-                result
-                    .poles
-                    .len()
-                    .saturating_add(result.zeros.len())
-                    .saturating_mul(2)
-                    .saturating_add(2),
+            } else {
+                None
+            };
+        let mut result = if let Some(result) = reduced {
+            result
+        } else {
+            let mut g_matrix = Matrix::from_dense(g_descriptor.to_dense_real());
+            let mut c_matrix = Matrix::from_dense(c_descriptor.to_dense_imag());
+            Self::stamp_vbic_pz_descriptor_states(
+                &circuit,
+                &dc_solution,
+                &mut g_matrix,
+                &mut c_matrix,
+            );
+            Self::stamp_ac_nqs_pz_descriptor_states(
+                &circuit,
+                &dc_solution,
+                &mut g_matrix,
+                &mut c_matrix,
             )?;
-            abort.observe_progress(1.0);
-            return Ok(result);
-        }
-
-        let mut g_matrix = Matrix::from_dense(g_descriptor.to_dense_real());
-        let mut c_matrix = Matrix::from_dense(c_descriptor.to_dense_imag());
-        Self::stamp_vbic_pz_descriptor_states(&circuit, &dc_solution, &mut g_matrix, &mut c_matrix);
-        Self::stamp_ac_nqs_pz_descriptor_states(
-            &circuit,
-            &dc_solution,
-            &mut g_matrix,
-            &mut c_matrix,
-        )?;
-        let analyzer = PoleZeroAnalyzer::new(g_matrix, c_matrix);
-
-        let result = analyzer
-            .analyze_with_abort(&config, abort)
-            .map_err(|error| match error {
-                PoleZeroAnalysisError::Aborted => SimulationError::Aborted,
-                error => SimulationError::Solver(crate::solver::SolverError::InvalidCircuit(
-                    format!("pole-zero extraction failed: {error}"),
-                )),
-            })?;
+            PoleZeroAnalyzer::new(g_matrix, c_matrix)
+                .analyze_with_abort(&config, abort)
+                .map_err(|error| match error {
+                    PoleZeroAnalysisError::Aborted => SimulationError::Aborted,
+                    error => SimulationError::Solver(crate::solver::SolverError::InvalidCircuit(
+                        format!("pole-zero extraction failed: {error}"),
+                    )),
+                })?
+        };
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
+        // The matrix analyzer knows coordinate indices; the engine owns their
+        // physical names, reference nodes and input excitation quantity.
+        let port = |kind: &str, positive, negative| {
+            let name = |id| {
+                circuit.node_name_by_id(id).ok_or_else(|| {
+                    SimulationError::Circuit(format!("PZ port node {id} has no circuit name"))
+                })
+            };
+            Ok::<_, SimulationError>(format!("{kind}({},{})", name(positive)?, name(negative)?))
+        };
+        result.input = port(
+            if input_is_current { "I" } else { "V" },
+            input_pos,
+            input_neg_node,
+        )?;
+        result.output = port("V", output_pos, output_neg.unwrap_or(0))?;
         self.ensure_result_values(
             result
                 .poles
@@ -858,6 +867,9 @@ impl Engine {
                 .saturating_add(2),
         )?;
         abort.observe_progress(1.0);
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         Ok(result)
     }
 
