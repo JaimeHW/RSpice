@@ -3543,6 +3543,17 @@ fn resolve_numeric_parameter_binding(
     scope: &ParamContext,
     random: &RandomState,
 ) -> Result<NumericParameterBinding, ParseError> {
+    finish_non_aborting_parse(resolve_numeric_parameter_binding_with_abort(
+        value, scope, random, &NoAbort,
+    ))
+}
+
+fn resolve_numeric_parameter_binding_with_abort(
+    value: &ParametricValue,
+    scope: &ParamContext,
+    random: &RandomState,
+    abort: &dyn AbortSignal,
+) -> Result<NumericParameterBinding, ParseWithAbortError> {
     match value {
         ParametricValue::Resolved(value) => Ok(NumericParameterBinding {
             value: (*value).into(),
@@ -3553,23 +3564,28 @@ fn resolve_numeric_parameter_binding(
             // All derived scopes consume the same netlist-wide sequence.
             context.adopt_random(random);
             context
-                .evaluate_parameter_binding(expr)
+                .evaluate_parameter_binding_with_abort(expr, abort)
                 .map(|(value, direction)| NumericParameterBinding { value, direction })
                 .map_err(|error| match error {
-                    super::expr::ExprError::UndefinedParam(name) => {
-                        ParseError::UndefinedParameter(name)
+                    super::expr::ExpressionEvaluationError::Aborted => ParseWithAbortError::Aborted,
+                    super::expr::ExpressionEvaluationError::Expression(
+                        super::expr::ExprError::UndefinedParam(name),
+                    ) => ParseError::UndefinedParameter(name).into(),
+                    super::expr::ExpressionEvaluationError::Expression(other) => {
+                        ParseError::InvalidValue(other.to_string()).into()
                     }
-                    other => ParseError::InvalidValue(other.to_string()),
                 })
         }
         ParametricValue::String(value) => Err(ParseError::InvalidValue(format!(
             "string parameter value '{}' cannot be used as a numeric value",
             value
-        ))),
+        ))
+        .into()),
         ParametricValue::StringExpression(expr) => Err(ParseError::InvalidValue(format!(
             "string parameter expression '{}' cannot be used as a numeric value",
             expr
-        ))),
+        ))
+        .into()),
     }
 }
 
@@ -3729,20 +3745,25 @@ fn prepare_runtime_parameter_expression(
     name: &str,
     expression: &str,
     scope: &ParamContext,
-) -> Result<Option<String>, ParseError> {
-    let prepared = prepare_behavioral_expression(expression, scope).map_err(|error| {
-        ParseError::InvalidValue(format!(
-            "parameter expression '{name}' could not be prepared: {error}"
-        ))
-    })?;
+    abort: &dyn AbortSignal,
+) -> Result<Option<String>, ParseWithAbortError> {
+    let prepared = super::expr::prepare_behavioral_expression_with_abort(expression, scope, abort)
+        .map_err(|error| match error {
+            super::expr::BehavioralPreparationError::Aborted => ParseWithAbortError::Aborted,
+            super::expr::BehavioralPreparationError::Semantic(error) => ParseError::InvalidValue(
+                format!("parameter expression '{name}' could not be prepared: {error}"),
+            )
+            .into(),
+        })?;
     if !behavioral_expression_references_runtime_quantity(&prepared) {
         return Ok(None);
     }
     match validate_prepared_behavioral_runtime_expression(&prepared) {
-        Ok(Some(identifier)) => Err(ParseError::UndefinedParameter(identifier)),
+        Ok(Some(identifier)) => Err(ParseError::UndefinedParameter(identifier).into()),
         Err(error) => Err(ParseError::InvalidValue(format!(
             "parameter expression '{name}' is invalid: {error}"
-        ))),
+        ))
+        .into()),
         Ok(None) => Ok(Some(prepared)),
     }
 }
@@ -3781,30 +3802,33 @@ fn resolve_deferred_param_expressions(
                 continue;
             }
             if scope.expression_dialect() == ExpressionDialect::Xyce {
-                match prepare_runtime_parameter_expression(&name, &expr, scope) {
+                match prepare_runtime_parameter_expression(&name, &expr, scope, abort) {
                     Ok(Some(_)) => {
                         scope.define_parameter_expression(&name, expr, None);
                         progress = true;
                         continue;
                     }
                     Ok(None) => {}
-                    Err(error) => {
+                    Err(ParseWithAbortError::Aborted) => return Err(ParseWithAbortError::Aborted),
+                    Err(ParseWithAbortError::Parse(error)) => {
                         first_error.get_or_insert(error);
                         unresolved.push((name, expr));
                         continue;
                     }
                 }
             }
-            match resolve_numeric_parameter_binding(
+            match resolve_numeric_parameter_binding_with_abort(
                 &ParametricValue::Expression(expr.clone()),
                 scope,
                 random,
+                abort,
             ) {
                 Ok(binding) => {
                     binding.bind(&name, scope);
                     progress = true;
                 }
-                Err(err) => {
+                Err(ParseWithAbortError::Aborted) => return Err(ParseWithAbortError::Aborted),
+                Err(ParseWithAbortError::Parse(err)) => {
                     first_error.get_or_insert(err);
                     unresolved.push((name, expr));
                 }
@@ -3913,7 +3937,12 @@ fn resolve_subcircuit_instance_params(
                 if instance_scope.expression_dialect() == ExpressionDialect::Xyce
                     && let ParametricValue::Expression(expression) = &value
                 {
-                    match prepare_runtime_parameter_expression(&name, expression, &instance_scope) {
+                    match prepare_runtime_parameter_expression(
+                        &name,
+                        expression,
+                        &instance_scope,
+                        abort,
+                    ) {
                         Ok(Some(prepared)) => {
                             instance_scope.shadow_spectre_statistical_parameter(&name);
                             instance_scope.define_parameter_expression(
@@ -3928,14 +3957,22 @@ fn resolve_subcircuit_instance_params(
                             continue;
                         }
                         Ok(None) => {}
-                        Err(error) => {
+                        Err(ParseWithAbortError::Aborted) => {
+                            return Err(ParseWithAbortError::Aborted);
+                        }
+                        Err(ParseWithAbortError::Parse(error)) => {
                             first_error.get_or_insert(error);
                             unresolved.push((name, value));
                             continue;
                         }
                     }
                 }
-                match resolve_numeric_parameter_binding(&value, &instance_scope, random) {
+                match resolve_numeric_parameter_binding_with_abort(
+                    &value,
+                    &instance_scope,
+                    random,
+                    abort,
+                ) {
                     Ok(resolved) => {
                         instance_scope.shadow_spectre_statistical_parameter(&name);
                         resolved.bind(&name, &mut instance_scope);
@@ -3944,7 +3981,8 @@ fn resolve_subcircuit_instance_params(
                         upsert_numeric_param_value(&mut numeric, name, resolved);
                         progress = true;
                     }
-                    Err(err) => {
+                    Err(ParseWithAbortError::Aborted) => return Err(ParseWithAbortError::Aborted),
+                    Err(ParseWithAbortError::Parse(err)) => {
                         first_error.get_or_insert(err);
                         unresolved.push((name, value));
                     }
