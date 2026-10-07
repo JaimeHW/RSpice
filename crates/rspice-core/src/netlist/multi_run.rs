@@ -11,14 +11,14 @@
 //!   existing top-level assignment in place (preserving in-order parameter
 //!   evaluation), and anything else appends.
 //! * `.DATA name p1 p2 … / rows … / .ENDDATA` — an analysis referencing
-//!   `DATA=name` (`.dc`, or `SWEEP DATA=name` on `.ac`/`.tran`) expands to
+//!   `DATA=name` (`.dc`, or `SWEEP DATA=name` on `.tran`) expands to
 //!   one run per table row with the row's parameter values bound. A bare
 //!   `.dc data=name` is one operating point per row, so it rewrites to
 //!   `.op`.
 //!
-//! The netlist parser itself only skips these blocks (the base deck stays
-//! parseable everywhere); the run orchestration lives in the CLI, which
-//! loops the expanded decks.
+//! Tables not consumed by textual DC/TRAN expansion remain in every concrete
+//! deck. The core parser and typed AC, NOISE, STEP and control runners own them;
+//! a runtime-selected control table need not have a declarative reference.
 
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -850,17 +850,43 @@ fn scan_assignments(line: &str) -> Vec<(String, usize, usize)> {
     out
 }
 
-/// Pull `.DATA … .ENDDATA` blocks out of the deck, returning the parsed
-/// tables and the deck lines with the blocks removed.
+/// Parse tables for textual sweep validation, removing only blocks consumed by
+/// DC/TRAN expansion. Preserve other blocks verbatim for typed/runtime consumers.
 fn extract_data_tables(
     lines: Vec<String>,
     resource_limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<(Vec<DataTable>, Vec<String>), MultiRunError> {
+    let mut consumed = BTreeSet::new();
+    let mut retained = BTreeSet::new();
+    let mut runtime_selection = false;
+    for (index, line) in lines.iter().enumerate() {
+        poll_abort(abort, index)?;
+        poll_text_abort(abort, line)?;
+        if first_token(line).eq_ignore_ascii_case(".control") {
+            // A variable or loop may select any table at execution time.
+            runtime_selection = true;
+        }
+        if let Some(name) = data_reference_name(line) {
+            if is_sweep_analysis(line) {
+                consumed.insert(name.to_ascii_uppercase());
+            } else {
+                retained.insert(name.to_ascii_uppercase());
+            }
+        } else if line
+            .split_whitespace()
+            .any(|word| word.eq_ignore_ascii_case("DATA"))
+        {
+            // A non-assignment or fragmented DATA selector belongs to the
+            // typed parser. Do not infer that this expander is its only owner.
+            runtime_selection = true;
+        }
+    }
     let mut tables: Vec<DataTable> = Vec::new();
     let mut kept = Vec::with_capacity(lines.len());
     let mut current: Option<DataTable> = None;
     let mut flat_values: Vec<Value> = Vec::new();
+    let mut retain_current = false;
 
     for (line_index, line) in lines.into_iter().enumerate() {
         poll_abort(abort, line_index)?;
@@ -868,6 +894,9 @@ fn extract_data_tables(
         let line_number = line_index + 1;
         let token = first_token(&line);
         if let Some(table) = current.as_mut() {
+            if retain_current {
+                kept.push(line.clone());
+            }
             if token.eq_ignore_ascii_case(".enddata") {
                 if table.params.is_empty() {
                     return Err(MultiRunError::new(format!(
@@ -968,6 +997,10 @@ fn extract_data_tables(
                     ".data at line {line_number} is missing a table name"
                 )));
             };
+            let canonical = name.to_ascii_uppercase();
+            retain_current = runtime_selection
+                || retained.contains(&canonical)
+                || !consumed.contains(&canonical);
             let params = fields.map(|field| field.to_owned()).collect::<Vec<_>>();
             for param in &params {
                 if !data_table_parameter_name_is_valid(param) {
@@ -981,6 +1014,9 @@ fn extract_data_tables(
                 params,
                 rows: Vec::new(),
             });
+            if retain_current {
+                kept.push(line);
+            }
             continue;
         }
         kept.push(line);
