@@ -114,7 +114,7 @@ authored deck would give it. Nothing here mints an identity of its own.
 
 `runAuthoredDeckDocument` also executes retained `.control` scripts in source
 order through the shared core interpreter. It supports scalar assignments,
-loops, conditionals, source alterations, `op`, `ac`, `tran`, `run`, and
+loops, conditionals, source alterations, `op`, `dc`, `ac`, `noise`, `tf`, `tran`, `run`, and
 resolved `plot`, `print`, and `settype` requests. Each completed analysis
 keeps its own core document and canonical identity. A late script error
 returns no handle and includes the authored command's source line.
@@ -129,6 +129,14 @@ the result and typed owner of its separate charge events and coverage in
 data are available through `controlWindow`; the client renders or displays
 them. Direct-analysis exports continue to run their explicitly requested
 analysis.
+
+Transfer-function control results use the same scalar documents as direct `.TF`,
+including physical gain units and exact infinite impedance determinations.
+Print descriptors include a `scalars` array when needed: each entry has its
+`position` among print entries, `resultIndex`, and the shared typed `scalar`.
+This preserves unbounded values without inserting infinity into finite trace
+windows. Empty scalar arrays are omitted; existing finite presentation metadata
+and `controlWindow` keep their contracts.
 
 Control scripts combined with declarative run axes, Fourier/FFT, restart or
 compression are currently refused explicitly. Other control commands and

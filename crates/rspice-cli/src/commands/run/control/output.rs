@@ -28,7 +28,52 @@ pub(super) fn present(
         // An authored print is output, including under --quiet. That flag
         // suppresses progress chatter, not the script's requested table.
         let mut stdout = std::io::stdout().lock();
-        for trace in traces {
+        let mut scalar_index = 0;
+        let mut trace_index = 0;
+        for position in 0..traces.len().saturating_add(request.scalars.len()) {
+            if rspice_core::AbortSignal::is_aborted(&crate::abort::ProcessAbort) {
+                return Err(cancellation_cli_error(args.timeout));
+            }
+            if let Some(scalar) = request
+                .scalars
+                .get(scalar_index)
+                .filter(|scalar| scalar.position == position)
+            {
+                use rspice_core::execution::result_document::{ScalarUnavailability, ScalarValue};
+                let text = match scalar.scalar.value() {
+                    ScalarValue::Unavailable {
+                        reason: ScalarUnavailability::PositiveInfinity,
+                    } => "inf".to_owned(),
+                    ScalarValue::Unavailable {
+                        reason: ScalarUnavailability::NegativeInfinity,
+                    } => "-inf".to_owned(),
+                    value => {
+                        serde_json::to_string(value).map_err(|error| CliError::InternalError {
+                            message: error.to_string(),
+                        })?
+                    }
+                };
+                let unit = scalar
+                    .scalar
+                    .unit()
+                    .map_or_else(|| "unspecified".into(), |unit| unit.symbol());
+                writeln!(
+                    stdout,
+                    "# {} [{}]\n{}",
+                    scalar.scalar.display_name(),
+                    unit,
+                    text
+                )
+                .map_err(|error| CliError::output_error(Path::new("stdout"), error))?;
+                scalar_index += 1;
+                continue;
+            }
+            let trace = traces
+                .get(trace_index)
+                .ok_or_else(|| CliError::InternalError {
+                    message: "control print scalar positions do not match its traces".into(),
+                })?;
+            trace_index += 1;
             writeln!(
                 stdout,
                 "# {} [{}] vs {} [{}]",
@@ -80,7 +125,7 @@ pub(super) fn present(
     );
     let document = PresentationDocument {
         schema: "rspice.control-presentation",
-        version: 1,
+        version: if request.scalars.is_empty() { 1 } else { 2 },
         command: &request.command.name,
         line: request.command.line,
         title: options.and_then(|options| options.title.as_deref()),
@@ -93,6 +138,15 @@ pub(super) fn present(
             .map(|trace| TraceDocument {
                 x: vector_document(&trace.x, circuit),
                 y: vector_document(&trace.y, circuit),
+            })
+            .collect(),
+        scalars: request
+            .scalars
+            .iter()
+            .map(|scalar| ScalarDocument {
+                position: scalar.position,
+                dataset: &scalar.dataset,
+                scalar: &scalar.scalar,
             })
             .collect(),
     };
@@ -131,6 +185,15 @@ struct PresentationDocument<'a> {
     x_logarithmic: bool,
     y_logarithmic: bool,
     traces: Vec<TraceDocument<'a>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    scalars: Vec<ScalarDocument<'a>>,
+}
+
+#[derive(Serialize)]
+struct ScalarDocument<'a> {
+    position: usize,
+    dataset: &'a str,
+    scalar: &'a rspice_core::execution::result_document::ResultScalar,
 }
 
 #[derive(Serialize)]

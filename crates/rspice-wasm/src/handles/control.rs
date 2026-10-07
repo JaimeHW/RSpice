@@ -17,8 +17,18 @@ pub struct ControlPresentationDescriptor<'a> {
     pub x_logarithmic: bool,
     pub y_logarithmic: bool,
     pub traces: Vec<ControlTraceDescriptor<'a>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub scalars: Vec<ControlScalarDescriptor<'a>>,
     pub changed_vectors: Vec<ControlChangedVector<'a>>,
     pub changed_unit: Option<SignalUnitView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlScalarDescriptor<'a> {
+    pub position: usize,
+    pub result_index: usize,
+    pub scalar: &'a rspice_core::execution::result_document::ResultScalar,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -121,6 +131,17 @@ impl WasmResultHandle {
                     x_logarithmic: false,
                     y_logarithmic: false,
                     traces: Vec::new(),
+                    scalars: presentation
+                        .scalars
+                        .iter()
+                        .map(|scalar| {
+                            Ok(ControlScalarDescriptor {
+                                position: scalar.position,
+                                result_index: self.control_result_index(&scalar.dataset)?,
+                                scalar: &scalar.scalar,
+                            })
+                        })
+                        .collect::<DetailedWasmResult<_>>()?,
                     changed_vectors: Vec::new(),
                     changed_unit: None,
                 };
@@ -269,6 +290,43 @@ mod tests {
         .unwrap()
         .with_control(execution.control_datasets, execution.control_presentations)
         .unwrap()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn transfer_function_handle_preserves_scalar_determinations_and_finite_windows() {
+        let execution = run_authored_deck_document_detailed("Open transfer\nV1 in 0 1\nR1 out 0 1k\n.control\ntf I(V1) V1\nprint transfer_function input_impedance transfer_gain output_impedance\n.endc\n.end\n").unwrap();
+        let handle = retain(execution);
+        let metadata = handle.metadata_snapshot().unwrap();
+        let presentation = &metadata.control_presentations[0];
+        assert_eq!(presentation.traces.len(), 2);
+        assert_eq!(presentation.scalars.len(), 2);
+        for (scalar, position) in presentation.scalars.iter().zip([1, 3]) {
+            assert_eq!(scalar.position, position);
+            assert_eq!(scalar.result_index, 0);
+            assert_eq!(scalar.scalar.value(), &rspice_core::execution::result_document::ScalarValue::Unavailable { reason: rspice_core::execution::result_document::ScalarUnavailability::PositiveInfinity });
+        }
+        let wire = serde_json::to_value(&metadata).unwrap();
+        assert_eq!(
+            wire["controlPresentations"][0]["scalars"][0]["scalar"]["value"]["reason"],
+            "positive_infinity"
+        );
+        for trace in 0..2 {
+            let window = handle.control_window(0, trace, 0, 1).unwrap();
+            assert!(window.iter().flatten().all(|sample| sample.is_finite()));
+            assert_eq!(window[2], [0.0]);
+        }
+        assert!(handle.control_window(0, 2, 0, 1).is_err());
+        let mut options = WasmExecutionOptions::default();
+        options.resource_limits.max_result_values = 32;
+        let source = "Open transfer\nV1 in 0 1\nR1 out 0 1k\n.control\ntf I(V1) V1\nrepeat 40\nprint input_impedance\nend\n.endc\n.end\n";
+        let error = run_authored_deck_document_with_options_and_abort_detailed(
+            source,
+            &options,
+            &rspice_core::NoAbort,
+        )
+        .unwrap_err();
+        assert_eq!(error.category, "resource_limit");
     }
 
     #[test]

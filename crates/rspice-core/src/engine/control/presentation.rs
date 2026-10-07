@@ -2,6 +2,7 @@
 
 use super::*;
 mod noise;
+mod transfer;
 use crate::ComplexValue;
 use crate::netlist::expr::{
     BinOpKind, Expr, ParseExpressionWithAbortError, UnaryOpKind, evaluate_complex,
@@ -72,6 +73,17 @@ pub enum ControlPresentationKind {
 pub struct ControlPresentation {
     pub command: ControlCommand,
     pub kind: ControlPresentationKind,
+    /// Scalar determinations accompanying PRINT, such as exact infinite impedance.
+    /// Finite vector samples remain in `kind`; these values are never clamped.
+    pub scalars: Vec<ControlScalar>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ControlScalar {
+    /// Position among the print's scalar entries and vector traces.
+    pub position: usize,
+    pub dataset: String,
+    pub scalar: crate::execution::result_document::ResultScalar,
 }
 
 #[derive(Clone, Copy)]
@@ -84,6 +96,7 @@ enum Column {
     TableCoordinate(usize),
     Noise(noise::NoiseColumn),
     NoiseContribution,
+    Transfer(transfer::TransferColumn),
 }
 
 struct Selected<'a> {
@@ -107,7 +120,8 @@ impl ControlNamedDataset {
 
     fn length(&self) -> usize {
         match &self.result {
-            ControlAnalysisResult::OperatingPoint(_) => 1,
+            ControlAnalysisResult::OperatingPoint(_)
+            | ControlAnalysisResult::TransferFunction(_) => 1,
             ControlAnalysisResult::Ac(points)
             | ControlAnalysisResult::AcTable(FrequencyDataResult { points, .. }) => points.len(),
             ControlAnalysisResult::Noise(points)
@@ -119,7 +133,8 @@ impl ControlNamedDataset {
 
     fn scale_unit(&self) -> SignalUnit {
         match &self.result {
-            ControlAnalysisResult::OperatingPoint(_) => SignalUnit::Dimensionless,
+            ControlAnalysisResult::OperatingPoint(_)
+            | ControlAnalysisResult::TransferFunction(_) => SignalUnit::Dimensionless,
             ControlAnalysisResult::Ac(_)
             | ControlAnalysisResult::AcTable(_)
             | ControlAnalysisResult::Noise(_)
@@ -134,7 +149,8 @@ impl ControlNamedDataset {
 
     fn scale_name(&self) -> &str {
         match &self.result {
-            ControlAnalysisResult::OperatingPoint(_) => "index",
+            ControlAnalysisResult::OperatingPoint(_)
+            | ControlAnalysisResult::TransferFunction(_) => "index",
             ControlAnalysisResult::Ac(_)
             | ControlAnalysisResult::AcTable(_)
             | ControlAnalysisResult::Noise(_)
@@ -148,7 +164,8 @@ impl ControlNamedDataset {
 
     fn scale_value(&self, row: usize) -> Option<Value> {
         match &self.result {
-            ControlAnalysisResult::OperatingPoint(_) => (row == 0).then_some(0.0),
+            ControlAnalysisResult::OperatingPoint(_)
+            | ControlAnalysisResult::TransferFunction(_) => (row == 0).then_some(0.0),
             ControlAnalysisResult::Ac(points)
             | ControlAnalysisResult::AcTable(FrequencyDataResult { points, .. }) => {
                 points.get(row).map(|point| point.frequency)
@@ -164,6 +181,7 @@ impl ControlNamedDataset {
 
     fn branch_names(&self) -> &[String] {
         match &self.result {
+            ControlAnalysisResult::TransferFunction(_) => &[],
             ControlAnalysisResult::OperatingPoint(result) => &result.branch_names,
             ControlAnalysisResult::Ac(points)
             | ControlAnalysisResult::AcTable(FrequencyDataResult { points, .. }) => {
@@ -188,6 +206,13 @@ impl Selected<'_> {
             return None;
         }
         match (self.column, &self.dataset.result) {
+            (Column::Transfer(column), ControlAnalysisResult::TransferFunction(result)) => {
+                Some(column.sample(result).into())
+            }
+            (Column::Transfer(_), _)
+            | (Column::Node(_) | Column::Branch(_), ControlAnalysisResult::TransferFunction(_)) => {
+                None
+            }
             (Column::TableCoordinate(index), _) => self
                 .dataset
                 .table_columns()?
@@ -326,7 +351,8 @@ impl ControlCircuit {
         line: usize,
     ) -> Result<Selected<'a>, ControlError> {
         if probe.is_none()
-            && let Some(mut selected) = noise::select(dataset, name, line)?
+            && let Some(mut selected) =
+                transfer::select(dataset, name).or(noise::select(dataset, name, line)?)
         {
             if let Some(unit) = self.vector_units.get(&selected.id) {
                 selected.unit = unit.clone();
@@ -375,6 +401,9 @@ impl ControlCircuit {
             (Column::Ground, "v(0)".into(), SignalUnit::Volt)
         } else {
             let names = match &dataset.result {
+                ControlAnalysisResult::TransferFunction(_) => {
+                    return Err(unavailable(line, dataset, name));
+                }
                 ControlAnalysisResult::DcSweep(result) => {
                     &result
                         .points
@@ -428,6 +457,13 @@ impl ControlCircuit {
             }
             Expr::FnCall { name, args } => {
                 let (dataset, probe) = self.qualified(name, line)?;
+                if probe == "OUTPUT_IMPEDANCE_AT_V" {
+                    let mut selected = transfer::output_probe(dataset, args, line)?;
+                    if let Some(unit) = self.vector_units.get(&selected.id) {
+                        selected.unit = unit.clone();
+                    }
+                    return Ok(selected);
+                }
                 if matches!(probe, "DNO" | "DNI") {
                     let mut selected = noise::contribution(dataset, probe, args, line)?;
                     if let Some(unit) = self.vector_units.get(&selected.id) {
@@ -491,6 +527,7 @@ impl ControlCircuit {
     ) -> Result<ControlPresentation, ControlExecutionError> {
         let line = command.line;
         let mut input = command.arguments.trim();
+        let mut scalars = Vec::new();
         let kind = if command.name == "settype" {
             let type_name = word(&mut input, line)?;
             let unit = match type_name.to_ascii_lowercase().as_str() {
@@ -559,6 +596,16 @@ impl ControlCircuit {
                 } else {
                     None
                 };
+                if command.name == "print"
+                    && x.is_none()
+                    && let Ok(selected) = self.direct(&y, line)
+                    && let Some(scalar) =
+                        transfer::unbounded(&selected, &label, traces.len() + scalars.len(), line)?
+                {
+                    resolver.charge(2)?;
+                    scalars.push(scalar);
+                    continue;
+                }
                 let ys = if let Some(group) = self.group(&y, line)? {
                     group
                         .into_iter()
@@ -607,7 +654,7 @@ impl ControlCircuit {
                     traces.push(ControlTrace { x, y });
                 }
             }
-            if traces.is_empty() {
+            if traces.is_empty() && scalars.is_empty() {
                 return Err(
                     command_error(line, "output requires at least one vector expression").into(),
                 );
@@ -622,6 +669,7 @@ impl ControlCircuit {
         Ok(ControlPresentation {
             command: command.clone(),
             kind,
+            scalars,
         })
     }
 }
@@ -755,7 +803,10 @@ impl<'a> Resolver<'a> {
             }
             Expr::FnCall { name, args } => {
                 let probe = name.rsplit('.').next().unwrap_or(name);
-                if matches!(probe, "V" | "N" | "I" | "DNO" | "DNI") {
+                if matches!(
+                    probe,
+                    "V" | "N" | "I" | "DNO" | "DNI" | "OUTPUT_IMPEDANCE_AT_V"
+                ) {
                     if matches!(probe, "V" | "N") && args.len() == 2 {
                         let mut first = Expr::FnCall {
                             name: name.clone(),

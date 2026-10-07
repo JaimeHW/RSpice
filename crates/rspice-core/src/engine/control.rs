@@ -22,7 +22,7 @@ pub use options::ControlSettings;
 pub(super) use options::apply_runtime_options;
 pub use presentation::{
     ControlCurrentSource, ControlPlotOptions, ControlPresentation, ControlPresentationKind,
-    ControlTrace, ControlVector, ControlVectorId,
+    ControlScalar, ControlTrace, ControlVector, ControlVectorId,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -51,6 +51,7 @@ pub enum ControlAnalysisResult {
     Noise(Vec<crate::analysis::NoiseResult>),
     NoiseTable(FrequencyDataResult<crate::analysis::NoiseResult>),
     DcSweep(Box<super::DcSweepResult>),
+    TransferFunction(Box<crate::analysis::TransferFunctionResult>),
     Transient(Box<TransientResult>),
 }
 
@@ -93,7 +94,7 @@ impl CommandKind {
             "option" | "options" => Self::Options,
             "set" => Self::Set,
             "alter" => Self::Alter,
-            "op" | "dc" | "ac" | "noise" | "tran" => Self::Analysis,
+            "op" | "dc" | "ac" | "noise" | "tran" | "tf" => Self::Analysis,
             "run" => Self::Run,
             "plot" | "print" | "settype" => Self::Presentation,
             _ => {
@@ -298,6 +299,7 @@ impl ControlCircuit {
                 ("noise", crate::identity::AnalysisKind::Noise)
             }
             AnalysisCommand::Tran { .. } => ("tran", crate::identity::AnalysisKind::Tran),
+            AnalysisCommand::Tf { .. } => ("tf", crate::identity::AnalysisKind::TransferFunction),
             _ => {
                 return Err(command_error(
                     line,
@@ -383,6 +385,33 @@ impl ControlCircuit {
                     "tran",
                     ControlAnalysisResult::Transient(Box::new(result)),
                     count,
+                )
+            }
+            AnalysisCommand::Tf {
+                output_node,
+                reference_node,
+                output_is_current,
+                input_source,
+            } => {
+                // The fixed scalar result can be admitted before solving, with
+                // cumulative diagnostics against the caller's full allowance.
+                engine
+                    .ensure_result_values(self.retained_values.saturating_add(3))
+                    .map_err(|error| simulation_error(line, error))?;
+                let result = bounded
+                    .run_transfer_function_with_abort(
+                        &netlist,
+                        output_node,
+                        reference_node.as_deref(),
+                        *output_is_current,
+                        input_source,
+                        abort,
+                    )
+                    .map_err(|error| simulation_error(line, error))?;
+                (
+                    kind,
+                    ControlAnalysisResult::TransferFunction(Box::new(result)),
+                    3,
                 )
             }
             _ => {

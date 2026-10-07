@@ -544,6 +544,19 @@ Textual multi-run expansion preserves tables needed by frequency/control consume
 including shared tables and ALTER variants. Scoped qualification is recorded in
 `tests/testdata/qualification/core-control-frequency-data-windows-20261006.json`.
 
+`ControlCircuit` also executes explicit `tf` and declarative `.TF` through the
+ordinary transfer-function solver. `ControlAnalysisResult::TransferFunction`
+retains the gain, physical gain unit, impedances and source/probe identities.
+Named `tf1`, `tf2`, ... datasets expose `transfer_function`/`transfer_gain`,
+`input_impedance` and `output_impedance`, including the ngspice impedance labels.
+Finite expressions use the existing one-point vector presentation contract.
+Exact infinite impedances requested by `print` are retained as typed
+`ControlPresentation::scalars`, with `ControlScalar::position` preserving order
+among scalar entries and vector traces. They are never converted into finite
+plot samples. Hosts must publish these scalar determinations as well as `kind`.
+Failed or cancelled analyses publish no dataset and consume no ordinal; the
+three retained transfer values count against the cumulative result allowance.
+
 The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and
 the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.
 Semiconductor temperature behavior belongs to each device model;

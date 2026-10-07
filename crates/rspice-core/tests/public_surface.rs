@@ -56,7 +56,8 @@ use rspice_core::analysis::harmonic_balance::{
 // Transfer gain units are retained for typed documents and control consumers.
 // An explicit coordinate-layout writer and reader disambiguate CLI table exports
 // from legacy operating-point, FFT and event carriers that share display titles.
-const MAX_PUBLIC_ITEMS: usize = 5548;
+// PRINT retains nonfinite scalar determinations and their order for CLI/WASM.
+const MAX_PUBLIC_ITEMS: usize = 5553;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

@@ -95,16 +95,19 @@ pub(super) fn run(
                     | ControlPresentationKind::Print(traces) => traces.as_slice(),
                     ControlPresentationKind::UnitsChanged { .. } => &[],
                 };
-                let count = traces.iter().fold(0usize, |count, trace| {
-                    count.saturating_add(
-                        trace
-                            .x
-                            .samples
-                            .len()
-                            .saturating_add(trace.y.samples.len())
-                            .saturating_mul(2),
-                    )
-                });
+                let count = traces.iter().fold(
+                    presentation.scalars.len().saturating_mul(2),
+                    |count, trace| {
+                        count.saturating_add(
+                            trace
+                                .x
+                                .samples
+                                .len()
+                                .saturating_add(trace.y.samples.len())
+                                .saturating_mul(2),
+                        )
+                    },
+                );
                 presentation_values = presentation_values.saturating_add(count);
                 if presentation_values > limits.max_result_values {
                     return Err(resource_limit_error(
@@ -172,6 +175,9 @@ pub(super) fn run(
             }
             ControlAnalysisResult::DcSweep(result) => {
                 AnalysisResultDocument::from_dc_analysis(dataset.analysis_id, result)
+            }
+            ControlAnalysisResult::TransferFunction(result) => {
+                AnalysisResultDocument::from_transfer_function(dataset.analysis_id, result)
             }
             ControlAnalysisResult::Noise(points) => {
                 AnalysisResultDocument::from_noise(dataset.analysis_id, points)
@@ -278,6 +284,85 @@ fn source_error(mut error: WasmError, line: usize, script: &ControlScriptSource)
 #[cfg(test)]
 mod tests {
     use super::super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn transfer_function_control_matches_direct_and_mixed_declarative_results() {
+        let source = "Transfer\nI1 0 out 0 AC 1\nR1 out 0 3k\n";
+        let direct =
+            run_authored_deck_document_detailed(&format!("{source}.tf V(out) I1\n.end\n")).unwrap();
+        for cards in [
+            ".control\ntf V(out) I1\n.endc",
+            ".tf V(out) I1\n.control\nrun\n.endc",
+        ] {
+            let control =
+                run_authored_deck_document_detailed(&format!("{source}{cards}\n.end\n")).unwrap();
+            assert_eq!(control.control_datasets, ["tf1"]);
+            assert_eq!(control.results[0].scalars(), direct.results[0].scalars());
+            assert_eq!(control.results[0].payload(), direct.results[0].payload());
+            assert_eq!(
+                control.results[0].scalars()[0].unit(),
+                Some(&SignalUnit::Ohm)
+            );
+        }
+        let mixed = run_authored_deck_document_detailed(&format!("{source}.op\n.tf V(out) I1\n.ac lin 2 10 100\n.control\nrun\nprint tf1.transfer_function\n.endc\n.end\n")).unwrap();
+        assert_eq!(mixed.control_datasets, ["op1", "tf1", "ac1"]);
+        assert_eq!(mixed.results[1].scalars(), direct.results[0].scalars());
+        let rspice_core::engine::ControlPresentationKind::Print(traces) =
+            &mixed.control_presentations[0].kind
+        else {
+            panic!("print");
+        };
+        assert_eq!(traces[0].y.unit, SignalUnit::Ohm);
+        assert!((traces[0].y.samples[0].re - 3000.0).abs() < 1e-7);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn transfer_function_cancellation_and_failed_probes_publish_no_deck() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct CancelAfter {
+            polls: AtomicUsize,
+            limit: usize,
+        }
+        impl AbortSignal for CancelAfter {
+            fn is_aborted(&self) -> bool {
+                self.polls.fetch_add(1, Ordering::Relaxed) >= self.limit
+            }
+        }
+        let source = "Transfer\nV1 in 0 1\nR1 in out 1k\nR2 out 0 2k\n.control\nop\ntf V(out) V1\nprint transfer_function\n.endc\n.end\n";
+        let options = WasmExecutionOptions::default();
+        let counted = CancelAfter {
+            polls: AtomicUsize::new(0),
+            limit: usize::MAX,
+        };
+        run_authored_deck_document_with_options_and_abort_detailed(source, &options, &counted)
+            .unwrap();
+        let polls = counted.polls.load(Ordering::Relaxed);
+        for limit in [0, polls / 2, polls - 1] {
+            let abort = CancelAfter {
+                polls: AtomicUsize::new(0),
+                limit,
+            };
+            let error = run_authored_deck_document_with_options_and_abort_detailed(
+                source, &options, &abort,
+            )
+            .unwrap_err();
+            assert_eq!(error.category, "cancellation");
+        }
+        let error = run_authored_deck_document_detailed(
+            &source.replace("tf V(out) V1", "tf V(missing) V1"),
+        )
+        .unwrap_err();
+        assert_eq!(error.primary_line, Some(7));
+        let mut limited = options;
+        limited.resource_limits.max_result_values = 5;
+        let error =
+            run_authored_deck_document_with_options_and_abort_detailed(source, &limited, &NoAbort)
+                .unwrap_err();
+        assert_eq!(error.category, "resource_limit");
+    }
+
     const TABLE_CANCELLATION_SOURCE: &str = "WASM table\n.param resistance=1k\nV1 in 0 AC 1\nR1 in out {resistance} tc1=.01 tnom=27\nC1 out 0 1u\n.data points HERTZ resistance TEMP\n100 1k 27\n10 2k 127\n100 3k 77\n.enddata\n";
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

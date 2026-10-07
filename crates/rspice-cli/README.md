@@ -98,9 +98,19 @@ operating point is run by default.
 With `.control` regions, `run` executes their commands in order, including
 regions loaded through `.include` and `-I` search paths. The current control
 host supports scalar assignments and nested loops/conditionals, `alter`,
-`op`, `dc`, `ac`, `noise`, `tran`, `run`, `print`, `plot`, and `settype`. A control
-`run` executes the deck's declarative OP, DC, AC, noise and transient analyses,
+`op`, `dc`, `ac`, `noise`, `tf`, `tran`, `run`, `print`, `plot`, and `settype`. A control
+`run` executes the deck's declarative OP, DC, AC, noise, TF and transient analyses,
 including AC/noise `DATA=<table>` forms. Unsupported commands fail with their source location.
+
+Transfer-function datasets (`tf1`, `tf2`, ...) retain gain, input/output impedance
+and probe identity. Gain units are dimensionless, ohms or siemens according to
+the actual output/input quantities; typed JSON and unit-bearing table formats
+preserve them. `print transfer_function input_impedance output_impedance` reads
+the current TF dataset, and qualified names access earlier runs. Infinite
+impedances print as `inf`/`-inf` and retain typed scalar determinations in version 2
+control-presentation JSON. Its `scalars[].position` preserves authored ordering
+among scalar entries and finite traces; ordinary finite presentations remain
+version 1. Plotting requires finite samples.
 An explicit command-line analysis mode continues to supersede authored cards.
 
 Frequency tables retain authored row order, including repeated or decreasing

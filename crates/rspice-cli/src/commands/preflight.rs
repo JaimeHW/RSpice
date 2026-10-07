@@ -300,6 +300,7 @@ pub(crate) fn check_requests(
                         | AnalysisCommand::NoiseData { .. }
                         | AnalysisCommand::Ac { .. }
                         | AnalysisCommand::AcData { .. }
+                        | AnalysisCommand::Tf { .. }
                         | AnalysisCommand::Tran { .. }
                 ) {
                     return Err(located(invalid(
@@ -314,7 +315,10 @@ pub(crate) fn check_requests(
                     "run has no declarative analysis to execute",
                 )));
             }
-        } else if matches!(command.name.as_str(), "op" | "dc" | "ac" | "noise" | "tran") {
+        } else if matches!(
+            command.name.as_str(),
+            "op" | "dc" | "ac" | "noise" | "tran" | "tf"
+        ) {
             if command.arguments.contains('$') {
                 deferred.push(command.line);
                 continue;

@@ -206,6 +206,9 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
         abort.observe_progress(1.0);
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
 
         let probe_label = if output_is_current {
             format!("I({output_node})")

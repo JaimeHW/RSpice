@@ -169,6 +169,9 @@ pub(super) fn run(
                             ControlAnalysisResult::Ac(result) => {
                                 frequency::finish_ac_results(&ctx, result)?
                             }
+                            ControlAnalysisResult::TransferFunction(result) => {
+                                frequency::finish_tf_result(&ctx, result)?;
+                            }
                             ControlAnalysisResult::AcTable(table) => {
                                 frequency::finish_ac_table(&ctx, table)?;
                             }

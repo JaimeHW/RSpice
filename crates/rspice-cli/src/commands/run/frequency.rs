@@ -60,6 +60,18 @@ pub(super) fn run_tf_from_command(
         )
         .map_err(|source| map_frequency_error(ctx, "Transfer Function", source))?;
 
+    finish_tf_result(ctx, &result)
+}
+
+pub(super) fn finish_tf_result(
+    ctx: &RunContext<'_>,
+    result: &rspice_core::analysis::TransferFunctionResult,
+) -> Result<(), CliError> {
+    let current_probe = result
+        .output
+        .strip_prefix("I(")
+        .and_then(|name| name.strip_suffix(')'));
+
     // ngspice's exact labels, per-form ordering, and C-style %e exponent
     // formatting, so scripts written against ngspice's .TF output parse
     // RSpice's unchanged.
@@ -71,7 +83,7 @@ pub(super) fn run_tf_from_command(
         let zout = format_spice_exponent(result.output_impedance);
         crate::console::line(format_args!("Transfer function information:"))?;
         crate::console::line(format_args!("transfer_function = {gain}"))?;
-        if output_is_current {
+        if let Some(output_node) = current_probe {
             crate::console::line(format_args!("{source}#input_impedance = {zin}"))?;
             crate::console::line(format_args!(
                 "{}#output_impedance = {zout}",
@@ -87,29 +99,36 @@ pub(super) fn run_tf_from_command(
         let analysis_id = output.analysis("tf")?;
         use super::export::{ColumnData, ExportColumn, ExportTable};
 
-        let scalar = |name: &str, var_type: &str, value: f64| ExportColumn {
-            unit: None,
+        let scalar = |name: &str, var_type: &str, unit, value: f64| ExportColumn {
+            unit: Some(unit),
             name: name.to_string(),
             var_type: var_type.to_string(),
             data: ColumnData::Real(vec![value]),
         };
         let table = ExportTable {
-            scale_unit: None,
+            scale_unit: Some(rspice_core::execution::SignalUnit::Dimensionless.symbol()),
             analysis: "tf".to_string(),
             plot_name: "DC Transfer Function".to_string(),
             scale_name: "point".to_string(),
             scale_type: "index".to_string(),
             scale: vec![0.0],
             columns: vec![
-                scalar("transfer_function", "gain", result.gain),
+                scalar(
+                    "transfer_function",
+                    "gain",
+                    result.gain_unit.symbol(),
+                    result.gain,
+                ),
                 scalar(
                     &format!("{source}#input_impedance"),
                     "impedance",
+                    rspice_core::execution::SignalUnit::Ohm.symbol(),
                     result.input_impedance,
                 ),
                 scalar(
                     &format!("output_impedance_at_{probe}"),
                     "impedance",
+                    rspice_core::execution::SignalUnit::Ohm.symbol(),
                     result.output_impedance,
                 ),
             ],
@@ -125,7 +144,7 @@ pub(super) fn run_tf_from_command(
             || {
                 rspice_core::execution::AnalysisResultDocument::from_transfer_function(
                     analysis_id,
-                    &result,
+                    result,
                 )
             },
         )?;
