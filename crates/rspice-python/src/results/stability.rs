@@ -869,6 +869,7 @@ impl PyStbResult {
             .map_err(|error| {
                 crate::errors::value_error(format!("invalid STB pickle samples: {error}"))
             })?;
+        let projected_retained_values = projected.retained_value_count();
         let restored = match margin_state {
             Some((1, gain, phase)) => {
                 let decode =
@@ -943,8 +944,7 @@ impl PyStbResult {
             }
         };
         let limits = rspice_core::ResourceLimits::default();
-        let retained_values = projected
-            .retained_value_count()
+        let retained_values = projected_retained_values
             .saturating_sub(4)
             .saturating_add(restored_circuit_poles.retained_value_count());
         let retained_bytes = warnings
