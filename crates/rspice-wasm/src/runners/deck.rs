@@ -184,7 +184,7 @@ pub fn run_authored_deck_document_with_options_and_abort_detailed(
                     .coordinate(result_coordinate.clone())
                     .topology_fingerprint(topology)
                     .namespaces(namespaces.clone())
-                    .build_with_abort(external_abort)
+                    .build_with_limits_and_abort(&resource_limits, external_abort)
                     .map_err(|error| name_the_failure(document_projection_error(error)))?;
                 retained_values = retained_values
                     .checked_add(document.total_value_count())
@@ -357,8 +357,13 @@ fn execute_analysis(
                 .map_err(simulation_error)?;
             ensure_not_aborted(abort)?;
             Ok(vec![
-                AnalysisResultDocument::from_ac_table(id, &table)
-                    .map_err(document_projection_error)?,
+                AnalysisResultDocument::from_ac_table_with_limits_and_abort(
+                    id,
+                    &table,
+                    &resource_limits,
+                    abort,
+                )
+                .map_err(document_projection_error)?,
             ])
         }
 
@@ -440,8 +445,13 @@ fn execute_analysis(
                 .map_err(simulation_error)?;
             ensure_not_aborted(abort)?;
             Ok(vec![
-                AnalysisResultDocument::from_noise_table(id, &table)
-                    .map_err(document_projection_error)?,
+                AnalysisResultDocument::from_noise_table_with_limits_and_abort(
+                    id,
+                    &table,
+                    &resource_limits,
+                    abort,
+                )
+                .map_err(document_projection_error)?,
             ])
         }
 

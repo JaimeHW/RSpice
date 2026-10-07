@@ -147,6 +147,21 @@ pub(super) fn run(
     let mut retained = presentation_values;
     for (dataset, topology) in circuit.into_datasets().into_iter().zip(topologies) {
         ensure_not_aborted(abort)?;
+        let mut remaining = limits;
+        remaining.max_result_values = limits.max_result_values.saturating_sub(retained);
+        let projection_error = |error| {
+            let error = match error {
+                rspice_core::execution::ResultDocumentError::ResourceLimit(mut error)
+                    if error.resource == ResourceKind::ResultValues =>
+                {
+                    error.requested = error.requested.saturating_add(retained);
+                    error.limit = limits.max_result_values;
+                    rspice_core::execution::ResultDocumentError::ResourceLimit(error)
+                }
+                other => other,
+            };
+            document_projection_error(error)
+        };
         let builder = match &dataset.result {
             ControlAnalysisResult::OperatingPoint(result) => {
                 AnalysisResultDocument::from_operating_point(
@@ -165,10 +180,20 @@ pub(super) fn run(
                 AnalysisResultDocument::from_ac(dataset.analysis_id, points)
             }
             ControlAnalysisResult::AcTable(table) => {
-                AnalysisResultDocument::from_ac_table(dataset.analysis_id, table)
+                AnalysisResultDocument::from_ac_table_with_limits_and_abort(
+                    dataset.analysis_id,
+                    table,
+                    &remaining,
+                    abort,
+                )
             }
             ControlAnalysisResult::NoiseTable(table) => {
-                AnalysisResultDocument::from_noise_table(dataset.analysis_id, table)
+                AnalysisResultDocument::from_noise_table_with_limits_and_abort(
+                    dataset.analysis_id,
+                    table,
+                    &remaining,
+                    abort,
+                )
             }
             ControlAnalysisResult::Transient(result) => AnalysisResultDocument::from_transient(
                 dataset.analysis_id,
@@ -177,7 +202,7 @@ pub(super) fn run(
                 Vec::new(),
             ),
         }
-        .map_err(document_projection_error)?;
+        .map_err(projection_error)?;
         let namespace = format!("control/{}", dataset.analysis_id);
         let document = builder
             .coordinate(result_coordinate.clone())
@@ -186,8 +211,8 @@ pub(super) fn run(
                 output: namespace.clone(),
                 checkpoint: namespace,
             })
-            .build_with_abort(abort)
-            .map_err(document_projection_error)?;
+            .build_with_limits_and_abort(&remaining, abort)
+            .map_err(projection_error)?;
         retained = retained.saturating_add(document.total_value_count());
         if retained > limits.max_result_values {
             return Err(resource_limit_error(
@@ -253,6 +278,52 @@ fn source_error(mut error: WasmError, line: usize, script: &ControlScriptSource)
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    const TABLE_CANCELLATION_SOURCE: &str = "WASM table\n.param resistance=1k\nV1 in 0 AC 1\nR1 in out {resistance} tc1=.01 tnom=27\nC1 out 0 1u\n.data points HERTZ resistance TEMP\n100 1k 27\n10 2k 127\n100 3k 77\n.enddata\n";
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn table_failure_and_cancellation_publish_no_partial_deck() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct CancelAfter {
+            calls: AtomicUsize,
+            limit: usize,
+        }
+        impl AbortSignal for CancelAfter {
+            fn is_aborted(&self) -> bool {
+                self.calls.fetch_add(1, Ordering::Relaxed) >= self.limit
+            }
+        }
+        let source = format!(
+            "{TABLE_CANCELLATION_SOURCE}.control\nop\nac data=points\nnoise V(out) V1 data=points\n.endc\n.end\n"
+        );
+        let options = WasmExecutionOptions::default();
+        let counted = CancelAfter {
+            calls: AtomicUsize::new(0),
+            limit: usize::MAX,
+        };
+        run_authored_deck_document_with_options_and_abort_detailed(&source, &options, &counted)
+            .unwrap();
+        let polls = counted.calls.load(Ordering::Relaxed);
+        for limit in [0, polls / 2, polls - 1] {
+            let abort = CancelAfter {
+                calls: AtomicUsize::new(0),
+                limit,
+            };
+            let error = run_authored_deck_document_with_options_and_abort_detailed(
+                &source, &options, &abort,
+            )
+            .unwrap_err();
+            assert_eq!(error.category, "cancellation");
+        }
+        let mut limited = options;
+        limited.resource_limits.max_result_values = 20;
+        let error =
+            run_authored_deck_document_with_options_and_abort_detailed(&source, &limited, &NoAbort)
+                .unwrap_err();
+        assert_eq!(error.category, "resource_limit");
+        let invalid = source.replace("100 3k 77", "-100 3k 77");
+        assert!(run_authored_deck_document_detailed(&invalid).is_err());
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]

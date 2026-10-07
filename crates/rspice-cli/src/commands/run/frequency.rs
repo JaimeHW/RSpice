@@ -750,14 +750,18 @@ fn finish_ac(
             &output.path,
             analysis_id,
             super::document::complex_schema(&signals)?,
-            || match coordinates {
-                Some(table) => rspice_core::execution::AnalysisResultDocument::from_ac_table(
+            || {
+                match coordinates {
+                Some(table) => rspice_core::execution::AnalysisResultDocument::from_ac_table_with_limits_and_abort(
                     analysis_id,
                     table,
+                    &ctx.engine.config().resource_limits,
+                    &crate::abort::ProcessAbort,
                 ),
                 None => {
                     rspice_core::execution::AnalysisResultDocument::from_ac(analysis_id, results)
                 }
+            }
             },
             |path, format| {
                 if let Some(coordinates) = coordinates {
@@ -1301,14 +1305,18 @@ fn finish_noise_projected(
             &output.path,
             analysis_id,
             schema,
-            || match coordinates {
-                Some(table) => rspice_core::execution::AnalysisResultDocument::from_noise_table(
+            || {
+                match coordinates {
+                Some(table) => rspice_core::execution::AnalysisResultDocument::from_noise_table_with_limits_and_abort(
                     analysis_id,
                     table,
+                    &ctx.engine.config().resource_limits,
+                    &crate::abort::ProcessAbort,
                 ),
                 None => {
                     rspice_core::execution::AnalysisResultDocument::from_noise(analysis_id, results)
                 }
+            }
             },
             |path, format| {
                 if let Some(coordinates) = coordinates {
