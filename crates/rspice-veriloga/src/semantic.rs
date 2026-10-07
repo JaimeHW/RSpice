@@ -6197,9 +6197,8 @@ impl SemanticAnalyzer {
             Expression::Digital(digital) => {
                 return Err(CompileError::Semantic(SemanticError::new(
                     SemanticErrorKind::UnsupportedFeature(format!(
-                        "a {} has no value in the continuous (analog) domain; it \
-                         is legal only inside an `always`/`initial` process or a \
-                         continuous `assign`",
+                        "a {} has no value in the continuous (analog) domain on this backend; \
+                         it is supported in discrete expressions, including variable initializers",
                         digital.construct()
                     )),
                     digital.span(),

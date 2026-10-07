@@ -360,7 +360,7 @@ pub const INTEGER_BOUNDS: VectorBounds = VectorBounds { msb: 31, lsb: 0 };
 /// A declared discrete-domain net or variable.
 #[derive(Debug, Clone)]
 pub struct AnalyzedDigitalSignal {
-    /// Context-free numeric declaration assignment, evaluated in this instance's
+    /// Context-free variable declaration assignment, evaluated in this instance's
     /// parameter scope and installed in discrete storage before process startup.
     pub initializer: Option<Expression>,
     pub name: SmolStr,
@@ -617,26 +617,6 @@ impl SemanticAnalyzer {
                     self.analyze_continuous_assign(&assignment, &signals, &index)
                 {
                     continuous_assigns.push(analyzed);
-                }
-            }
-        }
-        // A *variable* declaration assignment is not one. Section 6.2.1 makes
-        // it an initial-block assignment, which is a process rather than a
-        // driver, and synthesizing that process is not this wave's — so it
-        // refuses instead of being dropped the way the net form was.
-        for declaration in &module.digital_variables {
-            for item in &declaration.items {
-                if item.init.is_some() {
-                    self.record_error_at(
-                        SemanticErrorKind::UnsupportedFeature(format!(
-                            "a declaration initializer on the `{}` `{}` is not supported yet; \
-                             IEEE 1364-2005 section 6.2.1 makes it equivalent to an `initial` \
-                             assignment, so write one",
-                            declaration.kind.keyword(),
-                            item.name
-                        )),
-                        item.span,
-                    );
                 }
             }
         }
@@ -1163,7 +1143,11 @@ impl SemanticAnalyzer {
 
         seen.insert(item.name.clone(), item.span);
         signals.push(AnalyzedDigitalSignal {
-            initializer: None,
+            // VAMS-2023 8.2 initializes module variables before process
+            // execution. Net declaration assignments remain ordinary drivers.
+            initializer: matches!(class, DigitalSignalClass::Variable(_))
+                .then(|| item.init.clone())
+                .flatten(),
             name: item.name.clone(),
             class,
             signedness,

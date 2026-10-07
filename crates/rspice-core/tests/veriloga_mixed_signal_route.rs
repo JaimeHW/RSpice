@@ -2397,15 +2397,43 @@ fn digital_flow_probes_observe_named_sources_and_parallel_branch_identity() {
 }
 
 #[test]
+fn declaration_only_outputs_drive_loaded_spice_nodes_at_startup() {
+    let model = ModelFile::new(
+        "initialized_outputs",
+        "module initialized_outputs(q); output [0:1] q; reg [0:1] q=2'b10; endmodule",
+    );
+    let deck = format!(
+        "* declaration-only outputs\n.param vcc=1\nXq high low initialized_outputs\nRh high 0 1k\nRl low 0 1k\n.va \"{}\" initialized_outputs\n.end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 1e-9, 0.1e-9);
+    for (node, expected, state) in [
+        ("high", 1.0 / 1.02, rspice_core::xspice::DigitalState::One),
+        ("low", 0.0, rspice_core::xspice::DigitalState::Zero),
+    ] {
+        assert!(
+            waveform(&result, node)
+                .iter()
+                .all(|value| (value - expected).abs() < 1e-8),
+            "{node}"
+        );
+        let events = result.digital_trace_named(node).unwrap();
+        assert_eq!(events.len(), 1, "{node}: {events:?}");
+        assert_eq!(events[0].time, 0.0);
+        assert_eq!(events[0].value.state, state);
+    }
+}
+
+#[test]
 fn analog_variable_reads_share_the_candidate_with_spice_loads_and_digital_inputs() {
     let model = ModelFile::new(
         "variable_sampler",
         r#"
 `timescale 1ns/1ps
 module variable_sampler(p,q);
- inout p; electrical p; output q; reg q;
+ inout p; electrical p; output q; reg q=0;
  parameter real LOAD=1000;
- integer gain=-2; reg signed [7:0] adjustment; reg startup_ok;
+ integer gain=-2; reg signed [7:0] adjustment=-1; reg startup_ok;
  real measured,period; integer count,enabled;
  analog begin
    measured=gain*V(p);
@@ -2413,7 +2441,7 @@ module variable_sampler(p,q);
    I(p)<+(V(p)-gain+adjustment-255)/1000;
  end
  initial begin
-   adjustment=-1; period=1.537e-9; enabled=1; q=0;
+   period=1.537e-9; enabled=1;
    startup_ok=(measured-4*LOAD/(1000+LOAD)<1e-8)
      && (measured-4*LOAD/(1000+LOAD)>-1e-8);
    #1; gain=-4;

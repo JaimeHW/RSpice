@@ -4831,7 +4831,7 @@ endmodule
 
     #[test]
     fn discrete_analog_inputs_restore_on_rejection_and_checkpoint() {
-        let source = "module shared(p); inout p; electrical p; real state=0.25; integer bias=-2; initial begin #1 state=1.25; bias=-2; end analog I(p)<+state+bias+2; endmodule";
+        let source = "module shared(p); inout p; electrical p; real state=0.25; integer bias=-2; reg [4:0] packed=17; initial begin #1 state=1.25; bias=-3; packed=18; end analog I(p)<+state+bias+packed-15; endmodule";
         let mut host =
             MixedSignalHost::compile(source, None, "x", &[1], SchedulerLimits::default()).unwrap();
         let stamp = |host: &mut MixedSignalHost| {

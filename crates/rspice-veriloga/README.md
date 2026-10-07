@@ -235,19 +235,23 @@ Known digital arithmetic and relational operands wider than 64 bits use exact
 integer arithmetic, with results wrapping at their declared width. X/Z and
 division-by-zero behavior is preserved. Wide shift counts, based literals and
 unsized based values retain their bits, within the existing 65,536-bit literal
-budget. Some known based literals of 64 bits or fewer still pass through scalar
-parsing and are refused when their exact integer is not representable by `f64`;
-full literal/type/conversion work in MS06 remains open.
+budget. Known based literals that cannot fit exactly in the scalar `f64`
+representation use the exact-bit path too. Analog scalar consumers continue to
+reject unsupported discrete forms explicitly. Full literal/type/conversion work
+in MS06 remains open.
 
-Module-level `integer` and `real` declarations assigned by digital processes
-can carry constant initializers. The initializer does not select the variable's
-domain; ownership still follows its procedural writers, and writes from both
-domains remain errors. Each initializer uses its own instance's parameters and
-typed assignment conversion. Canonical signals retain the initial value, and the
+Digitally owned module-level `integer` and `real` variables, and explicit packed
+`reg` variables, can carry constant initializers. Numeric declarations still
+acquire their domain from their procedural writers; initialization does not
+choose ownership, and writes from both domains remain errors. Each initializer
+uses its own instance's parameters and typed assignment conversion. Canonical
+signals retain the initial value, and the
 core installs it before process startup, preserving it through ordinary trial
 rollback and checkpoint restoration. Custom digital stores must initialize from
-`DigitalSignal::initial_value` when present. Numeric arrays and explicit `reg`
-declaration assignments remain separate unsupported cases.
+`DigitalSignal::initial_value` when present. Packed initializers retain signed
+extension, truncation, ascending ranges and X/Z values. This follows the
+VAMS-2023 pre-simulation contract (8.2), including when a variable has no process
+writer. Unpacked discrete arrays remain unsupported.
 
 Delay-controlled nonblocking assignments capture their RHS and converted delay
 at encounter, then continue immediately. Positive delays retain every update

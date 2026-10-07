@@ -2699,6 +2699,18 @@ impl<'a> Parser<'a> {
         Some(op)
     }
 
+    fn parse_four_state_literal(&mut self) -> Result<Expression, ParseError> {
+        let span = self.current_span();
+        let text = self.current().text.clone().unwrap_or_default();
+        let value = crate::four_state::decode(&text)
+            .map_err(|message| ParseError::new(ParseErrorKind::InvalidNumber(message), span))?;
+        self.advance();
+        Ok(Expression::Digital(DigitalExpr::FourState(FourStateLit {
+            value,
+            span,
+        })))
+    }
+
     /// Parse primary expression
     fn parse_primary(&mut self) -> Result<Expression, ParseError> {
         let start = self.current_span();
@@ -2707,9 +2719,21 @@ impl<'a> Parser<'a> {
             TokenKind::IntegerLiteral | TokenKind::RealLiteral => {
                 let text = self.current().text.clone().unwrap_or_default();
                 let span = start.extend(self.current_span());
-                let value = parse_number(&text).map_err(|message| {
-                    ParseError::new(ParseErrorKind::InvalidNumber(message), span)
-                })?;
+                let value = match parse_number(&text) {
+                    Ok(value) => value,
+                    // Preserve the exact packed value when the scalar numeric
+                    // representation cannot carry it. Analog lowering still
+                    // checks whether that representation is legal in its domain.
+                    Err(_) if self.check(TokenKind::IntegerLiteral) && text.contains('\'') => {
+                        return self.parse_four_state_literal();
+                    }
+                    Err(message) => {
+                        return Err(ParseError::new(
+                            ParseErrorKind::InvalidNumber(message),
+                            span,
+                        ));
+                    }
+                };
                 self.advance();
                 Ok(Expression::Number(NumberLit {
                     value,
@@ -2717,18 +2741,7 @@ impl<'a> Parser<'a> {
                     span: start.extend(self.previous_span()),
                 }))
             }
-            TokenKind::FourStateLiteral => {
-                let text = self.current().text.clone().unwrap_or_default();
-                let span = start.extend(self.current_span());
-                let value = crate::four_state::decode(&text).map_err(|message| {
-                    ParseError::new(ParseErrorKind::InvalidNumber(message), span)
-                })?;
-                self.advance();
-                Ok(Expression::Digital(DigitalExpr::FourState(FourStateLit {
-                    value,
-                    span: start.extend(self.previous_span()),
-                })))
-            }
+            TokenKind::FourStateLiteral => self.parse_four_state_literal(),
             TokenKind::StringLiteral => {
                 let text = self.current().text.clone().unwrap_or_default();
                 self.advance();
@@ -4247,18 +4260,25 @@ mod tests {
     }
 
     #[test]
-    fn integer_not_exactly_representable_by_scalar_ir_is_rejected() {
-        let error = parse_error(
-            r#"module rounded;
-                parameter integer bad = 54'h20_0000_0000_0001;
-            endmodule"#,
+    fn based_integer_beyond_scalar_precision_retains_its_exact_bits() {
+        let module = parse_module(
+            r#"module exact;
+            parameter integer value = 54'h20_0000_0000_0001;
+        endmodule"#,
         );
-        let ParseErrorKind::InvalidNumber(message) = error.kind else {
-            panic!("unexpected parse error: {error}");
+        let Some(Expression::Digital(DigitalExpr::FourState(literal))) =
+            &module.parameters[0].default
+        else {
+            panic!("expected an exact bit literal")
         };
+        assert_eq!(literal.value.raw, "54'h20_0000_0000_0001");
+        assert_eq!(literal.value.width(), 54);
+        assert_eq!(literal.value.bits[0], crate::four_state::FourStateBit::One);
+        assert_eq!(literal.value.bits[53], crate::four_state::FourStateBit::One);
         assert!(
-            message.contains("cannot be represented exactly"),
-            "{message}"
+            literal.value.bits[1..53]
+                .iter()
+                .all(|bit| *bit == crate::four_state::FourStateBit::Zero)
         );
     }
 }

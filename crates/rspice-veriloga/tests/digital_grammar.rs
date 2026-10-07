@@ -1380,19 +1380,77 @@ mod canonical_ir_boundary {
         );
     }
 
-    /// A `reg` declaration initializer is not a driver: IEEE 1364-2005 section
-    /// 6.2.1 makes it an `initial` assignment. It refuses rather than being
-    /// dropped the way the net form used to be.
+    /// VAMS-2023 8.2 initializes module variables before process startup.
+    /// Assignment sizing retains all packed bits, including X/Z and signed fills.
     #[test]
-    fn a_variable_declaration_initializer_is_refused() {
-        let source = digital_module("    reg q = 1'b0;");
-        let error = VerilogACompiler::new(CompilerOptions::default())
-            .compile_canonical_ir(&source)
-            .expect_err("a variable declaration initializer must be refused");
-        assert!(
-            error.to_string().contains("declaration initializer"),
-            "{error}"
+    fn packed_declaration_initializers_preserve_width_bits_and_parameter_values() {
+        use rspice_veriloga::canonical_ir::digital::DigitalInitialValue;
+        let source = digital_module(
+            r#"
+parameter INIT=8'h96;
+reg q=1'b0;
+reg signed [7:0] signed_value=4'shf;
+reg [0:7] ascending=INIT;
+reg [3:0] truncated=8'hab;
+reg [11:0] unknown=4'bx10z;
+reg [7:0] rounded=2.5;
+reg [63:0] exact=64'h0020000000000001;
+reg [95:0] wide={32'h01234567,32'h89abcdef,32'hfedcba98};
+"#,
         );
+        let artifact = VerilogACompiler::default()
+            .compile_canonical_ir(&source)
+            .unwrap();
+        let plan = &artifact.digital;
+        assert!(plan.processes.is_empty() && plan.drivers.is_empty());
+        for (name, expected) in [
+            ("q", "0".to_string()),
+            ("signed_value", "11111111".to_string()),
+            ("ascending", "10010110".to_string()),
+            ("truncated", "1011".to_string()),
+            ("unknown", "00000000x10z".to_string()),
+            ("rounded", "00000011".to_string()),
+            ("exact", format!("{:064b}", 9_007_199_254_740_993_u64)),
+            (
+                "wide",
+                format!(
+                    "{:032b}{:032b}{:032b}",
+                    0x01234567_u32, 0x89abcdef_u32, 0xfedcba98_u32
+                ),
+            ),
+        ] {
+            let signal = plan
+                .signals
+                .iter()
+                .find(|signal| signal.name == name)
+                .unwrap();
+            let Some(DigitalInitialValue::FourState(value)) = &signal.initial_value else {
+                panic!("{name}")
+            };
+            assert_eq!(value.spelling(), expected, "{name}");
+            assert_eq!(value.width(), signal.width, "{name}");
+        }
+        let decoded: rspice_veriloga::canonical_ir::CanonicalDigitalPlan =
+            serde_json::from_str(&serde_json::to_string(plan).unwrap()).unwrap();
+        assert_eq!(&decoded, plan);
+        decoded.validate().unwrap();
+        let analog_scalar =
+            "module scalar(p); inout p; electrical p; analog I(p)<+64'h0020000000000001; endmodule";
+        assert!(
+            VerilogACompiler::default()
+                .compile_canonical_ir(analog_scalar)
+                .is_err(),
+            "an analog scalar consumer must not silently round an exact packed literal"
+        );
+        for expression in ["other", "$time", "V(p)"] {
+            let source = digital_module(&format!("reg other; reg invalid={expression};"));
+            assert!(
+                VerilogACompiler::default()
+                    .compile_canonical_ir(&source)
+                    .is_err(),
+                "{expression}"
+            );
+        }
     }
 
     /// The runtime path, which is what feeds the JIT and generated-Rust

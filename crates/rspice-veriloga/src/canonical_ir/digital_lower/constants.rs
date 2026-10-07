@@ -252,7 +252,7 @@ fn resolve_one(
     Ok(())
 }
 
-/// Numeric module declarations require constant expressions (VAMS-2023 3.2).
+/// Module variable declarations require constant expressions (VAMS-2023 A.2.2).
 /// Use the same typed expression evaluator as parameters, with the declared
 /// assignment type, so rounding, overflow and four-state bits are preserved.
 pub(super) fn initializer(
