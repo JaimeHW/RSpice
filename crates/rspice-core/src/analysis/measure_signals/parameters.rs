@@ -46,25 +46,21 @@ fn same(left: Option<ComplexValue>, right: Option<ComplexValue>) -> bool {
 
 impl MeasureParameterSeries {
     /// Number of accepted rows represented by this snapshot.
-    pub fn point_count(&self) -> usize {
+    #[cfg(test)]
+    pub(crate) fn point_count(&self) -> usize {
         self.rows
     }
 
     /// Number of retained real/imaginary scalar slots.
-    pub fn retained_value_count(&self) -> usize {
+    pub(crate) fn retained_value_count(&self) -> usize {
         self.columns.values().fold(0usize, |count, values| {
             count.saturating_add(values.len().saturating_mul(2))
         })
     }
 
-    /// Whether all rows can use the original deck's parameter bindings.
-    pub fn is_empty(&self) -> bool {
-        self.columns.is_empty()
-    }
-
     /// Resolve an override at the exact accepted row. An absent column uses
     /// the original deck; an absent value in an existing column is undefined.
-    pub fn resolve(&self, name: &str, row: usize) -> Result<Option<ComplexValue>, String> {
+    pub(crate) fn resolve(&self, name: &str, row: usize) -> Result<Option<ComplexValue>, String> {
         let Some(column) = self.columns.get(&name.to_uppercase()) else {
             return Ok(None);
         };
