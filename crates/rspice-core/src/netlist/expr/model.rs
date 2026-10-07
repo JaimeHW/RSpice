@@ -3,6 +3,62 @@
 use super::*;
 use crate::abort_signal::AbortSignal;
 
+/// Resolve scalar instance fields in dependency order, publishing each
+/// successful value for sibling expressions. An unresolved attempt must not
+/// consume statistical samples before a later pass can resolve its bindings.
+pub(crate) fn resolve_real_instance_expressions(
+    context: &ParamContext,
+    expressions: &[(String, String)],
+    abort: &dyn AbortSignal,
+) -> Result<Vec<(String, Value)>, ParameterResolutionError> {
+    check_abort(abort)?;
+    let mut context = context.clone();
+    let mut pending = expressions.iter().collect::<Vec<_>>();
+    let mut resolved = Vec::with_capacity(expressions.len());
+
+    while !pending.is_empty() {
+        let mut unresolved = Vec::new();
+        let mut first_error = None;
+        let mut progress = false;
+        for entry @ (name, expression) in pending {
+            match eval_expression_complex_with_probe_and_abort(expression, &context, abort) {
+                Ok(value) => {
+                    let value = require_real(value).map_err(|error| {
+                        ParameterResolutionError::Definition(format!(
+                            "instance expression parameter '{name}': {error}"
+                        ))
+                    })?;
+                    if !value.is_finite() {
+                        return Err(ParameterResolutionError::Definition(format!(
+                            "instance expression parameter '{name}' resolved to non-finite value {value}"
+                        )));
+                    }
+                    context.set(name, value);
+                    resolved.push((name.clone(), value));
+                    progress = true;
+                }
+                Err(ExpressionEvaluationError::Aborted) => {
+                    return Err(ParameterResolutionError::Aborted);
+                }
+                Err(ExpressionEvaluationError::Expression(error)) => {
+                    if first_error.is_none() {
+                        first_error = Some((name, error));
+                    }
+                    unresolved.push(entry);
+                }
+            }
+        }
+        if !progress {
+            let (name, error) = first_error.expect("unresolved expression has an error");
+            return Err(ParameterResolutionError::Definition(format!(
+                "instance expression parameter '{name}' could not be resolved: {error}"
+            )));
+        }
+        pending = unresolved;
+    }
+    Ok(resolved)
+}
+
 pub(crate) struct ModelEvaluationContext<'a> {
     context: ParamContext,
     abort: &'a dyn AbortSignal,

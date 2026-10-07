@@ -64,6 +64,25 @@ fn map_preparation_error(
     }
 }
 
+// Raw scalar syntax preserves complex values and function bindings. Symbolic
+// parameter definitions and behavioral-only syntax require prepared expansion.
+fn scalar_expression_preserves_bindings(
+    expression: &str,
+    scope: &ParamContext,
+    abort: &dyn AbortSignal,
+) -> Result<bool, ParseWithAbortError> {
+    if scope.has_retained_parameter_expressions() {
+        return Ok(false);
+    }
+    match super::expr::parse_expression_with_abort(expression, abort) {
+        Ok(_) => Ok(true),
+        Err(super::expr::ParseExpressionWithAbortError::Parse(_)) => Ok(false),
+        Err(super::expr::ParseExpressionWithAbortError::Aborted) => {
+            Err(ParseWithAbortError::Aborted)
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct ScopedModelParameter<'a> {
     model: &'a str,
@@ -2162,7 +2181,7 @@ impl<'a> Flattener<'a> {
                     model_scope_path,
                     abort,
                 )?;
-                let params = self.merge_deferred_params(params, expr_params, scope, abort)?;
+                let params = self.merge_xspice_scalar_params(params, expr_params, scope, abort)?;
                 // Numeric fields can use resolved instance overrides. String
                 // aliases retain their enclosing lexical parameter scope.
                 let numeric_scope = (!params.is_empty()
@@ -2755,14 +2774,7 @@ impl<'a> Flattener<'a> {
         direction: Option<&mut Option<Derivative>>,
         abort: &dyn AbortSignal,
     ) -> Result<Value, ParseWithAbortError> {
-        let preserves_bindings = !scope.has_retained_parameter_expressions()
-            && match super::expr::parse_expression_with_abort(expression, abort) {
-                Ok(_) => true,
-                Err(super::expr::ParseExpressionWithAbortError::Parse(_)) => false,
-                Err(super::expr::ParseExpressionWithAbortError::Aborted) => {
-                    return Err(ParseWithAbortError::Aborted);
-                }
-            };
+        let preserves_bindings = scalar_expression_preserves_bindings(expression, scope, abort)?;
         let expression = if preserves_bindings {
             expression.to_string()
         } else {
@@ -2881,6 +2893,69 @@ impl<'a> Flattener<'a> {
             }
             None => Ok((value, None)),
         }
+    }
+
+    fn merge_xspice_scalar_params(
+        &self,
+        instance_params: &[(String, Value)],
+        deferred_params: &[(String, String)],
+        scope: &ParamContext,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<(String, Value)>, ParseWithAbortError> {
+        if deferred_params.is_empty() {
+            return Ok(instance_params.to_vec());
+        }
+        let mut context = scope.clone();
+        context.adopt_random(&self.random);
+        for (name, value) in instance_params {
+            context.set(name, *value);
+        }
+        // Keep scoped static fields from accepting runtime quantities hidden
+        // inside parameters or functions. Preparation does not sample them.
+        let mut expressions = Vec::with_capacity(deferred_params.len());
+        for (name, expression) in deferred_params {
+            let prepared = prepare_behavioral_expression_with_abort(expression, &context, abort)
+                .map_err(|error| {
+                    map_preparation_error(error, |error| {
+                        ParseError::InvalidValue(format!(
+                            "instance parameter '{name}' could not be prepared: {error}"
+                        ))
+                    })
+                })?;
+            if behavioral_expression_references_runtime_quantity(&prepared) {
+                return Err(ParseError::InvalidValue(format!(
+                    "runtime-dependent instance/model parameter '{name}' is not supported by this device target"
+                )).into());
+            }
+            let preserves_bindings =
+                scalar_expression_preserves_bindings(expression, &context, abort)?;
+            expressions.push((
+                name.clone(),
+                if preserves_bindings {
+                    expression.clone()
+                } else {
+                    prepared
+                },
+            ));
+        }
+        let resolved =
+            super::expr::resolve_real_instance_expressions(&context, &expressions, abort).map_err(
+                |error| match error {
+                    super::expr::ParameterResolutionError::Aborted => ParseWithAbortError::Aborted,
+                    error => ParseError::InvalidValue(error.to_string()).into(),
+                },
+            )?;
+        let mut merged = instance_params.to_vec();
+        for (name, value) in resolved {
+            match merged
+                .iter_mut()
+                .find(|(existing, _)| existing.eq_ignore_ascii_case(&name))
+            {
+                Some(slot) => slot.1 = value,
+                None => merged.push((name, value)),
+            }
+        }
+        Ok(merged)
     }
 
     /// Merge deferred (expression-valued) instance parameters over the

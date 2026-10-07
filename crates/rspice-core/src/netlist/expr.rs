@@ -86,7 +86,8 @@ pub(crate) use eval::{
 };
 pub use eval::{evaluate, evaluate_complex};
 pub(crate) use model::{
-    ModelEvaluationContext, ModelNominalTemperature, set_model_temperature_scalars,
+    ModelEvaluationContext, ModelNominalTemperature, resolve_real_instance_expressions,
+    set_model_temperature_scalars,
 };
 pub(crate) use parameter_direction::ComplexDirection;
 pub(crate) use resolution::{ParameterEnvironment, ParameterResolutionError, ParameterResolver};
