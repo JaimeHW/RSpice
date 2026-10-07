@@ -3153,6 +3153,19 @@ impl Engine {
                     .to_owned(),
             ));
         };
+        let frequencies = ac_sweep
+            .as_ref()
+            .map(|sweep| {
+                super::sp::card_frequency_grid(
+                    sweep.variation,
+                    sweep.points,
+                    sweep.start_freq,
+                    sweep.stop_freq,
+                    self.config.resource_limits.max_analysis_points,
+                    abort,
+                )
+            })
+            .transpose()?;
         let output = if *output_is_current {
             AcSensitivityOutput::BranchCurrent(output_node.clone())
         } else {
@@ -3163,27 +3176,19 @@ impl Engine {
                     .resolve_reference(reference_node.as_deref(), ".SENS reference")?,
             }
         };
-        match ac_sweep {
+        match frequencies {
             None => self
                 .run_sensitivity_dc_complete_with_abort(netlist, output, filters, abort)
                 .map(SensitivityCardResult::Dc),
-            Some(sweep) => {
-                let frequencies = super::sp::card_frequency_grid(
-                    sweep.variation,
-                    sweep.points,
-                    sweep.start_freq,
-                    sweep.stop_freq,
-                    abort,
-                )?;
-                self.run_sensitivity_ac_complete_with_abort(
+            Some(frequencies) => self
+                .run_sensitivity_ac_complete_with_abort(
                     netlist,
                     output,
                     &frequencies,
                     filters,
                     abort,
                 )
-                .map(SensitivityCardResult::Ac)
-            }
+                .map(SensitivityCardResult::Ac),
         }
     }
 }

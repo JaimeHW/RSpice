@@ -74,6 +74,7 @@ impl OscPnoiseResult {
 /// The offset-frequency grid one authored `.PNOISE` card sweeps.
 fn pnoise_card_offsets(
     card: &crate::netlist::PnoiseCard,
+    max_points: usize,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<Value>, SimulationError> {
     super::sp::card_frequency_grid(
@@ -81,6 +82,7 @@ fn pnoise_card_offsets(
         card.sweep.points,
         card.sweep.start_freq,
         card.sweep.stop_freq,
+        max_points,
         abort,
     )
 }
@@ -327,7 +329,8 @@ impl Engine {
         operating_point: &super::PssOperatingPoint,
         abort: &dyn AbortSignal,
     ) -> Result<PeriodicNoiseResult, SimulationError> {
-        let offsets = pnoise_card_offsets(card, abort)?;
+        let offsets =
+            pnoise_card_offsets(card, self.config.resource_limits.max_analysis_points, abort)?;
         let output = pnoise_card_output(card);
         let autonomous = operating_point.config().is_autonomous();
         check_pnoise_card_carrier(card, autonomous)?;
@@ -377,7 +380,8 @@ impl Engine {
         operating_point: &super::HbOperatingPoint,
         abort: &dyn AbortSignal,
     ) -> Result<PeriodicNoiseResult, SimulationError> {
-        let offsets = pnoise_card_offsets(card, abort)?;
+        let offsets =
+            pnoise_card_offsets(card, self.config.resource_limits.max_analysis_points, abort)?;
         // A harmonic-balance carrier is driven by construction: its tones are
         // the deck's own sources.
         check_pnoise_card_carrier(card, false)?;

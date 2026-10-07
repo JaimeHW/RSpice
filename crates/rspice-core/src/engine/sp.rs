@@ -64,7 +64,14 @@ impl Engine {
                 "run_sp_with_abort was given a card that is not .SP".to_owned(),
             ));
         };
-        let frequencies = card_frequency_grid(*variation, *points, *start_freq, *stop_freq, abort)?;
+        let frequencies = card_frequency_grid(
+            *variation,
+            *points,
+            *start_freq,
+            *stop_freq,
+            self.config.resource_limits.max_analysis_points,
+            abort,
+        )?;
         let planes = ports
             .iter()
             .map(crate::analysis::s_param::Port::from)
@@ -484,21 +491,25 @@ impl Engine {
 /// The frequency grid one authored card's sweep specification describes.
 ///
 /// Cancellation during grid construction is a cancelled run, not a malformed
-/// card, so the two failures stay distinguishable to the caller.
+/// card, so the two failures stay distinguishable to the caller. Admission
+/// applies the caller's point budget before frequency storage is allocated.
 pub(crate) fn card_frequency_grid(
     variation: crate::netlist::FreqVariation,
     points: usize,
     start: Value,
     stop: Value,
+    max_points: usize,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<Value>, SimulationError> {
-    crate::analysis::ac::try_ac_sweep_frequencies_with_abort(variation, points, start, stop, abort)
-        .map_err(|error| match error {
-            error @ (crate::analysis::FrequencyGridError::Aborted
-            | crate::analysis::FrequencyGridError::Allocation { .. }
-            | crate::analysis::FrequencyGridError::LimitExceeded { .. }) => error.into(),
-            other => SimulationError::Netlist(other.to_string()),
-        })
+    crate::analysis::ac::try_ac_sweep_frequencies_bounded_with_abort(
+        variation, points, start, stop, max_points, abort,
+    )
+    .map_err(|error| match error {
+        error @ (crate::analysis::FrequencyGridError::Aborted
+        | crate::analysis::FrequencyGridError::Allocation { .. }
+        | crate::analysis::FrequencyGridError::LimitExceeded { .. }) => error.into(),
+        other => SimulationError::Netlist(other.to_string()),
+    })
 }
 
 /// Read the termination from the same small-signal storage used by AC stamping.

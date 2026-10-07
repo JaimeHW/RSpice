@@ -624,6 +624,7 @@ C1 out 0 {c}\n\
         5,
         corner / 100.0,
         corner * 100.0,
+        engine.config.resource_limits.max_analysis_points,
         &crate::abort_signal::NoAbort,
     )
     .expect("the decade grid builds");
