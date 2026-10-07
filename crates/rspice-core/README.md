@@ -504,15 +504,13 @@ authored lexical scope, and duplicate `.INITCOND` cards retain typed errors.
 
 Long startup cards use cursor checkpoints instead of copying all tokens for
 every target/value. Constraint validation skips path searches when an endpoint
-has not entered the graph. The qualified 256-entry IC/NODESET cases allocate
-about 95% fewer bytes during parsing; this measures allocation volume, not peak
-memory or elapsed time. Native, CLI and optimized WebAssembly evidence is in
-`tests/testdata/qualification/core-forward-startup-windows-20261006.json`.
+has not entered the graph. `tests/startup_card_allocations.rs` enforces parser
+allocation budgets for IC/NODESET cards.
 
 General dependency planning remains incomplete. Other earlier card failures and
 eager parameter error classes can still prevent temperature discovery. Further
 physical-override combinations, statistical/runtime binding, general graph and
-binding complexity, and broader resource qualification remain in the plan.
+binding complexity, and broader resource behavior still require qualification.
 
 Control scalar evaluation preserves both real and imaginary components through
 `let`, `$name`/`$&name` substitution and print samples. Conditions are true when
@@ -563,8 +561,8 @@ JSON additionally retains binding and completion metadata. Noise band totals
 require at least two strictly increasing frequencies with all other coordinates
 constant.
 Textual multi-run expansion preserves tables needed by frequency/control consumers,
-including shared tables and ALTER variants. Scoped qualification is recorded in
-`tests/testdata/qualification/core-control-frequency-data-windows-20261006.json`.
+including shared tables and ALTER variants. Regression coverage is in
+`tests/control_frequency_data.rs`.
 
 `ControlCircuit` also executes explicit `tf` and declarative `.TF` through the
 ordinary transfer-function solver. `ControlAnalysisResult::TransferFunction`

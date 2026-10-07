@@ -1,5 +1,8 @@
 # Core qualification data
 
+This directory contains fixtures and baselines consumed by automated tests.
+Keep development plans and host-specific execution reports outside the repository.
+
 ## Structural baseline
 
 `rspice-qualification-v1.json` is consumed by
