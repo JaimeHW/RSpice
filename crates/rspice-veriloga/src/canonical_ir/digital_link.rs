@@ -605,6 +605,7 @@ fn relocate_value(
         | CfgValueKind::DigitalTime { .. }
         | CfgValueKind::DigitalDelayTicks { .. }
         | CfgValueKind::DigitalRepeatCount { .. }
+        | CfgValueKind::DigitalRealNegate { .. }
         | CfgValueKind::DigitalRealArithmetic { .. }
         | CfgValueKind::DigitalRealCompare { .. }
         | CfgValueKind::DigitalRealSelect { .. }

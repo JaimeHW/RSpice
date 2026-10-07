@@ -585,17 +585,10 @@ fn apply(
                 bits(context.width),
                 CfgValueKind::DigitalBitwiseNot { input: right },
             ),
-            UnaryOp::Neg if real => {
-                let zero = lowerer.real_constant(0.0);
-                (
-                    CfgValueType::Real,
-                    CfgValueKind::DigitalRealArithmetic {
-                        op: RealArithmeticOp::Sub,
-                        left: zero,
-                        right,
-                    },
-                )
-            }
+            UnaryOp::Neg if real => (
+                CfgValueType::Real,
+                CfgValueKind::DigitalRealNegate { input: right },
+            ),
             UnaryOp::Neg => {
                 let zero = lowerer.builder.push_leaf(
                     bits(context.width),

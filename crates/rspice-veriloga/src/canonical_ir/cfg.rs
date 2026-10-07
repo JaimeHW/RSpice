@@ -960,6 +960,12 @@ pub enum CfgValueKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         array_index: Option<DigitalAnalogArrayIndex>,
     },
+    /// IEEE binary64 sign inversion, preserving magnitude and NaN payload bits.
+    /// A subtraction from positive zero cannot represent this operation because
+    /// it maps positive zero to positive zero.
+    DigitalRealNegate {
+        input: ValueId,
+    },
     /// Arithmetic over two real values, inside a process function.
     ///
     /// Distinct from [`Self::Binary`], which is the analog body's arithmetic on
@@ -1363,6 +1369,7 @@ impl CfgValueKind {
             | Self::DigitalAnalogPotential { .. }
             | Self::DigitalAnalogFlow { .. }
             | Self::DigitalAnalogVariable { .. }
+            | Self::DigitalRealNegate { .. }
             | Self::DigitalRealArithmetic { .. }
             | Self::DigitalRealCompare { .. }
             | Self::DigitalExpression { .. }
@@ -1661,6 +1668,7 @@ impl CfgValueKind {
 
             Self::DigitalBitwiseNot { input }
             | Self::DigitalLogicalNot { input }
+            | Self::DigitalRealNegate { input }
             | Self::DigitalRealToBits { input }
             | Self::DigitalBitsToReal { input }
             | Self::DigitalIntegerToReal { input, .. }
@@ -2001,6 +2009,7 @@ impl CfgValueKind {
 
             Self::DigitalBitwiseNot { input }
             | Self::DigitalLogicalNot { input }
+            | Self::DigitalRealNegate { input }
             | Self::DigitalRealToBits { input }
             | Self::DigitalBitsToReal { input }
             | Self::DigitalIntegerToReal { input, .. }
@@ -2528,6 +2537,13 @@ impl CfgFunction {
             let lanes = self.value_lanes(value.id);
             match &value.kind {
                 CfgValueKind::LaneSplat(_) | CfgValueKind::BlockParameter => {}
+                CfgValueKind::DigitalRealNegate { input } => {
+                    if value.value_type != CfgValueType::Real
+                        || self.value(*input).value_type != CfgValueType::Real
+                    {
+                        return Err(CfgValidationError::DigitalRealNegateTypeMismatch(value.id));
+                    }
+                }
                 CfgValueKind::DigitalPower { base, exponent, .. } => {
                     if !matches!(value.value_type, CfgValueType::FourState { width } if width > 0)
                         || self.value(*base).value_type != value.value_type
@@ -2905,6 +2921,7 @@ pub enum CfgValidationError {
     LaneShapeMismatch(ValueId),
     SelectionTypeMismatch(ValueId),
     DigitalPowerTypeMismatch(ValueId),
+    DigitalRealNegateTypeMismatch(ValueId),
     /// A discrete-domain value reached the derivative pass.
     ///
     /// Not an unsupported model — a compiler bug. Nothing in a four-state
@@ -2947,6 +2964,10 @@ impl std::fmt::Display for CfgValidationError {
             Self::SelectionTypeMismatch(value) => write!(
                 f,
                 "{value} requires a Boolean condition and two operands matching its numerical type"
+            ),
+            Self::DigitalRealNegateTypeMismatch(value) => write!(
+                f,
+                "{value}: real negation requires a real operand and a real result"
             ),
             Self::DigitalPowerTypeMismatch(value) => write!(
                 f,

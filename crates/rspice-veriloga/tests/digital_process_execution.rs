@@ -8175,3 +8175,127 @@ fn logical_short_circuit_drivers_reenter_the_guard_after_wakeup() {
         assert_eq!(h.get("either"), either);
     }
 }
+#[test]
+fn real_negation_preserves_sign_and_payload_bits() {
+    let mut h = Harness::from_source(
+        r#"
+module negate_bits;
+ reg [63:0] pattern,flipped,restored,parameter_negative,parameter_positive,integer_zero;
+ real input_value;
+ parameter real NEGATIVE=-0.0;
+ parameter real POSITIVE=-(-0.0);
+ initial begin
+   input_value=$bitstoreal(pattern);
+   flipped=$realtobits(-input_value);
+   restored=$realtobits(-(-input_value));
+   parameter_negative=$realtobits(NEGATIVE);
+   parameter_positive=$realtobits(POSITIVE);
+   integer_zero=$realtobits(-0);
+ end
+endmodule
+"#,
+    );
+    // Transport the actual artifact, not a manually constructed arithmetic node.
+    h.plan = serde_json::from_slice(&serde_json::to_vec(&h.plan).unwrap()).unwrap();
+    h.plan.validate().unwrap();
+    for pattern in [
+        0_u64,
+        0x8000_0000_0000_0000,
+        1,
+        0x8000_0000_0000_0001,
+        0x3ff8_0000_0000_0000,
+        0xbff8_0000_0000_0000,
+        0x7fef_ffff_ffff_ffff,
+        0xffef_ffff_ffff_ffff,
+        0x7ff0_0000_0000_0000,
+        0xfff0_0000_0000_0000,
+        0x7ff8_0000_0000_0042,
+        0xfff8_0000_0000_0042,
+        0x7ff0_0000_0000_0042,
+        0xfff0_0000_0000_0042,
+    ] {
+        h.set("pattern", &format!("{pattern:064b}"));
+        expect_finished(h.start(0));
+        assert_eq!(
+            h.get("flipped"),
+            format!("{:064b}", pattern ^ (1_u64 << 63)),
+            "negating {pattern:016x}"
+        );
+        assert_eq!(
+            h.get("restored"),
+            format!("{pattern:064b}"),
+            "double negation {pattern:016x}"
+        );
+        assert_eq!(h.get("parameter_negative"), format!("{:064b}", 1_u64 << 63));
+        assert_eq!(h.get("parameter_positive"), "0".repeat(64));
+        assert_eq!(
+            h.get("integer_zero"),
+            "0".repeat(64),
+            "integral negation precedes conversion to real"
+        );
+    }
+}
+#[test]
+fn real_negation_event_bits_detect_signed_zero_changes() {
+    let mut h = Harness::from_source(
+        "module negated_event; real r; reg q; initial begin r=0.0; q=0; @($realtobits(-r)) q=1; end endmodule",
+    );
+    h.plan = serde_json::from_slice(&serde_json::to_vec(&h.plan).unwrap()).unwrap();
+    h.plan.validate().unwrap();
+    h.set_real("r", 0.0);
+    let suspension = expect_suspended(h.start(0));
+    let (DigitalWaitRequest::Expressions(mut wait), resume) = suspension.into_parts() else {
+        panic!("computed event");
+    };
+    let mut scratch = rspice_veriloga::canonical_ir::digital_eval::DigitalEvalScratch::new();
+    let r = h.signal("r");
+    h.set_real("r", -0.0);
+    assert!(
+        wait.observe(&h.plan, r, &mut h.store, &mut scratch)
+            .unwrap()
+    );
+    expect_finished(h.resume(0, &resume));
+    assert_eq!(h.get("q"), "1");
+}
+
+#[test]
+fn real_negation_rejects_malformed_process_and_event_types() {
+    use rspice_veriloga::canonical_ir::{CfgValueKind, CfgValueType};
+    let h = Harness::from_source(
+        "module negate_types; real r; reg [63:0] bits; initial begin r=0.0; bits=$realtobits(-r); @($realtobits(-r)) bits=0; end endmodule",
+    );
+    for nested in [false, true] {
+        for input_type in [false, true] {
+            let mut plan = h.plan.clone();
+            let function = &mut plan.processes[0].function;
+            let function = if nested {
+                function
+                    .values
+                    .iter_mut()
+                    .find_map(|v| match &mut v.kind {
+                        CfgValueKind::DigitalExpression { function, .. } => Some(&mut **function),
+                        _ => None,
+                    })
+                    .expect("event expression")
+            } else {
+                function
+            };
+            let (result, input) = function
+                .values
+                .iter()
+                .find_map(|v| match v.kind {
+                    CfgValueKind::DigitalRealNegate { input } => Some((v.id, input)),
+                    _ => None,
+                })
+                .expect("negation");
+            let corrupt = if input_type { input } else { result };
+            function.values[usize::from(corrupt)].value_type =
+                CfgValueType::FourState { width: 64 };
+            let error = format!("{:?}", plan.validate().unwrap_err());
+            assert!(
+                error.contains("real negation"),
+                "{nested}/{input_type}: {error}"
+            );
+        }
+    }
+}

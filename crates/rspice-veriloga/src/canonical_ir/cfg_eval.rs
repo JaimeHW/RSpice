@@ -1456,6 +1456,7 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             | CfgValueKind::DigitalAnalogPotential { .. }
             | CfgValueKind::DigitalAnalogFlow { .. }
             | CfgValueKind::DigitalAnalogVariable { .. }
+            | CfgValueKind::DigitalRealNegate { .. }
             | CfgValueKind::DigitalRealArithmetic { .. }
             | CfgValueKind::DigitalRealCompare { .. }
             | CfgValueKind::DigitalExpression { .. }

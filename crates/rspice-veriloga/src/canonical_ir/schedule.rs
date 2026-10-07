@@ -1889,6 +1889,7 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::DigitalAnalogPotential { .. }
             | CfgValueKind::DigitalAnalogFlow { .. }
         | CfgValueKind::DigitalAnalogVariable { .. }
+        | CfgValueKind::DigitalRealNegate { .. }
         | CfgValueKind::DigitalRealArithmetic { .. }
         | CfgValueKind::DigitalRealCompare { .. }
         | CfgValueKind::DigitalExpression { .. }
@@ -2305,6 +2306,7 @@ mod digital_leaf_class {
             CfgValueKind::DigitalRealSignalRead {
                 signal: DigitalSignalId::from(0usize),
             },
+            CfgValueKind::DigitalRealNegate { input: value },
             CfgValueKind::DigitalRealArithmetic {
                 op: RealArithmeticOp::Add,
                 left: value,

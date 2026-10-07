@@ -2334,6 +2334,9 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     .ok_or(DigitalEvalError::AnalogProbeUnavailable(id))?;
                 Ok(DigitalScalar::Real(value))
             }
+            CfgValueKind::DigitalRealNegate { input } => {
+                Ok(DigitalScalar::Real(-self.real(*input)?))
+            }
             CfgValueKind::DigitalRealArithmetic { op, left, right } => {
                 let (op, left, right) = (*op, *left, *right);
                 let left = self.real(left)?;

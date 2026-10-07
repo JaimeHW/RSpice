@@ -523,6 +523,13 @@ lowerer applies this behavior to constants, processes, drivers and computed
 events, preserving captured operands across analog sample barriers.
 Stateful analog operators remain invalid in digital expressions.
 
+Schema 91 gives discrete real unary negation an explicit sign-inversion
+operation. Negating positive zero produces negative zero; negating twice
+restores the original binary64 bits, including NaN payloads. Constants,
+processes and computed event expressions use the same operation. Integral
+negation still happens in its packed domain before any conversion to real.
+Serialized artifacts validate both the operand and result as real values.
+
 Concatenation and packed-selection helpers remain recursive. Closed defaults
 containing those forms retain the temporary 256-expression-node bound; large
 packed defaults receive an explicit diagnostic. Their iterative migration,

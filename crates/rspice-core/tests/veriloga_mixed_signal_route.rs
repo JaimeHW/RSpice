@@ -2703,3 +2703,63 @@ endmodule
         assert!((events[1].time - 1e-9).abs() < 1e-22, "{node}: {events:?}");
     }
 }
+#[test]
+fn real_negation_signed_zero_reaches_native_analog_equations() {
+    let model = ModelFile::new(
+        "signed_zero_negation",
+        r#"
+`timescale 1ns/1ps
+module signed_zero_negation(p,q);
+ inout p; electrical p; output reg q=0;
+ parameter real START=0.0;
+ real r;
+ initial begin r=START; #1 r=-r; q=($realtobits(r)===64'h8000000000000000); end
+ analog I(p)<+(V(p)-atan2(r,-1.0))/1000;
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* signed zero crosses the unified mixed engine\n.param vcc=1\n\
+         Xa pa qa signed_zero_negation\nXb pb qb signed_zero_negation START=-0.0\n\
+         Ra pa 0 1k\nRb pb 0 1k\nRqa qa 0 1k\nRqb qb 0 1k\n\
+         .va \"{}\" signed_zero_negation\n.end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 2e-9, 0.1e-9);
+    for (node, initial) in [
+        ("pa", std::f64::consts::FRAC_PI_2),
+        ("pb", -std::f64::consts::FRAC_PI_2),
+    ] {
+        let voltage = waveform(&result, node);
+        assert!(
+            (voltage[0] - initial).abs() < 1e-8,
+            "{node}: initial {}",
+            voltage[0]
+        );
+        assert!(
+            (voltage.last().unwrap() + initial).abs() < 1e-8,
+            "{node}: after negation {}",
+            voltage.last().unwrap()
+        );
+        for (&time, &value) in result.time.iter().zip(&voltage) {
+            if time < 0.999e-9 {
+                assert!((value - initial).abs() < 1e-8, "{node} at {time}: {value}");
+            } else if time > 1.001e-9 {
+                assert!((value + initial).abs() < 1e-8, "{node} at {time}: {value}");
+            }
+        }
+    }
+    let positive = result.digital_trace_named("qa").unwrap();
+    assert_eq!(positive.len(), 2, "{positive:?}");
+    assert_eq!(
+        positive[1].value.state,
+        rspice_core::xspice::DigitalState::One
+    );
+    assert!((positive[1].time - 1e-9).abs() < 1e-22);
+    let negative = result.digital_trace_named("qb").unwrap();
+    assert!(
+        negative
+            .iter()
+            .all(|point| point.value.state == rspice_core::xspice::DigitalState::Zero)
+    );
+}

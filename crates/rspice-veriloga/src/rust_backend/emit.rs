@@ -2442,6 +2442,7 @@ impl Emitter<'_> {
             | CfgValueKind::DigitalAnalogPotential { .. }
             | CfgValueKind::DigitalAnalogFlow { .. }
             | CfgValueKind::DigitalAnalogVariable { .. }
+            | CfgValueKind::DigitalRealNegate { .. }
             | CfgValueKind::DigitalRealArithmetic { .. }
             | CfgValueKind::DigitalRealCompare { .. }
             | CfgValueKind::DigitalExpression { .. }
