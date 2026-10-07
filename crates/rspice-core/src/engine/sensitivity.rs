@@ -331,12 +331,6 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        if output_pos == 0 {
-            return Err(SimulationError::Circuit(
-                "Sensitivity output node must not be ground".to_string(),
-            ));
-        }
-
         let engine = self.resolved_for_netlist(netlist);
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
         Self::warn_xspice_mif_analysis_boundary(
@@ -380,10 +374,12 @@ impl Engine {
         }
         engine.ensure_result_values(elements.len().saturating_mul(3).saturating_add(1))?;
 
-        let output_index = output_pos - 1;
+        let output_index = Self::optional_system_index(output_pos);
         let reference_index = output_neg.and_then(Self::optional_system_index);
         let mut observation = vec![Complex64::new(0.0, 0.0); matrix_size];
-        observation[output_index] = Complex64::new(1.0, 0.0);
+        if let Some(output_index) = output_index {
+            observation[output_index] = Complex64::new(1.0, 0.0);
+        }
         if let Some(reference) = reference_index {
             observation[reference] -= Complex64::new(1.0, 0.0);
         }
@@ -406,12 +402,21 @@ impl Engine {
             adjoint.push(value.re);
         }
 
+        let output_value = output_index.map_or(0.0, |index| dc_solution[index])
+            - reference_index.map_or(0.0, |index| dc_solution[index]);
+        let output_name = Self::sensitivity_output_name(
+            &AcSensitivityOutput::Voltage {
+                positive: output_pos,
+                negative: output_neg,
+            },
+            |node| circuit.node_name_by_id(node),
+        )?;
         let analyzer =
             SensitivityAnalyzer::with_precomputed_adjoint(dc_solution, adjoint, elements).ok_or(
                 SimulationError::Solver(crate::solver::SolverError::SingularMatrix),
             )?;
         analyzer
-            .analyze_precomputed_with_abort(output_index, reference_index, abort)
+            .build_result_with_abort(&output_name, output_value, abort)
             .map_err(|error| match error {
                 SensitivityAnalysisError::Aborted => SimulationError::Aborted,
             })?
@@ -2737,6 +2742,36 @@ impl Engine {
         })
     }
 
+    // Solver indices select observations; retained identities use the circuit
+    // namespace. The resolver is called only for non-ground nodes so DC's
+    // ground-inclusive table and AC's zero-based table share this projection.
+    fn sensitivity_output_name<'a>(
+        output: &AcSensitivityOutput,
+        node_name: impl Fn(usize) -> Option<&'a str>,
+    ) -> Result<String, SimulationError> {
+        let name = |node| {
+            if node == 0 {
+                Ok("0")
+            } else {
+                node_name(node).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Sensitivity output node {node} has no retained circuit name"
+                    ))
+                })
+            }
+        };
+        match output {
+            AcSensitivityOutput::Voltage { positive, negative } => {
+                let positive = name(*positive)?;
+                Ok(match negative {
+                    Some(negative) => format!("V({positive},{})", name(*negative)?),
+                    None => format!("V({positive})"),
+                })
+            }
+            AcSensitivityOutput::BranchCurrent(element) => Ok(format!("I({element})")),
+        }
+    }
+
     pub(in crate::engine) fn dc_sensitivity_output_value(
         result: &SimulationResult,
         output: &AcSensitivityOutput,
@@ -2849,22 +2884,6 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        if let AcSensitivityOutput::Voltage { positive: 0, .. } = output {
-            return Err(SimulationError::Circuit(
-                "Sensitivity output node must not be ground".to_string(),
-            ));
-        }
-        if let AcSensitivityOutput::Voltage {
-            positive,
-            negative: Some(negative),
-        } = output
-            && positive == negative
-        {
-            return Err(SimulationError::Circuit(
-                "Sensitivity output and reference nodes must differ".to_string(),
-            ));
-        }
-
         let flat = self.flattened_sensitivity_netlist(netlist, abort)?;
         Self::validate_complete_dc_sensitivity_coverage(&flat)?;
         Self::validate_design_parameter_filters(&flat, filters, "DC")?;
@@ -2887,13 +2906,9 @@ impl Engine {
         let nominal_result = self.run_dc_op_with_abort(&flat, abort)?;
         let nominal_output = Self::dc_sensitivity_output_value(&nominal_result, &output)?;
 
-        let output_name = match &output {
-            AcSensitivityOutput::Voltage { positive, negative } => negative.map_or_else(
-                || format!("V({positive})"),
-                |negative| format!("V({positive},{negative})"),
-            ),
-            AcSensitivityOutput::BranchCurrent(element) => format!("I({element})"),
-        };
+        let output_name = Self::sensitivity_output_name(&output, |node| {
+            nominal_result.node_names.get(node).map(String::as_str)
+        })?;
         let mut result = SensitivityResult::new(&output_name, nominal_output);
         result.sensitivities.reserve(targets.len());
 
@@ -3001,12 +3016,6 @@ impl Engine {
             ));
         }
         self.ensure_analysis_points(frequencies.len())?;
-        if let AcSensitivityOutput::Voltage { positive: 0, .. } = output {
-            return Err(SimulationError::Circuit(
-                "Sensitivity output node must not be ground".to_string(),
-            ));
-        }
-
         let flat = self.flattened_sensitivity_netlist(netlist, abort)?;
         Self::validate_design_parameter_filters(&flat, filters, "AC")?;
         let candidates = Self::collect_ac_sensitivity_targets(&flat, self.config.resource_limits)?
@@ -3035,13 +3044,12 @@ impl Engine {
         let nominal_output =
             Self::ac_sensitivity_outputs(&nominal_results, &output, frequencies, abort)?;
 
-        let output_name = match &output {
-            AcSensitivityOutput::Voltage { positive, negative } => negative.map_or_else(
-                || format!("V({positive})"),
-                |negative| format!("V({positive},{negative})"),
-            ),
-            AcSensitivityOutput::BranchCurrent(element) => format!("I({element})"),
-        };
+        let output_name = Self::sensitivity_output_name(&output, |node| {
+            nominal_results[0]
+                .node_names
+                .get(node - 1)
+                .map(String::as_str)
+        })?;
         let mut sensitivities = Vec::with_capacity(targets.len());
         let mut runs = 1;
         for target in targets {

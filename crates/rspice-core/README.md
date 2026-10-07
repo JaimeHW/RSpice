@@ -733,6 +733,11 @@ sensitivities; they are computed, never recombined from device rows, because a
 parameter inside a behavioural expression, a source argument or `.options`
 reaches the circuit through no differentiated field at all.
 
+Engine results retain physical circuit names in their output probes, including
+numeric and hierarchical node names. Either voltage terminal may be ground;
+`V(0,out)` reverses `V(out)`, while `V(0)` and `V(out,out)` have zero output and
+zero absolute derivatives. Normalization remains unavailable at zero output.
+
 Method of record. A design parameter on a qualified linear circuit is **exact**:
 the parser's forward-mode derivative of every expression the parameter reaches
 is contracted with one transpose solve per frequency, so the error is the LU

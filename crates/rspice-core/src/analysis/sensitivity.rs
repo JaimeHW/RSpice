@@ -926,7 +926,7 @@ impl SensitivityAnalyzer {
             }
         }
 
-        self.build_result_with_abort(output_node, output_value, abort)
+        self.build_result_with_abort(&format!("V({})", output_node + 1), output_value, abort)
     }
 
     /// Assemble sensitivities from the adjoint supplied to
@@ -959,7 +959,7 @@ impl SensitivityAnalyzer {
         let output_value = output_ref
             .map(|reference| self.solution[output_node] - self.solution[reference])
             .unwrap_or(self.solution[output_node]);
-        self.build_result_with_abort(output_node, output_value, abort)
+        self.build_result_with_abort(&format!("V({})", output_node + 1), output_value, abort)
     }
 
     fn valid_vectors_with_abort(
@@ -978,16 +978,17 @@ impl SensitivityAnalyzer {
         Ok(true)
     }
 
-    fn build_result_with_abort(
+    pub(crate) fn build_result_with_abort(
         &self,
-        output_node: usize,
+        output_name: &str,
         output_value: Value,
         abort: &dyn AbortSignal,
     ) -> Result<Option<SensitivityResult>, SensitivityAnalysisError> {
+        ensure_sensitivity_not_aborted(abort)?;
         if !output_value.is_finite() {
             return Ok(None);
         }
-        let mut result = SensitivityResult::new(&format!("V({})", output_node + 1), output_value);
+        let mut result = SensitivityResult::new(output_name, output_value);
 
         // Compute sensitivity for each element
         for (index, elem) in self.elements.iter().enumerate() {
