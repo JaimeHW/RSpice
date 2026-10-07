@@ -597,6 +597,33 @@ impl ParamSpec {
 // Code Model Trait
 //=============================================================================
 
+/// Real rational transfer coefficients in ascending powers of `s` (rad/s).
+/// The transfer is `gain * numerator(s) / denominator(s)`. The realization
+/// retains every denominator state, including modes canceled by the numerator.
+#[derive(Debug, Clone)]
+pub struct XspiceRationalTransfer {
+    pub numerator: Vec<Value>,
+    pub denominator: Vec<Value>,
+    pub gain: Value,
+}
+
+/// A model's complete small-signal descriptor contract at the accepted bias.
+#[derive(Debug, Clone)]
+pub enum XspiceSmallSignalDescriptor {
+    /// The ordinary AC stamp is exactly `G + j*omega*C` at every frequency,
+    /// including zero, and contains every model state as an existing MNA row.
+    AffineAc,
+    /// One scalar transfer, with no additional contributions or private modes.
+    /// Its input and output may each be a voltage or current port.
+    Rational {
+        input_port: &'static str,
+        output_port: &'static str,
+        coefficients: std::sync::Arc<XspiceRationalTransfer>,
+    },
+    /// A complete finite-state descriptor is not available for this model.
+    Unsupported(&'static str),
+}
+
 /// Whether a code-model instance can be safely resumed from a transient
 /// checkpoint without serializing additional model-owned state.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -697,6 +724,23 @@ pub trait CodeModel: Send + Sync {
     /// regions that can switch during a Newton step must keep the default.
     fn has_memoryless_linear_transient_stamp(&self) -> bool {
         false
+    }
+
+    /// Complete continuous-time small-signal equations for natural-pole studies.
+    /// Frequency samples cannot establish the number of private dynamic states.
+    /// Models must explicitly declare their descriptor; the default only admits
+    /// models that already guarantee a memoryless linear stamp.
+    fn small_signal_descriptor(
+        &self,
+        _ctx: &super::CmContext,
+    ) -> CmResult<XspiceSmallSignalDescriptor> {
+        Ok(if self.has_memoryless_linear_transient_stamp() {
+            XspiceSmallSignalDescriptor::AffineAc
+        } else {
+            XspiceSmallSignalDescriptor::Unsupported(
+                "model has not declared complete dynamic-state descriptor equations",
+            )
+        })
     }
 
     /// Whether this model can participate in transient checkpoint resume.

@@ -2333,6 +2333,11 @@ impl XspiceInstance {
         self.model.output_input_partials(&self.context, output_port)
     }
 
+    /// Complete model equations for continuous-time natural-pole extraction.
+    pub fn small_signal_descriptor(&self) -> CmResult<super::XspiceSmallSignalDescriptor> {
+        self.model.small_signal_descriptor(&self.context)
+    }
+
     /// Get model-provided complex AC control partials for an analog output.
     pub fn output_input_ac_partials(
         &self,

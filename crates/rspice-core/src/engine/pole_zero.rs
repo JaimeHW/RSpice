@@ -11,6 +11,7 @@ use crate::{CircuitData, Netlist, Value};
 mod ac_nqs;
 mod descriptor;
 mod reduction;
+mod xspice;
 
 impl Engine {
     /// Reduce a sparse `G + sC` descriptor to a dense state-space model whose
@@ -733,7 +734,7 @@ impl Engine {
         Self::warn_xspice_mif_analysis_boundary(
             &circuit,
             "Pole-zero",
-            "using the AC linearization path because ngspice MIF code models do not provide DEVpzLoad hooks",
+            "using model-declared descriptor equations; ngspice MIF code models do not provide DEVpzLoad hooks",
         );
         Self::ensure_pz_circuit(&circuit)?;
         let num_nodes = circuit.num_nodes();

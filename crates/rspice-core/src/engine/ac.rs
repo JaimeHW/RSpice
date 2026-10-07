@@ -1123,9 +1123,22 @@ impl Engine {
         circuit: &CircuitData,
         ac_matrix: &mut ComplexMatrix,
         frequency_hz: Value,
-    ) {
+        include_reduced_dynamic_stamps: bool,
+    ) -> Result<(), SimulationError> {
         let num_nodes = circuit.num_nodes();
         for instance in &circuit.xspice_instances {
+            if !include_reduced_dynamic_stamps
+                && matches!(
+                    instance
+                        .small_signal_descriptor()
+                        .map_err(|error| SimulationError::Circuit(error.to_string()))?,
+                    crate::xspice::XspiceSmallSignalDescriptor::Rational { .. }
+                )
+            {
+                // PZ supplies the full port topology and private state equations.
+                // Sampling a reduced transfer would discard its natural modes.
+                continue;
+            }
             let ports = instance.ports();
             for (pos, neg, branch_ordinal) in instance.current_probe_branches() {
                 Self::stamp_xspice_ac_current_probe(circuit, ac_matrix, pos, neg, branch_ordinal);
@@ -1543,6 +1556,7 @@ impl Engine {
                 }
             }
         }
+        Ok(())
     }
 
     pub(in crate::engine) fn bjt_ac_charge_blocks(
@@ -2809,7 +2823,12 @@ impl Engine {
             }
         }
 
-        Self::stamp_xspice_small_signal_ac(circuit, ac_matrix, frequency_hz);
+        Self::stamp_xspice_small_signal_ac(
+            circuit,
+            ac_matrix,
+            frequency_hz,
+            include_reduced_dynamic_stamps,
+        )?;
         // Every small-signal analysis is assembled here -- AC, noise, SP, TF,
         // STB and pole-zero all reach this one fill -- so pinning the event
         // placeholder rows last gives them the same rank the DC and transient

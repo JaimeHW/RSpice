@@ -123,5 +123,6 @@ pub(crate) use resource_transaction::{
 };
 pub use traits::{
     CmError, CmResult, CodeModel, InputDataFileParameter, ParamSpec, ParamType, PortDirection,
-    PortSpec, PortType, XspiceCheckpointSupport,
+    PortSpec, PortType, XspiceCheckpointSupport, XspiceRationalTransfer,
+    XspiceSmallSignalDescriptor,
 };

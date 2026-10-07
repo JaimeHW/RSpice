@@ -127,6 +127,13 @@ impl CodeModel for MetadataOverlayModel {
             .output_input_ac_partials(ctx, output_port, frequency)
     }
 
+    fn small_signal_descriptor(
+        &self,
+        ctx: &CmContext,
+    ) -> CmResult<super::XspiceSmallSignalDescriptor> {
+        self.inner.small_signal_descriptor(ctx)
+    }
+
     fn output_input_vector_ac_partials(
         &self,
         ctx: &CmContext,

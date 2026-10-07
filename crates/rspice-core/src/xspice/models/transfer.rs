@@ -4,7 +4,8 @@ use crate::{
     Complex64, Value,
     xspice::{
         AnalysisType, CmContext, CmError, CmResult, CodeModel, EvaluationPhase, ParamSpec,
-        PortDirection, PortSpec, PortType, data_file,
+        PortDirection, PortSpec, PortType, XspiceRationalTransfer, XspiceSmallSignalDescriptor,
+        data_file,
     },
 };
 use std::f64::consts::PI;
@@ -32,12 +33,7 @@ struct XferTableData {
     last_upper_index: AtomicUsize,
 }
 
-#[derive(Debug, Clone)]
-struct SXferCoefficients {
-    numerator: Vec<Value>,
-    denominator: Vec<Value>,
-    gain: Value,
-}
+type SXferCoefficients = XspiceRationalTransfer;
 
 #[derive(Debug, Clone, PartialEq)]
 struct XferTableSignature {
@@ -1088,6 +1084,12 @@ fn transfer_commits_state(ctx: &CmContext) -> bool {
 pub struct Xfer;
 
 impl CodeModel for Xfer {
+    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        Ok(XspiceSmallSignalDescriptor::Unsupported(
+            "interpolated frequency table has no declared finite-state rational realization",
+        ))
+    }
+
     fn input_data_file_parameters(&self) -> &[crate::xspice::InputDataFileParameter] {
         &[crate::xspice::InputDataFileParameter {
             name: "file",
@@ -1160,6 +1162,18 @@ impl CodeModel for Xfer {
 pub struct SXfer;
 
 impl CodeModel for SXfer {
+    fn small_signal_descriptor(&self, ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        Ok(match s_xfer_coefficients_for_context(ctx)? {
+            Some(coefficients) => XspiceSmallSignalDescriptor::Rational {
+                input_port: "in",
+                output_port: "out",
+                coefficients,
+            },
+            // ngspice disables improper transfers before allocating states.
+            None => XspiceSmallSignalDescriptor::AffineAc,
+        })
+    }
+
     fn name(&self) -> &str {
         "s_xfer"
     }

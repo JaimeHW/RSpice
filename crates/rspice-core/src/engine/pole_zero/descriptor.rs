@@ -1,4 +1,5 @@
 //! One frozen small-signal descriptor shared by transfer and natural-pole studies.
+use super::xspice::RationalDescriptor;
 use super::*;
 use crate::analysis::pole_zero::PoleSpectrum;
 use crate::engine::progress::StudyProgress;
@@ -10,6 +11,7 @@ pub(super) struct LinearizedDescriptor<'a> {
     pub c: ComplexMatrix,
     circuit: &'a CircuitData,
     operating_point: &'a [Value],
+    xspice: Vec<RationalDescriptor<'a>>,
 }
 
 impl LinearizedDescriptor<'_> {
@@ -20,6 +22,7 @@ impl LinearizedDescriptor<'_> {
             .iter()
             .any(|bjt| bjt.uses_vbic_dynamic_charges())
             || Engine::pz_ac_nqs_state_count(self.circuit) != 0
+            || !self.xspice.is_empty()
     }
 
     pub(super) fn into_analyzer(
@@ -31,7 +34,13 @@ impl LinearizedDescriptor<'_> {
         let order = self
             .g
             .nrows
-            .saturating_add(Engine::pz_ac_nqs_state_count(self.circuit));
+            .saturating_add(Engine::pz_ac_nqs_state_count(self.circuit))
+            .saturating_add(
+                self.xspice
+                    .iter()
+                    .map(RationalDescriptor::state_count)
+                    .fold(0usize, usize::saturating_add),
+            );
         ResourceLimitError::ensure(
             ResourceKind::ResultValues,
             order.saturating_mul(order.saturating_mul(8).saturating_add(1)),
@@ -46,6 +55,7 @@ impl LinearizedDescriptor<'_> {
             &mut g,
             &mut c,
         )?;
+        RationalDescriptor::stamp_all(&self.xspice, self.circuit, &mut g, &mut c);
         Ok(PoleZeroAnalyzer::new(g, c).with_resource_limits(limits))
     }
 }
@@ -79,9 +89,16 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
+        let xspice = RationalDescriptor::collect(circuit)?;
         let order = circuit
             .matrix_size()
-            .saturating_add(Self::pz_ac_nqs_state_count(circuit));
+            .saturating_add(Self::pz_ac_nqs_state_count(circuit))
+            .saturating_add(
+                xspice
+                    .iter()
+                    .map(RationalDescriptor::state_count)
+                    .fold(0usize, usize::saturating_add),
+            );
         ResourceLimitError::ensure(
             ResourceKind::MatrixUnknowns,
             order,
@@ -97,6 +114,7 @@ impl Engine {
             c,
             circuit,
             operating_point,
+            xspice,
         })
     }
 

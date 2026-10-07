@@ -671,7 +671,9 @@ pub(crate) const fn periodic_capability_descriptor(
         },
         F::XspiceInstance => PeriodicCapabilityDescriptor {
             residual_jacobian: Inapplicable,
-            dynamic_state: Complete,
+            dynamic_state: Restricted(
+                "model must declare complete dynamic-state descriptor equations",
+            ),
             small_signal: Absent("XSPICE code-model equations"),
             noise: Inapplicable,
             pss_state: Absent("XSPICE accepted-step and event state"),
@@ -1519,6 +1521,27 @@ pub(in crate::engine) fn dynamic_state_descriptor_gaps(
                 format!("{}: {missing}", family.label()),
             )),
             Restricted(condition) => match family {
+                F::XspiceInstance => {
+                    for instance in &circuit.xspice_instances {
+                        let reason = match instance.small_signal_descriptor() {
+                            Ok(crate::xspice::XspiceSmallSignalDescriptor::Unsupported(reason)) => {
+                                Some(reason.to_string())
+                            }
+                            Err(error) => Some(error.to_string()),
+                            _ => None,
+                        };
+                        if let Some(reason) = reason {
+                            gaps.push(CapabilityGap::new(
+                                family,
+                                format!(
+                                    "XSPICE instance '{}' ({}): {reason}",
+                                    instance.name,
+                                    instance.model_name()
+                                ),
+                            ));
+                        }
+                    }
+                }
                 F::BehavioralSource => {
                     for (name, gap) in
                         circuit

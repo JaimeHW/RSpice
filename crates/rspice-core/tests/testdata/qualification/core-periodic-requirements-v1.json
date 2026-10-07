@@ -216,7 +216,7 @@
     ["BehavioralSource","PssStateMap","complete",null,"C14","pss_state_gaps"],
     ["BehavioralSource","EnvelopeContinuation","complete",null,"C14","envelope_gaps"],
     ["XspiceInstance","PeriodicResidualJacobian","inapplicable",null,"C14","periodic_carrier_residual_gaps"],
-    ["XspiceInstance","DynamicStateDescriptor","complete",null,"C14","dynamic_state_descriptor_gaps"],
+    ["XspiceInstance","DynamicStateDescriptor","restricted","model must declare complete dynamic-state descriptor equations","C09","dynamic_state_descriptor_gaps"],
     ["XspiceInstance","PeriodicSmallSignalDescriptor","absent","XSPICE code-model equations","C09","periodic_carrier_descriptor_gaps"],
     ["XspiceInstance","NoiseSources","inapplicable",null,"C14","cyclostationary_noise_gaps"],
     ["XspiceInstance","PssStateMap","absent","XSPICE accepted-step and event state","C09","pss_state_gaps"],
