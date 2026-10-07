@@ -1070,6 +1070,14 @@ fn parse_param_value(
     }
     if let Some(sign) = sign {
         stream.advance();
+        if (!xspice_param_prefers_bare_string(param_name)
+            || (param_name.eq_ignore_ascii_case("model")
+                && !matches!(stream.peek().kind, TokenKind::Ident(_))))
+            && let Some(value) =
+                try_scalar_expression_param(stream, netlist_params, defer_simple_param_refs, sign)
+        {
+            return Ok(value);
+        }
         return parse_unsigned_param_value(
             stream,
             line_num,
@@ -1119,7 +1127,7 @@ fn parse_unsigned_param_value(
             && scalar_expression_token_can_start(kind) =>
         {
             if let Some(value) =
-                try_scalar_expression_param(stream, netlist_params, defer_simple_param_refs)
+                try_scalar_expression_param(stream, netlist_params, defer_simple_param_refs, 1.0)
             {
                 Ok(value)
             } else {
@@ -1338,6 +1346,7 @@ fn try_scalar_expression_param(
     stream: &mut TokenStream,
     netlist_params: &XspiceParseContext<'_>,
     defer_simple_param_refs: bool,
+    sign: Value,
 ) -> Option<XspiceParamValue> {
     let first = stream.peek().clone();
     let mut probe = stream.clone();
@@ -1346,7 +1355,7 @@ fn try_scalar_expression_param(
         return None;
     }
 
-    let expr = collect_contiguous_expression(stream)?;
+    let expr = signed_xspice_expr(sign, collect_contiguous_expression(stream)?);
     if !expr.contains(['j', 'J'])
         && let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&expr)
     {
@@ -1716,14 +1725,6 @@ fn parse_real_vector_entry(
         _ => 1.0,
     };
 
-    let signed_expr = |expr: String| {
-        if sign < 0.0 {
-            format!("-({expr})")
-        } else {
-            expr
-        }
-    };
-
     let expr_text = collect_contiguous_expression(stream).ok_or_else(|| ParseError::Syntax {
         line: line_num,
         message: format!(
@@ -1740,12 +1741,13 @@ fn parse_real_vector_entry(
     if let Some(value) = parse_boolean_literal(&expr_text) {
         return Ok(XspiceVectorEntry::Resolved(sign * value));
     }
+    let expr_text = signed_xspice_expr(sign, expr_text);
     if !defer_simple_param_refs && let Ok(value) = netlist_params.evaluate(&expr_text) {
-        return Ok(XspiceVectorEntry::Resolved(
-            sign * real_instance_value(value, line_num, param_name)?,
-        ));
+        return Ok(XspiceVectorEntry::Resolved(real_instance_value(
+            value, line_num, param_name,
+        )?));
     }
-    Ok(XspiceVectorEntry::Deferred(signed_expr(expr_text)))
+    Ok(XspiceVectorEntry::Deferred(expr_text))
 }
 
 fn parse_string_vector_param(
@@ -1983,15 +1985,14 @@ fn parse_xspice_complex_component(
     if let Some(value) = parse_boolean_literal(&expr_text) {
         return Ok(XspiceComplexComponent::Resolved(sign * value));
     }
+    let expr_text = signed_xspice_expr(sign, expr_text);
     if !defer_simple_param_refs && let Ok(value) = netlist_params.evaluate(&expr_text) {
-        return Ok(XspiceComplexComponent::Resolved(
-            sign * real_instance_value(value, line_num, param_name)?,
-        ));
+        return Ok(XspiceComplexComponent::Resolved(real_instance_value(
+            value, line_num, param_name,
+        )?));
     }
     if defer_simple_param_refs {
-        return Ok(XspiceComplexComponent::Deferred(signed_xspice_expr(
-            sign, expr_text,
-        )));
+        return Ok(XspiceComplexComponent::Deferred(expr_text));
     }
 
     Err(ParseError::Syntax {
@@ -2012,7 +2013,9 @@ fn xspice_complex_component_expr(component: XspiceComplexComponent) -> String {
 
 fn signed_xspice_expr(sign: Value, expr: String) -> String {
     if sign < 0.0 {
-        format!("-({expr})")
+        // Grouping from braces/quotes is already explicit in the collected
+        // expression. The sign belongs to its first operand, not the whole sum.
+        format!("-{expr}")
     } else {
         expr
     }

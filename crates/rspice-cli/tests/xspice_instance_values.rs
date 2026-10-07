@@ -1,6 +1,18 @@
 mod common;
 
-use std::process::Command;
+use std::{path::Path, process::Command};
+
+fn csv_voltage(path: &Path, node: &str) -> f64 {
+    std::fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .filter_map(|line| line.split_once(','))
+        .find(|(name, _)| name.eq_ignore_ascii_case(&format!("V({node})")))
+        .unwrap()
+        .1
+        .parse()
+        .unwrap()
+}
 
 #[test]
 fn check_and_run_reject_non_real_instance_fields_without_replacing_results() {
@@ -78,14 +90,42 @@ fn forward_xspice_reference_preserves_the_seeded_gain_of_another_instance() {
     let mut reference = rspice_core::netlist::ParamContext::new();
     reference.set_random_seed(37);
     let expected = rspice_core::netlist::expr::eval_expression("aunif(100,1)", &reference).unwrap();
-    let csv = std::fs::read_to_string(result).unwrap();
-    let actual: f64 = csv
-        .lines()
-        .filter_map(|line| line.split_once(','))
-        .find(|(name, _)| name.eq_ignore_ascii_case("V(OUT)"))
-        .unwrap()
-        .1
-        .parse()
-        .unwrap();
+    let actual = csv_voltage(&result, "out");
     assert!((actual - expected).abs() < 1e-10, "{actual} != {expected}");
+}
+
+#[test]
+fn signed_instance_expressions_preserve_precedence_in_published_results() {
+    let body = "A1 in out gain gain=-z+3\nA2 in grouped gain gain=-{z+3}";
+    for devices in [
+        format!(".PARAM z=2\n{body}"),
+        format!("{body}\n.PARAM z=2"),
+        format!(
+            ".SUBCKT cell in out grouped PARAMS: z=0\n{body}\n.ENDS\nX1 in out grouped cell z=2"
+        ),
+    ] {
+        let directory = common::test_dir("signed_instance_fields");
+        let deck = directory.join("deck.cir");
+        let result = directory.join("result.csv");
+        std::fs::write(
+            &deck,
+            format!("* signed expressions\nV1 in 0 1\n{devices}\n.OP\n.END\n"),
+        )
+        .unwrap();
+        for command in ["check", "run"] {
+            let mut process = Command::new(env!("CARGO_BIN_EXE_rspice"));
+            process.args(["--quiet", command]).arg(&deck);
+            if command == "run" {
+                process.args(["--format", "csv", "--output"]).arg(&result);
+            }
+            let output = process.output().unwrap();
+            assert!(
+                output.status.success(),
+                "{devices}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        assert!((csv_voltage(&result, "out") - 1.0).abs() < 1e-12);
+        assert!((csv_voltage(&result, "grouped") + 5.0).abs() < 1e-12);
+    }
 }
