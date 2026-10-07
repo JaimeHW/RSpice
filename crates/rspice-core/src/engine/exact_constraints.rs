@@ -15,7 +15,3 @@ impl From<ConstraintError> for SimulationError {
         }
     }
 }
-
-// The physical transition adapter remains test-gated until fully integrated.
-#[cfg(test)]
-mod transition;

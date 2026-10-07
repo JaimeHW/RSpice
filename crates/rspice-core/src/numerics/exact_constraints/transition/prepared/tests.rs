@@ -422,7 +422,7 @@ fn malformed_singular_unrepresentable_and_bounded_transitions_are_explicit() {
     ] {
         assert!(matches!(
             PreparedTransition::new(4, &a, &e, restricted, &NoAbort),
-            Err(SimulationError::ResourceLimit(_))
+            Err(ConstraintError::ResourceLimit(_))
         ));
     }
     for limit in [1, 50] {
@@ -432,7 +432,7 @@ fn malformed_singular_unrepresentable_and_bounded_transitions_are_explicit() {
         };
         assert!(matches!(
             PreparedTransition::new(4, &a, &e, limits, &abort),
-            Err(SimulationError::Aborted)
+            Err(ConstraintError::Aborted)
         ));
         assert_eq!(abort.polls.load(Ordering::Relaxed), limit);
     }
@@ -447,7 +447,7 @@ fn malformed_singular_unrepresentable_and_bounded_transitions_are_explicit() {
             },
             &NoAbort
         ),
-        Err(SimulationError::ResourceLimit(_))
+        Err(ConstraintError::ResourceLimit(_))
     ));
     assert!(prepared.evaluate(&[0.0; 3], jet, limits, &NoAbort).is_err());
     assert!(
@@ -462,7 +462,7 @@ fn malformed_singular_unrepresentable_and_bounded_transitions_are_explicit() {
         };
         assert!(matches!(
             prepared.evaluate(&[0.0; 4], jet, limits, &abort),
-            Err(SimulationError::Aborted)
+            Err(ConstraintError::Aborted)
         ));
         assert_eq!(abort.polls.load(Ordering::Relaxed), limit);
     }
