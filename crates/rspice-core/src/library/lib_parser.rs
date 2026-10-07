@@ -72,12 +72,14 @@ fn read_library_file_bytes_limited(
     let metadata_bytes = usize::try_from(file.metadata()?.len()).unwrap_or(usize::MAX);
     ResourceLimitError::ensure(resource, metadata_bytes, limit)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    read_bytes_limited(
-        AbortReader::new(file, abort, LIBRARY_READ_CANCELLED),
-        resource,
-        limit,
-    )
-    .map_err(resource_read_error_to_io)
+    let mut reader = AbortReader::new(file, abort, LIBRARY_READ_CANCELLED);
+    read_bytes_limited(&mut reader, resource, limit).map_err(|error| {
+        if reader.was_cancelled() {
+            io::Error::new(io::ErrorKind::Interrupted, LIBRARY_READ_CANCELLED)
+        } else {
+            resource_read_error_to_io(error)
+        }
+    })
 }
 
 //=============================================================================

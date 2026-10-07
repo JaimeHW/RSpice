@@ -3035,6 +3035,43 @@ endmodule
     }
 
     #[test]
+    fn cancelled_disk_cache_read_preserves_the_valid_record() {
+        let root = unique_test_root("cancelled-read");
+        let source_path = root.join("model.va");
+        std::fs::create_dir_all(&root).expect("create temporary cache root");
+        let entry = compiled_entry(&source_path);
+        let cache_root = root.join("cache");
+        persist_model_to_disk_locked(&source_path, &entry, &cache_root)
+            .expect("persist valid cache record");
+        let source_key = VerilogASourceKey::new(&source_path, None);
+        let cache_path = cache_record_path_with_root(&source_key, &cache_root);
+        let original = std::fs::read(&cache_path).expect("read cache fixture");
+        let abort = crate::abort_signal::CountingAbort::new(32);
+
+        let error = load_model_from_disk_locked_with_limits(
+            &source_key,
+            &cache_root,
+            ResourceLimits::default(),
+            &abort,
+        )
+        .expect_err("partial cache decoding must return cancellation");
+
+        assert!(matches!(error, SimulationError::Aborted));
+        assert_eq!(abort.observed_at(), Some(33));
+        assert_eq!(abort.polls_after_abort(), 0);
+        assert_eq!(
+            std::fs::read(&cache_path).expect("cache retained"),
+            original
+        );
+        assert!(
+            load_model_from_disk_locked(&source_path, &cache_root)
+                .expect("read the retained record")
+                .is_some()
+        );
+        std::fs::remove_dir_all(root).expect("remove temporary cache root");
+    }
+
+    #[test]
     fn disk_cache_discards_a_stale_canonical_artifact() {
         let root = unique_test_root("stale-artifact");
         let source_path = root.join("model.va");

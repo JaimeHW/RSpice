@@ -317,12 +317,14 @@ fn read_source_limited(path: &Path, limit: usize, abort: &dyn AbortSignal) -> io
     let metadata_bytes = usize::try_from(file.metadata()?.len()).unwrap_or(usize::MAX);
     ResourceLimitError::ensure(ResourceKind::DependencySourceBytes, metadata_bytes, limit)
         .map_err(resource_error_to_io)?;
-    read_bytes_limited(
-        AbortReader::new(file, abort, DISCOVERY_READ_CANCELLED),
-        ResourceKind::DependencySourceBytes,
-        limit,
-    )
-    .map_err(resource_read_error_to_io)
+    let mut reader = AbortReader::new(file, abort, DISCOVERY_READ_CANCELLED);
+    read_bytes_limited(&mut reader, ResourceKind::DependencySourceBytes, limit).map_err(|error| {
+        if reader.was_cancelled() {
+            io::Error::new(io::ErrorKind::Interrupted, DISCOVERY_READ_CANCELLED)
+        } else {
+            resource_read_error_to_io(error)
+        }
+    })
 }
 
 fn resource_error_to_io(error: ResourceLimitError) -> io::Error {
@@ -599,6 +601,18 @@ mod tests {
         )
         .expect_err("immediate abort must win over filesystem access");
         assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+    }
+
+    #[test]
+    fn source_read_preserves_cancellation_after_partial_input() {
+        let tree = TempTree::new("partial-cancellation");
+        let path = tree.0.join("device.va");
+        fs::write(&path, vec![b' '; 128 * 1024]).expect("source fixture is written");
+        let abort = crate::abort_signal::CountingAbort::new(1);
+        let error = read_source_limited(&path, 256 * 1024, &abort)
+            .expect_err("source reading must stop after the first chunk");
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(error.to_string(), DISCOVERY_READ_CANCELLED);
     }
 
     #[cfg(unix)]
