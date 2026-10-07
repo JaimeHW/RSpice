@@ -36,6 +36,24 @@ pub(super) fn scalar(
     resolved: &ResolvedConstants,
     time_scale: crate::time_scale::ModuleTimeScale,
 ) -> Option<crate::numeric_literal::NumericLiteralValue> {
+    scalar_impl(expression, resolved, time_scale, None)
+}
+
+pub(super) fn scalar_prepared(
+    expression: &Expression,
+    resolved: &ResolvedConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
+    shapes: &expressions::Shapes,
+) -> Option<crate::numeric_literal::NumericLiteralValue> {
+    scalar_impl(expression, resolved, time_scale, Some(shapes))
+}
+
+fn scalar_impl(
+    expression: &Expression,
+    resolved: &ResolvedConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
+    shapes: Option<&expressions::Shapes>,
+) -> Option<crate::numeric_literal::NumericLiteralValue> {
     let mut reads = BTreeSet::new();
     collect_expression_reads(expression, &mut reads);
     if reads.iter().any(|name| {
@@ -72,11 +90,20 @@ pub(super) fn scalar(
     };
     let entry = lowerer.builder.create_block();
     lowerer.builder.seal_block(entry);
-    let signed = lowerer.self_signed(expression);
-    let value = if lowerer.is_real_expression(expression) {
-        lowerer.real_expression(entry, expression)
+    let shape = shapes.map_or_else(
+        || expressions::shape(&lowerer, expression),
+        |shapes| shapes.get(expression),
+    );
+    let signed = shape.signed;
+    let mode = if shape.real {
+        expressions::Mode::Real
     } else {
-        lowerer.expression(entry, expression)
+        expressions::Mode::Bits(Context::SELF_DETERMINED)
+    };
+    let value = if let Some(shapes) = shapes {
+        expressions::lower_prepared(&mut lowerer, entry, expression, mode, shapes)
+    } else {
+        expressions::lower(&mut lowerer, entry, expression, mode)
     };
     lowerer.builder.set_terminator(entry, CfgTerminator::Return);
     if !lowerer.diagnostics.is_empty() {

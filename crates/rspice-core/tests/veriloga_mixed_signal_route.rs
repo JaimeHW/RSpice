@@ -2663,13 +2663,14 @@ module typed_parameter_defaults(p,q);
  parameter K=8'd255+8'd2;
  parameter real R=8'd255+8'd1;
  parameter integer CARRY={packed};
- parameter real TARGET=CARRY+K+R;
+ parameter PACKED={{8'd1,({packed})}};
+ parameter real TARGET=CARRY+K+R+PACKED-344;
  parameter integer MODE=0;
  localparam LOCAL=8'd255+8'd2;
  analog I(p)<+(V(p)-(TARGET+LOCAL))/1000;
  initial #1 begin
-   if(MODE==0) q=(K==1)&&(R==0)&&(CARRY==600)&&(TARGET==601)&&(LOCAL==1);
-   else q=(K==7)&&(R==2.5)&&(CARRY==3)&&(TARGET==12.5)&&(LOCAL==1);
+   if(MODE==0) q=(K==1)&&(R==0)&&(CARRY==600)&&(TARGET==601)&&(LOCAL==1)&&(PACKED==344);
+   else q=(K==7)&&(R==2.5)&&(CARRY==3)&&(TARGET==12.5)&&(LOCAL==1)&&(PACKED==344);
  end
 endmodule
 "#

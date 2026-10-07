@@ -3054,6 +3054,15 @@ impl ProcessLowerer<'_> {
             msb: self.constant_index(msb)?,
             lsb: self.constant_index(lsb)?,
         };
+        self.validate_part_bounds(selected, range, span)
+    }
+
+    fn validate_part_bounds(
+        &mut self,
+        selected: VectorBounds,
+        range: VectorBounds,
+        span: Span,
+    ) -> Option<VectorBounds> {
         if Self::bounded_part_width(selected.msb, selected.lsb).is_none() {
             self.error(
                 "packed part-select width exceeds the supported vector width",
@@ -3092,110 +3101,14 @@ impl ProcessLowerer<'_> {
         Some(self.named_value(block, name, span))
     }
 
-    fn packed_bit_read(
+    fn digital_array_read_value(
         &mut self,
         block: BlockId,
-        input: ValueId,
-        range: VectorBounds,
-        bit: &Expression,
+        name: &str,
+        index: ValueId,
+        signed: bool,
     ) -> ValueId {
-        let kind = CfgValueKind::DigitalBitSelect {
-            input,
-            signed: self.self_signed(bit),
-            index: self.array_index_value(block, bit),
-            bounds: (range.msb, range.lsb),
-        };
-        self.builder
-            .push(block, CfgValueType::FourState { width: 1 }, kind)
-    }
-
-    fn packed_part_read(
-        &mut self,
-        block: BlockId,
-        input: ValueId,
-        range: VectorBounds,
-        msb: &Expression,
-        lsb: &Expression,
-        span: Span,
-    ) -> ValueId {
-        let Some(selected) = self.part_select_bounds(msb, lsb, range, span) else {
-            return self.unknown(1);
-        };
-        let width = selected.width();
-        let (Some(msb), Some(lsb)) = (
-            range.checked_position_of(selected.msb),
-            range.checked_position_of(selected.lsb),
-        ) else {
-            // A bounded selection with unrepresentable endpoints is entirely
-            // outside storage. Preserve its width instead of saturating both
-            // offsets to the same position and accidentally selecting one bit.
-            return self.unknown(width);
-        };
-        self.builder.push(
-            block,
-            CfgValueType::FourState { width },
-            CfgValueKind::DigitalPartSelect { input, msb, lsb },
-        )
-    }
-
-    fn array_packed_read(
-        &mut self,
-        block: BlockId,
-        access: &crate::ast::ArraySelectExpr,
-    ) -> ValueId {
-        let element = crate::ast::ArrayAccessExpr {
-            packed: None,
-            array: access.name.clone(),
-            index: access.index.clone(),
-            discrete_validity: None,
-            span: access.span,
-        };
-        let (input, range) = if let Some(array) = self.digital_array(&access.name) {
-            if self.real_signal(array.base) {
-                self.error(
-                    "packed selection requires integral array elements",
-                    access.span,
-                );
-                return self.unknown(1);
-            }
-            (
-                self.digital_array_read(block, &element),
-                self.signals[usize::from(array.base)].declared_range(),
-            )
-        } else if self
-            .analog_array(&access.name)
-            .is_some_and(|(quantity, _, _)| {
-                quantity == super::digital::DigitalAnalogQuantity::IntegerVariable
-            })
-        {
-            // Keep the ordinary candidate-state probe and its single word
-            // selector. Packed selection consumes the resulting signed-32
-            // sample without introducing a second observation or conversion.
-            (self.analog_array_read(block, &element), INTEGER_BOUNDS)
-        } else {
-            self.error(
-                "packed selection requires an unpacked array of four-state or integer elements",
-                access.span,
-            );
-            return self.unknown(1);
-        };
-        match &access.select {
-            crate::ast::PackedSelect::Bit(bit) => self.packed_bit_read(block, input, range, bit),
-            crate::ast::PackedSelect::Part { msb, lsb } => {
-                self.packed_part_read(block, input, range, msb, lsb, access.span)
-            }
-        }
-    }
-
-    fn digital_array_read(
-        &mut self,
-        block: BlockId,
-        access: &crate::ast::ArrayAccessExpr,
-    ) -> ValueId {
-        let array = self
-            .digital_array(&access.array)
-            .expect("resolved discrete array");
-        let index = self.array_index_value(block, &access.index);
+        let array = self.digital_array(name).expect("resolved discrete array");
         let value_type = if self.real_signal(array.base) {
             CfgValueType::Real
         } else {
@@ -3209,7 +3122,7 @@ impl ProcessLowerer<'_> {
             CfgValueKind::DigitalArrayRead {
                 array,
                 index,
-                signed: self.self_signed(&access.index),
+                signed,
             },
         )
     }
@@ -3361,14 +3274,17 @@ impl ProcessLowerer<'_> {
         Some((variable.quantity, lower, len))
     }
 
-    fn analog_array_read(
+    fn analog_array_read_value(
         &mut self,
         block: BlockId,
-        access: &crate::ast::ArrayAccessExpr,
+        name: &str,
+        span: Span,
+        index: ValueId,
+        signed: bool,
     ) -> ValueId {
         use super::digital::{DigitalAnalogProbeTarget, DigitalAnalogQuantity};
-        let (quantity, lower, len) = self.analog_array(&access.array).expect("array classified");
-        let first = format!("{}[{lower}]", access.array);
+        let (quantity, lower, len) = self.analog_array(name).expect("array classified");
+        let first = format!("{name}[{lower}]");
         let target = DigitalAnalogProbeTarget::Variable { name: first.into() };
         // Reserve one contiguous binding group, shared by every read of this
         // array. Selection is O(1); no conditional chain or analog re-evaluation.
@@ -3381,23 +3297,16 @@ impl ProcessLowerer<'_> {
         } else {
             let base = self.probes.len();
             for offset in 0..len {
-                let name: SmolStr =
-                    format!("{}[{}]", access.array, lower + i64::from(offset)).into();
+                let name: SmolStr = format!("{}[{}]", name, lower + i64::from(offset)).into();
                 self.probes.push(DigitalAnalogProbe {
                     id: DigitalAnalogProbeId::from(self.probes.len()),
                     access: name.clone(),
                     quantity,
                     target: DigitalAnalogProbeTarget::Variable { name },
-                    span: access.span.into(),
+                    span: span.into(),
                 });
             }
             base
-        };
-        let signed = self.self_signed(&access.index);
-        let index = if self.is_real_expression(&access.index) {
-            self.real_expression(block, &access.index)
-        } else {
-            self.expression(block, &access.index)
         };
         let value_type = if quantity == DigitalAnalogQuantity::IntegerVariable {
             CfgValueType::FourState { width: 32 }
@@ -3479,12 +3388,7 @@ impl ProcessLowerer<'_> {
                 self.real_constant(number.value)
             }
             Expression::BranchAccess(access) => self.analog_probe(block, access),
-            Expression::ArrayAccess(access) if self.digital_array(&access.array).is_some() => {
-                self.digital_array_read(block, access)
-            }
-            Expression::ArrayAccess(access) if self.analog_array(&access.array).is_some() => {
-                self.analog_array_read(block, access)
-            }
+            Expression::ArrayAccess(_) => unreachable!("iterative array read lowering"),
             Expression::Identifier(identifier) => {
                 if self.digital_array(&identifier.name).is_some() {
                     self.error(
@@ -3810,15 +3714,10 @@ impl ProcessLowerer<'_> {
                     CfgValueKind::FourStateConstant(value),
                 )
             }
-            Expression::Digital(crate::ast::DigitalExpr::ArraySelect(access)) => {
-                self.array_packed_read(block, access)
-            }
-            Expression::Digital(crate::ast::DigitalExpr::PartSelect(select)) => {
-                let Some(input) = self.packed_named_value(block, &select.name, select.span) else {
-                    return self.unknown(1);
-                };
-                let range = self.declared_range_of(&select.name);
-                self.packed_part_read(block, input, range, &select.msb, &select.lsb, select.span)
+            Expression::Digital(
+                crate::ast::DigitalExpr::ArraySelect(_) | crate::ast::DigitalExpr::PartSelect(_),
+            ) => {
+                unreachable!("iterative packed selection lowering")
             }
             Expression::Digital(
                 crate::ast::DigitalExpr::Xnor(_)
@@ -3878,36 +3777,8 @@ impl ProcessLowerer<'_> {
             Expression::Identifier(identifier) => {
                 self.named_value(block, &identifier.name, identifier.span)
             }
-            Expression::ArrayAccess(access) => {
-                if self.digital_array(&access.array).is_some() {
-                    return self.digital_array_read(block, access);
-                }
-                if self.analog_array(&access.array).is_some() {
-                    return self.analog_array_read(block, access);
-                }
-                let Some(input) = self.packed_named_value(block, &access.array, access.span) else {
-                    return self.unknown(1);
-                };
-                let range = self.declared_range_of(&access.array);
-                self.packed_bit_read(block, input, range, &access.index)
-            }
-            // Section 5.4.1 makes every operand of a concatenation
-            // self-determined, and the concatenation's own size the sum of
-            // them. The context stops here: in `{a, b + c}` the sum is as wide
-            // as `b` and `c`, and wraps, however wide the target is. This is
-            // the operator the whole rule is usually got wrong on, because
-            // pushing the context through it looks like the same thing.
-            Expression::ArrayLiteral(literal) => {
-                let mut parts = Vec::new();
-                for element in &literal.elements {
-                    self.concat_element(block, element, &mut parts);
-                }
-                let width = parts.iter().map(|part| self.value_width(*part)).sum();
-                self.builder.push(
-                    block,
-                    CfgValueType::FourState { width },
-                    CfgValueKind::DigitalConcat { parts },
-                )
+            Expression::ArrayAccess(_) | Expression::ArrayLiteral(_) => {
+                unreachable!("iterative array and concatenation lowering")
             }
             // Both arms retain the common width and sign; the condition is
             // self-determined. Evaluation skips the unselected source arm.
@@ -4073,11 +3944,10 @@ impl ProcessLowerer<'_> {
             Expression::Digital(crate::ast::DigitalExpr::FourState(literal)) => {
                 literal.value.width()
             }
-            Expression::Digital(crate::ast::DigitalExpr::ArraySelect(access)) => {
-                self.packed_select_width(&access.select)
-            }
-            Expression::Digital(crate::ast::DigitalExpr::PartSelect(select)) => {
-                self.part_select_width(&select.msb, &select.lsb)
+            Expression::Digital(
+                crate::ast::DigitalExpr::ArraySelect(_) | crate::ast::DigitalExpr::PartSelect(_),
+            ) => {
+                unreachable!("iterative packed selection typing")
             }
             // Section 4.1.8: an identity comparison is one bit, and so is a
             // reduction of section 5.1.10.
@@ -4115,11 +3985,7 @@ impl ProcessLowerer<'_> {
                     1
                 }
             }
-            Expression::ArrayLiteral(literal) => literal
-                .elements
-                .iter()
-                .map(|element| self.element_width(element))
-                .sum(),
+            Expression::ArrayLiteral(_) => unreachable!("iterative concatenation typing"),
             // `$realtobits` is 64 bits by the format it names, not by the
             // context it sits in: it is double-precision's own pattern, and a
             // narrower one would be a different pattern rather than a shorter
@@ -4133,65 +3999,6 @@ impl ProcessLowerer<'_> {
                     .unwrap_or(1)
             }
             _ => 1,
-        }
-    }
-
-    /// The self-determined width one concatenation element contributes.
-    ///
-    /// A replication contributes its count times the width of what it repeats,
-    /// and nothing when the count is not the constant section 5.1.14 requires
-    /// — which is what the lowering contributes too, having refused it.
-    fn element_width(&self, element: &ArrayLiteralElement) -> u32 {
-        match element {
-            ArrayLiteralElement::Value(expression) => self.self_width(expression),
-            ArrayLiteralElement::Replication(replication) => {
-                let Some(count) = self
-                    .constant(&replication.count)
-                    .filter(|count| *count >= 0)
-                    .and_then(|count| u32::try_from(count).ok())
-                else {
-                    return 0;
-                };
-                let inner: u32 = replication
-                    .elements
-                    .iter()
-                    .map(|element| self.element_width(element))
-                    .sum();
-                count.saturating_mul(inner)
-            }
-        }
-    }
-
-    fn concat_element(
-        &mut self,
-        block: BlockId,
-        element: &ArrayLiteralElement,
-        parts: &mut Vec<ValueId>,
-    ) {
-        match element {
-            ArrayLiteralElement::Value(expression) => {
-                parts.push(self.expression(block, expression));
-            }
-            ArrayLiteralElement::Replication(replication) => {
-                // IEEE 1364-2005 section 5.1.14 requires a constant
-                // replication count, so the repetition is expanded here and
-                // the IR needs no replication node.
-                let Some(count) = self
-                    .constant(&replication.count)
-                    .filter(|count| *count >= 0)
-                else {
-                    self.error(
-                        "a replication count must be a non-negative constant",
-                        replication.span,
-                    );
-                    return;
-                };
-                for _ in 0..count {
-                    for element in &replication.elements {
-                        self.concat_element(block, element, parts);
-                    }
-                }
-            }
         }
     }
 

@@ -8299,3 +8299,166 @@ fn real_negation_rejects_malformed_process_and_event_types() {
         }
     }
 }
+
+#[test]
+fn iterative_concat_defaults_and_nested_selectors_preserve_values() {
+    let packed = vec!["8'd1"; 600].join("+");
+    let index = vec!["zero"; 600].join("+");
+    let source = format!(
+        r#"
+module concat_typed(p);
+ inout p; electrical p;
+ parameter N={{4'h3,({packed})}};
+ parameter integer I={{4'h3,({packed})}};
+ parameter real R={{4'h3,({packed})}};
+ parameter W={{{{2{{2'b11}}}}{{1'b1}}}};
+ reg [87:0] repeated;
+ reg [15:0] result, constant_value, exact;
+ reg [7:0] zero, words[0:1], indices[0:1], keys[0:1];
+ reg [127:0] data;
+ reg [3:0] selected;
+ reg [14:0] nested;
+ reg [7:0] pattern;
+ real real_value;
+ initial begin
+   zero=0; data=128'h0123456789abcdef0123456789abcdef;
+   words[0]=8'h81; words[1]=8'h42; indices[0]=1; keys[0]=0;
+   result={{4'h3,({packed})}};
+   constant_value=N; real_value=R;
+   repeated={{({packed}){{1'b1}}}};
+   nested=W;
+   selected=data[{{1{{({packed})}}}}:{{1{{({packed})}}}}-3];
+   exact=words[indices[keys[{index}]]][6:0];
+   pattern={{2{{2'bxz,{{2{{1'b1}}}}}}}};
+ end
+ analog I(p)<+(N+I+R)*V(p);
+endmodule"#
+    );
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(&source)
+        .unwrap();
+    for name in ["N", "I", "R"] {
+        assert_eq!(
+            artifact
+                .hir
+                .parameters
+                .iter()
+                .find(|p| p.name == name)
+                .unwrap()
+                .default,
+            Some(856.0),
+            "{name}"
+        );
+    }
+    let mut h = Harness::from_source(&source);
+    h.plan = serde_json::from_slice(&serde_json::to_vec(&h.plan).unwrap()).unwrap();
+    h.plan.validate().unwrap();
+    expect_finished(h.start(0));
+    assert_eq!(h.get("result"), format!("{:016b}", 856));
+    assert_eq!(h.get("constant_value"), format!("{:016b}", 856));
+    assert_eq!(h.get_real("real_value"), 856.0);
+    assert_eq!(h.get("repeated"), "1".repeat(88));
+    assert_eq!(h.get("nested"), "1".repeat(15));
+    assert_eq!(h.get("pattern"), "xz11xz11");
+    assert_eq!(h.get("selected"), "1101");
+    assert_eq!(h.get("exact"), format!("{:016b}", 0x42));
+}
+
+#[test]
+fn iterative_concat_replication_samples_each_operand_once_including_zero() {
+    use rspice_veriloga::canonical_ir::CfgValueKind;
+    let mut h = Harness::from_source(
+        r#"
+module replication_samples(p); inout p; electrical p;
+ integer a,b,c, words[0:1], word, bit;
+ reg [3:0] repeated; reg kept, selected; reg [7:0] prefix;
+ analog begin a=1; b=0; c=1; words[0]=2; words[1]=0; end
+ initial begin
+   prefix=prefix+1;
+   repeated={2{a[0],b[0]}};
+   kept={{0{c[0]}},1'b1};
+   word=0; bit=1; selected=words[word][bit];
+ end
+endmodule"#,
+    );
+    h.plan = serde_json::from_slice(&serde_json::to_vec(&h.plan).unwrap()).unwrap();
+    h.plan.validate().unwrap();
+    let samples = h.plan.processes[0]
+        .function
+        .values
+        .iter()
+        .filter(|value| matches!(value.kind, CfgValueKind::DigitalAnalogVariable { .. }))
+        .count();
+    assert_eq!(samples, 4, "one evaluation of a, b, c and the array word");
+    h.set("prefix", "00000000");
+    let a = expect_suspended(h.start(0));
+    assert_eq!(a.wait(), &DigitalWaitRequest::AnalogSample(h.probe("a")));
+    h.set_analog("a", 1.0);
+    let b = expect_suspended(h.resume(0, a.resume_state()));
+    assert_eq!(b.wait(), &DigitalWaitRequest::AnalogSample(h.probe("b")));
+    h.set_analog("b", 0.0);
+    let c = expect_suspended(h.resume(0, b.resume_state()));
+    assert_eq!(c.wait(), &DigitalWaitRequest::AnalogSample(h.probe("c")));
+    assert_eq!(h.get("repeated"), "1010");
+    h.set_analog("c", 1.0);
+    let words = expect_suspended(h.resume(0, c.resume_state()));
+    assert_eq!(
+        words.wait(),
+        &DigitalWaitRequest::AnalogSample(h.probe("words[0]"))
+    );
+    assert_eq!(h.get("kept"), "1");
+    h.set("word", &format!("{:032b}", 1));
+    h.set_analog("words[0]", 2.0);
+    h.set_analog("words[1]", 0.0);
+    expect_finished(h.resume(0, words.resume_state()));
+    assert_eq!(
+        h.get("selected"),
+        "1",
+        "word index captured before sampling"
+    );
+    assert_eq!(h.get("prefix"), "00000001");
+}
+
+#[test]
+fn iterative_concat_rejects_invalid_counts_and_unbounded_widths() {
+    for expression in [
+        "{-1{1'b1}}",
+        "{1'bx{1'b1}}",
+        "{1'bz{1'b1}}",
+        "{0{1'b1}}",
+        "{65537{1'b1}}",
+        "{4294967296{1'b1}}",
+        "{32769{2'b10}}",
+        "{{0{1'b1}}, {0{1'b0}}}",
+        "{{{0{1'b1}}}, 1'b1}",
+        "{count{1'b1}}",
+    ] {
+        let source =
+            format!("module invalid; integer count; reg q; initial q={expression}; endmodule");
+        assert!(
+            VerilogACompiler::default()
+                .compile_canonical_ir(&source)
+                .is_err(),
+            "{expression}"
+        );
+    }
+}
+
+#[test]
+fn iterative_concat_zero_count_preserves_operand_errors() {
+    let mut h = Harness::from_source(
+        "module zero_errors; reg q; reg [95:0] poison;\n\
+         initial q={{0{$realtobits(poison+0.0)}},1'b1}; endmodule",
+    );
+    h.plan = serde_json::from_slice(&serde_json::to_vec(&h.plan).unwrap()).unwrap();
+    h.plan.validate().unwrap();
+    assert!(matches!(
+        start(&h.plan, &h.plan.processes[0], &mut h.store),
+        Err(DigitalEvalError::InvalidNumericConversion { .. })
+    ));
+    assert_eq!(
+        h.get("q"),
+        "x",
+        "failed operand must not publish the assignment"
+    );
+}

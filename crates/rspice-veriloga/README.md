@@ -530,11 +530,20 @@ processes and computed event expressions use the same operation. Integral
 negation still happens in its packed domain before any conversion to real.
 Serialized artifacts validate both the operand and result as real values.
 
-Concatenation and packed-selection helpers remain recursive. Closed defaults
-containing those forms retain the temporary 256-expression-node bound; large
-packed defaults receive an explicit diagnostic. Their iterative migration,
-dependent packed-default semantics, general parameter typing and the full
-typed external parameter ABI remain open. Wasm helper ABI remains 20.
+Schema 92 extends the explicit expression stacks to concatenations,
+replications, array reads and packed selections. Nested constant replication
+counts and part bounds reuse prepared descendant types. Closed packed defaults
+no longer have the temporary 256-expression-node limit. Concatenation widths
+are checked before expansion against the 65,536-bit vector limit; invalid
+counts and concatenations with no result bits receive diagnostics.
+
+Replication operands execute exactly once, including zero-count operands
+whose result bits are omitted inside a nonempty concatenation. Array word
+indices are captured before analog sampling; packed bit selection follows
+the sample. Replication preserves X/Z bits and does not propagate assignment
+width into its operands. Dependent packed-default semantics, general parameter
+typing and the full typed external parameter ABI remain open. Wasm helper ABI
+remains 20.
 Source: [VAMS-2023, 3.4.1 and 4.2](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
 
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated

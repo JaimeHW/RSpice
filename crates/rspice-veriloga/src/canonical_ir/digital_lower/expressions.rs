@@ -5,7 +5,7 @@
 //! its nodes only within that walk and are never dereferenced or persisted.
 
 use super::*;
-use crate::ast::DigitalExpr;
+use crate::ast::{DigitalExpr, PackedSelect};
 
 #[derive(Clone, Copy)]
 pub(super) struct Shape {
@@ -27,6 +27,23 @@ fn children(expression: &Expression) -> Vec<&Expression> {
         }
         Expression::Digital(DigitalExpr::CaseEquality(value)) => vec![&value.left, &value.right],
         Expression::Digital(DigitalExpr::Reduction(value)) => vec![&value.operand],
+        Expression::ArrayAccess(value) => vec![&value.index],
+        Expression::Digital(DigitalExpr::PartSelect(value)) => vec![&value.msb, &value.lsb],
+        Expression::Digital(DigitalExpr::ArraySelect(value)) => value.children(),
+        Expression::ArrayLiteral(value) => {
+            let mut children = Vec::new();
+            let mut pending: Vec<_> = value.elements.iter().rev().collect();
+            while let Some(element) = pending.pop() {
+                match element {
+                    ArrayLiteralElement::Value(value) => children.push(value),
+                    ArrayLiteralElement::Replication(value) => {
+                        children.push(&value.count);
+                        pending.extend(value.elements.iter().rev());
+                    }
+                }
+            }
+            children
+        }
         Expression::Call(value) => value.args.iter().collect(),
         Expression::SystemFunction(value) => value.args.iter().collect(),
         _ => Vec::new(),
@@ -37,8 +54,103 @@ fn key(expression: &Expression) -> *const Expression {
     expression
 }
 
-fn shapes(lowerer: &ProcessLowerer<'_>, root: &Expression) -> HashMap<*const Expression, Shape> {
-    let mut result: HashMap<*const Expression, Shape> = HashMap::new();
+/// Prepared information belongs to one immutable AST walk. Constant selectors
+/// use already-prepared descendants, so a replication count containing another
+/// replication cannot recursively re-enter type inference.
+#[derive(Default)]
+pub(super) struct Shapes {
+    values: HashMap<*const Expression, Shape>,
+    constants: HashMap<*const Expression, Option<i64>>,
+    elements: HashMap<*const ArrayLiteralElement, Option<u32>>,
+}
+
+impl std::ops::Index<&*const Expression> for Shapes {
+    type Output = Shape;
+    fn index(&self, key: &*const Expression) -> &Shape {
+        &self.values[key]
+    }
+}
+
+impl Shapes {
+    pub(super) fn get(&self, expression: &Expression) -> Shape {
+        self[&key(expression)]
+    }
+
+    fn prepare_constant(&mut self, lowerer: &ProcessLowerer<'_>, expression: &Expression) {
+        if self.constants.contains_key(&key(expression)) {
+            return;
+        }
+        let mut reads = BTreeSet::new();
+        collect_expression_reads(expression, &mut reads);
+        let value = if reads.iter().any(|name| {
+            lowerer.lookup_local(name).is_some() || lowerer.index.contains_key(name.as_str())
+        }) {
+            None
+        } else {
+            constants::scalar_prepared(expression, lowerer.constants, lowerer.time_scale, self)
+                .and_then(|value| match value {
+                    crate::numeric_literal::NumericLiteralValue::Integer(value) => Some(value),
+                    crate::numeric_literal::NumericLiteralValue::Real(value) => {
+                        crate::semantic::SemanticAnalyzer::exact_const_i64(value)
+                    }
+                })
+        };
+        self.constants.insert(key(expression), value);
+    }
+
+    fn constant(&self, expression: &Expression) -> Option<i64> {
+        self.constants[&key(expression)]
+    }
+
+    fn count(&self, expression: &Expression) -> Option<u32> {
+        self.constant(expression)
+            .and_then(|count| u32::try_from(count).ok())
+    }
+
+    fn part_width(&self, msb: &Expression, lsb: &Expression) -> u32 {
+        self.constant(msb)
+            .zip(self.constant(lsb))
+            .and_then(|(msb, lsb)| ProcessLowerer::bounded_part_width(msb, lsb))
+            .unwrap_or(1)
+    }
+
+    fn group_width(&self, elements: &[ArrayLiteralElement]) -> Option<u32> {
+        elements.iter().try_fold(0u32, |sum, element| {
+            sum.checked_add(self.elements[&(element as *const _)]?)
+                .filter(|width| *width <= crate::semantic::MAX_DIGITAL_VECTOR_WIDTH)
+        })
+    }
+
+    fn prepare_elements(&mut self, lowerer: &ProcessLowerer<'_>, elements: &[ArrayLiteralElement]) {
+        let mut pending: Vec<_> = elements
+            .iter()
+            .rev()
+            .map(|element| (element, false))
+            .collect();
+        while let Some((element, ready)) = pending.pop() {
+            let width = match element {
+                ArrayLiteralElement::Value(value) => Some(self.get(value).width),
+                ArrayLiteralElement::Replication(value) => {
+                    if !ready {
+                        self.prepare_constant(lowerer, &value.count);
+                        pending.push((element, true));
+                        pending.extend(value.elements.iter().rev().map(|element| (element, false)));
+                        continue;
+                    }
+                    self.group_width(&value.elements)
+                        .filter(|width| *width > 0)
+                        .zip(self.count(&value.count))
+                        .and_then(|(width, count)| width.checked_mul(count))
+                        .filter(|width| *width <= crate::semantic::MAX_DIGITAL_VECTOR_WIDTH)
+                }
+            };
+            self.elements.insert(element, width);
+        }
+    }
+}
+
+fn shapes(lowerer: &ProcessLowerer<'_>, root: &Expression) -> Shapes {
+    let mut result = Shapes::default();
     let mut pending = vec![(root, false)];
     while let Some((expression, ready)) = pending.pop() {
         if !ready {
@@ -50,6 +162,20 @@ fn shapes(lowerer: &ProcessLowerer<'_>, root: &Expression) -> HashMap<*const Exp
                     .map(|child| (child, false)),
             );
             continue;
+        }
+        match expression {
+            Expression::ArrayLiteral(value) => result.prepare_elements(lowerer, &value.elements),
+            Expression::Digital(DigitalExpr::PartSelect(value)) => {
+                result.prepare_constant(lowerer, &value.msb);
+                result.prepare_constant(lowerer, &value.lsb);
+            }
+            Expression::Digital(DigitalExpr::ArraySelect(value)) => {
+                if let PackedSelect::Part { msb, lsb } = &value.select {
+                    result.prepare_constant(lowerer, msb);
+                    result.prepare_constant(lowerer, lsb);
+                }
+            }
+            _ => {}
         }
         let get = |expression: &Expression| result[&key(expression)];
         let shape = match expression {
@@ -140,13 +266,40 @@ fn shapes(lowerer: &ProcessLowerer<'_>, root: &Expression) -> HashMap<*const Exp
                     real: false,
                 }
             }
+            Expression::ArrayLiteral(value) => Shape {
+                width: result
+                    .group_width(&value.elements)
+                    .filter(|width| {
+                        *width > 0
+                            || matches!(
+                                value.elements.as_slice(),
+                                [ArrayLiteralElement::Replication(_)]
+                            )
+                    })
+                    .unwrap_or(1),
+                signed: false,
+                real: false,
+            },
+            Expression::Digital(DigitalExpr::PartSelect(value)) => Shape {
+                width: result.part_width(&value.msb, &value.lsb),
+                signed: false,
+                real: false,
+            },
+            Expression::Digital(DigitalExpr::ArraySelect(value)) => Shape {
+                width: match &value.select {
+                    PackedSelect::Bit(_) => 1,
+                    PackedSelect::Part { msb, lsb } => result.part_width(msb, lsb),
+                },
+                signed: false,
+                real: false,
+            },
             _ => Shape {
                 width: lowerer.self_width_leaf(expression),
                 signed: lowerer.self_signed_leaf(expression),
                 real: lowerer.is_real_expression_leaf(expression),
             },
         };
-        result.insert(key(expression), shape);
+        result.values.insert(key(expression), shape);
     }
     result
 }
@@ -185,6 +338,12 @@ enum Operation {
 enum Work<'a> {
     Expression(BlockId, &'a Expression, Mode),
     Apply(BlockId, Operation),
+    Elements(BlockId, &'a [ArrayLiteralElement], u32),
+    Element(BlockId, &'a ArrayLiteralElement),
+    Concat(BlockId, usize, u32),
+    ArrayRead(BlockId, &'a SmolStr, Span, bool),
+    BitSelect(BlockId, ValueId, VectorBounds, bool),
+    ArraySelect(BlockId, &'a crate::ast::ArraySelectExpr, VectorBounds),
     LogicalLeft(BlockId, LogicalOp, &'a Expression),
     LogicalRight(LogicalFrame),
     Conditional(BlockId, &'a crate::ast::ConditionalExpr, ConditionalDomain),
@@ -210,6 +369,16 @@ pub(super) fn lower(
     mode: Mode,
 ) -> ValueId {
     let shapes = shapes(lowerer, root);
+    lower_prepared(lowerer, block, root, mode, &shapes)
+}
+
+pub(super) fn lower_prepared(
+    lowerer: &mut ProcessLowerer<'_>,
+    block: BlockId,
+    root: &Expression,
+    mode: Mode,
+    shapes: &Shapes,
+) -> ValueId {
     let mut pending = vec![Work::Expression(block, root, mode)];
     let mut values = Vec::new();
     while let Some(work) = pending.pop() {
@@ -218,6 +387,110 @@ pub(super) fn lower(
             Work::Apply(block, operation) => {
                 let value = apply(lowerer, block, operation, &mut values);
                 values.push(value);
+                continue;
+            }
+            Work::Elements(block, elements, count) => {
+                pending.push(Work::Concat(block, values.len(), count));
+                pending.extend(
+                    elements
+                        .iter()
+                        .rev()
+                        .map(|element| Work::Element(block, element)),
+                );
+                continue;
+            }
+            Work::Element(block, element) => {
+                match element {
+                    ArrayLiteralElement::Value(value) => {
+                        if shapes.get(value).width == 0 {
+                            // The parser represents {0{...}} as an expression
+                            // inside its surrounding concatenation. It has no
+                            // result bits, but its operands still execute.
+                            let Expression::ArrayLiteral(literal) = value else {
+                                unreachable!()
+                            };
+                            let [ArrayLiteralElement::Replication(replication)] =
+                                literal.elements.as_slice()
+                            else {
+                                unreachable!()
+                            };
+                            pending.push(Work::Elements(block, &replication.elements, 0));
+                        } else {
+                            pending.push(Work::Expression(
+                                block,
+                                value,
+                                Mode::Bits(Context::SELF_DETERMINED),
+                            ));
+                        }
+                    }
+                    ArrayLiteralElement::Replication(value) => pending.push(Work::Elements(
+                        block,
+                        &value.elements,
+                        shapes.count(&value.count).expect("validated count"),
+                    )),
+                }
+                continue;
+            }
+            Work::Concat(block, start, count) => {
+                let parts = values.split_off(start);
+                // VAMS 4.2.13 evaluates the operands once, even for a zero
+                // replication. Only the resulting bit pattern is repeated.
+                if count != 0 {
+                    let width = parts
+                        .iter()
+                        .map(|part| lowerer.value_width(*part))
+                        .sum::<u32>()
+                        * count;
+                    let repeated = (0..count).flat_map(|_| parts.iter().copied()).collect();
+                    values.push(lowerer.builder.push(
+                        block,
+                        CfgValueType::FourState { width },
+                        CfgValueKind::DigitalConcat { parts: repeated },
+                    ));
+                }
+                continue;
+            }
+            Work::ArrayRead(block, name, span, signed) => {
+                let index = values.pop().expect("array index");
+                values.push(if lowerer.digital_array(name).is_some() {
+                    lowerer.digital_array_read_value(block, name, index, signed)
+                } else {
+                    lowerer.analog_array_read_value(block, name, span, index, signed)
+                });
+                continue;
+            }
+            Work::BitSelect(block, input, range, signed) => {
+                let index = values.pop().expect("bit index");
+                values.push(lowerer.builder.push(
+                    block,
+                    CfgValueType::FourState { width: 1 },
+                    CfgValueKind::DigitalBitSelect {
+                        input,
+                        index,
+                        signed,
+                        bounds: (range.msb, range.lsb),
+                    },
+                ));
+                continue;
+            }
+            Work::ArraySelect(block, access, range) => {
+                let input = values.pop().expect("array word");
+                match &access.select {
+                    PackedSelect::Bit(bit) => {
+                        pending.push(Work::BitSelect(block, input, range, shapes.get(bit).signed));
+                        pending.push(Work::Expression(block, bit, value_mode(shapes.get(bit))));
+                    }
+                    PackedSelect::Part { msb, lsb } => values.push(part_read(
+                        lowerer,
+                        block,
+                        input,
+                        range,
+                        msb,
+                        lsb,
+                        access.span,
+                        shapes,
+                    )),
+                }
                 continue;
             }
             Work::LogicalLeft(block, op, right) => {
@@ -319,6 +592,103 @@ pub(super) fn lower(
         };
         // Push right before left: stack execution preserves source order.
         match expression {
+            Expression::ArrayLiteral(value) => {
+                if shapes
+                    .group_width(&value.elements)
+                    .is_none_or(|width| width == 0)
+                {
+                    lowerer.error(
+                        "a concatenation requires a positive bounded width and non-negative constant replication counts",
+                        value.span);
+                    values.push(lowerer.unknown(1));
+                } else {
+                    pending.push(Work::Elements(block, &value.elements, 1));
+                }
+            }
+            Expression::ArrayAccess(access) => {
+                if lowerer.digital_array(&access.array).is_some()
+                    || lowerer.analog_array(&access.array).is_some()
+                {
+                    pending.push(Work::ArrayRead(
+                        block,
+                        &access.array,
+                        access.span,
+                        shapes.get(&access.index).signed,
+                    ));
+                } else if let Some(input) =
+                    lowerer.packed_named_value(block, &access.array, access.span)
+                {
+                    pending.push(Work::BitSelect(
+                        block,
+                        input,
+                        lowerer.declared_range_of(&access.array),
+                        shapes.get(&access.index).signed,
+                    ));
+                } else {
+                    values.push(lowerer.unknown(1));
+                    continue;
+                }
+                pending.push(Work::Expression(
+                    block,
+                    &access.index,
+                    value_mode(shapes.get(&access.index)),
+                ));
+            }
+            Expression::Digital(DigitalExpr::PartSelect(select)) => {
+                let value = if let Some(input) =
+                    lowerer.packed_named_value(block, &select.name, select.span)
+                {
+                    part_read(
+                        lowerer,
+                        block,
+                        input,
+                        lowerer.declared_range_of(&select.name),
+                        &select.msb,
+                        &select.lsb,
+                        select.span,
+                        shapes,
+                    )
+                } else {
+                    lowerer.unknown(1)
+                };
+                values.push(value);
+            }
+            Expression::Digital(DigitalExpr::ArraySelect(access)) => {
+                let range = if let Some(array) = lowerer.digital_array(&access.name) {
+                    if lowerer.real_signal(array.base) {
+                        lowerer.error(
+                            "packed selection requires integral array elements",
+                            access.span,
+                        );
+                        values.push(lowerer.unknown(1));
+                        continue;
+                    }
+                    lowerer.signals[usize::from(array.base)].declared_range()
+                } else if lowerer
+                    .analog_array(&access.name)
+                    .is_some_and(|(quantity, _, _)| {
+                        quantity == super::super::digital::DigitalAnalogQuantity::IntegerVariable
+                    })
+                {
+                    INTEGER_BOUNDS
+                } else {
+                    lowerer.error("packed selection requires an unpacked array of four-state or integer elements", access.span);
+                    values.push(lowerer.unknown(1));
+                    continue;
+                };
+                pending.push(Work::ArraySelect(block, access, range));
+                pending.push(Work::ArrayRead(
+                    block,
+                    &access.name,
+                    access.span,
+                    shapes.get(&access.index).signed,
+                ));
+                pending.push(Work::Expression(
+                    block,
+                    &access.index,
+                    value_mode(shapes.get(&access.index)),
+                ));
+            }
             Expression::Conditional(value) => {
                 let domain = if real {
                     ConditionalDomain::Real
@@ -545,6 +915,47 @@ pub(super) fn lower(
     }
     debug_assert_eq!(values.len(), 1);
     values.pop().expect("expression result")
+}
+
+fn value_mode(shape: Shape) -> Mode {
+    if shape.real {
+        Mode::Real
+    } else {
+        Mode::Bits(Context::SELF_DETERMINED)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn part_read(
+    lowerer: &mut ProcessLowerer<'_>,
+    block: BlockId,
+    input: ValueId,
+    range: VectorBounds,
+    msb: &Expression,
+    lsb: &Expression,
+    span: Span,
+    shapes: &Shapes,
+) -> ValueId {
+    let Some((msb, lsb)) = shapes.constant(msb).zip(shapes.constant(lsb)) else {
+        lowerer.error("a bit or part select must have constant bounds representable as signed 64-bit integers", span);
+        return lowerer.unknown(1);
+    };
+    let Some(selected) = lowerer.validate_part_bounds(VectorBounds { msb, lsb }, range, span)
+    else {
+        return lowerer.unknown(1);
+    };
+    let width = selected.width();
+    let (Some(msb), Some(lsb)) = (
+        range.checked_position_of(selected.msb),
+        range.checked_position_of(selected.lsb),
+    ) else {
+        return lowerer.unknown(width);
+    };
+    lowerer.builder.push(
+        block,
+        CfgValueType::FourState { width },
+        CfgValueKind::DigitalPartSelect { input, msb, lsb },
+    )
 }
 
 fn apply(

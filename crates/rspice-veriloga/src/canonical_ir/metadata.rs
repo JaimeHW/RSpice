@@ -14,6 +14,8 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 92 evaluates replication operands once, including zero-count operands,
+/// and uses iterative concatenation and selection lowering.
 /// Version 91 represents real unary negation as exact sign inversion.
 /// Version 90 short-circuits logical expressions in the discrete domain.
 /// Version 89 sizes comparison operands before evaluating their arithmetic.
@@ -93,7 +95,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 91;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 92;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {
