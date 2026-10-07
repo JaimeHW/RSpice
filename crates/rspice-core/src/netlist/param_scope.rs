@@ -14,16 +14,17 @@
 //!
 //! # Usage
 //!
-//! ```ignore
+//! ```
+//! use rspice_core::netlist::{HierarchyPath, ParamResolver};
+//! let path = HierarchyPath::root().child("X1");
 //! let mut resolver = ParamResolver::new();
 //!
 //! // Define parameters at different scopes
 //! resolver.set_global("R", 1000.0);
-//! resolver.set_subcircuit("RESISTOR_DIV", "R", 2000.0);
 //! resolver.set_instance(&path, "R", 3000.0);
 //!
 //! // Resolve - higher precedence wins
-//! let value = resolver.resolve("R", &path);
+//! assert_eq!(resolver.resolve("R", &path), Some(3000.0));
 //! ```
 
 use super::hierarchy_path::HierarchyPath;
@@ -146,6 +147,10 @@ pub struct ParamResolver {
     /// Instance-level overrides indexed by full path string
     instance_overrides: HashMap<String, HashMap<String, Value>>,
 
+    /// Complete real-valued snapshots captured by hierarchy expansion. An absent
+    /// name in a snapshot must not fall back to an outer, shadowed binding.
+    resolved_scopes: HashMap<Vec<String>, HashMap<String, Value>>,
+
     /// Local/occurrence-level overrides (most specific)
     local_overrides: HashMap<String, HashMap<String, Value>>,
 
@@ -188,6 +193,31 @@ impl ParamResolver {
             .insert(name.to_uppercase(), value);
     }
 
+    /// Replace the values recorded for one completed parameter scope without
+    /// evaluating its expressions again. Segment keys preserve hierarchy even
+    /// when a literal instance name contains the display separator.
+    pub(crate) fn set_resolved_scope(
+        &mut self,
+        path: &HierarchyPath,
+        params: Vec<(String, Value)>,
+    ) {
+        self.resolved_scopes.insert(
+            path.segments().iter().map(|s| s.to_uppercase()).collect(),
+            params
+                .into_iter()
+                .map(|(n, v)| (n.to_uppercase(), v))
+                .collect(),
+        );
+    }
+
+    /// Clear data belonging to the previous expansion, retaining definitions.
+    pub(crate) fn clear_expansion(&mut self) {
+        self.global_params.clear();
+        self.instance_overrides.clear();
+        self.local_overrides.clear();
+        self.resolved_scopes.clear();
+    }
+
     //-------------------------------------------------------------------------
     // Parameter Resolution
     //-------------------------------------------------------------------------
@@ -199,10 +229,13 @@ impl ParamResolver {
     ///
     /// Resolution order (highest to lowest precedence):
     /// 1. Local override at exact path
-    /// 2. Instance override at path or ancestor
-    /// 3. Subcircuit default (requires subcircuit name)
-    /// 4. Library parameter (if active library set)
-    /// 5. Global parameter
+    /// 2. Instance override or captured effective scope at path or ancestor
+    /// 3. Library parameter (if active library set)
+    /// 4. Global parameter
+    ///
+    /// Captured scopes include resolved subcircuit defaults and local parameters.
+    /// They contain only materialized real values; symbolic, string and complex
+    /// bindings return None and still shadow outer parameters.
     pub fn resolve(&self, name: &str, path: &HierarchyPath) -> Option<Value> {
         let name_upper = name.to_uppercase();
         let path_str = path.to_string().to_uppercase();
@@ -222,6 +255,10 @@ impl ParamResolver {
                 && let Some(&value) = params.get(&name_upper)
             {
                 return Some(value);
+            }
+            let key: Vec<_> = p.segments().iter().map(|s| s.to_uppercase()).collect();
+            if let Some(params) = self.resolved_scopes.get(&key) {
+                return params.get(&name_upper).copied();
             }
             current = p.parent();
         }
@@ -249,11 +286,9 @@ impl ParamResolver {
 
     /// Clear all parameters
     pub fn clear(&mut self) {
-        self.global_params.clear();
+        self.clear_expansion();
         self.library_params.clear();
         self.subcircuit_defaults.clear();
-        self.instance_overrides.clear();
-        self.local_overrides.clear();
         self.active_library = None;
     }
 
@@ -264,7 +299,8 @@ impl ParamResolver {
         let subckt: usize = self.subcircuit_defaults.values().map(|m| m.len()).sum();
         let instance: usize = self.instance_overrides.values().map(|m| m.len()).sum();
         let local: usize = self.local_overrides.values().map(|m| m.len()).sum();
-        global + library + subckt + instance + local
+        let resolved: usize = self.resolved_scopes.values().map(|m| m.len()).sum();
+        global + library + subckt + instance + local + resolved
     }
 }
 

@@ -95,7 +95,7 @@ pub struct FlattenerConfig {
     pub preserve_hierarchy: bool,
     /// Separator character for hierarchical names (default: '.')
     pub hierarchy_separator: char,
-    /// Whether to collect hierarchy metadata during flattening
+    /// Collect expanded instance metadata and resolved real parameter scopes
     pub collect_metadata: bool,
 }
 
@@ -157,9 +157,10 @@ pub struct InstanceMetadata {
     pub path: HierarchyPath,
     /// Subcircuit definition name
     pub subcircuit_name: String,
-    /// Instance parameters (overrides)
+    /// Materialized real instance overrides, in authored order. Symbolic,
+    /// string and complex values are omitted; physical M retains its multiplier.
     pub instance_params: Vec<(String, Value)>,
-    /// Child instances within this instance
+    /// Fully qualified paths of direct expanded child instances
     pub children: Vec<String>,
 }
 
@@ -287,10 +288,17 @@ pub(super) struct SubcircuitInstanceNames<'a> {
 /// stack is.
 #[derive(Clone, Copy)]
 struct FlattenScope<'a> {
+    metadata: Option<MetadataScope<'a>>,
     prefix: &'a str,
     node_map: &'a HashMap<String, String>,
     scope: &'a ParamContext,
     depth: usize,
+}
+
+#[derive(Clone, Copy)]
+struct MetadataScope<'a> {
+    path: &'a HierarchyPath,
+    parent_index: Option<usize>,
 }
 
 /// Flattens a hierarchical netlist into a flat element list
@@ -429,12 +437,14 @@ impl<'a> Flattener<'a> {
         }
     }
 
-    /// Get the collected instance metadata (after flattening)
+    /// Expanded instances in depth-first declaration order, when collection is
+    /// enabled. Empty before flattening or after a failed/cancelled expansion.
     pub fn instance_metadata(&self) -> &[InstanceMetadata] {
         &self.instance_metadata
     }
 
-    /// Get a reference to the parameter resolver
+    /// Inspect real parameter values from the latest successful expansion.
+    /// Instance scopes are captured only when `collect_metadata` is enabled.
     pub fn param_resolver(&self) -> &ParamResolver {
         &self.param_resolver
     }
@@ -497,6 +507,21 @@ impl<'a> Flattener<'a> {
         netlist: &Netlist,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Element>, ParseWithAbortError> {
+        self.instance_metadata.clear();
+        self.param_resolver.clear_expansion();
+        let result = self.flatten_impl(netlist, abort);
+        if result.is_err() {
+            self.instance_metadata.clear();
+            self.param_resolver.clear_expansion();
+        }
+        result
+    }
+
+    fn flatten_impl(
+        &mut self,
+        netlist: &Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Element>, ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
         if let Err(error) = validate_mutual_inductor_references(netlist) {
             self.handle_branch_error(error.into(), "mutual-inductor validation")?;
@@ -543,12 +568,17 @@ impl<'a> Flattener<'a> {
             self.param_resolver.set_global(&name, value);
         }
 
+        let root_path = HierarchyPath::root_with_separator(self.config.hierarchy_separator);
         for (element_index, element) in netlist.elements.iter().enumerate() {
             poll_parse_abort(abort, element_index)?;
             let stack_len = self.expansion_stack.len();
             if let Err(error) = self.flatten_element(
                 element,
                 FlattenScope {
+                    metadata: self.config.collect_metadata.then_some(MetadataScope {
+                        path: &root_path,
+                        parent_index: None,
+                    }),
                     prefix: "",
                     node_map: &HashMap::new(),
                     scope: &global_scope,
@@ -588,6 +618,7 @@ impl<'a> Flattener<'a> {
         abort: &dyn AbortSignal,
     ) -> Result<(), ParseWithAbortError> {
         let FlattenScope {
+            metadata,
             prefix,
             node_map,
             scope,
@@ -696,6 +727,7 @@ impl<'a> Flattener<'a> {
                         subckt_name,
                         params,
                         FlattenScope {
+                            metadata,
                             prefix,
                             node_map,
                             scope,
@@ -1004,6 +1036,7 @@ impl<'a> Flattener<'a> {
         abort: &dyn AbortSignal,
     ) -> Result<(), ParseWithAbortError> {
         let FlattenScope {
+            metadata,
             prefix,
             node_map: parent_node_map,
             scope: caller_scope,
@@ -1137,6 +1170,53 @@ impl<'a> Flattener<'a> {
             abort,
         )?;
 
+        let instance_path = metadata.map(|parent| {
+            parent
+                .path
+                .child(self.qualify_hierarchy_name("", &instance.name))
+        });
+        let instance_metadata = if let (Some(parent), Some(path)) = (metadata, &instance_path) {
+            let values = param_scope
+                .all_params()
+                .into_iter()
+                .filter(|(name, _)| param_scope.get_complex(name).is_some_and(|v| v.im == 0.0))
+                .collect();
+            self.param_resolver.set_resolved_scope(path, values);
+            let mut overrides = Vec::new();
+            for (index, (name, _)) in instance_params.iter().enumerate() {
+                poll_parse_abort(abort, index)?;
+                let value = if applies_as_physical_multiplier && name.eq_ignore_ascii_case("M") {
+                    Some(multiplicity)
+                } else {
+                    param_scope
+                        .get_complex(name)
+                        .filter(|v| v.im == 0.0)
+                        .map(|v| v.re)
+                };
+                if let Some(value) = value {
+                    overrides.push((name.clone(), value));
+                }
+            }
+            let index = self.instance_metadata.len();
+            if let Some(parent_index) = parent.parent_index {
+                self.instance_metadata[parent_index]
+                    .children
+                    .push(path.to_string());
+            }
+            self.instance_metadata.push(InstanceMetadata {
+                path: path.clone(),
+                subcircuit_name: subckt.name.clone(),
+                instance_params: overrides,
+                children: Vec::new(),
+            });
+            Some(MetadataScope {
+                path,
+                parent_index: Some(index),
+            })
+        } else {
+            None
+        };
+
         // Expand each element in the subcircuit
         self.expansion_stack.push(subckt_name.to_owned());
         for (element_index, sub_element) in subckt.elements.iter().enumerate() {
@@ -1158,6 +1238,7 @@ impl<'a> Flattener<'a> {
                 self.flatten_element(
                     &substituted,
                     FlattenScope {
+                        metadata: instance_metadata,
                         prefix: &new_prefix,
                         node_map: &node_map,
                         scope: &param_scope,
@@ -6104,17 +6185,23 @@ C1 mid out 1u
         }
         source.push_str(".SUBCKT S8 a b\nR1 a b 1\n.ENDS\n.END\n");
         let netlist = Netlist::parse(&source).expect("nested abort deck parses");
-        let mut flattener = Flattener::new(&netlist.subcircuits);
+        let mut flattener = Flattener::with_config(&netlist.subcircuits, FlattenerConfig::debug());
+        flattener
+            .flatten(&netlist)
+            .expect("initial expansion succeeds");
+        assert_eq!(flattener.instance_metadata().len(), 9);
 
         let error = flattener
             .flatten_with_abort(&netlist, &CountingAbort::new(4))
             .expect_err("nested expansion must observe cancellation");
         assert!(matches!(error, ParseWithAbortError::Aborted));
+        assert!(flattener.instance_metadata().is_empty());
 
         let elements = flattener
             .flatten(&netlist)
             .expect("retry clears partial recursion state");
         assert_eq!(elements.len(), 1);
         assert_eq!(elements[0].name, "XTOP.X0.X1.X2.X3.X4.X5.X6.X7.R1");
+        assert_eq!(flattener.instance_metadata().len(), 9);
     }
 }
