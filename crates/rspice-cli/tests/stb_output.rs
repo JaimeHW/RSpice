@@ -19,6 +19,48 @@ c1 ctrl 0 159.154943091895n
 ";
 
 #[test]
+fn gain_margin_is_reported_without_a_unity_gain_crossover() {
+    // Three buffered RC sections give T(s)=1000/(1+s/(2*pi*1000))^3.
+    // At f=sqrt(3)*1000 Hz the phase is -180 degrees and T=-125,
+    // while the entire authored band remains above unity.
+    let dir = test_dir("stb_phase_crossover");
+    let deck = dir.join("stb.sp");
+    std::fs::write(
+        &deck,
+        "* three-pole loop\n\
+E1 eo 0 n3 0 -1000\nVP eo x 0\n\
+R1 x n1 1k\nC1 n1 0 159.154943091895n\n\
+E2 b1 0 n1 0 1\nR2 b1 n2 1k\nC2 n2 0 159.154943091895n\n\
+E3 b2 0 n2 0 1\nR3 b2 n3 1k\nC3 n3 0 159.154943091895n\n\
+.stb dec 100 100 3000 probe=VP\n.end\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["run", deck.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.contains("No unity-gain crossover"), "{stdout}");
+    let line = stdout
+        .lines()
+        .find(|line| line.contains("Gain margin:"))
+        .expect("the measured phase crossing must report a gain margin");
+    let words = line.split_whitespace().collect::<Vec<_>>();
+    let margin: f64 = words[2].parse().unwrap();
+    let frequency: f64 = words[5].parse().unwrap();
+    assert!((margin + 20.0 * 125f64.log10()).abs() < 0.02, "{line}");
+    assert!(
+        (frequency / (3f64.sqrt() * 1000.0) - 1.0).abs() < 0.001,
+        "{line}"
+    );
+}
+
+#[test]
 fn stb_card_runs_and_exports_loop_gain() {
     let dir = test_dir("stb");
     let deck = dir.join("stb_loop.sp");
@@ -59,6 +101,8 @@ fn stb_card_runs_and_exports_loop_gain() {
         .expect("phase margin value")
         .parse()
         .expect("phase margin parses");
+    assert!(stdout.contains("no gain margin to report"), "{stdout}");
+    assert!(!stdout.contains("Gain margin: inf"), "{stdout}");
     // Closed form: 180 - atan(fu/fp) with fu = 1kHz*sqrt(1000^2-1) ~ 1 MHz.
     assert!(
         (pm - 90.057).abs() < 0.5,

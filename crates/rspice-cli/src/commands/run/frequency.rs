@@ -930,16 +930,22 @@ pub(super) fn run_stb(
                 "  Phase margin: {:.2} deg at {:.4e} Hz (unity-gain crossover)",
                 margins.phase_margin_deg, margins.phase_margin_freq
             ))?;
+        }
+        if margins.gain_margin_freq > 0.0 && margins.gain_margin_db.is_finite() {
             crate::console::line(format_args!(
                 "  Gain margin: {:.2} dB at {:.4e} Hz",
                 margins.gain_margin_db, margins.gain_margin_freq
             ))?;
-            if margins.conditionally_stable {
-                crate::console::line(format_args!(
-                    "  Conditionally stable: {} unity-gain crossovers",
-                    margins.num_crossovers
-                ))?;
-            }
+        } else {
+            crate::console::line(format_args!(
+                "  No negative-real-axis crossover found in the swept band; no gain margin to report"
+            ))?;
+        }
+        if margins.num_crossovers > 1 {
+            crate::console::line(format_args!(
+                "  Multiple unity-gain crossovers: {}",
+                margins.num_crossovers
+            ))?;
         }
         for warning in &stb.result.warnings {
             crate::console::line(format_args!("  Warning: {warning}"))?;
