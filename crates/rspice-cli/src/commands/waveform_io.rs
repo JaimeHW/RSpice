@@ -15,6 +15,7 @@ use std::path::Path;
 
 mod delimited;
 mod json;
+pub(crate) use json::{Kind as JsonKind, kind as json_kind};
 mod snapshot;
 pub(crate) use delimited::{parse_record as parse_delimited_record, records as delimited_records};
 mod touchstone;
@@ -807,20 +808,22 @@ fn parse_json(
 ) -> Result<ImportedResult, CliError> {
     // A declared typed schema owns the whole document. Legacy-shaped extra
     // fields must not bypass its version, payload or resource validation.
-    if has_typed_json_schema(path, content)? {
+    let kind = json_kind(path, content)?;
+    if kind == JsonKind::Typed {
         let document = parse_typed_document(path, content, resource_limits)?;
         return result_document_table(path, &document, resource_limits).map(Into::into);
     }
-    parse_untyped_json(path, content, resource_limits)
+    parse_untyped_json(path, content, kind, resource_limits)
 }
 
 /// Read the legacy table or FFT dialect after ruling out a typed result schema.
 pub(super) fn parse_untyped_json(
     path: &Path,
     content: &str,
+    kind: JsonKind,
     resource_limits: rspice_core::ResourceLimits,
 ) -> Result<ImportedResult, CliError> {
-    let value = json::parse(content).map_err(|e| conversion_error(path, e))?;
+    let value = json::parse(path, content, kind, resource_limits)?;
     let read_unit = |object: &serde_json::Value| -> Result<Option<String>, CliError> {
         match object.get("unit") {
             None | Some(serde_json::Value::Null) => Ok(None),
@@ -942,19 +945,6 @@ pub(super) fn parse_untyped_json(
         path,
         "unrecognized JSON schema: expected a typed result document, or 'scale' and 'signals'",
     ))
-}
-
-/// Inspect only the schema discriminator, without retaining a second copy of
-/// the document's potentially large numeric arrays in a generic JSON tree.
-pub(crate) fn has_typed_json_schema(path: &Path, content: &str) -> Result<bool, CliError> {
-    #[derive(serde::Deserialize)]
-    struct Header {
-        schema: Option<serde_json::Value>,
-    }
-    let header: Header =
-        serde_json::from_str(content).map_err(|error| conversion_error(path, error))?;
-    Ok(header.schema.as_ref().and_then(serde_json::Value::as_str)
-        == Some(rspice_core::execution::ANALYSIS_RESULT_DOCUMENT_SCHEMA))
 }
 
 /// Decode all retained evidence under the caller's policy before projecting it.

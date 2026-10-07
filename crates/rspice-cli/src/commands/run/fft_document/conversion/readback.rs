@@ -51,8 +51,8 @@ struct Complex {
     imaginary: f64,
 }
 
-// Admission occurs before allocating the typed spectra and metadata. The
-// caller already bounded the input bytes before parsing the JSON syntax tree.
+// The JSON reader admits numbers during decoding. Keep this independent check
+// at the typed projection boundary too, before allocating spectra and metadata.
 fn numeric_count(value: &serde_json::Value) -> usize {
     match value {
         serde_json::Value::Number(_) => 1,

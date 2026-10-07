@@ -512,6 +512,12 @@ fn all_fft_readers_enforce_numeric_admission_before_publication() {
                 let error: serde_json::Value = serde_json::from_slice(&compared.stderr).unwrap();
                 assert_eq!(error["error"]["category"], "resource_limit");
                 assert_eq!(error["error"]["limit"], 1);
+                if format == "json" {
+                    assert_eq!(
+                        error["error"]["requested"], 2,
+                        "JSON decoding must stop at the first excess numeric field"
+                    );
+                }
                 assert_eq!(std::fs::read(&golden).unwrap(), original);
             }
         }

@@ -1,10 +1,41 @@
-//! Preserve JSON values without silently choosing between repeated object keys.
+//! Admit JSON numeric payloads while decoding and reject repeated object keys.
 
-use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
+use rspice_core::{ResourceKind, ResourceLimitError, ResourceLimits};
+use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::Value;
 
-pub(super) fn parse(content: &str) -> Result<Value, serde_json::Error> {
-    serde_json::from_str::<UniqueValue>(content).map(|value| value.0)
+mod header;
+pub(crate) use header::{Kind, kind};
+
+pub(super) fn parse(
+    path: &std::path::Path,
+    content: &str,
+    kind: Kind,
+    limits: ResourceLimits,
+) -> Result<Value, crate::cli::CliError> {
+    let mut admission = Admission {
+        limits,
+        count: 0,
+        failure: None,
+    };
+    let mut deserializer = serde_json::Deserializer::from_str(content);
+    let decoded = Seed {
+        admission: &mut admission,
+        scope: if kind == Kind::Fft {
+            Scope::AllNumbers
+        } else {
+            Scope::Table
+        },
+    }
+    .deserialize(&mut deserializer)
+    .and_then(|value| deserializer.end().map(|()| value));
+    decoded.map_err(|error| match admission.failure {
+        Some(source) => crate::cli::CliError::ResourceLimit {
+            path: path.to_owned(),
+            source,
+        },
+        None => super::conversion_error(path, error),
+    })
 }
 
 /// Missing or null legacy metadata is unstated; other non-text values are
@@ -24,17 +55,96 @@ pub(super) fn optional_text<'a>(
     }
 }
 
-struct UniqueValue(Value);
+struct Admission {
+    limits: ResourceLimits,
+    count: usize,
+    failure: Option<ResourceLimitError>,
+}
 
-impl<'de> Deserialize<'de> for UniqueValue {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserializer.deserialize_any(UniqueVisitor).map(Self)
+impl Admission {
+    fn admit<E: de::Error>(&mut self) -> Result<(), E> {
+        let requested = self.count.saturating_add(1);
+        for (resource, limit) in [
+            (
+                ResourceKind::ExternalDataValues,
+                self.limits.max_external_data_values,
+            ),
+            (ResourceKind::ResultValues, self.limits.max_result_values),
+        ] {
+            if requested > limit {
+                self.failure = Some(ResourceLimitError {
+                    resource,
+                    requested,
+                    limit,
+                });
+                return Err(E::custom("JSON numeric value budget exceeded"));
+            }
+        }
+        self.count = requested;
+        Ok(())
     }
 }
 
-struct UniqueVisitor;
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Scope {
+    Table,
+    Scale,
+    Signals,
+    Signal,
+    Samples,
+    Sample,
+    Other,
+    AllNumbers,
+}
 
-impl<'de> Visitor<'de> for UniqueVisitor {
+impl Scope {
+    fn field(self, key: &str) -> Self {
+        match (self, key) {
+            (Self::AllNumbers, _) => Self::AllNumbers,
+            (Self::Table, "scale") => Self::Scale,
+            (Self::Table, "signals") => Self::Signals,
+            (Self::Scale, "values") | (Self::Signal, "values" | "real" | "imag") => Self::Samples,
+            _ => Self::Other,
+        }
+    }
+
+    fn element(self) -> Self {
+        match self {
+            Self::AllNumbers => Self::AllNumbers,
+            Self::Signals => Self::Signal,
+            Self::Samples => Self::Sample,
+            _ => Self::Other,
+        }
+    }
+
+    fn non_numeric<E: de::Error>(self) -> Result<(), E> {
+        if self == Self::Sample {
+            Err(E::custom("non-numeric entry in a result sample array"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+struct Seed<'a> {
+    admission: &'a mut Admission,
+    scope: Scope,
+}
+
+impl<'de> DeserializeSeed<'de> for Seed<'_> {
+    type Value = Value;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Value, D::Error> {
+        // Charge a table sample before decoding or retaining it. FFTs count
+        // every numeric source field, including metadata, in the visitor.
+        if self.scope == Scope::Sample {
+            self.admission.admit()?;
+        }
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for Seed<'_> {
     type Value = Value;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -42,44 +152,62 @@ impl<'de> Visitor<'de> for UniqueVisitor {
     }
 
     fn visit_bool<E: de::Error>(self, value: bool) -> Result<Value, E> {
+        self.scope.non_numeric()?;
         Ok(value.into())
     }
 
     fn visit_i64<E: de::Error>(self, value: i64) -> Result<Value, E> {
+        if self.scope == Scope::AllNumbers {
+            self.admission.admit()?;
+        }
         Ok(value.into())
     }
 
     fn visit_u64<E: de::Error>(self, value: u64) -> Result<Value, E> {
+        if self.scope == Scope::AllNumbers {
+            self.admission.admit()?;
+        }
         Ok(value.into())
     }
 
     fn visit_f64<E: de::Error>(self, value: f64) -> Result<Value, E> {
+        if self.scope == Scope::AllNumbers {
+            self.admission.admit()?;
+        }
         serde_json::Number::from_f64(value)
             .map(Value::Number)
             .ok_or_else(|| E::custom("non-finite JSON number"))
     }
 
     fn visit_str<E: de::Error>(self, value: &str) -> Result<Value, E> {
+        self.scope.non_numeric()?;
         Ok(value.into())
     }
 
     fn visit_string<E: de::Error>(self, value: String) -> Result<Value, E> {
+        self.scope.non_numeric()?;
         Ok(value.into())
     }
 
     fn visit_unit<E: de::Error>(self) -> Result<Value, E> {
+        self.scope.non_numeric()?;
         Ok(Value::Null)
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<Value, A::Error> {
+        self.scope.non_numeric()?;
         let mut values = Vec::new();
-        while let Some(UniqueValue(value)) = sequence.next_element()? {
+        while let Some(value) = sequence.next_element_seed(Seed {
+            admission: &mut *self.admission,
+            scope: self.scope.element(),
+        })? {
             values.push(value);
         }
         Ok(Value::Array(values))
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut object: A) -> Result<Value, A::Error> {
+        self.scope.non_numeric()?;
         let mut values = serde_json::Map::new();
         while let Some(key) = object.next_key::<String>()? {
             // Check decoded keys before reading their values. Escaped key
@@ -88,9 +216,93 @@ impl<'de> Visitor<'de> for UniqueVisitor {
             if values.contains_key(&key) {
                 return Err(de::Error::custom(format!("duplicate JSON field {key:?}")));
             }
-            let UniqueValue(value) = object.next_value()?;
+            let value = object.next_value_seed(Seed {
+                admission: &mut *self.admission,
+                scope: self.scope.field(&key),
+            })?;
             values.insert(key, value);
         }
         Ok(Value::Object(values))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn numeric_admission_stops_decoding_at_the_first_excess_value() {
+        let tail = "0,".repeat(100_000);
+        for (scope, content, expected_kind) in [
+            (
+                Scope::Table,
+                format!(r#"{{"scale":{{"values":[0,1,{tail}0]}},"signals":[]}}"#),
+                Kind::Table,
+            ),
+            // FFT metadata contributes to the same budget even when the
+            // format discriminator follows the numeric payload in the file.
+            (
+                Scope::AllNumbers,
+                format!(r#"{{"metadata":[0,1,{tail}0],"analysis":"fft"}}"#),
+                Kind::Fft,
+            ),
+        ] {
+            assert_eq!(
+                kind(std::path::Path::new("input.json"), &content).unwrap(),
+                expected_kind
+            );
+            for resource in [ResourceKind::ExternalDataValues, ResourceKind::ResultValues] {
+                let mut limits = ResourceLimits::default();
+                if resource == ResourceKind::ExternalDataValues {
+                    limits.max_external_data_values = 1;
+                } else {
+                    limits.max_result_values = 1;
+                }
+                let mut admission = Admission {
+                    limits,
+                    count: 0,
+                    failure: None,
+                };
+                let mut input = Cursor::new(content.as_bytes());
+                let result = Seed {
+                    admission: &mut admission,
+                    scope,
+                }
+                .deserialize(&mut serde_json::Deserializer::from_reader(&mut input));
+                assert!(result.is_err());
+                let error = admission.failure.unwrap();
+                assert_eq!(error.resource, resource);
+                assert_eq!((error.requested, error.limit), (2, 1));
+                assert!(
+                    input.position() < 128,
+                    "parsed {} bytes despite a one-value budget",
+                    input.position()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_non_numeric_sample_is_rejected_without_materializing_its_contents() {
+        let content = format!(
+            r#"{{"scale":{{"values":[{{"nested":[{}0]}}]}}}}"#,
+            "0,".repeat(100_000)
+        );
+        let mut admission = Admission {
+            limits: ResourceLimits::default(),
+            count: 0,
+            failure: None,
+        };
+        let mut input = Cursor::new(content.as_bytes());
+        let error = Seed {
+            admission: &mut admission,
+            scope: Scope::Table,
+        }
+        .deserialize(&mut serde_json::Deserializer::from_reader(&mut input))
+        .unwrap_err();
+        assert!(error.to_string().contains("non-numeric"), "{error}");
+        assert!(input.position() < 128);
+        assert!(admission.failure.is_none());
     }
 }

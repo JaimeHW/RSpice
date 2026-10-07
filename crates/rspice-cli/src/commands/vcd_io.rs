@@ -520,14 +520,15 @@ fn load_json_document(
 ) -> Result<LoadedVcdDocument, CliError> {
     let content =
         waveform_io::read_utf8_input_limited(path, resource_limits.max_external_data_bytes)?;
-    let result = if waveform_io::has_typed_json_schema(path, &content)? {
+    let kind = waveform_io::json_kind(path, &content)?;
+    let result = if kind == waveform_io::JsonKind::Typed {
         let document = waveform_io::parse_typed_document(path, &content, resource_limits)?;
         if let Some(traces) = typed_transient_traces(&document) {
             return traces_document(path, &traces, expand_buses);
         }
         waveform_io::result_document_table(path, &document, resource_limits)?.into()
     } else {
-        waveform_io::parse_untyped_json(path, &content, resource_limits)?
+        waveform_io::parse_untyped_json(path, &content, kind, resource_limits)?
     };
     let table = waveform_io::validate_result(path, result, resource_limits)?.into_table(path)?;
     LoadedVcdDocument::from_table(path, &table)
