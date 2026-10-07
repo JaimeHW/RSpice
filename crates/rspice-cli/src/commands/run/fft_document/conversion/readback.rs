@@ -72,11 +72,18 @@ impl FftBundle {
         value: serde_json::Value,
         limits: rspice_core::ResourceLimits,
     ) -> Result<Self, CliError> {
+        let numeric_values = numeric_count(&value);
         enforce_resource_limit(
             path,
             rspice_core::ResourceKind::ExternalDataValues,
-            numeric_count(&value),
+            numeric_values,
             limits.max_external_data_values,
+        )?;
+        enforce_resource_limit(
+            path,
+            rspice_core::ResourceKind::ResultValues,
+            numeric_values,
+            limits.max_result_values,
         )?;
         let document: Document =
             serde_json::from_value(value).map_err(|error| conversion_error(path, error))?;

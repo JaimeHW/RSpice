@@ -154,7 +154,6 @@ fn all_fft_readers_enforce_numeric_admission_before_publication() {
     let directory = test_dir("budget");
     let source = source(&directory);
     let config = directory.join("limited.toml");
-    std::fs::write(&config, "[resources]\nmax_external_data_values=1\n").unwrap();
     let destination = directory.join("protected.json");
     std::fs::write(&destination, "predecessor").unwrap();
     for format in ["json", "csv", "tsv", "raw", "ascii", "hdf5"] {
@@ -164,18 +163,52 @@ fn all_fft_readers_enforce_numeric_admission_before_publication() {
                 .status
                 .success()
         );
-        let output = convert(
-            &input,
-            &destination,
-            format,
-            "json",
-            &["--config", config.to_str().unwrap()],
-        );
-        assert_eq!(output.status.code(), Some(75), "{format}: {output:?}");
-        assert_eq!(
-            std::fs::read_to_string(&destination).unwrap(),
-            "predecessor"
-        );
+        for budget in ["max_external_data_values", "max_result_values"] {
+            std::fs::write(&config, format!("[resources]\n{budget}=1\n")).unwrap();
+            let output = convert(
+                &input,
+                &destination,
+                format,
+                "json",
+                &["--config", config.to_str().unwrap()],
+            );
+            assert_eq!(
+                output.status.code(),
+                Some(75),
+                "{format} {budget}: {output:?}"
+            );
+            assert_eq!(
+                std::fs::read_to_string(&destination).unwrap(),
+                "predecessor"
+            );
+            for bless in [false, true] {
+                let golden = directory.join(format!("golden.{format}"));
+                let original = std::fs::read(&input).unwrap();
+                std::fs::write(&golden, &original).unwrap();
+                let mut args = vec![
+                    "--config",
+                    config.to_str().unwrap(),
+                    "--error-format",
+                    "json",
+                    "compare",
+                    input.to_str().unwrap(),
+                    golden.to_str().unwrap(),
+                ];
+                if bless {
+                    args.push("--bless");
+                }
+                let compared = cli(&args);
+                assert_eq!(
+                    compared.status.code(),
+                    Some(75),
+                    "{format} {budget} bless={bless}: {compared:?}"
+                );
+                let error: serde_json::Value = serde_json::from_slice(&compared.stderr).unwrap();
+                assert_eq!(error["error"]["category"], "resource_limit");
+                assert_eq!(error["error"]["limit"], 1);
+                assert_eq!(std::fs::read(&golden).unwrap(), original);
+            }
+        }
     }
 }
 

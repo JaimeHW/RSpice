@@ -194,6 +194,12 @@ impl FftBundle {
                 numeric_values,
                 limits.max_external_data_values,
             )?;
+            enforce_resource_limit(
+                path,
+                rspice_core::ResourceKind::ResultValues,
+                numeric_values,
+                limits.max_result_values,
+            )?;
             if fields.number::<u32>("schema_version").map_err(err)? != FFT_ARTIFACT_SCHEMA_VERSION
                 || fields.text("analysis") != "fft"
                 || fields.text("artifact_format") != if separator == ',' { "csv" } else { "tsv" }
