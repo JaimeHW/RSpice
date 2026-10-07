@@ -10,12 +10,12 @@
 //! The encoding is a single JSON object. Keys are `camelCase`; every object in
 //! the document rejects unknown fields, and decoding rejects a
 //! `schemaVersion` this build does not implement *before* any field is
-//! decoded. Every field below is required unless it is described as nullable.
+//! decoded. Every field below is required unless described as optional.
 //!
 //! ```text
 //! {
 //!   "schema":        "rspice-analysis-result"   fixed identifier
-//!   "schemaVersion": 10                          this build's exact version
+//!   "schemaVersion": 11                          this build's exact version
 //!   "resultKind":    "op" | "dc" | "ac" | "tran" | "noise" | "sp" |
 //!                    "port-noise" | "distortion" | "tf" | "stb" |
 //!                    "sensitivity" | "pole-zero" | "fourier" | "fft" |
@@ -78,6 +78,9 @@
 //!                        "regions": [] or [string|null] one per point,
 //!                        "parameters": [ { "name", "unit": <unit|null>,
 //!                                          "values": [f64|null] } ] } ]
+//!   "frequencyTable": optional AC/noise table metadata:
+//!                     { "tableName", "requestedRows", "finish": <object|null>,
+//!                       "columns": [{ "name", "target", "axis": <axis name> }] }
 //!   "payload":       { "family": <result kind tag>, ... }  see below
 //! }
 //! ```
@@ -169,6 +172,7 @@
 //! a placeholder meaning.
 
 mod builders;
+mod frequency_table;
 mod numeric_count;
 mod payload;
 mod quasi_periodic;
@@ -179,6 +183,7 @@ mod wire;
 use std::collections::BTreeSet;
 use std::fmt;
 
+pub use frequency_table::{FrequencyTableColumn, FrequencyTableMetadata};
 pub use quasi_periodic::{QpacPayload, QpnoisePayload, QpssPayload, QpxfPayload};
 use serde::{Deserialize, Serialize};
 
@@ -220,7 +225,7 @@ use crate::execution::topology::TopologyFingerprint;
 pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 
 /// Schema version this build produces.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 10;
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 11;
 
 /// Version 9 adds the sampling request and resolved crossing geometry to PNoise.
 ///
@@ -254,6 +259,7 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 10;
 ///
 /// Version 10 adds explicitly ordered current impulse derivatives, with SI
 /// coefficients separate from ordinary integrated charge.
+/// Version 11 adds frequency-table provenance and physical row coordinates.
 ///
 /// A new result *family* costs no version. No document of an existing family
 /// changes shape, and no reader of an earlier version has a document of the
@@ -261,7 +267,7 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 10;
 /// Bumping for one would instead make every family's freshly produced
 /// document undecodable by every current reader, which is the compatibility
 /// break this constant exists to avoid.
-const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 10] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 11] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 
 /// First version whose transient payload may declare a digital bus.
 const FIRST_DIGITAL_BUS_DOCUMENT_VERSION: u32 = 2;
@@ -299,6 +305,8 @@ pub struct AnalysisResultDocument {
     signals: Vec<ResultSignal>,
     scalars: Vec<ResultScalar>,
     device_states: Vec<DeviceStateSeries>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    frequency_table: Option<FrequencyTableMetadata>,
     payload: ResultPayload,
 }
 
@@ -377,6 +385,7 @@ impl AnalysisResultDocument {
             signals: Vec::new(),
             scalars: Vec::new(),
             device_states: Vec::new(),
+            frequency_table: None,
         }
     }
 
@@ -450,6 +459,11 @@ impl AnalysisResultDocument {
         &self.payload
     }
 
+    /// Authored table bindings for a table-driven AC or noise result.
+    pub const fn frequency_table(&self) -> Option<&FrequencyTableMetadata> {
+        self.frequency_table.as_ref()
+    }
+
     /// Numerical values retained per point across every axis and signal.
     ///
     /// A complex sample counts as two values. Use this to size a window before
@@ -477,6 +491,11 @@ impl AnalysisResultDocument {
             .saturating_add(scalars)
             .saturating_add(device_states)
             .saturating_add(self.payload.value_count())
+            .saturating_add(
+                self.frequency_table
+                    .as_ref()
+                    .map_or(0, FrequencyTableMetadata::value_count),
+            )
     }
 
     /// Copy a bounded window of every axis and signal.
@@ -657,6 +676,7 @@ impl AnalysisResultDocument {
         self.payload.validate(limits, abort)?;
         quasi_periodic::validate_primary(self, limits, abort)?;
         self.validate_current_impulses()?;
+        frequency_table::validate(self, abort)?;
         if let ResultPayload::Sensitivity(payload) = &self.payload {
             self.validate_sensitivity_availability(payload, abort)?;
         }
@@ -1012,6 +1032,7 @@ pub struct AnalysisResultDocumentBuilder {
     signals: Vec<ResultSignal>,
     scalars: Vec<ResultScalar>,
     device_states: Vec<DeviceStateSeries>,
+    frequency_table: Option<FrequencyTableMetadata>,
 }
 
 impl AnalysisResultDocumentBuilder {
@@ -1134,6 +1155,7 @@ impl AnalysisResultDocumentBuilder {
             signals: self.signals,
             scalars: self.scalars,
             device_states: self.device_states,
+            frequency_table: self.frequency_table,
             payload: self.payload,
         };
         document.validate_with_limits_and_abort(limits, abort)?;

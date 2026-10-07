@@ -369,14 +369,7 @@ impl ControlCircuit {
                 .enumerate()
                 .find(|(_, c)| c.name.eq_ignore_ascii_case(name))
         {
-            use super::super::FrequencyDataTarget;
-            let unit = match &column.target {
-                FrequencyDataTarget::Frequency => SignalUnit::Hertz,
-                FrequencyDataTarget::Parameter(name) if name == "TEMP" => {
-                    SignalUnit::Custom("degC".into())
-                }
-                _ => SignalUnit::Unspecified,
-            };
+            let unit = column.target.unit();
             (Column::TableCoordinate(index), lower, unit)
         } else if matches!(lower.as_str(), "0" | "gnd" | "gnd!") {
             (Column::Ground, "v(0)".into(), SignalUnit::Volt)

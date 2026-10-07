@@ -4,7 +4,14 @@ use crate::{ModelFinish, Value};
 
 /// Resolved meaning of a frequency-table column. Declared parameters take
 /// precedence over identically named devices; names here are canonical uppercase.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "target",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum FrequencyDataTarget {
     Frequency,
     Parameter(String),
@@ -12,6 +19,18 @@ pub enum FrequencyDataTarget {
         device_name: String,
         parameter_name: String,
     },
+}
+
+impl FrequencyDataTarget {
+    /// Physical coordinate unit; ordinary parameter/device bindings state no unit.
+    pub fn unit(&self) -> crate::execution::SignalUnit {
+        use crate::execution::SignalUnit;
+        match self {
+            Self::Frequency => SignalUnit::Hertz,
+            Self::Parameter(name) if name == "TEMP" => SignalUnit::Custom("degC".into()),
+            _ => SignalUnit::Unspecified,
+        }
+    }
 }
 
 /// An authored column and its values aligned with the returned analysis points.

@@ -42,10 +42,13 @@ use rspice_core::analysis::harmonic_balance::{
 ///   Python results, simulation transport and result-document consumers.
 /// - Model-catalog matching and authored-analysis options:
 ///   CLI models/run and the shared frontend execution contracts.
+/// - Seven frequency-table document statements retain CLI/WASM AC/noise row
+///   coordinates: two builders, two metadata types, an accessor, a re-export,
+///   and the coordinate-unit resolver shared with control presentation.
 ///
 /// Changes to this ceiling must continue to identify their frontend caller;
 /// this accounting does not exempt any family from the ratchet.
-const MAX_PUBLIC_ITEMS: usize = 5534;
+const MAX_PUBLIC_ITEMS: usize = 5541;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
