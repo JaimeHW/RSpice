@@ -6,6 +6,46 @@ use rspice_core::{Engine, Netlist, NoAbort};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn expression_capacitor_poles_use_the_accepted_bias_and_control_derivatives() {
+    use rspice_core::config::ExpressionDialect;
+    use rspice_core::engine::{SimulationConfig, SpiceDialect};
+    use rspice_core::netlist::NetlistParseOptions;
+
+    for (devices, expected) in [
+        ("C1 out 0 C={1u*(1+V(out))}\n", -500.0),
+        (
+            "Econtrol ctrl 0 out 0 2\nC1 out 0 C={1u*(1+V(ctrl))}\n",
+            -200.0,
+        ),
+    ] {
+        let netlist = Netlist::parse_with_options(
+            &format!(
+                "Capacitor bias\nI1 0 out DC 1m AC 1\nR1 out 0 1k\n{devices}.pz out 0 out 0 cur pol\n.end\n"
+            ),
+            NetlistParseOptions {
+                expression_dialect: ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+        config.convergence_config.gmin_target = 0.0;
+        let result = Engine::new_with_resolved_config(config)
+            .run_pz_from_card_with_abort(&netlist, &netlist.analyses[0], &NoAbort)
+            .unwrap();
+        // Vout=1. Terminal control gives C(op)=2u. External control adds
+        // Vout*dC/dVctrl*dVctrl/dVout=2u to C(op)=3u, for a total 5u.
+        assert_eq!(result.poles.len(), 1, "{result:?}");
+        assert!(
+            (result.poles[0].re / expected - 1.0).abs() < 1e-10 && result.poles[0].im == 0.0,
+            "expected {expected}, got {result:?}"
+        );
+        assert!(result.pole_evidence.is_qualified());
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn schur_cancellation_does_not_erase_or_shift_a_natural_pole() {
     // Exact binary64-rational oracle for -(g11*g22-g12*g21)/(g22*C),
     // with g12=0.1, g21=0.2, g22=0.3, C=1e-20. Floating subtraction

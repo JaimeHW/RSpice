@@ -238,7 +238,6 @@ impl Engine {
         let mut matrix = engine.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
-        let has_nonlinear = circuit.has_nonlinear_devices();
         progress.report(0.15)?;
         let bias = progress.stage(0.15, 0.35);
         let abort: &dyn AbortSignal = &bias;
@@ -249,12 +248,7 @@ impl Engine {
             abort,
         )?;
         circuit.refresh_jiles_atherton_inductances(&dc_solution);
-        if has_nonlinear {
-            circuit.update_nonlinear(&dc_solution);
-        }
-        circuit
-            .prepare_behavioral_small_signal(&dc_solution)
-            .map_err(SimulationError::Circuit)?;
+        Self::prepare_small_signal_state(&mut circuit, &dc_solution)?;
 
         let size = circuit.matrix_size();
         progress.report(0.35)?;

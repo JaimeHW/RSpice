@@ -759,9 +759,7 @@ impl Engine {
             self.solve_dc_operating_point_with_abort(netlist, &mut circuit, &mut matrix, abort)?;
         abort.observe_progress(0.25);
         circuit.refresh_jiles_atherton_inductances(&dc_solution);
-        if circuit.has_nonlinear_devices() {
-            circuit.update_nonlinear(&dc_solution);
-        }
+        Self::prepare_small_signal_state(&mut circuit, &dc_solution)?;
         let matrix_size = circuit
             .matrix_size()
             .saturating_add(Self::pz_ac_nqs_state_count(&circuit));
