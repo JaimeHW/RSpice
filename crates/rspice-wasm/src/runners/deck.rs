@@ -352,12 +352,13 @@ fn execute_analysis(
         AnalysisCommand::AcData { table_name } => {
             // A table-driven `.AC` may override circuit parameters per row, so
             // the core runner owns the whole sweep rather than only its grid.
-            let (_, points) = engine
-                .run_ac_data_with_abort(netlist, table_name, abort)
+            let table = engine
+                .run_ac_table_with_abort(netlist, table_name, abort)
                 .map_err(simulation_error)?;
             ensure_not_aborted(abort)?;
             Ok(vec![
-                AnalysisResultDocument::from_ac(id, &points).map_err(document_projection_error)?,
+                AnalysisResultDocument::from_ac_table(id, &table)
+                    .map_err(document_projection_error)?,
             ])
         }
 
@@ -426,8 +427,8 @@ fn execute_analysis(
             input_source,
             table_name,
         } => {
-            let (_, points) = engine
-                .run_noise_data_named_with_input_source_and_abort(
+            let table = engine
+                .run_noise_table_named_with_input_source_and_abort(
                     netlist,
                     output_node,
                     reference_node.as_deref(),
@@ -439,7 +440,7 @@ fn execute_analysis(
                 .map_err(simulation_error)?;
             ensure_not_aborted(abort)?;
             Ok(vec![
-                AnalysisResultDocument::from_noise(id, &points)
+                AnalysisResultDocument::from_noise_table(id, &table)
                     .map_err(document_projection_error)?,
             ])
         }

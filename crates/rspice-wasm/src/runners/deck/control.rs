@@ -164,11 +164,11 @@ pub(super) fn run(
             ControlAnalysisResult::Ac(points) => {
                 AnalysisResultDocument::from_ac(dataset.analysis_id, points)
             }
-            ControlAnalysisResult::AcTable(_) | ControlAnalysisResult::NoiseTable(_) => {
-                return Err(unsupported_deck_analysis(
-                    "control frequency-table publication requires typed row-coordinate support"
-                        .into(),
-                ));
+            ControlAnalysisResult::AcTable(table) => {
+                AnalysisResultDocument::from_ac_table(dataset.analysis_id, table)
+            }
+            ControlAnalysisResult::NoiseTable(table) => {
+                AnalysisResultDocument::from_noise_table(dataset.analysis_id, table)
             }
             ControlAnalysisResult::Transient(result) => AnalysisResultDocument::from_transient(
                 dataset.analysis_id,
@@ -253,6 +253,44 @@ fn source_error(mut error: WasmError, line: usize, script: &ControlScriptSource)
 #[cfg(test)]
 mod tests {
     use super::super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn control_frequency_tables_match_direct_documents_and_keep_coordinates() {
+        let source = "Tables\n.param resistance=1k\nV1 in 0 AC 1\nR1 in out {resistance}\nC1 out 0 1u\n.data points FREQ resistance\n100 1k\n10 2k\n100 3k\n.enddata\n";
+        for command in ["ac data=points", "noise V(out) V1 data=points"] {
+            let direct =
+                run_authored_deck_document_detailed(&format!("{source}.{command}\n.end\n"))
+                    .unwrap();
+            assert!(direct.results[0].frequency_table().is_some());
+            assert_eq!(direct.results[0].axes().len(), 2);
+            let metadata = crate::document::result_metadata(&direct.results[0], 1024).unwrap();
+            let wire = serde_json::to_value(metadata).unwrap();
+            assert_eq!(wire["frequencyTable"]["requestedRows"], 3);
+            assert_eq!(
+                wire["frequencyTable"]["columns"][1]["axis"],
+                "data(resistance)"
+            );
+            assert_eq!(
+                wire["frequencyTable"]["columns"][1]["target"]["target"],
+                "RESISTANCE"
+            );
+            for cards in [
+                format!(".control\n{command}\n.endc"),
+                format!(".{command}\n.control\nrun\n.endc"),
+            ] {
+                let control =
+                    run_authored_deck_document_detailed(&format!("{source}{cards}\n.end\n"))
+                        .unwrap();
+                assert_eq!(control.results[0].axes(), direct.results[0].axes());
+                assert_eq!(control.results[0].signals(), direct.results[0].signals());
+                assert_eq!(
+                    control.results[0].frequency_table(),
+                    direct.results[0].frequency_table()
+                );
+            }
+        }
+    }
 
     #[test]
     fn control_noise_document_matches_direct_current_referred_noise() {

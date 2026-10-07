@@ -394,6 +394,9 @@ pub struct ResultMetadata<'a> {
     /// Output and checkpoint namespaces this result was written under.
     pub namespaces: Option<&'a ResultNamespaces>,
     pub point_count: usize,
+    /// Authored table bindings and completion evidence; coordinates are in axes.
+    pub frequency_table:
+        Option<&'a rspice_core::execution::result_document::FrequencyTableMetadata>,
     pub axes: Vec<AxisDescriptor>,
     pub signals: Vec<SignalDescriptorView>,
     /// Per-analysis scalars, published in full: they are one value each.
@@ -450,6 +453,7 @@ pub(crate) fn result_metadata(
             .map(|fingerprint| fingerprint.to_string()),
         namespaces: document.namespaces(),
         point_count: document.point_count(),
+        frequency_table: document.frequency_table(),
         axes,
         signals,
         scalars: document.scalars(),
