@@ -656,6 +656,14 @@ and `0.5` become `0`, `1` and `x`, one change per level held rather than one
 per grid point, and the drive strength those columns already dropped is not
 recovered. A source with neither event timelines nor such columns is refused.
 
+VCD bus selectors accept scoped names, full declared ranges, and bit names,
+including qualified forms such as `D(top.data[7:0])` and `D(top.data[3])`.
+Without `--expand-buses`, selecting one bit keeps the whole vector and reports
+a note. With expansion, a bus selector keeps all members and a bit selector
+keeps only that member. Expansion preserves VCD scopes and aliases; RAW and
+JSON inputs retain their authored member node names, which also remain usable
+as selectors. Ambiguous names are rejected before publishing the output.
+
 VCD clipping preserves the held value of every selected signal at `--start`,
 including signals that remain constant throughout the window. The timescale is
 refined when necessary to represent the boundary without changing existing event

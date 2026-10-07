@@ -178,6 +178,30 @@ pub(crate) fn read_error(path: &Path, error: rspice_core::io::VcdError) -> CliEr
 // -------------------------------------------------------------------------
 // Into a dump
 
+/// A loaded dump with the original identities of any expanded buses.
+pub(crate) struct LoadedVcdDocument {
+    document: VcdDocument,
+    expanded_buses: Vec<selection::ExpandedBus>,
+}
+
+impl LoadedVcdDocument {
+    pub(crate) fn select_and_clip(
+        mut self,
+        requested: &[String],
+        start: Option<f64>,
+        stop: Option<f64>,
+    ) -> Result<(VcdDocument, Vec<String>), CliError> {
+        let notes = selection::select_with_buses(
+            &mut self.document,
+            &self.expanded_buses,
+            requested,
+            start,
+            stop,
+        )?;
+        Ok((self.document, notes))
+    }
+}
+
 /// Read any supported result file as a VCD document.
 ///
 /// The event timelines are used when the source carries them; otherwise the
@@ -199,15 +223,19 @@ pub(crate) fn load_vcd_document(
     format: InputFormat,
     resource_limits: ResourceLimits,
     expand_buses: bool,
-) -> Result<VcdDocument, CliError> {
+) -> Result<LoadedVcdDocument, CliError> {
     if format == InputFormat::Vcd {
         // Reading and rewriting normalises the file: canonical identifier
         // codes, one declaration order, the writer's layout.
         let mut document = parse_vcd(path, resource_limits)?;
+        let mut expanded_buses = Vec::new();
         if expand_buses {
-            expand_vector_variables(path, &mut document)?;
+            expand_vector_variables(path, &mut document, Some(&mut expanded_buses))?;
         }
-        return Ok(document);
+        return Ok(LoadedVcdDocument {
+            document,
+            expanded_buses,
+        });
     }
 
     if let Some(document) = event_traces_of(path, format, resource_limits, expand_buses)? {
@@ -215,7 +243,10 @@ pub(crate) fn load_vcd_document(
     }
 
     let table = load_table(path, format, resource_limits)?;
-    table_document(path, &table)
+    table_document(path, &table).map(|document| LoadedVcdDocument {
+        document,
+        expanded_buses: Vec::new(),
+    })
 }
 
 pub(crate) fn table_document(path: &Path, table: &ExportTable) -> Result<VcdDocument, CliError> {
@@ -244,7 +275,11 @@ pub(crate) fn table_document(path: &Path, table: &ExportTable) -> Result<VcdDocu
 ///
 /// The declaration order is the source's: a vector's members stand where the
 /// vector stood, so a dump of scalars and vectors keeps its column order.
-fn expand_vector_variables(path: &Path, document: &mut VcdDocument) -> Result<(), CliError> {
+fn expand_vector_variables(
+    path: &Path,
+    document: &mut VcdDocument,
+    mut buses: Option<&mut Vec<selection::ExpandedBus>>,
+) -> Result<(), CliError> {
     if !document
         .signals
         .iter()
@@ -254,12 +289,20 @@ fn expand_vector_variables(path: &Path, document: &mut VcdDocument) -> Result<()
     }
 
     let mut expanded: Vec<VcdSignal> = Vec::new();
-    for signal in std::mem::take(&mut document.signals) {
+    for mut signal in std::mem::take(&mut document.signals) {
         if signal.kind != VcdSignalKind::Logic || signal.width <= 1 {
             expanded.push(signal);
             continue;
         }
+        let start = expanded.len();
         expanded.extend(expand_one_vector(path, &signal)?);
+        if let Some(buses) = buses.as_mut() {
+            signal.changes = Vec::new();
+            buses.push(selection::ExpandedBus {
+                signal,
+                members: (start..expanded.len()).collect(),
+            });
+        }
     }
     document.signals = expanded;
     Ok(())
@@ -397,7 +440,7 @@ fn event_traces_of(
     format: InputFormat,
     resource_limits: ResourceLimits,
     expand_buses: bool,
-) -> Result<Option<VcdDocument>, CliError> {
+) -> Result<Option<LoadedVcdDocument>, CliError> {
     let traces = match format {
         InputFormat::Raw | InputFormat::RawAscii => {
             let file = rspice_core::io::parse_raw_plots_file_with_limits(path, resource_limits)
@@ -426,7 +469,16 @@ fn event_traces_of(
     } else {
         &traces.digital_buses
     };
-    event_document(path, &traces.digital_traces, &traces.real_traces, declared).map(Some)
+    let document = event_document(path, &traces.digital_traces, &traces.real_traces, declared)?;
+    let expanded_buses = if expand_buses {
+        selection::trace_buses(path, &document, &traces.digital_buses)?
+    } else {
+        Vec::new()
+    };
+    Ok(Some(LoadedVcdDocument {
+        document,
+        expanded_buses,
+    }))
 }
 
 /// The event timelines a typed result document carries, when it is a transient.
@@ -619,7 +671,7 @@ pub(crate) fn vcd_table(
     mut document: VcdDocument,
     resource_limits: ResourceLimits,
 ) -> Result<ExportTable, CliError> {
-    expand_vector_variables(path, &mut document)?;
+    expand_vector_variables(path, &mut document, None)?;
     let names = column_names(&document);
 
     let mut ticks: BTreeSet<u64> = BTreeSet::new();
@@ -726,28 +778,29 @@ fn column_names(document: &VcdDocument) -> Vec<String> {
     document
         .signals
         .iter()
-        .zip(&declared)
-        .map(|(signal, variable)| {
-            let inner = match variable {
-                Some(variable) => {
-                    let mut inner = String::new();
-                    for level in variable.scope.iter().skip(shared) {
-                        inner.push_str(level);
-                        inner.push('.');
-                    }
-                    inner.push_str(&variable.name);
-                    inner
-                }
-                // A signal always declares at least one name, so this is the
-                // same last resort the core writer's own labelling uses.
-                None => signal.identifier.clone(),
-            };
-            match signal.kind {
-                VcdSignalKind::Logic => format!("{DIGITAL_COLUMN_PREFIX}{inner})"),
-                VcdSignalKind::Real => format!("{REAL_COLUMN_PREFIX}{inner})"),
-            }
-        })
+        .map(|signal| column_name(signal, shared))
         .collect()
+}
+
+fn column_name(signal: &VcdSignal, shared: usize) -> String {
+    let inner = match signal.variables.first() {
+        Some(variable) => {
+            let mut inner = String::new();
+            for level in variable.scope.iter().skip(shared) {
+                inner.push_str(level);
+                inner.push('.');
+            }
+            inner.push_str(&variable.name);
+            inner
+        }
+        // A signal always declares at least one name, so this is the
+        // same last resort the core writer's own labelling uses.
+        None => signal.identifier.clone(),
+    };
+    match signal.kind {
+        VcdSignalKind::Logic => format!("{DIGITAL_COLUMN_PREFIX}{inner})"),
+        VcdSignalKind::Real => format!("{REAL_COLUMN_PREFIX}{inner})"),
+    }
 }
 
 /// How many leading scope levels every variable has in common.
@@ -863,11 +916,12 @@ mod tests {
     fn naming_one_bit_of_a_vector_keeps_the_whole_vector_and_says_so() {
         let bus = vector("data [7:4]", 4);
         let column = "D(data [7:4])";
-        for index in ["data[7]", "DATA[4]", "data[5]"] {
+        for (index, position) in [("data[7]", 0), ("DATA[4]", 3), ("data[5]", 2)] {
             assert_eq!(
                 signal_selection(&bus, column, index, &[]),
                 Selection::WholeBusForOneBit {
-                    bus: "data".to_string()
+                    bus: "data".to_string(),
+                    position
                 },
                 "'{index}' is a bit of this vector"
             );
@@ -969,7 +1023,7 @@ mod tests {
             },
         ];
 
-        expand_vector_variables(Path::new("fixture.vcd"), &mut document)
+        expand_vector_variables(Path::new("fixture.vcd"), &mut document, None)
             .expect("a well-formed vector expands");
 
         assert_eq!(

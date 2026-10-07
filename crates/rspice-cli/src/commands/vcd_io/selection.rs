@@ -28,6 +28,74 @@ pub(crate) fn select_and_clip(
     start: Option<f64>,
     stop: Option<f64>,
 ) -> Result<Vec<String>, CliError> {
+    select_with_buses(document, &[], requested, start, stop)
+}
+
+/// Original vector metadata plus its scalar output indices in declaration order.
+/// The metadata carries no value history; expansion owns that history once.
+pub(super) struct ExpandedBus {
+    pub signal: VcdSignal,
+    pub members: Vec<usize>,
+}
+
+pub(super) fn trace_buses(
+    path: &Path,
+    document: &VcdDocument,
+    buses: &[DigitalBusDeclaration],
+) -> Result<Vec<ExpandedBus>, CliError> {
+    let indices: std::collections::HashMap<_, _> = document
+        .signals
+        .iter()
+        .enumerate()
+        .filter(|(_, signal)| signal.kind == VcdSignalKind::Logic)
+        .filter_map(|(index, signal)| {
+            signal
+                .variables
+                .first()
+                .map(|variable| (variable.name.to_ascii_lowercase(), index))
+        })
+        .collect();
+    rspice_core::engine::validate_digital_bus_table(buses, indices.keys().map(String::as_str))
+        .map_err(|error| conversion_error(path, error))?;
+    buses
+        .iter()
+        .map(|bus| {
+            let members = bus
+                .members
+                .iter()
+                .map(|member| {
+                    indices
+                        .get(&member.to_ascii_lowercase())
+                        .copied()
+                        .ok_or_else(|| {
+                            conversion_error(path, format!("missing bus member '{member}'"))
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(ExpandedBus {
+                signal: VcdSignal {
+                    identifier: String::new(),
+                    variables: vec![VcdVariable {
+                        scope: vec![EVENT_SCOPE.to_owned()],
+                        name: format!("{} [{}:{}]", bus.name, bus.msb, bus.lsb),
+                    }],
+                    width: members.len() as u32,
+                    kind: VcdSignalKind::Logic,
+                    changes: Vec::new(),
+                },
+                members,
+            })
+        })
+        .collect()
+}
+
+pub(super) fn select_with_buses(
+    document: &mut VcdDocument,
+    buses: &[ExpandedBus],
+    requested: &[String],
+    start: Option<f64>,
+    stop: Option<f64>,
+) -> Result<Vec<String>, CliError> {
     let mut notes = Vec::new();
     if !requested.is_empty() {
         let names = column_names(document);
@@ -43,27 +111,53 @@ pub(crate) fn select_and_clip(
             .and_then(|signal| signal.variables.first())
             .map(|variable| &variable.scope[..depth])
             .unwrap_or_default();
+        let bus_names: Vec<_> = buses
+            .iter()
+            .map(|bus| column_name(&bus.signal, depth))
+            .collect();
         let mut keep = vec![false; document.signals.len()];
         for want in requested {
-            let mut matches = Vec::new();
+            // Key by the selected output signals: a bit's native name and its
+            // original bus alias can identify exactly the same scalar.
+            let mut matches = std::collections::BTreeMap::new();
+            let ambiguous = || CliError::InvalidArgument {
+                message: format!("variable selector '{want}' is ambiguous"),
+                suggestion: Some("use an unambiguous full signal or bus name".into()),
+            };
             for (index, (signal, name)) in document.signals.iter().zip(&names).enumerate() {
-                match signal_selection(signal, name, want, shared_scope) {
+                let note = match signal_selection(signal, name, want, shared_scope) {
                     Selection::No => continue,
-                    Selection::Whole => {}
-                    Selection::WholeBusForOneBit { bus } => {
-                        notes.push(format!(
-                            "'{want}' names one bit of digital bus '{bus}', and a VCD vector is \
-                             written whole or not at all, so the whole bus is kept; convert to a \
-                             table format to select one member column"
-                        ));
-                    }
-                }
-                matches.push(index);
+                    Selection::Ambiguous => return Err(ambiguous()),
+                    Selection::Whole => None,
+                    Selection::WholeBusForOneBit { .. } if signal.width == 1 => None,
+                    Selection::WholeBusForOneBit { bus, .. } => Some(format!(
+                        "'{want}' names one bit of digital bus '{bus}', and a VCD vector is written whole or not at all, so the whole bus is kept; use --expand-buses or convert to a table format to select one member"
+                    )),
+                };
+                matches.insert(vec![index], (name.as_str(), note));
+            }
+            for (bus, name) in buses.iter().zip(&bus_names) {
+                let mut members = match signal_selection(&bus.signal, name, want, shared_scope) {
+                    Selection::No => continue,
+                    Selection::Ambiguous => return Err(ambiguous()),
+                    Selection::Whole => bus.members.clone(),
+                    Selection::WholeBusForOneBit { position, .. } => vec![bus.members[position]],
+                };
+                members.sort_unstable();
+                matches.entry(members).or_insert((name.as_str(), None));
             }
             if matches.is_empty() {
                 return Err(CliError::InvalidArgument {
                     message: format!("variable '{want}' not found in input"),
-                    suggestion: Some(format!("available variables: {}", names.join(", "))),
+                    suggestion: Some(format!(
+                        "available variables: {}",
+                        names
+                            .iter()
+                            .chain(&bus_names)
+                            .map(String::as_str)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )),
                 });
             }
             if matches.len() > 1 {
@@ -72,21 +166,25 @@ pub(crate) fn select_and_clip(
                     suggestion: Some(format!(
                         "use a full signal name: {}",
                         matches
-                            .iter()
-                            .map(|&index| names[index].as_str())
+                            .values()
+                            .map(|(name, _)| *name)
                             .collect::<Vec<_>>()
                             .join(", ")
                     )),
                 });
             }
-            keep[matches[0]] = true;
+            let (indices, (_, note)) = matches.pop_first().expect("one matching selection");
+            for index in indices {
+                keep[index] = true;
+            }
+            if let Some(note) = note {
+                notes.push(note);
+            }
         }
         let mut keep = keep.into_iter();
         document.signals.retain(|_| keep.next().unwrap_or(false));
     }
-
     clipping::clip(document, start, stop)?;
-
     Ok(notes)
 }
 
@@ -95,12 +193,16 @@ pub(crate) fn select_and_clip(
 pub(super) enum Selection {
     /// The name does not reach this signal.
     No,
+    /// Different aliases of one vector assign this bit name to different positions.
+    Ambiguous,
     /// The name reaches this signal, and asks for exactly it.
     Whole,
     /// The name reaches one bit of this vector, which is kept whole.
     WholeBusForOneBit {
         /// The bus name, without its range, for the note.
         bus: String,
+        /// Position within the vector, most significant first.
+        position: usize,
     },
 }
 
@@ -157,7 +259,13 @@ fn bus_selection(
     want: &str,
     shared_scope: &[String],
 ) -> Selection {
-    if signal.kind != VcdSignalKind::Logic || signal.width <= 1 {
+    if signal.kind != VcdSignalKind::Logic
+        || (signal.width <= 1
+            && !signal
+                .variables
+                .iter()
+                .any(|variable| split_bus_notation(&variable.name).1.is_some()))
+    {
         return Selection::No;
     }
     let references = inner_name(column, DIGITAL_COLUMN_PREFIX)
@@ -176,6 +284,7 @@ fn bus_selection(
                 .join(".");
             [variable.scoped_name(), relative, variable.name.clone()]
         }));
+    let mut selected = Selection::No;
     for reference in references {
         let (base, range) = split_bus_notation(&reference);
         let (msb, lsb) = range.unwrap_or((i64::from(signal.width) - 1, 0));
@@ -192,12 +301,18 @@ fn bus_selection(
         if let Some(index) = bit_select_index(want, base)
             && (msb.min(lsb)..=msb.max(lsb)).contains(&index)
         {
-            return Selection::WholeBusForOneBit {
+            let position = msb.abs_diff(index) as usize;
+            if matches!(selected, Selection::WholeBusForOneBit { position: previous, .. } if previous != position)
+            {
+                return Selection::Ambiguous;
+            }
+            selected = Selection::WholeBusForOneBit {
                 bus: base.to_string(),
+                position,
             };
         }
     }
-    Selection::No
+    selected
 }
 
 /// The `k` of `base[k]`, when `want` is spelled that way for this base.

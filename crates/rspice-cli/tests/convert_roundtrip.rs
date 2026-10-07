@@ -739,6 +739,58 @@ fn expanding_a_bus_writes_its_members_as_the_scalars_a_dump_had_before() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn expanded_native_bus_selections_retain_authored_member_names_and_histories() {
+    let dir = test_dir("expanded_native_bus_selection");
+    let deck = bus_deck(&dir);
+    for (format, name) in [
+        ("raw", "run.raw"),
+        ("ascii", "run.ascii.raw"),
+        ("json", "run.json"),
+    ] {
+        let source = simulate(&dir, &deck, format, name);
+        let complete = dir.join("complete.vcd");
+        convert(&source, &complete, "vcd", &["--expand-buses"]);
+        let expected = rspice_core::io::parse_vcd_file(&complete).unwrap();
+        for (selector, count) in [
+            ("x1.count", 2),
+            ("D(x1.count[1:0])", 2),
+            ("x1.count[0]", 1),
+            ("D(x1.count[0])", 1),
+            ("COUNT#0", 1),
+            ("D(COUNT#0)", 1),
+        ] {
+            let selected = dir.join("selected.vcd");
+            convert(
+                &source,
+                &selected,
+                "vcd",
+                &["--expand-buses", "--variables", selector],
+            );
+            let document = rspice_core::io::parse_vcd_file(&selected).unwrap();
+            assert_eq!(document.signals.len(), count, "{format}, {selector}");
+            for signal in &document.signals {
+                let name = &signal.variables[0].name;
+                assert!(if count == 1 {
+                    name == "COUNT#0"
+                } else {
+                    name == "COUNT#0" || name == "COUNT#1"
+                });
+                let original = expected
+                    .signals
+                    .iter()
+                    .find(|original| original.variables == signal.variables)
+                    .unwrap();
+                assert_eq!(
+                    signal.changes, original.changes,
+                    "{format}, {selector}, {name}"
+                );
+                assert_eq!(document.timescale, expected.timescale);
+            }
+        }
+    }
+}
+
 /// A dump written elsewhere keeps its own hierarchy when its buses expand.
 ///
 /// Expanding is a reshaping of one variable, not a re-publication of the file:
