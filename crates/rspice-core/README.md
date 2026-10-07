@@ -815,6 +815,9 @@ nominal override, even when it differs from the authored value, and diagnoses
 undefined or out-of-range magnitude derivatives with parameter/frequency context.
 Scaled arithmetic retains finite derivatives through overflowing spans and
 cancelling weighted sums. Probe extraction and refinement poll cancellation.
+Public sensitivity runners report monotonic study progress. Nested compilation
+and solves cannot report whole-study completion; the final notification follows
+successful output projection and is immediately followed by a cancellation check.
 
 Derived sensitivities use `SensitivityValue<T>`: an available number or an
 explicit reason. Relative sensitivity and phase are undefined at zero output;

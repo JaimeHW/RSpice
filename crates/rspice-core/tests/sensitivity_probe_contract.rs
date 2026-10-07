@@ -318,3 +318,184 @@ fn standalone_adjoint_retains_both_numeric_terminals_and_voltage_units() {
         assert_eq!(result.output_unit, SignalUnit::Volt);
     }
 }
+
+struct ProgressObserver {
+    values: std::sync::Mutex<Vec<f64>>,
+    stopped: std::sync::atomic::AtomicBool,
+    stop_at: f64,
+}
+
+impl ProgressObserver {
+    fn new(stop_at: f64) -> Self {
+        Self {
+            values: Default::default(),
+            stopped: false.into(),
+            stop_at,
+        }
+    }
+}
+
+impl rspice_core::AbortSignal for ProgressObserver {
+    fn is_aborted(&self) -> bool {
+        self.stopped.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    fn observe_progress(&self, fraction: f64) {
+        self.values.lock().unwrap().push(fraction);
+        if fraction >= self.stop_at {
+            self.stopped
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+}
+
+fn run_progress_route(
+    route: &str,
+    netlist: &Netlist,
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<(), rspice_core::SimulationError> {
+    let engine = Engine::default();
+    let output = AcSensitivityOutput::Voltage {
+        positive: 2,
+        negative: None,
+    };
+    let filters = ["R1".into(), "PARAM:p".into()];
+    match route {
+        "linearized" => engine
+            .run_sensitivity_linearized_with_abort(netlist, 2, None, abort)
+            .map(|_| ()),
+        "parameter-dc" => engine
+            .run_sensitivity_with_abort(netlist, 2, "p", 1000.0, None, abort)
+            .map(|_| ()),
+        "parameter-ac" => engine
+            .run_sensitivity_ac_with_abort(netlist, 2, "p", 1000.0, &[100.0, 1000.0], None, abort)
+            .map(|_| ()),
+        "output-dc" => engine
+            .run_output_sensitivity_with_abort(netlist, output, "p", 1000.0, None, &mut 0, abort)
+            .map(|_| ()),
+        "output-ac" => engine
+            .run_output_sensitivity_ac_with_abort(
+                netlist,
+                output,
+                "p",
+                1000.0,
+                &[100.0, 1000.0],
+                None,
+                &mut 0,
+                abort,
+            )
+            .map(|_| ()),
+        "complete-dc" => engine
+            .run_sensitivity_dc_complete_with_abort(netlist, output, &filters, abort)
+            .map(|_| ()),
+        "complete-ac" => engine
+            .run_sensitivity_ac_complete_with_abort(
+                netlist,
+                output,
+                &[100.0, 1000.0],
+                &filters,
+                abort,
+            )
+            .map(|_| ()),
+        "card-dc" => engine
+            .run_sensitivity_from_card_with_abort(netlist, &netlist.analyses[0], abort)
+            .map(|_| ()),
+        "card-ac" => engine
+            .run_sensitivity_from_card_with_abort(netlist, &netlist.analyses[1], abort)
+            .map(|_| ()),
+        _ => unreachable!(),
+    }
+}
+
+const PROGRESS_ROUTES: &[&str] = &[
+    "linearized",
+    "parameter-dc",
+    "parameter-ac",
+    "output-dc",
+    "output-ac",
+    "complete-dc",
+    "complete-ac",
+    "card-dc",
+    "card-ac",
+];
+
+fn progress_deck(extra_resistor_parameters: &str) -> Netlist {
+    Netlist::parse(&format!(
+        "{}.sens V(out) R1 PARAM:p\n.sens V(out) R1 PARAM:p AC LIN 3 100 1000\n.end\n",
+        CIRCUIT.replace(
+            "R1 in out {p}",
+            &format!("R1 in out {{p}}{extra_resistor_parameters}")
+        )
+    ))
+    .unwrap()
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn sensitivity_progress_completes_once_for_exact_and_refined_public_routes() {
+    for extra in ["", " TC1=0.001"] {
+        let netlist = progress_deck(extra);
+        for route in PROGRESS_ROUTES {
+            let observer = ProgressObserver::new(f64::INFINITY);
+            run_progress_route(route, &netlist, &observer).unwrap();
+            let values = observer.values.lock().unwrap();
+            assert!(
+                values.len() >= 2,
+                "{route}{extra}: missing work/completion progress: {values:?}"
+            );
+            assert_eq!(values.last(), Some(&1.0), "{route}{extra}: {values:?}");
+            assert!(
+                values
+                    .iter()
+                    .all(|value| value.is_finite() && (0.0..=1.0).contains(value))
+            );
+            assert!(
+                values.windows(2).all(|pair| pair[0] < pair[1]),
+                "{route}{extra}: {values:?}"
+            );
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn sensitivity_observes_cancellation_from_work_and_completion_callbacks() {
+    for extra in ["", " TC1=0.001"] {
+        let netlist = progress_deck(extra);
+        for route in PROGRESS_ROUTES {
+            for stop_at in [0.05, 0.5, 1.0] {
+                let observer = ProgressObserver::new(stop_at);
+                assert!(
+                    matches!(
+                        run_progress_route(route, &netlist, &observer),
+                        Err(rspice_core::SimulationError::Aborted)
+                    ),
+                    "{route}{extra}: did not cancel at {stop_at}"
+                );
+                let values = observer.values.lock().unwrap();
+                assert!(values.last().is_some_and(|value| *value >= stop_at));
+                assert_eq!(values.iter().filter(|value| **value >= stop_at).count(), 1);
+            }
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn unavailable_numeric_magnitude_never_reports_a_completed_sensitivity() {
+    let netlist =
+        Netlist::parse("Zero AC magnitude\n.param p=0\nV1 out 0 AC {p}\nR1 out 0 1k\n.end\n")
+            .unwrap();
+    let observer = ProgressObserver::new(f64::INFINITY);
+    let error = Engine::default()
+        .run_sensitivity_ac_with_abort(&netlist, 1, "p", 0.0, &[100.0], None, &observer)
+        .unwrap_err();
+    assert!(error.to_string().contains("unavailable"));
+    assert!(
+        observer
+            .values
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|value| *value < 1.0)
+    );
+}

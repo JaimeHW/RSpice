@@ -3,6 +3,7 @@ mod design_parameter_tests;
 #[cfg(test)]
 mod expression_value_tests;
 mod parameter;
+mod progress;
 mod refinement;
 
 use super::{Engine, SimulationError};
@@ -15,6 +16,7 @@ use crate::analysis::sensitivity::{
 use crate::netlist::{ElementKind, SourceSpec};
 use crate::solver::SimulationResult;
 use crate::{CircuitData, Complex64, Netlist, Value};
+use progress::StudyProgress;
 use rspice_veriloga_runtime::arithmetic::ScaledValue;
 use std::collections::{HashMap, HashSet};
 
@@ -328,9 +330,9 @@ impl Engine {
         output_neg: Option<usize>,
         abort: &dyn AbortSignal,
     ) -> Result<SensitivityResult, SimulationError> {
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
+        let progress = StudyProgress::new(abort)?;
+        let setup = progress.stage(0.0, 0.2);
+        let abort: &dyn AbortSignal = &setup;
         let engine = self.resolved_for_netlist(netlist);
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
         Self::warn_xspice_mif_analysis_boundary(
@@ -345,6 +347,9 @@ impl Engine {
         }
         let matrix_size = circuit.matrix_size();
         engine.ensure_result_shape(matrix_size, matrix_size.saturating_mul(4).saturating_add(1))?;
+        progress.report(0.2)?;
+        let bias = progress.stage(0.2, 0.6);
+        let abort: &dyn AbortSignal = &bias;
 
         let mut matrix = engine.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
@@ -362,6 +367,9 @@ impl Engine {
         circuit
             .prepare_behavioral_small_signal(&dc_solution)
             .map_err(SimulationError::Circuit)?;
+        progress.report(0.6)?;
+        let derivatives = progress.stage(0.6, 0.95);
+        let abort: &dyn AbortSignal = &derivatives;
 
         let mut small_signal =
             Self::try_build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, 0.0)?;
@@ -415,14 +423,15 @@ impl Engine {
             SensitivityAnalyzer::with_precomputed_adjoint(dc_solution, adjoint, elements).ok_or(
                 SimulationError::Solver(crate::solver::SolverError::SingularMatrix),
             )?;
-        analyzer
+        let result = analyzer
             .build_result_with_abort(&output_name, output_value, abort)
             .map_err(|error| match error {
                 SensitivityAnalysisError::Aborted => SimulationError::Aborted,
             })?
             .ok_or(SimulationError::Solver(
                 crate::solver::SolverError::SingularMatrix,
-            ))
+            ))?;
+        progress.complete(result)
     }
 
     fn validate_sensitivity_node(
@@ -812,10 +821,11 @@ impl Engine {
         runs: &mut usize,
         abort: &dyn AbortSignal,
     ) -> Result<Value, SimulationError> {
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
+        let progress = StudyProgress::new(abort)?;
         Self::validate_parameter_sensitivity_inputs(param_value, delta)?;
+        progress.report(0.05)?;
+        let work = progress.stage(0.05, 0.95);
+        let abort: &dyn AbortSignal = &work;
         let response = self.design_parameter_derivatives(
             netlist,
             &output,
@@ -826,7 +836,8 @@ impl Engine {
             runs,
             abort,
         )?;
-        Ok(response.derivative[0].re)
+        progress.report(0.95)?;
+        progress.complete(response.derivative[0].re)
     }
 
     /// Run AC sensitivity analysis for a parameter across frequencies.
@@ -867,7 +878,10 @@ impl Engine {
         delta: Option<Value>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
-        self.run_output_sensitivity_ac_with_abort(
+        let progress = StudyProgress::new(abort)?;
+        let work = progress.stage(0.0, 0.95);
+        let abort: &dyn AbortSignal = &work;
+        let result = self.run_output_sensitivity_ac_with_abort(
             netlist,
             AcSensitivityOutput::Voltage {
                 positive: output_node,
@@ -882,14 +896,20 @@ impl Engine {
         )?
         .into_iter()
         .zip(frequencies)
-        .map(|(value, frequency)| match value {
-            SensitivityValue::Available(value) => Ok(value),
-            SensitivityValue::Unavailable { unavailable } => Err(SimulationError::Circuit(format!(
-                "AC output-magnitude sensitivity to parameter '{param_name}' at {frequency} Hz is unavailable ({})",
-                unavailable.as_str()
-            ))),
+        .map(|(value, frequency)| {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            match value {
+                SensitivityValue::Available(value) => Ok(value),
+                SensitivityValue::Unavailable { unavailable } => Err(SimulationError::Circuit(format!(
+                    "AC output-magnitude sensitivity to parameter '{param_name}' at {frequency} Hz is unavailable ({})",
+                    unavailable.as_str()
+                ))),
+            }
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+        progress.complete(result)
     }
 
     /// Differentiate AC probe magnitude with respect to an authored design parameter.
@@ -910,12 +930,13 @@ impl Engine {
         runs: &mut usize,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<SensitivityValue<Value>>, SimulationError> {
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
+        let progress = StudyProgress::new(abort)?;
         Self::validate_parameter_sensitivity_inputs(param_value, delta)?;
         super::ac::validate_ac_frequencies(frequencies)?;
         self.ensure_analysis_points(frequencies.len())?;
+        progress.report(0.05)?;
+        let work = progress.stage(0.05, 0.9);
+        let abort: &dyn AbortSignal = &work;
         let response = self.design_parameter_derivatives(
             netlist,
             &output,
@@ -926,7 +947,10 @@ impl Engine {
             runs,
             abort,
         )?;
-        Self::project_parameter_magnitude(&response.nominal, response.derivative, abort)
+        progress.report(0.9)?;
+        let result =
+            Self::project_parameter_magnitude(&response.nominal, response.derivative, abort)?;
+        progress.complete(result)
     }
 
     /// Differentiate one probe with respect to one authored design parameter.
@@ -2881,9 +2905,9 @@ impl Engine {
         filters: &[String],
         abort: &dyn AbortSignal,
     ) -> Result<SensitivityResult, SimulationError> {
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
+        let progress = StudyProgress::new(abort)?;
+        let setup = progress.stage(0.0, 0.1);
+        let abort: &dyn AbortSignal = &setup;
         let flat = self.flattened_sensitivity_netlist(netlist, abort)?;
         Self::validate_complete_dc_sensitivity_coverage(&flat)?;
         Self::validate_design_parameter_filters(&flat, filters, "DC")?;
@@ -2903,6 +2927,10 @@ impl Engine {
         self.ensure_batch_runs(1)?;
         self.ensure_result_values(targets.len().saturating_mul(3).saturating_add(1))?;
 
+        progress.report(0.1)?;
+        let nominal = progress.stage(0.1, 0.2);
+        let abort: &dyn AbortSignal = &nominal;
+
         let nominal_result = self.run_dc_op_with_abort(&flat, abort)?;
         let nominal_output = Self::dc_sensitivity_output_value(&nominal_result, &output)?;
 
@@ -2913,10 +2941,13 @@ impl Engine {
         result.sensitivities.reserve(targets.len());
 
         let mut runs = 1;
-        for target in targets {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
+        let count = targets.len();
+        for (index, target) in targets.into_iter().enumerate() {
+            let start = 0.2 + 0.75 * index as f64 / count as f64;
+            let end = 0.2 + 0.75 * (index + 1) as f64 / count as f64;
+            progress.report(start)?;
+            let work = progress.stage(start, end);
+            let abort: &dyn AbortSignal = &work;
             let derivative =
                 if let AcSensitivityLocation::DesignParameter { name } = &target.location {
                     self.design_parameter_derivatives(
@@ -2971,9 +3002,10 @@ impl Engine {
                 derivative,
                 nominal_output,
             ));
+            progress.report(end)?;
         }
 
-        Ok(result)
+        progress.complete(result)
     }
 
     /// Differentiate one AC probe, at every frequency, with respect to the
@@ -3007,9 +3039,9 @@ impl Engine {
         filters: &[String],
         abort: &dyn AbortSignal,
     ) -> Result<AcSensitivityResult, SimulationError> {
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
+        let progress = StudyProgress::new(abort)?;
+        let setup = progress.stage(0.0, 0.1);
+        let abort: &dyn AbortSignal = &setup;
         if frequencies.is_empty()
             || frequencies
                 .iter()
@@ -3045,6 +3077,9 @@ impl Engine {
                 .saturating_add(targets.len()),
         )?;
 
+        progress.report(0.1)?;
+        let nominal = progress.stage(0.1, 0.2);
+        let abort: &dyn AbortSignal = &nominal;
         let nominal_results = self.run_ac_with_abort(&flat, frequencies, abort)?;
         let nominal_output =
             Self::ac_sensitivity_outputs(&nominal_results, &output, frequencies, abort)?;
@@ -3057,10 +3092,13 @@ impl Engine {
         })?;
         let mut sensitivities = Vec::with_capacity(targets.len());
         let mut runs = 1;
-        for target in targets {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
+        let count = targets.len();
+        for (index, target) in targets.into_iter().enumerate() {
+            let start = 0.2 + 0.75 * index as f64 / count as f64;
+            let end = 0.2 + 0.75 * (index + 1) as f64 / count as f64;
+            progress.report(start)?;
+            let work = progress.stage(start, end);
+            let abort: &dyn AbortSignal = &work;
             let derivative =
                 if let AcSensitivityLocation::DesignParameter { name } = &target.location {
                     self.design_parameter_derivatives(
@@ -3106,9 +3144,10 @@ impl Engine {
                 derivative,
                 abort,
             )?);
+            progress.report(end)?;
         }
 
-        Ok(AcSensitivityResult {
+        progress.complete(AcSensitivityResult {
             output: output_name,
             output_unit: output.unit(),
             frequencies: frequencies.to_vec(),
@@ -3140,6 +3179,9 @@ impl Engine {
     ) -> Result<SensitivityCardResult, SimulationError> {
         use crate::netlist::AnalysisCommand;
 
+        let progress = StudyProgress::new(abort)?;
+        let setup = progress.stage(0.0, 0.05);
+        let abort: &dyn AbortSignal = &setup;
         let AnalysisCommand::Sensitivity {
             output_node,
             reference_node,
@@ -3176,7 +3218,10 @@ impl Engine {
                     .resolve_reference(reference_node.as_deref(), ".SENS reference")?,
             }
         };
-        match frequencies {
+        progress.report(0.05)?;
+        let work = progress.stage(0.05, 0.95);
+        let abort: &dyn AbortSignal = &work;
+        let result = match frequencies {
             None => self
                 .run_sensitivity_dc_complete_with_abort(netlist, output, filters, abort)
                 .map(SensitivityCardResult::Dc),
@@ -3189,7 +3234,8 @@ impl Engine {
                     abort,
                 )
                 .map(SensitivityCardResult::Ac),
-        }
+        }?;
+        progress.complete(result)
     }
 }
 
