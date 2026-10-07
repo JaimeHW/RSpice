@@ -531,6 +531,22 @@ pub enum DigitalWriteSelect {
 }
 
 impl DigitalWriteSelect {
+    /// Selected width and direction, checked before sizing or applying a write.
+    /// Out-of-range endpoints remain valid; the runtime clips their bits.
+    pub(crate) fn checked_width(&self, range: VectorBounds) -> Option<u32> {
+        let width = match self {
+            Self::Whole => u64::from(range.width()),
+            Self::Bit(_) => 1,
+            Self::Part { msb, lsb } => {
+                if msb != lsb && (msb > lsb) != (range.msb >= range.lsb) {
+                    return None;
+                }
+                msb.abs_diff(*lsb).checked_add(1)?
+            }
+        };
+        (width <= u64::from(crate::semantic::MAX_DIGITAL_VECTOR_WIDTH)).then_some(width as u32)
+    }
+
     /// Where this select's least significant bit is stored on a signal
     /// declared over `range`, counting from the least significant end.
     ///

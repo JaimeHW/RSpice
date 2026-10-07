@@ -562,6 +562,56 @@ endmodule
 }
 
 #[test]
+fn packed_selection_validation_distinguishes_scalars_from_one_bit_vectors() {
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    for (declaration, initialize, read) in [
+        ("reg value;", "value=1;", "value[0]"),
+        ("reg value;", "value=1;", "value[0:0]"),
+        ("reg value;", "value=1;", "value[index]"),
+        ("reg value[0:0];", "value[0]=1;", "value[0][0]"),
+        ("reg value[0:0];", "value[0]=1;", "value[0][0:0]"),
+        ("reg value[0:0];", "value[0]=1;", "value[0][index]"),
+    ] {
+        let source = format!(
+            "module selected(p); inout p; electrical p; {declaration} integer index; initial begin index=0; {initialize} end analog I(p)<+{read}; endmodule"
+        );
+        let error = compiler
+            .compile_runtime(&source, None)
+            .err()
+            .expect("scalar selection");
+        assert!(
+            error
+                .to_string()
+                .contains("scalar storage has no selectable bits"),
+            "{read}: {error}"
+        );
+        assert!(
+            !error.to_string().contains("Internal error"),
+            "{read}: {error}"
+        );
+    }
+    for (declaration, initialize, read) in [
+        ("reg value;", "value=1;", "value"),
+        ("reg value[0:0];", "value[0]=1;", "value[0]"),
+        ("reg [0:0] value;", "value=1;", "value[0]"),
+        ("reg [0:0] value;", "value=1;", "value[index]"),
+        ("reg [5:5] value;", "value=1;", "value[5:5]"),
+        ("reg [0:0] value[0:0];", "value[0]=1;", "value[0][index]"),
+        ("integer value;", "value=-1;", "value[31]"),
+    ] {
+        let source = format!(
+            "module selected(p); inout p; electrical p; {declaration} integer index; initial begin index=0; {initialize} end analog I(p)<+{read}; endmodule"
+        );
+        compiler
+            .compile_runtime(&source, None)
+            .unwrap_or_else(|error| panic!("{read}: {error}"));
+    }
+}
+
+#[test]
 fn packed_analog_selection_validates_grouping_and_keeps_one_word_selector() {
     use rspice_veriloga::canonical_ir::state::{CanonicalStateFamily, CanonicalStateLayout};
     let compiler = VerilogACompiler::new(CompilerOptions {

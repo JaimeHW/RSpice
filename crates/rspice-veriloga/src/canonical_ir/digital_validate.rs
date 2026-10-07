@@ -64,23 +64,64 @@ fn packed_write_type(
             CfgValueType::FourState { width: 1 }
         }
         DigitalArrayWriteSelect::Part { msb, lsb } => {
-            let width = msb
-                .abs_diff(lsb)
-                .checked_add(1)
-                .filter(|width| *width <= u64::from(crate::semantic::MAX_DIGITAL_VECTOR_WIDTH));
-            if signal.kind.is_real()
-                || width.is_none()
-                || (msb != lsb && (msb > lsb) != (bounds.0 >= bounds.1))
-            {
+            let width = DigitalWriteSelect::Part { msb, lsb }.checked_width(super::VectorBounds {
+                msb: bounds.0,
+                lsb: bounds.1,
+            });
+            if signal.kind.is_real() || width.is_none() {
                 return Err(error(
                     "digital packed part write has an invalid element type, width or direction",
                 ));
             }
             CfgValueType::FourState {
-                width: width.unwrap() as u32,
+                width: width.unwrap(),
             }
         }
     })
+}
+
+/// Fixed procedural/driver selections are part of the artifact, not SSA data.
+fn fixed_write_type(
+    signal: &DigitalSignal,
+    select: &DigitalWriteSelect,
+) -> Result<CfgValueType, Vec<IrDiagnostic>> {
+    if signal.kind.is_real() {
+        return if *select == DigitalWriteSelect::Whole {
+            Ok(CfgValueType::Real)
+        } else {
+            Err(error(
+                "digital fixed write cannot select bits of real storage",
+            ))
+        };
+    }
+    let width = select
+        .checked_width(signal.declared_range())
+        .ok_or_else(|| error("digital fixed write has an invalid selection width or direction"))?;
+    Ok(CfgValueType::FourState { width })
+}
+
+fn check_fixed_write(
+    signal: &DigitalSignal,
+    select: &DigitalWriteSelect,
+    effect: CfgValueType,
+    rhs: CfgValueType,
+) -> IrValidationResult {
+    let expected = fixed_write_type(signal, select)?;
+    // Fixed writes resize four-state/32-bit integer data at execution. Real
+    // conversion is explicit in the CFG and cannot be inferred from a target.
+    let valid_rhs = if expected == CfgValueType::Real {
+        rhs == CfgValueType::Real
+    } else {
+        matches!(rhs, CfgValueType::Integer)
+            || matches!(rhs, CfgValueType::FourState { width }
+                if width > 0 && width <= crate::semantic::MAX_DIGITAL_VECTOR_WIDTH)
+    };
+    if effect != CfgValueType::Effect || !valid_rhs {
+        return Err(error(
+            "digital fixed write has an invalid effect or RHS type",
+        ));
+    }
+    Ok(())
 }
 
 impl CanonicalDigitalPlan {
@@ -297,6 +338,7 @@ impl CanonicalDigitalPlan {
             let Some(signal) = self.signal(driver.id.signal) else {
                 return Err(error("digital driver names an undeclared signal"));
             };
+            fixed_write_type(signal, &driver.target.select)?;
             let count = &mut driver_counts[usize::from(signal.id)];
             if driver.target.signal != signal.id
                 || signal.procedurally_assignable
@@ -758,16 +800,24 @@ impl CanonicalDigitalPlan {
                                 }
                             }
                         }
-                        CfgValueKind::DigitalBlockingWrite { target, .. }
-                        | CfgValueKind::DigitalNonblockingWrite { target, .. } => {
-                            if self
+                        CfgValueKind::DigitalBlockingWrite { target, value: rhs }
+                        | CfgValueKind::DigitalNonblockingWrite {
+                            target, value: rhs, ..
+                        } => {
+                            let signal = self
                                 .signal(target.signal)
-                                .is_none_or(|signal| !signal.procedurally_assignable)
-                            {
-                                return Err(error(
-                                    "digital procedural write must target a declared variable",
-                                ));
-                            }
+                                .filter(|signal| signal.procedurally_assignable)
+                                .ok_or_else(|| {
+                                    error(
+                                        "digital procedural write must target a declared variable",
+                                    )
+                                })?;
+                            check_fixed_write(
+                                signal,
+                                &target.select,
+                                value.value_type,
+                                function.value(*rhs).value_type,
+                            )?;
                             if let CfgValueKind::DigitalNonblockingWrite {
                                 wait: Some(wait), ..
                             } = kind
@@ -782,7 +832,11 @@ impl CanonicalDigitalPlan {
                                 ));
                             }
                         }
-                        CfgValueKind::DigitalDriverWrite { driver, target, .. } => {
+                        CfgValueKind::DigitalDriverWrite {
+                            driver,
+                            target,
+                            value: rhs,
+                        } => {
                             if drivers.get(driver).is_none_or(|declared| {
                                 declared.process != process.id || declared.target != *target
                             }) {
@@ -790,6 +844,15 @@ impl CanonicalDigitalPlan {
                                     "digital driver write does not match its declaration",
                                 ));
                             }
+                            let signal = self.signal(target.signal).ok_or_else(|| {
+                                error("digital driver names an undeclared signal")
+                            })?;
+                            check_fixed_write(
+                                signal,
+                                &target.select,
+                                value.value_type,
+                                function.value(*rhs).value_type,
+                            )?;
                             written_drivers.insert(*driver);
                         }
                         _ => {}

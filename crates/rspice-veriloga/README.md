@@ -382,10 +382,17 @@ wait; nonblocking writes capture the bit and RHS when scheduled, then merge the
 bit into current storage when delivered. Constant and runtime bit selectors
 share numeric conversion and invalid-index behavior. In digital contexts,
 packed selections of un-ranged scalar declarations and scalar array elements
-are rejected; the separate analog-read path still needs the same scalar check.
+are rejected.
 Authored bounds travel with scalar bit and array writes so hierarchy linking
 preserves ascending and nonzero ranges while normalizing storage. These writes
 reuse the existing update and scheduling paths; Wasm helper ABI 20 is unchanged.
+Schema 81 extends scalar-selection diagnostics to analog expressions while
+preserving whole scalar reads and explicitly declared one-bit vectors. Fixed
+procedural and continuous-driver write targets now validate part widths,
+direction, real-storage restrictions, RHS types and effect types at the artifact
+boundary. Public procedural/deferred update application rejects incompatible
+storage and invalid part targets before mutation, sharing checked width arithmetic
+with artifact validation. Out-of-range endpoints still clip to existing bits.
 Process-local partial writes and dynamic continuous-driver targets remain open.
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
 initializer patterns, multidimensional shapes, full parameter-dependent

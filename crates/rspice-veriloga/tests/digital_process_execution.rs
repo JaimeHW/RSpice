@@ -4978,6 +4978,191 @@ fn dynamic_bit_writes_validate_source_and_artifact_types() {
 }
 
 #[test]
+fn packed_selection_validation_checks_fixed_write_artifacts() {
+    use rspice_veriloga::canonical_ir::{CfgValueKind, CfgValueType, digital::DigitalWriteSelect};
+    let h = Harness::from_source(
+        "module fixed; reg [7:4] q; real realq; wire [7:4] w;
+         initial begin realq=1.25; q=0; q[6:5]=3; q[7:6]<=2; end
+         assign w[6:5]=2'b11; endmodule",
+    );
+    for mutation in 0..8 {
+        let mut plan = h.plan.clone();
+        let expected = if mutation == 5 {
+            plan.drivers[0].target.select = DigitalWriteSelect::Part {
+                msb: i64::MAX,
+                lsb: i64::MIN,
+            };
+            "selection width or direction"
+        } else {
+            let (process, index) = plan
+                .processes
+                .iter()
+                .enumerate()
+                .find_map(|(p, process)| {
+                    process
+                        .function
+                        .values
+                        .iter()
+                        .position(|node| match &node.kind {
+                            CfgValueKind::DigitalBlockingWrite { target, .. } => {
+                                matches!(mutation, 0 | 1 | 3 | 4)
+                                    && matches!(target.select, DigitalWriteSelect::Part { .. })
+                            }
+                            CfgValueKind::DigitalNonblockingWrite { .. } => mutation == 2,
+                            CfgValueKind::DigitalDriverWrite { .. } => matches!(mutation, 6 | 7),
+                            _ => false,
+                        })
+                        .map(|index| (p, index))
+                })
+                .expect("fixture write");
+            let function = &mut plan.processes[process].function;
+            let node = &mut function.values[index];
+            let (target, rhs) = match &mut node.kind {
+                CfgValueKind::DigitalBlockingWrite { target, value }
+                | CfgValueKind::DigitalNonblockingWrite { target, value, .. }
+                | CfgValueKind::DigitalDriverWrite { target, value, .. } => (target, *value),
+                _ => unreachable!(),
+            };
+            match mutation {
+                0 => {
+                    target.select = DigitalWriteSelect::Part {
+                        msb: i64::MAX,
+                        lsb: i64::MIN,
+                    };
+                    "selection width or direction"
+                }
+                1 => {
+                    target.select = DigitalWriteSelect::Part { msb: 5, lsb: 6 };
+                    "selection width or direction"
+                }
+                2 => {
+                    target.signal = h.signal("realq");
+                    target.select = DigitalWriteSelect::Bit(0);
+                    "select bits of real storage"
+                }
+                3 | 6 => {
+                    let rhs = &mut function.values[usize::from(rhs)];
+                    rhs.kind = CfgValueKind::RealConstant(1.25);
+                    rhs.value_type = CfgValueType::Real;
+                    "effect or RHS type"
+                }
+                4 | 7 => {
+                    node.value_type = CfgValueType::Real;
+                    "effect or RHS type"
+                }
+                _ => unreachable!(),
+            }
+        };
+        let errors = plan.validate().unwrap_err();
+        assert!(
+            format!("{errors:?}").contains(expected),
+            "mutation {mutation}: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn packed_selection_validation_rejects_public_updates_without_mutation() {
+    use rspice_veriloga::canonical_ir::{
+        digital::{DigitalWriteSelect, DigitalWriteTarget},
+        digital_eval::apply_write,
+    };
+    let mut h = Harness::from_source(
+        "module fixed; reg [7:4] q; real realq; wire w;
+         initial begin q=10; realq=1.25; end assign w=1; endmodule",
+    );
+    let initial = h
+        .plan
+        .processes
+        .iter()
+        .position(|p| p.kind == DigitalProcessKind::Initial)
+        .unwrap();
+    expect_finished(h.start(initial));
+    let before = (h.store.values.clone(), h.store.reals.clone());
+    for (name, select, value) in [
+        (
+            "q",
+            DigitalWriteSelect::Part {
+                msb: i64::MAX,
+                lsb: i64::MIN,
+            },
+            DigitalUpdate::FourState(parse_value("11")),
+        ),
+        (
+            "q",
+            DigitalWriteSelect::Part { msb: 65536, lsb: 0 },
+            DigitalUpdate::FourState(parse_value("11")),
+        ),
+        (
+            "q",
+            DigitalWriteSelect::Part { msb: 5, lsb: 6 },
+            DigitalUpdate::FourState(parse_value("11")),
+        ),
+        (
+            "realq",
+            DigitalWriteSelect::Whole,
+            DigitalUpdate::FourState(parse_value("1")),
+        ),
+        (
+            "w",
+            DigitalWriteSelect::Whole,
+            DigitalUpdate::FourState(parse_value("1")),
+        ),
+        ("q", DigitalWriteSelect::Whole, DigitalUpdate::Real(2.5)),
+        (
+            "realq",
+            DigitalWriteSelect::Bit(0),
+            DigitalUpdate::Real(2.5),
+        ),
+    ] {
+        let target = DigitalWriteTarget {
+            signal: h.signal(name),
+            select,
+        };
+        let update = DigitalDeferredUpdate {
+            target: target.clone(),
+            value: value.clone(),
+            region: DigitalSchedulingRegion::NonBlockingAssign,
+            wait: None,
+        };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            apply_deferred(&h.plan, &mut h.store, &update)
+        }))
+        .expect("malformed update must return an error, never panic");
+        assert!(
+            matches!(result, Err(DigitalEvalError::InvalidWriteTarget(_))),
+            "{update:?}: {result:?}"
+        );
+        if let DigitalUpdate::FourState(value) = value {
+            let result = apply_write(&h.plan, &mut h.store, &target, &value);
+            assert!(matches!(
+                result,
+                Err(DigitalEvalError::InvalidWriteTarget(_))
+            ));
+        }
+        assert_eq!(h.store.values, before.0);
+        assert_eq!(h.store.reals, before.1);
+    }
+    let update = DigitalDeferredUpdate {
+        target: DigitalWriteTarget {
+            signal: h.signal("realq"),
+            select: DigitalWriteSelect::Whole,
+        },
+        value: DigitalUpdate::Real(2.5),
+        region: DigitalSchedulingRegion::NonBlockingAssign,
+        wait: None,
+    };
+    apply_deferred(&h.plan, &mut h.store, &update).unwrap();
+    assert_eq!(h.store.reals[usize::from(h.signal("realq"))], 2.5);
+    let target = DigitalWriteTarget {
+        signal: h.signal("q"),
+        select: DigitalWriteSelect::Part { msb: 9, lsb: 6 },
+    };
+    apply_write(&h.plan, &mut h.store, &target, &parse_value("0011")).unwrap();
+    assert_eq!(h.get("q"), "1110");
+}
+
+#[test]
 fn constant_vector_selections_clip_reads_writes_and_linked_targets() {
     let source = r#"
 module selects;

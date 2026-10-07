@@ -885,12 +885,13 @@ pub fn any_term_is_satisfied(
 ///
 /// Not the signal's width unless the target is the whole signal: assigning to
 /// `q[3]` resizes the right-hand side to one bit, not to `q`'s.
-fn target_width(signal: &DigitalSignal, select: &DigitalWriteSelect) -> u32 {
-    match select {
-        DigitalWriteSelect::Whole => signal.width,
-        DigitalWriteSelect::Bit(_) => 1,
-        DigitalWriteSelect::Part { msb, lsb } => msb.abs_diff(*lsb) as u32 + 1,
-    }
+fn target_width(
+    signal: &DigitalSignal,
+    select: &DigitalWriteSelect,
+) -> Result<u32, DigitalEvalError> {
+    select
+        .checked_width(signal.declared_range())
+        .ok_or(DigitalEvalError::InvalidWriteTarget(signal.id))
 }
 
 /// Perform one write against the environment, resizing per section 5.2.1.
@@ -912,7 +913,10 @@ pub fn apply_write<E: DigitalEnvironment + ?Sized>(
     let signal = plan
         .signal(target.signal)
         .ok_or(DigitalEvalError::UndeclaredSignal(target.signal))?;
-    let width = target_width(signal, &target.select);
+    if signal.kind.is_real() || !signal.procedurally_assignable {
+        return Err(DigitalEvalError::InvalidWriteTarget(signal.id));
+    }
+    let width = target_width(signal, &target.select)?;
     let value = value.resized(width);
 
     let next = match &target.select {
@@ -954,6 +958,12 @@ pub fn apply_deferred<E: DigitalEnvironment + ?Sized>(
             let signal = plan
                 .signal(update.target.signal)
                 .ok_or(DigitalEvalError::UndeclaredSignal(update.target.signal))?;
+            if !signal.kind.is_real()
+                || !signal.procedurally_assignable
+                || update.target.select != DigitalWriteSelect::Whole
+            {
+                return Err(DigitalEvalError::InvalidWriteTarget(signal.id));
+            }
             environment.write_real_signal(signal.id, *value);
             Ok(())
         }
@@ -1888,7 +1898,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         } else {
             DigitalUpdate::FourState(
                 self.four_state(value)?
-                    .resized(target_width(signal, &target.select)),
+                    .resized(target_width(signal, &target.select)?),
             )
         };
         self.environment.defer_update(DigitalDeferredUpdate {
@@ -2573,7 +2583,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 // section 5.2.1's width belongs to the assignment, and the
                 // assignment is here. What the kernel later does with the
                 // contribution cannot recover a width it was not given.
-                let width = target_width(signal, &target.select);
+                let width = target_width(signal, &target.select)?;
                 let Interpreter {
                     function,
                     environment,

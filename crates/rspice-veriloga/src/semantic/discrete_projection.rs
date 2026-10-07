@@ -7,6 +7,8 @@ use crate::array_index::{PACKED_CHUNK_BITS, PackedArrayLayout};
 #[derive(Clone, Copy)]
 struct SignalShape {
     range: VectorBounds,
+    /// Distinguish a declared one-bit vector from an un-ranged scalar.
+    selectable: bool,
     unpacked: Option<VectorBounds>,
     real: bool,
 }
@@ -36,6 +38,7 @@ impl ProjectionBuilder {
                 signal.name.clone(),
                 SignalShape {
                     range: signal.range.unwrap_or(VectorBounds::SCALAR),
+                    selectable: signal.range.is_some(),
                     unpacked: signal.unpacked,
                     real: signal.class.is_real(),
                 },
@@ -73,6 +76,14 @@ impl SemanticAnalyzer {
         if shape.real || shape.unpacked.is_some() != word.is_some() {
             return Err(error(format!(
                 "packed analog read of `{name}` requires a four-state scalar or a selected unpacked element"
+            )));
+        }
+        if !shape.selectable {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "packed analog read of `{name}` requires a vector or integer; scalar storage has no selectable bits"
+                )),
+                span,
             )));
         }
         let word = word
