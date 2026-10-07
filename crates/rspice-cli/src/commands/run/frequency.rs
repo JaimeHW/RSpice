@@ -978,9 +978,10 @@ pub(super) fn run_stb(
                     name: "loopgain_mag_db".to_string(),
                     var_type: "gain".to_string(),
                     data: ColumnData::Real(
-                        stb.loop_gains
+                        stb.result
+                            .bode_points
                             .iter()
-                            .map(|g| 20.0 * g.norm().max(1e-300).log10())
+                            .map(|point| point.magnitude_db)
                             .collect(),
                     ),
                 },
@@ -989,9 +990,10 @@ pub(super) fn run_stb(
                     name: "loopgain_phase_deg".to_string(),
                     var_type: "phase".to_string(),
                     data: ColumnData::Real(
-                        stb.loop_gains
+                        stb.result
+                            .bode_points
                             .iter()
-                            .map(|g| g.im.atan2(g.re).to_degrees())
+                            .map(|point| point.phase_deg)
                             .collect(),
                     ),
                 },

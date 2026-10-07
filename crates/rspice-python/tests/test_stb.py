@@ -159,3 +159,27 @@ R1 x ctrl 1k
             assert value.phase_margin_degrees == 0.0
             assert value.gain_margin_frequency == value.phase_margin_frequency == 100.0
             assert value.assessment == "NONPOSITIVE MEASURED MARGIN"
+
+    def test_phase_matches_the_core_bode_trace_and_survives_pickle(self, engine):
+        netlist = rspice.Netlist.parse("""* three-pole loop
+E1 eo 0 n3 0 -1000
+VP eo x 0
+R1 x n1 1k
+C1 n1 0 159.154943091895n
+E2 b1 0 n1 0 1
+R2 b1 n2 1k
+C2 n2 0 159.154943091895n
+E3 b2 0 n2 0 1
+R3 b2 n3 1k
+C3 n3 0 159.154943091895n
+.end
+""")
+        result = engine.run_stb(netlist, "VP", variation="dec", points=20,
+                                start_freq=100.0, stop_freq=1e5)
+        # T=1000/(1+j*f/1000)^3 crosses the phase branch cut inside this band.
+        expected = -3 * np.degrees(np.arctan(result.frequencies / 1000.0))
+        for value in [result, pickle.loads(pickle.dumps(result))]:
+            np.testing.assert_allclose(value.phase_degrees, expected, rtol=0, atol=1e-8)
+        phase = next(signal for signal in result.document()["signals"]
+                     if signal["descriptor"]["canonicalName"] == "loop_gain_phase")
+        np.testing.assert_array_equal(result.phase_degrees, phase["values"]["samples"])

@@ -24,7 +24,7 @@ pub struct StbData {
     pub frequencies: Vec<Value>,
     /// Loop gain magnitude (dB)
     pub loop_gain_db: Vec<Value>,
-    /// Loop gain phase (degrees)
+    /// Continuous loop gain phase from the core Bode projection (degrees).
     pub loop_phase_deg: Vec<Value>,
     /// Margins extracted from the loop gain. Always present: the extraction
     /// is what stability analysis is for, so it is a result, not an option.
@@ -138,20 +138,19 @@ pub fn run_stb_analysis_with_sweep_and_source_path_and_abort(
     let mut loop_phase_deg = Vec::with_capacity(stb_result.bode_points.len());
     for (index, point) in stb_result.bode_points.iter().enumerate() {
         poll_periodically(abort, index)?;
-        let magnitude = point.loop_gain.norm();
         if point.frequency.to_bits() != result_frequencies[index].to_bits()
             || !point.loop_gain.re.is_finite()
             || !point.loop_gain.im.is_finite()
-            || !magnitude.is_finite()
-            || magnitude <= 0.0
+            || !point.magnitude_db.is_finite()
+            || !point.phase_deg.is_finite()
         {
             return Err(ServiceRunError::Failure(format!(
                 "STB Bode point {} has an invalid frequency or loop gain",
                 index + 1
             )));
         }
-        loop_gain_db.push(20.0 * magnitude.log10());
-        loop_phase_deg.push(point.loop_gain.arg().to_degrees());
+        loop_gain_db.push(point.magnitude_db);
+        loop_phase_deg.push(point.phase_deg);
     }
     ensure_not_aborted(abort)?;
 
@@ -210,5 +209,33 @@ mod tests {
         let result = run_stb_analysis_with_abort("not a netlist", "", 0.0, 0.0, 0, &ImmediateAbort);
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
+    }
+
+    #[test]
+    fn stb_service_retains_the_continuous_core_bode_phase() {
+        let result = run_stb_analysis_with_abort(
+            "* three-pole loop\n\
+E1 eo 0 n3 0 -1000\nVP eo x 0\n\
+R1 x n1 1k\nC1 n1 0 159.154943091895n\n\
+E2 b1 0 n1 0 1\nR2 b1 n2 1k\nC2 n2 0 159.154943091895n\n\
+E3 b2 0 n2 0 1\nR3 b2 n3 1k\nC3 n3 0 159.154943091895n\n.end\n",
+            "VP",
+            100.0,
+            1e5,
+            20,
+            &rspice_core::NoAbort,
+        )
+        .unwrap();
+        assert_eq!(result.frequencies.len(), 61);
+        for ((&frequency, &phase), &magnitude) in result
+            .frequencies
+            .iter()
+            .zip(&result.loop_phase_deg)
+            .zip(&result.loop_gain_db)
+        {
+            let ratio = frequency / 1000.0;
+            assert!((phase + 3.0 * ratio.atan().to_degrees()).abs() < 1e-8);
+            assert!((magnitude - (60.0 - 30.0 * (1.0 + ratio * ratio).log10())).abs() < 1e-8);
+        }
     }
 }

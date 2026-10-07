@@ -527,6 +527,9 @@ type StbMarginState = (u8, Option<(f64, f64)>, Option<(f64, f64)>);
 pub struct PyStbResult {
     frequencies: Vec<f64>,
     loop_gains: Vec<rspice_core::Complex64>,
+    /// Pickle restoration retains the core's phase projection without
+    /// inventing authored document evidence. Direct results use `evidence`.
+    restored_phase_degrees: Vec<f64>,
     #[pyo3(get)]
     pub probe_name: String,
     #[pyo3(get)]
@@ -588,6 +591,7 @@ impl PyStbResult {
             )),
             frequencies: result.frequencies.clone(),
             loop_gains: result.loop_gains.clone(),
+            restored_phase_degrees: Vec::new(),
             probe_name: result.probe_name.clone(),
             gain_margin_db: margins.gain_margin.map(|m| m.value),
             gain_margin_frequency: margins.gain_margin.map(|m| m.frequency),
@@ -677,13 +681,20 @@ impl PyStbResult {
             .to_pyarray(py)
     }
 
+    /// Continuous Bode phase in degrees, using the core's unwrap convention.
     #[getter]
     fn phase_degrees<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
-        self.loop_gains
-            .iter()
-            .map(|value| value.arg().to_degrees())
-            .collect::<Vec<_>>()
-            .to_pyarray(py)
+        if let Some(evidence) = &self.evidence {
+            evidence
+                .core
+                .bode_points
+                .iter()
+                .map(|point| point.phase_deg)
+                .collect::<Vec<_>>()
+                .to_pyarray(py)
+        } else {
+            self.restored_phase_degrees.to_pyarray(py)
+        }
     }
 
     #[getter]
@@ -803,6 +814,11 @@ impl PyStbResult {
         Ok(Self {
             frequencies,
             loop_gains: gains,
+            restored_phase_degrees: projected
+                .bode_points
+                .iter()
+                .map(|point| point.phase_deg)
+                .collect(),
             probe_name,
             gain_margin_db: restored.gain_margin.map(|m| m.value),
             gain_margin_frequency: restored.gain_margin.map(|m| m.frequency),

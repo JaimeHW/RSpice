@@ -277,3 +277,75 @@ fn single_point_and_truncated_sweeps_export_unobserved_margins() {
         }
     }
 }
+
+#[test]
+fn stb_exports_core_bode_samples_without_clipping_or_rewrapping() {
+    let tiny = SINGLE_POLE_STB
+        .replace("-1000", "-1e-310")
+        .replace("dec 20 10 10meg", "lin 1 10 1000");
+    let three_pole = "* three-pole loop\n\
+E1 eo 0 n3 0 -1000\nVP eo x 0\n\
+R1 x n1 1k\nC1 n1 0 159.154943091895n\n\
+E2 b1 0 n1 0 1\nR2 b1 n2 1k\nC2 n2 0 159.154943091895n\n\
+E3 b2 0 n2 0 1\nR3 b2 n3 1k\nC3 n3 0 159.154943091895n\n\
+.stb dec 20 100 100k probe=VP\n.end\n"
+        .to_owned();
+    for (deck_text, gain, poles) in [(tiny, 1e-310_f64, 1.0), (three_pole, 1000.0, 3.0)] {
+        let dir = test_dir("stb_bode_export");
+        let deck = dir.join("loop.sp");
+        let output_path = dir.join("result.csv");
+        std::fs::write(&deck, deck_text).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args([
+                "run",
+                deck.to_str().unwrap(),
+                "-o",
+                output_path.to_str().unwrap(),
+                "-f",
+                "csv",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let content = std::fs::read_to_string(output_path).unwrap();
+        let start = content
+            .lines()
+            .position(|line| line.contains("loopgain_mag_db"))
+            .unwrap();
+        let mut lines = content.lines().skip(start);
+        let headers = lines
+            .next()
+            .unwrap()
+            .split(',')
+            .map(str::trim)
+            .collect::<Vec<_>>();
+        let column = |name| headers.iter().position(|header| *header == name).unwrap();
+        let [frequency, magnitude, phase] =
+            ["frequency", "loopgain_mag_db", "loopgain_phase_deg"].map(column);
+        let mut rows = 0;
+        for row in lines {
+            let row = row.split(',').map(str::trim).collect::<Vec<_>>();
+            let f = row[frequency].parse::<f64>().unwrap();
+            let actual_db = row[magnitude].parse::<f64>().unwrap();
+            let actual_phase = row[phase].parse::<f64>().unwrap();
+            // Independent T= gain/(1+j*f/1000)^poles oracle.
+            let ratio = f / 1000.0;
+            let expected_db = 20.0 * gain.log10() - 10.0 * poles * (1.0 + ratio * ratio).log10();
+            let expected_phase = -poles * ratio.atan().to_degrees();
+            assert!(
+                (actual_db - expected_db).abs() < 1e-8,
+                "{actual_db} versus {expected_db} at {f}Hz"
+            );
+            assert!(
+                (actual_phase - expected_phase).abs() < 1e-8,
+                "{actual_phase} versus {expected_phase} at {f}Hz"
+            );
+            rows += 1;
+        }
+        assert_eq!(rows, if poles == 1.0 { 1 } else { 61 });
+    }
+}

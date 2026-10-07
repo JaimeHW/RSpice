@@ -228,6 +228,9 @@ property, and the margin-only `is_stable` property has been removed. STB pickles
 preserve paired margin availability and independent DC evidence. Older pickles
 recompute margins from retained loop samples and discard inferred stability
 claims; a legacy first AC sample is not restored as a DC measurement.
+`phase_degrees` retains the core's continuous Bode phase, including across a
+pickle round trip. Use `numpy.angle(result.loop_gain, deg=True)` when principal
+phase values in [-180, 180] degrees are needed instead.
 
 A result restored from `pickle` carries this binding's own projection rather
 than the core result these are built from, and says so with
