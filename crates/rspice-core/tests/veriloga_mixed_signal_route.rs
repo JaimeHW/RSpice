@@ -2434,20 +2434,20 @@ module variable_sampler(p,q);
  inout p; electrical p; output q; reg q=0;
  parameter real LOAD=1000;
  integer gain=-2; reg signed [7:0] adjustment=-1; reg startup_ok;
- real measured,period; integer count,enabled;
+ real measured[-2:-1],period; integer count,enabled,index;
  analog begin
-   measured=gain*V(p);
+   measured[-2]=gain*V(p); measured[-1]=-gain*V(p);
    @(timer(0,period,0,enabled)) count=-3;
    I(p)<+(V(p)-gain+adjustment-255)/1000;
  end
  initial begin
-   period=1.537e-9; enabled=1;
-   startup_ok=(measured-4*LOAD/(1000+LOAD)<1e-8)
-     && (measured-4*LOAD/(1000+LOAD)>-1e-8);
-   #1; gain=-4;
+   period=1.537e-9; enabled=1; index=-2;
+   startup_ok=(measured[index]-4*LOAD/(1000+LOAD)<1e-8)
+     && (measured[index]-4*LOAD/(1000+LOAD)>-1e-8);
+   #1; gain=-4; index=-1;
    q=startup_ok && (count==-3) && (adjustment==-1)
-     && (measured-16*LOAD/(1000+LOAD)<1e-8)
-     && (measured-16*LOAD/(1000+LOAD)>-1e-8);
+     && (measured[index]+16*LOAD/(1000+LOAD)<1e-8)
+     && (measured[index]+16*LOAD/(1000+LOAD)>-1e-8);
  end
 endmodule
 "#,

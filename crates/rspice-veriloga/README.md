@@ -253,6 +253,16 @@ extension, truncation, ascending ranges and X/Z values. This follows the
 VAMS-2023 pre-simulation contract (8.2), including when a variable has no process
 writer. Unpacked discrete arrays remain unsupported.
 
+Digital processes can read elements of one-dimensional analog-owned `real` and
+`integer` arrays using constant or runtime indices. Reads retain the element
+type, signed integer arithmetic, and declared index bounds. They use the normal
+analog evaluation's published storage and sampling barrier; resumption preserves
+the chosen index and does not replay earlier digital writes. Real indices use
+the shared nearest-integer conversion. Unknown, unrepresentable, and out-of-range
+indices produce an explicit diagnostic, consistent with the current analog array
+runtime. Digitally owned arrays and multidimensional arrays still require work.
+Canonical schema 67 versions this indexed-read contract.
+
 Delay-controlled nonblocking assignments capture their RHS and converted delay
 at encounter, then continue immediately. Positive delays retain every update
 until its due tick; zero/X/Z delays use the current nonblocking region without

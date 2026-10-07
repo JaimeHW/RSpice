@@ -1453,6 +1453,94 @@ reg [95:0] wide={32'h01234567,32'h89abcdef,32'hfedcba98};
         }
     }
 
+    #[test]
+    fn analog_array_reads_preserve_element_types_and_validate_probe_ranges() {
+        use rspice_veriloga::canonical_ir::{CfgValueKind, CfgValueType};
+        let source = r#"
+module arrays(p);
+  inout p; electrical p;
+  real values[-2:0]; integer codes[2:0];
+  integer index; real sample; integer code;
+  analog begin
+    values[-2]=V(p); values[-1]=2*V(p); values[0]=3*V(p);
+    codes[0]=-3; codes[1]=-4; codes[2]=-5;
+  end
+  initial begin
+    index=-2; sample=values[index]; code=codes[index+2];
+    #1; index=0; sample=values[index]; code=codes[2];
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::default()
+            .compile_canonical_ir(source)
+            .unwrap();
+        let plan = &artifact.digital;
+        assert_eq!(plan.analog_probes.len(), 6);
+        assert_eq!(artifact.hir.digital_observations.len(), 6);
+        let function = &plan.processes[0].function;
+        let reads: Vec<_> = function
+            .values
+            .iter()
+            .filter_map(|value| {
+                if let CfgValueKind::DigitalAnalogVariable {
+                    array_index: Some(selection),
+                    ..
+                } = &value.kind
+                {
+                    assert_eq!(selection.len, 3);
+                    assert_eq!(value.kind.operands(), vec![selection.index]);
+                    Some(value.value_type)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(
+            reads,
+            [
+                CfgValueType::Real,
+                CfgValueType::FourState { width: 32 },
+                CfgValueType::Real,
+                CfgValueType::FourState { width: 32 }
+            ]
+        );
+        let decoded: rspice_veriloga::canonical_ir::CanonicalDigitalPlan =
+            serde_json::from_str(&serde_json::to_string(plan).unwrap()).unwrap();
+        decoded.validate().unwrap();
+        for (lower, len) in [(-2, 0), (-2, 7), (i64::MAX, 3), (-1, 3)] {
+            let mut invalid = decoded.clone();
+            let read = invalid.processes[0]
+                .function
+                .values
+                .iter_mut()
+                .find(|value| {
+                    matches!(
+                        value.kind,
+                        CfgValueKind::DigitalAnalogVariable {
+                            array_index: Some(_),
+                            ..
+                        }
+                    )
+                })
+                .unwrap();
+            if let CfgValueKind::DigitalAnalogVariable {
+                array_index: Some(selection),
+                ..
+            } = &mut read.kind
+            {
+                selection.lower = lower;
+                selection.len = len;
+            }
+            let errors = invalid.validate().unwrap_err();
+            assert!(format!("{errors:?}").contains("array"), "{errors:?}");
+        }
+        assert!(
+            VerilogACompiler::default()
+                .compile_canonical_ir(&source.replace("sample=values[index]", "sample=values"))
+                .is_err()
+        );
+    }
+
     /// The runtime path, which is what feeds the JIT and generated-Rust
     /// backends, refuses it as well.
     #[test]

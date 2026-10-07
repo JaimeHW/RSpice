@@ -576,8 +576,8 @@ fn kernel_region_metrics(
                 write!(out, "digital-delay-ticks:{input:?}:{signed}")
             }
             CfgValueKind::DigitalTime { query } => write!(out, "digital-time:{query:?}"),
-            CfgValueKind::DigitalAnalogVariable { probe } => {
-                write!(out, "digital-analog-variable:{probe}")
+            CfgValueKind::DigitalAnalogVariable { probe, array_index } => {
+                write!(out, "digital-analog-variable:{probe}:{array_index:?}")
             }
             CfgValueKind::DigitalAnalogFlow { probe } => write!(out, "digital-analog-flow:{probe}"),
             CfgValueKind::DigitalAnalogPotential { probe } => {

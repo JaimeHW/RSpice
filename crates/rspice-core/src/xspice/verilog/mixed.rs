@@ -4830,8 +4830,54 @@ endmodule
     }
 
     #[test]
+    fn analog_array_reads_reject_invalid_indices_without_guessing_a_sample() {
+        for (index, detail) in [
+            ("-1", "outside the declared bounds"),
+            ("2'bxz", "contains X/Z"),
+            ("96'h10000000000000000", "outside the signed 64-bit range"),
+        ] {
+            let source = format!(
+                "module arrays(p); inout p; electrical p; real values[0:1],sample; \
+                 reg signed [95:0] index={index}; \
+                 analog begin values[0]=V(p); values[1]=2*V(p); I(p)<+V(p)/1000; end \
+                 initial sample=values[index]; endmodule"
+            );
+            let mut host =
+                MixedSignalHost::compile(&source, None, "x", &[1], SchedulerLimits::default())
+                    .unwrap();
+            let error = host
+                .begin_trial(0.0, 0.0, IntegrationCoefficients::inactive(), true, false)
+                .and_then(|_| {
+                    while host.settle_analog_bridges(&[1.0])? {}
+                    Ok(())
+                })
+                .unwrap_err();
+            assert!(error.to_string().contains(detail), "{index}: {error}");
+        }
+    }
+
+    #[test]
     fn discrete_analog_inputs_restore_on_rejection_and_checkpoint() {
-        let source = "module shared(p); inout p; electrical p; real state=0.25; integer bias=-2; reg [4:0] packed=17; initial begin #1 state=1.25; bias=-3; packed=18; end analog I(p)<+state+bias+packed-15; endmodule";
+        let source = r#"
+module shared(p);
+ inout p; electrical p;
+ real state=0.25; integer bias=-2; reg [4:0] packed=17;
+ real observed[-2:-1], sample; integer codes[2:1], index;
+ reg sample_ok;
+ initial begin
+   index=-2; sample=observed[index];
+   sample_ok=(sample==0.25) && (codes[1]<0) && (codes[2]==5);
+   #1 state=1.25; bias=-3; packed=18; index=-1;
+   sample=observed[index];
+   sample_ok=(sample==-1.25) && (observed[-1.5]==1.25);
+ end
+ analog begin
+   observed[-2]=state; observed[-1]=-state;
+   codes[1]=-3; codes[2]=5;
+   I(p)<+state+bias+packed-15;
+ end
+endmodule
+"#;
         let mut host =
             MixedSignalHost::compile(source, None, "x", &[1], SchedulerLimits::default()).unwrap();
         let stamp = |host: &mut MixedSignalHost| {
@@ -4843,10 +4889,12 @@ endmodule
         };
         begin(&mut host, 0);
         assert_eq!(stamp(&mut host), -0.25);
+        assert_eq!(host.read_digital("sample_ok").unwrap(), "1");
         host.accept_trial().unwrap();
         let checkpoint = host.checkpoint().unwrap();
         begin(&mut host, 1);
         assert_eq!(stamp(&mut host), -1.25);
+        assert_eq!(host.read_digital("sample_ok").unwrap(), "1");
         host.reject_trial().unwrap();
         assert_eq!(
             host.analog
@@ -4859,10 +4907,12 @@ endmodule
         );
         begin(&mut host, 1);
         assert_eq!(stamp(&mut host), -1.25);
+        assert_eq!(host.read_digital("sample_ok").unwrap(), "1");
         host.accept_trial().unwrap();
         host.restore(&checkpoint).unwrap();
         begin(&mut host, 1);
         assert_eq!(stamp(&mut host), -1.25);
+        assert_eq!(host.read_digital("sample_ok").unwrap(), "1");
     }
 
     #[test]

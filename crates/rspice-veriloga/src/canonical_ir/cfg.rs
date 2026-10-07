@@ -71,6 +71,16 @@ use super::{
     NodeId, ParamId, ShapeId, ValueId, VariableId,
 };
 
+/// Runtime selection within a contiguous group of analog variable probes.
+/// The index remains an SSA operand so sample suspension captures it exactly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalAnalogArrayIndex {
+    pub index: ValueId,
+    pub signed: bool,
+    pub lower: i64,
+    pub len: u32,
+}
+
 /// What SSA tracks a definition for.
 ///
 /// Module variables are the obvious case. Contribution residuals are here for
@@ -931,6 +941,8 @@ pub enum CfgValueKind {
     /// A published analog-owned variable from the current analog evaluation.
     DigitalAnalogVariable {
         probe: DigitalAnalogProbeId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        array_index: Option<DigitalAnalogArrayIndex>,
     },
     /// Arithmetic over two real values, inside a process function.
     ///
@@ -1367,6 +1379,10 @@ impl CfgValueKind {
     /// skipped by half of them.
     pub fn operands(&self) -> Vec<ValueId> {
         match self {
+            Self::DigitalAnalogVariable { array_index, .. } => array_index
+                .iter()
+                .map(|selection| selection.index)
+                .collect(),
             Self::AnalogTask(task) => task.expressions().copied().collect(),
             Self::AnalogTaskGuard(value) => vec![*value],
             Self::DigitalRepeatCount { input, .. }
@@ -1605,6 +1621,11 @@ impl CfgValueKind {
 
     pub(crate) fn map_operands(&mut self, mut map: impl FnMut(ValueId) -> ValueId) {
         match self {
+            Self::DigitalAnalogVariable { array_index, .. } => {
+                if let Some(selection) = array_index {
+                    selection.index = map(selection.index);
+                }
+            }
             Self::AnalogTaskGuard(value) => *value = map(*value),
             Self::AnalogTask(task) => {
                 for value in task.expressions_mut() {

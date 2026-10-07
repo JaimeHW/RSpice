@@ -417,7 +417,7 @@ impl CanonicalDigitalPlan {
                                 ));
                             }
                         }
-                        CfgValueKind::DigitalAnalogVariable { probe } => {
+                        CfgValueKind::DigitalAnalogVariable { probe, array_index } => {
                             use super::digital::DigitalAnalogQuantity;
                             let Some(declaration) = self.analog_probe(*probe) else {
                                 return Err(error(
@@ -439,6 +439,60 @@ impl CanonicalDigitalPlan {
                                 return Err(error(
                                     "digital analog variable read has the wrong type",
                                 ));
+                            }
+                            if let Some(selection) = array_index {
+                                if selection.len == 0
+                                    || selection.len > 65_536
+                                    || selection
+                                        .lower
+                                        .checked_add(i64::from(selection.len) - 1)
+                                        .is_none()
+                                    || !matches!(
+                                        function.value(selection.index).value_type,
+                                        CfgValueType::Real
+                                            | CfgValueType::Integer
+                                            | CfgValueType::FourState { .. }
+                                    )
+                                {
+                                    return Err(error(
+                                        "digital analog array read has an invalid index or extent",
+                                    ));
+                                }
+                                let DigitalAnalogProbeTarget::Variable { name } =
+                                    &declaration.target
+                                else {
+                                    return Err(error(
+                                        "digital analog array read requires variable probes",
+                                    ));
+                                };
+                                let suffix = format!("[{}]", selection.lower);
+                                let Some(name) = name.strip_suffix(&suffix) else {
+                                    return Err(error(
+                                        "digital analog array read has an inconsistent lower bound",
+                                    ));
+                                };
+                                let base = usize::from(*probe);
+                                let Some(end) = base.checked_add(selection.len as usize) else {
+                                    return Err(error(
+                                        "digital analog array probe range overflows",
+                                    ));
+                                };
+                                let Some(probes) = self.analog_probes.get(base..end) else {
+                                    return Err(error(
+                                        "digital analog array read exceeds its probe table",
+                                    ));
+                                };
+                                for (offset, element) in probes.iter().enumerate() {
+                                    let expected_name =
+                                        format!("{name}[{}]", selection.lower + offset as i64);
+                                    if element.quantity != declaration.quantity
+                                        || !matches!(&element.target, DigitalAnalogProbeTarget::Variable { name } if name == &expected_name)
+                                    {
+                                        return Err(error(
+                                            "digital analog array read has inconsistent element bindings",
+                                        ));
+                                    }
+                                }
                             }
                         }
                         CfgValueKind::DigitalAnalogPotential { probe }

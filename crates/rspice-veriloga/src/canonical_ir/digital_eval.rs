@@ -1996,9 +1996,34 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             // Which value the environment hands back is section 7.3.6.3's
             // question, and it is deliberately not asked here — the
             // interpreter has no clock to compare the two domains' against.
-            CfgValueKind::DigitalAnalogVariable { probe } => {
+            CfgValueKind::DigitalAnalogVariable { probe, array_index } => {
                 use super::digital::DigitalAnalogQuantity;
-                let probe_id = *probe;
+                let probe_id = if let Some(selection) = array_index {
+                    let selected = match self.scalar(selection.index)? {
+                        ScalarRef::Real(value) => crate::array_index::checked_rounded_i64(value).ok(),
+                        ScalarRef::Integer(value) => Some(i64::from(value)),
+                        ScalarRef::FourState(value) => value.bit_index(selection.signed),
+                        ScalarRef::Effect => return Err(DigitalEvalError::EffectValueRead(selection.index)),
+                    }.ok_or(DigitalEvalError::InvalidNumericConversion {
+                        value: selection.index,
+                        detail: "analog array index contains X/Z or is outside the signed 64-bit range",
+                    })?;
+                    let offset = i128::from(selected) - i128::from(selection.lower);
+                    if offset < 0 || offset >= i128::from(selection.len) {
+                        return Err(DigitalEvalError::InvalidNumericConversion {
+                            value: selection.index,
+                            detail: "analog array index is outside the declared bounds",
+                        });
+                    }
+                    let slot = usize::from(*probe)
+                        .checked_add(offset as usize)
+                        .ok_or(DigitalEvalError::UndeclaredAnalogProbe(*probe))?;
+                    let slot = u32::try_from(slot)
+                        .map_err(|_| DigitalEvalError::UndeclaredAnalogProbe(*probe))?;
+                    DigitalAnalogProbeId::new(slot)
+                } else {
+                    *probe
+                };
                 let declaration = self
                     .plan
                     .analog_probe(probe_id)

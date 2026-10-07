@@ -528,7 +528,7 @@ fn relocate_value(
         }
         CfgValueKind::DigitalAnalogPotential { probe }
         | CfgValueKind::DigitalAnalogFlow { probe }
-        | CfgValueKind::DigitalAnalogVariable { probe } => {
+        | CfgValueKind::DigitalAnalogVariable { probe, .. } => {
             *probe = map.analog_probes[usize::from(*probe)]
         }
         CfgValueKind::DigitalBlockingWrite { target, .. } => relocate_target(target, source, map),
