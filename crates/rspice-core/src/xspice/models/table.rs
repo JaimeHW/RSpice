@@ -2,7 +2,7 @@
 
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, ParamSpec, PortDirection, PortSpec, PortType,
-    data_file,
+    XspiceSmallSignalDescriptor, data_file,
 };
 use crate::{Complex64, Value};
 use std::sync::{
@@ -2039,6 +2039,10 @@ fn table_params(kind: TableKind) -> &'static [ParamSpec] {
 }
 
 impl CodeModel for Table2D {
+    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        Ok(XspiceSmallSignalDescriptor::AffineAc)
+    }
+
     fn input_data_file_parameters(&self) -> &[crate::xspice::InputDataFileParameter] {
         &[crate::xspice::InputDataFileParameter {
             name: "file",
@@ -2103,6 +2107,10 @@ impl CodeModel for Table2D {
 }
 
 impl CodeModel for Table3D {
+    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        Ok(XspiceSmallSignalDescriptor::AffineAc)
+    }
+
     fn input_data_file_parameters(&self) -> &[crate::xspice::InputDataFileParameter] {
         &[crate::xspice::InputDataFileParameter {
             name: "file",

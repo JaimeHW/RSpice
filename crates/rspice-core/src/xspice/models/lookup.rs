@@ -5,6 +5,7 @@
 use crate::Value;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, ParamSpec, PortDirection, PortSpec, PortType,
+    XspiceSmallSignalDescriptor,
 };
 use std::sync::{
     Arc, OnceLock,
@@ -589,6 +590,10 @@ fn cache_lookup_eval(ctx: &mut CmContext, x: Value) -> CmResult<LookupResult> {
 pub struct PiecewiseLinear;
 
 impl CodeModel for PiecewiseLinear {
+    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        Ok(XspiceSmallSignalDescriptor::AffineAc)
+    }
+
     fn name(&self) -> &str {
         "pwl"
     }

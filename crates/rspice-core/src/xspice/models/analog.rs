@@ -6,7 +6,7 @@ use crate::numerics::scaled_product::ScaledProduct;
 use crate::xspice::context::AnalogValue;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, EvaluationPhase, ParamSpec, PortDirection, PortSpec,
-    PortType, XspiceCheckpointSupport,
+    PortType, XspiceCheckpointSupport, XspiceSmallSignalDescriptor,
 };
 use crate::{Complex64, Value};
 use std::sync::{
@@ -456,6 +456,10 @@ fn validate_analog_vector_params(ctx: &CmContext, model_name: &str) -> CmResult<
 pub struct Multiplier;
 
 impl CodeModel for Multiplier {
+    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        Ok(XspiceSmallSignalDescriptor::AffineAc)
+    }
+
     fn name(&self) -> &str {
         "mult"
     }
@@ -821,6 +825,10 @@ fn mult_partials_from_context(ctx: &CmContext) -> CmResult<Vec<(String, usize, V
 pub struct Divider;
 
 impl CodeModel for Divider {
+    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        Ok(XspiceSmallSignalDescriptor::AffineAc)
+    }
+
     fn name(&self) -> &str {
         "divider"
     }
@@ -1135,6 +1143,10 @@ fn divide_limited_denominator(
 pub struct Limiter;
 
 impl CodeModel for Limiter {
+    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        Ok(XspiceSmallSignalDescriptor::AffineAc)
+    }
+
     fn name(&self) -> &str {
         "limit"
     }
@@ -1372,6 +1384,10 @@ fn limit_transfer(
 pub struct ControlledLimiter;
 
 impl CodeModel for ControlledLimiter {
+    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        Ok(XspiceSmallSignalDescriptor::AffineAc)
+    }
+
     fn name(&self) -> &str {
         "climit"
     }
@@ -5441,6 +5457,13 @@ macro_rules! analog_model_alias {
         pub struct $alias;
 
         impl CodeModel for $alias {
+            fn small_signal_descriptor(
+                &self,
+                ctx: &CmContext,
+            ) -> CmResult<XspiceSmallSignalDescriptor> {
+                $target.small_signal_descriptor(ctx)
+            }
+
             fn name(&self) -> &str {
                 $name
             }

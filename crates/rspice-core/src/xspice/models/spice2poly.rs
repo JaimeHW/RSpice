@@ -9,6 +9,7 @@ use crate::numerics::scaled_product::ScaledProduct;
 use crate::xspice::context::AnalogValue;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, ParamSpec, PortDirection, PortSpec, PortType,
+    XspiceSmallSignalDescriptor,
 };
 use std::sync::{Arc, OnceLock};
 
@@ -476,6 +477,10 @@ fn evaluate_context_cached(ctx: &mut CmContext) -> CmResult<Arc<PolyEval>> {
 }
 
 impl CodeModel for Spice2Poly {
+    fn small_signal_descriptor(&self, _ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        Ok(XspiceSmallSignalDescriptor::AffineAc)
+    }
+
     fn name(&self) -> &str {
         "spice2poly"
     }
@@ -532,6 +537,10 @@ impl CodeModel for Spice2Poly {
 }
 
 impl CodeModel for IcmSpice2Poly {
+    fn small_signal_descriptor(&self, ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
+        Spice2Poly.small_signal_descriptor(ctx)
+    }
+
     fn name(&self) -> &str {
         "icm_spice2poly"
     }
