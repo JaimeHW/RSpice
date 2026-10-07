@@ -1783,6 +1783,7 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::BranchUnknownFlow(_)
         | CfgValueKind::EventState(_)
         | CfgValueKind::EvaluationInput(_)
+        | CfgValueKind::EvaluationInputIndexed { .. }
         // The check must report into this evaluation's error state, even if
         // its input is constant and an earlier evaluation rejected it.
         | CfgValueKind::ArrayIndex { .. }

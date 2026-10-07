@@ -581,7 +581,9 @@ pub(super) fn grouped_noise_extension(
     if plan.function.values.iter().any(|value| {
         matches!(
             value.kind,
-            CfgValueKind::EventState(_) | CfgValueKind::EvaluationInput(_)
+            CfgValueKind::EventState(_)
+                | CfgValueKind::EvaluationInput(_)
+                | CfgValueKind::EvaluationInputIndexed { .. }
         )
     }) {
         out.push_str("        let event_state = &*self.event_state_accepted;\n");

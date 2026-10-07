@@ -310,10 +310,27 @@ fn lower_cfg_outputs(
     state: &CfgStateAllocation,
     bindings: &CfgRuntimeBindings,
 ) -> JitResult<Program> {
+    // A prefix count validates each indexed range in constant time. Scalar-only
+    // models do not need this auxiliary table.
+    let mut missing_event_bindings = Vec::new();
+    if function
+        .values
+        .iter()
+        .any(|value| matches!(value.kind, CfgValueKind::EvaluationInputIndexed { .. }))
+    {
+        missing_event_bindings.reserve(bindings.event_state_variables.len() + 1);
+        missing_event_bindings.push(0usize);
+        for binding in &bindings.event_state_variables {
+            missing_event_bindings.push(
+                missing_event_bindings.last().copied().unwrap() + usize::from(binding.is_none()),
+            );
+        }
+    }
     Lowerer {
         function,
         state,
         bindings,
+        missing_event_bindings,
     }
     .run(outputs)
 }
@@ -322,6 +339,7 @@ struct Lowerer<'a> {
     function: &'a CfgFunction,
     state: &'a CfgStateAllocation,
     bindings: &'a CfgRuntimeBindings,
+    missing_event_bindings: Vec<usize>,
 }
 
 impl Lowerer<'_> {
@@ -950,6 +968,29 @@ impl Lowerer<'_> {
                     )));
                 }
                 push(NativeOp::LoadEvaluationState(slot), &[])
+            }
+            CfgValueKind::EvaluationInputIndexed { base, len, index } => {
+                let start = *base as usize;
+                let end = start
+                    .checked_add(*len as usize)
+                    .ok_or_else(|| self.refuse("CFG evaluation-input range overflows".into()))?;
+                if *len == 0
+                    || end >= self.missing_event_bindings.len()
+                    || self.missing_event_bindings[start] != self.missing_event_bindings[end]
+                {
+                    return Err(self.refuse(
+                        "CFG evaluation-input array has an unavailable runtime binding".into(),
+                    ));
+                }
+                let offset = push(
+                    NativeOp::CheckedArrayIndex {
+                        len: *len as usize,
+                        lower: 0,
+                    },
+                    &[operand(*index)?],
+                )?;
+                let slot = push(NativeOp::AddConst(f64::from(*base)), &[offset])?;
+                push(NativeOp::LoadEvaluationStateDyn, &[slot])
             }
             CfgValueKind::Temperature => push(NativeOp::LoadTemperature, &[]),
             CfgValueKind::ThermalVoltage => push(NativeOp::LoadThermalVoltage, &[]),
@@ -1735,7 +1776,7 @@ fn speculation_hazard(kind: &CfgValueKind) -> Option<&'static str> {
         CfgValueKind::BlockParameter => {
             Some("is a merge of the arms reaching it and so has no single value to move")
         }
-        CfgValueKind::ParameterGiven(_) | CfgValueKind::PortConnected(_) | CfgValueKind::ArrayIndex { .. } => {
+        CfgValueKind::ParameterGiven(_) | CfgValueKind::PortConnected(_) | CfgValueKind::ArrayIndex { .. } | CfgValueKind::EvaluationInputIndexed { .. } => {
             Some("is a bounds-checked read that can report a runtime error")
         }
         CfgValueKind::IdtScale => {

@@ -1335,6 +1335,7 @@ impl FunctionCompiler {
                         | NativeOp::LoadSimParamValue(_)
                         | NativeOp::LoadSimParamPresent(_)
                         | NativeOp::LoadEvaluationState(_)
+                        | NativeOp::LoadEvaluationStateDyn
                         | NativeOp::AnalogTasksEnabled
                         | NativeOp::AnalogTaskGuard
                         | NativeOp::AnalogFinish(_) => {

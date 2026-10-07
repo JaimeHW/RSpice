@@ -313,6 +313,14 @@ pub enum CfgValueKind {
     /// Uses the same dense state-slot order as EventState, with an immutable
     /// input lifetime rather than a read of the published candidate.
     EvaluationInput(u32),
+    /// Indexed read of an immutable evaluation-input array. `base` addresses
+    /// the dense event-state snapshot, and `index` is a zero-based offset.
+    /// Backends check the declared length and the available snapshot storage.
+    EvaluationInputIndexed {
+        base: u32,
+        len: u32,
+        index: ValueId,
+    },
     Temperature,
     ThermalVoltage,
     Multiplicity,
@@ -1248,6 +1256,7 @@ impl CfgValueKind {
             | Self::PortConnected(_)
             | Self::EventState(_)
             | Self::EvaluationInput(_)
+            | Self::EvaluationInputIndexed { .. }
             | Self::Temperature
             | Self::ThermalVoltage
             | Self::Multiplicity
@@ -1420,6 +1429,7 @@ impl CfgValueKind {
             | Self::LaneWiden { input }
             | Self::LaneExtract { input, .. }
             | Self::ArrayIndex { input, .. }
+            | Self::EvaluationInputIndexed { index: input, .. }
             | Self::IntegerBitwiseNot { input }
             | Self::LimitPrevious {
                 proposed: input, ..
@@ -1676,6 +1686,7 @@ impl CfgValueKind {
             | Self::LaneWiden { input }
             | Self::LaneExtract { input, .. }
             | Self::ArrayIndex { input, .. }
+            | Self::EvaluationInputIndexed { index: input, .. }
             | Self::IntegerBitwiseNot { input }
             | Self::LimitPrevious {
                 proposed: input, ..

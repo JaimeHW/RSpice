@@ -533,6 +533,204 @@ endmodule
     }
 }
 
+#[test]
+fn projected_array_indexed_read_scales_and_preserves_executed_path() {
+    use rspice_veriloga::CompilerOptions;
+    use rspice_veriloga::canonical_ir::{CfgValueKind, NodeId};
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let mut instruction_counts = Vec::new();
+    for len in [2, 128] {
+        let source = format!(
+            "module projected(p,q); inout p,q; electrical p,q;
+            real local; reg [7:0] data[7:{}];
+            analog begin local=9; I(p)<+(V(p)<0 ? 3 : data[V(p)]*V(q)); end
+            endmodule",
+            6 + len
+        );
+        let runtime = compiler.compile_runtime(&source, None).unwrap();
+        let artifact = &runtime.canonical_ir;
+        let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).unwrap();
+        let mut ad = differentiate(
+            &cfg.function,
+            &[
+                AdSeed::NodePotential(NodeId::from(0usize)),
+                AdSeed::NodePotential(NodeId::from(1usize)),
+            ],
+        )
+        .unwrap();
+        assert!(
+            ad.derivative(cfg.residuals[0], 0).is_none(),
+            "array selection has no continuous derivative"
+        );
+        let dp = ad
+            .function
+            .values
+            .iter()
+            .find(|v| matches!(v.kind, CfgValueKind::RealConstant(value) if value == 0.0))
+            .unwrap()
+            .id;
+        let dq = ad.derivative(cfg.residuals[0], 1).unwrap();
+        let (function, wanted) = optimize_cfg(&ad.function, &[cfg.residuals[0], dp, dq]);
+        assert_eq!(
+            function
+                .values
+                .iter()
+                .filter(|v| matches!(v.kind, CfgValueKind::EvaluationInputIndexed { .. }))
+                .count(),
+            2
+        );
+        assert!(
+            !function
+                .values
+                .iter()
+                .any(|v| matches!(v.kind, CfgValueKind::Select { .. })),
+            "projected reads must not build per-cell selection chains"
+        );
+        instruction_counts.push(
+            function
+                .blocks
+                .iter()
+                .map(|b| b.instructions.len())
+                .sum::<usize>(),
+        );
+        let (body, names) = emit_body(&function, &wanted, &EmitBindings::default()).unwrap();
+        let mut bias = bias(artifact);
+        bias.node_potentials[1] = 2.0;
+        let mut input = inputs(&bias);
+        let states: Vec<_> = artifact
+            .hir
+            .variables
+            .iter()
+            .filter(|v| v.is_state)
+            .map(|v| v.id)
+            .collect();
+        input.event_state.resize(states.len(), 0.0);
+        let pair = artifact
+            .hir
+            .discrete_inputs
+            .iter()
+            .find(|pair| artifact.hir.variables[usize::from(pair[0])].name == "data[7]")
+            .unwrap();
+        let numeric = states.iter().position(|id| id == &pair[0]).unwrap();
+        let valid = states.iter().position(|id| id == &pair[1]).unwrap();
+        input.event_state[numeric] = 5.0;
+        input.event_state[valid] = 1.0;
+        let mut executable = format!(
+            "fn read_projected(event_state: &[f64], node_potentials: &[f64]) -> [f64;3] {{ {body} [{}] }}\n",
+            names.join(", ")
+        );
+        let mut output_names = Vec::new();
+        let mut expected_outputs = Vec::new();
+        for (case, (index, available, expected)) in [
+            (-1.0, false, Some([3.0, 0.0, 0.0])),
+            (7.0, true, Some([10.0, 0.0, 5.0])),
+            (7.0, false, None),
+            (8.0, true, None),
+            (6.0, true, None),
+            ((7 + len) as f64, true, None),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            input.node_potentials[0] = index;
+            input.event_state[valid] = f64::from(u8::from(available));
+            let actual = evaluate_cfg(&function, &input);
+            if let Some(expected) = expected {
+                let actual = actual.unwrap();
+                for (value, expected) in wanted.iter().zip(expected) {
+                    assert_eq!(actual.value(*value), Some(expected));
+                }
+            } else {
+                assert!(actual.is_err(), "index {index}, available {available}");
+            }
+            executable.push_str(&format!("let result_{case} = std::panic::catch_unwind(|| read_projected(&{:?}, &[{index:?}, 2.0])).unwrap_or([-99.0; 3]);\n", input.event_state));
+            for lane in 0..3 {
+                output_names.push(format!("result_{case}[{lane}]"));
+            }
+            expected_outputs.extend(expected.unwrap_or([-99.0; 3]));
+        }
+        assert_eq!(
+            compile_and_run(
+                &scratch("projected-index"),
+                &format!("projected_{len}"),
+                &program(&executable, &output_names, &bias)
+            ),
+            expected_outputs
+        );
+
+        // A write present in either HIR view, including initialization, must
+        // prevent the value array from bypassing local reaching definitions.
+        use rspice_veriloga::canonical_ir::hir::{HirRegion, HirStatement};
+        for structured in [false, true] {
+            let mut hir = artifact.hir.clone();
+            let HirStatement::Assignment(mut write) = hir
+                .statements
+                .iter()
+                .find(|s| matches!(s, HirStatement::Assignment(_)))
+                .unwrap()
+                .clone()
+            else {
+                unreachable!()
+            };
+            write.target = pair[0];
+            write.target_name = hir.variables[usize::from(pair[0])].name.clone();
+            if structured {
+                hir.body.push(HirRegion::Initialization {
+                    phase: rspice_veriloga_runtime::AnalogEvaluationPhase::Initialization,
+                    span: write.span,
+                    body: vec![HirRegion::Assignment(write)],
+                });
+            } else {
+                hir.statements.push(HirStatement::Initialization {
+                    phase: rspice_veriloga_runtime::AnalogEvaluationPhase::Initialization,
+                    span: write.span,
+                    body: vec![HirStatement::Assignment(write)],
+                });
+            }
+            let lowered = CfgModel::from_hir(&hir, &artifact.mir).unwrap();
+            assert_eq!(
+                lowered
+                    .function
+                    .values
+                    .iter()
+                    .filter(|v| matches!(v.kind, CfgValueKind::EvaluationInputIndexed { .. }))
+                    .count(),
+                1,
+                "only the unwritten validity array is eligible"
+            );
+        }
+    }
+    assert_eq!(
+        instruction_counts[0], instruction_counts[1],
+        "selected-read work must not grow with array length"
+    );
+
+    // The generated runtime retains storage/index failures even when a caller
+    // masks the returned NaN with a comparison.
+    let ctx = rspice_veriloga_runtime::GeneratedEvalContext::with_analysis(
+        &[0.0],
+        300.15,
+        1,
+        rspice_veriloga_runtime::GeneratedAnalysisKind::Dc,
+    );
+    assert_eq!(
+        ctx.checked_evaluation_input_indexed(&[4.0, 7.0], 0.0, 1, 1),
+        7.0
+    );
+    for (index, base, len) in [
+        (1.0, 1, 1),
+        (0.0, 2, 1),
+        (f64::NAN, 0, 1),
+        (0.0, usize::MAX, 1),
+    ] {
+        assert!(!(ctx.checked_evaluation_input_indexed(&[4.0, 7.0], index, base, len) > 0.0));
+        assert!(ctx.take_evaluation_error().is_some());
+    }
+}
+
 /// The emitter and the interpreter evaluate the same operations in the same
 /// order, so anything less than bit equality is a real difference in meaning
 /// rather than a rounding artefact.

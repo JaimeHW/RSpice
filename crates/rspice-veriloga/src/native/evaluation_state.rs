@@ -79,3 +79,51 @@ fn evaluation_state_unavailable_aborts_before_subsequent_publication() {
         assert_eq!(variables, [5.0, 92.0, 93.0]);
     }
 }
+
+#[test]
+fn indexed_evaluation_state_pins_inputs_and_aborts_invalid_reads() {
+    let read = |target| NativeAssignment::Direct {
+        var_index: target,
+        program: NativeProgram::from_ops_for_test(
+            vec![NativeOp::LoadVariable(3), NativeOp::LoadEvaluationStateDyn],
+            1,
+            Vec::new(),
+            Vec::new(),
+        ),
+    };
+    let assignments = [read(0), assignment(1, NativeOp::Const(999.0)), read(2)];
+    let bytes = compile_assignment_pass_function(&assignments).unwrap();
+    let memory = ExecutableMemory::allocate(&bytes).unwrap();
+    let entry: extern "C" fn(*const EvalContext, *mut f64) =
+        unsafe { std::mem::transmute(memory.ptr_at(0).unwrap()) };
+    let saved = [4.0, -0.0, 7.25];
+    for (pointer, length, index, valid) in [
+        (saved.as_ptr(), 3, 0.0, true),
+        (saved.as_ptr(), 3, 1.0, true),
+        (saved.as_ptr(), 3, 2.0, true),
+        (saved.as_ptr(), 3, -1.0, false),
+        (saved.as_ptr(), 3, 0.5, false),
+        (saved.as_ptr(), 3, 3.0, false),
+        (saved.as_ptr(), 3, f64::NAN, false),
+        (saved.as_ptr(), 3, f64::INFINITY, false),
+        (saved.as_ptr(), 0, 0.0, false),
+        (std::ptr::null(), 3, 0.0, false),
+    ] {
+        let mut variables = [91.0, 92.0, 93.0, index];
+        let context = EvalContext {
+            evaluation_state_inputs: pointer,
+            evaluation_state_inputs_len: length,
+            ..EvalContext::empty_for_test()
+        };
+        entry(&context, variables.as_mut_ptr());
+        if valid {
+            assert!(context.take_runtime_error().is_none());
+            assert_eq!(variables[0].to_bits(), saved[index as usize].to_bits());
+            assert_eq!(variables[1], 999.0);
+            assert_eq!(variables[2].to_bits(), saved[index as usize].to_bits());
+        } else {
+            assert!(context.take_runtime_error().is_some(), "index {index}");
+            assert_eq!(&variables[..3], &[91.0, 92.0, 93.0]);
+        }
+    }
+}

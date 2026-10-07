@@ -495,6 +495,18 @@ impl<'a, S: CfgScalar> PlanWalk<'a, S> {
                 let value = self.read(self.point.evaluation_state_inputs, index, name)?;
                 stack.push(S::from_f64(value));
             }
+            NativeOp::LoadEvaluationStateDyn => {
+                let raw = stack.pop().ok_or(PostfixRefusal::Malformed(name))?.real();
+                if !raw.is_finite()
+                    || raw < 0.0
+                    || raw.fract() != 0.0
+                    || raw >= self.point.evaluation_state_inputs.len() as f64
+                {
+                    return Err(PostfixRefusal::RuntimeError(name));
+                }
+                let value = self.read(self.point.evaluation_state_inputs, raw as usize, name)?;
+                stack.push(S::from_f64(value));
+            }
             NativeOp::LoadPreludeSlot(index) => {
                 let value = *self
                     .prelude

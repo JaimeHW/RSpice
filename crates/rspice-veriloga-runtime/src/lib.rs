@@ -2289,6 +2289,35 @@ impl<'a> GeneratedEvalContext<'a> {
         }
     }
 
+    /// Read a projected array from the immutable dense evaluation-input snapshot.
+    /// Keep an unavailable input as an evaluation error even if its value is masked.
+    pub fn checked_evaluation_input_indexed(
+        &self,
+        inputs: &[Value],
+        index: Value,
+        base: usize,
+        len: usize,
+    ) -> Value {
+        let offset = self.checked_array_index(index, len, 0);
+        if !offset.is_finite() {
+            return Value::NAN;
+        }
+        if let Some(value) = base
+            .checked_add(offset as usize)
+            .and_then(|slot| inputs.get(slot))
+        {
+            return *value;
+        }
+        if self.evaluation_error.get().is_none() {
+            self.evaluation_error
+                .set(Some(GeneratedEvaluationError::ArrayIndex {
+                    reason: "procedural evaluation-state input is unavailable",
+                    non_finite: false,
+                }));
+        }
+        Value::NAN
+    }
+
     /// Retain integer failures even when the result only controls a branch.
     #[inline]
     pub fn integer_result(&self, result: Result<Value, integer::IntegerRuntimeError>) -> Value {

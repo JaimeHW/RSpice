@@ -240,6 +240,8 @@ pub(crate) enum NativeOp {
     /// Immutable procedural state at the start of this numerical evaluation.
     /// This buffer is distinct from the variable slots assignments publish.
     LoadEvaluationState(usize),
+    /// Checked absolute dense snapshot slot supplied by one SSA operand.
+    LoadEvaluationStateDyn,
     /// Publish one value into a per-evaluation prelude slot, and yield it.
     ///
     /// The only operation in this vocabulary whose point is its side effect.
@@ -8395,6 +8397,7 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::IdtModDerivativeState(_) => "IdtModDerivativeState",
         NativeOp::LoadPreludeSlot(_) => "LoadPreludeSlot",
         NativeOp::LoadEvaluationState(_) => "LoadEvaluationState",
+        NativeOp::LoadEvaluationStateDyn => "LoadEvaluationStateDyn",
         NativeOp::StorePreludeSlot(_) => "StorePreludeSlot",
         NativeOp::StoreVariable(_) => "StoreVariable",
     }
@@ -9313,6 +9316,7 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
 
         NativeOp::LoadVariableDyn { .. }
         | NativeOp::LoadDiscreteVariableDyn { .. }
+        | NativeOp::LoadEvaluationStateDyn
         | NativeOp::CheckedArrayIndex { .. }
         | NativeOp::AddConst(_)
         | NativeOp::SubConst(_)

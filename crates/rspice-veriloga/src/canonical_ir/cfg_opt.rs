@@ -761,6 +761,7 @@ impl Optimizer {
                 if matches!(
                     self.values[usize::from(instruction.result)].kind,
                     CfgValueKind::ArrayIndex { .. }
+                        | CfgValueKind::EvaluationInputIndexed { .. }
                         | CfgValueKind::Binary {
                             op: CfgBinaryOp::DiscreteValue,
                             ..

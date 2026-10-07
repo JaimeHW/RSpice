@@ -952,6 +952,20 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 .event_state
                 .get(slot as usize)
                 .ok_or(CfgEvalError::MissingInput("event state", slot as usize))?,
+            CfgValueKind::EvaluationInputIndexed { base, len, index } => {
+                let slot = crate::array_index::checked_array_slot(
+                    self.read(index)?.real(),
+                    base as usize,
+                    len as usize,
+                    0,
+                )
+                .map_err(|error| CfgEvalError::ArrayIndex(format!("{error:?}")))?;
+                *self
+                    .inputs
+                    .event_state
+                    .get(slot)
+                    .ok_or(CfgEvalError::MissingInput("event state", slot))?
+            }
             CfgValueKind::Temperature => self.inputs.temperature,
             CfgValueKind::ThermalVoltage => self.inputs.thermal_voltage,
             CfgValueKind::Multiplicity => self.inputs.multiplicity,

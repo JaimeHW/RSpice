@@ -289,7 +289,8 @@ to the existing discrete-state inputs. Implicit sensitivities and continuous
 assignments subscribe to every possible element and the index expression's inputs.
 Blocking intra-assignment controls evaluate the target index after resumption;
 nonblocking writes capture it when the update is scheduled (IEEE 1364 9.2.1/9.2.2).
-Schema 71 pairs each numeric discrete input with a finite validity state lane.
+The schema-70 value/validity contract pairs each numeric discrete input with a
+finite validity state lane. Schema 71 gives indexed reads a shared selector.
 An indexed read carries one selector for its value and validity arrays, preserving
 one evaluation and one stateful-operator site. The VM reads both selected cells;
 canonical and native SSA lowering share the selector before checking availability.
@@ -299,7 +300,14 @@ sampling, cached-stamp identity, trial rejection and checkpoint state. Custom
 hosts must populate the value/validity slot pairs in `hir.discrete_inputs` using
 validity 1 for a known finite value, or validity 0 and a zero placeholder for an
 unavailable value. The placeholder cannot be consumed by a checked read.
-The shared checked operation is lowered by the VM, native, generated-Rust and
+Schema 72 lowers read-only projected arrays to checked indexed reads of the dense,
+immutable evaluation-input snapshot. Value selection has constant cost per read;
+analog-writable arrays retain their reaching local definitions. Eligibility checks
+include initialization and both HIR views. Bounds errors and selected-value
+validity checks remain on the executed branch, and discrete selection contributes
+no continuous derivative. Snapshot storage, input sampling and conservative
+all-cell subscriptions still scale with array length.
+The shared checked operations are lowered by the VM, native, generated-Rust and
 Wasm paths (Wasm helper ABI 20). Full shipping-platform execution remains to be
 qualified. Non-finite real inputs still use the current rejection policy when
 read; language-complete propagation of special real values remains open.

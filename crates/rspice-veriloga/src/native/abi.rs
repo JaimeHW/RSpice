@@ -43,6 +43,13 @@ pub(crate) fn operand_array_call(
         model: "native".into(),
         detail: detail.into(),
     };
+    if matches!(op, NativeOp::LoadEvaluationStateDyn) {
+        return Ok(Some(OperandArrayCall {
+            count: 1,
+            descriptor: 0,
+            helper: rspice_evaluation_state_dynamic_native,
+        }));
+    }
     if let NativeOp::LoadEvaluationState(index) = op {
         return Ok(Some(OperandArrayCall {
             count: 0,
@@ -216,6 +223,35 @@ unsafe extern "C" fn rspice_evaluation_state_native(
     }
     // SAFETY: the frame's storage contract and the bounds check cover this read.
     unsafe { *context.evaluation_state_inputs.add(index) }
+}
+
+/// # Safety
+/// `operands` supplies one f64 and `ctx` obeys the scalar snapshot-read contract.
+unsafe extern "C" fn rspice_evaluation_state_dynamic_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    _descriptor: usize,
+) -> f64 {
+    let Some(context) = (unsafe { ctx.as_ref() }) else {
+        return 0.0;
+    };
+    let Some(&raw) = (unsafe { operands.as_ref() }) else {
+        set_native_context_error(context, "procedural evaluation-state index is unavailable");
+        return 0.0;
+    };
+    if !raw.is_finite()
+        || raw < 0.0
+        || raw.fract() != 0.0
+        || raw >= context.evaluation_state_inputs_len as f64
+    {
+        set_native_context_error(
+            context,
+            "procedural evaluation-state index is outside input storage",
+        );
+        return 0.0;
+    }
+    // SAFETY: the checked index and the frame satisfy the scalar helper contract.
+    unsafe { rspice_evaluation_state_native(std::ptr::null(), ctx, raw as usize) }
 }
 
 #[cfg(test)]

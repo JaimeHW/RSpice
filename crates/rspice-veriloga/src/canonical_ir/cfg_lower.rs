@@ -552,6 +552,8 @@ struct CfgLowerer<'a> {
     /// when that leaf is what a read of the variable means. Empty unless
     /// [`Self::frozen_event_state`].
     frozen_event_states: HashMap<VariableId, ValueId>,
+    /// Read-only projected arrays mapped to dense evaluation-input slots.
+    evaluation_input_arrays: HashMap<SmolStr, u32>,
     /// See [`CfgLowerMode::frozen_contribution_current`].
     frozen_contribution_current: bool,
     /// The current contributions the walk has already completed, in walk order.
@@ -673,6 +675,80 @@ impl PendingNoiseProcess {
 struct Limiter {
     operator: ExprId,
     proposed: ValueId,
+}
+
+/// A projection can bypass reaching local definitions only if no analog path,
+/// including initialization, writes any of its cells. Check both HIR views so
+/// the optimization stays conservative while both execution routes exist.
+fn evaluation_input_arrays(hir: &HirModel) -> HashMap<SmolStr, u32> {
+    if hir.discrete_inputs.is_empty() || hir.arrays.is_empty() {
+        return HashMap::new();
+    }
+    fn statements(hir: &HirModel, body: &[HirStatement], written: &mut HashSet<VariableId>) {
+        for statement in body {
+            match statement {
+                HirStatement::Assignment(assignment) => {
+                    written.extend(assignment_targets(hir, assignment))
+                }
+                HirStatement::Loop(loop_) => statements(hir, &loop_.body, written),
+                HirStatement::Initialization { body, .. } => statements(hir, body, written),
+                HirStatement::Task(_) => {}
+            }
+        }
+    }
+    fn regions(hir: &HirModel, body: &[HirRegion], written: &mut HashSet<VariableId>) {
+        for region in body {
+            match region {
+                HirRegion::Assignment(assignment) => {
+                    written.extend(assignment_targets(hir, assignment))
+                }
+                HirRegion::Conditional {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    regions(hir, then_body, written);
+                    regions(hir, else_body, written);
+                }
+                HirRegion::Loop { body, .. } | HirRegion::Initialization { body, .. } => {
+                    regions(hir, body, written)
+                }
+                HirRegion::Contribution(_) | HirRegion::Task(_) => {}
+            }
+        }
+    }
+    let mut written = HashSet::new();
+    statements(hir, &hir.statements, &mut written);
+    regions(hir, &hir.body, &mut written);
+    let projected: HashSet<_> = hir.discrete_inputs.iter().flatten().copied().collect();
+    let state_slots: HashMap<_, _> = hir
+        .variables
+        .iter()
+        .filter(|v| v.is_state)
+        .enumerate()
+        .filter_map(|(slot, v)| u32::try_from(slot).ok().map(|slot| (v.id, slot)))
+        .collect();
+    hir.arrays
+        .iter()
+        .filter_map(|array| {
+            let base = *state_slots.get(&array.base)?;
+            if array.len == 0 || base.checked_add(array.len).is_none() {
+                return None;
+            }
+            let immutable = (0..array.len).all(|offset| {
+                let Some(variable) = usize::from(array.base).checked_add(offset as usize) else {
+                    return false;
+                };
+                let Some(variable) = hir.variables.get(variable).map(|v| v.id) else {
+                    return false;
+                };
+                projected.contains(&variable)
+                    && !written.contains(&variable)
+                    && state_slots.get(&variable) == Some(&(base + offset))
+            });
+            immutable.then(|| (array.name.clone(), base))
+        })
+        .collect()
 }
 
 fn assignment_targets(hir: &HirModel, assignment: &super::hir::HirAssignment) -> Vec<VariableId> {
@@ -1151,6 +1227,7 @@ impl<'a> CfgLowerer<'a> {
             lower_prologue: mode.lower_prologue,
             frozen_event_state: mode.frozen_event_state,
             frozen_event_states: HashMap::new(),
+            evaluation_input_arrays: evaluation_input_arrays(hir),
             frozen_contribution_current: mode.frozen_contribution_current,
             completed_current_contributions: Vec::new(),
             noise_magnitude: false,
@@ -2325,6 +2402,17 @@ impl<'a> CfgLowerer<'a> {
     }
 
     fn array_read_offset(&mut self, array: &super::hir::HirArray, offset: ValueId) -> ValueId {
+        if let Some(&base) = self.evaluation_input_arrays.get(&array.name) {
+            return self.builder.push(
+                self.block,
+                CfgValueType::Real,
+                CfgValueKind::EvaluationInputIndexed {
+                    base,
+                    len: array.len,
+                    index: offset,
+                },
+            );
+        }
         let mut result = self.real_constant(0.0);
         for member in 0..array.len {
             let variable = VariableId::from(usize::from(array.base) + member as usize);

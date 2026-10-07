@@ -139,6 +139,8 @@ pub struct EmitBindings {
     /// Checked integer result callback; the owner retains evaluation failures.
     pub integer_result: String,
     pub array_index: String,
+    /// Checked snapshot read `(inputs, zero_based_index, base, len)`; retains failures.
+    pub evaluation_input_indexed: String,
     /// Checked derivative callback; the owner retains operand or derivative failures.
     pub checked_value: String,
     pub discrete_value: String,
@@ -160,6 +162,7 @@ impl Default for EmitBindings {
             analog_finish: "analog_finish".into(),
             integer_result: "integer_result".into(),
             array_index: "checked_array_index".into(),
+            evaluation_input_indexed: "checked_evaluation_input_indexed".into(),
             checked_value: "checked_derivative_value".into(),
             discrete_value: "checked_discrete_value".into(),
             ddt: "ddt".into(),
@@ -407,9 +410,18 @@ fn checked_derivative_value(primal: f64, derivative: f64) -> f64 {
     assert!(derivative.is_finite(), "ddx derivative is not finite");
     derivative
 }
+fn checked_discrete_value(validity: f64, value: f64) -> f64 {
+    assert!(validity == 1.0 && value.is_finite(), "standalone generated discrete input must be valid");
+    value
+}
 fn checked_array_index(raw: f64, len: usize, lower: i64) -> f64 {
     array_index::checked_array_slot(raw, 0, len, lower)
         .expect("standalone generated array index must be valid") as f64
+}
+fn checked_evaluation_input_indexed(inputs: &[f64], index: f64, base: usize, len: usize) -> f64 {
+    let slot = array_index::checked_array_slot(index, base, len, 0)
+        .expect("standalone generated evaluation-input index must be valid");
+    *inputs.get(slot).expect("standalone generated evaluation input must be available")
 }
 fn integer_result(result: Result<f64, integer::IntegerRuntimeError>) -> f64 {
     result.expect("standalone generated integer evaluation must be valid")
@@ -2199,6 +2211,12 @@ impl Emitter<'_> {
                     operator: "zi filter",
                 });
             }
+            CfgValueKind::EvaluationInputIndexed { base, len, index } => format!(
+                "{}(&{}, {}, {base}usize, {len}usize)",
+                bindings.evaluation_input_indexed,
+                bindings.event_state,
+                self.numeric_operand(*index)
+            ),
             CfgValueKind::ArrayIndex { input, lower, len } => format!(
                 "{}({}, {len}usize, {lower}i64)",
                 bindings.array_index,

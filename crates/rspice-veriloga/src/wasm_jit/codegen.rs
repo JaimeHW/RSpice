@@ -1705,6 +1705,9 @@ fn emit_instruction(body: &mut Function, instruction: &Instruction) -> WasmJitRe
                 index,
             )?;
         }
+        NativeOp::LoadEvaluationStateDyn => {
+            emit_evaluation_state_dynamic_load(body, operands)?;
+        }
         NativeOp::LoadPreludeSlot(index) => emit_f64_array_load(
             body,
             FRAME_PRELUDE_SLOTS_PTR_OFFSET,
@@ -2439,6 +2442,77 @@ fn emit_f64_array_load(
     body.instruction(&WasmInstruction::F64Load(f64_mem(element_offset(
         index, 8,
     )?)));
+    Ok(())
+}
+
+/// Read an already selected dense snapshot slot. Check before integer conversion
+/// and use a wide address calculation so wasm32 pointer arithmetic cannot wrap
+/// a malformed frame back into unrelated linear memory.
+fn emit_evaluation_state_dynamic_load(
+    body: &mut Function,
+    operands: &[crate::jit::ssa::ValueId],
+) -> WasmJitResult<()> {
+    emit_operand(body, operands, 0)?;
+    body.instruction(&WasmInstruction::F64Const(0.0.into()));
+    body.instruction(&WasmInstruction::F64Ge);
+    emit_operand(body, operands, 0)?;
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::I32Load(i32_mem(
+        FRAME_EVALUATION_STATE_INPUTS_LEN_OFFSET,
+    )));
+    body.instruction(&WasmInstruction::F64ConvertI32U);
+    body.instruction(&WasmInstruction::F64Lt);
+    body.instruction(&WasmInstruction::I32And);
+    emit_operand(body, operands, 0)?;
+    emit_operand(body, operands, 0)?;
+    body.instruction(&WasmInstruction::F64Floor);
+    body.instruction(&WasmInstruction::F64Eq);
+    body.instruction(&WasmInstruction::I32And);
+    body.instruction(&WasmInstruction::I32Eqz);
+    body.instruction(&WasmInstruction::If(BlockType::Empty));
+    emit_status_return(body, WASM_JIT_STATUS_RUNTIME_ERROR);
+    body.instruction(&WasmInstruction::End);
+
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::I32Load(i32_mem(
+        FRAME_EVALUATION_STATE_INPUTS_PTR_OFFSET,
+    )));
+    body.instruction(&WasmInstruction::I32Eqz);
+    body.instruction(&WasmInstruction::If(BlockType::Empty));
+    emit_status_return(body, WASM_JIT_STATUS_RUNTIME_ERROR);
+    body.instruction(&WasmInstruction::End);
+
+    emit_evaluation_state_dynamic_address(body, operands)?;
+    body.instruction(&WasmInstruction::I64Const(8));
+    body.instruction(&WasmInstruction::I64Add);
+    body.instruction(&WasmInstruction::MemorySize(0));
+    body.instruction(&WasmInstruction::I64ExtendI32U);
+    body.instruction(&WasmInstruction::I64Const(16));
+    body.instruction(&WasmInstruction::I64Shl);
+    body.instruction(&WasmInstruction::I64GtU);
+    body.instruction(&WasmInstruction::If(BlockType::Empty));
+    emit_status_return(body, WASM_JIT_STATUS_RUNTIME_ERROR);
+    body.instruction(&WasmInstruction::End);
+    emit_evaluation_state_dynamic_address(body, operands)?;
+    body.instruction(&WasmInstruction::I32WrapI64);
+    body.instruction(&WasmInstruction::F64Load(f64_mem(0)));
+    Ok(())
+}
+
+fn emit_evaluation_state_dynamic_address(
+    body: &mut Function,
+    operands: &[crate::jit::ssa::ValueId],
+) -> WasmJitResult<()> {
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::I32Load(i32_mem(
+        FRAME_EVALUATION_STATE_INPUTS_PTR_OFFSET,
+    )));
+    body.instruction(&WasmInstruction::I64ExtendI32U);
+    emit_operand(body, operands, 0)?;
+    body.instruction(&WasmInstruction::I64TruncSatF64U);
+    body.instruction(&WasmInstruction::I64Const(8));
+    body.instruction(&WasmInstruction::I64Mul);
+    body.instruction(&WasmInstruction::I64Add);
     Ok(())
 }
 
@@ -4198,6 +4272,84 @@ endmodule
                         assert_eq!(result, expected.to_le_bytes());
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn indexed_evaluation_state_executes_with_checked_wasm_addresses() {
+        let engine = Engine::default();
+        let source = program(
+            vec![NativeOp::LoadVariable(0), NativeOp::LoadEvaluationStateDyn],
+            1,
+        );
+        for bytes in [
+            emit_verified_value_program(&source).unwrap(),
+            branching_value_module(&source),
+        ] {
+            let (mut store, memory, instance) = instantiate_value_module(&engine, &bytes);
+            let entry = instance
+                .get_typed_func::<i32, i32>(&store, WASM_JIT_VALUE_EXPORT)
+                .unwrap();
+            const INPUTS: u32 = 256;
+            const VARIABLES: u32 = 320;
+            for (pointer, length, index, valid) in [
+                (INPUTS, 2, 0.0, true),
+                (INPUTS, 2, 1.0, true),
+                (INPUTS, 2, -1.0, false),
+                (INPUTS, 2, 0.5, false),
+                (INPUTS, 2, 2.0, false),
+                (INPUTS, 2, f64::NAN, false),
+                (INPUTS, 2, f64::INFINITY, false),
+                (INPUTS, 0, 0.0, false),
+                (0, 2, 0.0, false),
+                (u32::MAX - 3, 2, 1.0, false),
+                (INPUTS, u32::MAX, 536_870_912.0, false),
+                (INPUTS, u32::MAX, 8_192.0, false),
+            ] {
+                let mut frame = vec![0_u8; WASM_JIT_EVAL_FRAME_BYTES as usize];
+                for (offset, value) in [
+                    (FRAME_MAGIC_OFFSET, WASM_JIT_FRAME_MAGIC),
+                    (FRAME_ABI_VERSION_OFFSET, WASM_JIT_ABI_VERSION),
+                    (FRAME_BYTE_LEN_OFFSET, WASM_JIT_EVAL_FRAME_BYTES),
+                    (FRAME_VARIABLES_PTR_OFFSET, VARIABLES),
+                    (FRAME_VARIABLES_LEN_OFFSET, 1),
+                    (FRAME_EVALUATION_STATE_INPUTS_PTR_OFFSET, pointer),
+                    (FRAME_EVALUATION_STATE_INPUTS_LEN_OFFSET, length),
+                ] {
+                    frame[offset as usize..offset as usize + 4]
+                        .copy_from_slice(&value.to_le_bytes());
+                }
+                let result_start = FRAME_RESULT_OFFSET as usize;
+                frame[result_start..result_start + 8].copy_from_slice(&91.0_f64.to_le_bytes());
+                memory.write(&mut store, 0, &frame).unwrap();
+                memory
+                    .write(&mut store, INPUTS as usize, &7.25_f64.to_le_bytes())
+                    .unwrap();
+                memory
+                    .write(&mut store, INPUTS as usize + 8, &(-0.0_f64).to_le_bytes())
+                    .unwrap();
+                memory
+                    .write(&mut store, VARIABLES as usize, &index.to_le_bytes())
+                    .unwrap();
+                assert_eq!(
+                    entry.call(&mut store, 0).unwrap(),
+                    if valid {
+                        WASM_JIT_STATUS_OK
+                    } else {
+                        WASM_JIT_STATUS_RUNTIME_ERROR
+                    },
+                    "index {index}, pointer {pointer}, length {length}"
+                );
+                let expected: f64 = if valid {
+                    if index == 0.0 { 7.25 } else { -0.0 }
+                } else {
+                    91.0
+                };
+                assert_eq!(
+                    &memory.data(&store)[result_start..result_start + 8],
+                    &expected.to_le_bytes()
+                );
             }
         }
     }
