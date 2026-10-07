@@ -43,7 +43,7 @@ mod finish_wire {
         diagnostic_level: u8,
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize)]
     #[serde(
         remote = "crate::ModelFinishPoint",
         tag = "kind",
@@ -56,6 +56,34 @@ mod finish_wire {
         Transient { time: f64 },
         DcSweep { value: f64 },
         Frequency { frequency: f64 },
+    }
+
+    impl Location {
+        fn deserialize<'de, D: serde::Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<crate::ModelFinishPoint, D::Error> {
+            // Internally tagged unit variants ignore extra fields even under
+            // deny_unknown_fields. Empty struct variants validate those stages
+            // without changing the existing wire spelling.
+            #[derive(Deserialize)]
+            #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+            enum StrictLocation {
+                Initialization {},
+                OperatingPoint {},
+                Transient { time: f64 },
+                DcSweep { value: f64 },
+                Frequency { frequency: f64 },
+            }
+            Ok(match StrictLocation::deserialize(deserializer)? {
+                StrictLocation::Initialization {} => crate::ModelFinishPoint::Initialization,
+                StrictLocation::OperatingPoint {} => crate::ModelFinishPoint::OperatingPoint,
+                StrictLocation::Transient { time } => crate::ModelFinishPoint::Transient { time },
+                StrictLocation::DcSweep { value } => crate::ModelFinishPoint::DcSweep { value },
+                StrictLocation::Frequency { frequency } => {
+                    crate::ModelFinishPoint::Frequency { frequency }
+                }
+            })
+        }
     }
 
     pub(super) fn serialize<S: serde::Serializer>(
@@ -78,50 +106,28 @@ mod finish_wire {
 
 impl FrequencyTableMetadata {
     pub(super) fn value_count(&self) -> usize {
-        // Requested rows, plus the finish site's identity, diagnostic level,
-        // and (where present) physical completion coordinate.
-        1 + self.finish.as_ref().map_or(0, |finish| {
-            2 + usize::from(matches!(
-                finish.point,
-                crate::ModelFinishPoint::Frequency { .. }
-                    | crate::ModelFinishPoint::Transient { .. }
-                    | crate::ModelFinishPoint::DcSweep { .. }
-            ))
-        })
+        completion_value_count(self.finish.as_ref())
     }
 }
 
-impl AnalysisResultDocument {
-    /// Project AC table rows without losing parameter or device overrides.
-    pub fn from_ac_table(
-        analysis: AnalysisInstanceId,
-        result: &FrequencyDataResult<crate::analysis::AcResult>,
-    ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
-        attach(Self::from_ac(analysis, &result.points)?, result)
-    }
-
-    /// Project noise table rows with their authored order and row bindings.
-    pub fn from_noise_table(
-        analysis: AnalysisInstanceId,
-        result: &FrequencyDataResult<crate::analysis::NoiseResult>,
-    ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
-        attach(Self::from_noise(analysis, &result.points)?, result)
-    }
-}
-
-fn malformed(detail: impl Into<String>) -> ResultDocumentError {
+pub(super) fn malformed(detail: impl Into<String>) -> ResultDocumentError {
     ResultDocumentError::Malformed {
         location: "frequency table",
         detail: detail.into(),
     }
 }
 
-fn attach<T>(
+pub(super) fn attach<T>(
     mut builder: AnalysisResultDocumentBuilder,
     result: &FrequencyDataResult<T>,
+    abort: &dyn AbortSignal,
 ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
-    let mut columns = Vec::with_capacity(result.columns.len());
+    let mut columns = Vec::new();
+    columns
+        .try_reserve_exact(result.columns.len())
+        .map_err(|_| ResultDocumentError::AllocationFailed)?;
     for column in &result.columns {
+        check_abort(abort)?;
         let axis = if column.target == FrequencyDataTarget::Frequency {
             let frequency = builder
                 .axes
@@ -158,6 +164,7 @@ fn attach<T>(
         requested_rows: result.requested_rows,
         finish: result.finish.clone(),
     });
+    check_abort(abort)?;
     Ok(builder)
 }
 
@@ -186,24 +193,20 @@ pub(super) fn validate(
         return Err(malformed("table coordinates require an AC or noise result"));
     }
     require_name("frequency table name", &table.table_name)?;
-    if document.point_count == 0
-        || table.requested_rows < document.point_count
-        || (table.finish.is_none() && table.requested_rows != document.point_count)
-    {
-        return Err(malformed(
-            "accepted rows disagree with the table's completion evidence",
-        ));
-    }
-    if let Some(finish) = &table.finish {
-        require_name("finished model", &finish.model)?;
-        require_name("finished instance", &finish.instance)?;
-        match finish.point {
-            crate::ModelFinishPoint::Frequency { frequency }
-                if frequency.is_finite() && frequency >= 0.0 => {}
-            crate::ModelFinishPoint::Initialization | crate::ModelFinishPoint::OperatingPoint => {}
-            _ => {
+    validate_completion(
+        table.requested_rows,
+        document.point_count,
+        table.finish.as_ref(),
+    )?;
+    if let ResultPayload::Noise(payload) = &document.payload {
+        for contribution in &payload.contributions {
+            check_abort(abort)?;
+            if contribution.output_contribution.len() != document.point_count
+                || contribution.input_contribution.len() != document.point_count
+                || contribution.percentage.len() != document.point_count
+            {
                 return Err(malformed(
-                    "table completion has an invalid analysis coordinate",
+                    "noise contributions must align with accepted table rows",
                 ));
             }
         }
@@ -232,11 +235,13 @@ pub(super) fn validate(
     let mut targets = BTreeSet::new();
     let mut axes = BTreeSet::new();
     let mut frequency_columns = 0usize;
-    let axis_by_name = document
-        .axes
-        .iter()
-        .map(|axis| (&axis.name, axis))
-        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut axis_by_name = std::collections::BTreeMap::new();
+    for (index, axis) in document.axes.iter().enumerate() {
+        if index.is_multiple_of(ABORT_POLL_STRIDE) {
+            check_abort(abort)?;
+        }
+        axis_by_name.insert(&axis.name, axis);
+    }
     for column in &table.columns {
         check_abort(abort)?;
         require_name("table column", &column.name)?;
@@ -252,15 +257,7 @@ pub(super) fn validate(
                 "table columns, targets and coordinate axes must be distinct",
             ));
         }
-        let canonical = |name: &str| -> Result<(), ResultDocumentError> {
-            require_name("table target", name)?;
-            if name != name.to_ascii_uppercase() {
-                return Err(malformed(
-                    "table targets must use canonical uppercase names",
-                ));
-            }
-            Ok(())
-        };
+        validate_target(&column.target)?;
         match &column.target {
             FrequencyDataTarget::Frequency => {
                 frequency_columns += 1;
@@ -268,14 +265,7 @@ pub(super) fn validate(
                     return Err(malformed("frequency binding points to another axis"));
                 }
             }
-            FrequencyDataTarget::Parameter(name) => canonical(name)?,
-            FrequencyDataTarget::DeviceParameter {
-                device_name,
-                parameter_name,
-            } => {
-                canonical(device_name)?;
-                canonical(parameter_name)?;
-            }
+            FrequencyDataTarget::Parameter(_) | FrequencyDataTarget::DeviceParameter { .. } => {}
         }
         if column.target != FrequencyDataTarget::Frequency
             && (axis.kind != coordinate_kind(&column.target)
@@ -289,6 +279,68 @@ pub(super) fn validate(
         return Err(malformed(
             "table columns must describe every axis and exactly one frequency",
         ));
+    }
+    Ok(())
+}
+
+pub(super) fn completion_value_count(finish: Option<&crate::ModelFinish>) -> usize {
+    // requested_rows, plus site/diagnostic level and an optional finish coordinate.
+    1 + finish.map_or(0, |finish| {
+        2 + usize::from(matches!(
+            finish.point,
+            crate::ModelFinishPoint::Frequency { .. }
+                | crate::ModelFinishPoint::Transient { .. }
+                | crate::ModelFinishPoint::DcSweep { .. }
+        ))
+    })
+}
+
+pub(super) fn validate_target(target: &FrequencyDataTarget) -> Result<(), ResultDocumentError> {
+    let canonical = |name: &str| {
+        if name.is_empty() || name.trim() != name || name.to_ascii_uppercase() != name {
+            Err(malformed(
+                "table targets must have nonempty canonical uppercase names",
+            ))
+        } else {
+            Ok(())
+        }
+    };
+    match target {
+        FrequencyDataTarget::Frequency => Ok(()),
+        FrequencyDataTarget::Parameter(name) => canonical(name),
+        FrequencyDataTarget::DeviceParameter {
+            device_name,
+            parameter_name,
+        } => {
+            canonical(device_name)?;
+            canonical(parameter_name)
+        }
+    }
+}
+
+pub(super) fn validate_completion(
+    requested: usize,
+    accepted: usize,
+    finish: Option<&crate::ModelFinish>,
+) -> Result<(), ResultDocumentError> {
+    if accepted == 0 || accepted > requested || (finish.is_none() && accepted != requested) {
+        return Err(malformed(
+            "accepted row count disagrees with requested rows and completion",
+        ));
+    }
+    if let Some(finish) = finish {
+        super::require_name("frequency table finish instance", &finish.instance)?;
+        super::require_name("frequency table finish model", &finish.model)?;
+        match finish.point {
+            crate::ModelFinishPoint::Initialization | crate::ModelFinishPoint::OperatingPoint => {}
+            crate::ModelFinishPoint::Frequency { frequency }
+                if frequency.is_finite() && frequency >= 0.0 => {}
+            _ => {
+                return Err(malformed(
+                    "model finish does not identify a valid frequency-analysis stage",
+                ));
+            }
+        }
     }
     Ok(())
 }

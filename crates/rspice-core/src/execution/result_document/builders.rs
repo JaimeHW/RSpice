@@ -13,6 +13,7 @@
 //! [`AnalysisResultDocument`]: super::AnalysisResultDocument
 
 mod dc;
+mod frequency_table;
 
 use std::collections::BTreeMap;
 
@@ -877,21 +878,32 @@ impl AnalysisResultDocument {
         analysis: AnalysisInstanceId,
         points: &[AcResult],
     ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
+        Self::ac_projection(analysis, points, &crate::NoAbort)
+    }
+
+    fn ac_projection(
+        analysis: AnalysisInstanceId,
+        points: &[AcResult],
+        abort: &dyn crate::AbortSignal,
+    ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
         const LOCATION: &str = "AC result";
-        let (axis, signals) = complex_frequency_sweep(
+        let (axis, signals) = complex_frequency_sweep_with_abort(
             LOCATION,
             points,
             |point| point.frequency,
             |point| (&point.node_names, &point.voltages),
             |point| (&point.branch_names, &point.currents),
             None,
+            abort,
         )?;
         let point_count = points.len();
-        Ok(
-            Self::builder(analysis, ResultPayload::Ac(AcPayload {}), point_count)
-                .axis(axis)
-                .signals(signals),
+        Ok(Self::builder(
+            analysis,
+            ResultPayload::Ac(AcPayload::default()),
+            point_count,
         )
+        .axis(axis)
+        .signals(signals))
     }
 
     /// Project one transient result and, optionally, its compression report.
@@ -1302,6 +1314,14 @@ impl AnalysisResultDocument {
         analysis: AnalysisInstanceId,
         points: &[NoiseResult],
     ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
+        Self::noise_projection(analysis, points, &crate::NoAbort)
+    }
+
+    fn noise_projection(
+        analysis: AnalysisInstanceId,
+        points: &[NoiseResult],
+        abort: &dyn crate::AbortSignal,
+    ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
         const LOCATION: &str = "noise result";
         let first = points
             .first()
@@ -1316,13 +1336,14 @@ impl AnalysisResultDocument {
             ));
         }
         let point_count = points.len();
-        let (axis, mut signals) = complex_frequency_sweep(
+        let (axis, mut signals) = complex_frequency_sweep_with_abort(
             LOCATION,
             points,
             |point| point.frequency,
             |point| (&point.node_names, &point.voltages),
             |point| (&point.branch_names, &point.currents),
             None,
+            abort,
         )?;
 
         /// A total-noise channel: its signal name, its display label, the
@@ -1360,6 +1381,7 @@ impl AnalysisResultDocument {
             ),
         ];
         for (canonical, display, unit, extract) in totals {
+            super::check_abort(abort)?;
             let column = points.iter().map(extract).collect::<Vec<_>>();
             signals.push(ResultSignal::new(
                 analysis_descriptor(
@@ -1380,6 +1402,7 @@ impl AnalysisResultDocument {
 
         let mut catalog = Vec::with_capacity(first.contribution_catalog.len());
         for identity in &first.contribution_catalog {
+            super::check_abort(abort)?;
             catalog.push(NoiseSourceIdentityDocument {
                 device: identity.device.clone(),
                 mechanism: identity.mechanism.clone(),
@@ -1388,7 +1411,9 @@ impl AnalysisResultDocument {
 
         let mut order: Vec<(String, Option<String>)> = Vec::new();
         for point in points {
+            super::check_abort(abort)?;
             for contribution in &point.contributions {
+                super::check_abort(abort)?;
                 let key = (
                     contribution.identity.device.clone(),
                     contribution.identity.mechanism.clone(),
@@ -1400,11 +1425,13 @@ impl AnalysisResultDocument {
         }
         let mut contributions = Vec::with_capacity(order.len());
         for (device, mechanism) in order {
+            super::check_abort(abort)?;
             let mut mechanism_kind = None;
             let mut output = Vec::with_capacity(point_count);
             let mut input = Vec::with_capacity(point_count);
             let mut share = Vec::with_capacity(point_count);
             for point in points {
+                super::check_abort(abort)?;
                 let found = point.contributions.iter().find(|contribution| {
                     contribution.identity.device == device
                         && contribution.identity.mechanism == mechanism
@@ -4381,6 +4408,27 @@ fn complex_frequency_sweep<T>(
     currents: impl Fn(&T) -> (&Vec<String>, &Vec<Complex64>),
     qualifier: Option<SeriesQualifier>,
 ) -> Result<(ResultAxis, Vec<ResultSignal>), ResultDocumentError> {
+    complex_frequency_sweep_with_abort(
+        location,
+        points,
+        frequency,
+        voltages,
+        currents,
+        qualifier,
+        &crate::NoAbort,
+    )
+}
+
+fn complex_frequency_sweep_with_abort<T>(
+    location: &'static str,
+    points: &[T],
+    frequency: impl Fn(&T) -> Value,
+    voltages: impl Fn(&T) -> (&Vec<String>, &Vec<Complex64>),
+    currents: impl Fn(&T) -> (&Vec<String>, &Vec<Complex64>),
+    qualifier: Option<SeriesQualifier>,
+    abort: &dyn crate::AbortSignal,
+) -> Result<(ResultAxis, Vec<ResultSignal>), ResultDocumentError> {
+    super::check_abort(abort)?;
     let first = points
         .first()
         .ok_or_else(|| source_error(location, "a frequency sweep needs at least one point"))?;
@@ -4395,6 +4443,7 @@ fn complex_frequency_sweep<T>(
         branch_values.len(),
     )?;
     for point in points {
+        super::check_abort(abort)?;
         if voltages(point).0 != node_names || currents(point).0 != branch_names {
             return Err(source_error(
                 location,
@@ -4416,9 +4465,11 @@ fn complex_frequency_sweep<T>(
 
     let mut signals = Vec::with_capacity(node_names.len() + branch_names.len());
     for (index, name) in node_names.iter().enumerate() {
+        super::check_abort(abort)?;
         let column = points
             .iter()
             .map(|point| {
+                super::check_abort(abort)?;
                 voltages(point).1.get(index).copied().ok_or_else(|| {
                     source_error(location, format!("node '{name}' is missing at a point"))
                 })
@@ -4434,9 +4485,11 @@ fn complex_frequency_sweep<T>(
         )?);
     }
     for (index, name) in branch_names.iter().enumerate() {
+        super::check_abort(abort)?;
         let column = points
             .iter()
             .map(|point| {
+                super::check_abort(abort)?;
                 currents(point).1.get(index).copied().ok_or_else(|| {
                     source_error(location, format!("branch '{name}' is missing at a point"))
                 })

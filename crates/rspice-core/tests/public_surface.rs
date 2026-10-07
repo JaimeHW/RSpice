@@ -50,7 +50,9 @@ use rspice_core::analysis::harmonic_balance::{
 ///
 /// Changes to this ceiling must continue to identify their frontend caller;
 /// this accounting does not exempt any family from the ratchet.
-const MAX_PUBLIC_ITEMS: usize = 5542;
+// Two bounded/cancellable table projection entry points serve CLI/WASM
+// callers without forcing the default numerical budget on their output.
+const MAX_PUBLIC_ITEMS: usize = 5544;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
