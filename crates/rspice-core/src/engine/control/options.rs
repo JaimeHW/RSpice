@@ -97,6 +97,7 @@ impl ControlCircuit {
         &mut self,
         command: &ControlCommand,
         variables: &ParamContext,
+        abort: &dyn AbortSignal,
     ) -> Result<(), ControlExecutionError> {
         let text = command.arguments.trim();
         if text.eq_ignore_ascii_case("noinit") {
@@ -118,7 +119,7 @@ impl ControlCircuit {
             )
             .into());
         }
-        let count = scalar(value, variables, command.line)?;
+        let count = scalar(value, variables, command.line, abort)?;
         if count < 1.0 || count.fract() != 0.0 || count >= usize::MAX as Value {
             return Err(command_error(
                 command.line,

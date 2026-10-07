@@ -6,7 +6,7 @@ mod pole_zero;
 mod transfer;
 use crate::ComplexValue;
 use crate::netlist::expr::{
-    BinOpKind, Expr, ParseExpressionWithAbortError, UnaryOpKind, evaluate_complex,
+    BinOpKind, Expr, ParseExpressionWithAbortError, UnaryOpKind,
     parse_control_expression_prefix_with_abort,
 };
 use crate::signal_unit::SignalUnit;
@@ -477,6 +477,7 @@ impl ControlCircuit {
         expression: &Expr,
         variables: &ParamContext,
         line: usize,
+        abort: &dyn AbortSignal,
     ) -> Result<Selected<'a>, ControlError> {
         match expression {
             Expr::Param(name) => {
@@ -489,13 +490,14 @@ impl ControlCircuit {
                     if args.len() != 1 {
                         return Err(command_error(line, "a root reference requires one index"));
                     }
-                    let index = evaluate_complex_with_functions(
+                    let index = evaluate_complex_with_functions_and_abort(
                         &args[0],
                         variables,
                         &mut |name| resolve_scalar(self, name),
                         &mut |name, args| resolve_root_function(self, name, args),
+                        abort,
                     )
-                    .map_err(|error| command_error(line, error.to_string()))?;
+                    .map_err(|error| ControlError::evaluation(line, error))?;
                     let mut selected = pole_zero::select_root(dataset, probe, &[index])
                         .map_err(|error| command_error(line, error.to_string()))?;
                     if let Some(unit) = self.vector_units.get(&selected.id) {
@@ -597,7 +599,7 @@ impl ControlCircuit {
                 let (expression, _) = expression(&mut input, line, abort)?;
                 let selected = match self.group(&expression, line)? {
                     Some(group) => group,
-                    None => vec![self.direct(&expression, variables, line)?],
+                    None => vec![self.direct(&expression, variables, line, abort)?],
                 };
                 for selected in selected {
                     if selected.sample(0).is_none() {
@@ -631,7 +633,7 @@ impl ControlCircuit {
             while !input.is_empty() {
                 check_abort(abort, line)?;
                 if command.name == "plot"
-                    && parse_option(&mut input, &mut options, variables, line)?
+                    && parse_option(&mut input, &mut options, variables, line, abort)?
                 {
                     continue;
                 }
@@ -651,7 +653,7 @@ impl ControlCircuit {
                         Expr::FnCall { name, .. } => name.rsplit('.').next() == Some("OUTPUT_IMPEDANCE_AT_V"),
                         _ => false,
                     }
-                    && let Ok(selected) = self.direct(&y, variables, line)
+                    && let Ok(selected) = self.direct(&y, variables, line, abort)
                     && let Some(scalar) =
                         transfer::unbounded(&selected, &label, traces.len() + scalars.len(), line)?
                 {
@@ -878,7 +880,9 @@ impl<'a> Resolver<'a> {
                         };
                         return Ok(binary_unit(BinOpKind::Sub, a, b));
                     }
-                    let selected = self.circuit.direct(expression, self.variables, self.line)?;
+                    let selected =
+                        self.circuit
+                            .direct(expression, self.variables, self.line, self.abort)?;
                     return Ok(bind_selected(expression, selected, inputs));
                 }
                 // Only functions whose control-vector semantics are implemented
@@ -963,8 +967,14 @@ impl<'a> Resolver<'a> {
                     .ok_or_else(|| unavailable(self.line, input.dataset, &input.id.signal))?;
                 context.set_complex(key, value);
             }
-            let value = evaluate_complex(&expression, &context)
-                .map_err(|error| command_error(self.line, error.to_string()))?;
+            let value = evaluate_complex_with_functions_and_abort(
+                &expression,
+                &context,
+                &mut |_| Ok(None),
+                &mut |_, _| Ok(None),
+                self.abort,
+            )
+            .map_err(|error| ControlError::evaluation(self.line, error))?;
             if !value.re.is_finite() || !value.im.is_finite() {
                 return Err(command_error(
                     self.line,
@@ -1086,6 +1096,7 @@ fn parse_option(
     options: &mut ControlPlotOptions,
     variables: &ParamContext,
     line: usize,
+    abort: &dyn AbortSignal,
 ) -> Result<bool, ControlError> {
     let name = first_word(input).to_ascii_lowercase();
     match name.as_str() {
@@ -1113,8 +1124,8 @@ fn parse_option(
         }
         "xlimit" | "ylimit" => {
             word(input, line)?;
-            let low = scalar(word(input, line)?, variables, line)?;
-            let high = scalar(word(input, line)?, variables, line)?;
+            let low = scalar(word(input, line)?, variables, line, abort)?;
+            let high = scalar(word(input, line)?, variables, line, abort)?;
             if low >= high {
                 return Err(command_error(line, "plot limits must be increasing"));
             }

@@ -8,7 +8,7 @@ use crate::abort_signal::AbortSignal;
 pub use crate::control_protocol::{
     ControlCommand, ControlError, ControlErrorKind, ControlScalarEvaluator,
 };
-use crate::netlist::expr::{ParamContext, eval_expression_complex, is_real};
+use crate::netlist::expr::{ParamContext, eval_expression_complex_with_abort, is_real};
 use crate::{ComplexValue, Value};
 use std::collections::BTreeMap;
 
@@ -46,10 +46,10 @@ impl ControlScalarEvaluator for ParameterScalarEvaluator {
         expression: &str,
         variables: &ParamContext,
         line: usize,
+        abort: &dyn AbortSignal,
     ) -> Result<ComplexValue, ControlError> {
-        eval_expression_complex(expression, variables).map_err(|error| {
-            ControlError::new(line, ControlErrorKind::Expression, error.to_string())
-        })
+        eval_expression_complex_with_abort(expression, variables, abort)
+            .map_err(|error| ControlError::evaluation(line, error))
     }
 }
 
@@ -394,9 +394,10 @@ impl ControlSession<'_> {
         expression: &str,
         line: usize,
         evaluator: &mut dyn ControlScalarEvaluator,
+        abort: &dyn AbortSignal,
     ) -> Result<ComplexValue, ControlError> {
-        let expression = self.substitute(expression, line)?;
-        let value = evaluator.evaluate_scalar(&expression, &self.variables, line)?;
+        let expression = self.substitute(expression, line, abort)?;
+        let value = evaluator.evaluate_scalar(&expression, &self.variables, line, abort)?;
         if value.re.is_finite() && value.im.is_finite() {
             Ok(value)
         } else {
@@ -428,7 +429,7 @@ impl ControlSession<'_> {
             )?;
             match &instruction.op {
                 Op::Let { name, expression } => {
-                    let value = self.scalar(expression, line, evaluator)?;
+                    let value = self.scalar(expression, line, evaluator, abort)?;
                     self.variables.set_complex(name, value);
                     self.pc += 1;
                 }
@@ -437,17 +438,19 @@ impl ControlSession<'_> {
                     alternative,
                     ..
                 } => {
-                    self.pc = if self.scalar(condition, line, evaluator)? != ComplexValue::ZERO {
-                        self.pc + 1
-                    } else {
-                        alternative + 1
-                    };
+                    self.pc =
+                        if self.scalar(condition, line, evaluator, abort)? != ComplexValue::ZERO {
+                            self.pc + 1
+                        } else {
+                            alternative + 1
+                        };
                 }
                 Op::Else { end } => self.pc = end + 1,
                 Op::Loop { kind, end } => {
                     match kind {
                         LoopKind::While(condition) => {
-                            if self.scalar(condition, line, evaluator)? == ComplexValue::ZERO {
+                            if self.scalar(condition, line, evaluator, abort)? == ComplexValue::ZERO
+                            {
                                 if self
                                     .loops
                                     .last()
@@ -476,7 +479,7 @@ impl ControlSession<'_> {
                             state: LoopState::Conditional,
                         }),
                         LoopKind::Repeat(expression) => {
-                            let count = self.scalar(expression, line, evaluator)?;
+                            let count = self.scalar(expression, line, evaluator, abort)?;
                             if !is_real(count)
                                 || count.re < 0.0
                                 || count.re.fract() != 0.0
@@ -501,7 +504,7 @@ impl ControlSession<'_> {
                         }
                         LoopKind::Foreach { variable, words } => {
                             let values = split_words(
-                                &self.substitute(words, line)?,
+                                &self.substitute(words, line, abort)?,
                                 line,
                                 self.program.limits.max_loop_values,
                             )?;
@@ -533,7 +536,8 @@ impl ControlSession<'_> {
                             continue;
                         }
                         if let LoopKind::Dowhile(condition) = kind {
-                            if self.scalar(condition, start.line, evaluator)? != ComplexValue::ZERO
+                            if self.scalar(condition, start.line, evaluator, abort)?
+                                != ComplexValue::ZERO
                             {
                                 self.pc = opening + 1;
                                 continue;
@@ -588,7 +592,7 @@ impl ControlSession<'_> {
                     let command = ControlCommand {
                         line,
                         name: name.clone(),
-                        arguments: self.substitute(arguments, line)?,
+                        arguments: self.substitute(arguments, line, abort)?,
                     };
                     self.pc += 1;
                     return Ok(Some(command));
@@ -598,7 +602,12 @@ impl ControlSession<'_> {
         Ok(None)
     }
 
-    fn substitute(&self, text: &str, line: usize) -> Result<String, ControlError> {
+    fn substitute(
+        &self,
+        text: &str,
+        line: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ControlError> {
         let mut output = String::new();
         let mut chars = text.chars().peekable();
         while let Some(character) = chars.next() {
@@ -637,9 +646,8 @@ impl ControlSession<'_> {
                 )?;
                 output.push_str(value);
             } else {
-                let value = eval_expression_complex(&name, &self.variables).map_err(|error| {
-                    ControlError::new(line, ControlErrorKind::Expression, error.to_string())
-                })?;
+                let value = eval_expression_complex_with_abort(&name, &self.variables, abort)
+                    .map_err(|error| ControlError::evaluation(line, error))?;
                 if !value.re.is_finite() || !value.im.is_finite() {
                     return Err(ControlError::new(
                         line,

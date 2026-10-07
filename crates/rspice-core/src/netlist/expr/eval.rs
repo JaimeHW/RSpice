@@ -44,6 +44,33 @@ pub(crate) fn evaluate_complex_with_functions(
     })
 }
 
+pub(crate) fn evaluate_complex_with_functions_and_abort(
+    expr: &Expr,
+    ctx: &ParamContext,
+    resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
+    functions: &mut impl FnMut(&str, &[ComplexValue]) -> Result<Option<ComplexValue>, ExprError>,
+    abort: &dyn crate::abort_signal::AbortSignal,
+) -> Result<ComplexValue, ExpressionEvaluationError> {
+    let progress =
+        ExpressionEvaluator::new(ctx).evaluate_polling(expr, resolver, functions, &mut || {
+            if abort.is_aborted() {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        })?;
+    match progress {
+        ControlFlow::Break(()) => Err(ExpressionEvaluationError::Aborted),
+        ControlFlow::Continue(value) => {
+            Ok(if ctx.expression_dialect() == ExpressionDialect::Xyce {
+                normalize_xyce_expression_result(value)
+            } else {
+                value
+            })
+        }
+    }
+}
+
 /// Evaluate without applying the dialect's public root normalization.
 ///
 /// Most expression consumers must use [`evaluate_complex`]. Measurement
@@ -1059,10 +1086,30 @@ impl<'a> ExpressionEvaluator<'a> {
         resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
         functions: &mut impl FnMut(&str, &[ComplexValue]) -> Result<Option<ComplexValue>, ExprError>,
     ) -> Result<ComplexValue, ExprError> {
+        self.evaluate_polling(expr, resolver, functions, &mut || {
+            ControlFlow::<Infallible>::Continue(())
+        })
+        .map(uninterrupted)
+    }
+
+    fn evaluate_polling<B>(
+        &mut self,
+        expr: &Expr,
+        resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
+        functions: &mut impl FnMut(&str, &[ComplexValue]) -> Result<Option<ComplexValue>, ExprError>,
+        poll: &mut impl FnMut() -> ControlFlow<B>,
+    ) -> Result<ControlFlow<B, ComplexValue>, ExprError> {
         let mut frames = vec![EvalFrame::Eval(expr.clone(), EvalScope::global())];
         let mut values = Vec::<EvaluatedValue>::new();
+        let mut instructions = 0usize;
 
         while let Some(frame) = frames.pop() {
+            if instructions.is_multiple_of(64)
+                && let ControlFlow::Break(reason) = poll()
+            {
+                return Ok(ControlFlow::Break(reason));
+            }
+            instructions = instructions.wrapping_add(1);
             match frame {
                 EvalFrame::Eval(expr, scope) => match expr {
                     Expr::Number(value) => {
@@ -1201,7 +1248,9 @@ impl<'a> ExpressionEvaluator<'a> {
         }
 
         if values.len() == 1 {
-            Ok(values.pop().expect("length checked").numeric)
+            Ok(ControlFlow::Continue(
+                values.pop().expect("length checked").numeric,
+            ))
         } else {
             Err(ExprError::InvalidArgument(format!(
                 "expression evaluation produced {} values",

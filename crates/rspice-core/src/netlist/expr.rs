@@ -47,8 +47,9 @@ use parser::ExprParser;
 
 pub use crate::ComplexValue;
 pub(crate) use api::{
-    ParseExpressionWithAbortError, needs_forward_reference_probe,
-    parse_control_expression_prefix_with_abort, parse_expression_with_abort,
+    ParseExpressionWithAbortError, eval_expression_complex_with_abort,
+    needs_forward_reference_probe, parse_control_expression_prefix_with_abort,
+    parse_expression_with_abort,
 };
 pub use api::{
     eval_expression, eval_expression_complex, eval_simple, eval_simple_complex, parse_expression,
@@ -74,7 +75,7 @@ pub use context::{
 pub use error::ExprError;
 pub(crate) use eval::{
     ExpressionEvaluationError, PreparedExpression, PreparedProgress, evaluate_complex_raw,
-    evaluate_complex_with_functions, normalize_xyce_expression_component,
+    evaluate_complex_with_functions_and_abort, normalize_xyce_expression_component,
     normalize_xyce_expression_result,
 };
 pub use eval::{evaluate, evaluate_complex};

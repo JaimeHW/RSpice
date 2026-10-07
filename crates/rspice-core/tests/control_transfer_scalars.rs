@@ -72,7 +72,9 @@ fn unbounded_transfer_reads_fail_only_when_evaluated_and_respect_function_scope(
             ("transfer_function", 0.0),
         ] {
             assert_eq!(
-                circuit.evaluate_scalar(expression, &variables, 11).unwrap(),
+                circuit
+                    .evaluate_scalar(expression, &variables, 11, &NoAbort)
+                    .unwrap(),
                 ComplexValue::from(expected),
                 "{dialect:?}: {expression}"
             );
@@ -82,7 +84,7 @@ fn unbounded_transfer_reads_fail_only_when_evaluated_and_respect_function_scope(
         variables.set("input_impedance", 42.0);
         for expression in ["input_impedance", "tf1.V1#input_impedance", "saved()"] {
             let error = circuit
-                .evaluate_scalar(expression, &variables, 17)
+                .evaluate_scalar(expression, &variables, 17, &NoAbort)
                 .unwrap_err();
             assert_eq!(error.kind, ControlErrorKind::Expression);
             assert_eq!(error.line, 17);
@@ -90,7 +92,7 @@ fn unbounded_transfer_reads_fail_only_when_evaluated_and_respect_function_scope(
         }
         assert!(
             circuit
-                .evaluate_scalar("tf99.transfer_gain", &variables, 19)
+                .evaluate_scalar("tf99.transfer_gain", &variables, 19, &NoAbort)
                 .is_err()
         );
     }
@@ -106,12 +108,14 @@ fn transfer_bindings_preserve_expression_dialects_and_random_evaluation_order() 
         variables.set_random_seed(1742);
         variables.define_function("scaled", vec!["x".into()], "x*tf1.transfer_function");
         assert_eq!(
-            circuit.evaluate_scalar("scaled(2)", &variables, 8).unwrap(),
+            circuit
+                .evaluate_scalar("scaled(2)", &variables, 8, &NoAbort)
+                .unwrap(),
             ComplexValue::from(6000.0)
         );
         assert_eq!(
             circuit
-                .evaluate_scalar("scaled(1j)", &variables, 8)
+                .evaluate_scalar("scaled(1j)", &variables, 8, &NoAbort)
                 .unwrap(),
             ComplexValue::new(0.0, 3000.0)
         );
@@ -127,7 +131,9 @@ fn transfer_bindings_preserve_expression_dialects_and_random_evaluation_order() 
             "aunif(0,1)+1j*aunif(0,1)",
         ] {
             assert_eq!(
-                circuit.evaluate_scalar(expression, &variables, 8).unwrap(),
+                circuit
+                    .evaluate_scalar(expression, &variables, 8, &NoAbort)
+                    .unwrap(),
                 eval_expression_complex(expression, &reference).unwrap(),
                 "{dialect:?}: {expression}"
             );

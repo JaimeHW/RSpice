@@ -61,6 +61,30 @@ pub fn eval_expression_complex(input: &str, ctx: &ParamContext) -> Result<Comple
     evaluate_complex(&expr, ctx)
 }
 
+impl From<ParseExpressionWithAbortError> for ExpressionEvaluationError {
+    fn from(error: ParseExpressionWithAbortError) -> Self {
+        match error {
+            ParseExpressionWithAbortError::Aborted => Self::Aborted,
+            ParseExpressionWithAbortError::Parse(error) => Self::Expression(error),
+        }
+    }
+}
+
+pub(crate) fn eval_expression_complex_with_abort(
+    input: &str,
+    ctx: &ParamContext,
+    abort: &dyn crate::abort_signal::AbortSignal,
+) -> Result<ComplexValue, ExpressionEvaluationError> {
+    let expr = parse_expression_with_abort(input, abort)?;
+    evaluate_complex_with_functions_and_abort(
+        &expr,
+        ctx,
+        &mut |_| Ok(None),
+        &mut |_, _| Ok(None),
+        abort,
+    )
+}
+
 /// Evaluate a simple expression without parameters
 pub fn eval_simple(input: &str) -> Result<Value, ExprError> {
     eval_expression(input, &ParamContext::new())

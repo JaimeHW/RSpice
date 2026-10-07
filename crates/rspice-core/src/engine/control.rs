@@ -9,8 +9,8 @@ use crate::control_protocol::{
     ControlCommand, ControlError, ControlErrorKind, ControlScalarEvaluator,
 };
 use crate::netlist::expr::{
-    ParamContext, eval_expression_complex, evaluate_complex_with_functions, is_real,
-    parse_expression,
+    ExpressionEvaluationError, ParamContext, eval_expression_complex_with_abort,
+    evaluate_complex_with_functions_and_abort, is_real, parse_expression_with_abort,
 };
 use crate::netlist::{AnalysisCommand, Netlist};
 use crate::resource::{ResourceKind, ResourceLimitError};
@@ -194,13 +194,13 @@ impl ControlCircuit {
                 ))
             }
             CommandKind::Set => {
-                self.apply_set(command, variables)?;
+                self.apply_set(command, variables, abort)?;
                 Ok(PreparedCommand::Complete(
                     ControlCommandEffect::CircuitChanged,
                 ))
             }
             CommandKind::Alter => {
-                self.alter(engine, command, variables)?;
+                self.alter(engine, command, variables, abort)?;
                 Ok(PreparedCommand::Complete(
                     ControlCommandEffect::CircuitChanged,
                 ))
@@ -462,6 +462,7 @@ impl ControlCircuit {
         _engine: &Engine,
         command: &ControlCommand,
         variables: &ParamContext,
+        abort: &dyn AbortSignal,
     ) -> Result<(), ControlExecutionError> {
         let line = command.line;
         let text = command.arguments.trim();
@@ -502,7 +503,7 @@ impl ControlCircuit {
                 })?;
             let values = values
                 .split_whitespace()
-                .map(|value| scalar(value, variables, line))
+                .map(|value| scalar(value, variables, line, abort))
                 .collect::<Result<Vec<_>, _>>()?;
             if !(3..=6).contains(&values.len()) {
                 return Err(command_error(line, "SIN alteration requires offset, amplitude, frequency and up to three optional values").into());
@@ -518,7 +519,7 @@ impl ControlCircuit {
                 changes.push((canonical, value));
             }
         } else {
-            let value = scalar(value, variables, line)?;
+            let value = scalar(value, variables, line, abort)?;
             let canonical = Engine::canonical_device_parameter(&candidate, parameter);
             Engine::apply_device_step_value(&mut candidate, Some(&canonical), value)
                 .map_err(|error| simulation_error(line, error))?;
@@ -543,26 +544,31 @@ impl ControlScalarEvaluator for ControlCircuit {
         expression: &str,
         variables: &ParamContext,
         line: usize,
+        abort: &dyn AbortSignal,
     ) -> Result<ComplexValue, ControlError> {
-        parse_expression(expression)
+        parse_expression_with_abort(expression, abort)
+            .map_err(ExpressionEvaluationError::from)
             .and_then(|expression| {
-                evaluate_complex_with_functions(
+                evaluate_complex_with_functions_and_abort(
                     &expression,
                     variables,
                     &mut |name| presentation::resolve_scalar(self, name),
                     &mut |name, args| presentation::resolve_root_function(self, name, args),
+                    abort,
                 )
             })
-            .map_err(|error| {
-                ControlError::new(line, ControlErrorKind::Expression, error.to_string())
-            })
+            .map_err(|error| ControlError::evaluation(line, error))
     }
 }
 
-fn scalar(expression: &str, variables: &ParamContext, line: usize) -> Result<Value, ControlError> {
-    let value = eval_expression_complex(expression, variables).map_err(|error| {
-        ControlError::new(line, ControlErrorKind::Expression, error.to_string())
-    })?;
+fn scalar(
+    expression: &str,
+    variables: &ParamContext,
+    line: usize,
+    abort: &dyn AbortSignal,
+) -> Result<Value, ControlError> {
+    let value = eval_expression_complex_with_abort(expression, variables, abort)
+        .map_err(|error| ControlError::evaluation(line, error))?;
     if !value.re.is_finite() || !value.im.is_finite() {
         Err(ControlError::new(
             line,

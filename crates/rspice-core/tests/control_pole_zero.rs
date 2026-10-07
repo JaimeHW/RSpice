@@ -55,12 +55,14 @@ fn explicit_and_declarative_pz_runs_retain_complex_roots_and_immutable_names() {
     let variables = circuit.netlist().params.clone();
     let root = ComplexValue::new(-0.5, 3.0_f64.sqrt() / 2.0);
     close(
-        circuit.evaluate_scalar("pole(1)", &variables, 12).unwrap(),
+        circuit
+            .evaluate_scalar("pole(1)", &variables, 12, &NoAbort)
+            .unwrap(),
         root,
     );
     close(
         circuit
-            .evaluate_scalar("pz1.pole(2)", &variables, 12)
+            .evaluate_scalar("pz1.pole(2)", &variables, 12, &NoAbort)
             .unwrap(),
         root.conj(),
     );
@@ -69,22 +71,26 @@ fn explicit_and_declarative_pz_runs_retain_complex_roots_and_immutable_names() {
     assert_eq!(circuit.datasets()[1].name, "pz2");
     close(
         circuit
-            .evaluate_scalar("pz1.pole(1)", &variables, 12)
+            .evaluate_scalar("pz1.pole(1)", &variables, 12, &NoAbort)
             .unwrap(),
         root,
     );
     close(
         circuit
-            .evaluate_scalar("pz2.pole(1)", &variables, 12)
+            .evaluate_scalar("pz2.pole(1)", &variables, 12, &NoAbort)
             .unwrap(),
         ComplexValue::from((-3.0 + 5.0_f64.sqrt()) / 2.0),
     );
     close(
-        circuit.evaluate_scalar("dc_gain", &variables, 12).unwrap(),
+        circuit
+            .evaluate_scalar("dc_gain", &variables, 12, &NoAbort)
+            .unwrap(),
         ComplexValue::from(1.0),
     );
     close(
-        circuit.evaluate_scalar("hf_gain", &variables, 12).unwrap(),
+        circuit
+            .evaluate_scalar("hf_gain", &variables, 12, &NoAbort)
+            .unwrap(),
         ComplexValue::ZERO,
     );
 }
@@ -152,7 +158,9 @@ fn root_lookup_is_lazy_checked_and_preserves_user_functions_and_random_draws() {
         ("if(0,pz99.pole(1),7)", ComplexValue::from(7.0)),
     ] {
         close(
-            circuit.evaluate_scalar(expr, &variables, 17).unwrap(),
+            circuit
+                .evaluate_scalar(expr, &variables, 17, &NoAbort)
+                .unwrap(),
             expected,
         );
     }
@@ -168,7 +176,9 @@ fn root_lookup_is_lazy_checked_and_preserves_user_functions_and_random_draws() {
         "pole(1,2)",
         "pz99.pole(1)",
     ] {
-        let error = circuit.evaluate_scalar(expr, &variables, 17).unwrap_err();
+        let error = circuit
+            .evaluate_scalar(expr, &variables, 17, &NoAbort)
+            .unwrap_err();
         assert_eq!(error.line, 17);
         assert_eq!(error.kind, ControlErrorKind::Expression);
     }
@@ -192,12 +202,14 @@ fn root_lookup_is_lazy_checked_and_preserves_user_functions_and_random_draws() {
     );
     variables.define_function("pole", vec!["n".into()], "n+4j");
     close(
-        circuit.evaluate_scalar("pole(1)", &variables, 17).unwrap(),
+        circuit
+            .evaluate_scalar("pole(1)", &variables, 17, &NoAbort)
+            .unwrap(),
         ComplexValue::new(1.0, 4.0),
     );
     close(
         circuit
-            .evaluate_scalar("pz1.pole(1)", &variables, 17)
+            .evaluate_scalar("pz1.pole(1)", &variables, 17, &NoAbort)
             .unwrap(),
         root,
     );
@@ -360,12 +372,14 @@ fn highpass_zeros_and_unavailable_integrator_gain_are_not_fabricated() {
     execute(&mut circuit, "pz", "in 0 out 0 vol pz").unwrap();
     let variables = ParamContext::new();
     close(
-        circuit.evaluate_scalar("zero(1)", &variables, 10).unwrap(),
+        circuit
+            .evaluate_scalar("zero(1)", &variables, 10, &NoAbort)
+            .unwrap(),
         ComplexValue::ZERO,
     );
     close(
         circuit
-            .evaluate_scalar("high_frequency_gain", &variables, 10)
+            .evaluate_scalar("high_frequency_gain", &variables, 10, &NoAbort)
             .unwrap(),
         ComplexValue::from(1.0),
     );
@@ -380,14 +394,14 @@ fn highpass_zeros_and_unavailable_integrator_gain_are_not_fabricated() {
     variables.set("dc_gain", 42.0);
     assert!(
         circuit
-            .evaluate_scalar("dc_gain", &variables, 10)
+            .evaluate_scalar("dc_gain", &variables, 10, &NoAbort)
             .unwrap_err()
             .message
             .contains("no finite value")
     );
     close(
         circuit
-            .evaluate_scalar("if(0,dc_gain,7)", &variables, 10)
+            .evaluate_scalar("if(0,dc_gain,7)", &variables, 10, &NoAbort)
             .unwrap(),
         ComplexValue::from(7.0),
     );
