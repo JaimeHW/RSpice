@@ -960,6 +960,13 @@ and run durations. An empty failure row costs at least one value. Parallel batch
 workers share admission before their reports enter the aggregate collection;
 exceeding the budget exits 75 even with `--allow-failed-meas`.
 
+Continuous measurements admit selected records before allocation. Intermediate
+expression waveforms and sweep projections are also capped by
+`max_result_values`; these preparation buffers and the retained event records
+are checked separately. Event searches and derived waveform evaluation poll
+cancellation even when no event matches. Compressed transient runs apply the
+same controls while measuring the accepted trajectory before decimation.
+
 The same resource policy is applied consistently to `run`, `check`, and `info`,
 including stdin, include expansion, `.ALTER`/`.DATA` materialization, derived
 corner and S-parameter decks, circuit construction, and result retention. The

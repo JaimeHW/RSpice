@@ -35,6 +35,10 @@ fn run(source: &str, limit: usize, flags: &[&str]) -> Output {
 }
 
 fn assert_report_limit(output: &Output, limit: usize) {
+    assert_limit_at(output, limit, "Report retention");
+}
+
+fn assert_limit_at(output: &Output, limit: usize, analysis: &str) {
     assert_eq!(
         output.status.code(),
         Some(75),
@@ -45,7 +49,7 @@ fn assert_report_limit(output: &Output, limit: usize) {
     assert_eq!(fatal["error"]["resource"], "result_values");
     assert_eq!(fatal["error"]["limit"], limit);
     assert!(fatal["error"]["requested"].as_u64().unwrap() > limit as u64);
-    assert_eq!(fatal["error"]["analysis"], "Report retention");
+    assert_eq!(fatal["error"]["analysis"], analysis);
 }
 
 #[test]
@@ -154,7 +158,58 @@ fn continuous_record_counts_are_charged_after_event_selection() {
     );
     let summary: serde_json::Value = serde_json::from_slice(&exact.stdout).unwrap();
     assert_eq!(summary["counts"]["measurements"], 400);
-    assert_report_limit(&run(source, 1500, &[]), 1500);
+    assert_report_limit(&run(source, 1600, &[]), 1600);
+    assert_limit_at(
+        &run(source, 1500, &[]),
+        1500,
+        "DC continuous measurement projection",
+    );
+}
+
+#[test]
+fn continuous_evaluator_limits_reach_every_cli_analysis_route() {
+    for (analysis, command, at) in [
+        ("DC", "dc V1 0 1 1", "0.5"),
+        ("AC", "ac lin 3 1 3", "1.5"),
+        ("NOISE", "noise V(out) V1 lin 3 1 3", "1.5"),
+        ("TRAN", "tran 0.01 0.1", "0.05"),
+    ] {
+        let measurements: String = (0..300)
+            .map(|index| format!(".MEAS {analysis}_CONT sample{index} FIND TIME AT={at}\n"))
+            .collect();
+        for control in [false, true] {
+            let execution = if control {
+                format!(".CONTROL\n{command}\n.ENDC")
+            } else {
+                format!(".{command}")
+            };
+            let source = format!(
+                "* continuous evaluator budget\nV1 out 0 DC 1 AC 1\nR1 out 0 1k\n{measurements}{execution}\n.END\n"
+            );
+            let exact = run(&source, 901, &[]);
+            assert!(
+                exact.status.success(),
+                "{analysis}, control={control}: {}",
+                String::from_utf8_lossy(&exact.stderr)
+            );
+            let summary: serde_json::Value = serde_json::from_slice(&exact.stdout).unwrap();
+            assert_eq!(summary["counts"]["measurements"], 300);
+            assert_limit_at(
+                &run(&source, 800, &[]),
+                800,
+                &format!("{analysis} continuous measurement projection"),
+            );
+            if analysis == "TRAN" && !control {
+                let compressed = run(&source, 901, &["--compress"]);
+                assert!(
+                    compressed.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&compressed.stderr)
+                );
+                assert_limit_at(&run(&source, 800, &["--compress"]), 800, "Transient");
+            }
+        }
+    }
 }
 
 #[test]

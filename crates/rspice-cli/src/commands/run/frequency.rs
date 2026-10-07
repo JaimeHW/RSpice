@@ -713,7 +713,16 @@ fn finish_ac(
     })?;
     ctx.record_measurements("AC", measurements)?;
     let continuous_measurements =
-        rspice_core::analysis::evaluate_ac_continuous_measurements(ctx.netlist, results);
+        rspice_core::analysis::evaluate_ac_continuous_measurements_with_limits_and_abort(
+            ctx.netlist,
+            results,
+            &ctx.engine.config().resource_limits,
+            &crate::abort::ProcessAbort,
+        )
+        .map_err(|source| CliError::CoreSimulationError {
+            source,
+            analysis: Some("AC continuous measurement projection".to_string()),
+        })?;
     super::shared::record_continuous_measurements(ctx, "AC_CONT", continuous_measurements)?;
 
     if !ctx.quiet {
@@ -1214,7 +1223,16 @@ fn finish_noise_projected(
     })?;
     ctx.record_measurements("NOISE", measurements)?;
     let continuous_measurements =
-        rspice_core::analysis::evaluate_noise_continuous_measurements(ctx.netlist, results);
+        rspice_core::analysis::evaluate_noise_continuous_measurements_with_limits_and_abort(
+            ctx.netlist,
+            results,
+            &ctx.engine.config().resource_limits,
+            &crate::abort::ProcessAbort,
+        )
+        .map_err(|source| CliError::CoreSimulationError {
+            source,
+            analysis: Some("NOISE continuous measurement projection".to_string()),
+        })?;
     super::shared::record_continuous_measurements(ctx, "NOISE_CONT", continuous_measurements)?;
 
     if !ctx.quiet {

@@ -466,7 +466,16 @@ pub(super) fn finish_dc_sweep_result(
     })?;
     ctx.record_measurements("DC", measurements)?;
     let continuous_measurements =
-        rspice_core::analysis::evaluate_dc_continuous_measurements(ctx.netlist, &results);
+        rspice_core::analysis::evaluate_dc_continuous_measurements_with_limits_and_abort(
+            ctx.netlist,
+            &results,
+            &ctx.engine.config().resource_limits,
+            &crate::abort::ProcessAbort,
+        )
+        .map_err(|source| CliError::CoreSimulationError {
+            source,
+            analysis: Some("DC continuous measurement projection".to_string()),
+        })?;
     super::shared::record_continuous_measurements(ctx, "DC_CONT", continuous_measurements)?;
 
     // Resolve the authored output contract even when the caller did
@@ -990,7 +999,16 @@ pub(super) fn finish_transient_result(
     ctx.record_measurements("TRAN", measurements)?;
     let continuous_measurements = match post_results {
         Some(post) => post.continuous_measurements.clone(),
-        None => rspice_core::analysis::evaluate_tran_continuous_measurements(ctx.netlist, result),
+        None => rspice_core::analysis::evaluate_tran_continuous_measurements_with_limits_and_abort(
+            ctx.netlist,
+            result,
+            &ctx.engine.config().resource_limits,
+            &crate::abort::ProcessAbort,
+        )
+        .map_err(|source| CliError::CoreSimulationError {
+            source,
+            analysis: Some("TRAN continuous measurement projection".to_string()),
+        })?,
     };
     super::shared::record_continuous_measurements(ctx, "TRAN_CONT", continuous_measurements)?;
 
