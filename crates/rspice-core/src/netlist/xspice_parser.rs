@@ -1583,7 +1583,7 @@ fn parse_string_backed_param_value(
         message: format!("Invalid XSPICE vector parameter literal: {err}"),
     })?;
     let mut stream = TokenStream::new(tokens);
-    parse_vector_param_value(
+    let parsed = parse_vector_param_value(
         &mut stream,
         line_num,
         param_name,
@@ -1592,8 +1592,9 @@ fn parse_string_backed_param_value(
             abort,
         },
         false,
-    )
-    .map(Some)
+    )?;
+    finish_vector_literal(&mut stream, line_num, param_name)?;
+    Ok(Some(parsed))
 }
 
 pub(crate) fn parse_xspice_string_vector_literal(
@@ -1628,18 +1629,27 @@ pub(crate) fn parse_xspice_string_vector_literal(
         }
         _ => unreachable!("string-vector parser only returns string-vector values"),
     };
+    finish_vector_literal(&mut stream, line_num, param_name)?;
+    Ok(values)
+}
+
+fn finish_vector_literal(
+    stream: &mut TokenStream,
+    line_num: usize,
+    param_name: &str,
+) -> Result<(), ParseError> {
     while stream.consume(&TokenKind::Newline) {}
     if !stream.is_eof() {
         return Err(ParseError::Syntax {
             line: line_num,
             message: format!(
-                "Unexpected token '{}' after XSPICE string-vector parameter '{}'",
+                "Unexpected token '{}' after XSPICE vector parameter '{}'",
                 stream.peek().kind,
                 param_name
             ),
         });
     }
-    Ok(values)
+    Ok(())
 }
 
 fn parse_real_vector_param(
