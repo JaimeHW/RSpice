@@ -7,6 +7,9 @@ use crate::netlist::expr::{
 };
 use crate::netlist::parser::scopes::{LexicalScopes, ScopeEnvironment};
 
+mod binding;
+use binding::ScopeBinding;
+
 #[derive(Clone, Copy, Debug)]
 pub(in super::super) enum TemperatureOption {
     Temp,
@@ -62,6 +65,9 @@ pub(in super::super) struct TemperatureOptionPlan {
     // Keep its first error independently of subsequent redefinitions. A pass
     // containing one of these errors must never publish a netlist.
     provisional_error: Option<ParseError>,
+    // Successful isolated operands from a failed group are replay candidates,
+    // never published options. Ordinals prevent later cards being overwritten.
+    recovered: [Option<(usize, Value)>; 2],
 }
 
 pub(in super::super) struct TemperatureOptionSink<'a> {
@@ -153,6 +159,32 @@ impl TemperatureOptionSink<'_> {
 }
 
 impl TemperatureOptionPlan {
+    pub(in super::super) fn selected(&self, options: &SimulationOptions) -> ParserTemperatures {
+        let recovered = |index: usize| {
+            self.recovered[index]
+                .filter(|(ordinal, _)| self.last[index] == *ordinal)
+                .map(|(_, value)| value)
+        };
+        ParserTemperatures {
+            temp: recovered(0).or(options.temp),
+            tnom: recovered(1).or(options.tnom),
+        }
+    }
+
+    pub(in super::super) fn retain_scope_error(
+        &mut self,
+        error: ParseWithAbortError,
+    ) -> Result<(), ParseWithAbortError> {
+        match error {
+            error @ (ParseWithAbortError::Aborted
+            | ParseWithAbortError::Parse(ParseError::ResourceLimit(_))) => Err(error),
+            ParseWithAbortError::Parse(error) => {
+                self.provisional_error.get_or_insert(error);
+                Ok(())
+            }
+        }
+    }
+
     pub(in super::super) fn retain_parameter_error(
         &mut self,
         error: crate::netlist::expr::ExprError,
@@ -212,6 +244,7 @@ impl TemperatureOptionPlan {
                 entries: std::mem::take(entries),
             });
         }
+        let mut first_error = None;
         for pending in candidates {
             ensure_parse_not_aborted(abort)?;
             // A sibling closing cannot complete a declaration owned by this
@@ -220,94 +253,34 @@ impl TemperatureOptionPlan {
                 self.delayed.push(pending);
                 continue;
             }
-            if let Some(values) = pending.bind(scopes, root, frames, abort)? {
-                ensure_parse_not_aborted(abort)?;
-                for (entry, value) in pending.entries.iter().zip(values) {
-                    // Superseded active assignments are still evaluated and
-                    // validated, but only the latest assignment is published.
-                    if self.last[entry.option.index()] == entry.ordinal {
-                        entry.option.install(options, value);
-                    }
-                }
-            } else {
-                scopes.retain();
-                self.delayed.push(pending);
-            }
-        }
-        Ok(())
-    }
-}
-
-impl PendingScope {
-    fn bind(
-        &self,
-        scopes: &mut LexicalScopes,
-        root: &mut ParamContext,
-        frames: &mut [SubcktFrame],
-        abort: &dyn AbortSignal,
-    ) -> Result<Option<Vec<Value>>, ParseWithAbortError> {
-        let environment = scopes.environment(self.id, root, frames, abort)?;
-        // Probe the entire group before drawing from any live stream or
-        // publishing options. An unfinished ancestor can redefine its graph.
-        if self.stage(&environment.isolated(), abort)?.is_none() {
-            return Ok(None);
-        }
-        let Some((values, resolver)) = self.stage(&environment, abort)? else {
-            return Ok(None);
-        };
-        scopes.materialize_closed(&resolver, &environment, abort)?;
-        scopes.materialize_active(&resolver, root, frames, abort)?;
-        Ok(Some(values))
-    }
-
-    fn stage(
-        &self,
-        environment: &ScopeEnvironment,
-        abort: &dyn AbortSignal,
-    ) -> Result<Option<(Vec<Value>, ParameterResolver)>, ParseWithAbortError> {
-        let params = environment.parameters(self.id);
-        let mut resolver = ParameterResolver::default();
-        let mut values = Vec::with_capacity(self.entries.len());
-        for pending in &self.entries {
-            ensure_parse_not_aborted(abort)?;
-            let mut expression = pending.expression.clone();
-            expression.begin_evaluation();
-            let value = loop {
-                ensure_parse_not_aborted(abort)?;
-                match expression
-                    .resume_with(params, &mut |name| {
-                        Ok(pending
-                            .bound_values
-                            .get(name)
-                            .copied()
-                            .or_else(|| resolver.scoped_value(self.id, name, environment)))
-                    })
-                    .map_err(|error| pending.error(error.to_string()))?
-                {
-                    PreparedProgress::Complete(value) => break value,
-                    PreparedProgress::MissingParameter(name) => {
-                        match resolver.resolve_binding(self.id, &name, environment, abort) {
-                            Ok(_) => {}
-                            Err(ParameterResolutionError::IncompleteScope(_)) => return Ok(None),
-                            Err(ParameterResolutionError::Aborted) => {
-                                return Err(ParseWithAbortError::Aborted);
-                            }
-                            Err(error) => return Err(pending.error(error.to_string()).into()),
+            match pending.bind(scopes, root, frames, abort)? {
+                ScopeBinding::Complete(values) => {
+                    ensure_parse_not_aborted(abort)?;
+                    for (entry, value) in pending.entries.iter().zip(values) {
+                        // Superseded active assignments are still evaluated and
+                        // validated, but only the latest assignment is published.
+                        if self.last[entry.option.index()] == entry.ordinal {
+                            entry.option.install(options, value);
                         }
                     }
                 }
-            };
-            let value = if params.expression_dialect() == ExpressionDialect::Xyce {
-                crate::netlist::expr::normalize_xyce_expression_result(value)
-            } else {
-                value
+                ScopeBinding::Failed { error, selected } => {
+                    first_error.get_or_insert(error);
+                    for (index, value) in selected.into_iter().enumerate() {
+                        if let Some((ordinal, _)) = value
+                            && self.last[index] == ordinal
+                        {
+                            self.recovered[index] = value;
+                        }
+                    }
+                }
+                ScopeBinding::Incomplete => {
+                    scopes.retain();
+                    self.delayed.push(pending);
+                }
             }
-            .re * pending.sign;
-            let value = parse_celsius_option(pending.option.name(), value, pending.origin.line)
-                .map_err(|error| pending.error(error.to_string()))?;
-            values.push(value);
         }
-        Ok(Some((values, resolver)))
+        first_error.map_or(Ok(()), |error| Err(error.into()))
     }
 }
 
@@ -323,6 +296,57 @@ impl PendingTemperatureOption {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_group_candidates_never_publish_bindings_or_draw_from_live_streams() {
+        let mut state = ParseState::new();
+        state.params.set_random_seed(37);
+        for (index, line) in [
+            ".options temp={scale/(TNOM-27)} tnom={nominal+aunif(0,1)}",
+            ".param scale={base+aunif(0,1)} nominal=55",
+            ".param base=1",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            process_line(
+                line,
+                index + 2,
+                &NetlistSourceLocation::in_memory(index + 2),
+                &mut state,
+            )
+            .unwrap();
+        }
+        let expected = state.params.isolated_random_clone();
+        let probe = expected.isolated_random_clone();
+        let _scale = eval_expression("aunif(0,1)", &probe).unwrap();
+        let nominal = 55.0 + eval_expression("aunif(0,1)", &probe).unwrap();
+        let error = state
+            .temperature_options
+            .resolve_scope(
+                &mut state.scopes,
+                &mut state.params,
+                &mut state.subckt_stack,
+                &mut state.options,
+                &NoAbort,
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("Division by zero"), "{error}");
+        assert_eq!(state.options.temp, None);
+        assert_eq!(state.options.tnom, None);
+        assert_eq!(state.params.get("scale"), None);
+        assert_eq!(
+            state.temperature_options.selected(&state.options),
+            ParserTemperatures {
+                temp: None,
+                tnom: Some(nominal)
+            }
+        );
+        assert_eq!(
+            eval_expression("aunif(0,1)", &state.params).unwrap(),
+            eval_expression("aunif(0,1)", &expected).unwrap()
+        );
+    }
 
     #[test]
     fn incomplete_failed_and_cancelled_scope_probes_do_not_draw_or_publish() {

@@ -58,7 +58,7 @@ impl TemperaturePassError {
     pub(super) fn after_completion(
         error: ParseWithAbortError,
         used: ParserTemperatures,
-        options: &SimulationOptions,
+        mut resolved: ParserTemperatures,
         last_directive: Option<TemperatureDirective>,
         overrides: &[ParameterOverride],
     ) -> Self {
@@ -68,10 +68,6 @@ impl TemperaturePassError {
         ) {
             return error.into();
         }
-        let mut resolved = ParserTemperatures {
-            temp: options.temp,
-            tnom: options.tnom,
-        };
         if let Some(TemperatureDirective::Single(single)) = last_directive {
             resolved.temp = Some(single);
         }
@@ -305,6 +301,50 @@ mod tests {
     }
 
     #[test]
+    fn pending_group_discovery_stops_at_every_cancellation_boundary() {
+        for source in [
+            "Root group\n.options temp={scale/(TNOM-27)} tnom={nominal}\n.param scale=1 nominal=55\n.end\n",
+            "Delayed group\n.subckt parent p\n.subckt child q\n.options temp={scale/(TNOM-27)} tnom={nominal}\n.param scale=1\n.ends\n.param nominal=55\n.ends\n.end\n",
+        ] {
+            let mut completed = false;
+            for limit in 0..1024 {
+                let abort = crate::abort_signal::CountingAbort::new(limit);
+                let result = super::super::parse_netlist_with_options_and_abort(
+                    source,
+                    NetlistParseOptions::default(),
+                    &abort,
+                );
+                assert_eq!(abort.polls_after_abort(), 0, "poll limit {limit}");
+                match result {
+                    Err(ParseWithAbortError::Aborted) => {}
+                    Ok(netlist) => {
+                        assert!(limit > 20);
+                        assert_eq!(netlist.options.temp, Some(1.0 / 28.0));
+                        assert_eq!(netlist.options.tnom, Some(55.0));
+                        completed = true;
+                        break;
+                    }
+                    error => panic!("unexpected result at poll limit {limit}: {error:?}"),
+                }
+            }
+            assert!(completed, "cancellation coverage never completed: {source}");
+        }
+    }
+
+    #[test]
+    fn physical_override_takes_precedence_over_a_failed_groups_candidate() {
+        let netlist = parse_netlist_with_parameter_overrides_and_abort(
+            "Physical pending group\n.options temp={scale/(TNOM-27)} tnom={nominal}\n.param scale=1 nominal=55 observed={TEMP}\n.end\n",
+            NetlistParseOptions::default(),
+            &[ParameterOverride { name: "TEMP".into(), value: 85.0, global: false, direction: false }],
+            &NoAbort,
+        ).unwrap();
+        assert_eq!(netlist.options.temp, Some(85.0));
+        assert_eq!(netlist.options.tnom, Some(55.0));
+        assert_eq!(netlist.params.get("observed"), Some(85.0));
+    }
+
+    #[test]
     fn physical_temperature_override_survives_failed_analysis_completion() {
         let source = "Physical replay\n.ac lin 1 {1/(TNOM-27)} 100\n.temp 27\n.param nominal=55\n.options tnom={nominal}\n.end\n";
         let netlist = parse_netlist_with_parameter_overrides_and_abort(
@@ -344,7 +384,7 @@ mod tests {
                 Err(TemperaturePassError::after_completion(
                     failure.take().expect("terminal errors must not replay"),
                     ParserTemperatures::default(),
-                    &SimulationOptions {
+                    ParserTemperatures {
                         temp: Some(85.0),
                         ..Default::default()
                     },

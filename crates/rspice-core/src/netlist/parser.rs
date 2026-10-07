@@ -947,7 +947,7 @@ fn parse_netlist_impl(
             TemperaturePassError::after_completion(
                 error,
                 temperatures,
-                &state.options,
+                state.temperature_options.selected(&state.options),
                 last_temperature_directive,
                 overrides,
             )
@@ -4357,14 +4357,15 @@ fn process_line_gated(
         .next()
         .is_some_and(|head| head.eq_ignore_ascii_case(".ends"))
         && !state.subckt_stack.is_empty()
-    {
-        state.temperature_options.resolve_scope(
+        && let Err(error) = state.temperature_options.resolve_scope(
             &mut state.scopes,
             &mut state.params,
             &mut state.subckt_stack,
             &mut state.options,
             abort,
-        )?;
+        )
+    {
+        state.temperature_options.retain_scope_error(error)?;
     }
     process_line(line, line_num, origin, state).map_err(map_current_error)
 }
