@@ -337,6 +337,14 @@ STB progress covers circuit construction, bias, the frequency sweep and margin
 projection. It reaches completion once, after the result is constructed, and
 observes cancellation requested by that final callback before returning it.
 
+STB selects the signed phase margin closest to zero over all resolved unity-gain
+crossings, and the signed gain margin closest to zero over all negative-real-axis
+crossings. Each margin and its frequency come from the same interpolated segment.
+Phase margins are folded into (-180, 180] degrees; Bode samples retain unwrapped
+phase. A unity plateau counts as one connected crossing, while the reported
+margin considers its endpoints and any critical point inside it. These are
+sweep measurements; margins alone do not establish closed-loop stability.
+
 STB measures its DC return ratio independently at zero frequency, using the
 same linearized circuit and reusable two-experiment workspace. The requested
 positive-frequency grid is unchanged. A measured zero remains zero; an undefined

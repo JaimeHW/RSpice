@@ -277,16 +277,16 @@ impl StbConfig {
 /// Stability margins extracted from loop gain
 #[derive(Debug, Clone, Default)]
 pub struct StabilityMargins {
-    /// Gain margin in dB (positive = stable)
+    /// Signed gain margin nearest zero over the measured phase crossings, in dB.
     pub gain_margin_db: Value,
 
-    /// Frequency at which phase = -180° (gain margin frequency)
+    /// Frequency of the negative-real-axis crossing selected for the gain margin.
     pub gain_margin_freq: Value,
 
-    /// Phase margin in degrees (positive = stable)
+    /// Signed phase margin nearest zero over the measured unity crossings, in degrees.
     pub phase_margin_deg: Value,
 
-    /// Frequency at which |L| = 0 dB (unity gain crossover)
+    /// Frequency of the unity crossing selected for the phase margin.
     pub phase_margin_freq: Value,
 
     /// Independently measured zero-frequency return ratio. A positive-frequency
@@ -294,7 +294,7 @@ pub struct StabilityMargins {
     /// could not be evaluated; an engine evaluation failure has a warning.
     pub dc_loop_gain: Option<Complex64>,
 
-    /// Unity gain bandwidth (Hz)
+    /// Frequency of the unity crossing selected for the phase margin (Hz).
     pub unity_gain_bandwidth: Value,
 
     /// Whether the loop is conditionally stable (multiple crossovers)
@@ -762,191 +762,125 @@ impl StbAnalyzer {
         Ok(result)
     }
 
-    /// Extract stability margins from Bode data
+    /// Extract measured margins over every resolved crossing. Frequency and
+    /// ordinate are interpolated together on the same log-frequency segment.
     fn extract_margins(
         &self,
         points: &[BodePoint],
         abort: &dyn AbortSignal,
     ) -> Result<StabilityMargins, StbAnalysisError> {
         ensure_not_aborted(abort)?;
-        let mut margins = StabilityMargins::default();
-
-        if points.is_empty() {
-            return Ok(margins);
-        }
-
-        // Find unity gain crossover(s) - where magnitude crosses 0 dB
-        let crossovers = self.find_zero_crossings(points, |p| p.magnitude_db, abort)?;
-        margins.num_crossovers = crossovers.count;
-        margins.conditionally_stable = crossovers.count > 1;
-
-        // Phase margin: phase at first unity gain crossover
-        if let Some(freq) = crossovers.first_frequency {
-            margins.phase_margin_freq = freq;
-            margins.unity_gain_bandwidth = freq;
-
-            // Interpolate phase at crossover
-            let phase = self.interpolate_at_frequency(points, freq, |p| p.phase_deg, abort)?;
-            margins.phase_margin_deg = 180.0 + phase; // PM = 180° + phase
-        } else {
-            // No crossover found - either always > 0dB or always < 0dB
-            let mut all_above_unity = true;
-            let mut maximum = f64::NEG_INFINITY;
-            for (index, point) in points.iter().enumerate() {
-                poll_abort(abort, index)?;
-                all_above_unity &= point.magnitude_db > 0.0;
-                maximum = maximum.max(point.magnitude_db);
-            }
-            if all_above_unity {
-                margins.phase_margin_deg = f64::NEG_INFINITY;
-                margins.gain_margin_db = f64::NEG_INFINITY;
-                return Ok(margins);
-            } else {
-                // High gain margin (loop never reaches 0 dB)
-                margins.phase_margin_deg = f64::INFINITY;
-                margins.gain_margin_db = -maximum;
-            }
-        }
-
-        // Find phase crossover(s) - where phase crosses -180°
-        let phase_crossings = self.find_phase_crossings(points, -180.0, abort)?;
-
-        // Gain margin: magnitude at first phase crossover
-        if let Some(freq) = phase_crossings {
-            margins.gain_margin_freq = freq;
-
-            // Interpolate magnitude at phase crossover
-            let mag_db = self.interpolate_at_frequency(points, freq, |p| p.magnitude_db, abort)?;
-            margins.gain_margin_db = -mag_db; // GM = -|L| at -180°
-        } else {
-            // Phase never crosses -180° - infinite gain margin
-            margins.gain_margin_db = f64::INFINITY;
-        }
-
-        Ok(margins)
-    }
-
-    /// Find zero crossings in a curve
-    fn find_zero_crossings<F>(
-        &self,
-        points: &[BodePoint],
-        extractor: F,
-        abort: &dyn AbortSignal,
-    ) -> Result<CrossingSummary, StbAnalysisError>
-    where
-        F: Fn(&BodePoint) -> Value,
-    {
-        let mut crossings = CrossingSummary::default();
-
-        for (index, window) in points.windows(2).enumerate() {
+        let mut phase_margin = None;
+        let mut gain_margin = None;
+        let mut count = 0;
+        let mut all_above_unity = true;
+        for (index, point) in points.iter().enumerate() {
             poll_abort(abort, index)?;
-            let v0 = extractor(&window[0]);
-            let v1 = extractor(&window[1]);
-
-            if v0 == 0.0 && (index == 0 || extractor(&points[index - 1]) != 0.0) {
-                crossings.count += 1;
-                crossings.first_frequency.get_or_insert(window[0].frequency);
+            all_above_unity &= point.magnitude_db > 0.0;
+            if point.magnitude_db == 0.0 {
+                // A sampled unity plateau is one connected crossing, but
+                // its least phase margin may occur anywhere along it.
+                if index == 0 || points[index - 1].magnitude_db != 0.0 {
+                    count += 1;
+                }
+                retain_binding_margin(
+                    &mut phase_margin,
+                    phase_margin_degrees(point.phase_deg),
+                    point.frequency,
+                );
             }
-            if index + 2 == points.len() && v1 == 0.0 && v0 != 0.0 {
-                crossings.count += 1;
-                crossings.first_frequency.get_or_insert(window[1].frequency);
+            if point.phase_deg.rem_euclid(360.0) == 180.0 {
+                retain_binding_margin(&mut gain_margin, -point.magnitude_db, point.frequency);
             }
-            if (v0 > 0.0 && v1 < 0.0) || (v0 < 0.0 && v1 > 0.0) {
-                // Linear interpolation for crossing frequency
-                let f0 = window[0].frequency;
-                let f1 = window[1].frequency;
-
-                // Use log interpolation for frequency
-                let log_f0 = f0.log10();
-                let log_f1 = f1.log10();
-                let alpha = (0.0 - v0) / (v1 - v0);
-                let log_f_cross = log_f0 + alpha * (log_f1 - log_f0);
-                let f_cross = 10.0_f64.powf(log_f_cross);
-
-                crossings.count += 1;
-                crossings.first_frequency.get_or_insert(f_cross);
+            let Some(previous) = index.checked_sub(1).map(|i| &points[i]) else {
+                continue;
+            };
+            let m0 = previous.magnitude_db;
+            let m1 = point.magnitude_db;
+            let p0 = previous.phase_deg;
+            let p1 = point.phase_deg;
+            if (m0 < 0.0 && m1 > 0.0) || (m0 > 0.0 && m1 < 0.0) {
+                count += 1;
+                let alpha = -m0 / (m1 - m0);
+                let frequency = segment_frequency(previous.frequency, point.frequency, alpha);
+                retain_binding_margin(
+                    &mut phase_margin,
+                    phase_margin_degrees(p0 + alpha * (p1 - p0)),
+                    frequency,
+                );
+                // A segment lying on the negative real axis reaches zero
+                // gain margin exactly where its magnitude crosses unity.
+                if p0 == p1 && p0.rem_euclid(360.0) == 180.0 {
+                    retain_binding_margin(&mut gain_margin, 0.0, frequency);
+                }
             }
-        }
-
-        Ok(crossings)
-    }
-
-    /// Find phase crossings at specific phase value
-    fn find_phase_crossings(
-        &self,
-        points: &[BodePoint],
-        target_phase: Value,
-        abort: &dyn AbortSignal,
-    ) -> Result<Option<Value>, StbAnalysisError> {
-        for (index, window) in points.windows(2).enumerate() {
-            poll_abort(abort, index)?;
-            let p0 = window[0].phase_deg;
-            let p1 = window[1].phase_deg;
-
-            // A negative-real-axis crossing is an odd half-turn on this
-            // continuous segment, including an exact sampled endpoint.
-            let target = target_phase + 360.0 * ((p0.min(p1) - target_phase) / 360.0).ceil();
-            if p0 == target {
-                return Ok(Some(window[0].frequency));
-            }
-            if p1 == target {
-                return Ok(Some(window[1].frequency));
-            }
+            // Unwrapped adjacent phases differ by at most half a turn, so
+            // at most one odd half-turn lies strictly inside this segment.
+            // Include positive turns too: the first sampled phase cannot
+            // establish how many turns occurred before the sweep began.
+            let target = 180.0 + 360.0 * ((p0.min(p1) - 180.0) / 360.0).ceil();
             if target > p0.min(p1) && target < p0.max(p1) {
-                let f0 = window[0].frequency;
-                let f1 = window[1].frequency;
-
-                let log_f0 = f0.log10();
-                let log_f1 = f1.log10();
                 let alpha = (target - p0) / (p1 - p0);
-                let log_f_cross = log_f0 + alpha * (log_f1 - log_f0);
-                let f_cross = 10.0_f64.powf(log_f_cross);
-
-                return Ok(Some(f_cross));
+                let frequency = segment_frequency(previous.frequency, point.frequency, alpha);
+                retain_binding_margin(&mut gain_margin, -(m0 + alpha * (m1 - m0)), frequency);
+                if m0 == 0.0 && m1 == 0.0 {
+                    retain_binding_margin(&mut phase_margin, 0.0, frequency);
+                }
             }
         }
-
-        Ok(None)
-    }
-
-    /// Interpolate value at specific frequency
-    fn interpolate_at_frequency<F>(
-        &self,
-        points: &[BodePoint],
-        freq: Value,
-        extractor: F,
-        abort: &dyn AbortSignal,
-    ) -> Result<Value, StbAnalysisError>
-    where
-        F: Fn(&BodePoint) -> Value,
-    {
-        // Find bracketing points
-        for (index, window) in points.windows(2).enumerate() {
-            poll_abort(abort, index)?;
-            if window[0].frequency <= freq && window[1].frequency >= freq {
-                let f0 = window[0].frequency.log10();
-                let f1 = window[1].frequency.log10();
-                let v0 = extractor(&window[0]);
-                let v1 = extractor(&window[1]);
-
-                let alpha = (freq.log10() - f0) / (f1 - f0);
-                return Ok(v0 + alpha * (v1 - v0));
-            }
-        }
-
-        // Extrapolate from nearest
-        if freq < points[0].frequency {
-            Ok(extractor(&points[0]))
+        let mut margins = StabilityMargins {
+            num_crossovers: count,
+            conditionally_stable: count > 1,
+            ..Default::default()
+        };
+        if let Some((value, frequency)) = phase_margin {
+            margins.phase_margin_deg = value;
+            margins.phase_margin_freq = frequency;
+            margins.unity_gain_bandwidth = frequency;
         } else {
-            Ok(extractor(points.last().expect("non-empty STB points")))
+            margins.phase_margin_deg = if all_above_unity {
+                f64::NEG_INFINITY
+            } else {
+                f64::INFINITY
+            };
         }
+        if let Some((value, frequency)) = gain_margin {
+            margins.gain_margin_db = value;
+            margins.gain_margin_freq = frequency;
+        } else {
+            margins.gain_margin_db = if all_above_unity {
+                f64::NEG_INFINITY
+            } else {
+                f64::INFINITY
+            };
+        }
+        Ok(margins)
     }
 }
 
-#[derive(Debug, Default)]
-struct CrossingSummary {
-    first_frequency: Option<Value>,
-    count: usize,
+/// Retain the signed margin nearest zero; exact ties keep the lowest
+/// frequency because candidates arrive in ascending frequency order except
+/// for sampled right endpoints, which are inspected before their segment.
+fn retain_binding_margin(best: &mut Option<(Value, Value)>, value: Value, frequency: Value) {
+    if best.is_none_or(|(old_value, old_frequency)| {
+        value.abs() < old_value.abs()
+            || (value.abs() == old_value.abs() && frequency < old_frequency)
+    }) {
+        *best = Some((value, frequency));
+    }
+}
+
+/// Signed distance from the negative real axis in (-180, 180] degrees.
+/// Keep the full unwrapped phase in BodePoint; folding a reported margin
+/// does not establish a Nyquist winding count or closed-loop stability.
+fn phase_margin_degrees(phase: Value) -> Value {
+    let margin = super::phase::difference(-180.0, phase, 360.0).expect("validated finite phase");
+    if margin == -180.0 { 180.0 } else { margin }
+}
+
+fn segment_frequency(start: Value, stop: Value, alpha: Value) -> Value {
+    // Interpolating log values avoids overflow/underflow in stop/start.
+    10.0_f64.powf(start.log10() + alpha * (stop.log10() - start.log10()))
 }
 
 fn try_reserve_exact<T>(
