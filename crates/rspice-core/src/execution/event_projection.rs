@@ -745,7 +745,9 @@ fn event_femtoseconds(
         });
     }
     let ticks = scaled.round();
-    let tolerance = (scaled * 8.0 * f64::EPSILON).max(1e-9);
+    // An absolute tolerance would admit positive sub-femtosecond events as
+    // zero. Only allow error proportional to the timestamp's arithmetic.
+    let tolerance = scaled * 8.0 * f64::EPSILON;
     if (scaled - ticks).abs() > tolerance {
         return Err(EventProjectionError::InexactTime {
             node: node.to_string(),
@@ -1022,6 +1024,31 @@ mod tests {
         );
         assert!(error.to_string().contains("clk"), "{error}");
         assert!(error.to_string().contains("femtoseconds"), "{error}");
+    }
+
+    #[test]
+    fn positive_times_below_one_femtosecond_are_never_rounded_to_zero() {
+        for time in [Value::from_bits(1), 1e-30, 1e-25, 0.25e-15] {
+            for real in [false, true] {
+                let result = if real {
+                    event_vcd_document("tran", &[], &[real_trace("out", &[(time, 1.0)])], &[])
+                } else {
+                    event_vcd_document(
+                        "tran",
+                        &[digital_trace("out", &[(time, DigitalValue::one())])],
+                        &[],
+                        &[],
+                    )
+                };
+                assert_eq!(
+                    result.expect_err("a positive time must not become tick zero"),
+                    EventProjectionError::InexactTime {
+                        node: "out".to_owned(),
+                        time,
+                    }
+                );
+            }
+        }
     }
 
     #[test]

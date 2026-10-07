@@ -118,6 +118,24 @@ fn redundant_samples_cannot_hide_invalid_timeline_coordinates() {
 }
 
 #[test]
+fn positive_sub_femtosecond_events_are_never_moved_to_zero() {
+    let dir = test_dir("vcd_tiny_time");
+    let input = dir.join("source.json");
+    let output = dir.join("events.vcd");
+    for time in [f64::from_bits(1), 1e-30, 1e-25, 0.25e-15] {
+        table(&input, "time", None, &[0.0, time], &[0.0, 1.0]);
+        std::fs::write(&output, "predecessor").unwrap();
+        let converted = convert(&input, &output, "vcd", &[]);
+        assert_eq!(converted.status.code(), Some(1), "{time}: {converted:?}");
+        assert!(
+            String::from_utf8_lossy(&converted.stderr).contains("femtoseconds"),
+            "{converted:?}"
+        );
+        assert_eq!(std::fs::read_to_string(&output).unwrap(), "predecessor");
+    }
+}
+
+#[test]
 fn vcd_clipping_uses_seconds_after_converting_the_declared_time_unit() {
     let dir = test_dir("vcd_scaled_time_clipping");
     let input = dir.join("source.json");
